@@ -569,8 +569,12 @@ const COLLAPSIBLE_FILTER_META: Record<
   stages: { label: 'Status', icon: Circle },
 };
 
-/** Row width below which the toolbar's secondary controls drop their text labels. */
-const TOOLBAR_COMPACT_WIDTH = 820;
+/** The row's `gap-2`, in pixels. */
+const TOOLBAR_GAP = 8;
+
+/** `px-4` on both sides of the row, plus a margin so we fold one step early rather than
+ *  land flush against the actions group. */
+const TOOLBAR_ROW_INSET = 32 + 16;
 
 const DeskFilterTrigger = ({
   id,
@@ -917,35 +921,56 @@ const SupportScreen = (): ReactElement => {
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
 
   const filterRowRef = useRef<HTMLDivElement>(null);
-  const filterRowActionsRef = useRef<HTMLDivElement>(null);
   const filterStaticLeftRef = useRef<HTMLDivElement>(null);
+  const filterTwinRef = useRef<HTMLDivElement>(null);
+  const actionsRestRef = useRef<HTMLDivElement>(null);
+  const columnsWideTwinRef = useRef<HTMLDivElement>(null);
+  const columnsNarrowTwinRef = useRef<HTMLDivElement>(null);
+
   const { width: filterRowWidth } = useMeasure({ ref: filterRowRef, observeResize: true });
-  const { width: filterRowActionsWidth } = useMeasure({
-    ref: filterRowActionsRef,
-    observeResize: true,
-  });
   const { width: filterStaticLeftWidth } = useMeasure({
     ref: filterStaticLeftRef,
     observeResize: true,
   });
+  // Natural width of all three filter triggers. The twin's last child is a zero-width
+  // overflow sample, so its trailing gap has to come back off.
+  const { width: filterTwinWidth } = useMeasure({ ref: filterTwinRef, observeResize: true });
+  const filtersNaturalWidth = Math.max(0, filterTwinWidth - TOOLBAR_GAP);
+  // Everything in the actions group except the Columns picker — its width never changes
+  // with the toolbar's own responsive state.
+  const { width: actionsRestWidth } = useMeasure({ ref: actionsRestRef, observeResize: true });
+  const { width: columnsWideWidth } = useMeasure({
+    ref: columnsWideTwinRef,
+    observeResize: true,
+  });
+  const { width: columnsNarrowWidth } = useMeasure({
+    ref: columnsNarrowTwinRef,
+    observeResize: true,
+  });
 
-  // Secondary controls drop their labels purely as a function of row width. Deriving this
-  // from the collapse result instead would feed the actions' width back into the fit loop
-  // and let the two oscillate.
-  const isToolbarCompact = filterRowWidth > 0 && filterRowWidth < TOOLBAR_COMPACT_WIDTH;
+  const showColumnsPicker = viewMode === 'table';
+  const columnsLabelWidth = showColumnsPicker
+    ? Math.max(0, columnsWideWidth - columnsNarrowWidth)
+    : 0;
+  const actionsWidth =
+    actionsRestWidth + (showColumnsPicker ? columnsNarrowWidth + TOOLBAR_GAP : 0);
 
-  // px-4 either side, plus a small margin so we fold one trigger early rather than land
-  // flush against the actions group.
-  const filterFitWidth = Math.max(
+  // Room left for the filter triggers once the always-present controls are reserved.
+  const filterBudget = Math.max(
     0,
-    filterRowWidth - filterRowActionsWidth - filterStaticLeftWidth - 32 - 16,
+    filterRowWidth - TOOLBAR_ROW_INSET - filterStaticLeftWidth - actionsWidth,
   );
+
+  const isColumnsLabelled =
+    showColumnsPicker && filterBudget - columnsLabelWidth >= filtersNaturalWidth;
+
+  const filterFitWidth = Math.max(0, filterBudget - (isColumnsLabelled ? columnsLabelWidth : 0));
 
   const { measureRef: filterMeasureRef, visibleCount: visibleFilterCount } =
     useOverflowFit<HTMLDivElement>({
       itemCount: COLLAPSIBLE_FILTER_IDS.length,
       containerWidth: filterFitWidth,
-      gap: 8, // matches the row's `gap-2`
+      gap: TOOLBAR_GAP,
       minVisible: 0,
     });
 
@@ -2977,12 +3002,45 @@ const SupportScreen = (): ReactElement => {
                         aria-hidden
                         className='pointer-events-none invisible absolute left-0 top-0 -z-10 flex items-center gap-2'
                       >
-                        <div ref={filterMeasureRef} className='flex items-center gap-2'>
+                        <div
+                          ref={el => {
+                            filterMeasureRef.current = el;
+                            filterTwinRef.current = el;
+                          }}
+                          className='flex items-center gap-2'
+                        >
                           <DeskFilterTrigger id='assignee' active={hasAssigneeFilter} />
                           <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
                           <DeskFilterTrigger id='stages' active={hasStagesFilter} />
                           <span />
                         </div>
+                        {viewMode === 'table' && (
+                          <>
+                            <div ref={columnsWideTwinRef} className='flex items-center'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <Columns3 className='w-3.5 h-3.5' />
+                                  <span className='font-medium'>Columns</span>
+                                </div>
+                              </Button>
+                            </div>
+                            <div ref={columnsNarrowTwinRef} className='flex items-center'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <Columns3 className='w-3.5 h-3.5' />
+                                </div>
+                              </Button>
+                            </div>
+                          </>
+                        )}
                         <div ref={filterStaticLeftRef} className='flex items-center gap-2'>
                           {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
                             <span className='p-1.5'>
@@ -3312,8 +3370,7 @@ const SupportScreen = (): ReactElement => {
                         </>
                       )}
                     </div>
-                    <div ref={filterRowActionsRef} className='flex items-center gap-2 shrink-0'>
-                      {/* Table column picker — built-in columns + the board's custom fields */}
+                    <div className='flex items-center gap-2 shrink-0'>
                       {viewMode === 'table' && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
                           <Popover.Trigger asChild>
@@ -3321,14 +3378,14 @@ const SupportScreen = (): ReactElement => {
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
-                              title={isToolbarCompact ? 'Columns' : undefined}
+                              title={isColumnsLabelled ? undefined : 'Columns'}
                               aria-label='Columns'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                {/* Label drops before any filter folds — this is secondary
+                                {/* Label yields before any filter folds — this is secondary
                                     chrome, and the icon plus tooltip carries it fine. */}
-                                {!isToolbarCompact && <span className='font-medium'>Columns</span>}
+                                {isColumnsLabelled && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
                           </Popover.Trigger>
@@ -3410,103 +3467,107 @@ const SupportScreen = (): ReactElement => {
                           </Popover.Content>
                         </Popover.Root>
                       )}
-                      {/* View Toggle */}
-                      <div className='flex items-center border border-border rounded-lg overflow-hidden'>
-                        <button
-                          onClick={() => setViewMode('kanban')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'kanban'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Kanban View'
-                          data-track-category='Support'
-                          data-track-name='SetKanbanView'
-                        >
-                          <LayoutGrid size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('list')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'list'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='List View'
-                          data-track-category='Support'
-                          data-track-name='SetListView'
-                        >
-                          <List size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('table')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'table'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Table View'
-                          data-track-category='Support'
-                          data-track-name='SetTableView'
-                        >
-                          <Table2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('calendar')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'calendar'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Calendar View'
-                          data-track-category='Support'
-                          data-track-name='SetCalendarView'
-                        >
-                          <CalendarRange size={16} />
-                        </button>
-                      </div>
-                      {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
-                      {isSelectedChannelJoined && selectedChannelFull && (
-                        <CloudAgentDock buttonBehavior='floating' />
-                      )}
-                      {isSelectedChannelJoined &&
-                        selectedChannelId &&
-                        !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
-                          <Tooltip content='Compose new email' side='bottom'>
-                            <Button
-                              variant='default'
-                              size='sm'
-                              className='rounded-[10px] bg-primary hover:bg-primary/90 text-white'
-                              onClick={() => openNewCompose(selectedChannelId)}
-                              data-track-category='Support'
-                              data-track-name='OpenComposeEmail'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <Pencil size={14} />
-                              <span>Compose</span>
-                            </Button>
-                          </Tooltip>
+                      <div ref={actionsRestRef} className='flex items-center gap-2'>
+                        {/* View Toggle */}
+                        <div className='flex items-center border border-border rounded-lg overflow-hidden'>
+                          <button
+                            onClick={() => setViewMode('kanban')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'kanban'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Kanban View'
+                            data-track-category='Support'
+                            data-track-name='SetKanbanView'
+                          >
+                            <LayoutGrid size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('list')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'list'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='List View'
+                            data-track-category='Support'
+                            data-track-name='SetListView'
+                          >
+                            <List size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('table')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'table'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Table View'
+                            data-track-category='Support'
+                            data-track-name='SetTableView'
+                          >
+                            <Table2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('calendar')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'calendar'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Calendar View'
+                            data-track-category='Support'
+                            data-track-name='SetCalendarView'
+                          >
+                            <CalendarRange size={16} />
+                          </button>
+                        </div>
+                        {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
+                        {isSelectedChannelJoined && selectedChannelFull && (
+                          <CloudAgentDock buttonBehavior='floating' />
                         )}
-                      {ticketId && (
-                        <Button
-                          size='sm'
-                          variant='ghost'
-                          onClick={() => {
-                            const back = selectedChannelId
-                              ? `${supportBase}/${selectedChannelId}`
-                              : supportBase;
-                            void navigate(back);
-                          }}
-                          data-track-category='Support'
-                          data-track-name='CloseTicketPanel'
-                        >
-                          <PanelRight size={16} />
-                        </Button>
-                      )}
+                        {isSelectedChannelJoined &&
+                          selectedChannelId &&
+                          !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
+                            <Tooltip content='Compose new email' side='bottom'>
+                              <Button
+                                variant='default'
+                                size='sm'
+                                className='rounded-[10px] bg-primary hover:bg-primary/90 text-white'
+                                onClick={() => openNewCompose(selectedChannelId)}
+                                data-track-category='Support'
+                                data-track-name='OpenComposeEmail'
+                                data-track-metadata={JSON.stringify({
+                                  channelId: selectedChannelId,
+                                })}
+                              >
+                                <Pencil size={14} />
+                                <span>Compose</span>
+                              </Button>
+                            </Tooltip>
+                          )}
+                        {ticketId && (
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            onClick={() => {
+                              const back = selectedChannelId
+                                ? `${supportBase}/${selectedChannelId}`
+                                : supportBase;
+                              void navigate(back);
+                            }}
+                            data-track-category='Support'
+                            data-track-name='CloseTicketPanel'
+                          >
+                            <PanelRight size={16} />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
