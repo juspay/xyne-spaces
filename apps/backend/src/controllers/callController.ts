@@ -24,6 +24,7 @@ import {
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@xyne/storage';
+import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
@@ -49,6 +50,11 @@ import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
+
+const RecordingParticipantsCommandSchema = z.object({
+  action: z.enum(['add', 'remove']),
+  userId: z.string().min(1).max(64),
+});
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -398,6 +404,7 @@ export class CallController {
         sttModel,
         conversationId,
         artifactMessageId,
+        sdlcLink,
       } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
@@ -690,11 +697,47 @@ export class CallController {
       // Generate room link
       const roomLink = buildCallInviteUrl(callExternalId);
 
+      // SDLC linking context: validated here, applied by the LiveKit webhook when
+      // the call record (and its conversation) are created. Invalid input is
+      // dropped with a warning rather than failing the call.
+      let validatedSdlcLink: SdlcCallLink | null = null;
+      if (sdlcLink) {
+        const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
+        if (parsedSdlcLink.success) {
+          const link = parsedSdlcLink.data;
+          const sdlcRepo = await db.repo.findFirst({
+            where: { id: link.repoId, channelId: channel.id },
+            select: { id: true },
+          });
+          const linkTargetValid = sdlcRepo
+            ? link.ownerType === 'CANVAS'
+              ? Boolean(
+                  await db.canvas.findFirst({
+                    where: { id: link.ownerId, channelId: channel.id },
+                    select: { id: true },
+                  }),
+                )
+              : Boolean(
+                  await db.sdlcTrack.findFirst({
+                    where: { id: link.ownerId, repoId: link.repoId },
+                    select: { id: true },
+                  }),
+                )
+            : false;
+          if (linkTargetValid) {
+            validatedSdlcLink = link;
+          } else {
+            logger.warn(`[${correlationId}] sdlc_link_dropped | reason=entity_not_in_channel`);
+          }
+        } else {
+          logger.warn(`[${correlationId}] sdlc_link_dropped | reason=invalid_shape`);
+        }
+      }
+
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
-        projectId: channel.projectId,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
         sttModel: sttModel || 'azure',
@@ -702,6 +745,7 @@ export class CallController {
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
+        ...(validatedSdlcLink && { sdlcLink: validatedSdlcLink }),
       });
 
       stage = 'livekit_room_creation';
@@ -901,7 +945,6 @@ export class CallController {
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
-          projectId: channel.projectId,
           createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
@@ -1420,6 +1463,55 @@ export class CallController {
     }
   };
 
+  manageRecordingParticipants = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = RecordingParticipantsCommandSchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      if (input.action === 'add') {
+        const participant = await repositories.users.findById(input.userId);
+        if (
+          !participant ||
+          participant.workspaceId !== req.user!.workspaceId ||
+          participant.leftAt !== null
+        ) {
+          res.status(400).json({ success: false, error: 'User not found in this workspace' });
+          return;
+        }
+        await repositories.calls.addRecordingParticipant(callId, input.userId);
+      } else {
+        await repositories.calls.removeRecordingParticipant(callId, input.userId);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to manage recording participants', { error, callId });
+      res.status(400).json({ success: false, error: 'Failed to update participants' });
+    }
+  };
+
   /**
    * PATCH /api/calls/recordings/:callId
    * Update recording title
@@ -1464,9 +1556,16 @@ export class CallController {
         }
       }
 
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const resolvedLabels = input.labels
+        ? await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels)
+        : undefined;
+
       await repositories.calls.update(call.id, {
         ...(input.title ? { title: input.title } : {}),
-        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(resolvedLabels ? { labels: resolvedLabels } : {}),
         ...(input.markedItems !== undefined
           ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
           : {}),

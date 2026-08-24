@@ -3,6 +3,7 @@ import {
   UserType,
   createSdlcLinkSchema,
   createSdlcClawArtifactSchema,
+  createSdlcTrackSchema,
   updateSdlcBaselineDraftSchema,
   updateSdlcClawArtifactSchema,
 } from '@xyne/shared';
@@ -58,6 +59,25 @@ router.post(
     const { repoId, ...linkInput } = input;
     const link = await sdlcHub.linkContext(await actorFromRequest(req), repoId, linkInput);
     res.status(201).json({ success: true, link });
+  }),
+);
+
+router.post(
+  '/tracks/list',
+  route(async (req, res) => {
+    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
+    if (!repoId) throw new AppError('repoId is required', 400);
+    const tracks = await sdlcHub.listTracks(await actorFromRequest(req), repoId);
+    res.status(200).json({ success: true, tracks });
+  }),
+);
+
+router.post(
+  '/tracks',
+  route(async (req, res) => {
+    const input = createSdlcTrackSchema.parse(req.body);
+    const track = await sdlcHub.createTrack(await actorFromRequest(req), input);
+    res.status(201).json({ success: true, track });
   }),
 );
 

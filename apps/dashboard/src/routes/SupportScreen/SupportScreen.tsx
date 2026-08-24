@@ -3972,7 +3972,6 @@ export const SupportTicketDetail = ({
 
   const channelIntegrationInfo = useChannelIntegrationInfo(channelId || null);
   const deskEmail = channelIntegrationInfo.email ?? '';
-  const { outboundConfigured } = channelIntegrationInfo;
 
   useAskAiTicketContext({
     channelId: channelId || null,
@@ -4902,7 +4901,10 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
-                    recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
+                    recordOnly={
+                      channel.type === ChannelType.APP &&
+                      channelPreference?.appWebhookDeliveryEnabled === false
+                    }
                   />
                 ) : null
               ) : channel?.type === ChannelType.EMAIL ? (

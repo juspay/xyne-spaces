@@ -18,6 +18,9 @@ const envSchema = Joi.object({
   USE_MOCK_ANALYSIS: Joi.boolean().default(false),
   USE_MOCK_BUILD: Joi.boolean().default(false),
   PORT: Joi.number().default(3001),
+
+  // This is for making the backend API available under a prefix path (e.g. /api/v1) for reverse proxy setups. Empty string means no prefix.
+  API_PATH_PREFIX: Joi.string().allow('').default(''),
   HOST: Joi.string().default('localhost'),
   CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
   ALLOWED_MEDIA_ORIGINS: Joi.string().default(
@@ -539,6 +542,10 @@ export const config = {
   // Email of the Digital Twin app's bot user (empty = twin delivery disabled).
   digitalTwinAppEmail: envVars.DIGITAL_TWIN_APP_EMAIL as string,
   port: envVars.PORT,
+  // Normalized to '/sdlc-api' form, or ''.
+  apiPathPrefix: (envVars.API_PATH_PREFIX as string)
+    ? `/${(envVars.API_PATH_PREFIX as string).trim().replace(/^\/+|\/+$/g, '')}`
+    : '',
   host: envVars.HOST,
   cors: {
     origin: envVars.CORS_ORIGIN.split(',')

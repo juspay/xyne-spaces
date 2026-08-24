@@ -409,9 +409,12 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             touchAction: 'pan-y',
             overscrollBehavior: 'contain',
             pointerEvents: 'auto',
+            // Never narrower than the trigger it drops from; a compact trigger
+            // still lets the content size the popover as before.
+            minWidth: 'var(--radix-popover-trigger-width)',
             // Virtuoso rows are absolutely positioned and can't size the popover;
             // lock it to the plain list's max width so widths stay consistent.
-            ...(isVirtualized && { width: '24rem' }),
+            ...(isVirtualized && { width: 'max(24rem, var(--radix-popover-trigger-width))' }),
           }}
           onWheel={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}

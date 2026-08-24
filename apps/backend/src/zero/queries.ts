@@ -3335,6 +3335,19 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
+  // Boards mapped to a channel via ChannelBoardMapping.
+  // Preferred path for resolving channel → boards; consumer falls back to
+  // boardsListByProject if the mapping is empty.
+  boardsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.channel_board_mappings
+        .where('channelId', channelId)
+        .related('board')
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
   boardsListByProject: defineQuery(
     z.object({ projectId: z.string() }),
     ({ args: { projectId } }) => {
@@ -4149,6 +4162,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('sdlcEntityLinks')
       .orderBy('name', 'asc');
   }),
+  getSdlcTracks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
+    zql.sdlc_tracks.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  ),
+  getSdlcRepoByChannelId: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => zql.repos.where('channelId', channelId).one(),
+  ),
   getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
     return zql.repos
       .where('id', repoId)
@@ -4160,7 +4180,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           .related('participants')
           .related('channelStats')
           .related('canvasFolders', folder =>
-            folder.where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs']).related('canvases'),
+            folder
+              .where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs'])
+              .related('canvases', canvas => canvas.related('sdlcArtifact')),
           ),
       )
       .related('setupExecution')

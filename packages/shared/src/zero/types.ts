@@ -96,7 +96,6 @@ export enum EntityType {
 }
 
 export enum GuestEntity {
-  PROJECT = 'PROJECT',
   CHANNEL = 'CHANNEL',
   CANVAS = 'CANVAS',
 }
@@ -731,6 +730,9 @@ export enum ChannelType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  // SDLC repository channel: system-managed, hidden from the chat surfaces
+  // the same way SUPPORT channels are (inline type checks).
+  SDLC = 'SDLC',
 }
 
 // @ts-ignore TS1294

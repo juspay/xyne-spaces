@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { isSdlcBaselineApprovalCurrent } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -26,7 +25,6 @@ import {
   deleteClawConversation,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
-import { BASELINE_DEFINITIONS } from '@/sdlc/baselineDefinitions';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
 import {
   buildSdlcAskAiContext,
@@ -371,67 +369,34 @@ export class XyneAIControllerV2 {
             name: sdlcRepo.name,
           };
         }
-        const [memories, contextLinks, channelCanvases] = await Promise.all([
-          sdlcRepo.projectId
-            ? db.knowledgeDocument.findMany({
-                where: { projectId: sdlcRepo.projectId },
-                select: { id: true, title: true, content: true, metadata: true },
-              })
-            : [],
-          db.sdlcEntityLink.findMany({
-            where: { repoId: sdlcRepo.id, relationType: 'CONTEXT' },
-            orderBy: { createdAt: 'desc' },
-            take: 50,
-            select: { targetType: true, targetId: true },
-          }),
-          db.canvas.findMany({
-            where: { channelId: effectiveChannelIds[0] },
-            select: { id: true, title: true, metadata: true, lastEditedAt: true },
-          }),
-        ]);
-        const currentKnowledgeDocumentIds = new Set(
-          channelCanvases.flatMap((canvas) => {
-            const metadata = canvas.metadata as Record<string, unknown> | null;
-            return metadata?.artifactKind === 'BASELINE' &&
-              typeof metadata.knowledgeDocumentId === 'string' &&
-              isSdlcBaselineApprovalCurrent({
-                approvedAt: typeof metadata.approvedAt === 'string' ? metadata.approvedAt : null,
-                lastEditedAt: canvas.lastEditedAt,
-              })
-              ? [metadata.knowledgeDocumentId]
-              : [];
-          })
-        );
+        const contextLinks = await db.sdlcEntityLink.findMany({
+          where: { repoId: sdlcRepo.id, relationType: 'CONTEXT' },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: { targetType: true, targetId: true },
+        });
         const selectedCanvas = effectiveCanvasId
-          ? channelCanvases.find((canvas) => canvas.id === effectiveCanvasId)
+          ? await db.canvas.findFirst({
+              where: { id: effectiveCanvasId, channelId: effectiveChannelIds[0] },
+              select: {
+                id: true,
+                title: true,
+                sdlcArtifact: { select: { artifactType: true } },
+              },
+            })
           : undefined;
         const selectedArtifact = resolveSdlcAskAiSelectedArtifact(
           selectedCanvas
             ? {
                 id: selectedCanvas.id,
                 title: selectedCanvas.title,
-                metadata: selectedCanvas.metadata as Record<string, unknown> | null,
+                artifactType: selectedCanvas.sdlcArtifact?.artifactType,
               }
-            : undefined,
-          sdlcRepo.id
+            : selectedCanvas,
         );
-        const approvedBaseline = memories
-          .filter((memory) => {
-            const metadata = memory.metadata as Record<string, unknown> | null;
-            return (
-              metadata?.repoId === sdlcRepo.id &&
-              typeof metadata.baselineKind === 'string' &&
-              currentKnowledgeDocumentIds.has(memory.id)
-            );
-          })
-          .sort((left, right) => {
-            const leftKind = String((left.metadata as Record<string, unknown>).baselineKind);
-            const rightKind = String((right.metadata as Record<string, unknown>).baselineKind);
-            return (
-              BASELINE_DEFINITIONS.findIndex((item) => item.kind === leftKind) -
-              BASELINE_DEFINITIONS.findIndex((item) => item.kind === rightKind)
-            );
-          });
+        // Baseline knowledge-document injection is disabled until the standalone
+        // baseline approval flow returns; READY baselines gate artifact creation instead.
+        const approvedBaseline: Array<{ title: string; content: string }> = [];
         const linkedContext = sdlcRepo.workspaceId
           ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
           : [];
