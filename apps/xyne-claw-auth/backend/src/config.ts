@@ -1,4 +1,7 @@
-import { parseSpacesEncryptionKeyRing } from "./spaces-encryption-key-ring.js";
+import {
+  createLazySpacesEncryptionKeyRing,
+  parseSpacesEncryptionKeyRing,
+} from "./spaces-encryption-key-ring.js";
 import { createHmac } from "node:crypto";
 import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
 
@@ -22,6 +25,12 @@ const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("
 // Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
 // the derived data key; reads fall back to the legacy root during migration.
 registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
+
+const loadSpacesEncryptionKeys =
+  createLazySpacesEncryptionKeyRing(
+    process.env["SPACES_ENCRYPTION_KEY"],
+    process.env["SPACES_ENCRYPTION_KEYS"]
+  );
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
@@ -50,10 +59,9 @@ export const CONFIG = {
   // names, or rows written under a missing id cannot be read. SPACES_ENCRYPTION_KEY
   // is registered as "legacy" to match the id Spaces gives unversioned rows.
   // Empty ring when unset; the backfill short-circuits with a clear error.
-  spacesEncryptionKeys: parseSpacesEncryptionKeyRing(
-    process.env["SPACES_ENCRYPTION_KEY"],
-    process.env["SPACES_ENCRYPTION_KEYS"],
-  ),
+  get spacesEncryptionKeys(): ReadonlyMap<string, Buffer> {
+    return loadSpacesEncryptionKeys();
+  },
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
   // Public base URL of the claw SPA, used for post-OAuth browser redirects.
   // Precedence: explicit FRONTEND_URL override; else in production the SPA is

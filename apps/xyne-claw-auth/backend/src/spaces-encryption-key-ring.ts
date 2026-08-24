@@ -79,3 +79,25 @@ export function parseSpacesEncryptionKeyRing(
 
   return ring;
 }
+
+/**
+ * Defer Spaces key validation until a route actually needs the key ring.
+ *
+ * This prevents an optional, malformed Spaces backfill key from stopping
+ * unrelated Claw-auth OAuth, session, and agent-auth functionality at startup.
+ * A successful result is cached for the lifetime of the process.
+ */
+export function createLazySpacesEncryptionKeyRing(
+  legacyKey: string | undefined,
+  orderedKeys: string | undefined,
+): () => ReadonlyMap<string, Buffer> {
+  let cached: ReadonlyMap<string, Buffer> | null = null;
+
+  return (): ReadonlyMap<string, Buffer> => {
+    if (cached === null) {
+      cached = parseSpacesEncryptionKeyRing(legacyKey, orderedKeys);
+    }
+
+    return cached;
+  };
+}

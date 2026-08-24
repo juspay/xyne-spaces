@@ -4,6 +4,12 @@ import Joi from 'joi';
 dotenv.config();
 
 const envSchema = Joi.object({
+  // Legacy AES-256-CBC key used for unversioned ciphertext.
+  ENCRYPTION_KEY: Joi.string().allow('').optional(),
+  // Ordered JSON key ring. The final entry is the active writer;
+  // all entries remain available for decryption.
+  ENCRYPTION_KEYS: Joi.string().allow('').optional(),
+
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
@@ -189,7 +195,7 @@ const envSchema = Joi.object({
         'payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to ' +
         'accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI ' +
         'are external ecosystem entities. Juspay itself is the operator, NOT an external ' +
-        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.',
+        'organisation — never classify Juspay (or its own products/teams) as ORGANISATION.'
     ),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Document outline generation (BaseStrategy.buildDocumentOutline) — an extra LLM
@@ -339,9 +345,7 @@ const envSchema = Joi.object({
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
-    .allow('')
-    .default(''),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
