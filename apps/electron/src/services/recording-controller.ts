@@ -86,6 +86,10 @@ function watchRendererLifecycle(win: BrowserWindow): void {
   watchedRenderers.add(win);
   win.webContents.on('did-start-loading', () => {
     rendererReady = false;
+    // A reload tears down the LiveKit connection, so any call is over; the
+    // remounted renderer resends call state either way. Without this a renderer
+    // that hangs mid-reload would strand the flag true and mute detection.
+    callActive = false;
   });
   win.webContents.on('render-process-gone', () => {
     rendererReady = false;
@@ -346,8 +350,8 @@ export function setRecordingStarting(next: boolean): void {
 }
 
 // Calls enable the mic the same way recordings do, so the meeting detector must
-// treat both as ours. The renderer reports call state on every transition and
-// resends it on mount, so a reload self-heals; only a crash needs the reset above.
+// treat both as ours. The renderer reports call state on every transition and on
+// mount; the lifecycle hooks above clear it when the renderer reloads or dies.
 export function setCallActive(next: boolean): void {
   callActive = next;
 }
