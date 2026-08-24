@@ -67,7 +67,12 @@ const UnreadsInbox = (): ReactElement => {
         isUnread = true;
       }
 
-      return isUnread && !isDeskChannelType(c.type) && c.type !== ChannelType.SUPPORT;
+      return (
+        isUnread &&
+        !isDeskChannelType(c.type) &&
+        c.type !== ChannelType.SUPPORT &&
+        c.type !== ChannelType.SDLC
+      );
     });
   }, [
     starred,
