@@ -366,30 +366,6 @@ const AppSidebar = (): ReactElement => {
           ) : (
             <nav>
               <ul className='relative flex flex-col gap-4'>
-                {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
-                {aiLandingDefault && (
-                  <li key='/ai' className='relative'>
-                    <Tooltip content='Xyne AI' side='right' delayDuration={0}>
-                      <Link
-                        to={prefixWs('/ai')}
-                        onClick={() => handleNavigationClick('Xyne AI')}
-                        data-testid='nav-xyne-ai'
-                        data-track-category='App_Sidebar'
-                        data-track-name='Sidebar_Nav_Item'
-                        data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
-                        className={cn(
-                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
-                          activeRoute === '/ai'
-                            ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                            : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                        )}
-                      >
-                        <XyneAISidebarIcon size={16} />
-                      </Link>
-                    </Tooltip>
-                  </li>
-                )}
-
                 {toolbarItems.map((item, index) => {
                   const shortcutIndex =
                     railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
