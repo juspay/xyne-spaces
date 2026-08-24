@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadCustomTools } from "../src/custom-tools.js";
 import {
   DESIGN_SYSTEM_MAX_CHARS,
+  SPEC_QUESTION_OUTLINE,
   buildDesignSystemPromptInjection,
   parseTaskCommand,
   resolveTaskCommandMode,
@@ -217,5 +218,58 @@ describe("/record-skill task command", () => {
 
   it("executes immediately instead of entering plan mode", () => {
     expect(resolveTaskCommandMode("/record-skill", "plan")).toBe("auto");
+  });
+});
+
+describe("/spec task command", () => {
+  it("matches only the leading command token", () => {
+    expect(parseTaskCommand("/spec write the spec for XYNE-1")?.command).toBe("/spec");
+    expect(parseTaskCommand("  /SPEC\nXYNE-1")?.command).toBe("/spec");
+    expect(parseTaskCommand("please /spec XYNE-1")).toBeNull();
+    expect(parseTaskCommand("/specs XYNE-1")).toBeNull();
+  });
+
+  it("binds the run with a delivery contract rather than a required tool", () => {
+    const command = parseTaskCommand("/spec XYNE-1");
+    expect(command?.requiredTool).toBeUndefined();
+    const outputFormat = command?.agentConfigOverlay?.["outputFormat"] as
+      | { type?: string; template?: string }
+      | undefined;
+    expect(outputFormat?.type).toBe("markdown");
+    expect(outputFormat?.template).toBe(SPEC_QUESTION_OUTLINE);
+  });
+
+  it("fixes the sections while leaving the questions to the ticket", () => {
+    for (const heading of [
+      "Problem statement",
+      "Solutioning",
+      "Implementation details",
+      "Test cases",
+      "Out of scope",
+    ]) {
+      expect(SPEC_QUESTION_OUTLINE).toContain(heading);
+    }
+    expect(SPEC_QUESTION_OUTLINE).toContain("Skip any section that does not apply");
+    expect(SPEC_QUESTION_OUTLINE).toContain("no greeting");
+  });
+
+  it("asks a bug what broke and why, without duplicating the RCA record", () => {
+    expect(SPEC_QUESTION_OUTLINE).toContain("BUG");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Reproduction");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Root cause");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT ask for severity, bug type,");
+  });
+
+  it("keeps the overlay off the agent's own config", () => {
+    const savedConfig: Record<string, unknown> = { tools: { custom: ["todo-read"] } };
+    const command = parseTaskCommand("/spec XYNE-1");
+    const merged = { ...savedConfig, ...(command?.agentConfigOverlay ?? {}) };
+
+    expect(merged["outputFormat"]).toBeDefined();
+    expect(savedConfig["outputFormat"]).toBeUndefined();
+  });
+
+  it("executes immediately instead of entering plan mode", () => {
+    expect(resolveTaskCommandMode("/spec XYNE-1", "plan")).toBe("auto");
   });
 });
