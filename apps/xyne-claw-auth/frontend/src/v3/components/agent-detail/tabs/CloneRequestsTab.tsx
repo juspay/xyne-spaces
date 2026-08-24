@@ -132,6 +132,11 @@ export function CloneRequestsTab({
                     <p className="truncate text-[11.5px] text-xyne-fg-tertiary">
                       requested {new Date(req.createdAt).toLocaleString()}
                     </p>
+                    {req.requestReason && (
+                      <p className="mt-1 line-clamp-2 text-[11.5px] leading-snug text-xyne-fg-secondary">
+                        Reason: {req.requestReason}
+                      </p>
+                    )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
@@ -190,6 +195,11 @@ export function CloneRequestsTab({
                     <p className="truncate text-[11.5px] text-xyne-fg-tertiary">
                       {callerSlug} · owner {owner}
                     </p>
+                    {req.requestReason && (
+                      <p className="mt-1 line-clamp-2 text-[11.5px] leading-snug text-xyne-fg-secondary">
+                        Reason: {req.requestReason}
+                      </p>
+                    )}
                     <p className="truncate text-[11.5px] text-xyne-fg-tertiary">
                       approved {req.approvedAt ? new Date(req.approvedAt).toLocaleString() : "previously"}
                     </p>

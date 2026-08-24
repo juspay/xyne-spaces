@@ -628,6 +628,7 @@ export interface AgentDelegationGrant {
   approvedByUserId: string | null;
   approvedAt: string | null;
   createdByUserId: string | null;
+  requestReason: string | null;
   createdAt: string;
   updatedAt: string;
   callee: (Pick<AgentLight, "id" | "slug" | "name" | "description" | "enabled"> & {
@@ -647,6 +648,7 @@ export interface AgentDelegationRequest {
   approvedByUserId: string | null;
   approvedAt: string | null;
   createdByUserId: string | null;
+  requestReason: string | null;
   createdAt: string;
   updatedAt: string;
   caller: (Pick<AgentLight, "id" | "slug" | "name" | "description" | "enabled" | "ownerUserId" | "owner">) | null;
@@ -665,7 +667,7 @@ export async function listDelegationGrants(slug: string): Promise<AgentDelegatio
 
 export async function createDelegationGrant(
   slug: string,
-  payload: { calleeSlug: string; identityMode?: DelegationIdentityMode },
+  payload: { calleeSlug: string; identityMode?: DelegationIdentityMode; requestReason?: string },
 ): Promise<AgentDelegationGrant> {
   const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
     `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-grants`,

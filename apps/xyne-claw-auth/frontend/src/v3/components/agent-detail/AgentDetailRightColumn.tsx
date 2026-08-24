@@ -274,10 +274,15 @@ export function AgentDetailRightColumn({
     ? `Whitelist · ${privacyCount} ${privacyCount === 1 ? "person" : "people"}`
     : "Everyone can call it";
   const pendingRequestCount = cloneRequests.length + delegationRequests.length;
+  const activeDelegationCount = activeDelegations.length;
   const requestStatus =
-    pendingRequestCount > 0
-      ? `${pendingRequestCount} pending ${pendingRequestCount === 1 ? "request" : "requests"}`
-      : "No pending requests";
+    activeDelegationCount > 0 && pendingRequestCount > 0
+      ? `${activeDelegationCount} can call · ${pendingRequestCount} pending`
+      : activeDelegationCount > 0
+        ? `${activeDelegationCount} ${activeDelegationCount === 1 ? "agent can" : "agents can"} call it`
+        : pendingRequestCount > 0
+          ? `${pendingRequestCount} pending ${pendingRequestCount === 1 ? "request" : "requests"}`
+          : "No agents can call it";
 
   const cards: CardDef[] = [
     {
@@ -344,14 +349,12 @@ export function AgentDetailRightColumn({
     },
     {
       id: "requests",
-      label: "Requests",
+      label: "Call graph",
       status: requestStatus,
       icon: CopyIcon,
-      badge: pendingRequestCount || undefined,
-      // Owner-only inbox. Always visible to the owner so there's a persistent
-      // place to check for clone requests — the badge appears only when some
-      // are pending, and the panel shows an empty state otherwise. Kept last so
-      // it sits at the end of the dashboard grid.
+      badge: pendingRequestCount || activeDelegationCount || undefined,
+      // Owner-only call graph + inbox. Shows who can call this agent and pending
+      // clone/delegation approvals.
       show: canManageRequests,
     },
   ];

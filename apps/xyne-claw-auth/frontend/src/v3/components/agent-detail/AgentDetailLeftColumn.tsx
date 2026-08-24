@@ -1464,7 +1464,8 @@ interface Props {
   allAgents: AgentLight[];
   delegationGrants: AgentDelegationGrant[];
   delegationLoading: boolean;
-  onAddDelegationGrant: (calleeSlug: string, identityMode: DelegationIdentityMode) => Promise<void>;
+  currentUserId: string;
+  onAddDelegationGrant: (calleeSlug: string, identityMode: DelegationIdentityMode, requestReason?: string) => Promise<void>;
   onDeleteDelegationGrant: (grant: AgentDelegationGrant) => Promise<void>;
   onAddDelegationConfigEntry: (calleeSlug: string) => Promise<void>;
   onCreateDelegationGrantForConfig: (calleeSlug: string) => Promise<void>;
@@ -1701,6 +1702,7 @@ export function AgentDetailLeftColumn({
   allAgents,
   delegationGrants,
   delegationLoading,
+  currentUserId,
   onAddDelegationGrant,
   onDeleteDelegationGrant,
   onAddDelegationConfigEntry,
@@ -2179,6 +2181,7 @@ export function AgentDetailLeftColumn({
           suggestContext={{ systemPrompt: prompt, description: agent.description ?? undefined }}
           delegatedAgents={permissions.role === "owner" ? {
             currentAgentSlug: agent.slug,
+            currentUserId,
             isOrchestratorTier: agent.delegationTier === "orchestrator",
             agents: allAgents,
             grants: delegationGrants,

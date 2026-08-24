@@ -767,10 +767,10 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     });
   }, []);
 
-  const handleAddDelegationGrant = useCallback(async (calleeSlug: string, identityMode: DelegationIdentityMode) => {
+  const handleAddDelegationGrant = useCallback(async (calleeSlug: string, identityMode: DelegationIdentityMode, requestReason?: string) => {
     if (!agent) return;
     try {
-      const grant = await createDelegationGrant(agent.slug, { calleeSlug, identityMode });
+      const grant = await createDelegationGrant(agent.slug, { calleeSlug, identityMode, requestReason });
       upsertGrantState(grant);
       await persistToolsConfig(addCallableAgentSlug(calleeSlug));
       if (grant.status === "approved") {
@@ -1079,6 +1079,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             allAgents={allAgents}
             delegationGrants={delegationGrants}
             delegationLoading={delegationLoading}
+            currentUserId={userId}
             onAddDelegationGrant={handleAddDelegationGrant}
             onDeleteDelegationGrant={handleDeleteDelegationGrant}
             onAddDelegationConfigEntry={handleAddDelegationConfigEntry}

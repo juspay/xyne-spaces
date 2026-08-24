@@ -1006,6 +1006,7 @@ async function postDelegationDmWithCalleeIdentity(args: {
 
 async function notifyOwnerOfDelegationRequestInSpaces(args: {
   caller: { slug: string; name: string; ownerUserId: string | null };
+  requestReason?: string | null;
   callee: {
     slug: string;
     name: string;
@@ -1015,14 +1016,15 @@ async function notifyOwnerOfDelegationRequestInSpaces(args: {
     spacesAppUserId: string | null;
   };
 }): Promise<void> {
-  const { caller, callee } = args;
+  const { caller, callee, requestReason } = args;
+  const reasonLine = requestReason?.trim() ? `\n\nReason: ${requestReason.trim()}` : "";
   const owner = caller.ownerUserId ? await userRepository.findById(caller.ownerUserId).catch(() => null) : null;
   const ownerName = owner?.name ?? owner?.email ?? caller.ownerUserId ?? "unknown owner";
   const dashboardLink = `${CONFIG.spacesAppUrl.replace(/\/+$/, "")}/claw/v3/agents/${encodeURIComponent(callee.slug)}`;
   await postDelegationDmWithCalleeIdentity({
     callee,
     targetUserId: callee.ownerUserId,
-    text: `🤝 Delegation request: agent ${caller.name} (${ownerName}) wants to delegate tasks to your agent ${callee.name}. Approve or reject: ${dashboardLink}`,
+    text: `🤝 Delegation request: agent ${caller.name} (${ownerName}) wants to delegate tasks to your agent ${callee.name}.${reasonLine}\n\nApprove or reject: ${dashboardLink}`,
     logContext: `request caller=${caller.slug} callee=${callee.slug}`,
   });
 }
@@ -1105,6 +1107,7 @@ router.get("/delegation-requests/pending-for-me", async (req: Request, res: Resp
         approvedByUserId: grant.approvedByUserId,
         approvedAt: grant.approvedAt,
         createdByUserId: grant.createdByUserId,
+        requestReason: grant.requestReason,
         createdAt: grant.createdAt,
         updatedAt: grant.updatedAt,
         caller: callerById.get(grant.callerAgentId) ?? null,
@@ -1151,6 +1154,7 @@ router.get(
           createdByUserId: g.createdByUserId,
           createdAt: g.createdAt,
           updatedAt: g.updatedAt,
+          requestReason: g.requestReason,
           callee: byId.get(g.calleeAgentId) ?? null,
         })),
       });
@@ -1171,8 +1175,10 @@ router.post(
       const { calleeSlug, identityMode } = (req.body ?? {}) as {
         calleeSlug?: string;
         identityMode?: string;
+        requestReason?: string;
       };
       const calleeHandle = typeof calleeSlug === "string" ? calleeSlug.trim() : "";
+      const reason = typeof requestReason === "string" ? requestReason.trim() : "";
       if (!calleeHandle) {
         res.status(400).json({ success: false, error: "calleeSlug is required" });
         return;
@@ -1216,6 +1222,14 @@ router.post(
       // credentials/quota, so the callee owner is always consulted, even for
       // grants created by claw admins.
       const autoApprove = !!caller.ownerUserId && caller.ownerUserId === callee.ownerUserId;
+      if (!autoApprove && reason.length < 3) {
+        res.status(400).json({ success: false, error: "requestReason is required when delegating to an agent owned by someone else" });
+        return;
+      }
+      if (reason.length > 1000) {
+        res.status(400).json({ success: false, error: "requestReason must be 1000 characters or less" });
+        return;
+      }
       const existingGrant = await prisma.agentDelegationGrant.findUnique({
         where: {
           callerAgentId_calleeAgentId: {
@@ -1251,6 +1265,7 @@ router.post(
           approvedByUserId,
           approvedAt,
           createdByUserId: requesterId ?? null,
+          requestReason: reason || null,
         },
         update: {
           identityMode: mode,
@@ -1258,11 +1273,13 @@ router.post(
           status,
           approvedByUserId,
           approvedAt,
+          requestReason: reason || existingGrant?.requestReason || null,
         },
       });
       if (grant.status === "pending" && existingGrant?.status !== "pending") {
         void notifyOwnerOfDelegationRequestInSpaces({
           caller: { slug: caller.slug, name: caller.name, ownerUserId: caller.ownerUserId },
+          requestReason: grant.requestReason,
           callee,
         }).catch((err) => {
           log.warn("[agents/delegation] request DM failed:", err instanceof Error ? err.message : String(err));
@@ -1272,6 +1289,7 @@ router.post(
         success: true,
         data: {
           ...grant,
+          requestReason: grant.requestReason,
           callee: {
             id: callee.id,
             slug: callee.slug,
@@ -1332,6 +1350,7 @@ router.get(
           createdByUserId: grant.createdByUserId,
           createdAt: grant.createdAt,
           updatedAt: grant.updatedAt,
+          requestReason: grant.requestReason,
           caller: callerById.get(grant.callerAgentId) ?? null,
         })),
       });
