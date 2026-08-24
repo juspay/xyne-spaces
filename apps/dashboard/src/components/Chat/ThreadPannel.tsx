@@ -128,7 +128,9 @@ interface ThreadMessagesProps {
   /** Overrides what the header's Ask AI button does. Defaults to opening the
    *  panel on this thread; hosts with their own agent session (e.g. Desk's
    *  draft agent) pass their own opener. */
-  onAskAI?: () => void;
+  onAskAI?: (threadInfo?: ThreadInfo) => void;
+  /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
+  onUserClick?: ((userId: string) => void) | undefined;
 }
 
 export const ThreadMessages = ({
@@ -150,6 +152,7 @@ export const ThreadMessages = ({
   onChannelLinkClick,
   skipInputAutoFocus: propSkipInputAutoFocus = false,
   onAskAI,
+  onUserClick,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -1099,6 +1102,7 @@ export const ThreadMessages = ({
               channelId={derivedChannelId || ''}
               conversationId={derivedConversationId || ''}
               threadMessages={messages}
+              {...(onUserClick && { onUserClick })}
               initialScrollOffset={0}
               isTicketThread={false}
               channelScopeType={channel?.scopeType}
@@ -1231,7 +1235,7 @@ export const ThreadMessages = ({
                     variant='ghost'
                     onClick={() => {
                       if (onAskAI) {
-                        onAskAI();
+                        onAskAI(threadInfo ?? undefined);
                         return;
                       }
                       xyneAIActor.send({
@@ -1455,6 +1459,7 @@ export const ThreadMessages = ({
                     channelId={derivedChannelId || ''}
                     conversationId={derivedConversationId || ''}
                     threadMessages={messages}
+                    {...(onUserClick && { onUserClick })}
                     messagesWithSeparators={messagesWithSeparators}
                     initialScrollOffset={0}
                     isTicketThread={true}
@@ -1595,6 +1600,10 @@ export const ThreadMessages = ({
                         size='sm'
                         variant='ghost'
                         onClick={() => {
+                          if (onAskAI) {
+                            onAskAI(threadInfo ?? undefined);
+                            return;
+                          }
                           xyneAIActor.send({
                             type: 'OPEN',
                             channelId: derivedChannelId,
@@ -1763,6 +1772,7 @@ export const ThreadMessages = ({
                   channelId={derivedChannelId || ''}
                   conversationId={derivedConversationId || ''}
                   threadMessages={messages}
+                  {...(onUserClick && { onUserClick })}
                   initialScrollOffset={0}
                   isTicketThread={false}
                   channelScopeType={channel?.scopeType}
