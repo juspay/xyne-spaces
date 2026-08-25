@@ -6,12 +6,25 @@ interface OrderedEncryptionKey {
   key: string;
 }
 
-function parseHexKey(raw: unknown, label: string): Buffer {
-  if (typeof raw !== "string" || !/^[0-9a-fA-F]{64}$/.test(raw)) {
-    throw new Error(label + " must be 32 bytes (64 hex characters)");
+function parseHexKey(
+  raw: unknown,
+  label: string
+): Buffer {
+  if (typeof raw !== "string") {
+    throw new Error(
+      `${label} must be 32 bytes (64 hex characters)`
+    );
   }
 
-  return Buffer.from(raw, "hex");
+  const normalized = raw.trim();
+
+  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error(
+      `${label} must be 32 bytes (64 hex characters)`
+    );
+  }
+
+  return Buffer.from(normalized, "hex");
 }
 
 export function parseSpacesEncryptionKeyRing(
