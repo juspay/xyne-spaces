@@ -199,36 +199,40 @@ async function getOrCreateSession(
   // creds-loader's "live-first hit" is computed and then thrown away — the
   // child keeps calling Spaces with a stale env-baked token and 401s.
   if (serverType === "xyne-spaces" || serverType === "xyne-dashboard") {
-    const live = await getSpacesAuthForUser(userId, "mcp-runner");
-    if (live) {
+    // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
+    // cluster, regardless of whether a live login session exists. The agent's
+    // app token is resolved so the spaces tools authenticate via /api/apps/*
+    // (no user session needed).
+    if (agentSlug === "onyx-ask-ai") {
+      if (!CONFIG.onyxVespaEndpoint.trim()) {
+        throw new Error("[mcp/runner] onyx dispatch but ONYX_EVAL_VESPA_ENDPOINT is unset — refusing to spawn (no prod fallback).");
+      }
+      const appToken = await resolveAppTokenForAppUser(userId);
+      log.info(`[mcp/runner] onyx-routing for bench agent (slug=${agentSlug}, user=${userId}) → ${CONFIG.onyxVespaEndpoint} (appToken=${appToken ? "resolved" : "missing"})`);
       credentials = {
         ...credentials,
-        token: live.token,
-        sessionId: live.sessionId,
-        workspaceId: live.workspaceId,
+        authMode: "app",
         userId,
+        workspaceId: CONFIG.onyxWorkspaceId,
+        directVespa: "true",
+        vespaEndpoint: CONFIG.onyxVespaEndpoint,
+        url: CONFIG.spacesBackendUrl,
+        ...(appToken ? { token: appToken } : {}),
       };
     } else {
-      // No login session for this userId. If it's an agent's app user, fall back
-      // to the agent's app token in APP MODE so the spaces tools work headlessly
-      // via /api/apps/* (no user session needed).
-      // Bench lane: the onyx bench agent NEVER needs an app token — its tool
-      // (spaces-vespa-search) talks straight to the benchmark Vespa cluster.
-      if (agentSlug === "onyx-ask-ai") {
-        if (!CONFIG.onyxVespaEndpoint.trim()) {
-          throw new Error("[mcp/runner] onyx dispatch but ONYX_EVAL_VESPA_ENDPOINT is unset — refusing to spawn (no prod fallback).");
-        }
-        log.info(`[mcp/runner] onyx-routing for bench agent (slug=${agentSlug}, user=${userId}) → ${CONFIG.onyxVespaEndpoint}`);
+      const live = await getSpacesAuthForUser(userId, "mcp-runner");
+      if (live) {
         credentials = {
           ...credentials,
-          authMode: "app",
+          token: live.token,
+          sessionId: live.sessionId,
+          workspaceId: live.workspaceId,
           userId,
-          workspaceId: CONFIG.onyxWorkspaceId,
-          directVespa: "true",
-          vespaEndpoint: CONFIG.onyxVespaEndpoint,
-          url: CONFIG.spacesBackendUrl,
         };
       } else {
+        // No login session for this userId. If it's an agent's app user, fall
+        // back to the agent's app token in APP MODE so the spaces tools work
+        // headlessly via /api/apps/* (no user session needed).
         const appToken = await resolveAppTokenForAppUser(userId);
         if (appToken) {
           const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
