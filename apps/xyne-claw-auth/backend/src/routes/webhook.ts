@@ -7927,6 +7927,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
               agentSlug: ctx.agentSlug,
               userId: ctx.senderId,
               toolInvocation,
+              ...(ctx.triggerSource ? { triggerSource: ctx.triggerSource } : {}),
               ts: Date.now(),
             });
           }

@@ -115,7 +115,7 @@ export interface SessionContext {
   slackDelivery?: SlackDeliveryTarget;
   /** Surface that dispatched this run. Used by MCP tool filtering to apply
    *  surface-scoped default tools without mutating the stored agent config. */
-  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack";
+  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
   /**
    * When true, the result-forward branch resolves the agent's plain `@Name`
    * mentions into clickable/notifying Spaces mentions (name→userId via

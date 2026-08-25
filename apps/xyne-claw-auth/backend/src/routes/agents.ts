@@ -31,7 +31,8 @@ import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
-import { validateAgentModelConfig } from "../lib/agent-config-validation.js";
+import { validateAgentModelConfig, validateAwakeningConfig } from "../lib/agent-config-validation.js";
+import { syncAwakeningState } from "../awakening/lifecycle.js";
 import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
@@ -740,6 +741,11 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
         res.status(400).json({ success: false, error: configCheck.error });
         return;
       }
+      const awakeningCheck = validateAwakeningConfig(normalizedConfig as Record<string, unknown>);
+      if (!awakeningCheck.ok) {
+        res.status(400).json({ success: false, error: awakeningCheck.error });
+        return;
+      }
       logAgentConfigWriteDiff(existing.slug, requesterId ?? undefined, existing.config, normalizedConfig);
       data.config = normalizedConfig as Prisma.InputJsonValue;
     }
@@ -794,6 +800,15 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     }
 
     const agent = await agentRepository.update(req.params.slug, existing.orgId, data);
+
+    // Create/park the scheduler state row so the awakening tick starts or
+    // stops seeing this agent. Best-effort: a failure here must not fail the
+    // config write — the next write, or a manual re-enable, reconciles it.
+    if (normalizedConfig !== undefined) {
+      await syncAwakeningState(existing.id, existing.orgId, normalizedConfig).catch((e) =>
+        log.warn(`[agents] syncAwakeningState failed for ${existing.slug}:`, e instanceof Error ? e.message : e),
+      );
+    }
 
     // Model-settings audit — which model actually serves this agent's runs.
     // Written only when config.modelSettings really changed, so the
