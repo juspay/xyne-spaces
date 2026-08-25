@@ -42,6 +42,9 @@ export function useMcpCatalog(): McpCatalog {
     connectionsByServerId,
     loading: tools.isLoading,
     isError: tools.isError,
-    refetch: () => void tools.refetch(),
+    refetch: (): void => {
+      void tools.refetch();
+      void mcp.refetch();
+    },
   };
 }

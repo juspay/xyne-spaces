@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MaximizeTwoArrow } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
@@ -51,6 +51,13 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
   const [busyType, setBusyType] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<string | null>(null);
   const [credentialsFor, setCredentialsFor] = useState<McpServer | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connectedKey = [...params.keys()].find(key => key.endsWith('_connected'));
+    if (!connectedKey || params.get(connectedKey) !== 'true') return;
+    refetch();
+  }, [refetch]);
 
   const connectors = props?.connectors ?? [];
   if (connectors.length === 0) return null;
