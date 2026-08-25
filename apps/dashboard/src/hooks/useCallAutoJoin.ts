@@ -131,8 +131,15 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
       return undefined;
     }
 
+    // A channel can hold several active calls at once, differing by origin: one
+    // CHANNEL call, one CONVERSATION call per thread, plus calendar-linked ones.
+    // Match CHANNEL explicitly rather than excluding CONVERSATION — the query is
+    // ordered newest-first, so "anything but a thread call" would follow a
+    // calendar call that started after the channel's own call and join the wrong
+    // one. CHANNEL is also exactly what the backend converges on when initiating
+    // (findActiveCallByChannelId), so client and server agree on which call this is.
     const calls = (activeCalls ?? []) as readonly AutoJoinCall[];
-    const channelCall = calls.find(call => call.callOrigin !== CallOrigin.CONVERSATION);
+    const channelCall = calls.find(call => call.callOrigin === CallOrigin.CHANNEL);
 
     if (isInCall) {
       if (channelCall && currentCallId === channelCall.externalId) {
