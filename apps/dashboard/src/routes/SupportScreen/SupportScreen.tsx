@@ -215,8 +215,13 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
-import useMeasure from '../../hooks/useMeasure';
-import useOverflowFit from '../../hooks/useOverflowFit';
+import {
+  COLLAPSIBLE_FILTER_IDS,
+  COLLAPSIBLE_FILTER_META,
+  DeskFilterTrigger,
+  type CollapsibleFilterId,
+} from './DeskFilterTrigger';
+import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
@@ -553,58 +558,6 @@ interface DemergeEmailResponse {
 
 type ViewMode = 'kanban' | 'list' | 'table' | 'calendar';
 
-/**
- * The desk toolbar collapses filter triggers into the "Filters" popover when the row runs
- * out of room
- */
-const COLLAPSIBLE_FILTER_IDS = ['assignee', 'priority', 'stages'] as const;
-type CollapsibleFilterId = (typeof COLLAPSIBLE_FILTER_IDS)[number];
-
-const COLLAPSIBLE_FILTER_META: Record<
-  CollapsibleFilterId,
-  { label: string; icon: React.ComponentType<{ className?: string }> }
-> = {
-  assignee: { label: 'Assignee', icon: User },
-  priority: { label: 'Priority', icon: BarChart4Icon },
-  stages: { label: 'Status', icon: Circle },
-};
-
-/** The row's `gap-2`, in pixels. */
-const TOOLBAR_GAP = 8;
-
-/** `px-4` on both sides of the row, plus a margin so we fold one step early rather than
- *  land flush against the actions group. */
-const TOOLBAR_ROW_INSET = 32 + 16;
-
-const DeskFilterTrigger = ({
-  id,
-  active,
-  open,
-  className,
-  ...props
-}: {
-  id: CollapsibleFilterId;
-  active?: boolean;
-  open?: boolean;
-} & React.ComponentProps<'button'>): ReactElement => {
-  const { label, icon: Icon } = COLLAPSIBLE_FILTER_META[id];
-  return (
-    <Button
-      variant='outline'
-      size='sm'
-      className={cn('rounded-[10px] border-border hover:bg-muted text-muted-foreground', className)}
-      {...props}
-    >
-      <div className='flex items-center gap-1.5'>
-        <Icon className='w-3 h-3 p-px font-medium' />
-        <span className='font-medium'>{label}</span>
-        {active && <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />}
-        <ChevronDown className={cn('w-3 h-3 ml-1 transition-transform', open && 'rotate-180')} />
-      </div>
-    </Button>
-  );
-};
-
 const SupportScreen = (): ReactElement => {
   const {
     workspaceId,
@@ -920,70 +873,18 @@ const SupportScreen = (): ReactElement => {
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
 
-  const filterRowRef = useRef<HTMLDivElement>(null);
-  const filterStaticLeftRef = useRef<HTMLDivElement>(null);
-  const filterTwinRef = useRef<HTMLDivElement>(null);
-  const actionsRestRef = useRef<HTMLDivElement>(null);
-  const columnsWideTwinRef = useRef<HTMLDivElement>(null);
-  const columnsNarrowTwinRef = useRef<HTMLDivElement>(null);
-
-  const { width: filterRowWidth } = useMeasure({ ref: filterRowRef, observeResize: true });
-  const { width: filterStaticLeftWidth } = useMeasure({
-    ref: filterStaticLeftRef,
-    observeResize: true,
-  });
-  // Natural width of all three filter triggers. The twin's last child is a zero-width
-  // overflow sample, so its trailing gap has to come back off.
-  const { width: filterTwinWidth } = useMeasure({ ref: filterTwinRef, observeResize: true });
-  const filtersNaturalWidth = Math.max(0, filterTwinWidth - TOOLBAR_GAP);
-  // Everything in the actions group except the Columns picker — its width never changes
-  // with the toolbar's own responsive state.
-  const { width: actionsRestWidth } = useMeasure({ ref: actionsRestRef, observeResize: true });
-  const { width: columnsWideWidth } = useMeasure({
-    ref: columnsWideTwinRef,
-    observeResize: true,
-  });
-  const { width: columnsNarrowWidth } = useMeasure({
-    ref: columnsNarrowTwinRef,
-    observeResize: true,
-  });
-
-  const showColumnsPicker = viewMode === 'table';
-  const columnsLabelWidth = showColumnsPicker
-    ? Math.max(0, columnsWideWidth - columnsNarrowWidth)
-    : 0;
-  const actionsWidth =
-    actionsRestWidth + (showColumnsPicker ? columnsNarrowWidth + TOOLBAR_GAP : 0);
-
-  // Room left for the filter triggers once the always-present controls are reserved.
-  const filterBudget = Math.max(
-    0,
-    filterRowWidth - TOOLBAR_ROW_INSET - filterStaticLeftWidth - actionsWidth,
-  );
-
-  const isColumnsLabelled =
-    showColumnsPicker && filterBudget - columnsLabelWidth >= filtersNaturalWidth;
-
-  const filterFitWidth = Math.max(0, filterBudget - (isColumnsLabelled ? columnsLabelWidth : 0));
-
-  const { measureRef: filterMeasureRef, visibleCount: visibleFilterCount } =
-    useOverflowFit<HTMLDivElement>({
-      itemCount: COLLAPSIBLE_FILTER_IDS.length,
-      containerWidth: filterFitWidth,
-      gap: TOOLBAR_GAP,
-      minVisible: 0,
-    });
-
-  const collapsedFilterIds = useMemo(
-    () => COLLAPSIBLE_FILTER_IDS.slice(visibleFilterCount),
-    [visibleFilterCount],
-  );
-  const hasCollapsedFilters = collapsedFilterIds.length > 0;
-
-  const isFilterVisibleOnBar = useCallback(
-    (id: CollapsibleFilterId): boolean => COLLAPSIBLE_FILTER_IDS.indexOf(id) < visibleFilterCount,
-    [visibleFilterCount],
-  );
+  const {
+    rowRef: filterRowRef,
+    filterTwinRef,
+    staticLeftRef: filterStaticLeftRef,
+    actionsRestRef,
+    columnsWideTwinRef,
+    columnsNarrowTwinRef,
+    isColumnsLabelled,
+    collapsedFilterIds,
+    hasCollapsedFilters,
+    isFilterVisibleOnBar,
+  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' });
 
   // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
   // still announces itself instead of silently disappearing.
@@ -3002,13 +2903,7 @@ const SupportScreen = (): ReactElement => {
                         aria-hidden
                         className='pointer-events-none invisible absolute left-0 top-0 -z-10 flex items-center gap-2'
                       >
-                        <div
-                          ref={el => {
-                            filterMeasureRef.current = el;
-                            filterTwinRef.current = el;
-                          }}
-                          className='flex items-center gap-2'
-                        >
+                        <div ref={filterTwinRef} className='flex items-center gap-2'>
                           <DeskFilterTrigger id='assignee' active={hasAssigneeFilter} />
                           <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
                           <DeskFilterTrigger id='stages' active={hasStagesFilter} />
