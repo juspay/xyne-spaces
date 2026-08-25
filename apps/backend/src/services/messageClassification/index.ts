@@ -6,6 +6,7 @@ import {
   THREAD_TYPES,
   OrgLLMServiceAccountPurpose,
 } from '@xyne/shared';
+import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { logLLMCallStart, logLLMError, logLLMSuccess } from '@/agents/agentLogger';
@@ -149,7 +150,7 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   });
   const rootIsBot = rootMessage?.msgType === 'BOT';
 
-  const modelName = process.env['MESSAGE_CLASSIFIER_MODEL'] ?? 'gpt-4o-mini';
+  const modelName = config.messageClassification.model;
   const { acts, threadTypes } = await classifyThread(
     {
       thread_messages: threadMessages,
@@ -381,15 +382,27 @@ const coerce = (raw: string | null | undefined, valid: Set<string>): string | nu
   return valid.has(normalized) ? normalized : null;
 };
 
+/**
+ * The key minted for this classifier alone, so its rate limit and spend are its own. Env
+ * rather than an org service-account row: one key for the worker, nothing to provision.
+ */
+const dedicatedCredential = (): OrgLLMCredential | null => {
+  const { threadTypeClassificationApiKey: apiKey, baseUrl } = config.litellm;
+  if (!apiKey || !baseUrl) return null;
+  return { apiKey, baseUrl, defaultModel: null, purpose: OrgLLMServiceAccountPurpose.DEFAULT };
+};
+
 async function classifyThread(
   input: ClassifierInput,
   projectId: string,
   modelName: string,
 ): Promise<Classification> {
-  const credential = await orgLLMCredentialService.getCredentialByProjectId(
-    projectId,
-    OrgLLMServiceAccountPurpose.DEFAULT,
-  );
+  const credential =
+    dedicatedCredential() ??
+    (await orgLLMCredentialService.getCredentialByProjectId(
+      projectId,
+      OrgLLMServiceAccountPurpose.DEFAULT,
+    ));
   if (!credential) {
     throw new Error('LiteLLM credentials are not configured for this organization');
   }
