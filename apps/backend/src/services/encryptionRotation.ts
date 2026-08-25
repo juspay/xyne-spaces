@@ -5,6 +5,7 @@ const LEGACY_KEY_ID = 'legacy';
 const ENCRYPTED_VALUE_PREFIX = 'enc:';
 const IV_HEX_LENGTH = 32;
 const AES_BLOCK_HEX_LENGTH = 32;
+const MAX_FAILURE_SAMPLES = 5;
 
 export type CiphertextClassification =
   | { kind: 'legacy'; keyId: typeof LEGACY_KEY_ID }
@@ -23,6 +24,7 @@ export interface CiphertextRotationResult {
   value: string;
   classification: CiphertextClassification;
   outcome: RotationOutcome;
+  error?: string;
 }
 
 export interface JsonRotationStats {
@@ -32,6 +34,7 @@ export interface JsonRotationStats {
   otherKey: number;
   malformed: number;
   failed: number;
+  failureSamples: string[];
   wouldRotate: number;
   rotated: number;
   byKeyId: Record<string, number>;
@@ -141,11 +144,12 @@ export function rotateCiphertext(
       classification,
       outcome: 'rotated',
     };
-  } catch {
+  } catch (err) {
     return {
       value,
       classification,
       outcome: 'failed',
+      error: err instanceof Error ? err.message : String(err),
     };
   }
 }
@@ -158,6 +162,7 @@ function createJsonRotationStats(): JsonRotationStats {
     otherKey: 0,
     malformed: 0,
     failed: 0,
+    failureSamples: [],
     wouldRotate: 0,
     rotated: 0,
     byKeyId: {},
@@ -190,6 +195,11 @@ function recordRotationResult(stats: JsonRotationStats, result: CiphertextRotati
   switch (result.outcome) {
     case 'failed':
       stats.failed += 1;
+
+      if (result.error && stats.failureSamples.length < MAX_FAILURE_SAMPLES) {
+        stats.failureSamples.push(result.error);
+      }
+
       break;
     case 'would-rotate':
       stats.wouldRotate += 1;

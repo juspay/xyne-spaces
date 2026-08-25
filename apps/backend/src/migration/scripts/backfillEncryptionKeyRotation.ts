@@ -21,6 +21,11 @@ interface ScalarRow {
   value: string;
 }
 
+interface FailureSample {
+  rowId: string;
+  reason: string;
+}
+
 interface TargetStats {
   rowsScanned: number;
   valuesScanned: number;
@@ -29,11 +34,13 @@ interface TargetStats {
   otherKey: number;
   malformed: number;
   failed: number;
+  failureSamples: FailureSample[];
   wouldRotate: number;
   rotated: number;
   updated: number;
   casSkipped: number;
   updateFailed: number;
+  updateFailureSamples: FailureSample[];
   invalidJson: number;
   blockedRows: number;
   byKeyId: Record<string, number>;
@@ -47,7 +54,13 @@ interface ScalarTarget {
 
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
+const MAX_FAILURE_SAMPLES = 5;
 const WORKFLOW_TARGET = 'workflows.context';
+
+const SCOPE_NOTICE =
+  'Covers AES-256-CBC values written by encryptionService only; ' +
+  'AES-256-GCM envelopes are out of scope, and successful completion ' +
+  'does not authorize retirement of ENCRYPTION_KEY.';
 
 const TARGET_NAMES = [
   'workflow-mappings.entitySecret',
@@ -70,9 +83,29 @@ function writeStderr(...parts: unknown[]): void {
   process.stderr.write(parts.map(String).join(' ') + '\n');
 }
 
+function getFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+
+  return message.replace(/\s+/g, ' ').slice(0, 500);
+}
+
+function recordFailureSample(samples: FailureSample[], rowId: string, error: unknown): void {
+  if (samples.length >= MAX_FAILURE_SAMPLES) {
+    return;
+  }
+
+  samples.push({
+    rowId,
+    reason: getFailureReason(error),
+  });
+}
+
 function printHelp(): void {
   writeStdout(`
 Encryption key-rotation backfill
+
+Scope:
+  ${SCOPE_NOTICE}
 
 Dry-run is the default:
 
@@ -187,11 +220,13 @@ function createStats(): TargetStats {
     otherKey: 0,
     malformed: 0,
     failed: 0,
+    failureSamples: [],
     wouldRotate: 0,
     rotated: 0,
     updated: 0,
     casSkipped: 0,
     updateFailed: 0,
+    updateFailureSamples: [],
     invalidJson: 0,
     blockedRows: 0,
     byKeyId: {},
@@ -277,6 +312,10 @@ async function processScalarTarget(
 
       const result = rotateCiphertext(row.value, activeKeyId, options.apply);
 
+      if (result.outcome === 'failed' && result.error) {
+        recordFailureSample(stats.failureSamples, row.id, result.error);
+      }
+
       recordCiphertextResult(stats, result);
 
       if (options.apply && result.outcome === 'rotated') {
@@ -288,8 +327,9 @@ async function processScalarTarget(
           } else {
             stats.casSkipped += 1;
           }
-        } catch {
+        } catch (err) {
           stats.updateFailed += 1;
+          recordFailureSample(stats.updateFailureSamples, row.id, err);
         }
       }
     }
@@ -348,6 +388,10 @@ async function processWorkflowContexts(
 
       const result = rotateEncryptedJsonStrings(parsed, activeKeyId, options.apply);
 
+      for (const reason of result.stats.failureSamples) {
+        recordFailureSample(stats.failureSamples, row.id, reason);
+      }
+
       mergeJsonStats(stats, result.stats);
 
       if (!options.apply || !result.changed) {
@@ -377,8 +421,9 @@ async function processWorkflowContexts(
         } else {
           stats.casSkipped += 1;
         }
-      } catch {
+      } catch (err) {
         stats.updateFailed += 1;
+        recordFailureSample(stats.updateFailureSamples, row.id, err);
       }
     }
 
@@ -694,6 +739,7 @@ async function main(): Promise<void> {
       JSON.stringify(
         {
           event: 'encryption_backfill_started',
+          scope: SCOPE_NOTICE,
           mode: options.apply ? 'apply' : 'dry-run',
           activeKeyId,
           batchSize: options.batchSize,
@@ -725,6 +771,8 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         event: 'encryption_backfill_completed',
+        scope: SCOPE_NOTICE,
+        legacyKeyRetirementAuthorized: false,
         mode: options.apply ? 'apply' : 'dry-run',
         activeKeyId,
         blocked,
