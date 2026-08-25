@@ -146,8 +146,7 @@ export interface SelectableRow {
   priority?: TicketListItem['priority'];
   assignedTo?: string | null;
   userGroupId?: string | null;
-  // Bulk actions route stage changes by board type and create labels under the
-  // ticket's project, so both ids ride along with the selection.
+  // Carried for the bulk bar — see SelectedTicket in SupportScreen.
   boardId?: string | null;
   projectId?: string | null;
 }

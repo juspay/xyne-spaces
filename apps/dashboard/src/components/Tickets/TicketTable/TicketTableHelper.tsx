@@ -134,15 +134,15 @@ export interface AssigneeTicketUpdate {
 /**
  * Inverse of `getAssigneeOptions`. Its `user:<id>` / `group:<id>` values map onto a
  * bare id in `assignedTo` and a group in `userGroupId` — writing the encoded value
- * back is rejected ("assignee must be an active user"). Unassign clears both.
+ * back is rejected ("assignee must be an active user"). Unassign clears the agent,
+ * not the team, which outlives it on autoassignment boards.
  */
 export const assigneeOptionToTicketUpdate = (value: string | null): AssigneeTicketUpdate => {
   if (value?.startsWith('group:')) {
     return { assignedTo: null, userGroupId: value.slice('group:'.length) };
   }
   if (value) return { assignedTo: value.replace(/^user:/, '') };
-  // The mutator ignores a null userGroupId, so '' is how a group is cleared.
-  return { assignedTo: null, userGroupId: '' };
+  return { assignedTo: null };
 };
 
 export const UNASSIGNED_OPTION: EntityOption = {

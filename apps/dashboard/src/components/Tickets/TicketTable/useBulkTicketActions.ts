@@ -1,8 +1,10 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { BoardType } from '@xyne/shared';
 import type { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { useChannelMemberIds } from '../../../hooks/useChannelMemberIds';
+import { useActiveUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
@@ -17,6 +19,31 @@ export interface BulkActionTicket {
   boardId?: string | null | undefined;
   projectId?: string | null | undefined;
 }
+
+/** The channel a selection shares, or undefined when it spans several — or none. */
+export const sharedChannelId = (
+  tickets: readonly { channelId?: string | null | undefined }[],
+): string | undefined => {
+  const first = tickets[0]?.channelId;
+  if (!first) return undefined;
+  return tickets.every(ticket => ticket.channelId === first) ? first : undefined;
+};
+
+/**
+ * Active users the bulk bar may offer, narrowed to the selection's channel — the bulk
+ * equivalent of `useChannelAssignGate`, which keeps non-members off a single ticket.
+ * A selection spanning channels has no one member list, so it keeps the full one.
+ */
+export const useBulkAssignableUsers = (
+  channelId: string | undefined,
+): ReturnType<typeof useActiveUsers> => {
+  const activeUsers = useActiveUsers();
+  const { memberIds, loaded } = useChannelMemberIds(channelId);
+  return useMemo(
+    () => (channelId && loaded ? activeUsers.filter(user => memberIds.has(user.id)) : activeUsers),
+    [activeUsers, channelId, loaded, memberIds],
+  );
+};
 
 /**
  * Ceiling on one bulk action, matching `MAX_TICKETS` in the spaces-create-bulk-tickets
@@ -118,6 +145,25 @@ const capSelection = (tickets: readonly BulkActionTicket[]): readonly BulkAction
 export const useBulkTicketActions = (): BulkTicketActions => {
   const zero = useZero();
 
+  // `boardDetailById` pulls a whole board to read one field, so a bulk action passes a
+  // cache — one lookup per board, not per ticket. Per-action, so it can't go stale.
+  const boardTypeOf = useCallback(
+    (
+      boardId: string,
+      cache?: Map<string, Promise<string | undefined>>,
+    ): Promise<string | undefined> => {
+      const cached = cache?.get(boardId);
+      if (cached) return cached;
+      // No try/catch: Zero queries resolve through the cache and don't throw here.
+      const pending = zero
+        .run(queries.boardDetailById({ boardId }), { type: 'complete' })
+        .then(board => (board as { boardType?: string } | null)?.boardType);
+      cache?.set(boardId, pending);
+      return pending;
+    },
+    [zero],
+  );
+
   // NON_LINEAR boards reject direct ticket.update — use the transition mutator instead.
   const stageChange = useCallback(
     async (
@@ -125,21 +171,16 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       boardId: string | null | undefined,
       toStageName: string,
       toStageStatusV2?: TicketStatusV2,
+      boardTypes?: Map<string, Promise<string | undefined>>,
     ): Promise<string | null> => {
-      if (boardId) {
-        // No try/catch: Zero queries resolve through the cache and don't throw here.
-        const board = (await zero.run(queries.boardDetailById({ boardId }), {
-          type: 'complete',
-        })) as { boardType?: string } | null;
-        if (board?.boardType === BoardType.NON_LINEAR) {
-          const message = await mutationError(
-            zero.mutate(mutators.nonLinear.transition({ ticketId, toStageName, now: Date.now() })),
-            'Unable to change stage',
-          );
-          return message === 'This transition requires a form to be submitted'
-            ? 'Open this ticket on its board to fill the required form for this stage'
-            : message;
-        }
+      if (boardId && (await boardTypeOf(boardId, boardTypes)) === BoardType.NON_LINEAR) {
+        const message = await mutationError(
+          zero.mutate(mutators.nonLinear.transition({ ticketId, toStageName, now: Date.now() })),
+          'Unable to change stage',
+        );
+        return message === 'This transition requires a form to be submitted'
+          ? 'Open this ticket on its board to fill the required form for this stage'
+          : message;
       }
       return mutationError(
         zero.mutate(
@@ -153,7 +194,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
         'Failed to update stage',
       );
     },
-    [zero],
+    [zero, boardTypeOf],
   );
 
   const routeStageChange = useCallback(
@@ -174,9 +215,12 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       const { stage, ...fields } = updates;
       const hasFields = Object.keys(fields).length > 0;
       const pending: Array<Promise<string | null>> = [];
+      const boardTypes = new Map<string, Promise<string | undefined>>();
       for (const ticket of capSelection(tickets)) {
         if (stage) {
-          pending.push(stageChange(ticket.id, ticket.boardId, stage.name, stage.statusV2));
+          pending.push(
+            stageChange(ticket.id, ticket.boardId, stage.name, stage.statusV2, boardTypes),
+          );
         }
         if (hasFields) {
           pending.push(

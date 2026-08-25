@@ -142,11 +142,13 @@ import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } fr
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
-import { useActiveUsers, useUser } from '../../hooks/useUsers';
+import { useUser } from '../../hooks/useUsers';
 import { BulkActionToolbar } from '../../components/Tickets/TicketTable/BulkActionToolbar';
 import { assigneeOptionToTicketUpdate } from '../../components/Tickets/TicketTable/TicketTableHelper';
 import {
   dueDateToEta,
+  sharedChannelId,
+  useBulkAssignableUsers,
   useBulkTicketActions,
   type BulkTicketUpdates,
 } from '../../components/Tickets/TicketTable/useBulkTicketActions';
@@ -1708,11 +1710,13 @@ const SupportScreen = (): ReactElement => {
   // --- Bulk field edits over the current selection ---------------------------
   // The list view has no grid of its own, so the shared bulk bar is driven from
   // here; the table view renders the same bar from inside TicketTable.
-  // Active only — the server rejects a deactivated assignee, so don't offer one.
-  const deskUsers = useActiveUsers();
   const { applyUpdates: applyBulkUpdates, applyTags: applyBulkTags } = useBulkTicketActions();
 
   const selectedTicketList = useMemo(() => Array.from(selectedTickets.values()), [selectedTickets]);
+
+  // Active users in the selection's channel — see useBulkAssignableUsers.
+  const bulkChannelId = useMemo(() => sharedChannelId(selectedTicketList), [selectedTicketList]);
+  const deskUsers = useBulkAssignableUsers(bulkChannelId);
 
   // Every desk ticket lives on the channel's board, so the label catalog can be
   // read off whichever page of tickets is currently loaded.

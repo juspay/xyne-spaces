@@ -17,7 +17,7 @@ import type { Ticket, TicketTag } from '@xyne/shared';
 import { isDeskChannelType } from '@xyne/shared';
 import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
-import { useActiveUsers, useUser, useUsers } from '../../../hooks/useUsers';
+import { useActiveUsers, useUser } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
 import { Calendar, Check, User } from 'lucide-react';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
@@ -36,6 +36,8 @@ import { BulkActionToolbar } from './BulkActionToolbar';
 import {
   dueDateToEta,
   MAX_BULK_TICKETS,
+  sharedChannelId,
+  useBulkAssignableUsers,
   useBulkTicketActions,
   type BulkTicketUpdates,
 } from './useBulkTicketActions';
@@ -190,7 +192,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   onSelectionChange,
 }) => {
   const zero = useZero();
-  const users = useUsers();
   // Assignment dropdowns must not offer deactivated users — the server rejects them.
   const activeUsers = useActiveUsers();
   const navigate = useNavigate();
@@ -208,6 +209,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
+  // Tracked off the selection so the bulk bar can offer that channel's members only.
+  const [bulkChannelId, setBulkChannelId] = useState<string | undefined>(undefined);
+  const bulkAssignableUsers = useBulkAssignableUsers(bulkChannelId);
 
   useEffect(() => {
     if (!gridApi || selectedIds === undefined) return;
@@ -434,7 +438,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         minWidth: 213,
         cellEditor: AssigneeCellEditor,
         cellEditorParams: {
-          users: users,
+          users: activeUsers,
         },
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
@@ -695,7 +699,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     ticketTags,
     zero,
     visibleColumns,
-    users,
+    activeUsers,
     availableTags,
     onTitleClick,
     extraColumns,
@@ -747,6 +751,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             onSelectionChanged={params => {
               const selectedRows = params.api.getSelectedRows() as Ticket[];
               setSelectedCount(selectedRows.length);
+              setBulkChannelId(sharedChannelId(selectedRows));
               onSelectionChange?.(selectedRows);
             }}
             rowData={tickets}
@@ -777,7 +782,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           {selectedCount > 0 && (
             <BulkActionToolbar
               selectedCount={selectedCount}
-              users={activeUsers}
+              users={bulkAssignableUsers}
               userGroups={userGroups}
               onAssigneeChange={val => handleBulkUpdate(assigneeOptionToTicketUpdate(val))}
               onStatusChange={val => handleBulkUpdate({ statusV2: val })}
