@@ -7420,6 +7420,7 @@ export function createMutators(
           alias: z.string().optional(),
           description: z.string().optional(),
           reassignOnUnavailable: z.boolean().optional(),
+          maxWorkload: z.number().int().positive().nullable().optional(),
           userResponsibilityUpdates: z
             .record(z.string(), z.nativeEnum(UserResponsibility))
             .optional(),
@@ -7434,6 +7435,7 @@ export function createMutators(
             alias,
             description,
             reassignOnUnavailable,
+            maxWorkload,
             userResponsibilityUpdates,
             userRoleUpdates,
             timestamp,
@@ -7474,6 +7476,7 @@ export function createMutators(
             ...(alias !== undefined && { alias }),
             ...(description !== undefined && { description }),
             ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+            ...(maxWorkload !== undefined && { maxWorkload }),
             updatedAt: timestamp,
           });
 
@@ -7652,6 +7655,7 @@ export function createMutators(
                 ? { roleId, ...(responsibility ? { responsibility } : {}) }
                 : { responsibility: UserResponsibility.MEMBER }),
               onCallSetNumbers: [],
+              isNotified: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -10456,6 +10460,7 @@ export function createMutators(
             z.object({
               userId: z.string(),
               onCallSetNumbers: z.array(z.number()),
+              isNotified: z.boolean().optional(),
             })
           ).optional(),
           boardWeight: z.object({
@@ -10531,6 +10536,7 @@ export function createMutators(
                 await tx.mutate.user_group_mappings.update({
                   id: existingMapping.id,
                   onCallSetNumbers: mapping.onCallSetNumbers,
+                  ...(mapping.isNotified !== undefined && { isNotified: mapping.isNotified }),
                   updatedAt: now,
                 });
               }
