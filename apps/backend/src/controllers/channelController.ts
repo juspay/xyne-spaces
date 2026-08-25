@@ -1308,6 +1308,9 @@ export class ChannelController {
         }
       }
 
+      // ChannelBoardMapping is now populated by ChannelRepository.create itself
+      // (dual-write for any channel creation path), so no manual createMany here.
+
       // Create activities for all channel members (excluding creator)
       await createChannelCreatedActivity(channel.id, userId);
 
@@ -1316,7 +1319,6 @@ export class ChannelController {
         channelId: channel.id,
         name: channel.name,
         scopeType: channel.scopeType,
-        projectId: channel.projectId,
       });
 
       // Queue channel for Vespa ingestion AFTER participants are added
@@ -1417,15 +1419,16 @@ export class ChannelController {
   // POST /api/channels/check-duplicate - Check if channel name is duplicate
   checkDuplicate = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, projectId }: { name: string; projectId: string } = req.body;
+      // projectId is accepted for backwards compatibility with older clients but
+      // is no longer required or used: duplicate-channel checks are workspace-scoped.
+      const { name, projectId }: { name: string; projectId?: string } = req.body;
 
       // Validate required fields
-      if (!name || !projectId) {
+      if (!name) {
         res.status(400).json({
-          error: 'Name and projectId are required',
+          error: 'Name is required',
           details: {
-            name: !name ? 'Name is required' : undefined,
-            projectId: !projectId ? 'ProjectId is required' : undefined,
+            name: 'Name is required',
           }
         });
         return;
@@ -1442,7 +1445,7 @@ export class ChannelController {
       const response: CheckDuplicateChannelResponse = {
         isDuplicate,
         name: name.trim(),
-        projectId,
+        ...(projectId ? { projectId } : {}),
       };
 
       res.status(200).json(response);
@@ -1970,7 +1973,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           createdBy: channel.createdBy,
           conversationCount: conversations.length,
           participantCount: participants.length,
@@ -2111,7 +2113,6 @@ export class ChannelController {
             scopeType: existingSelfDm.scopeType,
             description: existingSelfDm.description,
             visibility: existingSelfDm.visibility,
-            projectId: existingSelfDm.projectId,
             conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
             participantCount: participants.length,
             unreadCount,
@@ -2163,7 +2164,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           conversationCount: initialConversation ? 1 : 0,
           participantCount: 1,
           unreadCount: 0,
@@ -2286,7 +2286,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           conversationCount: initialConversation ? 1 : 0,
           participantCount: 2,
           unreadCount: 0,
@@ -2424,7 +2423,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           conversationCount: initialConversation ? 1 : 0,
           participantCount: allMemberIds.length,
           unreadCount: 0,

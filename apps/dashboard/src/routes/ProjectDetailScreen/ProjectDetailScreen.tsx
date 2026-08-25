@@ -229,7 +229,7 @@ const ProjectDetailScreen = (): ReactElement => {
 
   const { data: channelDuplicateCheck } = useQuery({
     queryKey: ['checkDuplicateChannel', debouncedRepositoryName, 'default'],
-    queryFn: () => channelService.checkDuplicateChannel(debouncedRepositoryName, 'default'),
+    queryFn: () => channelService.checkDuplicateChannel(debouncedRepositoryName),
     enabled:
       Boolean(debouncedRepositoryName) && validateChannelName(debouncedRepositoryName) === null,
     staleTime: 0,

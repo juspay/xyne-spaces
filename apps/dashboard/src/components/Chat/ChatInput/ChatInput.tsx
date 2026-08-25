@@ -2,6 +2,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   forwardRef,
   useRef,
   useImperativeHandle,
@@ -13,6 +14,7 @@ import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 
 import { InputBox } from '../../ui/InputBox';
 import {
+  type SdlcDiscussion,
   MessageType,
   ChannelScopeType,
   ChannelVisibility,
@@ -78,6 +80,7 @@ import {
   getSlashCommandArtifactBodyText,
   stripSlashCommandFromHtml,
 } from '../SlashCommandArtifacts';
+import { useSlashCommandArtifactSideEffects } from '../SlashCommandArtifactSideEffects';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -121,6 +124,8 @@ interface ChatInputProps {
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
+  /** SDLC discussion binding: new channel conversations are linked to this owner. */
+  sdlcDiscussion?: Omit<SdlcDiscussion, 'linkId'>;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -142,6 +147,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       threadParticipantIds,
       dockSlot,
       twinEdit,
+      sdlcDiscussion,
     },
     ref,
   ) => {
@@ -197,6 +203,22 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const channelResults = useChannelSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
 
+    // A thread is one incident's workspace, so it holds at most one open artifact
+    // of a given command. The channel root is unrestricted — it has no
+    // conversation yet, so this can never match there.
+    const { bannerItems: openArtifacts } = useSlashCommandArtifactSideEffects();
+    const openArtifactCommandsInThread = useMemo(
+      () =>
+        new Set(
+          conversationId
+            ? openArtifacts
+                .filter(artifact => artifact.conversationId === conversationId)
+                .map(artifact => artifact.definition.command)
+            : [],
+        ),
+      [conversationId, openArtifacts],
+    );
+
     // Slash commands for this channel — filtered by context (thread vs chat)
     const [channelCommands, setChannelCommands] = useState<CommandItem[]>(
       SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
@@ -240,6 +262,22 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         .then(setGlobalShortcuts)
         .catch(() => undefined);
     }, [channelId, conversation?.conversationId]);
+
+    // Hide, don't just reject: an artifact the user cannot post here should not
+    // be offered. The send guards below still fire, because the command can also
+    // be typed inline or left over in `activeArtifactCommand`.
+    const availableCommands = useMemo(
+      () =>
+        openArtifactCommandsInThread.size === 0
+          ? channelCommands
+          : channelCommands.filter(
+              command =>
+                command.kind !== 'slash-command-artifact' ||
+                !command.slashCommandArtifactCommand ||
+                !openArtifactCommandsInThread.has(command.slashCommandArtifactCommand),
+            ),
+      [channelCommands, openArtifactCommandsInThread],
+    );
 
     const handleCommandSelect = useCallback(
       async (command: CommandItem, text?: string) => {
@@ -291,6 +329,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     });
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
+    // SDLC channels are hidden from the chat directory, so "also send to
+    // channel" has no destination a user could ever see — hide the toggle.
+    const isSdlcChannel = channel?.type === ChannelType.SDLC;
     const upcomingScheduledInContext = useUpcomingDelayedMessage(channelId, conversationId ?? null);
 
     const bannerScheduledFor = upcomingScheduledInContext ?? recentScheduledFor;
@@ -585,6 +626,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           toast.error(`Describe the ${artifactDraft.definition.bodyNoun} before sending`);
           throw new Error(`${artifactDraft.definition.command} body is required`);
         }
+        if (artifactDraft && openArtifactCommandsInThread.has(artifactDraft.definition.command)) {
+          toast.error(`A ${artifactDraft.definition.badge} is already open in this thread`, {
+            description: 'Close it first, or declare this one in the channel instead.',
+          });
+          throw new Error(`${artifactDraft.definition.command} already open in this thread`);
+        }
 
         const bodyHtml = processMessageForSending(
           artifactDraft?.typedInline
@@ -839,6 +886,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageId: newMessageId,
               timestamp: messageCreatedAt,
               ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
+              ...(sdlcDiscussion !== undefined && {
+                sdlcDiscussion: { ...sdlcDiscussion, linkId: uuidv4() },
+              }),
             });
 
             saveDraft(lookupId, '', '');
@@ -899,6 +949,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         twinEdit,
         channelDraftForSend,
         activeArtifactCommand,
+        openArtifactCommandsInThread,
       ],
     );
 
@@ -916,6 +967,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         const artifactDraft = detectSlashCommandArtifact(activeArtifactCommand, plainText);
         if (artifactDraft && !getSlashCommandArtifactBodyText(artifactDraft, plainText)) {
           toast.error(`Describe the ${artifactDraft.definition.bodyNoun} before scheduling`);
+          return;
+        }
+        if (artifactDraft && openArtifactCommandsInThread.has(artifactDraft.definition.command)) {
+          toast.error(`A ${artifactDraft.definition.badge} is already open in this thread`, {
+            description: 'Close it first, or declare this one in the channel instead.',
+          });
           return;
         }
         const bodyHtml = processMessageForSending(
@@ -984,6 +1041,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         setRecentScheduledFor,
         allowThreadBroadcastMentions,
         activeArtifactCommand,
+        openArtifactCommandsInThread,
       ],
     );
 
@@ -1081,7 +1139,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                   onActiveChange={setAgentActive}
                 />
               }
-              commandItems={channelCommands}
+              commandItems={availableCommands}
               onCommandSelect={handleCommandSelect}
               {...(activeArtifactCommand && {
                 slashCommandArtifactCommand: activeArtifactCommand,
@@ -1105,7 +1163,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               blockedExtensions={[...BLOCKED_EXTENSIONS]}
               preserveThreadRoute={!!conversationId}
               {...(conversationId &&
-                !messageId && {
+                !messageId &&
+                !isSdlcChannel && {
                   onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
                   alsoSendToChannelChecked: alsoSendToChannel,
                   isDMThread: !!isDM,
@@ -1123,7 +1182,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                             title: messageContent,
                             description: messageContent,
                             channelId: channelId,
-                            projectId: (channel.projectId as string | null) || '',
                             ticketType: BaseTicketType.Support,
                             ...(conversationId && { sourceConversationId: conversationId }),
                           };

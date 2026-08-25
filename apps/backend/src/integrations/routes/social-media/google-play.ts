@@ -240,7 +240,6 @@ router.post(
           },
           select: {
             id: true,
-            projectId: true,
           },
         }),
         db.emailChannelPreference.findUnique({
@@ -262,7 +261,15 @@ router.post(
           orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
         }),
       ]);
-      if (!channel?.projectId || !preference?.boardId || !credentialSource) {
+      if (!channel || !preference?.boardId || !credentialSource) {
+        res.status(404).json({ error: 'Social media desk configuration not found' });
+        return;
+      }
+      const mappedBoard = await db.board.findUnique({
+        where: { id: preference.boardId },
+        select: { projectId: true },
+      });
+      if (!mappedBoard?.projectId) {
         res.status(404).json({ error: 'Social media desk configuration not found' });
         return;
       }
@@ -376,7 +383,6 @@ router.post(
           select: {
             id: true,
             name: true,
-            projectId: true,
             visibility: true,
           },
         }),
@@ -401,7 +407,15 @@ router.post(
           orderBy: { createdAt: 'asc' },
         }),
       ]);
-      if (!channel?.projectId || !preference?.boardId || sources.length === 0) {
+      if (!channel || !preference?.boardId || sources.length === 0) {
+        res.status(404).json({ error: 'Social media desk configuration not found' });
+        return;
+      }
+      const stateBoard = await db.board.findUnique({
+        where: { id: preference.boardId },
+        select: { projectId: true },
+      });
+      if (!stateBoard?.projectId) {
         res.status(404).json({ error: 'Social media desk configuration not found' });
         return;
       }
@@ -424,7 +438,7 @@ router.post(
           packageName: source.externalIdentifier!,
           displayName: source.displayName,
         })),
-        projectId: channel.projectId,
+        projectId: stateBoard.projectId,
         boardId: preference.boardId,
         assigneeUserGroupId: preference.assigneeUserGroupId ?? undefined,
         visibility: channel.visibility as 'PUBLIC' | 'PRIVATE',
@@ -582,6 +596,29 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
           emailMergeMode: EmailMergeMode.DISABLED,
         },
       });
+
+      // Dual-write: mirror the channel→project board set into ChannelBoardMapping
+      // so downstream consumers never need to read channel.projectId.
+      const mappingBoards = await tx.board.findMany({
+        where: { projectId: state.projectId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (mappingBoards.length > 0) {
+        await tx.channelBoardMapping.createMany({
+          data: mappingBoards.map((b, index) => ({
+            channelId: channel.id,
+            boardId: b.id,
+            workspaceId: state.workspaceId,
+            isDefault: state.boardId ? b.id === state.boardId : index === 0,
+            createdBy: state.userId,
+            createdAt: now,
+            updatedAt: now,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       const sourceRecords = buildGooglePlaySourceRecords({
         workspaceId: state.workspaceId,
         channelId: channel.id,

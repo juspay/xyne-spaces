@@ -23,8 +23,8 @@ const ITEMS_PER_PAGE = 15;
 type AppsView = 'installed' | 'org' | 'marketplace';
 
 const VIEW_TABS: { value: AppsView; label: string }[] = [
-  { value: 'installed', label: 'Installed' },
   { value: 'org', label: 'Org Apps' },
+  { value: 'installed', label: 'Installed' },
   { value: 'marketplace', label: 'Marketplace' },
 ];
 
@@ -39,7 +39,7 @@ const AppsScreen = (): ReactElement => {
   const currentPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
   const view: AppsView = isAppsView(searchParams.get('view'))
     ? (searchParams.get('view') as AppsView)
-    : 'installed';
+    : 'org';
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 

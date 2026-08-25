@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import { createElement, type ComponentType, type ReactElement } from 'react';
 import {
   GraphTrendLine,
   Settings01,
@@ -14,7 +14,6 @@ import {
   ClipboardDefault,
   Piechart01,
   FileText,
-  MicOn,
   CalendarTimer,
   Globe,
   UserShield,
@@ -32,6 +31,7 @@ import {
   RocketShip,
   type PikaIconProps,
 } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
@@ -40,6 +40,12 @@ import { AccessType } from '@xyne/shared';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
+
+// Matches the waveform the Xyne Scribe list uses. lucide has no Solid/Stroke
+// pair, so `variant` is dropped here rather than passed through to the <svg>.
+const AudioWaveIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
+  createElement(AudioLines, props);
+
 export const RAIL_SHORTCUT_LIMIT = 9;
 export const railShortcutsAvailable = (): boolean => isElectronApp();
 
@@ -65,7 +71,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn },
   { path: '/calls', label: 'Calls', icon: PhoneDefault },
-  { path: '/recordings', label: 'Recordings', icon: MicOn },
+  { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon },
   { path: '/projects', label: 'Tickets', icon: TicketToken },
   { path: '/sdlc', label: 'SDLC', icon: Atom },
   { path: '/support', label: 'Support', icon: Troubleshoot },
@@ -137,7 +143,10 @@ export const filterNavItemsByPermission = (
 
     let hasAccess = true;
     if (requiresAccess) {
-      if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
+      if (resourceName === 'SDLC') {
+        // Any tier (READ/WRITE/ADMIN) unlocks the SDLC screen.
+        hasAccess = permissions.some(p => p.resourceName === resourceName);
+      } else if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
         hasAccess = permissions.some(
           p =>
             p.resourceName === resourceName &&

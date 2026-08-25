@@ -98,6 +98,12 @@ import {
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
 import {
+  MessageArtifactStatus,
+  parseSlashCommandArtifactMessage,
+  withSlashCommandArtifactClosed,
+} from '@xyne/shared';
+import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
+import {
   FLOW_STAGE_NAMES,
   FlowPlanSchema,
   deserializeFlowPlan,
@@ -2441,6 +2447,20 @@ export function createMutators(
             ) {
               throw new Error('Invalid SDLC discussion owner');
             }
+            if (existingDiscussion.length > 0) {
+              throw new Error('Conversation already has an SDLC discussion owner');
+            }
+            if (sdlcDiscussion.ownerType === 'TRACK') {
+              const track = await tx.run(
+                zql.sdlc_tracks.where('id', sdlcDiscussion.ownerId).one(),
+              );
+              if (!track || track.repoId !== repo.id) {
+                throw new Error('Invalid SDLC discussion owner');
+              }
+            } else {
+            if (!sdlcDiscussion.surfaceType || !sdlcDiscussion.surfaceId) {
+              throw new Error('Invalid SDLC discussion owner');
+            }
             const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
               {
                 workspaceId: authData.workspaceId,
@@ -2450,8 +2470,16 @@ export function createMutators(
                 surfaceId: sdlcDiscussion.surfaceId,
               },
               {
-                getCanvas: async id =>
-                  (await tx.run(zql.canvases.where('id', id).one())) ?? null,
+                getCanvas: async id => {
+                  const canvas = await tx.run(zql.canvases.where('id', id).one());
+                  if (!canvas) return null;
+                  // Kind lives on the artifact row now; a canvas with no SDLC
+                  // artifact is not a valid discussion owner.
+                  const artifact = await tx.run(
+                    zql.sdlc_artifacts.where('artifactId', id).one(),
+                  );
+                  return { ...canvas, artifactType: artifact?.artifactType ?? '' };
+                },
                 getTicket: async id => {
                   const ticket = await tx.run(zql.tickets.where('id', id).one());
                   return ticket?.channelId ? { ...ticket, channelId: ticket.channelId } : null;
@@ -2477,11 +2505,9 @@ export function createMutators(
                 },
               },
             );
-            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerCanvasId) {
+            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerId) {
               throw new Error('Invalid SDLC discussion owner');
             }
-            if (existingDiscussion.length > 0) {
-              throw new Error('Conversation already has an SDLC discussion owner');
             }
           }
 
@@ -2503,8 +2529,8 @@ export function createMutators(
               id: sdlcDiscussion.linkId,
               workspaceId: authData.workspaceId,
               repoId: sdlcDiscussion.repoId,
-              sourceType: 'CANVAS',
-              sourceId: sdlcDiscussion.ownerCanvasId,
+              sourceType: sdlcDiscussion.ownerType,
+              sourceId: sdlcDiscussion.ownerId,
               targetType: 'CONVERSATION',
               targetId: conversationId,
               relationType: 'DISCUSSION',
@@ -3209,6 +3235,24 @@ export function createMutators(
             throw new Error('You need to be a participant for adding a conversations');
           }
 
+          // One open artifact per thread. A thread is a single incident's workspace,
+          // so a second /sev2 inside it would fork the responders across two cards
+          // and two calls. The channel is unrestricted — that is where a genuinely
+          // separate incident belongs.
+          const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+          if (outgoingArtifact) {
+            const openArtifact = await tx.run(zql.message_artifacts
+              // channelId first: it is the only selective index on this table.
+              .where('channelId', conversation.channelId)
+              .where('conversationId', conversationId)
+              .where('command', outgoingArtifact.definition.command)
+              .where('status', MessageArtifactStatus.ACTIVE)
+              .one());
+            if (openArtifact) {
+              throw new Error(`A ${outgoingArtifact.definition.badge} is already open in this thread`);
+            }
+          }
+
           const message = {
             messageId,
             conversationId,
@@ -3858,6 +3902,51 @@ export function createMutators(
           }
         },
       ),
+      /**
+       * Close a slash-command artifact (e.g. decline a SEV2) without ever running
+       * a call. Only the message's author may do it.
+       *
+       * Two writes, both required: the artifact row moves to a terminal status so
+       * the banner and channel indicator clear for everyone, and the closed marker
+       * is baked into the message's FlowJSON so the card still renders as finished
+       * once the row has left the ACTIVE-only artifact subscription.
+       */
+      closeSlashCommandArtifact: defineMutator(
+        z.object({ messageId: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { messageId, timestamp } }) => {
+          const message = await tx.run(zql.messages.where('messageId', messageId).one());
+          if (!message) {
+            throw new Error('Message not available');
+          }
+          if (message.senderId !== authData.sub) {
+            throw new Error('Only the author can close this incident');
+          }
+
+          const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
+          if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
+            throw new Error('This incident is already closed');
+          }
+
+          const content = withSlashCommandArtifactClosed(message.content, {
+            closedAt: timestamp,
+            closedBy: authData.sub,
+          });
+          if (!content) {
+            throw new Error('Message is not a slash command artifact');
+          }
+
+          if (artifact) {
+            await tx.mutate.message_artifacts.update({
+              id: artifact.id,
+              status: MessageArtifactStatus.CANCELLED,
+              updatedAt: timestamp,
+            });
+          }
+          // Deliberately not `edited: true` — closing is a lifecycle transition,
+          // not an edit, and must not raise a "message edited" notification.
+          await tx.mutate.messages.update({ messageId, content });
+        },
+      ),
       updateShowInChannel: defineMutator(
         z.object({
           messageId: z.string(),
@@ -4434,6 +4523,7 @@ export function createMutators(
             updatedAt: now,
             labels: [],
             markedItems: [],
+            recordingParticipants: [],
             xyneManaged: false,
             metadata: {
               systemMessageId,
@@ -9230,9 +9320,10 @@ export function createMutators(
               (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER)) ||
             guestSharedRole === CanvasRole.EDITOR ||
             guestSharedRole === CanvasRole.OWNER;
-          const canvasMetadata = canvas.metadata as Record<string, unknown> | null;
-          const isSdlcBaseline =
-            canvasMetadata?.surface === 'SDLC' && canvasMetadata.artifactKind === 'BASELINE';
+          const sdlcArtifact = await tx.run(
+            zql.sdlc_artifacts.where('artifactId', params.id).one(),
+          );
+          const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
 
           if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
             throw new Error('You do not have permission to edit this canvas');
@@ -9766,29 +9857,28 @@ export function createMutators(
             throw new Error('Folder name is required');
           }
 
-          if (!projectId && channelId) {
-            throw new Error('Channel folders must belong to a project');
+          // Channel folders no longer require a project (the channel canvas UI has
+          // no project grouping), but the channel itself must still be valid and
+          // not archived. A projectId is optional; when present it must match.
+          if (channelId) {
+            const channel = await tx.run(zql.channels.where('id', channelId).one());
+            if (!channel) {
+              throw new Error('Channel not found');
+            }
+
+            if (channel.isArchived) {
+              throw new Error('Channel is archived');
+            }
+
+            if (projectId && channel.projectId != null && channel.projectId !== projectId) {
+              throw new Error('Channel does not belong to project');
+            }
           }
 
           if (projectId) {
             const project = await tx.run(zql.projects.where('id', projectId).one());
             if (!project) {
               throw new Error('Project not found');
-            }
-
-            if (channelId) {
-              const channel = await tx.run(zql.channels.where('id', channelId).one());
-              if (!channel) {
-                throw new Error('Channel not found');
-              }
-
-              if (channel.isArchived) {
-                throw new Error('Channel is archived');
-              }
-
-              if (channel.projectId !== projectId) {
-                throw new Error('Channel does not belong to project');
-              }
             }
           }
 
@@ -9798,7 +9888,9 @@ export function createMutators(
               .where('name', cleanName)
               .where(({ and, cmp }) =>
                 channelId
-                  ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
+                  ? projectId
+                    ? and(cmp('projectId', '=', projectId), cmp('channelId', '=', channelId))
+                    : and(cmp('projectId', 'IS', null), cmp('channelId', '=', channelId))
                   : projectId
                     ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
                     : and(
@@ -9883,10 +9975,15 @@ export function createMutators(
                 .where('name', cleanName)
                 .where(({ and, cmp }) =>
                   folder.channelId
-                    ? and(
-                      cmp('projectId', '=', folder.projectId as string),
-                      cmp('channelId', '=', folder.channelId),
-                    )
+                    ? folder.projectId
+                      ? and(
+                        cmp('projectId', '=', folder.projectId),
+                        cmp('channelId', '=', folder.channelId),
+                      )
+                      : and(
+                        cmp('projectId', 'IS', null),
+                        cmp('channelId', '=', folder.channelId),
+                      )
                     : folder.projectId
                       ? and(
                         cmp('projectId', '=', folder.projectId),
@@ -10121,7 +10218,6 @@ export function createMutators(
                   nudgeId,
                   nudgeKind: nudge.nudgeKind,
                   sourceId: nudge.sourceId,
-                  projectId: nudge.projectId,
                 },
               },
             });
@@ -10213,7 +10309,6 @@ export function createMutators(
                     targetId: entityId,
                     linkKind: SurfaceLinkKind.RELATES_TO,
                     createdBy: ctx.userID,
-                    projectId: nudge.projectId,
                     createdAt: timestamp,
                   });
                 }
@@ -10744,6 +10839,77 @@ export function createMutators(
           }
           await tx.mutate.sdlc_entity_links.delete({ id: linkId });
         }
+      ),
+
+      createTrack: defineMutator(
+        z.object({
+          id: z.string(),
+          repoId: z.string(),
+          name: z.string().trim().min(1).max(120),
+          description: z.string().trim().max(2000).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+          if (!repo?.channelId) {
+            throw new Error('SDLC repository not found');
+          }
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', repo.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!participant) {
+            throw new Error('Repository membership required');
+          }
+          await tx.mutate.sdlc_tracks.insert({
+            id: args.id,
+            workspaceId: authData.workspaceId,
+            repoId: args.repoId,
+            name: args.name,
+            description: args.description,
+            status: 'ACTIVE',
+            createdBy: authData.sub,
+            createdAt: args.timestamp,
+            updatedAt: args.timestamp,
+          });
+        },
+      ),
+      updateTrack: defineMutator(
+        z.object({
+          trackId: z.string(),
+          name: z.string().trim().min(1).max(120).optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          status: sdlcTrackStatusSchema.optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
+          if (!track) {
+            throw new Error('SDLC track not found');
+          }
+          const repo = await tx.run(zql.repos.where('id', track.repoId).one());
+          if (!repo?.channelId) {
+            throw new Error('SDLC repository not found');
+          }
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', repo.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!participant) {
+            throw new Error('Repository membership required');
+          }
+          await tx.mutate.sdlc_tracks.update({
+            id: args.trackId,
+            ...(args.name !== undefined ? { name: args.name } : {}),
+            ...(args.description !== undefined ? { description: args.description } : {}),
+            ...(args.status !== undefined ? { status: args.status } : {}),
+            updatedAt: args.timestamp,
+          });
+        },
       ),
     },
     form: {
@@ -11828,7 +11994,6 @@ export function createMutators(
             name: trimmed,
             ...(color ? { color } : {}),
             channelId,
-            projectId: channel.projectId,
             workspaceId: channel.workspaceId,
             createdBy: ctx.userID,
             createdAt: timestamp,
@@ -11870,7 +12035,6 @@ export function createMutators(
               name: trimmed,
               ...(args.color ? { color: args.color } : {}),
               channelId: args.channelId,
-              projectId: channel.projectId,
               workspaceId: channel.workspaceId,
               createdBy: ctx.userID,
               createdAt: now,

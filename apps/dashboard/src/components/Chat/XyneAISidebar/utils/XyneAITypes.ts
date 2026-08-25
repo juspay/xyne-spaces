@@ -10,9 +10,18 @@ export interface SelectedChannel {
   isPrivate: boolean;
 }
 
+/**
+ * What a canvas IS, for screens that attach one on the user's behalf.
+ * `call-notes` = the human's own notes taken during the call; `call-summary` =
+ * the AI-generated summary of it. The two are easy to confuse from the row
+ * alone but carry very different authority, so the role travels with the item.
+ */
+export type CanvasRole = 'call-notes' | 'call-summary';
+
 export interface SelectedCanvas {
   id: string;
   title: string;
+  canvasRole?: CanvasRole;
 }
 
 export interface SelectedTicket {
@@ -109,7 +118,7 @@ export interface StoredMessage {
  */
 export interface ClawCitation {
   label?: string;
-  kind: 'thread' | 'canvas' | 'ticket' | 'external' | 'collection-item';
+  kind: 'thread' | 'canvas' | 'ticket' | 'external' | 'collection-item' | 'recording';
   channelId?: string;
   conversationId?: string;
   messageId?: string;
@@ -117,6 +126,9 @@ export interface ClawCitation {
   channelType?: string;
   channelKind?: string;
   canvasId?: string;
+  /** For kind="recording": the call's externalId — the `/recordings/:id` segment.
+   *  Note-taker recordings have no channel or thread, so this is their only link. */
+  recordingId?: string;
   ticketId?: string;
   xyneId?: string;
   mailId?: string;

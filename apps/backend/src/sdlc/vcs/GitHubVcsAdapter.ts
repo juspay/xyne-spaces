@@ -11,6 +11,7 @@ import type {
   ParsedRepository,
   PullRequestInspection,
   RepositoryInspection,
+  RepositoryVisibility,
   SourceLineRange,
   ValidatedCredential,
   VcsProviderAdapter,
@@ -154,26 +155,27 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
       `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/branches/${encodeURIComponent(baseBranch)}`,
       token
     );
-    await this.lsRemote(repository.cloneUrl, baseBranch, token);
     const canPush = token ? repo.permissions?.push === true : false;
+    const visibility: RepositoryVisibility =
+      repo.visibility === 'internal' ? 'INTERNAL' : repo.private === true ? 'PRIVATE' : 'PUBLIC';
     return {
       repository: {
         ...repository,
         owner: repo.owner?.login || repository.owner,
         name: repo.name || repository.name,
       },
-      visibility:
-        repo.visibility === 'internal' ? 'INTERNAL' : repo.private === true ? 'PRIVATE' : 'PUBLIC',
+      visibility,
       defaultBranch: baseBranch,
       identityLogin: token ? 'credential' : null,
       capabilities: [
         {
           capability: 'READ_REPOSITORY',
           state: 'PROVEN',
-          source: token
-            ? 'github-api+authenticated-git-ls-remote'
-            : 'github-api+anonymous-git-ls-remote',
+          source: token ? 'github-api-authenticated' : 'github-api-anonymous',
+          // GET /branches/{branch} needs Contents:read, the same grant a clone needs,
+          // which is why no git ls-remote probe is required here.
           detail: `Read and branch ${baseBranch} verified without remote mutation`,
+          visibility,
         },
         {
           capability: 'PUSH_BRANCH',
@@ -194,7 +196,6 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
       ],
       evidence: {
         apiRead: true,
-        gitLsRemote: true,
         configuredBaseBranch: baseBranch,
         githubPushPermission: repo.permissions?.push === true,
         pullRequestPermissionProof: 'INFERRED_REQUIRED',
@@ -554,28 +555,6 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
       response.status >= 500 ? 503 : 502,
       response.status >= 500
     );
-  }
-
-  private async lsRemote(url: string, branch: string, token?: string): Promise<void> {
-    const env = this.gitEnvironment(token);
-    try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['ls-remote', '--exit-code', url, `refs/heads/${branch}`],
-        {
-          env,
-          timeout: 20_000,
-          maxBuffer: 1024 * 1024,
-        }
-      );
-      if (!stdout.trim()) throw new Error('missing ref');
-    } catch {
-      throw new VcsProviderError(
-        'GITHUB_GIT_READ_FAILED',
-        `Git could not read branch ${branch}; check Contents permission and branch name`,
-        403
-      );
-    }
   }
 
   private gitEnvironment(token?: string): NodeJS.ProcessEnv {

@@ -4,11 +4,14 @@
 // share one route table and react-router strips the basename, so a path means the
 // same thing on both sides.
 
+import type { SdlcCallLink } from '@xyne/shared';
+
 export const SDLC_FRAME_MESSAGE = {
   navigate: 'xyne:sdlc-frame:navigate',
   route: 'xyne:sdlc-frame:route',
   ready: 'xyne:sdlc-frame:ready',
   reset: 'xyne:sdlc-frame:reset',
+  initiateCall: 'xyne:sdlc-frame:initiate-call',
 } as const;
 
 export interface SdlcFrameNavigateMessage {
@@ -30,11 +33,27 @@ export interface SdlcFrameResetMessage {
   type: typeof SDLC_FRAME_MESSAGE.reset;
 }
 
+/**
+ * Frame → parent: initiate a call on the HOST's roomActor. The SDLC lane is a
+ * chromeless iframe whose own call overlay is suppressed, so a call started
+ * inside it must be owned by the host to render the global mini-view. Only
+ * serialisable call params cross the boundary — onComplete stays in the frame.
+ */
+export interface SdlcFrameInitiateCallMessage {
+  type: typeof SDLC_FRAME_MESSAGE.initiateCall;
+  channelId: string;
+  targetUserIds?: string[];
+  callDisplayName?: string;
+  conversationId?: string;
+  sdlcLink?: SdlcCallLink;
+}
+
 export type SdlcFrameMessage =
   | SdlcFrameNavigateMessage
   | SdlcFrameRouteMessage
   | SdlcFrameReadyMessage
-  | SdlcFrameResetMessage;
+  | SdlcFrameResetMessage
+  | SdlcFrameInitiateCallMessage;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -66,6 +85,22 @@ export function parseSdlcFrameMessage(data: unknown): SdlcFrameMessage | null {
       return null;
     }
     return { type, path };
+  }
+
+  if (type === SDLC_FRAME_MESSAGE.initiateCall) {
+    const { channelId, targetUserIds, callDisplayName, conversationId, sdlcLink } = data;
+    if (typeof channelId !== 'string' || !channelId) return null;
+    return {
+      type,
+      channelId,
+      ...(Array.isArray(targetUserIds) &&
+        targetUserIds.every((id): id is string => typeof id === 'string') && {
+          targetUserIds,
+        }),
+      ...(typeof callDisplayName === 'string' && { callDisplayName }),
+      ...(typeof conversationId === 'string' && { conversationId }),
+      ...(isRecord(sdlcLink) && { sdlcLink: sdlcLink as SdlcCallLink }),
+    };
   }
 
   return null;

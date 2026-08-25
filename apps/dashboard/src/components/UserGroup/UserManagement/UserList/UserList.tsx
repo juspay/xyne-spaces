@@ -13,7 +13,11 @@ import { Search, Trash2 } from 'lucide-react';
 import { useUserSearch } from '../../../../hooks/useUsers';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
-import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
+import {
+  getUserDisplayName,
+  isUserDeactivated,
+  matchesUserQuery,
+} from '../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../hooks/usePlatform';
 
 interface UserListProps {
@@ -53,12 +57,7 @@ export const UserList = ({
   const filteredUsers = useMemo(() => {
     if (!searchTerm.trim()) return users;
 
-    const searchLower = searchTerm.toLowerCase();
-    return users.filter(
-      user =>
-        getUserDisplayName(user).toLowerCase().includes(searchLower) ||
-        user.email?.toLowerCase().includes(searchLower),
-    );
+    return users.filter(user => matchesUserQuery(user, searchTerm));
   }, [users, searchTerm]);
 
   // Get users that can be added (not already in the group)
