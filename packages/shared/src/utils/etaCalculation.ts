@@ -9,6 +9,14 @@
 const IST_OFFSET_HOURS = 5.5;
 
 /**
+ * Safety cap on the day-stepping loops in `calculateETADeadline` and
+ * `calculateWorkingDurationMs`. Both walk forward one working day at a
+ * time, so a bogus or unbounded input (e.g. a multi-year estimate, or a
+ * corrupted date range) could otherwise loop indefinitely.
+ */
+const MAX_WORKING_DAY_ITERATIONS = 1000;
+
+/**
  * Working hours configuration interface
  */
 export interface WorkingHoursConfig {
@@ -182,9 +190,8 @@ export function calculateETADeadline(
   // actual last working day instead of the start of the day after it -
   // consistent with how a single exact day is already pinned above.
   let dayIterations = 0;
-  const MAX_DAY_ITERATIONS = 1000; // Safety limit for very large/bogus estimates
   while (remainingHours > workingHoursPerDay) {
-    if (dayIterations >= MAX_DAY_ITERATIONS) {
+    if (dayIterations >= MAX_WORKING_DAY_ITERATIONS) {
       throw new Error(
         'Maximum iterations reached in calculateETADeadline - possible infinite loop'
       );
@@ -226,9 +233,8 @@ export function calculateWorkingDurationMs(
   const end = new Date(endUtc);
   let totalMs = 0;
   let iterations = 0;
-  const MAX_ITERATIONS = 1000; // Safety limit for large date ranges
 
-  while (current < end && iterations < MAX_ITERATIONS) {
+  while (current < end && iterations < MAX_WORKING_DAY_ITERATIONS) {
     iterations++;
 
     // 1. Skip weekends
@@ -278,7 +284,7 @@ export function calculateWorkingDurationMs(
     }
   }
 
-  if (iterations >= MAX_ITERATIONS) {
+  if (iterations >= MAX_WORKING_DAY_ITERATIONS) {
     throw new Error(
       `Maximum iterations reached in calculateWorkingDurationMs - possible infinite loop. Range: ${startUtc.toISOString()} to ${endUtc.toISOString()}`
     );
