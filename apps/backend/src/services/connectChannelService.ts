@@ -3,6 +3,7 @@ import { DatabaseClient } from '../database/client';
 import { ConnectChannelRepository } from '../database/repositories/connectChannelRepository';
 import { ConnectChannelMemberRepository } from '../database/repositories/connectChannelMemberRepository';
 import { connectMemberSyncService } from './connectMemberSyncService';
+import { runAsSystem } from '../database/tenant/context';
 import { logger } from '../utils/logger';
 
 /**
@@ -30,7 +31,7 @@ export class ConnectChannelService {
       where: { id: channelId },
       select: { scopeType: true },
     });
-    
+
     if (!channel) throw new Error('Channel not found');
     if (channel.scopeType !== 'DEFAULT') {
       throw new Error('Only DEFAULT channels can be connect-enabled');
@@ -42,9 +43,19 @@ export class ConnectChannelService {
     if (pointerLink) {
       throw new Error('A connect guest (pointer) channel cannot itself be connect-enabled');
     }
-    await this.db.channel.update({
-      where: { id: channelId },
-      data: { isConnectEnabled: true },
+    await this.markConnectEnabled(channelId);
+  }
+
+  async markConnectEnabled(channelId: string): Promise<void> {
+    // runAsSystem: the cross-org DM flow calls this on a freshly-created host channel while running under
+    // the initiator's request scope, where a tenant-scoped write/read could miss the row (this was the
+    // "Channel not found" the old enableConnect guard hit). Update under system scope so it can't fail on
+    // scope. The `await` is INSIDE the callback so it executes in system scope (not a lazy scoped promise).
+    await runAsSystem(async () => {
+      await this.db.channel.update({
+        where: { id: channelId },
+        data: { isConnectEnabled: true },
+      });
     });
     logger.info(`[ConnectChannel] enabled connect on channel ${channelId}`);
   }

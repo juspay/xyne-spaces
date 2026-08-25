@@ -132,7 +132,9 @@ export class ConnectDmService {
     });
 
     // 2. Mark connect-capable BEFORE adding members so the participant mirror writes their member rows.
-    await connectChannelService.enableConnect(hostChannel.id);
+    //    Use the internal flag flip (not the user-facing enableConnect): a DM/GroupDM host channel is not
+    //    scopeType DEFAULT, so the DEFAULT-only guard in enableConnect would (and did) wrongly reject it.
+    await connectChannelService.markConnectEnabled(hostChannel.id);
     await this.participants.addParticipant(
       hostChannel.id,
       initiatorUserId,
@@ -287,7 +289,8 @@ export class ConnectDmService {
   ): Promise<void> {
     if (channel.workspaceId !== initiatorWorkspaceId) return; // guest side already wired
     if (!channel.isConnectEnabled) {
-      await connectChannelService.enableConnect(channel.id);
+      // DM/GroupDM host channel (non-DEFAULT) — internal flip, not the user-facing enableConnect guard.
+      await connectChannelService.markConnectEnabled(channel.id);
     }
     await this.materializeForeignWorkspaces(
       channel.id,
