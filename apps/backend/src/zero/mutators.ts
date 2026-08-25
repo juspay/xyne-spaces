@@ -1307,6 +1307,34 @@ export function createMutators(
             if (foreign) {
               throw new Error('External people can only be added to connect channels');
             }
+          } else if (channel.scopeType === ChannelScopeType.DEFAULT) {
+            // R4.2 (write-layer fence, mirrors the UI's restrictToSameWorkspace): on a DEFAULT connect
+            // channel the generic add path may only add people from the requester's OWN workspace. A
+            // host-org member may additionally re-add a member of an ALREADY-connected guest org (rejoin
+            // / add another member of a trusted org). Bringing in a brand-new org must go through the
+            // invite handshake, never this path. (DM/GroupDM adds are governed by reachability elsewhere.)
+            const connectLink = linkedAsHost ?? linkedAsPointer;
+            const hostChannelId = connectLink?.hostChannelId ?? channelId;
+            const hostWorkspaceId = connectLink?.hostWorkspaceId ?? channel.workspaceId;
+            const requesterIsHostOrg = requestingUser.workspaceId === hostWorkspaceId;
+            for (const user of validUsers) {
+              if (user.workspaceId === requestingUser.workspaceId) continue; // own-org add — always allowed
+              if (!requesterIsHostOrg) {
+                throw new Error('You can only add people from your own workspace to this connect channel');
+              }
+              const orgAlreadyLinked = await tx.run(
+                zql.connect_channel
+                  .where('hostChannelId', hostChannelId)
+                  .where('guestWorkspaceId', user.workspaceId)
+                  .where('status', 'ACTIVE')
+                  .one(),
+              );
+              if (!orgAlreadyLinked) {
+                throw new Error(
+                  'People from a new organization must be invited through Connect, not added directly',
+                );
+              }
+            }
           }
 
           const addedUsers = [];
@@ -4112,6 +4140,18 @@ export function createMutators(
             const isConnectChannel =
               channel.isConnectEnabled === true || Boolean(linkedAsHost) || Boolean(linkedAsPointer);
 
+            // R4.2 parity for the @tag "Add them" path: on a DEFAULT connect channel, only the requester's
+            // OWN-workspace users (or members of an ALREADY-connected org, host-org side) may be added — a
+            // brand-new org must go through the invite handshake. Resolve the requester + host once here.
+            const isDefaultConnect = isConnectChannel && channel.scopeType === ChannelScopeType.DEFAULT;
+            const requestingUserRow = isDefaultConnect
+              ? await tx.run(zql.users.where('id', authData.sub).one())
+              : null;
+            const npConnectLink = linkedAsHost ?? linkedAsPointer;
+            const npHostChannelId = npConnectLink?.hostChannelId ?? channelId;
+            const npHostWorkspaceId = npConnectLink?.hostWorkspaceId ?? channel.workspaceId;
+            const npRequesterIsHostOrg = requestingUserRow?.workspaceId === npHostWorkspaceId;
+
             // Add users to channel (with validation)
             const validUsers = [];
 
@@ -4123,6 +4163,23 @@ export function createMutators(
               // Non-connect channel: refuse a foreign-workspace user (the loophole this closes).
               if (!isConnectChannel && user.workspaceId !== channel.workspaceId) {
                 continue;
+              }
+
+              // DEFAULT connect channel: enforce the own-org / already-connected-org rule (skip violators).
+              if (
+                isDefaultConnect &&
+                requestingUserRow &&
+                user.workspaceId !== requestingUserRow.workspaceId
+              ) {
+                if (!npRequesterIsHostOrg) continue; // a guest may only add own-workspace users
+                const orgAlreadyLinked = await tx.run(
+                  zql.connect_channel
+                    .where('hostChannelId', npHostChannelId)
+                    .where('guestWorkspaceId', user.workspaceId)
+                    .where('status', 'ACTIVE')
+                    .one(),
+                );
+                if (!orgAlreadyLinked) continue; // new org must be invited, not @tag-added
               }
 
               const participantId = uuidv4();

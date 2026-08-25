@@ -2,6 +2,7 @@ import { useSelector } from '@xstate/react';
 import { stateMachineActor, UnreadCounts } from '../machines/stateMachine';
 import { useMemo } from 'react';
 import { ActivityClassification, ChannelScopeType } from '@xyne/shared';
+import { useHostToPointerChannelId } from './useHostChannelId';
 
 export const useAllUnreadCount = (): UnreadCounts => {
   const userChannelStatuses = useSelector(
@@ -12,6 +13,11 @@ export const useAllUnreadCount = (): UnreadCounts => {
   const unreadActivities = useSelector(stateMachineActor, state => state.context.unreadActivities);
 
   const visibleChannels = useSelector(stateMachineActor, state => state.context.visibleChannels);
+
+  // Slack-Connect: a guest's activities/status are stamped with the connect HOST channelId, but the
+  // sidebar renders their local POINTER channel. This resolver maps host→pointer so unread lands on the
+  // row the guest actually sees. No-op for normal channels and for the host viewer (they hold no pointer).
+  const hostToPointer = useHostToPointerChannelId();
 
   return useMemo(() => {
     const counts: UnreadCounts = {};
@@ -31,7 +37,9 @@ export const useAllUnreadCount = (): UnreadCounts => {
     // Thread activities are excluded — only channel-level activities count for channel badges
     for (const activity of unreadActivities ?? []) {
       if (!activity.channelId) continue;
-      if (dmChannelIds.has(activity.channelId)) continue;
+      // Connect guests: fold the host-stamped activity onto the pointer id the sidebar renders.
+      const channelKey = hostToPointer(activity.channelId);
+      if (dmChannelIds.has(channelKey)) continue;
       if (activity.isThreadActivity === true) continue;
       if (activity.actorAction === 'added_v2') continue;
       if (activity.actorAction === 'removed') continue;
@@ -39,16 +47,17 @@ export const useAllUnreadCount = (): UnreadCounts => {
       const classification = activity.classification ?? ActivityClassification.PENDING;
       if (classification === ActivityClassification.SKIP) continue;
 
-      counts[activity.channelId] = (counts[activity.channelId] || 0) + 1;
+      counts[channelKey] = (counts[channelKey] || 0) + 1;
     }
 
     // DM/GROUP_DM channels: use channelUserStatus.unreadCount
     for (const status of userChannelStatuses) {
-      if (dmChannelIds.has(status.channelId)) {
-        counts[status.channelId] = status.unreadCount || 0;
+      const channelKey = hostToPointer(status.channelId);
+      if (dmChannelIds.has(channelKey)) {
+        counts[channelKey] = status.unreadCount || 0;
       }
     }
 
     return counts;
-  }, [userChannelStatuses, unreadActivities, visibleChannels]);
+  }, [userChannelStatuses, unreadActivities, visibleChannels, hostToPointer]);
 };
