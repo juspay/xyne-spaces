@@ -17,7 +17,7 @@ vi.mock("../logger.js", () => ({
   createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { isSlotBusy, releaseSlot } from "./message-queue.js";
+import { isSlotBusy, releaseSlot, tryAcquireSlot, getSlotOwner, attachSlotSession } from "./message-queue.js";
 
 describe("releaseSlot key scoping (twin-slot leak regression, 2026-08-19)", () => {
   beforeEach(() => {
@@ -82,5 +82,69 @@ describe("isSlotBusy", () => {
     getMock.mockResolvedValue("token");
     await isSlotBusy("conv-1", "digital-twin", "user-9");
     expect(getMock).toHaveBeenCalledWith("claw:busy:conv-1:digital-twin:user-9");
+  });
+});
+
+describe("slot owner metadata (same-user interrupt source of truth)", () => {
+  let setLocal: ReturnType<typeof vi.fn>;
+  let getLocal: ReturnType<typeof vi.fn>;
+  let pexpireLocal: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    getConnMock.mockReset();
+    setLocal = vi.fn().mockResolvedValue("OK");
+    getLocal = vi.fn();
+    pexpireLocal = vi.fn().mockResolvedValue(1);
+    getConnMock.mockReturnValue({ set: setLocal, get: getLocal, pexpire: pexpireLocal });
+  });
+
+  it("tryAcquireSlot stamps the owner userId on the meta key when the slot is won", async () => {
+    setLocal.mockResolvedValueOnce("OK");
+    const token = await tryAcquireSlot("conv-1", "ask-ai", undefined, "user-7");
+    expect(token).toBeTruthy();
+    expect(setLocal).toHaveBeenCalledWith("claw:busy:conv-1:ask-ai", expect.any(String), "PX", expect.any(Number), "NX");
+    expect(setLocal).toHaveBeenCalledWith("claw:busymeta:conv-1:ask-ai", JSON.stringify({ userId: "user-7" }), "PX", expect.any(Number));
+  });
+
+  it("tryAcquireSlot writes no meta when the slot is already held", async () => {
+    setLocal.mockResolvedValueOnce(null);
+    const token = await tryAcquireSlot("conv-1", "ask-ai", undefined, "user-7");
+    expect(token).toBeNull();
+    expect(setLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it("tryAcquireSlot writes no meta when no ownerUserId is given (back-compat)", async () => {
+    setLocal.mockResolvedValueOnce("OK");
+    await tryAcquireSlot("conv-1", "ask-ai");
+    expect(setLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it("getSlotOwner returns the parsed {userId, sessionId}", async () => {
+    getLocal.mockResolvedValue(JSON.stringify({ userId: "u1", sessionId: "s1" }));
+    await expect(getSlotOwner("conv-1", "ask-ai")).resolves.toEqual({ userId: "u1", sessionId: "s1" });
+    expect(getLocal).toHaveBeenCalledWith("claw:busymeta:conv-1:ask-ai");
+  });
+
+  it("getSlotOwner returns null when no meta is present", async () => {
+    getLocal.mockResolvedValue(null);
+    await expect(getSlotOwner("conv-1", "ask-ai")).resolves.toBeNull();
+  });
+
+  it("getSlotOwner fails safe to null on a Redis error", async () => {
+    getConnMock.mockImplementation(() => { throw new Error("down"); });
+    await expect(getSlotOwner("conv-1", "ask-ai")).resolves.toBeNull();
+  });
+
+  it("attachSlotSession merges the sessionId while preserving the ownerUserId", async () => {
+    getLocal.mockResolvedValue(JSON.stringify({ userId: "u1" }));
+    await attachSlotSession("conv-1", "ask-ai", "sess-9");
+    expect(setLocal).toHaveBeenCalledWith("claw:busymeta:conv-1:ask-ai", JSON.stringify({ userId: "u1", sessionId: "sess-9" }), "PX", expect.any(Number));
+  });
+
+  it("attachSlotSession only refreshes TTL when the sessionId is already stamped", async () => {
+    getLocal.mockResolvedValue(JSON.stringify({ userId: "u1", sessionId: "sess-9" }));
+    await attachSlotSession("conv-1", "ask-ai", "sess-9");
+    expect(setLocal).not.toHaveBeenCalled();
+    expect(pexpireLocal).toHaveBeenCalledWith("claw:busymeta:conv-1:ask-ai", expect.any(Number));
   });
 });

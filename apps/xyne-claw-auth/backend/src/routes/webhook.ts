@@ -58,6 +58,8 @@ import {
   tryAcquireSlot,
   releaseSlot,
   refreshSlot,
+  attachSlotSession,
+  getSlotOwner,
   enqueueMessage,
   dequeueMessage,
   queueDepth,
@@ -2370,15 +2372,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Claim the conversation slot before slow provider/history/attachment setup.
   // Bare `/upgrade` is an ack-only command, so it must not reserve a run slot.
   if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId && task) {
-    const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug);
+    const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug, undefined, targetUserId);
     slotToken = slot;
     if (!slot) {
-      const activeRun = await agentRunRepository.findRunningByConversation(payload.conversationId).catch(() => null);
+      const slotOwner = await getSlotOwner(payload.conversationId, runAgentSlug).catch(() => null);
       const sameUserActiveRun =
         !explicitQueueOnly &&
-        activeRun?.agentSlug === runAgentSlug &&
-        activeRun.userId === targetUserId
-          ? activeRun
+        slotOwner?.userId === targetUserId &&
+        slotOwner.sessionId
+          ? { sessionId: slotOwner.sessionId }
           : null;
       const queuedMsg: QueuedMessage = {
         eventId: (payload as { messageId?: string }).messageId ?? traceId,
@@ -7819,9 +7821,11 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       const ctx = sessionId ? await getSession(sessionId).catch(() => null) : null;
       if (ctx?.mentionedUserId) {
         await refreshSlot(conversationId, agentSlug, undefined, ctx.mentionedUserId).catch(() => {});
+        if (sessionId) await attachSlotSession(conversationId, agentSlug, sessionId, ctx.mentionedUserId).catch(() => {});
       }
     } else {
       await refreshSlot(conversationId, agentSlug).catch(() => {});
+      if (sessionId) await attachSlotSession(conversationId, agentSlug, sessionId).catch(() => {});
     }
   }
 
