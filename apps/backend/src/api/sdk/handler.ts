@@ -88,10 +88,6 @@ export function errorHandler(
   if (isServerError) logger.error('[sdk] request failed', logPayload);
   else logger.warn('[sdk] request rejected', logPayload);
 
-  if (apiError.retryAfterSeconds !== undefined) {
-    res.setHeader('Retry-After', String(apiError.retryAfterSeconds));
-  }
-
   const body: ApiErrorBody = {
     error: {
       code: apiError.code,
@@ -99,9 +95,6 @@ export function errorHandler(
       ...(apiError.details ? { details: apiError.details } : {}),
       request_id: id,
       retryable: apiError.retryable,
-      ...(apiError.retryAfterSeconds !== undefined
-        ? { retry_after_seconds: apiError.retryAfterSeconds }
-        : {}),
     },
   };
 

@@ -12,8 +12,8 @@
  */
 
 import type { AuthData } from '@/zero/mutators';
-import { runCatalogMutation } from '@/zero/server';
-import { toSdkApiError } from './errors';
+import { CatalogQueryError, runCatalogMutation } from '@/zero/server';
+import { SdkApiError, toSdkApiError } from './errors';
 
 /** Run one catalog mutator as the authenticated caller. */
 export async function callMutator(
@@ -24,8 +24,9 @@ export async function callMutator(
   try {
     await runCatalogMutation(name, args, authData);
   } catch (err) {
-    // Domain failures from the mutator catalog are plain `Error`s (~485 throw
-    // sites), so this is where they acquire a code and a status.
+    if (err instanceof CatalogQueryError && err.phase === 'unknown') {
+      throw new SdkApiError('not_found', err.message, { cause: err.cause });
+    }
     throw toSdkApiError(err);
   }
 }

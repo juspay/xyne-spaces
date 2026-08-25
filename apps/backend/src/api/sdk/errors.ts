@@ -1,11 +1,6 @@
 /**
  * Error plumbing for /api/sdk.
  *
- * Every failure path funnels through `SdkApiError`; `middleware/errorHandler.ts` is
- * the only place that writes a status code. Domain errors thrown inside the
- * mutator catalog are free-text (~485 `throw new Error` sites), so they map to
- * a single `domain_rule` code with the message passed through — clients branch
- * on `code`, never on message text.
  */
 
 import {
@@ -22,7 +17,6 @@ export class SdkApiError extends Error {
   public readonly status: number;
   public readonly retryable: boolean;
   public readonly details?: readonly ErrorDetail[];
-  public readonly retryAfterSeconds?: number;
   /** Set when the underlying cause should be logged but never returned to the caller. */
   public readonly cause?: unknown;
 
@@ -31,7 +25,6 @@ export class SdkApiError extends Error {
     message?: string,
     opts: {
       details?: readonly ErrorDetail[];
-      retryAfterSeconds?: number;
       cause?: unknown;
     } = {},
   ) {
@@ -42,7 +35,6 @@ export class SdkApiError extends Error {
     this.status = definition.status;
     this.retryable = definition.retryable;
     if (opts.details !== undefined) this.details = opts.details;
-    if (opts.retryAfterSeconds !== undefined) this.retryAfterSeconds = opts.retryAfterSeconds;
     if (opts.cause !== undefined) this.cause = opts.cause;
     Error.captureStackTrace(this, SdkApiError);
   }
@@ -64,7 +56,7 @@ export class SdkApiError extends Error {
  * Translate anything thrown below the route layer into an SdkApiError.
  *
  * Ordering matters: ACL denials are a distinct 403 and must be checked before
- * the generic Error catch-all, otherwise they would surface as 422 domain rules.
+ * the generic Error catch-all, otherwise they would surface as 400s.
  */
 export function toSdkApiError(err: unknown): SdkApiError {
   if (err instanceof SdkApiError) return err;
@@ -77,17 +69,17 @@ export function toSdkApiError(err: unknown): SdkApiError {
 
   // @rocicorp/zero's ApplicationError carries a structured `details` payload.
   // It is currently used by exactly one mutator; new domain errors should adopt
-  // it so they can carry a specific code instead of the generic domain_rule.
+  // it so they can carry a specific code instead of the generic 400.
   if (isApplicationError(err)) {
     const code = extractCode(err.details);
-    return new SdkApiError(code ?? 'domain_rule', err.message, {
+    return new SdkApiError(code ?? 'validation_failed', err.message, {
       details: [{ issue: JSON.stringify(err.details) }],
       cause: err,
     });
   }
 
   if (err instanceof Error) {
-    return new SdkApiError('domain_rule', err.message, { cause: err });
+    return new SdkApiError('validation_failed', err.message, { cause: err });
   }
 
   return new SdkApiError('internal', 'Unexpected error.', { cause: err });

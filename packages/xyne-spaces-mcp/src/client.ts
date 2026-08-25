@@ -116,11 +116,8 @@ export function describeError(err: unknown): string {
 	if (!(err instanceof SpacesApiError)) {
 		return err instanceof Error ? err.message : String(err);
 	}
-	if (err.code === "token_expired") {
-		return `Your Xyne Spaces API key has expired — keys last at most 90 days, chosen at creation. Mint a new one in ${KEY_SOURCE} and set XYNE_SPACES_API_KEY.`;
-	}
 	if (err.status === 401 || err.code === "unauthenticated") {
-		return `Not authorized to Xyne Spaces. Set XYNE_SPACES_API_KEY to a key minted in ${KEY_SOURCE}.`;
+		return `${err.message} Set XYNE_SPACES_API_KEY to a key minted in ${KEY_SOURCE}. Keys last at most 90 days, and can be revoked from that page.`;
 	}
 	if (err.code === "forbidden") {
 		return `${err.message} (Your key acts as your Spaces user, so it can only reach what that user can.)`;

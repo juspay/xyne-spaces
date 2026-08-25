@@ -15,12 +15,6 @@ export type SdkErrorCode =
 /**
  * Base error class for all SDK errors.
  *
- * `code` is the SDK's own coarse classification. `serverCode` is the precise code
- * the API returned in its error envelope — one of the 17 defined by
- * `@xyne/spaces-contract` (`insufficient_scope`, `idempotency_key_conflict`,
- * `mixed_update_fields`, …). Switch on `serverCode` when you need to tell apart
- * failures that share an HTTP status; the class hierarchy alone cannot.
- *
  * The contract is not imported here: it depends on zod, and this package ships
  * with no runtime dependencies. The string is passed through verbatim, and
  * `npm run contract-check` verifies the codes the SDK reasons about are real.
@@ -62,6 +56,11 @@ export class NotFoundError extends SdkError {
 
 /**
  * Thrown when rate limited (429).
+ *
+ * @deprecated The Spaces API has no rate limiter, so nothing throws this
+ * today. It is kept exported because removing it would break any consumer
+ * that imports it, and because a limiter is planned. Do not build a retry
+ * strategy around it yet — see `RETRYABLE` handling in the README.
  */
 export class RateLimitError extends SdkError {
   readonly retryAfter?: number;

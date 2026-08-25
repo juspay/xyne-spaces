@@ -35,7 +35,6 @@ import { config } from '@/config/env';
 import type { SdkAuth } from './auth';
 import { SdkApiError } from './errors';
 import { handle } from './handler';
-import type { ErrorCode } from '@xyne/spaces-contract';
 
 const channelController = new ChannelController();
 const conversationController = new ConversationController();
@@ -65,8 +64,6 @@ interface BaseRoute {
   readonly mapBody?: (body: unknown) => unknown;
   /** Unwrap the controller's envelope into the SDK's response shape. */
   readonly unwrap?: (body: unknown) => unknown;
-  /** What a 5xx from this handler means. */
-  readonly serverErrorCode?: ErrorCode;
 }
 
 /**
@@ -140,7 +137,6 @@ const ROUTES: readonly DirectRoute[] = [
       return q ? { ...query, q } : { ...query, q, filterOnly: 'true' };
     },
     unwrap: unwrapEnvelope,
-    serverErrorCode: 'upstream_unavailable',
   },
   {
     method: 'get',
@@ -148,7 +144,6 @@ const ROUTES: readonly DirectRoute[] = [
     controller: schemaHandler,
     query: searchSchemaQuerySchema,
     unwrap: unwrapEnvelope,
-    serverErrorCode: 'upstream_unavailable',
   },
 
   /**
@@ -198,13 +193,11 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'get',
     path: '/claw/agents',
     service: async () => listS2SClawAgents(),
-    serverErrorCode: 'upstream_unavailable',
   },
   {
     method: 'post',
     path: '/claw/runs',
     body: clawRunBody,
-    serverErrorCode: 'upstream_unavailable',
     service: async (req, auth) => {
       const input = clawRunBody.parse(req.body);
       const { authData } = auth;
@@ -232,10 +225,9 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/claw/runs/:sessionId',
-    serverErrorCode: 'upstream_unavailable',
     service: async (req, auth) => {
       const sessionId = req.params['sessionId'];
-      if (!sessionId) throw new SdkApiError('invalid_request', 'sessionId is required.');
+      if (!sessionId) throw new SdkApiError('validation_failed', 'sessionId is required.');
       const status = await getS2SClawRunStatus(sessionId, auth.authData.sub);
       if (!status) throw SdkApiError.notFound('Claw run');
       return status;
@@ -262,9 +254,7 @@ export function createDirectRouter(): Router {
           } catch (err) {
             throw err instanceof SdkApiError
               ? err
-              : new SdkApiError(route.serverErrorCode ?? 'internal', serviceMessage(err), {
-                  cause: err,
-                });
+              : new SdkApiError('internal', serviceMessage(err), { cause: err });
           }
           return;
         }
@@ -369,7 +359,7 @@ export async function callController(
   if (!settled) {
     throw new SdkApiError('internal', 'The handler produced no response.');
   }
-  if (status >= 400) throw controllerError(status, body, route.serverErrorCode);
+  if (status >= 400) throw controllerError(status, body);
 
   return {
     status,
@@ -387,7 +377,7 @@ export async function callController(
 function unwrapEnvelope(raw: unknown): unknown {
   const body = raw as { success?: boolean; data?: unknown; error?: string } | undefined;
   if (body?.success === false) {
-    throw new SdkApiError('upstream_unavailable', body.error ?? 'The request failed.');
+    throw new SdkApiError('internal', body.error ?? 'The request failed.');
   }
   if (body && typeof body === 'object' && 'data' in body) return body.data;
   if (body && typeof body === 'object') {
@@ -428,7 +418,7 @@ function principalOf(authData: {
   };
 }
 
-function controllerError(status: number, body: unknown, serverErrorCode?: ErrorCode): SdkApiError {
+function controllerError(status: number, body: unknown): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;
   const message =
     (typeof payload?.message === 'string' && payload.message) ||
@@ -437,23 +427,17 @@ function controllerError(status: number, body: unknown, serverErrorCode?: ErrorC
 
   switch (status) {
     case 400:
-      return new SdkApiError('invalid_request', message);
+    case 409:
+    case 422:
+      return new SdkApiError('validation_failed', message);
     case 401:
       return new SdkApiError('unauthenticated', message);
     case 403:
       return new SdkApiError('forbidden', message);
     case 404:
       return new SdkApiError('not_found', message);
-    case 409:
-      return new SdkApiError('conflict', message);
-    case 422:
-      return new SdkApiError('domain_rule', message);
-    case 429:
-      return new SdkApiError('rate_limited', message);
     default:
-      return serverErrorCode
-        ? new SdkApiError(serverErrorCode, message)
-        : new SdkApiError('internal', 'The handler failed.', { cause: body });
+      return new SdkApiError('internal', 'The handler failed.', { cause: body });
   }
 }
 

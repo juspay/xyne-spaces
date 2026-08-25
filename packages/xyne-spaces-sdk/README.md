@@ -317,32 +317,51 @@ you can keep polling with `getRun`.
 
 ## Errors
 
-Typed classes for shape, a stable `serverCode` for specifics:
+The API speaks **five codes, one per status**, so the class you catch already
+tells you what happened:
 
 ```typescript
-import { AuthError, NotFoundError, RateLimitError, SdkError } from '@xyne/spaces-sdk';
+import { AuthError, NotFoundError, SdkError } from '@xyne/spaces-sdk';
 
 try {
-  await sdk.tickets.update({ ticketId, status: 'COMPLETED' });
+  await sdk.tickets.update(ticketId, { statusV2: 'COMPLETED' });
 } catch (err) {
-  if (err instanceof NotFoundError) {
-    // Gone, or not visible to this key. The API is not an existence oracle.
-  } else if (err instanceof RateLimitError) {
-    await wait(err.retryAfter);
-  } else if (err instanceof AuthError && err.serverCode === 'token_expired') {
-    // The key ran out. Mint a new one; retrying will not help.
-  } else if (err instanceof SdkError && err.serverCode === 'domain_rule') {
-    // A business rule rejected it — err.message is meant to be shown.
+  if (err instanceof AuthError) {
+    // 401. Missing, expired, or revoked — the server does not distinguish.
+    // Mint a new key; retrying will not help.
+  } else if (err instanceof NotFoundError) {
+    // 404. Gone, or not visible to this key. The API is not an existence oracle.
+  } else if (err instanceof SdkError && err.code === 'validation_error') {
+    // 400. Bad arguments, or a business rule refused it.
+    // err.message is written for a person — show it.
+  } else if (err instanceof SdkError && err.code === 'forbidden') {
+    // 403. The key's user cannot reach this.
+  } else if (err instanceof SdkError && err.code === 'api_error') {
+    // 500. Logged server-side against the request id; the message is generic.
   }
 }
 ```
 
-`serverCode` is one of the 12 codes defined by
-[`@xyne/spaces-contract`](../xyne-spaces-contract): `validation_failed`,
-`invalid_request`, `unauthenticated`, `token_expired`, `forbidden`, `not_found`,
-`conflict`, `domain_rule`, `rate_limited`, `internal`, `service_misconfigured`,
-`upstream_unavailable`. It is absent for purely local failures, where `code` is
-`network_error` or `timeout`.
+| Status | Class / `code` | `serverCode` |
+|---|---|---|
+| 400 | `SdkError`, `code: 'validation_error'` | `validation_failed` |
+| 401 | `AuthError` | `unauthenticated` |
+| 403 | `SdkError`, `code: 'forbidden'` | `forbidden` |
+| 404 | `NotFoundError` | `not_found` |
+| 500 | `SdkError`, `code: 'api_error'` | `internal` |
+
+`serverCode` carries the API's own vocabulary from
+[`@xyne/spaces-contract`](../xyne-spaces-contract). It is absent for failures
+that never reached the server, where `code` is `network_error` or `timeout` —
+which is the main thing it is still useful for telling apart.
+
+**400 is the one whose message matters.** A business rule that refuses a write
+("Ticket not found", "You are not a participant of this channel") arrives as a
+400 with that text intact, because a caller can act on it. 5xx messages are
+replaced server-side with a generic string, so nothing there is worth showing.
+
+`RateLimitError` is still exported but nothing throws it: this API has no rate
+limiter yet. Do not build a retry strategy around it.
 
 Every response carries an `X-Request-Id`, echoed into error bodies — quote it in
 support requests.

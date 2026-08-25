@@ -55,13 +55,12 @@ export async function apiKeyAuth(
     try {
       verified = verifyApiKey(presented);
     } catch (err) {
-      // Distinct from `unauthenticated`: the key was genuinely issued and
-      // simply ran out (or was swept up by a force logout), which the caller
-      // fixes by minting a new one rather than by hunting for a mistake in
-      // how they sent it.
+      // Expiry gets its own message but the same code: the fix — mint a new
+      // key — is identical to every other auth failure here, so a caller has
+      // nothing to branch on that the message does not already say.
       if (err instanceof jwt.TokenExpiredError) {
         throw new SdkApiError(
-          'token_expired',
+          'unauthenticated',
           'This API key has expired. Create a new one from the Apps page.',
         );
       }
@@ -107,7 +106,7 @@ export async function apiKeyAuth(
     // both levers, so an expiry shortened here takes effect too.
     if (keyRow.expiresAt.getTime() <= Date.now()) {
       throw new SdkApiError(
-        'token_expired',
+        'unauthenticated',
         'This API key has expired. Create a new one from the Apps page.',
       );
     }

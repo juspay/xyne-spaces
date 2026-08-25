@@ -184,30 +184,37 @@ One envelope, from `handler.ts`, the only place a status code is written:
 
 `code` is the stable field. Branch on it, never on `message`.
 
-| Code | Status | Retryable |
-|---|---|---|
-| `validation_failed` | 400 | |
-| `invalid_request` | 400 | |
-| `unauthenticated` | 401 | |
-| `token_expired` | 401 | |
-| `forbidden` | 403 | |
-| `not_found` | 404 | |
-| `conflict` | 409 | |
-| `domain_rule` | 422 | |
-| `rate_limited` | 429 | ✓ |
-| `internal` | 500 | ✓ |
-| `service_misconfigured` | 503 | |
-| `upstream_unavailable` | 503 | ✓ |
+**Five codes, one per status.** The mapping is total: every failure this API can
+produce lands on exactly one of them.
 
-Two behaviours worth knowing:
+| Code | Status | Retryable | Means |
+|---|---|---|---|
+| `validation_failed` | 400 | | Bad arguments, **or a business rule refused it** |
+| `unauthenticated` | 401 | | Key missing, malformed, expired, or revoked |
+| `forbidden` | 403 | | The Zero ACL said no |
+| `not_found` | 404 | | No such endpoint, operation, or visible resource |
+| `internal` | 500 | ✓ | Everything else |
+
+This replaced a twelve-code vocabulary. Three of those codes had no producer
+anywhere in the codebase, `rate_limited` described a limiter that does not
+exist, and `retry_after_seconds` was declared, read, and never once set — so
+callers were branching on distinctions the server could not actually make.
+Adding a sixth code means adding a status; two failures that share a status
+share a code and differ in `message`.
+
+Three behaviours worth knowing:
 
 - **5xx messages are replaced** with a generic string, so SQL and connection
   detail never reach a caller. The cause is logged against the `request_id`.
-- **`domain_rule` messages pass through verbatim.** The mutator catalog raises
+- **4xx messages pass through verbatim**, and that is the point of routing
+  business-rule failures to 400 rather than 500. The mutator catalog raises
   plain `Error`s at ~485 sites carrying genuine user-facing text ("Ticket not
-  found"), and those are worth surfacing. The cost is that an *unexpected* error
-  is echoed too, since the mapping cannot tell them apart. Give a new domain
-  failure a typed error if its message should not be public.
+  found"), and a caller can act on those. The cost is that an *unexpected*
+  error is echoed too, since the mapping cannot tell them apart — give a new
+  domain failure a typed error if its message should not be public.
+- **An unknown query or mutator name is a 404**, not a 400. Both sides tag it
+  before dispatch (`CatalogQueryError` with phase `'unknown'`), so it can never
+  be confused with an operation that ran and refused.
 
 `X-Request-Id` is echoed on every response, and a caller-supplied one is honoured
 so a retry chain can be correlated.
@@ -229,8 +236,9 @@ authorization path to keep in sync.
 
 Reads go to the replica (`DATABASE_READ_REPLICA_POOL_URL`). In production, a
 missing replica makes the API report `degraded` at `/health` and return
-`service_misconfigured`; outside production it falls back to the primary pool,
-so a local setup with no replica configured still works.
+`internal` — it is a deployment fault the caller can do nothing about, so the
+detail goes to the logs, not the response. Outside production it falls back to
+the primary pool, so a local setup with no replica configured still works.
 
 ### Writes
 

@@ -671,6 +671,14 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
   }
 }
 
+function mustGetCatalogMutator(mutators: ReturnType<typeof createMutators>, name: string) {
+  try {
+    return mustGetMutator(mutators, name);
+  } catch (error) {
+    throw new CatalogQueryError('unknown', `Unknown catalog mutator "${name}".`, error);
+  }
+}
+
 /**
  * Run one catalog mutator in a transaction, then drain its post-commit work.
  *
@@ -700,11 +708,11 @@ export async function runCatalogMutation(
   const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
   const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
   const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
+  const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
+  const mutator = mustGetCatalogMutator(mutators, name);
 
   await dbProvider.transaction(async (tx) => {
-    const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
     const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name);
-    const mutator = mustGetMutator(mutators, name);
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.
     await mutator.fn({ tx: wrappedTx, args: args as never, ctx });

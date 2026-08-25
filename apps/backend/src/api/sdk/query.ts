@@ -42,7 +42,7 @@ export async function callQuery<T = unknown>(
   const provider = replicaDbProvider ?? (sdkConfig.allowPrimaryForReads ? dbProvider : null);
   if (!provider) {
     throw new SdkApiError(
-      'service_misconfigured',
+      'internal',
       'Read replica is not configured for this deployment (DATABASE_READ_REPLICA_POOL_URL).',
     );
   }
@@ -53,12 +53,12 @@ export async function callQuery<T = unknown>(
     if (!(err instanceof CatalogQueryError)) throw err;
     switch (err.phase) {
       case 'unknown':
-        throw new SdkApiError('invalid_request', err.message, { cause: err.cause });
+        throw new SdkApiError('not_found', err.message, { cause: err.cause });
       case 'build':
         throw new SdkApiError('validation_failed', err.message, { cause: err.cause });
       default:
         // The cause is logged, not returned: it carries SQL and connection detail.
-        throw new SdkApiError('upstream_unavailable', 'The database is temporarily unavailable.', {
+        throw new SdkApiError('internal', 'The database is temporarily unavailable.', {
           cause: err.cause,
         });
     }

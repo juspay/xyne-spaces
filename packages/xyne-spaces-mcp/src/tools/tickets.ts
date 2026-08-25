@@ -567,7 +567,7 @@ const ticketTransition: ToolDef = {
 	// not a NON_LINEAR board — its own comment says DEFAULT and RELEASE boards
 	// must use the standard stage-update path instead. `ticket.update` is that
 	// path: it resolves the target stage on the board and reconciles statusV2
-	// against the stage's default. Picking wrong fails with a domain_rule error,
+	// against the stage's default. Picking wrong fails with a 400,
 	// so the board type is read first rather than guessed.
 	//
 	// `now` and `updatedAt` are caller-supplied timestamps, and `formValuesJson`

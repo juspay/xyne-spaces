@@ -300,19 +300,23 @@ Failures come back as text with the API's stable error code, and the auth cases 
 to do:
 
 ```
-Your Xyne Spaces API key has expired — keys last at most 90 days, chosen at creation.
-Mint a new one in the Spaces dashboard, under Apps → API keys and set XYNE_SPACES_API_KEY.
+This API key has expired. Create a new one from the Apps page. Set XYNE_SPACES_API_KEY
+to a key minted in the Spaces dashboard, under Apps → API keys. Keys last at most
+90 days, and can be revoked from that page.
 ```
 
-| Code | Means |
-|---|---|
-| `unauthenticated` | No key configured, or it's malformed / not signed by this deployment |
-| `token_expired` | Past its chosen lifetime — mint another. Deleting a key in the dashboard does not do this early; see below |
-| `forbidden` | Your user is not allowed this. Not a bug in the tool |
-| `not_found` | Absent, or invisible to you — deliberately indistinguishable |
-| `validation_failed` | An argument the server rejects. The message names the field |
-| `domain_rule` | A business rule refused it, e.g. an unsupported stage move |
-| `upstream_unavailable` | Search or Claw is down. Retryable |
+The API speaks five codes, one per status:
+
+| Code | Status | Means |
+|---|---|---|
+| `validation_failed` | 400 | An argument the server rejects, **or** a business rule refusing the operation (an unsupported stage move). The message says which |
+| `unauthenticated` | 401 | No key configured, or it is malformed, expired, or revoked — deliberately indistinguishable |
+| `forbidden` | 403 | Your user is not allowed this. Not a bug in the tool |
+| `not_found` | 404 | Absent, or invisible to you — deliberately indistinguishable. Also: no operation by that name |
+| `internal` | 500 | A server-side failure, including search or Claw being down. Retryable |
+
+The 400 message is written for a person to read, so surface it rather than
+retrying. A 500 message is deliberately generic; the detail is server-side.
 
 Anything unexpected carries a `request_id` so a server-side failure can be correlated.
 
