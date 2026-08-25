@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { useQuery } from './useQuery.js';
-import { queries } from '../zero/queries.js';
+import { useSelector } from '@xstate/react';
+import { stateMachineActor } from '../machines/stateMachine.js';
 
 export interface UserGroupLike {
   id: string;
@@ -20,9 +20,10 @@ export const useUserGroupSearch = (
   searchQuery: string,
   limit: number = 10,
 ): UserGroupLike[] => {
-  const [allUserGroups, details] = useQuery(queries.getAllUserGroups());
+  // Groups are loaded once by InitialStateLoader (getAllUserGroups) — read them
+  // from the state machine instead of opening a live Zero query per mount.
+  const allUserGroups = useSelector(stateMachineActor, state => state.context.allUserGroups);
   return useMemo(() => {
-    if (details.type !== 'complete') return [];
     if (!allUserGroups || allUserGroups.length === 0) return [];
 
     let filtered: UserGroupLike[];
@@ -39,5 +40,5 @@ export const useUserGroupSearch = (
         .sort((a, b) => a.name.localeCompare(b.name));
     }
     return filtered.slice(0, limit);
-  }, [allUserGroups, details.type, searchQuery, limit]);
+  }, [allUserGroups, searchQuery, limit]);
 };

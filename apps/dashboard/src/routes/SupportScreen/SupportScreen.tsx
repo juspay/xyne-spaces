@@ -249,6 +249,18 @@ const ChannelInfoModal = ({
 
 const ALL_CHANNELS_ID = 'all';
 
+// `cid` lets refresh / new-tab / copied links start the email query without
+// waiting for the ticket lookup (router state does this for in-app clicks).
+const ticketDetailPath = (
+  base: string,
+  channelId: string,
+  xyneId: string,
+  conversationId?: string | null,
+): string =>
+  conversationId
+    ? `${base}/${channelId}/${xyneId}?cid=${encodeURIComponent(conversationId)}`
+    : `${base}/${channelId}/${xyneId}`;
+
 const composerOpenByConv = new Map<string, boolean>();
 
 // ---------------------------------------------------------------------------
@@ -1708,9 +1720,15 @@ const SupportScreen = (): ReactElement => {
         clearTicketSelection();
         setShowMergeDialog(false);
         if (parentTicket) {
-          void navigate(`${supportBase}/${parentTicket.channelId}/${parentTicket.xyneId}`, {
-            state: { conversationId: parentTicket.conversationId, ticketId: parentTicket.id },
-          });
+          void navigate(
+            ticketDetailPath(
+              supportBase,
+              parentTicket.channelId,
+              parentTicket.xyneId,
+              parentTicket.conversationId,
+            ),
+            { state: { conversationId: parentTicket.conversationId, ticketId: parentTicket.id } },
+          );
         }
       } catch (error: unknown) {
         const err = error as {
@@ -2001,7 +2019,12 @@ const SupportScreen = (): ReactElement => {
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ticketData = ticket as SupportTicket;
-      const ticketUrl = `${supportBase}/${ticketData.channelId}/${ticketData.xyneId}`;
+      const ticketUrl = ticketDetailPath(
+        supportBase,
+        ticketData.channelId,
+        ticketData.xyneId,
+        ticketData.conversationId,
+      );
 
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
@@ -3383,12 +3406,17 @@ const SupportScreen = (): ReactElement => {
                         isMember={isSelectedChannelJoined}
                         ticketFilter={ticketFilter}
                         onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
+                          void navigate(
+                            ticketDetailPath(
+                              supportBase,
+                              ticket.channelId,
+                              ticket.xyneId,
+                              ticket.conversationId,
+                            ),
+                            {
+                              state: { conversationId: ticket.conversationId, ticketId: ticket.id },
                             },
-                          });
+                          );
                         }}
                         onTicketsLoaded={setKanbanTickets}
                       />
@@ -3404,12 +3432,17 @@ const SupportScreen = (): ReactElement => {
                         selectedIds={selectedTicketIds}
                         onSelectionChange={handleTableSelectionChange}
                         onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
+                          void navigate(
+                            ticketDetailPath(
+                              supportBase,
+                              ticket.channelId,
+                              ticket.xyneId,
+                              ticket.conversationId,
+                            ),
+                            {
+                              state: { conversationId: ticket.conversationId, ticketId: ticket.id },
                             },
-                          });
+                          );
                         }}
                       />
                     ) : (
@@ -3430,12 +3463,17 @@ const SupportScreen = (): ReactElement => {
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={setKanbanTickets}
                         onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
+                          void navigate(
+                            ticketDetailPath(
+                              supportBase,
+                              ticket.channelId,
+                              ticket.xyneId,
+                              ticket.conversationId,
+                            ),
+                            {
+                              state: { conversationId: ticket.conversationId, ticketId: ticket.id },
                             },
-                          });
+                          );
                         }}
                       />
                     )}
@@ -3778,7 +3816,7 @@ export const SupportTicketDetail = ({
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
-  const stateConversationId = routerState?.conversationId ?? null;
+  const stateConversationId = routerState?.conversationId ?? searchParams.get('cid');
   const ticketId = routerState?.ticketId ?? null;
 
   // channelId for ACL + query gating — comes from the URL path. Both ticket
@@ -4007,12 +4045,10 @@ export const SupportTicketDetail = ({
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
-    void navigate(`${navBasePath ?? supportBase}/${nextChannelId}/${t.xyneId}`, {
-      state: {
-        conversationId: t.conversationId,
-        ticketId: t.id,
-      },
-    });
+    void navigate(
+      ticketDetailPath(navBasePath ?? supportBase, nextChannelId, t.xyneId, t.conversationId),
+      { state: { conversationId: t.conversationId, ticketId: t.id } },
+    );
   };
 
   type DeskNavRow = {
@@ -5332,13 +5368,21 @@ const EmailThreadItem = ({
         });
 
         if (channelIdParam) {
-          void navigate(`/support/${channelIdParam}/${response.data.newTicket.xyneId}`, {
-            state: {
-              conversationId: response.data.newTicket.conversationId,
-              title: email.subject,
-              ticketId: response.data.newTicket.ticketId,
+          void navigate(
+            ticketDetailPath(
+              '/support',
+              channelIdParam,
+              response.data.newTicket.xyneId,
+              response.data.newTicket.conversationId,
+            ),
+            {
+              state: {
+                conversationId: response.data.newTicket.conversationId,
+                title: email.subject,
+                ticketId: response.data.newTicket.ticketId,
+              },
             },
-          });
+          );
         }
       }
     } catch (err) {
