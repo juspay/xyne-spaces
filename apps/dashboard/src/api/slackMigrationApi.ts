@@ -42,7 +42,11 @@ export interface MigrationJobView {
   updatedAt: number;
   completedAt?: number;
   error?: string;
-  issues?: { conversationId: string; kind: 'skipped' | 'truncated' | 'ingest-error'; reason: string }[];
+  issues?: {
+    conversationId: string;
+    kind: 'skipped' | 'truncated' | 'ingest-error';
+    reason: string;
+  }[];
 }
 
 interface Envelope<T> {

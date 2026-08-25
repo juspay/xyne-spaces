@@ -906,7 +906,11 @@ export default function SlackMigration(): React.JSX.Element {
                     own jobs here — or ask an admin to do it for you.
                   </p>
                   {mine.map(job => (
-                    <JobCard key={job.id} job={job} actions={<OwnerActions job={job} busy={busy} run={run} />} />
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      actions={<OwnerActions job={job} busy={busy} run={run} />}
+                    />
                   ))}
                 </section>
               )}
@@ -1070,7 +1074,8 @@ function AdminActions({
     void run(fn).finally(() => setPending(null));
   };
   const canApprove = job.status === 'AWAITING_APPROVAL' && job.phase === 'collect';
-  const canStop = job.status === 'COLLECTING' || job.status === 'INGESTING' || job.status === 'QUEUED';
+  const canStop =
+    job.status === 'COLLECTING' || job.status === 'INGESTING' || job.status === 'QUEUED';
   const canResume = job.status === 'STOPPED' || job.status === 'FAILED';
   return (
     <>
