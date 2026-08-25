@@ -1,11 +1,11 @@
 import type Bull from 'bull';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { deskReportGenerationService } from '@/services/deskReportGenerationService';
 
 /**
- * Desk Report generation worker — mirrors recapWorker.ts's single
- * processGenerationJob entry point. Sweeps every desk with deskReportEnabled
- * and dispatches (does not wait on) a Claw agent run per desk; each run
+ * Desk Report generation worker — \Sweeps every
+ * deskReportEnabled desk and dispatches a Claw agent run per desk; each
  * reports back asynchronously via deskReportCallback.handler.ts.
  */
 export class DeskReportWorker {
@@ -27,7 +27,7 @@ export class DeskReportWorker {
   async processCleanupJob(job: Bull.Job<{ retentionDays?: number }>): Promise<{ deletedRows: number; deletedFiles: number }> {
     logger.info(`[DESK_REPORT_WORKER] Processing cleanup job ${job.id || 'manual'}...`);
     try {
-      const retentionDays = job.data?.retentionDays || 30;
+      const retentionDays = job.data?.retentionDays || config.deskReportScheduler.retentionDays;
       return await deskReportGenerationService.cleanupOldReports(retentionDays);
     } catch (error) {
       logger.error('[DESK_REPORT_WORKER] Cleanup job failed:', error);

@@ -20,24 +20,20 @@ interface LatestDeskReport {
   rangeDays: number;
   agentSlug: string | null;
   error: string | null;
-  // True while a newer regeneration (cron or manual) is in flight. The
-  // previous completed report (if any) stays in `url`/`status` untouched —
-  // this is purely an "in progress" banner, never a state that hides it.
+  // True while a regeneration is in flight — purely a banner, never hides
+  // the previous completed report.
   generating: boolean;
 }
 
 interface LatestDeskReportResponse {
   success: boolean;
   data: LatestDeskReport | null;
-  // Whether the current user may trigger "Generate now" — computed
-  // server-side (canManageDeskReport), not re-derived from an org role here.
+  // Computed server-side (canManageDeskReport) — not re-derived here.
   canGenerate: boolean;
 }
 
 /**
- * Sidebar panel for the scheduled desk report — sibling to
- * DeskMetricsDashboard, same Dialog shell. Every fetch is scoped by
- * channelId (enforced again server-side), so it never shows another desk's report.
+ * Sidebar panel for the scheduled desk report
  */
 export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   open,
@@ -46,17 +42,13 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   channelName,
 }) => {
   const [report, setReport] = useState<LatestDeskReport | null>(null);
-  // Defaults to false (hide the button) until the first fetch resolves — the
-  // server is the only source of truth for this, no client-side guess.
   const [canGenerate, setCanGenerate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Only show the full-panel spinner on the very first load. Once a report
-  // is on screen, subsequent refreshes (polling, "generate now") update
-  // `report` in place so the previous report never disappears mid-fetch.
+  // Full-panel spinner only on first load — later refreshes update in place.
   const fetchLatest = useCallback(
     async (opts?: { silent?: boolean }): Promise<void> => {
       if (!opts?.silent) setLoading(true);
@@ -81,10 +73,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
     void fetchLatest();
   }, [open, fetchLatest]);
 
-  // While a generation is in flight (cron-triggered or manual), poll quietly
-  // in the background so the "Generating…" banner clears on its own the
-  // moment the new report lands — the currently-shown report is never
-  // touched while this is running.
+  // Poll quietly while generating so the banner clears on its own.
   useEffect(() => {
     if (!open || !report?.generating) return;
     const interval = setInterval((): void => {
@@ -105,12 +94,10 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
             'This can take a few minutes — the current report stays visible until it’s ready.',
         });
       } else {
-        // e.g. a generation is already in flight for this desk — not an
-        // error the user needs to retry, just a no-op they should know about.
+        // e.g. already generating — a no-op to know about, not an error to retry.
         toast.info(res.data.error ?? 'Could not start desk report generation');
       }
-      // Silent: the previous report (if any) should stay on screen; only the
-      // `generating` banner should appear, not a loading state that hides it.
+      // Silent: keep the previous report visible, no loading state.
       await fetchLatest({ silent: true });
     } catch {
       toast.error('Failed to start desk report generation');
@@ -244,8 +231,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                 </p>
               </div>
             ) : report.status === 'pending' ? (
-              // No completed report exists yet at all — nothing to keep
-              // showing, so this is the only case that's a full spinner.
+              // No completed report yet — the only case that's a full spinner.
               <div className='flex h-full flex-col items-center justify-center gap-2 text-center'>
                 <RefreshCw size={22} className='animate-spin text-desk-muted' />
                 <p className='text-sm text-desk-muted'>Generating the desk report…</p>
@@ -256,10 +242,8 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                 {report.error && <p className='max-w-sm text-xs text-desk-muted'>{report.error}</p>}
               </div>
             ) : (
-              // A completed report exists — keep it visible even if a newer
-              // generation is running or the newest attempt failed; the
-              // header banner / error strip carries that state instead of
-              // replacing the report.
+              // Keep the completed report visible even mid-regeneration or
+              // after a failed retry — the banner/error strip carries that.
               <div className='flex h-full flex-col'>
                 {report.error && (
                   <p className='shrink-0 border-b border-desk-border bg-destructive/5 px-6 py-2 text-xs text-destructive dark:border-border'>

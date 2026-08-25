@@ -1,14 +1,3 @@
-/**
- * Desk Report scheduled generation — mirrors recapGenerationService.ts's
- * shape (sweep enabled channels, per-channel try/catch), but triggers a
- * Claw agent run per desk since the report comes from the `create-desk-report`
- * tool, not something computed in-process.
- *
- * Persistence reuses the generic MessageAttachment table
- * (entityType='DESK_REPORT', entityId=channelId). A 'pending' row is written
- * before dispatch so the panel can show "Generating…"; the callback route
- * (deskReportCallback.handler.ts) flips it to 'completed'/'failed'.
- */
 import { randomUUID } from 'crypto';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -19,10 +8,8 @@ import { storageService } from '@/services/storage';
 import { AttachmentEntityType } from '@xyne/shared';
 
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
-// A run that never gets a callback (crashed agent, dropped webhook) would
-// otherwise leave a 'pending' row stuck forever, showing "Generating…" in the
-// panel indefinitely. Anything past this age is reaped as failed.
-const STUCK_PENDING_HOURS = 2;
+// A run with no callback (crash, dropped webhook) is reaped as failed past this age.
+export const STUCK_PENDING_HOURS = 2;
 
 const messageAttachmentRepo = new MessageAttachmentRepository();
 
@@ -34,9 +21,7 @@ export interface DeskReportGenerationResult {
 
 export class DeskReportGenerationService {
   /**
-   * Sweep every channel with deskReportEnabled=true and trigger a fresh
-   * report for each. Per-channel failures are isolated — one bad desk never
-   * blocks the rest, same resilience pattern as recap's channel loop.
+   * Sweep every channel with deskReportEnabled=true and trigger a fresh report for each.
    */
   async generateReportsForEnabledDesks(): Promise<{
     total: number;
@@ -81,8 +66,7 @@ export class DeskReportGenerationService {
 
   /**
    * Trigger one desk's report. This is also the entry point for a manual
-   * "generate now" trigger — always scoped to a single channelId, so a
-   * caller can never accidentally regenerate another desk's report.
+   * "generate now" trigger — always scoped to a single channelId.
    */
   async generateReportForChannel(pref: {
     channelId: string;
@@ -100,22 +84,17 @@ export class DeskReportGenerationService {
       return { channelId, success: false, error: 'No desk owner configured' };
     }
 
-    // Refuse a second run while one is already in flight for this channel —
-    // otherwise a manual click during an active cron run races two pending
-    // rows and whichever callback lands last can flip an already-completed
-    // report to failed. Stale rows past STUCK_PENDING_HOURS don't count as
-    // "in flight" so a crashed run can't block generations for hours.
+    // Reap anything past STUCK_PENDING_HOURS before checking if one's in flight.
+    await this.reapStuckPending(channelId);
+
+    // Refuse a second run while one's in flight. Plain check-then-write.
     const existingPending = await db.messageAttachment.findFirst({
-      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false },
+      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false, uploadStatus: 'pending' },
       orderBy: { createdAt: 'desc' },
     });
     if (existingPending) {
-      const existingMetadata = (existingPending.metadata as Record<string, unknown> | null) ?? {};
-      const stuckCutoff = new Date(Date.now() - STUCK_PENDING_HOURS * 60 * 60 * 1000);
-      if (existingMetadata['status'] === 'pending' && existingPending.createdAt > stuckCutoff) {
-        logger.info(`[DeskReport] channel ${channelId} already has a report generating — skipping`);
-        return { channelId, success: false, error: 'A report is already generating for this desk' };
-      }
+      logger.info(`[DeskReport] channel ${channelId} already has a report generating — skipping`);
+      return { channelId, success: false, error: 'A report is already generating for this desk' };
     }
 
     const owner = await db.user.findUnique({
@@ -130,10 +109,8 @@ export class DeskReportGenerationService {
     const channel = await db.channel.findUnique({ where: { id: channelId }, select: { name: true } });
     const channelName = channel?.name ?? channelId;
 
-    // Two distinct reasons a report can't be dispatched, both surfaced the
-    // same way (a 'failed' row with an actionable message): nothing picked
-    // yet, or something was picked but no longer exists (deleted/renamed
-    // since). Only the second case needs an actual lookup.
+    // Two reasons dispatch can be blocked, both surfaced as a 'failed' row:
+    // no agent picked, or a picked agent no longer exists.
     let dispatchBlockedMessage: string | null = null;
     if (!agentSlug) {
       dispatchBlockedMessage = 'No agent selected for Desk Report. Pick an agent in Desk Settings → Agent before this desk\'s report can be generated.';
@@ -164,7 +141,8 @@ export class DeskReportGenerationService {
         storageProvider: config.fileStorage.provider,
         conversationId: null,
         workspaceId,
-        metadata: { status: 'failed', rangeDays, agentSlug, triggeredBy: 'cron', error: dispatchBlockedMessage },
+        uploadStatus: 'failed',
+        metadata: { rangeDays, agentSlug, triggeredBy: 'cron', error: dispatchBlockedMessage },
       });
       return { channelId, success: false, error: dispatchBlockedMessage };
     }
@@ -186,8 +164,8 @@ export class DeskReportGenerationService {
       storageProvider: config.fileStorage.provider,
       conversationId: null,
       workspaceId,
+      uploadStatus: 'pending',
       metadata: {
-        status: 'pending',
         rangeDays,
         agentSlug: resolvedAgentSlug,
         triggeredBy: 'cron',
@@ -227,43 +205,67 @@ export class DeskReportGenerationService {
   /** Flip the most recent pending row for a channel to failed, e.g. on dispatch failure. */
   private async markLatestPending(channelId: string, status: 'failed', errorMessage?: string): Promise<void> {
     const pending = await db.messageAttachment.findFirst({
-      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false },
+      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false, uploadStatus: 'pending' },
       orderBy: { createdAt: 'desc' },
     });
     if (!pending) return;
     const metadata = (pending.metadata as Record<string, unknown> | null) ?? {};
-    if (metadata['status'] !== 'pending') return;
     await db.messageAttachment.update({
       where: { id: pending.id },
-      data: { metadata: { ...metadata, status, error: errorMessage ?? 'Generation failed' } },
+      data: { uploadStatus: status, metadata: { ...metadata, error: errorMessage ?? 'Generation failed' } },
     });
   }
 
   /**
-   * Nightly cleanup — mirrors recap's cleanup job, but a desk's newest
-   * COMPLETED report is never deleted regardless of age, so cleanup can't
-   * regress a desk to "No report generated yet". Everything else past
-   * retentionDays (or STUCK_PENDING_HOURS for stuck 'pending' rows) is
-   * removed, storage file included.
+   * Flip this channel's pending row(s) to 'failed' if they've been pending
+   * longer than STUCK_PENDING_HOURS (crashed agent, dropped webhook) — so a
+   * dropped run doesn't just sit there and block a fresh dispatch.
    */
+  private async reapStuckPending(channelId: string): Promise<void> {
+    const stuckCutoff = new Date(Date.now() - STUCK_PENDING_HOURS * 60 * 60 * 1000);
+    const stuck = await db.messageAttachment.findMany({
+      where: {
+        entityType: DESK_REPORT_ENTITY_TYPE,
+        entityId: channelId,
+        isDeleted: false,
+        uploadStatus: 'pending',
+        createdAt: { lt: stuckCutoff },
+      },
+    });
+    for (const row of stuck) {
+      const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
+      await db.messageAttachment.update({
+        where: { id: row.id },
+        data: { uploadStatus: 'failed', metadata: { ...metadata, error: 'Generation timed out' } },
+      });
+    }
+  }
+
   async cleanupOldReports(retentionDays: number): Promise<{ deletedRows: number; deletedFiles: number }> {
     const cutoff = new Date();
     cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
 
-    const pendingCutoff = new Date();
-    pendingCutoff.setUTCHours(pendingCutoff.getUTCHours() - STUCK_PENDING_HOURS);
+    const stuckCutoff = new Date(Date.now() - STUCK_PENDING_HOURS * 60 * 60 * 1000);
+    await db.messageAttachment.updateMany({
+      where: {
+        entityType: DESK_REPORT_ENTITY_TYPE,
+        isDeleted: false,
+        uploadStatus: 'pending',
+        createdAt: { lt: stuckCutoff },
+      },
+      data: { uploadStatus: 'failed' },
+    });
 
     const rows = await db.messageAttachment.findMany({
       where: { entityType: DESK_REPORT_ENTITY_TYPE, isDeleted: false },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, entityId: true, url: true, createdAt: true, metadata: true },
+      select: { id: true, entityId: true, url: true, createdAt: true, uploadStatus: true },
     });
 
     // Group by channel so we can always spare each channel's newest completed row.
     const latestCompletedIdByChannel = new Map<string, string>();
     for (const row of rows) {
-      const status = (row.metadata as Record<string, unknown> | null)?.['status'];
-      if (status !== 'completed') continue;
+      if (row.uploadStatus !== 'completed') continue;
       if (!latestCompletedIdByChannel.has(row.entityId)) {
         latestCompletedIdByChannel.set(row.entityId, row.id); // rows are newest-first
       }
@@ -271,8 +273,6 @@ export class DeskReportGenerationService {
 
     const toDelete = rows.filter((row) => {
       if (row.id === latestCompletedIdByChannel.get(row.entityId)) return false; // spare the newest per channel
-      const status = (row.metadata as Record<string, unknown> | null)?.['status'];
-      if (status === 'pending') return row.createdAt < pendingCutoff;
       return row.createdAt < cutoff;
     });
 

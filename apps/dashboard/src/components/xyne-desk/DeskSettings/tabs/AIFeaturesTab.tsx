@@ -204,7 +204,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
                   <div className='flex max-w-[260px] flex-col gap-1'>
                     <span>
                       Add a Claw agent to this channel and pick it as the report agent — the report
-                      won`t generate until one is selected, there`s no built-in default.
+                      won&apos;t generate until one is selected, there&apos;s no built-in default.
                     </span>
                   </div>
                 }

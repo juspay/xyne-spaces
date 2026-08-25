@@ -1,15 +1,9 @@
-/**
- * Read-side for the Desk Report sidebar panel — "give me the latest generated
- * report for THIS desk". Every query is filtered by entityId=channelId, which
- * is what guarantees a desk can never see another desk's report (see the
- * Phase 2 plan's isolation requirement).
- */
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { assertChannelMembership } from '@/utils/channelMembership';
 import { AttachmentEntityType, ChannelRole } from '@xyne/shared';
-import { deskReportGenerationService } from '@/services/deskReportGenerationService';
+import { deskReportGenerationService, STUCK_PENDING_HOURS } from '@/services/deskReportGenerationService';
 import { storageService } from '@/services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { config } from '@/config/env';
@@ -17,12 +11,6 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 
 const channelParticipantRepo = new ChannelParticipantRepository();
 
-/**
- * "Can this user manage Desk Report for this desk" — same rule as
- * EmailChannelPreferencesACL.canUpdate: the desk owner, or a channel-level
- * admin, never an org-wide role. Shared by getLatest (button visibility)
- * and generateNow (actual enforcement).
- */
 async function canManageDeskReport(
   channelId: string,
   userId: string | undefined,
@@ -57,33 +45,34 @@ export class DeskReportPanelController {
       )?.ownerUserId;
       const canGenerate = await canManageDeskReport(channelId, req.user?.id, ownerUserId);
 
-      // Pull recent rows, not just the newest — a regeneration writes a
-      // fresh 'pending' row that would otherwise blank out the report the
-      // user is looking at. We report the latest COMPLETED report plus a
-      // `generating` flag, so the previous report never disappears mid-run.
-      const recent = await db.messageAttachment.findMany({
-        where: {
-          entityType: AttachmentEntityType.DESK_REPORT,
-          entityId: channelId,
-          isDeleted: false,
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-      });
+      // Query the latest completed report and the newest row directly via
+      // uploadStatus — no fixed-window scan to push a completed report out of view.
+      const [newest, completed] = await Promise.all([
+        db.messageAttachment.findFirst({
+          where: { entityType: AttachmentEntityType.DESK_REPORT, entityId: channelId, isDeleted: false },
+          orderBy: { createdAt: 'desc' },
+        }),
+        db.messageAttachment.findFirst({
+          where: {
+            entityType: AttachmentEntityType.DESK_REPORT,
+            entityId: channelId,
+            isDeleted: false,
+            uploadStatus: 'completed',
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
 
-      if (recent.length === 0) {
+      if (!newest) {
         res.json({ success: true, data: null, canGenerate });
         return;
       }
 
-      const statusOf = (row: (typeof recent)[number]): string => {
-        const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
-        return typeof metadata['status'] === 'string' ? metadata['status'] : 'completed';
-      };
-
-      const newest = recent[0];
-      const completed = recent.find((row) => statusOf(row) === 'completed') ?? null;
-      const generating = statusOf(newest) === 'pending';
+      // A 'pending' row older than this is a crashed/dropped run, not still
+      // generating — don't show "Generating…" forever.
+      const stuckCutoff = new Date(Date.now() - STUCK_PENDING_HOURS * 60 * 60 * 1000);
+      const isStuckPending = newest.uploadStatus === 'pending' && newest.createdAt < stuckCutoff;
+      const generating = newest.uploadStatus === 'pending' && !isStuckPending;
 
       if (!completed) {
         // Never had a completed report — surface the newest row's own state
@@ -92,12 +81,12 @@ export class DeskReportPanelController {
         res.json({
           success: true,
           data: {
-            status: statusOf(newest),
+            status: isStuckPending ? 'failed' : (newest.uploadStatus ?? 'completed'),
             url: null,
             generatedAt: (metadata['generatedAt'] as string | undefined) ?? newest.createdAt.toISOString(),
             rangeDays: (metadata['rangeDays'] as number | undefined) ?? 1,
             agentSlug: (metadata['agentSlug'] as string | undefined) ?? null,
-            error: (metadata['error'] as string | undefined) ?? null,
+            error: isStuckPending ? 'Generation timed out' : ((metadata['error'] as string | undefined) ?? null),
             generating,
           },
           canGenerate,
@@ -106,10 +95,10 @@ export class DeskReportPanelController {
       }
 
       const metadata = (completed.metadata as Record<string, unknown> | null) ?? {};
-      // Only surface an error if the newest attempt failed AND it's not the
-      // one already represented by `completed` — i.e. a regeneration attempt
-      // failed after this report was generated.
-      const newestFailed = statusOf(newest) === 'failed' && newest.id !== completed.id;
+      // Only surface an error if the newest attempt failed (or timed out) AND
+      // it's not the one already represented by `completed` — i.e. a
+      // regeneration attempt failed after this report was generated.
+      const newestFailed = (newest.uploadStatus === 'failed' || isStuckPending) && newest.id !== completed.id;
       const newestMetadata = newestFailed ? ((newest.metadata as Record<string, unknown> | null) ?? {}) : null;
 
       res.json({
@@ -122,7 +111,11 @@ export class DeskReportPanelController {
           generatedAt: (metadata['generatedAt'] as string | undefined) ?? completed.createdAt.toISOString(),
           rangeDays: (metadata['rangeDays'] as number | undefined) ?? 1,
           agentSlug: (metadata['agentSlug'] as string | undefined) ?? null,
-          error: newestFailed ? ((newestMetadata?.['error'] as string | undefined) ?? 'Generation failed') : null,
+          error: newestFailed
+            ? isStuckPending
+              ? 'Generation timed out'
+              : ((newestMetadata?.['error'] as string | undefined) ?? 'Generation failed')
+            : null,
           generating,
         },
         canGenerate,
@@ -134,11 +127,7 @@ export class DeskReportPanelController {
   };
 
   /**
-   * GET /api/desk-report/:channelId/view — streams the latest completed
-   * report's HTML. Add `?download=1` to force a save-as instead of inline
-   * render. The report is our own server-generated, sanitized HTML (not a
-   * user upload), so unlike the generic attachment-download route it's safe
-   * to serve as inline text/html for the sidebar iframe.
+   * GET /api/desk-report/:channelId/view — streams the latest completed report's HTML.
    */
   serveReport = async (req: Request, res: Response): Promise<void> => {
     const channelId = req.params['channelId'];
@@ -154,16 +143,17 @@ export class DeskReportPanelController {
     }
 
     try {
-      // Must match getLatest's fallback — serve the latest COMPLETED row,
-      // not just the newest, since a regeneration may still be pending.
-      const recent = await db.messageAttachment.findMany({
-        where: { entityType: AttachmentEntityType.DESK_REPORT, entityId: channelId, isDeleted: false },
+      // Must match getLatest — serve the latest COMPLETED row directly via
+      // uploadStatus, not just the newest, since a regeneration may still be
+      // pending.
+      const latest = await db.messageAttachment.findFirst({
+        where: {
+          entityType: AttachmentEntityType.DESK_REPORT,
+          entityId: channelId,
+          isDeleted: false,
+          uploadStatus: 'completed',
+        },
         orderBy: { createdAt: 'desc' },
-        take: 5,
-      });
-      const latest = recent.find((row) => {
-        const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
-        return metadata['status'] === 'completed';
       });
       if (!latest || !latest.url) {
         res.status(404).send('No completed desk report for this channel');
@@ -187,7 +177,21 @@ export class DeskReportPanelController {
         // helmet's default X-Frame-Options/CSP would otherwise block this
         // route's whole purpose — embedding in the dashboard's iframe.
         res.removeHeader('X-Frame-Options');
-        res.setHeader('Content-Security-Policy', `frame-ancestors 'self' ${config.frontendUrl}`);
+        res.setHeader(
+          'Content-Security-Policy',
+          [
+            'sandbox allow-scripts',
+            "default-src 'none'",
+            "script-src 'unsafe-inline'",
+            "style-src 'unsafe-inline'",
+            'img-src data: https:',
+            "connect-src 'none'",
+            "frame-src 'none'",
+            "form-action 'none'",
+            "base-uri 'none'",
+            `frame-ancestors 'self' ${config.frontendUrl}`,
+          ].join('; '),
+        );
       }
       res.send(buffer);
     } catch (err) {

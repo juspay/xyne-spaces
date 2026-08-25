@@ -1,10 +1,3 @@
-/**
- * Terminal callback for a Claw agent run triggered by
- * deskReportGenerationService. Mirrors autodraftCallback.handler.ts's shape,
- * but decodes the `[ATTACHMENT:<name>:<mime>]\n<base64>` marker
- * `create-desk-report` emits instead of treating the result as plain text,
- * and persists into MessageAttachment (entityType=DESK_REPORT).
- */
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -12,9 +5,32 @@ import { runAsServiceActor } from '@/database/tenant/context';
 import { uploadFiles } from '@/services/fileUploadService';
 import { AttachmentEntityType } from '@xyne/shared';
 
-// Matches the same marker create-desk-report emits and custom-tools.ts parses
-// on the claw side: `[ATTACHMENT:<fileName>:<mimeType>]\n<base64>`.
-const ATTACHMENT_RE = /\[ATTACHMENT:([^:\]]+):([^\]]+)\]\n([A-Za-z0-9+/=]+)/;
+const ATTACHMENT_MARKER_PREFIX = '[ATTACHMENT:';
+const ATTACHMENT_HEADER_END = ']\n';
+
+function parseAttachmentMarker(
+  text: string,
+): { fileName: string; mimeType: string; data: string } | null {
+  const start = text.indexOf(ATTACHMENT_MARKER_PREFIX);
+  if (start === -1) return null;
+  const headerStart = start + ATTACHMENT_MARKER_PREFIX.length;
+  const headerEnd = text.indexOf(ATTACHMENT_HEADER_END, headerStart);
+  if (headerEnd === -1) return null;
+
+  const header = text.slice(headerStart, headerEnd);
+  const sep = header.indexOf(':');
+  if (sep === -1) return null;
+
+  const fileName = header.slice(0, sep);
+  const mimeType = header.slice(sep + 1);
+
+  const dataStart = headerEnd + ATTACHMENT_HEADER_END.length;
+  const dataEnd = text.indexOf('\n', dataStart);
+  const data = (dataEnd === -1 ? text.slice(dataStart) : text.slice(dataStart, dataEnd)).trim();
+  if (!fileName || !mimeType || !data) return null;
+
+  return { fileName, mimeType, data };
+}
 
 interface RawAttachment {
   fileName?: string;
@@ -45,11 +61,8 @@ function extractHtmlAttachment(
   // this is the format the tool actually returns from its own `execute()`.
   const result = payload['result'];
   if (typeof result === 'string') {
-    const match = ATTACHMENT_RE.exec(result);
-    if (match) {
-      const [, fileName, mimeType, data] = match;
-      if (fileName && mimeType && data) return { fileName, mimeType, data };
-    }
+    const parsed = parseAttachmentMarker(result);
+    if (parsed) return parsed;
   }
   return null;
 }
@@ -76,25 +89,44 @@ export async function handleDeskReportCallback(
       runAsServiceActor('desk-report-callback', workspaceId, fn);
 
     // Only ever matches a row still 'pending' — a stale/duplicated webhook
-    // delivery arriving after the row already settled must never be able to
-    // flip an already-completed (or failed) report with a different run's result.
-    const recent = await runScoped(() =>
-      db.messageAttachment.findMany({
-        where: { entityType: AttachmentEntityType.DESK_REPORT, entityId: channelId, isDeleted: false },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
+    // delivery arriving after the row already settled must never flip an
+    // already-completed (or failed) report.
+    const pending = await runScoped(() =>
+      db.messageAttachment.findFirst({
+        where: {
+          entityType: AttachmentEntityType.DESK_REPORT,
+          entityId: channelId,
+          isDeleted: false,
+          uploadStatus: 'pending',
+        },
       }),
     );
-    const pending = recent.find((row) => {
-      const rowMetadata = (row.metadata as Record<string, unknown> | null) ?? {};
-      return rowMetadata['status'] === 'pending';
-    });
     if (!pending) {
       logger.warn('[DeskReport] callback: no pending row found for channel — dropping', { channelId, sessionId });
       res.json({ success: true, persisted: false });
       return;
     }
     const metadata = (pending.metadata as Record<string, unknown> | null) ?? {};
+
+    // Reject a definite sessionId mismatch — a stray result must not bind to
+    // a different dispatched run. A callback that omits sessionId entirely
+    // still goes through, just logged, since some shapes may not echo it.
+    const pendingSessionId = typeof metadata['sessionId'] === 'string' ? metadata['sessionId'] : undefined;
+    if (sessionId && pendingSessionId && sessionId !== pendingSessionId) {
+      logger.warn('[DeskReport] callback: sessionId mismatch — dropping', {
+        channelId,
+        receivedSessionId: sessionId,
+        pendingSessionId,
+      });
+      res.json({ success: true, persisted: false });
+      return;
+    }
+    if (!sessionId) {
+      logger.warn('[DeskReport] callback: no sessionId in payload — accepting without cross-check', {
+        channelId,
+        pendingSessionId,
+      });
+    }
 
     const errorMessage = typeof payload['error'] === 'string' ? payload['error'] : undefined;
     const attachment = status === 'error' || errorMessage ? null : extractHtmlAttachment(payload);
@@ -109,7 +141,10 @@ export async function handleDeskReportCallback(
       await runScoped(() =>
         db.messageAttachment.update({
           where: { id: pending.id },
-          data: { metadata: { ...metadata, status: 'failed', error: errorMessage ?? 'No report produced' } },
+          data: {
+            uploadStatus: 'failed',
+            metadata: { ...metadata, error: errorMessage ?? 'No report produced' },
+          },
         }),
       );
       res.json({ success: true, persisted: false });
@@ -135,7 +170,8 @@ export async function handleDeskReportCallback(
           size: uploaded.fileSize,
           mimetype: uploaded.mimeType,
           url: uploaded.fileUrl,
-          metadata: { ...metadata, status: 'completed', generatedAt: new Date().toISOString() },
+          uploadStatus: 'completed',
+          metadata: { ...metadata, generatedAt: new Date().toISOString() },
         },
       }),
     );
