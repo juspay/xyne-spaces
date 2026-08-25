@@ -1,3 +1,10 @@
+## [1.206.0-release-20260821.7](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.6...v1.206.0-release-20260821.7) (2026-08-25)
+
+
+### Features
+
+* add brief on/off toggle, improve metrics [release-20260821] ([#956](https://github.com/juspay/xyne-spaces/issues/956)) ([60db0dd](https://github.com/juspay/xyne-spaces/commit/60db0dd0094864067a7c4af7e913431494c12437))
+
 ## [1.206.0-release-20260821.6](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.5...v1.206.0-release-20260821.6) (2026-08-25)
 
 
