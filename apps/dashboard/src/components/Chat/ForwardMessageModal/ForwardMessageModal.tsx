@@ -40,7 +40,7 @@ import { InputBox } from '../../ui/InputBox';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { ForwardMessageFormProps, ForwardTarget, SelectionMode } from './ForwardMessageModal.types';
 import { toast } from 'sonner';
-import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { subscribeSendLifecycle } from '@xyne/shared/messages';
 import {
   getDMParticipantIdsToFetch,
   getDMNames,
@@ -122,42 +122,28 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         const timestamp = Date.now();
 
         try {
-          // Await the SERVER result before reporting success. A bare/unawaited
-          // zero.mutate resolves optimistically on the client, so a server-side
-          // rejection (lock timeout, participant guard, "channel not found")
-          // silently rolls the write back AFTER the success toast has fired and
-          // the user has navigated away — the message never actually forwards
-          // and only a retry succeeds. surfaceMutationError awaits `.server`
-          // and inspects it (Zero resolves, not rejects, application errors).
-          const forwarded = await surfaceMutationError(
-            zero.mutate(
-              mutators.conversations.forwardMessage({
-                targetChannelId: firstTarget.id,
-                originalMessageId: message.messageId,
-                optionalMessage: value.optionalMessageText.trim()
-                  ? value.optionalMessageHtml
-                  : undefined,
-                conversationId,
-                messageId,
-                timestamp,
-                conversationParticipantId: uuidv4(),
-              }),
-            ),
-            'Failed to forward message',
+          // Local-first, exactly like sendMessage(): fire the mutator WITHOUT
+          // awaiting the round-trip, report success optimistically, and observe
+          // the real outcome in the background. Awaiting `.server` here would
+          // freeze the modal for the full statement-lock-timeout window (~30s)
+          // on the very failure this targets, and would also fire on transient
+          // `zero`-type errors that Replicache auto-retries — a false "Failed"
+          // that leads the user to re-forward and create a duplicate.
+          const mutation = zero.mutate(
+            mutators.conversations.forwardMessage({
+              targetChannelId: firstTarget.id,
+              originalMessageId: message.messageId,
+              optionalMessage: value.optionalMessageText.trim()
+                ? value.optionalMessageHtml
+                : undefined,
+              conversationId,
+              messageId,
+              timestamp,
+              conversationParticipantId: uuidv4(),
+            }),
           );
 
-          if (!forwarded) {
-            logger.error(Event.MESSAGE_FORWARD_FAILED, {
-              originalMessageId: message.messageId,
-              targetType: 'channel',
-              targetChannelId: firstTarget.id,
-            });
-            // Leave the modal open so the user can retry; surfaceMutationError
-            // has already shown the real error toast.
-            return;
-          }
-
-          // Only now is the forward durably persisted server-side.
+          // Optimistic success — instant, as before.
           logger.info(Event.MESSAGE_FORWARDED, {
             originalMessageId: message.messageId,
             targetType: 'channel',
@@ -176,6 +162,23 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
           // Navigate to the channel
           void navigate(`/chat/dir/${firstTarget.id}`);
+
+          // Surface a GENUINE (non-transient) forward failure after the fact.
+          // subscribeSendLifecycle ignores `zero`-type transient errors (Zero
+          // still persists on reconnect) and only fires onAppError for a real
+          // mutator rejection — e.g. the reported lock timeout — so the failure
+          // is no longer silently swallowed while a duplicate is avoided.
+          subscribeSendLifecycle(mutation, () => {
+            logger.error(Event.MESSAGE_FORWARD_FAILED, {
+              originalMessageId: message.messageId,
+              targetType: 'channel',
+              targetChannelId: firstTarget.id,
+            });
+            toast.error('Failed to forward message', {
+              description: `Please try again.`,
+              duration: 3000,
+            });
+          });
         } catch (error) {
           logger.error(Event.FRONTEND_ERROR, {
             type: 'migrated_console_error',
