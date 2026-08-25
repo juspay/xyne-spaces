@@ -4456,6 +4456,7 @@ export const mutators = defineMutators({
         alias: z.string().optional(),
         description: z.string().optional(),
         reassignOnUnavailable: z.boolean().optional(),
+        maxWorkload: z.number().int().positive().nullable().optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4471,6 +4472,7 @@ export const mutators = defineMutators({
           alias,
           description,
           reassignOnUnavailable,
+          maxWorkload,
           userResponsibilityUpdates,
           userRoleUpdates,
           timestamp,
@@ -4482,6 +4484,7 @@ export const mutators = defineMutators({
           ...(alias !== undefined && { alias }),
           ...(description !== undefined && { description }),
           ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+          ...(maxWorkload !== undefined && { maxWorkload }),
           updatedAt: timestamp,
         });
 
@@ -4639,6 +4642,7 @@ export const mutators = defineMutators({
               ? { roleId, ...(responsibility ? { responsibility } : {}) }
               : { responsibility: UserResponsibility.MEMBER }),
             onCallSetNumbers: [],
+            isNotified: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7543,6 +7547,7 @@ export const mutators = defineMutators({
             z.object({
               userId: z.string(),
               onCallSetNumbers: z.array(z.number()),
+              isNotified: z.boolean().optional(),
             }),
           )
           .optional(),
@@ -7638,6 +7643,7 @@ export const mutators = defineMutators({
               await tx.mutate.user_group_mappings.update({
                 id: existingMapping.id,
                 onCallSetNumbers: mapping.onCallSetNumbers,
+                ...(mapping.isNotified !== undefined && { isNotified: mapping.isNotified }),
                 updatedAt: now,
               });
             }
