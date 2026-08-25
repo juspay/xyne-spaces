@@ -671,6 +671,10 @@ model DailyBriefActivity {
   dateBucket String
   /// How many times this user did this on this day.
   count      Int      @default(1)
+  /// Regenerations that signal dissatisfaction — excludes retry_after_failure.
+  /// A counter rather than an origin string: the row is unique per user/kind/day,
+  /// so a single value would be last-write-wins across mixed origins.
+  rejectionCount Int  @default(0)
   /// First occurrence on this day.
   occurredAt DateTime @default(now())
   /// Most recent occurrence on this day.
