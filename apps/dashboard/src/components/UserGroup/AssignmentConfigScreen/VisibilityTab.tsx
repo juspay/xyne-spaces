@@ -3,7 +3,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import type { Board } from '@xyne/shared';
+import { AssignmentStrategy, type Board } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
 import {
   computeAssignmentScores,
@@ -33,8 +33,8 @@ interface VisibilityTabProps {
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
   assignmentStates: readonly AssignmentStateLike[] | null | undefined;
-  /** True when the group's assignment method is Round robin. */
-  isRoundRobin: boolean;
+  /** The group's assignment method — decides how these rows are ranked. */
+  assignmentStrategy: AssignmentStrategy;
   isCurrentUserGroupMember: boolean;
   userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
   /** user_groups.maxWorkload — shown only when set (non-null). */
@@ -57,12 +57,13 @@ export function VisibilityTab({
   boardComplexityScores,
   expertiseMappings,
   assignmentStates,
-  isRoundRobin,
+  assignmentStrategy,
   isCurrentUserGroupMember,
   userGroupMappings,
   maxWorkload,
 }: VisibilityTabProps): ReactElement {
   const hasMaxWorkload = maxWorkload !== null && maxWorkload !== undefined;
+  const isRoundRobin = assignmentStrategy === AssignmentStrategy.ROUND_ROBIN;
 
   const scoreRows = useMemo(
     () =>
@@ -76,7 +77,7 @@ export function VisibilityTab({
         boards,
         selectedBoardId,
         maxWorkload: maxWorkload ?? null,
-        isRoundRobin,
+        strategy: assignmentStrategy,
       }),
     [
       users,
@@ -88,7 +89,7 @@ export function VisibilityTab({
       boards,
       selectedBoardId,
       maxWorkload,
-      isRoundRobin,
+      assignmentStrategy,
     ],
   );
 

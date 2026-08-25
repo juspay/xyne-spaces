@@ -1628,7 +1628,7 @@ export const AssignmentConfigScreen = ({
               assignmentStates={userAssignmentStates}
               // Local, not persisted: every other control on this screen previews
               // unsaved edits, so switching method must re-rank this tab immediately.
-              isRoundRobin={localAssignmentStrategy === AssignmentStrategy.ROUND_ROBIN}
+              assignmentStrategy={localAssignmentStrategy}
               isCurrentUserGroupMember={isCurrentUserGroupMember}
               userGroupMappings={userGroupMembers}
               maxWorkload={userGroup?.maxWorkload ?? null}

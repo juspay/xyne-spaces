@@ -1,11 +1,13 @@
 // Pure helpers for the Assignment Config "Visibility" tab.
-// Replicates the backend `pickBest` ranking (assignmentEngine.ts) from
+// Recomputes the backend `pickBest` scoring (assignmentEngine.ts) from
 // already-synced Zero data — no backend call:
 //   effectiveActiveTasks = weightedActiveTasks + (startOffset ?? 0)
-//   WORKLOAD    → score = effectiveActiveTasks − expertiseBonus − percentDiff
-//                 (percentDiff = percentage − currentPct, and only when the board
-//                  has "Use percentage assignment" on; otherwise 0)
-//   ROUND_ROBIN → least-recently-assigned first (never-assigned members lead)
+//   score = effectiveActiveTasks − expertiseBonus − percentDiff
+//           (percentDiff = percentage − currentPct, and only when the board has
+//            "Use percentage assignment" on; otherwise 0)
+//
+// The resulting rows are then ordered by the same `comparatorFor(strategy)` the
+// engine ranks with, so this preview cannot drift from what the engine will pick.
 //
 // startOffset is the cold-start fairness offset (see cold-start-fairness-design.md):
 // a one-time, persisted value on user_group_mappings that keeps a brand-new member's
@@ -13,8 +15,7 @@
 // It's a single aggregate per (user, group) — not per board — so it's added
 // unconditionally regardless of which board is selected.
 
-/** Mirrors `NEVER_ASSIGNED_RANK` in the backend engine. */
-const NEVER_ASSIGNED_RANK = -1;
+import { AssignmentStrategy, comparatorFor, type RankableAssignee } from '@xyne/shared';
 
 export interface AssignmentStateLike {
   userId: string;
@@ -129,10 +130,35 @@ export function computeTotalTicketsOnBoard(
     .reduce((sum, w) => sum + (w.activeTasks ?? 0), 0);
 }
 
+/** What the shared comparator needs from a row, before display-shifting. */
+interface RankableRow {
+  user: { id: string };
+  weightedActiveTasks: number;
+  effectiveActiveTasks: number;
+  score: number | null;
+  lastAssignedAt: number | null;
+}
+
 /**
- * Per-user tickets + engine score, sorted so the row assigned next comes first.
- * Under WORKLOAD that is the lowest score (or lowest weighted load when no board
- * is selected); under ROUND_ROBIN it is the least-recently-assigned member.
+ * `score` is null until a board is selected, so effective load stands in — it is
+ * exactly what the engine scores on once the board-specific terms are zero.
+ */
+const toRankable = (row: RankableRow): RankableAssignee => ({
+  userId: row.user.id,
+  score: row.score ?? row.effectiveActiveTasks,
+  weightedActiveTasks: row.weightedActiveTasks,
+  lastAssignedAt: row.lastAssignedAt,
+});
+
+/** Sort rows exactly as the engine ranks candidates under `strategy`. */
+const withStrategy = (strategy: AssignmentStrategy) => {
+  const compare = comparatorFor(strategy);
+  return (a: RankableRow, b: RankableRow) => compare(toRankable(a), toRankable(b));
+};
+
+/**
+ * Per-user tickets + engine score, ordered by `strategy` so the row the engine
+ * would assign next comes first.
  */
 export function computeAssignmentScores<U extends { id: string }>(params: {
   users: readonly U[];
@@ -145,7 +171,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   selectedBoardId: string | null;
   /** user_groups.maxWorkload — group-level cap, or null/undefined when unlimited. */
   maxWorkload?: number | null;
-  isRoundRobin?: boolean;
+  strategy?: AssignmentStrategy;
 }): AssignmentScoreRow<U>[] {
   const {
     users,
@@ -157,7 +183,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
     boards,
     selectedBoardId,
     maxWorkload,
-    isRoundRobin = false,
+    strategy = AssignmentStrategy.WORKLOAD,
   } = params;
 
   const weightByBoard = buildWeightByBoard(boardComplexityScores);
@@ -215,14 +241,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         lastAssignedAt,
       };
     })
-    .sort((a, b) =>
-      isRoundRobin
-        ? // Same tiebreak chain as the backend `sortCandidates`.
-          (a.lastAssignedAt ?? NEVER_ASSIGNED_RANK) - (b.lastAssignedAt ?? NEVER_ASSIGNED_RANK) ||
-          a.weightedActiveTasks - b.weightedActiveTasks ||
-          a.user.id.localeCompare(b.user.id)
-        : (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks),
-    );
+    .sort(withStrategy(strategy));
 
   const realScores = rows.map(r => r.score).filter((s): s is number => s !== null);
   const minScore = realScores.length > 0 ? Math.min(...realScores) : 0;

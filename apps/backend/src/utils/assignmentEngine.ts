@@ -1,5 +1,12 @@
 import { repositories } from '@/database/repositories';
-import { AssignmentStrategy, UserResponsibility } from '@xyne/shared';
+import {
+  AssignmentStrategy,
+  NEVER_ASSIGNED_RANK,
+  UserResponsibility,
+  comparatorFor,
+  parseAssignmentStrategy,
+  type RankableAssignee,
+} from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { logger } from './logger';
@@ -139,82 +146,57 @@ async function resolveStartOffsets(
   return offsets;
 }
 
-/**
- * A member who has never been picked sorts ahead of everyone with a real
- * timestamp, so a newly added member gets the next ticket.
- */
-const NEVER_ASSIGNED_RANK = -1;
+// ─── Ranking strategy ────────────────────────────────────────────────────────
 
-function roundRobinRank(state: UserAssignmentState | undefined): number {
-  const ts = state?.lastAssignedAt;
-  return ts ? new Date(ts).getTime() : NEVER_ASSIGNED_RANK;
+/**
+ * How a group ranks its eligible candidates, and what must happen once a pick is
+ * made.
+ *
+ * WORKLOAD is stateless; ROUND_ROBIN has to advance a cursor. Bundling `commit`
+ * into the strategy is what keeps the branching out of the engine: every call
+ * site ranks and commits unconditionally, and WORKLOAD's commit is a no-op.
+ * Adding a third method means adding one object here, not editing the engine.
+ */
+interface RankingStrategy {
+  readonly name: AssignmentStrategy;
+  /** Order already-eligible candidates in place, best-first. */
+  rank(candidates: AssignmentCandidate[]): void;
+  /** Record that these users were assigned. Best-effort — never throws. */
+  commit(pickedUserIds: Array<string | undefined>): Promise<void>;
+  /** Why this candidate won, appended to the selection log line. */
+  explain(candidate: AssignmentCandidate): string;
 }
 
-/**
- * Rank already-eligible candidates in place, best-first.
- *
- * ROUND_ROBIN swaps the ranking only — the eligibility tiers that produced
- * `candidates` and the maxTickets cap applied afterwards are identical in both
- * modes.
- *
- * Ties on the cursor are common (members never assigned all share
- * NEVER_ASSIGNED_RANK, and picks made in the same batch share a timestamp), so
- * they break on the lighter workload first. `userId` only settles a genuine
- * dead heat — breaking on it alone would hand every tie to the same person.
- */
-function sortCandidates(candidates: AssignmentCandidate[], isRoundRobin: boolean): void {
-  if (isRoundRobin) {
-    candidates.sort(
-      (a, b) =>
-        (a.details?.lastAssignedRank ?? NEVER_ASSIGNED_RANK) -
-          (b.details?.lastAssignedRank ?? NEVER_ASSIGNED_RANK) ||
-        (a.details?.weightedActiveTasks ?? 0) - (b.details?.weightedActiveTasks ?? 0) ||
-        a.userId.localeCompare(b.userId),
-    );
-    return;
-  }
-  candidates.sort((a, b) => a.score - b.score);
-}
+const toRankable = (
+  candidate: AssignmentCandidate,
+  lastAssignedAt: number | null,
+): RankableAssignee => ({
+  userId: candidate.userId,
+  score: candidate.score,
+  weightedActiveTasks: candidate.details?.weightedActiveTasks ?? 0,
+  lastAssignedAt,
+});
+
+const compareByWorkload = comparatorFor(AssignmentStrategy.WORKLOAD);
+
+const WORKLOAD_STRATEGY: RankingStrategy = {
+  name: AssignmentStrategy.WORKLOAD,
+  rank(candidates) {
+    // The cursor is irrelevant here, so every candidate presents a null one.
+    candidates.sort((a, b) => compareByWorkload(toRankable(a, null), toRankable(b, null)));
+  },
+  // Stateless: the next evaluation re-derives the ranking from live workload.
+  async commit() {},
+  explain: candidate => ` with score: ${candidate.score.toFixed(2)}`,
+};
 
 /**
- * Which strategy the group ranks its eligible members by. Anything other than an
- * explicit ROUND_ROBIN falls back to WORKLOAD, so groups predating the column
- * (and any bad value) keep today's behaviour.
- */
-function resolveAssignmentStrategy(
-  userGroupId: string,
-  group: { assignmentStrategy?: string | null } | null | undefined,
-): AssignmentStrategy {
-  // Both fallbacks are silent-by-design failure modes — a group configured for
-  // ROUND_ROBIN would quietly assign by workload — so say so in the log.
-  if (!group) {
-    logger.warn(
-      `[Assignment] User group ${userGroupId} not readable in this context; defaulting to ${AssignmentStrategy.WORKLOAD}`,
-    );
-    return AssignmentStrategy.WORKLOAD;
-  }
-  if (
-    group.assignmentStrategy !== AssignmentStrategy.ROUND_ROBIN &&
-    group.assignmentStrategy !== AssignmentStrategy.WORKLOAD
-  ) {
-    logger.warn(
-      `[Assignment] User group ${userGroupId} has unrecognised assignmentStrategy '${group.assignmentStrategy}'; defaulting to ${AssignmentStrategy.WORKLOAD}`,
-    );
-    return AssignmentStrategy.WORKLOAD;
-  }
-  return group.assignmentStrategy as AssignmentStrategy;
-}
-
-/**
- * Advance the round-robin cursor for the members just picked.
+ * Least-recently-assigned first, with the cursor read once up front so ranking
+ * stays a pure sort over a snapshot.
  *
- * Best-effort, and deliberately not transactional: a failure here must never
- * block an assignment that otherwise succeeded, so the member simply stays
- * eligible next round.
- *
- * KNOWN LIMITATION — the cursor moves at *evaluation* time, not once the
- * assignment is durable, and this writes via Prisma outside any caller
- * transaction (`evaluateAssignmentRule` runs inside Zero mutator transactions at
+ * KNOWN LIMITATION — `commit` moves the cursor at *evaluation* time, not once the
+ * assignment is durable, and writes via Prisma outside any caller transaction
+ * (`evaluateAssignmentRule` runs inside Zero mutator transactions at
  * mutators.ts:5964 and :6367). If the caller then rolls back, retries, or fails
  * to persist, the member's turn is consumed for a ticket they never received.
  * Reads and writes are also not atomic, so two concurrent evaluations for the
@@ -222,31 +204,83 @@ function resolveAssignmentStrategy(
  * conditional update inside the caller's transaction, after persist) is the fix;
  * it needs every call site to opt in, so it is not done here.
  */
-async function recordRoundRobinPicks(
-  userStates: UserAssignmentState[],
-  pickedUserIds: Array<string | undefined>,
-): Promise<void> {
-  const userIds = [...new Set(pickedUserIds.filter((id): id is string => Boolean(id)))];
-  if (userIds.length === 0) return;
-
-  const now = new Date();
-  await Promise.all(
-    userIds.map(async userId => {
-      const state = userStates.find(s => s.userId === userId);
-      if (!state) return;
-      try {
-        // Stamps the assignee's own row, so it runs above the caller's scope.
-        await withWorkspaceScope(() =>
-          repositories.userAssignmentState.update(state.id, { lastAssignedAt: now }),
-        );
-      } catch (error) {
-        logger.error(
-          `[Assignment] Failed to advance round-robin cursor for user ${userId}:`,
-          error,
-        );
-      }
-    }),
+function createRoundRobinStrategy(userStates: UserAssignmentState[]): RankingStrategy {
+  const cursorByUserId = new Map<string, number | null>(
+    userStates.map(s => [s.userId, s.lastAssignedAt ? new Date(s.lastAssignedAt).getTime() : null]),
   );
+  const cursorOf = (userId: string) => cursorByUserId.get(userId) ?? null;
+  const compare = comparatorFor(AssignmentStrategy.ROUND_ROBIN);
+
+  return {
+    name: AssignmentStrategy.ROUND_ROBIN,
+    rank(candidates) {
+      candidates.sort((a, b) =>
+        compare(toRankable(a, cursorOf(a.userId)), toRankable(b, cursorOf(b.userId))),
+      );
+    },
+    async commit(pickedUserIds) {
+      const userIds = [...new Set(pickedUserIds.filter((id): id is string => Boolean(id)))];
+      if (userIds.length === 0) return;
+
+      const now = new Date();
+      await Promise.all(
+        userIds.map(async userId => {
+          const state = userStates.find(s => s.userId === userId);
+          if (!state) return;
+          try {
+            // Stamps the assignee's own row, so it runs above the caller's scope.
+            await withWorkspaceScope(() =>
+              repositories.userAssignmentState.update(state.id, { lastAssignedAt: now }),
+            );
+          } catch (error) {
+            // Never block an assignment that otherwise succeeded — the member
+            // simply keeps their turn and stays eligible next round.
+            logger.error(
+              `[Assignment] Failed to advance round-robin cursor for user ${userId}:`,
+              error,
+            );
+          }
+        }),
+      );
+    },
+    explain: candidate =>
+      ` (lastAssignedAt rank: ${cursorOf(candidate.userId) ?? NEVER_ASSIGNED_RANK})`,
+  };
+}
+
+/**
+ * Exhaustive by construction: a new AssignmentStrategy member fails to compile
+ * until it is built here.
+ */
+const STRATEGY_BUILDERS: Record<
+  AssignmentStrategy,
+  (userStates: UserAssignmentState[]) => RankingStrategy
+> = {
+  [AssignmentStrategy.WORKLOAD]: () => WORKLOAD_STRATEGY,
+  [AssignmentStrategy.ROUND_ROBIN]: createRoundRobinStrategy,
+};
+
+/**
+ * The strategy a group ranks by. Anything unrecognised — including groups that
+ * predate the column — falls back to WORKLOAD, so today's behaviour is the
+ * default.
+ */
+function createRankingStrategy(
+  userGroupId: string,
+  group: { assignmentStrategy?: string | null } | null | undefined,
+  userStates: UserAssignmentState[],
+): RankingStrategy {
+  const strategy = parseAssignmentStrategy(group?.assignmentStrategy);
+  if (strategy === null) {
+    // Both fallbacks are silent-by-design failure modes — a group configured for
+    // ROUND_ROBIN would quietly assign by workload — so say so in the log.
+    logger.warn(
+      group
+        ? `[Assignment] User group ${userGroupId} has unrecognised assignmentStrategy '${group.assignmentStrategy}'; falling back to ${AssignmentStrategy.WORKLOAD}`
+        : `[Assignment] User group ${userGroupId} not readable in this context; falling back to ${AssignmentStrategy.WORKLOAD}`,
+    );
+  }
+  return STRATEGY_BUILDERS[strategy ?? AssignmentStrategy.WORKLOAD](userStates);
 }
 
 async function filterMappingsToChannelParticipants(
@@ -433,8 +467,7 @@ export async function evaluateAssignmentRule(
   ]);
 
   const maxWorkload = userGroup?.maxWorkload ?? null;
-  const assignmentStrategy = resolveAssignmentStrategy(userGroupId, userGroup);
-  const isRoundRobin = assignmentStrategy === AssignmentStrategy.ROUND_ROBIN;
+  const strategy = createRankingStrategy(userGroupId, userGroup, userStates);
 
   // Filter workload and board scores to project boards only
   if (projectBoardIds) {
@@ -518,7 +551,6 @@ export async function evaluateAssignmentRule(
         userTickets,
         currentPercent,
         percentDiff,
-        lastAssignedRank: roundRobinRank(getUserState(userId)),
       },
     });
   }
@@ -528,8 +560,7 @@ export async function evaluateAssignmentRule(
     return { reason: 'NO_ON_CALL_USERS' };
   }
 
-  // WORKLOAD: lowest score wins. ROUND_ROBIN: least-recently-assigned wins.
-  sortCandidates(candidates, isRoundRobin);
+  strategy.rank(candidates);
 
   // Pick the first candidate who has not exceeded their maxTickets (if set)
   // Exclude excludeUserId from assignment and pick the next-best candidate when possible.
@@ -640,12 +671,11 @@ export async function evaluateAssignmentRule(
           userTickets,
           currentPercent,
           percentDiff,
-          lastAssignedRank: roundRobinRank(getUserState(userId)),
         },
       });
     }
 
-    sortCandidates(fallbackCandidates, isRoundRobin);
+    strategy.rank(fallbackCandidates);
 
     // Pick first fallback candidate who hasn't exceeded maxTickets
     // Exclude excludeUserId from fallback assignment and pick the next-best candidate when possible.
@@ -693,15 +723,11 @@ export async function evaluateAssignmentRule(
   }
 
   logger.info(
-    `[Assignment] Selected userId: ${selectedUser.userId} via ${assignmentStrategy}` +
-      (isRoundRobin
-        ? ` (lastAssignedAt rank: ${selectedUser.details?.lastAssignedRank})`
-        : ` with score: ${selectedUser.score.toFixed(2)}`),
+    `[Assignment] Selected userId: ${selectedUser.userId} via ${strategy.name}` +
+      strategy.explain(selectedUser),
   );
 
-  if (isRoundRobin) {
-    await recordRoundRobinPicks(userStates, [selectedUser.userId]);
-  }
+  await strategy.commit([selectedUser.userId]);
 
   return { assignedUserId: selectedUser.userId };
 }
@@ -733,7 +759,7 @@ interface SharedContext {
   maxWorkload:              number | null;
   userGroup:                { name: string; workspaceId: string } | null;
   totalTicketsOnBoard:      number;
-  assignmentStrategy:       AssignmentStrategy;
+  strategy:                 RankingStrategy;
 }
 
 /**
@@ -747,9 +773,8 @@ async function pickBest(
   boardId: string,
   excludeUserId?: string,
 ): Promise<AssignmentResult> {
-  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, maxWorkload, userGroup, totalTicketsOnBoard, assignmentStrategy } = ctx;
+  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, maxWorkload, userGroup, totalTicketsOnBoard, strategy } = ctx;
   const userGroupId = userGroupMappings[0]?.userGroupId;
-  const isRoundRobin = assignmentStrategy === AssignmentStrategy.ROUND_ROBIN;
 
   const getUserState   = (id: string) => userStateMap.get(id);
   const hasExpertise   = (id: string) => expertiseMap.get(id)?.hasExpertise === true;
@@ -812,13 +837,12 @@ async function pickBest(
       score: effectiveActiveTasks - expertBonus - percentDiff,
       details: {
         weightedActiveTasks, startOffset, effectiveActiveTasks, expertBonus, hasExpertise: expert, percentage, maxTickets, userTickets, currentPct, percentDiff,
-        lastAssignedRank: roundRobinRank(userStateMap.get(userId)),
       },
     };
   };
 
   const selectFrom = (candidates: AssignmentCandidate[]): AssignmentResult => {
-    sortCandidates(candidates, isRoundRobin);
+    strategy.rank(candidates);
     let excluded: AssignmentCandidate | undefined;
     let cappedCount = 0;
     for (const c of candidates) {
@@ -907,7 +931,7 @@ export async function evaluateAllRoles(
   ]);
 
   const maxWorkload = userGroup?.maxWorkload ?? null;
-  const assignmentStrategy = resolveAssignmentStrategy(userGroupId, userGroup);
+  const strategy = createRankingStrategy(userGroupId, userGroup, userStates);
 
   // Filter workload and board scores to project boards only
   if (projectBoardIds) {
@@ -966,7 +990,7 @@ export async function evaluateAllRoles(
     maxWorkload,
     userGroup,
     totalTicketsOnBoard,
-    assignmentStrategy,
+    strategy,
   };
 
   // ── Per-role pools ─────────────────────────────────────────────────────────
@@ -990,19 +1014,17 @@ export async function evaluateAllRoles(
     member.assignedUserId,
   );
 
-  logger.info(`[Assignment] evaluateAllRoles results (${assignmentStrategy}) — manager:${manager.assignedUserId} teamLead:${teamLead.assignedUserId} member:${member.assignedUserId} prReviewer:${prReviewer.assignedUserId} qa:${qa.assignedUserId}`);
+  logger.info(`[Assignment] evaluateAllRoles results (${strategy.name}) — manager:${manager.assignedUserId} teamLead:${teamLead.assignedUserId} member:${member.assignedUserId} prReviewer:${prReviewer.assignedUserId} qa:${qa.assignedUserId}`);
 
-  if (assignmentStrategy === AssignmentStrategy.ROUND_ROBIN) {
-    // Each role draws from a disjoint responsibility pool, so every pick advances
-    // its own member's cursor.
-    await recordRoundRobinPicks(userStates, [
-      manager.assignedUserId,
-      teamLead.assignedUserId,
-      member.assignedUserId,
-      prReviewer.assignedUserId,
-      qa.assignedUserId,
-    ]);
-  }
+  // Each role draws from a disjoint responsibility pool, so every pick advances
+  // its own member's cursor.
+  await strategy.commit([
+    manager.assignedUserId,
+    teamLead.assignedUserId,
+    member.assignedUserId,
+    prReviewer.assignedUserId,
+    qa.assignedUserId,
+  ]);
 
   return { manager, teamLead, member, prReviewer, qa };
 }
@@ -1077,7 +1099,7 @@ export async function evaluateRoleSlots(
   ]);
 
   const maxWorkload = userGroup?.maxWorkload ?? null;
-  const assignmentStrategy = resolveAssignmentStrategy(userGroupId, userGroup);
+  const strategy = createRankingStrategy(userGroupId, userGroup, userStates);
 
   if (projectBoardIds) {
     allWorkloadMappings = allWorkloadMappings.filter(w => projectBoardIds!.has(w.boardId));
@@ -1116,7 +1138,7 @@ export async function evaluateRoleSlots(
     maxWorkload,
     userGroup,
     totalTicketsOnBoard,
-    assignmentStrategy,
+    strategy,
   };
 
   // Score each roleId's pool independently. `excludeUserId` (if set) removes
@@ -1130,14 +1152,9 @@ export async function evaluateRoleSlots(
     summary.push(`${roleId}:${res.assignedUserId ?? 'none'}`);
   }
 
-  logger.info(`[Assignment] evaluateRoleSlots results (${assignmentStrategy}) — ${summary.join(' ')}`);
+  logger.info(`[Assignment] evaluateRoleSlots results (${strategy.name}) — ${summary.join(' ')}`);
 
-  if (assignmentStrategy === AssignmentStrategy.ROUND_ROBIN) {
-    await recordRoundRobinPicks(
-      userStates,
-      roleIds.map(roleId => result[roleId]?.assignedUserId),
-    );
-  }
+  await strategy.commit(roleIds.map(roleId => result[roleId]?.assignedUserId));
 
   return result;
 }
