@@ -379,12 +379,18 @@ export class SearchService {
       // Fetch personalization weights if using personalized rank profile
       let channelWeights = {};
       let userWeights = {};
+      // For mail's involvement rank terms (from/to hold email addresses)
+      let personalizationUserEmail: string | undefined;
 
       if (rankProfile === RankProfile.personalizedRank) {
         try {
           const userDoc = await this.vespa.getDocument({docId:userId,schema:userSchema,namespace:config.namespace});
           channelWeights = userDoc?.fields?.channelWeights || {};
           userWeights = userDoc?.fields?.userWeights || {};
+          personalizationUserEmail = userDoc?.fields?.email || undefined;
+          if (!personalizationUserEmail) {
+            this.logger.warn(`No email on Vespa user doc ${userId}; mail involvement rank terms skipped`);
+          }
           this.logger.info(`Fetched personalization weights for user ${userId}`);
         } catch (error) {
           this.logger.warn(
@@ -416,6 +422,7 @@ export class SearchService {
           sort,
           isExactMatch,
           rankProfile,
+          personalizationUserEmail,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());

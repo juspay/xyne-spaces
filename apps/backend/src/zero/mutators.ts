@@ -97,6 +97,11 @@ import {
   sdlcDiscussionSchema,
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import {
+  MessageArtifactStatus,
+  parseSlashCommandArtifactMessage,
+  withSlashCommandArtifactClosed,
+} from '@xyne/shared';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
 import {
   FLOW_STAGE_NAMES,
@@ -2917,9 +2922,20 @@ export function createMutators(
             metadata: undefined,
           });
 
-          // Copy attachments from the original message
-          for (const attachment of attachmentsArray) {
-            if (!attachment) continue;
+          // Copy attachments from the original message, preserving their display order.
+          // Sort the source rows by the same comparator the UI uses, then stamp a
+          // strictly increasing explicit position (and createdAt offset) on each clone
+          // so the forwarded copy renders in the same order the sender saw.
+          const orderedSourceAttachments = [...attachmentsArray]
+            .filter((a): a is MessageAttachment => !!a)
+            .sort(
+              (a, b) =>
+                ((a.position ?? Number.MAX_SAFE_INTEGER) -
+                  (b.position ?? Number.MAX_SAFE_INTEGER)) ||
+                (a.createdAt as number) - (b.createdAt as number) ||
+                a.id.localeCompare(b.id),
+            );
+          for (const [index, attachment] of orderedSourceAttachments.entries()) {
             await tx.mutate.message_attachments.insert({
               id: uuidv4(),
               entityId: messageId,
@@ -2935,7 +2951,8 @@ export function createMutators(
               conversationId: conversationId,
               workspaceId: authData.workspaceId,
               metadata: attachment.metadata,
-              createdAt: now,
+              createdAt: now + index,
+              position: index,
               isDeleted: false,
             });
           }
@@ -3023,7 +3040,8 @@ export function createMutators(
                       conversationId: conversationId,
                       workspaceId: authData.workspaceId,
                       metadata: attInfo.metadata as any,
-                      createdAt: now,
+                      createdAt: now + j,
+                      position: j,
                       isDeleted: false,
                     });
                   }
@@ -3216,6 +3234,24 @@ export function createMutators(
 
           if (participant === undefined && channel.visibility == ChannelVisibility.PRIVATE) {
             throw new Error('You need to be a participant for adding a conversations');
+          }
+
+          // One open artifact per thread. A thread is a single incident's workspace,
+          // so a second /sev2 inside it would fork the responders across two cards
+          // and two calls. The channel is unrestricted — that is where a genuinely
+          // separate incident belongs.
+          const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+          if (outgoingArtifact) {
+            const openArtifact = await tx.run(zql.message_artifacts
+              // channelId first: it is the only selective index on this table.
+              .where('channelId', conversation.channelId)
+              .where('conversationId', conversationId)
+              .where('command', outgoingArtifact.definition.command)
+              .where('status', MessageArtifactStatus.ACTIVE)
+              .one());
+            if (openArtifact) {
+              throw new Error(`A ${outgoingArtifact.definition.badge} is already open in this thread`);
+            }
           }
 
           const message = {
@@ -3865,6 +3901,51 @@ export function createMutators(
 
             // Activity creation now handled by activity injection system
           }
+        },
+      ),
+      /**
+       * Close a slash-command artifact (e.g. decline a SEV2) without ever running
+       * a call. Only the message's author may do it.
+       *
+       * Two writes, both required: the artifact row moves to a terminal status so
+       * the banner and channel indicator clear for everyone, and the closed marker
+       * is baked into the message's FlowJSON so the card still renders as finished
+       * once the row has left the ACTIVE-only artifact subscription.
+       */
+      closeSlashCommandArtifact: defineMutator(
+        z.object({ messageId: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { messageId, timestamp } }) => {
+          const message = await tx.run(zql.messages.where('messageId', messageId).one());
+          if (!message) {
+            throw new Error('Message not available');
+          }
+          if (message.senderId !== authData.sub) {
+            throw new Error('Only the author can close this incident');
+          }
+
+          const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
+          if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
+            throw new Error('This incident is already closed');
+          }
+
+          const content = withSlashCommandArtifactClosed(message.content, {
+            closedAt: timestamp,
+            closedBy: authData.sub,
+          });
+          if (!content) {
+            throw new Error('Message is not a slash command artifact');
+          }
+
+          if (artifact) {
+            await tx.mutate.message_artifacts.update({
+              id: artifact.id,
+              status: MessageArtifactStatus.CANCELLED,
+              updatedAt: timestamp,
+            });
+          }
+          // Deliberately not `edited: true` — closing is a lifecycle transition,
+          // not an edit, and must not raise a "message edited" notification.
+          await tx.mutate.messages.update({ messageId, content });
         },
       ),
       updateShowInChannel: defineMutator(
@@ -7379,6 +7460,7 @@ export function createMutators(
           alias: z.string().optional(),
           description: z.string().optional(),
           reassignOnUnavailable: z.boolean().optional(),
+          maxWorkload: z.number().int().positive().nullable().optional(),
           userResponsibilityUpdates: z
             .record(z.string(), z.nativeEnum(UserResponsibility))
             .optional(),
@@ -7393,6 +7475,7 @@ export function createMutators(
             alias,
             description,
             reassignOnUnavailable,
+            maxWorkload,
             userResponsibilityUpdates,
             userRoleUpdates,
             timestamp,
@@ -7433,6 +7516,7 @@ export function createMutators(
             ...(alias !== undefined && { alias }),
             ...(description !== undefined && { description }),
             ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+            ...(maxWorkload !== undefined && { maxWorkload }),
             updatedAt: timestamp,
           });
 
@@ -7611,6 +7695,7 @@ export function createMutators(
                 ? { roleId, ...(responsibility ? { responsibility } : {}) }
                 : { responsibility: UserResponsibility.MEMBER }),
               onCallSetNumbers: [],
+              isNotified: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -10415,6 +10500,7 @@ export function createMutators(
             z.object({
               userId: z.string(),
               onCallSetNumbers: z.array(z.number()),
+              isNotified: z.boolean().optional(),
             })
           ).optional(),
           boardWeight: z.object({
@@ -10490,6 +10576,7 @@ export function createMutators(
                 await tx.mutate.user_group_mappings.update({
                   id: existingMapping.id,
                   onCallSetNumbers: mapping.onCallSetNumbers,
+                  ...(mapping.isNotified !== undefined && { isNotified: mapping.isNotified }),
                   updatedAt: now,
                 });
               }
@@ -12435,6 +12522,7 @@ export function createMutators(
                   height,
                   uploadedByUserId: authData.sub,
                   createdAt: timestamp + index,
+                  position: index,
                   createdBy: authData.sub,
                   url: '', // Will be populated after upload completes
                   metadata: null,

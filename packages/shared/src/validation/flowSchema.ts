@@ -802,6 +802,11 @@ export const slashCommandArtifactEndedCallSchema = z.object({
   joinedCount: z.number().int().nonnegative(),
 });
 
+export const slashCommandArtifactClosedSchema = z.object({
+  closedAt: z.number().int().nonnegative(),
+  closedBy: z.string(),
+});
+
 export const slashCommandArtifactPropsSchema = z.object({
   command: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
   /**
@@ -816,10 +821,23 @@ export const slashCommandArtifactPropsSchema = z.object({
    * claims a call ended.
    */
   endedCall: slashCommandArtifactEndedCallSchema.optional(),
+  /**
+   * Written once when the message's author closes the artifact without ever
+   * running — or after having run — a call. Same reasoning as `endedCall`: a
+   * closed artifact drops out of the ACTIVE-only artifact subscription, so the
+   * card would otherwise fall back to looking brand new.
+   *
+   * Only trusted when no live artifact row contradicts it.
+   */
+  closed: slashCommandArtifactClosedSchema.optional(),
 });
 
 export type SlashCommandArtifactEndedCall = z.infer<
   typeof slashCommandArtifactEndedCallSchema
+>;
+
+export type SlashCommandArtifactClosed = z.infer<
+  typeof slashCommandArtifactClosedSchema
 >;
 
 export const slashCommandArtifactComponentSchema = baseComponentSchema.extend({
