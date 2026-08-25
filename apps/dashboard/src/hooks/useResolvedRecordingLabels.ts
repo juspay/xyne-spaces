@@ -41,20 +41,19 @@ export async function confirmRecordingLabelSuggestion(
   }
 }
 
+/** Persists a labels change and only applies it locally once the write succeeds. */
 export async function applyRecordingLabelsChange(
   externalId: string,
-  previousLabels: string[],
   nextLabels: string[],
   applyLocally: (labels: string[]) => void,
   errorContext: string,
 ): Promise<void> {
-  applyLocally(nextLabels);
   try {
     await recordingService.updateRecording(externalId, { labels: nextLabels });
+    applyLocally(nextLabels);
   } catch (err) {
     logRecordingError(errorContext, err);
     toast.error('Failed to update labels');
-    applyLocally(previousLabels);
   }
 }
 

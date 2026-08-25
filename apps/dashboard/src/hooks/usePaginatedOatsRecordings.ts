@@ -103,6 +103,8 @@ export function usePaginatedOatsRecordings(
     };
   }, [refreshRecordings]);
 
+  // Patches one row's labels in place so a label action doesn't force
+  // the full-list refetch that resets scroll position and pagination
   useEffect(() => {
     const listener: LabelsPatchListener = (recordingId, labels) => {
       setRecordings(current =>

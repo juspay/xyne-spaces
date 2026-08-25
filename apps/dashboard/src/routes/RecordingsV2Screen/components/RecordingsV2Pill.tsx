@@ -288,7 +288,6 @@ const RecordingsV2Pill = ({
     const nextLabels = recording.labels.filter(id => id !== labelId);
     await applyRecordingLabelsChange(
       recording.externalId,
-      recording.labels,
       nextLabels,
       labels => patchOatsRecordingLabels(recording.id, labels),
       'RecordingsV2Pill.rejectSuggestion',
