@@ -2,8 +2,7 @@ import { useMemo } from 'react';
 import { useCacConfig } from '@xyne/shared/hooks';
 
 export const CMDK_SEARCH_CAC_KEY = 'cmdk_search_config';
-// Safe for the open-source Vespa schemas, which define no `personalized` profile. Enterprise
-// (private vespa-core schemas) turns personalization on per tab through the CAC key below.
+// Per-deployment overrides come through the CAC key below.
 const DEFAULT_RANK_PROFILE = 'default_native';
 
 export interface CmdkSearchCacConfig {
@@ -25,8 +24,8 @@ export const DEFAULT_CMDK_SEARCH_CAC_CONFIG: CmdkSearchCacConfig = {
  * Resolves the default rank profile per Cmd+K tab through Superposition CAC.
  *
  * CAC key: `cmdk_search_config`
- * Code default: every tab -> `default_native` (the open-source schemas have no other profile).
- * Enterprise override example:
+ * Code default: every tab -> `default_native`.
+ * Override example:
  *   { "allDefaultRankProfile": "personalized",
  *     "tabDefaultRankProfiles": { "messages": "personalized", "tickets": "personalized",
  *                                 "files": "personalized", "desk": "personalized" } }
