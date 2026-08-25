@@ -1,3 +1,10 @@
+## [1.224.0](https://github.com/juspay/xyne-spaces/compare/v1.223.0...v1.224.0) (2026-08-25)
+
+
+### Features
+
+* scope recap Ask AI to referenced threads ([#999](https://github.com/juspay/xyne-spaces/issues/999)) ([b550b3f](https://github.com/juspay/xyne-spaces/commit/b550b3fa2d130f161616af4392177351d257ff4e))
+
 ## [1.223.0](https://github.com/juspay/xyne-spaces/compare/v1.222.0...v1.223.0) (2026-08-25)
 
 
