@@ -15,8 +15,8 @@ import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault } from '@xyne/ico
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { queries, TOPICS_EXPLORER_TICKET_LIMIT } from '../../../zero/queries';
-// Not useCachedQuery: it persists the whole result to IndexedDB, re-stringifying
-// the array on every live update. This rollup is throwaway, not warm-start state.
+// Not useCachedQuery: this rollup is throwaway, not warm-start state worth
+// re-stringifying into IndexedDB on every live update.
 import { useQuery } from '../../../hooks/useQuery';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { useUsersById } from '../../../hooks/useUsers';
@@ -31,18 +31,17 @@ import {
   MAX_DEPTH,
   MAX_BOXES,
   NONE_KEY,
-  readableOn,
   MS_PER_DAY,
   TREND_DAYS,
   applyTicketFilters,
   buildDimensions,
   buildTrend,
-  colourFor,
   dimensionFor,
   distinctValues,
   groupLevel,
   labelFor,
   maxDailyCount,
+  swatchFor,
   templateFor,
   ticketsForKey,
   usefulDimensions,
@@ -56,7 +55,7 @@ import {
 /**
  * Topics Explorer — desk-scoped ticket volume grouped by any stack of columns.
  * Treemap left, one daily-volume trend row per group right, sharing order and
- * colour so the panels read as one view. Zero has no aggregation, so the rollup
+ * shade so the panels read as one view. Zero has no aggregation, so the rollup
  * runs client-side — hence one channel and a bounded created-at window.
  */
 
@@ -98,10 +97,8 @@ export const TopicsExplorer = ({
 }: TopicsExplorerProps): ReactElement => {
   const navigate = useNavigate();
   const usersById = useUsersById();
-  // Both defaults carry a ticket-list filter, so the out-of-the-box drill-through
-  // lands on exactly the tickets in the tile. aiSubCategory is deliberately not a
-  // default: the list has no filter for it, so opening from it silently widens to
-  // the parent category and has to warn.
+  // Both defaults carry a ticket-list filter, so the drill-through lands on
+  // exactly the tickets in the tile; aiSubCategory has none and would widen.
   const [dims, setDims] = useState<DimensionKey[]>(['aiCategory', 'priority']);
   const [filters, setFilters] = useState<TicketFilters>({});
   // AI tags/sentiment live outside Zero, so they resolve to conversation ids.
@@ -137,11 +134,8 @@ export const TopicsExplorer = ({
     return {
       startMs: from,
       endMs: to,
-      // Calendar days spanned, inclusive — NOT elapsed time. The trend buckets by
-      // calendar day, so rounding the elapsed span dropped a whole day whenever
-      // the custom times made it fractional: a 1 Aug 09:00 → 5 Aug 17:00 range is
-      // 4.3 elapsed days but covers 5 days, and 1 Aug's tickets were counted in
-      // the boxes while having no bar in the graph.
+      // Calendar days spanned, inclusive — not elapsed time, which a custom time
+      // makes fractional: 1 Aug 09:00 → 5 Aug 17:00 is 4.3 elapsed but 5 days.
       rangeDays: Math.max(Math.round((startOfDay(to) - startOfDay(from)) / MS_PER_DAY) + 1, 1),
     };
   }, [dateRange, startTime, endTime]);
@@ -167,7 +161,7 @@ export const TopicsExplorer = ({
   const deferredRows = useDeferredValue(rows);
   const isSyncingRows = rows !== deferredRows;
   // No `as unknown as`: the assignability check is what makes a Zero schema
-  // rename fail the build instead of silently emptying a grouping at runtime.
+  // rename fail the build rather than silently empty a grouping.
   const allTickets = useMemo<readonly TopicsTicket[]>(() => deferredRows ?? [], [deferredRows]);
   // A deferred frame counts as loading, so the panel never flashes a partial
   // rollup as if it were final.
@@ -201,9 +195,8 @@ export const TopicsExplorer = ({
       .then(ids => {
         if (cancelled) return;
         setTagConversationIds(ids);
-        // filterConversationsByTags is hard-capped at 1000 rows server-side. In a
-        // list that is fine; here the whitelist is the denominator of every box,
-        // so at the cap the counts are simply wrong and must say so.
+        // This whitelist is the denominator of every box, so hitting the server's
+        // 1000-row cap makes the counts wrong and has to be said out loud.
         setTagFilterCapped(ids.length >= TAG_FILTER_CONVERSATION_CAP);
       })
       .catch((err: unknown) => {
@@ -256,21 +249,13 @@ export const TopicsExplorer = ({
   const dimensions = useMemo(() => buildDimensions(aiTagsByConversation), [aiTagsByConversation]);
 
   // From the whole range, not the filtered subset, so a choice never disappears
-  // once something else is selected. NONE_KEY is dropped: it is the grouping
-  // sentinel for "no value", and offering it as a filter gave an option that
-  // matched nothing, since the filters compare against the real column value.
+  // once something else is selected.
   const availableAiCategories = useMemo(
-    () =>
-      distinctValues(allTickets, 'aiCategory').flatMap(o =>
-        o.value === NONE_KEY ? [] : [o.value],
-      ),
+    () => distinctValues(allTickets, 'aiCategory'),
     [allTickets],
   );
   const availableStages = useMemo(
-    () =>
-      distinctValues(allTickets, 'stageName').flatMap(o =>
-        o.value === NONE_KEY ? [] : [{ name: o.value }],
-      ),
+    () => distinctValues(allTickets, 'stageName').map(name => ({ name })),
     [allTickets],
   );
 
@@ -346,13 +331,11 @@ export const TopicsExplorer = ({
   const tiles = useMemo(() => {
     const total = scoped.length || 1;
     return nodes.map((node, i) => {
-      const colour = colourFor(i);
       const share = Math.round((node.tickets.length / total) * 100);
       return {
         name: node.label,
         nodeKey: node.key,
-        colour,
-        ink: readableOn(colour),
+        ...swatchFor(i),
         count: `${node.tickets.length.toLocaleString()} tickets`,
         // Percentages of a level whose groups overlap do not add up, so they are
         // suppressed everywhere at once — tile text, aria-label and tooltip.
@@ -362,19 +345,20 @@ export const TopicsExplorer = ({
     });
   }, [nodes, scoped.length, isOverlapping]);
 
-  /** One trend row per group, in the same order and hue as the tiles. */
+  /** One trend row per group, in the same order and shade as the tiles. */
   const rowsWithTrend = useMemo(
     () =>
       nodes.map((node, i) => ({
         key: node.key,
         label: node.label,
-        colour: colourFor(i),
-        points: trend[i]?.points ?? [],
+        colour: swatchFor(i).fill,
+        points: trend[i] ?? [],
       })),
     [nodes, trend],
   );
 
-  const layout = useMemo(() => templateFor(tiles.length), [tiles.length]);
+  // No useMemo: templateFor indexes a module-level table, so the reference is already stable.
+  const layout = templateFor(tiles.length);
 
   // Only once the sync has settled: mid-stream the count is still climbing, so
   // an early check flashes the cap warning.
@@ -428,10 +412,9 @@ export const TopicsExplorer = ({
         else if (value !== undefined && value !== null) params.append(key, String(value));
       }
 
-      // The drill path overrides any filter on the same field. The list ORs
-      // repeated params, so filtering Assignee={alice,bob} and drilling into
-      // alice used to open both — a superset of the tile you clicked. Cleared
-      // once per param, since every aiTag level shares `generatedTags`.
+      // The drill path overrides any filter on the same field: the list ORs
+      // repeated params, so Assignee={alice,bob} drilled into alice would open
+      // both. Cleared once per param, since every aiTag level shares `generatedTags`.
       const overridden = new Set<string>();
 
       [...validPath, nodeKey].forEach((key, i) => {
@@ -604,18 +587,16 @@ export const TopicsExplorer = ({
                     onChange={e => {
                       const next = [...activeDims];
                       next[level] = e.target.value as DimensionKey;
-                      regroup(next.filter((v, i) => next.indexOf(v) === i));
+                      regroup(next);
                     }}
                     className={selectClass}
                     aria-label={`Group level ${level + 1}`}
                     data-track-category='TOPICS_EXPLORER'
                     data-track-name='CHANGE_DIMENSION'
                   >
-                    {/* Current dim first, then anything not already used at
-                        another level. Filtering `available` alone dropped the
-                        selected dim once it stopped splitting the data, leaving
-                        a select whose value matched no option — the browser then
-                        showed the first one while the state said otherwise. */}
+                    {/* Current dim first, then anything not already used at another
+                        level. `available` alone drops the selected dim once it stops
+                        splitting the data, leaving a value that matches no option. */}
                     {[dim, ...available.filter(k => !activeDims.includes(k))].map(k => (
                       <option key={k} value={k}>
                         {dimensionFor(dimensions, k).label}
@@ -669,7 +650,7 @@ export const TopicsExplorer = ({
 
           {/* Breadcrumb + counts */}
           <div className='flex flex-wrap items-center gap-1 px-6 py-2 text-sm'>
-            {/* A real breadcrumb: bare buttons split by "›" were announced as
+            {/* A real breadcrumb: bare buttons split by "›" are announced as
                 "greater than" between every level. */}
             <nav aria-label='Drill path'>
               <ol className='flex flex-wrap items-center gap-1'>
@@ -795,7 +776,7 @@ export const TopicsExplorer = ({
               </div>
             </section>
 
-            {/* Right: one trend row per group, same order and hue as the tiles */}
+            {/* Right: one trend row per group, same order and shade as the tiles */}
             <section className='flex min-h-[320px] flex-col overflow-hidden rounded-xl border border-border bg-card'>
               <header className='flex items-baseline justify-between border-b border-border px-4 py-2'>
                 <h3 className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>

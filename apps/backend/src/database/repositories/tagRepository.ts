@@ -239,15 +239,13 @@ export class TagRepository {
   }
 
   /**
-   * Returns the distinct (conversationId, tagCategory, tag) triples for every email
-   * of a desk channel whose `createdAt` falls inside [start, end].
+   * Distinct (conversationId, tagCategory, tag) triples for every email of a desk
+   * channel created inside [start, end].
    *
-   * Unlike `findConversationIdsByEmailTags` (which answers "which threads match this
-   * filter?" and is hard-capped at 1000 rows with no date bound), this is the grouping
-   * read: the caller gets the actual tag values per conversation so it can bucket
-   * tickets by category. The result is date-scoped and capped at `rowCap` rows; when
-   * the cap is hit `truncated` is true so the client can warn rather than silently
-   * under-report.
+   * Where `findConversationIdsByEmailTags` answers "which threads match this
+   * filter?", this is the grouping read: the caller gets the tag values themselves
+   * so it can bucket tickets by category. `truncated` reports the `rowCap` being
+   * hit, so the client can warn rather than silently under-report.
    */
   async findGeneratedTagsByConversation(
     channelId: string,
@@ -280,25 +278,17 @@ export class TagRepository {
     `;
 
     const truncated = rows.length > rowCap;
-    if (!truncated) {
-      logger.info('[TAG-REPO] findGeneratedTagsByConversation success', {
-        channelId,
-        count: rows.length,
-        truncated,
-      });
-      return { rows, truncated };
+    let complete = rows;
+    if (truncated) {
+      // Cutting at an arbitrary row hands back a conversation carrying only some
+      // of its tags, which reads as real data. The ORDER BY groups each
+      // conversation together, so dropping the trailing partial one leaves the
+      // rest whole — unless it fills the cap, where that would leave nothing.
+      const kept = rows.slice(0, rowCap);
+      const last = kept[kept.length - 1]?.conversationId;
+      const trimmed = kept.filter(row => row.conversationId !== last);
+      complete = trimmed.length > 0 ? trimmed : kept;
     }
-
-    // Cutting at an arbitrary row would return a conversation carrying only some
-    // of its tags, which reads as real data rather than as truncation. Ordering
-    // groups each conversation's rows together, so dropping the trailing partial
-    // one leaves every returned conversation complete.
-    const kept = rows.slice(0, rowCap);
-    const lastConversationId = kept[kept.length - 1]?.conversationId;
-    const trimmed = kept.filter(row => row.conversationId !== lastConversationId);
-    // Unless one conversation fills the whole cap, in which case trimming leaves
-    // nothing and the panel would report "no AI tags" instead of partial data.
-    const complete = trimmed.length > 0 ? trimmed : kept;
 
     logger.info('[TAG-REPO] findGeneratedTagsByConversation success', {
       channelId,

@@ -7,8 +7,8 @@ import { shapeStyle, type BoxShape } from './TopicsExplorer.utils';
 export interface TopicTile {
   name: string;
   nodeKey: string;
-  colour: string;
-  /** Foreground that passes contrast on `colour` — see readableOn(). */
+  /** Purple shade for this rank, with its paired foreground. */
+  fill: string;
   ink: string;
   count: string;
   /** Empty when the level's groups overlap, where a percentage would mislead. */
@@ -28,7 +28,7 @@ export interface TopicsTreemapProps {
   onHover: (nodeKey: string | null) => void;
 }
 
-/** The left-hand mosaic: one clipped box per group, sized by the template. */
+/** The left-hand mosaic: one box per group, placed and sized by the template. */
 export const TopicsTreemap = ({
   tiles,
   layout,
@@ -42,22 +42,18 @@ export const TopicsTreemap = ({
       const isHovered = hovered === tile.nodeKey;
       const shape = layout[i];
       if (!shape) return null;
-      // A 1-row box is ~45px but label + count + bar needs ~68px and would clip.
-      // Degrade to label-only; count and share stay in the aria-label and tooltip.
-      const isShort = shape.h <= 1;
       const label = `${tile.name}: ${tile.count}${
         tile.share ? `, ${tile.share} of tickets at this level` : ''
       }. ${drillable ? 'Opens sub-groups' : 'Opens ticket list'}`;
       return (
-        // Shared Tooltip: it portals out of the transformed dialog and handles
-        // collisions, which a hand-rolled fixed-position card had to do itself.
+        // Shared Tooltip: it portals out of the transformed dialog and handles collisions.
         <Tooltip
           key={tile.nodeKey}
           side='bottom'
           delayDuration={80}
           content={
             <span className='block max-w-[260px]'>
-              {/* Wraps, not truncates: the full name is why this exists. */}
+              {/* Wraps rather than truncates: the full name is why this exists. */}
               <span className='block break-words font-semibold'>{tile.name}</span>
               <span className='mt-0.5 block text-muted-foreground'>
                 {tile.share ? `${tile.count} · ${tile.share}` : tile.count}
@@ -76,18 +72,15 @@ export const TopicsTreemap = ({
             onMouseLeave={() => onHover(null)}
             onBlur={() => onHover(null)}
             className={cn(
-              'absolute flex min-w-0 flex-col justify-between overflow-hidden p-3 text-left',
+              'absolute flex min-w-0 flex-col justify-between overflow-hidden rounded-[10px] p-3 text-left',
               'outline-none transition-[filter] duration-150',
               isHovered && 'z-10',
             )}
             style={{
               ...shapeStyle(shape),
-              padding: isShort ? '6px 10px' : '12px',
-              borderRadius: 10,
-              background: tile.colour,
+              background: tile.fill,
               color: tile.ink,
-              // Inset ring, not `outline`: clip-path clips outlines, so a notched
-              // box loses its focus indicator.
+              // Inset ring so the focus/hover indicator sits inside the tile's own bounds.
               boxShadow: isHovered ? `inset 0 0 0 3px ${tile.ink}` : undefined,
               filter: isHovered ? 'brightness(1.08)' : undefined,
             }}
@@ -97,28 +90,21 @@ export const TopicsTreemap = ({
           >
             <span className='min-w-0'>
               <span className='block truncate text-sm font-semibold'>{tile.name}</span>
-              {!isShort && (
-                <span className='mt-0.5 block truncate text-xs opacity-90'>
-                  {tile.share ? `${tile.count} · ${tile.share}` : tile.count}
-                </span>
-              )}
+              <span className='mt-0.5 block truncate text-xs opacity-90'>
+                {tile.share ? `${tile.count} · ${tile.share}` : tile.count}
+              </span>
             </span>
 
             {/* Inherits the tile's foreground so it stays visible on light swatches. */}
-            {!isShort && (
+            <span
+              className='mt-2 block h-1.5 w-full overflow-hidden rounded-full'
+              style={{ backgroundColor: 'currentColor', opacity: 0.25 }}
+            >
               <span
-                className='mt-2 block h-1.5 w-full overflow-hidden rounded-full'
-                style={{ backgroundColor: 'currentColor', opacity: 0.25 }}
-              >
-                <span
-                  className='block h-full rounded-full'
-                  style={{
-                    width: `${Math.max(tile.sharePct, 2)}%`,
-                    backgroundColor: 'currentColor',
-                  }}
-                />
-              </span>
-            )}
+                className='block h-full rounded-full'
+                style={{ width: `${Math.max(tile.sharePct, 2)}%`, backgroundColor: 'currentColor' }}
+              />
+            </span>
           </button>
         </Tooltip>
       );

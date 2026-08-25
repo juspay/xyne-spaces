@@ -2880,14 +2880,9 @@ const SupportScreen = (): ReactElement => {
                           <Tooltip content='Topics explorer' side='bottom'>
                             <button
                               onClick={() => {
-                                const base = selectedChannelId
-                                  ? `${supportBase}/${selectedChannelId}`
-                                  : supportBase;
-                                if (isTopicsOpen) {
-                                  void navigate(base, { replace: true });
-                                } else {
-                                  void navigate(`${base}?topics=open`);
-                                }
+                                const base = `${supportBase}/${selectedChannelId}`;
+                                if (isTopicsOpen) void navigate(base, { replace: true });
+                                else void navigate(`${base}?topics=open`);
                               }}
                               className={cn(
                                 'p-1.5 rounded transition-colors',
@@ -3625,12 +3620,9 @@ const SupportScreen = (): ReactElement => {
                 channelPreference?.metricsEnabled && (
                   <TopicsExplorer
                     open
-                    onClose={() => {
-                      const base = selectedChannelId
-                        ? `${supportBase}/${selectedChannelId}`
-                        : supportBase;
-                      void navigate(base, { replace: true });
-                    }}
+                    onClose={() =>
+                      void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
+                    }
                     channelId={selectedChannelId}
                     channelName={selectedChannelName ?? undefined}
                     supportBase={supportBase}

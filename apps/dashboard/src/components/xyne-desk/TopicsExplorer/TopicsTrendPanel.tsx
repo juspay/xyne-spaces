@@ -42,10 +42,8 @@ export interface TopicsTrendPanelProps {
 }
 
 /**
- * One row, memoized individually. Hovering changes `isHovered` on exactly two
- * rows, so only those re-render — memoizing the list as a whole did not help,
- * because `hovered` is a prop of the list and rebuilt all eight charts on every
- * pointer move across either panel.
+ * One row, memoized individually so a hover re-renders the two rows whose
+ * `isHovered` changed rather than every chart in the list.
  */
 const TrendRowBase = ({
   row,

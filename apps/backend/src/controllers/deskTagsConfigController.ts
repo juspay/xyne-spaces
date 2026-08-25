@@ -228,13 +228,11 @@ export class DeskTagsConfigController {
   };
 
   /**
-   * GET /api/channels/:channelId/tags-config/generated-tags-by-conversation
-   *   ?startMs=…&endMs=…&categories=sentiment,priority
+   * GET /api/channels/:channelId/tags-config/generated-tags-by-conversation?startMs=…&endMs=…
    *
-   * Returns the LLM/manual tag values per conversation for this channel within the
-   * given date range. The tag framework lives in the `non_zero` schema which Zero
-   * does not mirror, so the dashboard cannot read these client-side — this is the
-   * read path that lets it group tickets by tag category.
+   * Tag values per conversation for this channel in the given date range. Tags
+   * live in the `non_zero` schema, which Zero does not mirror, so this is the
+   * only read path for grouping tickets by tag category.
    * ACL: channel member.
    */
   getGeneratedTagsByConversation = async (req: Request, res: Response): Promise<void> => {

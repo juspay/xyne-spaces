@@ -1,5 +1,4 @@
 import { UNASSIGNED_FILTER_VALUE } from '../../../zero/queries';
-import { CHART_COLORS } from '../../QueryVisualizations/constants';
 import type { TicketFilters } from '../../Tickets/TicketFilters/types';
 
 export const TREND_DAYS = 30;
@@ -8,11 +7,9 @@ export const MAX_DEPTH = 4;
 export const MS_PER_DAY = 86_400_000;
 /** Key used when a ticket has no value for a dimension. */
 export const NONE_KEY = '__none__';
-const ACCENT = '#8200DB';
 
 /** Ticket fields the rollup reads. Structurally assignable from a synced Zero row. */
 export interface TopicsTicket {
-  id: string;
   createdAt: number;
   /** Needed to apply the AI-tag filter, which resolves to conversation ids. */
   conversationId: string;
@@ -34,19 +31,11 @@ export interface DimensionContext {
 
 export interface Dimension {
   label: string;
-  /**
-   * Group KEYS a ticket contributes — raw column values, never display text,
-   * since these travel to the ticket list as filter params and must be what its
-   * filters expect (a user id, not a name).
-   */
+  /** Group keys — raw column values, since these travel to the ticket list as filter params. */
   values: (ticket: TopicsTicket) => string[];
   /** Human-readable text for a key. Defaults to the key itself. */
   format?: (key: string, ctx: DimensionContext) => string;
-  /**
-   * URL value for the "no value" bucket. `null` means the ticket list cannot
-   * express it, so a drill-through says so rather than emitting a value the list
-   * would ignore or reject.
-   */
+  /** URL value for the "no value" bucket. `null` means the ticket list cannot express it. */
   emptyParam?: string | null;
   /** True when a ticket can land in more than one bucket, so groups overlap. */
   multi?: boolean;
@@ -67,46 +56,39 @@ export interface TopicNode {
   label: string;
   tickets: TopicsTicket[];
 }
-export interface TrendSeries {
-  key: string;
-  label: string;
-  points: { day: string; count: number }[];
+export interface TrendPoint {
+  day: string;
+  count: number;
 }
 
-/** One hue per group, shared by its tile and its trend row so the two panels match. */
-export const PALETTE = CHART_COLORS.series;
-
-const channelLuminance = (c: number): number => {
-  const v = c / 255;
-  return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-};
-
-/** WCAG relative luminance of a #rrggbb colour. */
-const relativeLuminance = (hex: string): number => {
-  const n = parseInt(hex.replace('#', ''), 16);
-  return (
-    0.2126 * channelLuminance((n >> 16) & 255) +
-    0.7152 * channelLuminance((n >> 8) & 255) +
-    0.0722 * channelLuminance(n & 255)
-  );
-};
+export interface Swatch {
+  fill: string;
+  /** Paired at authoring time; every combination clears WCAG AA (4.5:1). */
+  ink: string;
+}
 
 /**
- * Foreground that passes contrast on a swatch. White failed WCAG AA on 9 of the
- * 10 palette colours, so this is picked per swatch to stay above 4.5:1.
+ * Purple ramp, deepest first, shared by a group's tile and its trend row so the
+ * two panels read as one view. One shade per box on a full page — see MAX_BOXES.
  */
-export const readableOn = (background: string): string =>
-  relativeLuminance(background) > 0.18 ? '#111111' : '#FFFFFF';
+const PALETTE: readonly Swatch[] = [
+  { fill: '#4C1D95', ink: '#FFFFFF' },
+  { fill: '#5B21B6', ink: '#FFFFFF' },
+  { fill: '#6D28D9', ink: '#FFFFFF' },
+  { fill: '#7C3AED', ink: '#FFFFFF' },
+  { fill: '#9333EA', ink: '#FFFFFF' },
+  { fill: '#A78BFA', ink: '#1F1147' },
+  { fill: '#C4B5FD', ink: '#1F1147' },
+  { fill: '#DDD6FE', ink: '#1F1147' },
+];
 
-/** Hue by rank within the page. */
-export const colourFor = (index: number): string => PALETTE[index % PALETTE.length] ?? ACCENT;
+/** Shade by rank within the page. */
+export const swatchFor = (index: number): Swatch => PALETTE[index % PALETTE.length] as Swatch;
 
 const GRID_COLUMNS = 8;
 const GRID_ROWS = 6;
 /** Half-gap between adjacent boxes, in px. */
 const GUTTER = 3;
-
-type Corner = 'tl' | 'tr' | 'bl' | 'br';
 
 export interface BoxShape {
   /** Cell coords on the GRID_COLUMNS x GRID_ROWS grid. */
@@ -114,30 +96,24 @@ export interface BoxShape {
   y: number;
   w: number;
   h: number;
-  /** Optional corner cut, which turns the rectangle into an L. */
-  notch?: { corner: Corner; w: number; h: number };
 }
 
 /**
  * Layout per box count over the 8x6 grid, indexed by count. One string per
- * template, boxes separated by spaces: `x,y,w,h` or `x,y,w,h,corner,nw,nh` for
- * an L. Encoded rather than nested arrays purely because the formatter expands
- * those to one number per line, which buried 8 layouts in 50 lines.
- *
- * Every template tiles all 48 cells exactly — full coverage, no overlap — so the
- * panel is always filled. Areas step down with rank while the largest stays
- * within ~3x the smallest, and several use L-shapes rather than plain rectangles.
+ * template, `x,y,w,h` boxes separated by spaces, in rank order so areas step
+ * down with volume. Every template tiles all 48 cells, so the panel is always
+ * full, and no box is under 2 rows tall, which is what label + count + bar needs.
  */
 const SPECS: readonly string[] = [
   '',
   '0,0,8,6',
-  '0,0,5,6,tr,1,2 4,0,4,6,bl,1,4',
-  '0,0,4,6,br,2,2 4,0,4,4 2,4,6,2',
+  '0,0,4,6 4,0,4,6',
+  '0,0,4,6 4,0,4,3 4,3,4,3',
   '0,0,5,4 5,0,3,4 0,4,5,2 5,4,3,2',
-  '0,0,4,4,br,1,1 4,0,4,3 3,3,3,3 0,4,3,2 6,3,2,3',
+  '0,0,4,3 4,0,4,3 0,3,3,3 3,3,3,3 6,3,2,3',
   '0,0,4,3 4,0,4,3 0,3,2,3 2,3,2,3 4,3,2,3 6,3,2,3',
   '0,0,3,3 3,0,3,3 6,0,2,3 0,3,2,3 2,3,2,3 4,3,2,3 6,3,2,3',
-  '0,0,4,3 4,0,4,3 0,3,2,2 2,3,2,2 4,3,2,2 6,3,2,2 0,5,4,1 4,5,4,1',
+  '0,0,4,2 4,0,4,2 0,2,3,2 3,2,3,2 0,4,3,2 3,4,3,2 6,2,2,2 6,4,2,2',
 ];
 
 const LAYOUT_TEMPLATES: BoxShape[][] = SPECS.map(spec =>
@@ -145,49 +121,29 @@ const LAYOUT_TEMPLATES: BoxShape[][] = SPECS.map(spec =>
     .split(' ')
     .filter(Boolean)
     .map(box => {
-      const [x, y, w, h, corner, nw, nh] = box.split(',');
-      const rect = { x: Number(x), y: Number(y), w: Number(w), h: Number(h) };
-      // A corner always ships with both notch dimensions.
-      return corner
-        ? { ...rect, notch: { corner: corner as Corner, w: Number(nw), h: Number(nh) } }
-        : rect;
+      const [x, y, w, h] = box.split(',').map(Number) as [number, number, number, number];
+      return { x, y, w, h };
     }),
 );
 
-/** Largest page a template exists for. Pages never exceed this. */
-export const MAX_BOXES = LAYOUT_TEMPLATES.length - 1;
-const FALLBACK_TEMPLATE = LAYOUT_TEMPLATES[MAX_BOXES] as BoxShape[];
+/**
+ * Largest page a template exists for. Capped by the palette too, so a page can
+ * never run past the ramp and give two groups the same shade.
+ */
+export const MAX_BOXES = Math.min(LAYOUT_TEMPLATES.length - 1, PALETTE.length);
 
 export const templateFor = (count: number): BoxShape[] =>
-  LAYOUT_TEMPLATES[Math.min(Math.max(count, 1), MAX_BOXES)] ?? FALLBACK_TEMPLATE;
+  LAYOUT_TEMPLATES[Math.min(Math.max(count, 1), MAX_BOXES)] as BoxShape[];
 
 /** CSS position/size for a shape, as percentages of the panel. */
 export const shapeStyle = (
   shape: BoxShape,
-): { left: string; top: string; width: string; height: string; clipPath?: string } => {
-  // Real geometry, not an `outline`: that needs hsl() around the token and would
-  // steal the only property that can show a focus ring.
-  const base = {
-    left: `calc(${(shape.x / GRID_COLUMNS) * 100}% + ${GUTTER}px)`,
-    top: `calc(${(shape.y / GRID_ROWS) * 100}% + ${GUTTER}px)`,
-    width: `calc(${(shape.w / GRID_COLUMNS) * 100}% - ${GUTTER * 2}px)`,
-    height: `calc(${(shape.h / GRID_ROWS) * 100}% - ${GUTTER * 2}px)`,
-  };
-  if (!shape.notch) return base;
-
-  // Percentages within the box itself, so the cut lands on a cell boundary.
-  const nx = (shape.notch.w / shape.w) * 100;
-  const ny = (shape.notch.h / shape.h) * 100;
-  return {
-    ...base,
-    clipPath: {
-      tl: `polygon(${nx}% 0, 100% 0, 100% 100%, 0 100%, 0 ${ny}%, ${nx}% ${ny}%)`,
-      tr: `polygon(0 0, ${100 - nx}% 0, ${100 - nx}% ${ny}%, 100% ${ny}%, 100% 100%, 0 100%)`,
-      bl: `polygon(0 0, 100% 0, 100% 100%, ${nx}% 100%, ${nx}% ${100 - ny}%, 0 ${100 - ny}%)`,
-      br: `polygon(0 0, 100% 0, 100% ${100 - ny}%, ${100 - nx}% ${100 - ny}%, ${100 - nx}% 100%, 0 100%)`,
-    }[shape.notch.corner],
-  };
-};
+): { left: string; top: string; width: string; height: string } => ({
+  left: `calc(${(shape.x / GRID_COLUMNS) * 100}% + ${GUTTER}px)`,
+  top: `calc(${(shape.y / GRID_ROWS) * 100}% + ${GUTTER}px)`,
+  width: `calc(${(shape.w / GRID_COLUMNS) * 100}% - ${GUTTER * 2}px)`,
+  height: `calc(${(shape.h / GRID_ROWS) * 100}% - ${GUTTER * 2}px)`,
+});
 
 const one = (v: string | null | undefined): string[] => [
   v === null || v === undefined || v === '' ? NONE_KEY : v,
@@ -196,7 +152,7 @@ const one = (v: string | null | undefined): string[] => [
 /**
  * A single-valued Zero column. `emptyParam` is always null: the ticket list has
  * no "has no value" filter for these columns, so a drill-through reports the
- * level as dropped rather than emit a value the list ignores or rejects.
+ * level as dropped instead.
  */
 const single = (
   label: string,
@@ -212,21 +168,16 @@ const single = (
 });
 
 /**
- * Groupable dimensions, in "Group by" option order. `values` yields raw keys and
- * `format` renders them — kept separate because keys travel to the ticket list as
- * filter params. Zero-backed columns only; LLM tag categories live in
- * `non_zero.tags`, which Zero does not mirror, so `buildDimensions` adds those.
+ * Groupable dimensions, in "Group by" option order. Zero-backed columns only;
+ * LLM tag categories live in `non_zero.tags`, so `buildDimensions` adds those.
  */
 const DIMENSION_DEFS = {
   aiCategory: single('AI Category', t => t.aiCategory, 'Unclassified', 'aiCategory'),
   aiSubCategory: single('AI Sub-category', t => t.aiSubCategory, 'Unclassified'),
   tag: {
     label: 'Tag',
-    // Multi-valued: a ticket with three tags counts under all three, so groups
-    // deliberately sum to more than the parent.
-    // Falls back to NONE_KEY when every mapping has a blank name: returning []
-    // put the ticket in no bucket at all, so the groups silently summed to less
-    // than the header total.
+    // Multi-valued, so groups deliberately sum to more than the parent. A ticket
+    // whose mappings are all blank falls back to NONE_KEY rather than no bucket.
     values: (t): string[] => {
       const names = (t.tagMappings ?? []).map(m => m.tagName).filter(Boolean);
       return names.length > 0 ? names : [NONE_KEY];
@@ -234,7 +185,7 @@ const DIMENSION_DEFS = {
     format: (key): string => (key === NONE_KEY ? 'Untagged' : key),
     multi: true,
     // No `param`: SupportScreen parses `tags` but never applies it, so emitting
-    // one would open an unfiltered list. Unset means "reported as dropped".
+    // one would open an unfiltered list.
     emptyParam: null,
   },
   priority: single('Priority', t => t.priority, 'No priority', 'priority'),
@@ -246,8 +197,8 @@ const DIMENSION_DEFS = {
     values: (t): string[] => [t.assignedTo ? t.assignedTo : UNASSIGNED_FILTER_VALUE],
     format: (key, ctx): string =>
       key === UNASSIGNED_FILTER_VALUE ? 'Unassigned' : ctx.userName(key),
-    // No `emptyParam`: this dimension never yields NONE_KEY — the unassigned
-    // bucket already uses the sentinel the ticket list understands.
+    // No `emptyParam`: the unassigned bucket already uses the sentinel the ticket
+    // list understands, so this dimension never yields NONE_KEY.
     param: 'assignee',
   },
 } satisfies Record<string, Dimension>;
@@ -257,8 +208,7 @@ export type StaticDimensionKey = keyof typeof DIMENSION_DEFS;
 
 /**
  * Prefix marking a data-driven LLM-tag dimension. The category suffix only
- * exists at runtime, so the key type stays open — but narrower than `string`,
- * so a typo cannot pass for a static key.
+ * exists at runtime, so the key type stays open — but narrower than `string`.
  */
 export const AI_TAG_DIMENSION_PREFIX = 'aiTag:';
 export type AiTagDimensionKey = `${typeof AI_TAG_DIMENSION_PREFIX}${string}`;
@@ -271,10 +221,7 @@ export type DimensionMap = ReadonlyMap<DimensionKey, Dimension>;
 export const DIMENSIONS: Record<StaticDimensionKey, Dimension> = DIMENSION_DEFS;
 const STATIC_DIMENSION_KEYS = Object.keys(DIMENSIONS) as StaticDimensionKey[];
 
-/**
- * Placeholder for a key that no longer resolves — e.g. a tag category that
- * vanished when the range changed. Yields one empty bucket instead of throwing.
- */
+/** Placeholder for a key that no longer resolves, e.g. a tag category the range no longer covers. */
 const MISSING_DIMENSION: Dimension = {
   label: 'Unavailable',
   values: () => [NONE_KEY],
@@ -314,10 +261,8 @@ export const buildDimensions = (tagsByConversation: ConversationTagMap): Dimensi
   for (const category of [...categories].sort((a, b) => a.localeCompare(b))) {
     const prefix = `${category}:`;
     map.set(aiTagDimensionKey(category), {
-      // "AI Tag · " keeps these distinct from BOTH the user-applied "Tag" dimension
-      // and the static AI columns: a category named "priority" would otherwise render
-      // "AI: Priority" beside the "AI Priority" column — same value space, different
-      // numbers, indistinguishable.
+      // "AI Tag · " keeps these distinct from the user-applied "Tag" dimension and
+      // from the static AI columns, which a category named "priority" would shadow.
       label: `AI Tag · ${titleise(category)}`,
       values: ticket => {
         const keys = (tagsByConversation.get(ticket.conversationId) ?? [])
@@ -342,19 +287,24 @@ export const buildDimensions = (tagsByConversation: ConversationTagMap): Dimensi
 export const labelFor = (dim: Dimension, key: string, ctx: DimensionContext): string =>
   dim.format?.(key, ctx) ?? key;
 
-/** Distinct values for a Zero-backed dimension, most common first — powers the filter menus. */
+/**
+ * Distinct values for a Zero-backed dimension, most common first — powers the
+ * filter menus. NONE_KEY is dropped: it is the grouping sentinel for "no value",
+ * and the filters compare against the real column, so it would match nothing.
+ */
 export const distinctValues = (
   tickets: readonly TopicsTicket[],
   key: StaticDimensionKey,
-): { value: string; count: number }[] => {
+): string[] => {
   const counts = new Map<string, number>();
   for (const ticket of tickets) {
-    for (const value of DIMENSIONS[key].values(ticket))
-      counts.set(value, (counts.get(value) ?? 0) + 1);
+    for (const value of DIMENSIONS[key].values(ticket)) {
+      if (value !== NONE_KEY) counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
   }
   return [...counts.entries()]
-    .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([value]) => value);
 };
 
 /** Dimensions worth offering: a column where every ticket shares one value splits nothing. */
@@ -365,8 +315,8 @@ export const usefulDimensions = (
   const keys = [...dimensions.keys()];
   if (tickets.length === 0) return keys;
   return keys.filter(key => {
-    // Always offered: hiding a tag dimension when nothing is tagged makes the
-    // option look missing, where grouping by it honestly shows one "Untagged" box.
+    // Always offered: grouping by a tag nothing carries honestly shows one
+    // "Untagged" box, where hiding the option makes it look missing.
     if (key === 'tag' || key.startsWith(AI_TAG_DIMENSION_PREFIX)) return true;
     const seen = new Set<string>();
     for (const ticket of tickets) {
@@ -409,11 +359,7 @@ export const applyTicketFilters = (
   });
 };
 
-/**
- * Group tickets by one dimension, ranked by volume. Returns every group —
- * trimming happens at display time by paging, so a desk with hundreds of
- * categories stays explorable rather than collapsing its tail into a dead bucket.
- */
+/** Group tickets by one dimension, ranked by volume. Every group is returned; paging trims. */
 export const groupLevel = (
   tickets: readonly TopicsTicket[],
   dim: Dimension,
@@ -453,11 +399,9 @@ const trendStartMs = (days: number, endMs: number): number => {
 };
 
 /**
- * Highest single-day count across every node — the shared Y domain.
- *
- * Counts directly instead of calling buildTrend and reducing over the result:
- * that allocated a TrendSeries plus a `days`-long point array per node, so a
- * level with 300 groups built ~9,000 throwaway objects to read one number.
+ * Highest single-day count across every node — the shared Y domain. Counts
+ * directly rather than reducing over buildTrend, which allocates a point array
+ * per node to read one number.
  */
 export const maxDailyCount = (nodes: TopicNode[], days: number, endMs: number): number => {
   const startMs = trendStartMs(days, endMs);
@@ -477,7 +421,7 @@ export const maxDailyCount = (nodes: TopicNode[], days: number, endMs: number): 
 };
 
 /** Daily counts per node, zero-filled so a quiet day reads as 0 rather than a gap. */
-export const buildTrend = (nodes: TopicNode[], days: number, endMs: number): TrendSeries[] => {
+export const buildTrend = (nodes: TopicNode[], days: number, endMs: number): TrendPoint[][] => {
   // Walk calendar days, not fixed milliseconds — a DST day is 23 or 25 hours long.
   const startMs = trendStartMs(days, endMs);
   const cursor = new Date(startMs);
@@ -494,10 +438,6 @@ export const buildTrend = (nodes: TopicNode[], days: number, endMs: number): Tre
       const key = toDayKey(ticket.createdAt);
       byDay.set(key, (byDay.get(key) ?? 0) + 1);
     }
-    return {
-      key: node.key,
-      label: node.label,
-      points: dayKeys.map(day => ({ day, count: byDay.get(day) ?? 0 })),
-    };
+    return dayKeys.map(day => ({ day, count: byDay.get(day) ?? 0 }));
   });
 };
