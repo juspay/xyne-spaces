@@ -59,6 +59,24 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "upi-workspace-template-c",
     "upi-workspace-template-d",
   ],
+  // credit: 2-way. Stormed FOUR times on 2026-08-25 alone, every one a
+  // RESOURCE_OPERATION_RATE_EXCEEDED on whichever single snapshot it pointed at
+  // (v8 -> auto-20260825 -> auto-20260825b). Cutting a fresh snapshot bought
+  // under an hour each time: the limit is per SOURCE snapshot, and a failed
+  // clone retries every 12-30s, so once you cross the ceiling the retry traffic
+  // alone holds you above it — measured 8 distinct PVCs still hammering one
+  // snapshot with every credit pool already scaled to 0. Clones are 200Gi like
+  // euler's, so start at a/b — the cheapest change that halves the per-snapshot
+  // restore rate. Add c/d if it still throttles under Credit Doctor fan-out.
+  //
+  // Infra side is created by:
+  //   BASE_TEMPLATE=credit-workspace-template BASE_WARMPOOL=credit-warmpool \
+  //   GOLDEN_PVC=credit-golden-pvc SNAP_PREFIX=credit-golden-snap-rot \
+  //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  "credit-workspace-template": [
+    "credit-workspace-template-a",
+    "credit-workspace-template-b",
+  ],
 };
 
 // Per-base round-robin cursor. Process-local (each claw pod has its own), which
