@@ -456,7 +456,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
-  // Per-tab CAC default (default_native unless Superposition overrides); explicit user picks win.
+  // Per-tab CAC default; an explicit user pick (rankProfile) wins.
   const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
     Array<{ id: string; type: MentionType; prefix?: string; name?: string }>

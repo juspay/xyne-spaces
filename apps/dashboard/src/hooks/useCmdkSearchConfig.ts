@@ -6,13 +6,9 @@ export const CMDK_SEARCH_CAC_KEY = 'cmdk_search_config';
 const DEFAULT_RANK_PROFILE = 'default_native';
 
 export interface CmdkSearchCacConfig {
-  /** Legacy ALL-tab override, kept so existing Superposition configs keep working. */
+  /** Legacy ALL-tab override. */
   allDefaultRankProfile: string;
-  /**
-   * Per-tab default rank profile, keyed by TabType value ('all', 'messages', 'tickets',
-   * 'files', 'desk', ...). Missing tabs fall back to allDefaultRankProfile for 'all' and
-   * default_native otherwise.
-   */
+  /** Per-tab default, keyed by TabType value ('messages', 'tickets', 'attachments', 'desk', ...). */
   tabDefaultRankProfiles?: Record<string, string>;
 }
 
@@ -21,14 +17,8 @@ export const DEFAULT_CMDK_SEARCH_CAC_CONFIG: CmdkSearchCacConfig = {
 };
 
 /**
- * Resolves the default rank profile per Cmd+K tab through Superposition CAC.
- *
- * CAC key: `cmdk_search_config`
- * Code default: every tab -> `default_native`.
- * Override example:
- *   { "allDefaultRankProfile": "personalized",
- *     "tabDefaultRankProfiles": { "messages": "personalized", "tickets": "personalized",
- *                                 "files": "personalized", "desk": "personalized" } }
+ * Default rank profile per Cmd+K tab: `default_native` unless the `cmdk_search_config` CAC key
+ * overrides it (allDefaultRankProfile for the ALL tab, tabDefaultRankProfiles per tab).
  */
 export function useCmdkDefaultRankProfiles(): (tab: string) => string {
   const { config } = useCacConfig<CmdkSearchCacConfig>({
@@ -43,11 +33,7 @@ export function useCmdkDefaultRankProfiles(): (tab: string) => string {
   }, [config]);
 }
 
-/**
- * tabDefaultRankProfiles is keyed by TabType value, but SearchFilterBar works in docType
- * vocabulary ('files', 'people') which differs for two tabs. Normalize so one CAC spelling
- * (the TabType one) governs both the search behavior and the filter-chip label.
- */
+// SearchFilterBar works in docType vocabulary, which differs from TabType for two tabs.
 const DOC_TYPE_TO_TAB_KEY: Record<string, string> = {
   files: 'attachments',
   people: 'users',
