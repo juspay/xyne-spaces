@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { AuthProvider } from '@xyne/shared';
+import { AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { UserSessionService } from '../services/userSessionService';
@@ -23,7 +23,6 @@ import {
 } from '@/services/organizationDomainService';
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 interface ResetCodePayload {
@@ -36,6 +35,7 @@ interface RegistrationPendingPayload {
   passwordHash: string;
   name: string;
   workspaceId?: string;
+  invitationId?: string;
 }
 
 const LOGIN_MAX_FAILED_ATTEMPTS = 5;
@@ -60,17 +60,8 @@ export class EmailAuthController {
     this.userService = new UserService();
   }
 
-  private clearAuthCookies(req: Request, res: Response): void {
-    res.clearCookie('google_access_token', { path: '/' });
-    res.clearCookie('user_session_id', { path: '/' });
-
-    for (const cookieName of Object.keys(req.cookies || {})) {
-      if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
-        res.clearCookie(cookieName, { path: '/' });
-      }
-    }
-
-    res.clearCookie('xyne_last_workspace', { path: '/' });
+  private getPreAcceptanceOrgRole(role: string): OrgRole {
+    return role === WorkspaceRole.GUEST ? OrgRole.GUEST : OrgRole.COMMUNITY_MEMBER;
   }
 
   /**
@@ -125,7 +116,6 @@ export class EmailAuthController {
 
       if (!orgMember || orgMember.leftAt) {
         // Keep this response identical to the wrong-password response below.
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -134,7 +124,6 @@ export class EmailAuthController {
       }
 
       if (!orgMember.passwordHash) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -164,7 +153,6 @@ export class EmailAuthController {
           return;
         }
 
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -450,12 +438,12 @@ export class EmailAuthController {
 
       res.cookie('google_access_token', jwtToken, {
         ...cookieBase,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
       });
 
       res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
         ...cookieBase,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       res.cookie('user_session_id', session.id, {
@@ -512,7 +500,6 @@ export class EmailAuthController {
     try {
       const userId = req.user?.id;
       if (!userId) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({ error: 'Authentication required' });
         return;
       }
@@ -790,6 +777,9 @@ export class EmailAuthController {
     try {
       const { email, hashedPassword, name } = req.body;
       const workspaceId: string | undefined = req.body.workspaceId;
+      const invitationId: string | undefined = typeof req.body.invitationId === 'string'
+        ? req.body.invitationId.trim()
+        : undefined;
 
       if (!email || !hashedPassword || !name) {
         res.status(400).json({
@@ -828,9 +818,34 @@ export class EmailAuthController {
         return;
       }
 
-      // If workspaceId is provided, verify the workspace exists and is active
+      // If invitationId is provided, this registration is only for accepting
+      // that existing workspace invitation. Do not let it fall through to the
+      // normal create-org onboarding path after verification.
       let workspaceName: string | null = null;
-      if (workspaceId) {
+      let invitationWorkspaceId: string | null = null;
+      if (invitationId) {
+        const invitation = await this.prisma.invitation.findFirst({
+          where: {
+            invitationId,
+            email: normalizedEmail,
+            acceptedAt: null,
+            expiredAt: { gt: new Date() },
+          },
+          include: {
+            workspace: {
+              select: { id: true, name: true, status: true },
+            },
+          },
+        });
+
+        if (!invitation || !invitation.workspace || invitation.workspace.status !== 'ACTIVE') {
+          res.status(400).json({ error: 'Invalid or expired invitation' });
+          return;
+        }
+
+        workspaceName = invitation.workspace.name;
+        invitationWorkspaceId = invitation.workspace.id;
+      } else if (workspaceId) {
         const workspace = await this.prisma.workspace.findUnique({
           where: { id: workspaceId },
           select: { id: true, name: true, status: true },
@@ -881,7 +896,12 @@ export class EmailAuthController {
         email: normalizedEmail,
         passwordHash,
         name: trimmedName,
-        ...(workspaceId ? { workspaceId } : {}),
+        ...(invitationWorkspaceId
+          ? { workspaceId: invitationWorkspaceId }
+          : workspaceId
+            ? { workspaceId }
+            : {}),
+        ...(invitationId ? { invitationId } : {}),
       };
 
       await Promise.all([
@@ -996,7 +1016,7 @@ export class EmailAuthController {
       }
 
       // Code verified — retrieve pending data
-      const { passwordHash, name, workspaceId } = payload;
+      const { passwordHash, name, workspaceId, invitationId } = payload;
 
       const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
       if (existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL) {
@@ -1014,7 +1034,31 @@ export class EmailAuthController {
       // - If neither, don't create OrgMember yet — defer to create-org flow
       let orgId: string | null = null;
 
-      if (workspaceId) {
+      let invitationOrgRole: OrgRole | null = null;
+
+      if (invitationId) {
+        const invitation = await this.prisma.invitation.findFirst({
+          where: {
+            invitationId,
+            email: normalizedEmail,
+            acceptedAt: null,
+            expiredAt: { gt: new Date() },
+          },
+          include: {
+            workspace: {
+              select: { orgId: true, status: true },
+            },
+          },
+        });
+
+        if (!invitation || !invitation.workspace || invitation.workspace.status !== 'ACTIVE') {
+          res.status(400).json({ error: 'Invalid or expired invitation' });
+          return;
+        }
+
+        orgId = invitation.orgId ?? invitation.workspace.orgId;
+        invitationOrgRole = this.getPreAcceptanceOrgRole(invitation.role);
+      } else if (workspaceId) {
         const workspace = await this.prisma.workspace.findUnique({
           where: { id: workspaceId },
           select: { orgId: true, status: true },
@@ -1038,22 +1082,26 @@ export class EmailAuthController {
       // pick it up when creating the OrgMember.
       const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: normalizedEmail },
-        select: { memberId: true, orgId: true },
+        select: { memberId: true, orgId: true, role: true },
       });
 
       if (existingOrgMember) {
         if (orgId && existingOrgMember.orgId !== orgId) {
-          res.status(409).json({
-            error: 'Organization conflict',
-            message: 'This email is already associated with a different organization.',
-          });
-          return;
+          if (existingOrgMember.role !== OrgRole.COMMUNITY_MEMBER) {
+            res.status(409).json({
+              error: 'Organization conflict',
+              message: 'This email is already associated with a different organization.',
+            });
+            return;
+          }
         }
         await this.prisma.orgMember.update({
           where: { email: normalizedEmail },
           data: {
             passwordHash,
             leftAt: null,
+            ...(orgId && existingOrgMember.orgId !== orgId ? { orgId } : {}),
+            ...(invitationOrgRole ? { role: invitationOrgRole } : {}),
           },
         });
       } else if (orgId) {
@@ -1061,7 +1109,7 @@ export class EmailAuthController {
           data: {
             orgId,
             email: normalizedEmail,
-            role: 'COMMUNITY_MEMBER',
+            role: invitationOrgRole ?? OrgRole.COMMUNITY_MEMBER,
             passwordHash,
           },
         });
@@ -1126,6 +1174,7 @@ export class EmailAuthController {
       if (workspaceId) {
         res.status(200).json({
           success: true,
+          ...(invitationId ? { invitationPending: true, invitationId } : {}),
           workspaces: [],
           pendingUserData: { email: normalizedEmail, name: userName },
           userExistsButRemoved: false,

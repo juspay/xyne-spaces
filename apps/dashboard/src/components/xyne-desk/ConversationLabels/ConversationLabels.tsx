@@ -14,6 +14,7 @@ export type ConversationLabelSlot = 'chips' | 'picker';
 interface ConversationLabelsProps {
   conversationId: string;
   channelId: string;
+  isMember: boolean;
   slot: ConversationLabelSlot;
   appliedMappings: ReadonlyArray<{
     id: string;
@@ -50,6 +51,7 @@ const colorForName = (name: string): string => {
 export const ConversationLabels = ({
   conversationId,
   channelId,
+  isMember,
   slot,
   appliedMappings,
 }: ConversationLabelsProps): JSX.Element | null => {
@@ -58,9 +60,10 @@ export const ConversationLabels = ({
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [catalog] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
-    enabled: !!channelId && pickerOpen,
-  });
+  const [catalog] = useCachedQuery(
+    queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
+    { enabled: !!channelId && pickerOpen },
+  );
 
   const appliedNames = useMemo(
     () => new Set(appliedMappings.map(m => m.labelName.toLowerCase())),

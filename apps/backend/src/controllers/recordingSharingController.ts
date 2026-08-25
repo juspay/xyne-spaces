@@ -20,6 +20,8 @@ const RecordingSharingCommandSchema = z.discriminatedUnion('action', [
     access: z
       .enum([EntityUserAccess.VIEW, EntityUserAccess.EDIT, EntityUserAccess.ADMIN])
       .optional(),
+    // Optional rich-text share message.
+    messageContent: z.string().trim().min(1).max(10000).optional(),
   }),
   z.object({
     action: z.literal('revoke'),
@@ -55,6 +57,16 @@ export class RecordingSharingController {
     }
 
     try {
+      logger.info('[RecordingSharingController] Recording sharing action received', {
+        callId,
+        userId: user.id,
+        workspaceId: user.workspaceId,
+        action: parsed.data.action,
+        targetCount: parsed.data.action === 'grant' || parsed.data.action === 'revoke'
+          ? parsed.data.targets.length
+          : undefined,
+      });
+
       const result = await recordingSharingService.execute(callId, {
         userId: user.id,
         workspaceId: user.workspaceId,

@@ -1,9 +1,11 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
+import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -14,6 +16,39 @@ import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("runner");
+
+/**
+ * Tolerant JSON Schema validator for MCP tool output schemas.
+ *
+ * Since SDK ~1.28, Client.listTools() eagerly compiles an Ajv validator for
+ * EVERY tool's outputSchema. A single non-self-contained schema — e.g. Google
+ * Stitch's `$ref: "#/$defs/ScreenInstance"` with the $defs block living
+ * outside the outputSchema document — makes Ajv throw MissingRefError
+ * ("can't resolve reference ... from id #"), which fails the whole listTools
+ * and bricks the entire connector, not just the one bad tool.
+ *
+ * One malformed third-party schema must degrade to "that tool's output isn't
+ * validated", never to "the connector doesn't work". Compile failures are
+ * logged once and replaced with a pass-through validator.
+ */
+const strictSchemaValidator = new AjvJsonSchemaValidator();
+const warnedSchemaCompileFailures = new Set<string>();
+const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
+  getValidator: (schema) => {
+    try {
+      return strictSchemaValidator.getValidator(schema);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!warnedSchemaCompileFailures.has(message)) {
+        warnedSchemaCompileFailures.add(message);
+        log.warn(
+          `[mcp/runner] tool outputSchema failed to compile — output validation disabled for this tool: ${message}`,
+        );
+      }
+      return (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined });
+    }
+  },
+};
 
 /**
  * Resolve the app token for an agent's app user. App users have no Spaces login
@@ -110,7 +145,18 @@ const SESSION_SWEEP_INTERVAL_MS = Number(process.env["MCP_SESSION_SWEEP_INTERVAL
  */
 const PER_AGENT_SERVER_TYPES = new Set<string>(["xyne-spaces-app-tools"]);
 
-function sessionKey(userId: string, serverType: string, agentSlug?: string): string {
+function sessionKey(
+  userId: string,
+  serverType: string,
+  agentSlug?: string,
+  credentials?: Record<string, unknown>,
+): string {
+  // Slack credentials can be supplied by the workspace that dispatched a
+  // surface run. Keep each team's env-bound child process isolated.
+  const slackTeamId = credentials?.["teamId"];
+  if (serverType === "slack" && typeof slackTeamId === "string" && slackTeamId) {
+    return `${userId}:${serverType}:team:${slackTeamId}`;
+  }
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
     return `${userId}:${serverType}:${agentSlug}`;
   }
@@ -143,7 +189,7 @@ async function getOrCreateSession(
   credentials: Record<string, unknown>,
   agentSlug?: string,
 ): Promise<Client> {
-  const key = sessionKey(userId, serverType, agentSlug);
+  const key = sessionKey(userId, serverType, agentSlug, credentials);
 
   // For xyne-spaces: ALWAYS read fresh creds from the Spaces DB FIRST, before
   // any cache lookup. The cached child process has its token baked into env
@@ -192,6 +238,8 @@ async function getOrCreateSession(
       ? (credentials["token"] as string)
       : typeof credentials["accessToken"] === "string"
         ? (credentials["accessToken"] as string)
+        : typeof credentials["botToken"] === "string"
+          ? (credentials["botToken"] as string)
         : typeof credentials["apiKey"] === "string"
           ? (credentials["apiKey"] as string)
           : undefined;
@@ -285,7 +333,10 @@ async function spawnSession(
     });
   }
 
-  const client = new Client({ name: "xyne-claw-auth", version: "0.1.0" });
+  const client = new Client(
+    { name: "xyne-claw-auth", version: "0.1.0" },
+    { jsonSchemaValidator: tolerantSchemaValidator },
+  );
   try {
     await client.connect(transport as Parameters<typeof client.connect>[0]);
   } catch (err) {
@@ -373,18 +424,6 @@ async function shouldForwardFiles(serverType: string): Promise<boolean> {
   return val;
 }
 
-function extForMime(mime: string): string {
-  const m = mime.toLowerCase();
-  if (m.includes("pdf")) return "pdf";
-  if (m.includes("png")) return "png";
-  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
-  if (m.includes("csv")) return "csv";
-  if (m.includes("spreadsheet") || m.includes("excel") || m.includes("xlsx")) return "xlsx";
-  if (m.includes("json")) return "json";
-  if (m.includes("zip")) return "zip";
-  return "bin";
-}
-
 /**
  * Many file-fetching MCP tools (e.g. bitbucket-mcp-server's get_file_content)
  * return the fetched file as a STRING field nested inside a JSON envelope —
@@ -423,7 +462,8 @@ function unwrapFileContentEnvelope(text: string): string {
 
 /**
  * Pull binary files out of an MCP result's content array:
- *   • EmbeddedResource ({type:"resource", resource:{blob, mimeType}}) → file
+ *   • EmbeddedResource ({type:"resource", resource:{blob, mimeType, uri}}) → file
+ *     (download name is taken from the resource `uri`; see fileNameFromResource)
  *   • ImageContent / AudioContent ({type:"image"|"audio", data, mimeType}) → file
  * Returns base64 attachments; ignores text items (incl. base64 text fallbacks).
  */
@@ -439,7 +479,7 @@ function extractAttachments(
       const res = c["resource"] as Record<string, unknown>;
       if (typeof res["blob"] === "string") {
         const mime = typeof res["mimeType"] === "string" ? res["mimeType"] : "application/octet-stream";
-        out.push({ fileName: `${tool}-${++idx}.${extForMime(mime)}`, mimeType: mime, data: res["blob"] });
+        out.push({ fileName: fileNameFromResource(res["uri"], mime, tool, ++idx), mimeType: mime, data: res["blob"] });
       }
     } else if ((type === "image" || type === "audio") && typeof c["data"] === "string") {
       const mime = typeof c["mimeType"] === "string"
@@ -531,6 +571,18 @@ export async function callTool(
 
 export async function evictSession(userId: string, serverType: string, agentSlug?: string): Promise<void> {
   const key = sessionKey(userId, serverType, agentSlug);
+  if (serverType === "slack") {
+    const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:team:`));
+    for (const candidate of keys) {
+      const scopedSession = sessions.get(candidate);
+      if (!scopedSession) continue;
+      log.info(`[mcp/runner] evicting cached session for ${candidate}`);
+      sessions.delete(candidate);
+      await scopedSession.transport.close().catch(() => {});
+    }
+    if (keys.length === 0) log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
+    return;
+  }
   const session = sessions.get(key);
   if (session) {
     log.info(`[mcp/runner] evicting cached session for ${key}`);

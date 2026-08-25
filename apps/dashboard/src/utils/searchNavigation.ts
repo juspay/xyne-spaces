@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 /**
  * Search Navigation Utilities
  *
@@ -79,7 +80,11 @@ export const navigateToSearchResult = async (
       break;
 
     default:
-      console.warn('[SEARCH-NAVIGATION] Unknown result type:', result.type);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[SEARCH-NAVIGATION] Unknown result type:'),
+        context: [result.type],
+      });
   }
 };
 
@@ -97,7 +102,10 @@ export const navigateToUser = async (
   channelData?: Channel[],
 ): Promise<void> => {
   if (!channelData) {
-    console.warn('[SEARCH-NAVIGATION] No channel data available for user navigation');
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('[SEARCH-NAVIGATION] No channel data available for user navigation'),
+    });
     return;
   }
 
@@ -121,7 +129,11 @@ export const navigateToUser = async (
       });
       void navigate(`/chat/dir/${dmResponse.id}`);
     } catch (error) {
-      console.error('[SEARCH-NAVIGATION] Failed to create DM:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[SEARCH-NAVIGATION] Failed to create DM:'),
+        error: error,
+      });
       throw new Error('Failed to start conversation with user');
     }
   }
@@ -264,7 +276,12 @@ export const navigateToAttachment = (
       },
     });
   } else {
-    console.warn('[SEARCH-NAVIGATION] Cannot navigate to attachment: missing channel information');
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String(
+        '[SEARCH-NAVIGATION] Cannot navigate to attachment: missing channel information',
+      ),
+    });
   }
 };
 
@@ -537,7 +554,11 @@ export const openSearchResult = async (
           panelUrl = withTheme.toString();
         }
       } catch (error) {
-        console.warn('[openSearchResult] failed to attach theme param:', error);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[openSearchResult] failed to attach theme param:'),
+          context: [error],
+        });
       }
     }
 
@@ -549,7 +570,11 @@ export const openSearchResult = async (
       try {
         await window.electronAPI?.syncXyneCookiesToBrowserPanel?.(panelUrl);
       } catch (error) {
-        console.warn('[openSearchResult] cookie sync failed:', error);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[openSearchResult] cookie sync failed:'),
+          context: [error],
+        });
       }
     }
 
@@ -589,9 +614,12 @@ export const navigateToCollection = (
 
   // Navigate to knowledge base file viewer
   if (!projectId || !channelId || !collectionId || !docId) {
-    console.warn(
-      '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, channelId, collectionId, or docId',
-    );
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String(
+        '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, channelId, collectionId, or docId',
+      ),
+    });
     return;
   }
 

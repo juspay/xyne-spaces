@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
@@ -35,7 +36,7 @@ import {
   isOneToOneDMChannel,
   getDMParticipantIdsToFetch,
   parseDMParticipantIds,
-  getDMSearchableNames,
+  getDMNames,
   formatChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -44,6 +45,7 @@ import Badge from '../../ui/Badge';
 import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
+  TAB_TO_DOC_TYPE,
   MentionType,
   type MentionData,
   ChannelCommandMenuProps,
@@ -67,6 +69,7 @@ import {
 } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
@@ -90,12 +93,8 @@ import {
 } from '../../../services/Analytics/mixpanelService';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-import {
-  useSearchMetrics,
-  filterChannelsBySearchableNames,
-  rankUsers,
-  CMDK_USER_LIMIT,
-} from '../../../hooks/useSearchMetrics';
+import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
+import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
@@ -202,6 +201,27 @@ const DEFAULT_ENABLED_TABS: TabType[] = [
   TabType.TICKETS,
   TabType.DESK,
 ];
+
+// A backend result group belongs to the active tab (ALL shows all; Files shows every
+// media kind). Prevents stale cross-tab groups from flashing during the search debounce.
+const backendGroupBelongsToTab = (groupKey: string, tab: TabType): boolean => {
+  if (tab === TabType.ALL) return true;
+  if (tab === TabType.MESSAGES) return groupKey === 'conversation';
+  if (tab === TabType.TICKETS) return groupKey === 'ticket';
+  if (tab === TabType.ATTACHMENTS) {
+    return (
+      groupKey === 'attachment' ||
+      groupKey === 'canvas' ||
+      groupKey === 'transcript' ||
+      groupKey === 'recording'
+    );
+  }
+  if (tab === TabType.CANVAS) return groupKey === 'canvas';
+  if (tab === TabType.CALL) return groupKey === 'transcript';
+  if (tab === TabType.RECORDING) return groupKey === 'recording';
+  if (tab === TabType.DESK) return groupKey === 'desk';
+  return false;
+};
 
 // Faint format hints for filters that open NO typeahead popup, so the caret would
 // otherwise sit after a bare colon with no cue. Shown only while the value is empty
@@ -418,14 +438,17 @@ const ChannelCommandMenu = ({
       channel: Channel;
       category: ChannelCategory;
       searchableNames?: string[];
+      searchNames?: string[];
     }> = [];
 
     // Add starred channels
     starred.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
@@ -440,10 +463,12 @@ const ChannelCommandMenu = ({
 
     // Add direct messages
     directMessages.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
@@ -565,10 +590,17 @@ const ChannelCommandMenu = ({
 
   // Shared Cmd+K user rank for the plain-search USERS section. Hoisted so the
   // strong-match check below and the rendered section use the exact same order.
-  const rankedLocalUsers = useMemo(
-    () => rankUsers(filteredLocalUsers, cleanedSearchText, dmContactRecency),
-    [filteredLocalUsers, cleanedSearchText, dmContactRecency],
-  );
+  // Uses rankUsersWithMfu (not plain rankUsers) because filteredLocalUsers is the
+  // 25-capped `useUserSearch` window: a frequently-used person who matches the query
+  // but ranks past the cap would be sliced out before ranking. rankUsersWithMfu
+  // recovers those query-matching weighted users from the full `allUsers` list.
+  // Re-render once when affinity weights finish loading so the empty People-tab ranking re-reads
+  // them (rankUsersWithMfu reads getUserWeight imperatively; same fix as GlobalCommandMenu browse).
+  const affinityVersion = useAffinityCallback();
+  const rankedLocalUsers = useMemo(() => {
+    void affinityVersion;
+    return rankUsersWithMfu(filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency);
+  }, [filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency, affinityVersion]);
 
   // Slack-style strong user match: when the top-ranked user's full name
   // prefix-matches the query, the USERS section renders ABOVE the "Show
@@ -698,6 +730,7 @@ const ChannelCommandMenu = ({
     resetSearchState,
     navigate: path => void navigate(path),
     onCommandClick: handleSlashCommandClick,
+    dmContactRecency,
   });
   // The parent owns the input box, ghost, keydown handler, mention guards and the compose/confirm
   // overlays, so it reads these fields directly. Everything the palette needs is handed to it as the
@@ -1067,8 +1100,12 @@ const ChannelCommandMenu = ({
     }
 
     onOpenChange(false);
+    // Land on the tab the user was already filtering by — Messages stays on Messages,
+    // Files on Files, and so on. Tabs with no results-page docType (and plain All) fall
+    // through to undefined, which leaves the page on its own default.
+    const docType = TAB_TO_DOC_TYPE[activeTab as keyof typeof TAB_TO_DOC_TYPE];
     void navigate(
-      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, docType).toString()}`,
     );
   };
 
@@ -1437,18 +1474,24 @@ const ChannelCommandMenu = ({
 
     if (userTrigger === 'to:') return [];
     if (mentionSearchType !== MentionType.USER && channelTrigger !== 'in:') return [];
-    return rankUsers(mentionUsers, mentionSearchQuery, dmContactRecency).map(user => ({
-      id: user.id,
-      name: user.name,
-      status: user.status,
-      ...(user.email && { email: user.email }),
-    }));
+    // `useUserSearch` slices to CMDK_USER_LIMIT *before* ranking, so a frequently-used
+    // person can be dropped from `mentionUsers` entirely. `rankUsersWithMfu` recovers
+    // MFU-weighted matches from the full `allUsers` list so they can float back up.
+    return rankUsersWithMfu(mentionUsers, allUsers, mentionSearchQuery, dmContactRecency).map(
+      user => ({
+        id: user.id,
+        name: user.name,
+        status: user.status,
+        ...(user.email && { email: user.email }),
+      }),
+    );
   }, [
     isDeskPeopleTrigger,
     userTrigger,
     deskContacts,
     deskPeople,
     mentionUsers,
+    allUsers,
     mentionSearchQuery,
     mentionSearchType,
     channelTrigger,
@@ -1902,7 +1945,11 @@ const ChannelCommandMenu = ({
       }
       onOpenChange(false);
     } catch (err) {
-      console.error('Navigation failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Navigation failed:'),
+        error: err,
+      });
     }
   };
 
@@ -2113,6 +2160,22 @@ const ChannelCommandMenu = ({
     cleanedSearchText,
   ]);
 
+  // Slack-style strong starred match: the Starred section only LEADS (hoists above People/Channels)
+  // when a starred item's displayed name prefix-matches the query. Without this, ANY query hoisted
+  // Starred, so a weak fuzzy hit on a starred DM (e.g. "venkatesan" matching a starred
+  // "…Venkattaramanujam" DM shown as "Mamtha") jumped above the exact "Venkatesan S" user. Checks
+  // every matched starred item (not just the top, which affinity may hold), mirroring the prefix
+  // rule hasStrongUserMatch/hasStrongChannelMatch use.
+  const hasStrongStarredMatch = useMemo(() => {
+    if (hasFromOrInFilter) return false;
+    const q = cleanedSearchText.toLowerCase().trim();
+    if (!q) return false;
+    const starredMatches = groupedChannels[ChannelCategory.STARRED] ?? [];
+    return starredMatches.some(item =>
+      (item.searchableNames ?? []).some(name => name.toLowerCase().startsWith(q)),
+    );
+  }, [hasFromOrInFilter, groupedChannels, cleanedSearchText]);
+
   const iconSize = 14;
 
   const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
@@ -2203,7 +2266,12 @@ const ChannelCommandMenu = ({
   // log the raw backend error to the console so devs can still triage from
   // DevTools without exposing implementation details in the UI.
   useEffect(() => {
-    if (error) console.warn('[Cmd+K search]', error);
+    if (error)
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[Cmd+K search]'),
+        context: [error],
+      });
   }, [error]);
 
   // Signature of the backend result ORDER, not just count: a re-rank that keeps the same row
@@ -2301,24 +2369,7 @@ const ChannelCommandMenu = ({
             </div>
           )
         : ['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
-            .filter(groupKey => {
-              if (activeTab === TabType.ALL) return true;
-              if (activeTab === TabType.MESSAGES && groupKey === 'conversation') return true;
-              if (activeTab === TabType.TICKETS && groupKey === 'ticket') return true;
-              if (
-                activeTab === TabType.ATTACHMENTS &&
-                (groupKey === 'attachment' ||
-                  groupKey === 'canvas' ||
-                  groupKey === 'transcript' ||
-                  groupKey === 'recording')
-              )
-                return true;
-              if (activeTab === TabType.CANVAS && groupKey === 'canvas') return true;
-              if (activeTab === TabType.CALL && groupKey === 'transcript') return true;
-              if (activeTab === TabType.RECORDING && groupKey === 'recording') return true;
-              if (activeTab === TabType.DESK && groupKey === 'desk') return true;
-              return false;
-            })
+            .filter(groupKey => backendGroupBelongsToTab(groupKey, activeTab))
             .map(groupKey => {
               const items = groupedBackendResults[groupKey];
               if (!items || items.length === 0) return null;
@@ -2396,6 +2447,7 @@ const ChannelCommandMenu = ({
   const renderDefaultBackendResults = () => (
     <>
       {Object.entries(groupedBackendResults)
+        .filter(([type]) => backendGroupBelongsToTab(type, activeTab))
         .sort(([typeA], [typeB]) => {
           if (hasFromOrInFilter) {
             // When from:/in: filter is active, prioritize Messages/Tickets before Users
@@ -2809,7 +2861,7 @@ const ChannelCommandMenu = ({
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
   const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
-  const hoistStarred = canHoist && !hasFromOrInFilter && searchText.trim().length > 0;
+  const hoistStarred = canHoist && hasStrongStarredMatch;
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
 
@@ -4443,9 +4495,13 @@ const ChannelCommandMenu = ({
                         ) : (
                           <>
                             {renderBrowseLocalChannels()}
-                            {activeTab !== TabType.CHANNELS &&
-                              backendResults.length > 0 &&
-                              renderDefaultBackendResults()}
+                            {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
+                                search branch, instead of the raw, unranked backend user list. */}
+                            {activeTab === TabType.USERS
+                              ? renderSearchUsersSection()
+                              : activeTab !== TabType.CHANNELS &&
+                                backendResults.length > 0 &&
+                                renderDefaultBackendResults()}
                           </>
                         )}
                       </>
@@ -4658,7 +4714,11 @@ const ChannelCommandMenu = ({
 
             toast.success(`${ticketsToMerge.length + 1} tickets merged successfully`);
           } catch (err) {
-            console.error('Merge failed:', err);
+            logger.error(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_error',
+              message: String('Merge failed:'),
+              error: err,
+            });
             toast.error('Failed to merge tickets. Please try again.');
           }
         }}
@@ -4675,7 +4735,7 @@ const ChannelCommandMenu = ({
         // matches no item so it never marks one selected too — otherwise it latches a result row
         // and a SECOND highlight appears alongside the manually-selected one.
         value='__none__'
-        onValueChange={() => {}}
+        onValueChange={() => undefined}
         data-nav-active={hasNavigated ? 'true' : undefined}
         data-mention-active={mentionSearchType ? 'true' : undefined}
         shouldFilter={false}
@@ -4753,7 +4813,7 @@ const ChannelCommandMenu = ({
               // See inline <Command> above: pin cmdk's value to a sentinel ('__none__') that matches no
               // item so it never adds a second highlighted row next to the imperatively-managed one.
               value='__none__'
-              onValueChange={() => {}}
+              onValueChange={() => undefined}
               data-nav-active={hasNavigated ? 'true' : undefined}
               data-mention-active={mentionSearchType ? 'true' : undefined}
               shouldFilter={false}

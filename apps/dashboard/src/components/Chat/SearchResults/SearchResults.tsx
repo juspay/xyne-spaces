@@ -1,5 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from '@xyne/icons';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
@@ -51,7 +52,7 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
   formatChannelLabel,
-  getDMSearchableNames,
+  getDMNames,
   isDMChannel,
   isGroupDMChannel,
   groupChannelsByScope,
@@ -174,6 +175,7 @@ function buildSelectedMentions(
 
 const SearchResults = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const [selectedPanel, setSelectedPanel] = useState<SidePanelState>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -266,23 +268,28 @@ const SearchResults = (): ReactElement => {
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
+    searchNames?: string[];
   }> => {
     const result = [];
     for (const ch of starredChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     for (const ch of regularChannels) {
       result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
     }
     for (const ch of dmChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     return result;
@@ -769,8 +776,24 @@ const SearchResults = (): ReactElement => {
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
       <div className='shrink-0 px-4'>
-        <div className='pt-4'>
-          <SearchQueryInput query={query} onSubmit={handleQuerySubmit} isSearching={isLoading} />
+        <div className='pt-4 flex items-center gap-2'>
+          {/* This page is only ever arrived at from somewhere — the cmd+K palette, or a
+              link out of it — and it is the one screen that renders no AppNavigator, so it
+              had no in-app way back at all. Going back lands on the palette's own history
+              entry, which reopens cmd+K with the search still in it. */}
+          <button
+            type='button'
+            aria-label='Back'
+            onClick={() => void navigate(-1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_BACK'
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div className='flex-1 min-w-0'>
+            <SearchQueryInput query={query} onSubmit={handleQuerySubmit} isSearching={isLoading} />
+          </div>
         </div>
         <div className='mt-3'>
           <SearchFilterBar filters={filters} onFiltersChange={handleFiltersChange} />

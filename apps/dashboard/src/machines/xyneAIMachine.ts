@@ -1,5 +1,7 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
+import type { CanvasRole } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 // Available XyneAI states
 export type XyneAIState = 'closed' | 'open';
@@ -69,7 +71,11 @@ export interface CanvasSelectionContext {
  * context that it sends to the Claw API.
  */
 export interface AskAIInitialContextSelections {
-  canvases: Array<{ id: string; title: string; canvasId?: string }>;
+  /** `canvasRole` marks what an auto-attached canvas IS (a recording attaches
+   *  both its AI summary and the user's own notes) so the agent can weigh them
+   *  differently. Must stay declared here or the role is dropped in transit. */
+  canvases: Array<{ id: string; title: string; canvasId?: string; canvasRole?: CanvasRole }>;
+  tickets?: Array<{ id: string; title: string; xyneId?: string; status?: string }>;
   recordings: Array<{
     id: string;
     title: string;
@@ -77,6 +83,12 @@ export interface AskAIInitialContextSelections {
     conversationId?: string;
     externalId?: string;
   }>;
+}
+
+export interface XyneAIResearchContext {
+  type: 'product' | 'repository';
+  id: string;
+  name: string;
 }
 
 // Context interface for the XyneAI machine
@@ -115,6 +127,11 @@ export interface XyneAIContext {
   // re-attach the KB collection chip when the user clicks the Ask AI button
   // again from /knowledge-base after manually removing the chip.
   kbOpenNonce: number;
+  // Trusted entity selected by the surface opening the assistant.
+  researchContext: XyneAIResearchContext | null;
+  // Parent-driven message submission (for contextual CTAs such as SDLC actions).
+  initialQuery: string | null;
+  autoSendNonce: number;
 }
 
 // Event types for XyneAI machine
@@ -137,6 +154,8 @@ export type XyneAIEvent =
       kbDocId?: string | null;
       kbDocName?: string | null;
       initialContextSelections?: AskAIInitialContextSelections | null;
+      researchContext?: XyneAIResearchContext | null;
+      initialQuery?: string | null;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
@@ -283,7 +302,11 @@ const saveContextToIndexedDB = async (context: Partial<XyneAIContext>): Promise<
     const store = transaction.objectStore(STORE_NAME);
     store.put(context, 'xyneai-context');
   } catch (error) {
-    console.error('Failed to save XyneAI context to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save XyneAI context to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -300,7 +323,11 @@ export const loadContextFromIndexedDB = async (): Promise<Partial<XyneAIContext>
         reject(new Error(request.error?.message || 'Failed to get context from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load XyneAI context from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -313,7 +340,11 @@ const clearContextFromIndexedDB = async (): Promise<void> => {
     const store = transaction.objectStore(STORE_NAME);
     store.delete('xyneai-context');
   } catch (error) {
-    console.error('Failed to clear XyneAI context from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear XyneAI context from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -345,7 +376,11 @@ export const saveMermaidDiagram = async (
 
     store.put(mermaidData, messageId);
   } catch (error) {
-    console.error('Failed to save mermaid diagram to IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to save mermaid diagram to IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -363,7 +398,11 @@ export const loadMermaidDiagram = async (messageId: string): Promise<MermaidDiag
         reject(new Error(request.error?.message || 'Failed to get mermaid diagram from IndexedDB'));
     });
   } catch (error) {
-    console.error('Failed to load mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to load mermaid diagram from IndexedDB:'),
+      error: error,
+    });
     return null;
   }
 };
@@ -376,7 +415,11 @@ export const deleteMermaidDiagram = async (messageId: string): Promise<void> => 
     const store = transaction.objectStore(MERMAID_STORE_NAME);
     store.delete(messageId);
   } catch (error) {
-    console.error('Failed to delete mermaid diagram from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to delete mermaid diagram from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -401,7 +444,11 @@ export const clearOldMermaidDiagrams = async (): Promise<void> => {
       }
     };
   } catch (error) {
-    console.error('Failed to clear old mermaid diagrams from IndexedDB:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to clear old mermaid diagrams from IndexedDB:'),
+      error: error,
+    });
   }
 };
 
@@ -473,6 +520,11 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId ?? null,
           kbDocId: event.kbDocId ?? null,
           kbDocName: event.kbDocName ?? null,
+          researchContext: event.researchContext ?? null,
+          initialQuery: event.initialQuery?.trim() || null,
+          autoSendNonce: event.initialQuery?.trim()
+            ? context.autoSendNonce + 1
+            : context.autoSendNonce,
           // Bump the nonce on every KB-scoped OPEN (collection OR file) so the
           // sidebar re-attaches the collection chip and/or file scope even if
           // the user previously removed them.
@@ -548,6 +600,11 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId !== undefined ? event.kbChannelId : context.kbChannelId,
           kbDocId: event.kbDocId !== undefined ? event.kbDocId : context.kbDocId,
           kbDocName: event.kbDocName !== undefined ? event.kbDocName : context.kbDocName,
+          researchContext: event.researchContext ?? null,
+          initialQuery: event.initialQuery?.trim() || null,
+          autoSendNonce: event.initialQuery?.trim()
+            ? context.autoSendNonce + 1
+            : context.autoSendNonce,
           // Re-bump on every KB-scoped OPEN (collection OR file).
           kbOpenNonce:
             event.kbCollectionId || event.kbDocId ? context.kbOpenNonce + 1 : context.kbOpenNonce,
@@ -600,6 +657,9 @@ export const xyneAIMachine = setup({
         kbDocId: null,
         kbDocName: null,
         kbOpenNonce: context.kbOpenNonce,
+        researchContext: null,
+        initialQuery: null,
+        autoSendNonce: context.autoSendNonce,
       };
 
       // Clear from IndexedDB when closing
@@ -745,6 +805,9 @@ export const xyneAIMachine = setup({
     kbDocId: null,
     kbDocName: null,
     kbOpenNonce: 0,
+    researchContext: null,
+    initialQuery: null,
+    autoSendNonce: 0,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',
@@ -817,7 +880,8 @@ export const xyneAIMachine = setup({
 const initializeActor = async (): Promise<void> => {
   try {
     const persistedContext = await loadContextFromIndexedDB();
-    if (persistedContext && persistedContext.xyneAIState === 'open') {
+    const isSdlcRoute = window.location.pathname.split('/').includes('sdlc');
+    if (persistedContext && persistedContext.xyneAIState === 'open' && !isSdlcRoute) {
       // Restore the open state with persisted context
       // Only include defined values in the send event
       xyneAIActor.send({
@@ -846,7 +910,11 @@ const initializeActor = async (): Promise<void> => {
     // Clean up old mermaid diagrams on app startup
     void clearOldMermaidDiagrams();
   } catch (error) {
-    console.error('Failed to initialize XyneAI actor with persisted state:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to initialize XyneAI actor with persisted state:'),
+      error: error,
+    });
   }
 };
 

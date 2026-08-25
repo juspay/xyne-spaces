@@ -1,5 +1,6 @@
 import Fuse from 'fuse.js';
 import { UserStatus } from '../zero/schema.js';
+import { matchesAllTokens } from './tokenMatch.js';
 
 interface Searchable {
   name: string;
@@ -7,12 +8,17 @@ interface Searchable {
 }
 
 interface UserLike extends Searchable {
+  id: string;
   email: string;
   displayName?: string | null;
   status?: string | null;
 }
 
 const isDeactivated = (user: UserLike): boolean => user.status === UserStatus.INACTIVE;
+
+// Score for token-AND recall matches: below prefix/substring/email boosts (all negative),
+// at/above weak fuzzy matches. Mirrors the score-0 convention used for channel token matches.
+const TOKEN_MATCH_SCORE = 0;
 
 export function searchUsers<T extends UserLike>(
   users: T[],
@@ -66,6 +72,22 @@ export function searchUsers<T extends UserLike>(
       score: finalScore,
     };
   });
+
+  // Fuse bitap matches one contiguous fuzzy run, so reordered or gapped multi-word queries
+  // ('prasad siva', 'hars patil') never match. Add a token-AND recall pass: every query token
+  // must be a substring of the name, in any order. Dedup by id — NOT name — because Fuse also
+  // keys on email, so two distinct people can share a name; name-dedup would drop one.
+  const tokens = q.split(/[\s,]+/).filter(Boolean);
+  if (tokens.length > 1) {
+    const seenIds = new Set(rescored.map(r => r.item.id));
+    for (const user of users) {
+      if (seenIds.has(user.id)) continue;
+      const haystack = `${user.displayName ?? ''} ${user.name}`;
+      if (matchesAllTokens(haystack, query)) {
+        rescored.push({ item: user, score: TOKEN_MATCH_SCORE });
+      }
+    }
+  }
 
   return rescored
     .sort((a, b) => {

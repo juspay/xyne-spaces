@@ -9,7 +9,7 @@ import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import {
-  AUTOMATION_WORKFLOW_TYPE,
+  isExecutableAutomationWorkflowType,
   mayDrainInFlight,
   parseAutomationConfig,
   readAutomationMeta,
@@ -18,6 +18,9 @@ import { getAutomationPauseState } from '@/database/repositories/workflowExecuti
 import { computeScheduleRunAt } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
+
+const EXECUTION_FETCH_MAX_RETRIES = 3;
+const EXECUTION_FETCH_RETRY_BASE_DELAY_MS = 200;
 
 class AutomationWorker {
   private isInitialized = false;
@@ -50,8 +53,17 @@ class AutomationWorker {
     const { executionId } = job.data;
     logger.info(`[AUTOMATION-WORKER] Job ${job.id} starting — execution=${executionId}`);
 
-    const execution = await db.workflowExecution.findUnique({ where: { id: executionId } });
-    if (!execution || execution.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    const fetchExecution = () => db.workflowExecution.findUnique({ where: { id: executionId } });
+    let execution = await fetchExecution();
+    for (let retry = 0; !execution && retry < EXECUTION_FETCH_MAX_RETRIES; retry++) {
+      const delayMs = EXECUTION_FETCH_RETRY_BASE_DELAY_MS * 2 ** retry;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      execution = await fetchExecution();
+      logger.warn(
+        `[AUTOMATION-WORKER-RETRY] execution=${executionId} fetch failed, retrying (${retry + 1})`,
+      );
+    }
+    if (!execution || !isExecutableAutomationWorkflowType(execution.workflowType)) {
       logger.warn(
         `[AUTOMATION-WORKER] execution=${executionId} missing or wrong workflowType — dropping`,
       );
@@ -103,7 +115,7 @@ class AutomationWorker {
     }
 
     const workflow = await repositories.workflows.findById(execution.workflowId);
-    if (!workflow || workflow.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
+    if (!workflow || !isExecutableAutomationWorkflowType(workflow.workflowType)) {
       logger.warn(`[AUTOMATION-WORKER] workflow ${execution.workflowId} missing — dropping`);
       return;
     }

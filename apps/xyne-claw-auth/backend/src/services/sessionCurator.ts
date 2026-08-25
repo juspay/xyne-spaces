@@ -179,7 +179,8 @@ export interface DistillSessionFileArgs {
   agentSlug: string;
   userId: string;
   filename: string;
-  /** Raw uploaded Claude export (Claude Code JSONL or claude.ai JSON). */
+  source?: "claude" | "opencode" | "codex" | (string & {});
+  /** Raw uploaded Claude/OpenCode/Codex export. */
   rawSession: string;
 }
 

@@ -22,6 +22,7 @@ import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper'
 import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendingAuth';
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
+import { setOnboardingCookie } from '@/utils/onboardingCookie';
 
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
@@ -695,13 +696,11 @@ export class MicrosoftAuthController {
           });
         }
 
-        // Set new user cookie for onboarding
-        if (isNewUser) {
-          res.cookie('is_new_user', 'true', {
-            ...cookieOptions,
-            maxAge: 24 * 60 * 60 * 1000, // 24 hours
-          });
-        }
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
 
         // Redirect to frontend with success
         const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
@@ -1079,7 +1078,7 @@ export class MicrosoftAuthController {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
           ...cookieOptions,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         if (sessionId) {
@@ -1089,15 +1088,11 @@ export class MicrosoftAuthController {
           });
         }
 
-        if (isNewUser) {
-          res.cookie('is_new_user', 'true', {
-            httpOnly: false,
-            secure: isProduction,
-            sameSite: 'strict',
-            path: '/',
-            maxAge: 24 * 60 * 60 * 1000,
-          });
-        }
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
 
         const tokenKey = await this.storePendingOAuthTokens(
           refreshToken,
@@ -1212,15 +1207,11 @@ export class MicrosoftAuthController {
         });
       }
 
-      if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: isProduction,
-          sameSite: 'strict',
-          path: '/',
-          maxAge: 24 * 60 * 60 * 1000,
-        });
-      }
+      setOnboardingCookie(res, isNewUser, {
+        secure: isProduction,
+        sameSite: 'strict' as const,
+        maxAge: 24 * 60 * 60 * 1000,
+      });
 
       logger.info(`[${requestId}] Multiple workspaces (${workspaces.length}) detected - returning to selector`);
       res.status(200).json({
@@ -1483,12 +1474,11 @@ export class MicrosoftAuthController {
         });
       }
 
-      if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          ...cookieOptions,
-          maxAge: 24 * 60 * 60 * 1000,
-        });
-      }
+      setOnboardingCookie(res, isNewUser, {
+        secure: isProduction,
+        sameSite: 'lax' as const,
+        maxAge: 24 * 60 * 60 * 1000,
+      });
 
       res.json({
         success: true,

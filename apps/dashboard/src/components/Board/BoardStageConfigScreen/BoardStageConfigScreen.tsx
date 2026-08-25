@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   type ReactElement,
   type RefObject,
@@ -895,7 +896,11 @@ const BoardStageConfigScreen = ({
       applyLoadedTransitions(transitions, stages);
       return true;
     } catch (err) {
-      console.error('Failed to load stage transitions:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to load stage transitions:'),
+        error: err,
+      });
       return false;
     } finally {
       setIsTransitionsLoading(false);
@@ -1399,7 +1404,11 @@ const BoardStageConfigScreen = ({
         setConditionDeleteDialog(null);
       })
       .catch(error => {
-        console.error('Failed to check pending stage requests:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to check pending stage requests:'),
+          error: error,
+        });
         toast.error('Could not check pending approvals', {
           description: 'Please try again before deleting this condition.',
         });
@@ -2168,7 +2177,11 @@ const BoardStageConfigScreen = ({
             onClose();
           }
         } catch (transitionErr) {
-          console.error('Stage transition sync failed:', transitionErr);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Stage transition sync failed:'),
+            error: transitionErr,
+          });
           const errMsg =
             transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
           toast.warning('Board saved, but stage transitions could not be synced', {
@@ -2537,8 +2550,8 @@ const BoardStageConfigScreen = ({
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseEditForm}
-                    onSave={() => {}}
-                    onUpdate={handleEditFormSave}
+                    onSave={() => undefined}
+                    onUpdate={formData => void handleEditFormSave(formData)}
                     {...(editingFormId ? { formId: editingFormId } : {})}
                     initialData={editingFormData}
                     title='Edit Transition Form'

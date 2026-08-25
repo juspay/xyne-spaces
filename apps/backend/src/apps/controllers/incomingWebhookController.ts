@@ -12,6 +12,7 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { config } from '@/config/env';
+import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
   buildSentinelRawFallbackMessage,
   buildSentinelRawFallbackTicketDescription,
@@ -275,6 +276,9 @@ class IncomingWebhookController {
         res.status(400).send('invalid_payload');
         return;
       }
+      logger.info('[INCOMING-WEBHOOK] BODY', {
+        body: context.body,
+      });
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
@@ -357,14 +361,11 @@ class IncomingWebhookController {
             }
 
             const board = await repositories.boards.findById(context.webhook.boardId);
-            const channel = await repositories.channels.findById(context.channelId);
-            if (!board || !channel || board.projectId !== channel.projectId) {
-              logger.warn('[Incoming-Webhook] Invalid board/channel configuration for ticket webhook', {
+            if (!board) {
+              logger.warn('[Incoming-Webhook] Invalid board configuration for ticket webhook', {
                 webhookId: context.webhook.id,
                 boardId: context.webhook.boardId,
                 channelId: context.channelId,
-                boardProjectId: board?.projectId,
-                channelProjectId: channel?.projectId,
               });
               res.status(400).send('invalid_payload');
               return;
@@ -706,11 +707,6 @@ class IncomingWebhookController {
           return;
         }
 
-        if (board.projectId !== channel.projectId) {
-          res.status(400).json({ error: 'Board must belong to the same project as the selected channel' });
-          return;
-        }
-
         boardName = board.name;
       }
 
@@ -999,6 +995,37 @@ class IncomingWebhookController {
     if (typeof subscribeUrl !== 'string' || !subscribeUrl) {
       logger.warn('[Incoming-Webhook] SNS confirm called without a SubscribeURL');
       return { type: 'ack' };
+    }
+
+    // SSRF guard: this endpoint is authenticated but SubscribeURL is fully
+    // attacker-controlled body input. A genuine SNS confirmation URL is always
+    // https on sns.<region>.amazonaws.com, so pin the host to that AND run the
+    // shared private-range/DNS guard to defeat DNS rebinding. Failures fall
+    // through to the standard `ack` (no error toast, reason logged).
+    let parsedSubscribeUrl: URL;
+    try {
+      parsedSubscribeUrl = new URL(subscribeUrl);
+    } catch {
+      logger.warn('[Incoming-Webhook] SNS confirm rejected: invalid SubscribeURL');
+      return { type: 'ack' };
+    }
+    const isAmazonSnsHost =
+      parsedSubscribeUrl.protocol === 'https:' &&
+      /^sns\.[a-z0-9-]+\.amazonaws\.com$/i.test(parsedSubscribeUrl.hostname);
+    if (!isAmazonSnsHost) {
+      logger.warn('[Incoming-Webhook] SNS confirm rejected: SubscribeURL is not an Amazon SNS https host', {
+        host: parsedSubscribeUrl.hostname,
+      });
+      return { type: 'ack' };
+    }
+    try {
+      await assertWebhookUrlSafe(subscribeUrl);
+    } catch (error) {
+      if (error instanceof SsrfBlockedError) {
+        logger.warn('[Incoming-Webhook] SNS confirm blocked by SSRF guard', { error: error.message });
+        return { type: 'ack' };
+      }
+      throw error;
     }
 
     try {

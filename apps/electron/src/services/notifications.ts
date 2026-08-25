@@ -1,5 +1,6 @@
 import { Notification, BrowserWindow, app } from 'electron';
 import log from 'electron-log/main';
+import { Logger } from './logger/Logger';
 
 export interface NotificationData {
   title: string;
@@ -22,7 +23,7 @@ const activeCallNotifications = new Map<string, Notification>();
 
 export function showNotification(data: NotificationData, mainWindow: BrowserWindow | null): void {
   if (!Notification.isSupported()) {
-    console.warn('[NotificationService] Notifications are not supported on this platform');
+    log.warn('[NotificationService] Notifications are not supported on this platform');
     return;
   }
 
@@ -62,10 +63,10 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
 
     // Bounce the dock if on macOS and not focused
     if (process.platform === 'darwin' && !mainWindow?.isFocused()) {
-      app.dock.bounce();
+      app.dock?.bounce();
     }
   } catch (error) {
-    console.error('[NotificationService] Failed to show notification:', error);
+    Logger.logError('notification.show.failed', error);
   }
 }
 
@@ -74,7 +75,7 @@ export function showCallNotification(
   mainWindow: BrowserWindow | null,
 ): void {
   if (!Notification.isSupported()) {
-    console.warn('[NotificationService] Notifications are not supported on this platform');
+    log.warn('[NotificationService] Notifications are not supported on this platform');
     return;
   }
 
@@ -85,10 +86,10 @@ export function showCallNotification(
   }
 
   try {
-    const callTypeLabel = data.callType === 'VIDEO' ? 'Video' : 'Audio';
-    
+    // There is one kind of call, so the OS notification says so too. `callType`
+    // stays on the payload — LiveKit room setup and CallKit still key off it.
     const notification = new Notification({
-      title: `Incoming ${callTypeLabel} Call`,
+      title: 'Incoming call',
       body: `${data.callerName} is calling you`,
       silent: false,
       urgency: 'critical',
@@ -131,17 +132,17 @@ export function showCallNotification(
     });
 
     notification.on('failed', (_event, error) => {
-      console.error('[NotificationService] Call notification failed:', error);
+      Logger.logError('call-notification.failed', error, { call_id: data.callId });
       activeCallNotifications.delete(data.callId);
     });
 
     notification.show();
 
     if (process.platform === 'darwin' && !mainWindow?.isFocused()) {
-      app.dock.bounce('critical');
+      app.dock?.bounce('critical');
     }
   } catch (error) {
-    console.error('[NotificationService] Failed to show call notification:', error);
+    Logger.logError('call-notification.show.failed', error, { call_id: data.callId });
   }
 }
 

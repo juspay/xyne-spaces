@@ -10,31 +10,6 @@ export type TicketScope = {
   projectId: string;
 };
 
-export async function hasGuestProjectAccess(
-  ctx: QueryContext,
-  tx: Transaction<Schema>,
-  projectId: string,
-): Promise<boolean> {
-  return hasGuestProjectAccessForUser(ctx, tx, ctx.userID, projectId);
-}
-
-export async function hasGuestProjectAccessForUser(
-  ctx: QueryContext,
-  tx: Transaction<Schema>,
-  userId: string,
-  projectId: string,
-): Promise<boolean> {
-  const access = await tx.run(
-    zql.guest_access
-      .where('workspaceId', '=', ctx.workspaceId)
-      .where('userId', '=', userId)
-      .where('accessibleEntityType', '=', GuestEntity.PROJECT)
-      .where('accessibleEntityId', '=', projectId)
-      .one(),
-  );
-  return Boolean(access);
-}
-
 export async function hasGuestChannelAccess(
   ctx: QueryContext,
   tx: Transaction<Schema>,
@@ -72,13 +47,7 @@ export async function hasGuestChannelAccessForUser(
       .where('userId', '=', userId)
       .one(),
   );
-  if (channelParticipant) {
-    return true;
-  }
-
-  return channel.projectId
-    ? hasGuestProjectAccessForUser(ctx, tx, userId, channel.projectId)
-    : false;
+  return Boolean(channelParticipant);
 }
 
 export async function hasGuestTicketAccess(
@@ -108,11 +77,7 @@ export async function hasGuestTicketAccess(
       .where('userId', '=', ctx.userID)
       .one(),
   );
-  if (channelParticipant) {
-    return true;
-  }
-
-  return hasGuestProjectAccess(ctx, tx, ticket.projectId);
+  return Boolean(channelParticipant);
 }
 
 export async function hasChannelMutationAccess(

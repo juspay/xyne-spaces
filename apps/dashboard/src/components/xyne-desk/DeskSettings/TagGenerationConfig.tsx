@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Pencil } from 'lucide-react';
 import {
@@ -194,7 +195,11 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
         setForm(prev => (prev ? { ...prev, tags: merged } : prev));
       }
     } catch (err) {
-      console.error('[TagGenerationConfig] Failed to fetch historical tag values:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[TagGenerationConfig] Failed to fetch historical tag values:'),
+        error: err,
+      });
     }
   };
 

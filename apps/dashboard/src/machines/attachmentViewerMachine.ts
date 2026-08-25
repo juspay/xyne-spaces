@@ -258,6 +258,17 @@ export const attachmentViewerMachine = createMachine(
       },
       error: {
         on: {
+          UPDATE: {
+            target: 'opening',
+            actions: assign({
+              attachments: ({ event }) => event.attachments,
+              currentIndex: ({ event }) => event.startIndex ?? 0,
+              fileData: null,
+              status: () => 'loading',
+              error: null,
+              retryCount: 0,
+            }),
+          },
           RETRY: {
             target: 'opening',
             actions: assign(({ context }) => ({

@@ -44,6 +44,7 @@ import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { db } from '@/database/client';
@@ -79,15 +80,6 @@ const AddAttachmentsFromConversationBodySchema = z.object({
   sourceConversationId: z.string().min(1, 'sourceConversationId is required'),
   sourceMessageId: z.string().min(1).optional(),
 });
-
-const SupportTicketCreateSchema = z.object({
-  title: z.string(),
-  description: z.string(),
-  fileMetadata: z.string().optional(),
-}).strict();
-
-const SUPPORT_TICKET_CREATED_RESPONSE = Object.freeze({ success: true as const });
-
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { TicketIdService } from '@/services/ticketIdService';
 import { unifiedBotUserService } from '@/bots/unified';
@@ -450,27 +442,8 @@ export class TicketController {
 
   createTicket = async (req: Request, res: Response): Promise<void> => {
     try {
-      const isSupportTicketRequest = req.headers['x-support-ticket'] === 'true';
-
       // If this is a support/error-report ticket, resolve channel+board from CAC
-      if (isSupportTicketRequest) {
-        const validationResult = SupportTicketCreateSchema.safeParse(req.body);
-        if (!validationResult.success) {
-          const unexpectedFields = validationResult.error.issues.flatMap(issue =>
-            issue.code === 'unrecognized_keys' ? issue.keys : [],
-          );
-          res.status(400).json({
-            error: 'Invalid support ticket request',
-            code: 'INVALID_TICKET_FIELDS',
-            ...(unexpectedFields.length > 0 && { unexpectedFields }),
-          });
-          return;
-        }
-
-        // Drop the original object before adding server-owned routing fields. This
-        // ensures no client property can reach the internal ticket model.
-        req.body = validationResult.data;
-
+      if (req.headers['x-support-ticket'] === 'true') {
         const cacConfig = await superpositionClient.getObjectValue(
           'error_report_channel_config',
           null,
@@ -483,17 +456,37 @@ export class TicketController {
         }
 
         const channel = await this.channelRepository.findById(cacConfig.channelId);
-        if (!channel?.projectId) {
-          res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
+        if (!channel) {
+          res.status(503).json({ error: 'Support channel not found.' });
           return;
         }
 
+        const SUPPORT_TAG = 'Support Ticket';
+        const existingTags: string[] = Array.isArray(req.body.tags) ? req.body.tags : [];
         req.body.channelId = cacConfig.channelId;
-        req.body.projectId = channel.projectId;
         if (cacConfig.boardId) {
           req.body.boardId = cacConfig.boardId;
+          const board = await this.boardRepository.findBoardById(cacConfig.boardId);
+          if (!board?.projectId) {
+            res.status(503).json({ error: 'Support board has no project mapping.' });
+            return;
+          }
+          req.body.projectId = board.projectId;
+        } else {
+          // No explicit board configured — resolve the channel's default board
+          // (ChannelBoardMapping first, legacy channel.projectId as fallback) and
+          // derive projectId from that board, never from channel.projectId directly.
+          const resolved = await resolveChannelDefaultBoard(db, channel.id);
+          if (!resolved?.projectId) {
+            res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
+            return;
+          }
+          req.body.projectId = resolved.projectId;
         }
-        req.body.tags = ['Support Ticket'];
+        req.body.tags = [
+          SUPPORT_TAG,
+          ...existingTags.filter(t => t.toLowerCase() !== SUPPORT_TAG.toLowerCase()),
+        ];
       }
 
       // Handle both FormData (with files) and JSON requests
@@ -502,7 +495,7 @@ export class TicketController {
         title,
         description,
         assignedTo,
-        projectId,
+        projectId: clientProjectId,
         userGroupId,
         statusV2,
         priority,
@@ -520,6 +513,8 @@ export class TicketController {
         ticketType,
         stageName
       }: CreateTicketRequest & { parentTicketId?: string } = req.body;
+
+      let projectId = clientProjectId;
 
       const fromTicketsTab = req.body.fromTicketsTab === true || req.body.fromTicketsTab === 'true';
 
@@ -657,6 +652,9 @@ export class TicketController {
       const initialMessageId = randomUUID();
 
       const board = await this.boardRepository.findBoardById(boardId);
+      if (board?.projectId) {
+        projectId = board.projectId;
+      }
       const effectiveStatusV2 =
         board?.boardType === BoardType.FLOW ? TicketStatusV2.TODO : (statusV2 as TicketStatusV2);
       const effectiveStageName = board?.boardType === BoardType.FLOW ? 'TODO' : stageName;
@@ -1322,7 +1320,7 @@ export class TicketController {
         updatedAt: ticket.updatedAt,
       };
 
-      res.status(201).json(isSupportTicketRequest ? SUPPORT_TICKET_CREATED_RESPONSE : response);
+      res.status(201).json(response);
 
       // Check if this is a support channel by fetching the channel type
       const channel = await this.channelRepository.findById(ticket.channelId);

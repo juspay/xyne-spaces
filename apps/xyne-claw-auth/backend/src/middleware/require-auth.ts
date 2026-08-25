@@ -4,10 +4,16 @@ import { CONFIG } from "../config.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { checkResultCallbackToken } from "../lib/session-tokens.js";
 import { verify as verifyCliToken } from "../lib/cli-tokens.js";
+import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { prisma } from "../db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("require-auth");
+
+// Track which Response objects were authenticated via a CLI/service access token.
+// Used by requireNoAccessToken to reject access-token callers from routes that
+// do not enforce scopes. Intentionally NOT exposed outside this module.
+const accessTokenRegistry = new WeakMap<Response, VerifiedCliToken>();
 
 /**
  * Attach phase-1 org context to the request as headers, right after `x-user-id`
@@ -174,6 +180,7 @@ export async function requireAuth(
       // (locals always exists under Express; test doubles may omit it.)
       res.locals = res.locals ?? {};
       res.locals["accessToken"] = token;
+      accessTokenRegistry.set(res, token);
       next();
       return;
     }
@@ -333,4 +340,78 @@ export async function requireUserAuth(
   req.headers["x-user-id"] = userId;
   await attachOrgContext(req, userId);
   next();
+}
+
+/**
+ * Barrier middleware: reject requests whose identity came from a CLI/service
+ * access token. Mount this AFTER requireAuth on routes that should only be
+ * reachable by a browser session or a validated S2S key.
+ *
+ * This closes the bearer-token scope-enforcement gap: requireAuth accepts
+ * xyne_cli_* / xyne_svc_* tokens, but most routes do not enforce scopes.
+ * Only endpoints that explicitly understand scopes (currently /run) should
+ * omit this barrier.
+ */
+export function requireNoAccessToken(_req: Request, res: Response, next: NextFunction): void {
+  const token = accessTokenRegistry.get(res);
+  if (token) {
+    // Actionable on purpose: this endpoint worked for token callers before the
+    // scope gap was closed, so a bare "not authorized" reads as a regression.
+    // Name the token, the reason, and the two supported paths forward.
+    log.warn(
+      `[require-auth] access-token (${token.client ?? "unknown"}) rejected on non-/run route userId=${token.userId}`,
+    );
+    res.status(403).json({
+      success: false,
+      error:
+        "This endpoint does not accept CLI/service access tokens (they carry no scopes here). " +
+        "Use the /run API with a service token, or call this endpoint with a signed-in browser session.",
+      code: "ACCESS_TOKEN_NOT_ALLOWED",
+    });
+    return;
+  }
+  next();
+}
+
+/**
+ * Scope-aware variant of the barrier for routers that have READ endpoints the
+ * CLI legitimately needs. Browser sessions and S2S pass untouched (no token in
+ * the registry). An access token passes ONLY when BOTH hold:
+ *   1. the request is a read (GET/HEAD) — token callers can never reach the
+ *      router's write handlers through this mount, and
+ *   2. the token carries `scope`.
+ *
+ * WHY THIS EXISTS: the #81 barrier closed the scope-enforcement gap by
+ * blanket-rejecting access tokens everywhere except /run — which also broke
+ * the CLI's own read paths (GET /runs/light, /runs/search, /runs/:id,
+ * GET /agents). Device-flow CLI tokens are MINTED with agents:read/runs:read
+ * (routes/cli-auth.ts SCOPES) but no route honored them; the barrier's own
+ * error text ("they carry no scopes here") described the mount, not the token.
+ * This middleware makes those minted read scopes mean something while keeping
+ * the write surface exactly as locked as requireNoAccessToken left it.
+ */
+export function allowReadAccessToken(scope: string) {
+  return function allowReadAccessTokenMw(req: Request, res: Response, next: NextFunction): void {
+    const token = accessTokenRegistry.get(res);
+    if (!token) {
+      next();
+      return;
+    }
+    const isRead = req.method === "GET" || req.method === "HEAD";
+    if (isRead && token.scopes.includes(scope)) {
+      next();
+      return;
+    }
+    log.warn(
+      `[require-auth] access-token (${token.client ?? "unknown"}) rejected: ` +
+        `${req.method} needs ${isRead ? `scope ${scope}` : "a browser session (writes are session-only)"} userId=${token.userId}`,
+    );
+    res.status(403).json({
+      success: false,
+      error: isRead
+        ? `This token does not have the ${scope} scope.`
+        : "CLI/service access tokens are read-only here; sign in with a browser session for writes.",
+      code: "ACCESS_TOKEN_NOT_ALLOWED",
+    });
+  };
 }

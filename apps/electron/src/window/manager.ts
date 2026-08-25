@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, Menu, MenuItem, app } from 'electron';
+import { BrowserWindow, shell, Menu, MenuItem, app, dialog } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
@@ -16,7 +16,28 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
+import { isRecordingInProgress, stopRecordingForReload } from '../services/recording-controller';
 import type { Counter } from '@opentelemetry/api';
+
+async function confirmReloadWhileRecording(window: BrowserWindow): Promise<boolean> {
+  if (!isRecordingInProgress()) return true;
+
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: ['Keep recording', 'Reload anyway'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: 'Recording in progress',
+    message: 'Reloading will stop your recording.',
+    detail: 'Everything captured so far is saved to your recordings.',
+  });
+
+  if (response !== 1) return false;
+
+  await stopRecordingForReload();
+  return true;
+}
 
 let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;
@@ -123,6 +144,12 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     options?.inactive ? mainWindow?.showInactive() : mainWindow?.show(),
   );
 
+  // Mirrors 'open-in-browser-panel' so links sent to the external browser are
+  // logged too, not just the ones routed into the panel.
+  const notifyExternalOpen = (externalUrl: string): void => {
+    mainWindow?.webContents.send('link-opened-external', externalUrl);
+  };
+
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler((details) => {
      try {
@@ -142,6 +169,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
 
       if(currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
         shell.openExternal(url);
+        notifyExternalOpen(url);
         return { action: 'deny' };
       }
 
@@ -153,6 +181,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
         const wantExternal = prefExternal !== modifier;
         if (wantExternal) {
           shell.openExternal(url);
+          notifyExternalOpen(url);
         } else {
           mainWindow?.webContents.send('open-in-browser-panel', url);
         }
@@ -174,7 +203,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       return { action: 'allow' };
       
     } catch (error) {
-      console.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
+      log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
       return { action: 'deny' };
     }
 });
@@ -203,12 +232,14 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
         event.preventDefault();
         shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
         return;
       }
 
       event.preventDefault();
       if (browserSettingsService.getSettings().openLinksExternally) {
         shell.openExternal(navUrl);
+        notifyExternalOpen(navUrl);
       } else {
         mainWindow?.webContents.send('open-in-browser-panel', navUrl);
       }
@@ -217,7 +248,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
     }
   });
 
-  console.log('✅ setWindowOpenHandler configured for main window');
+  log.info('✅ setWindowOpenHandler configured for main window');
 
 
   // Setup spellchecker context menu
@@ -245,6 +276,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
+          if (!(await confirmReloadWhileRecording(mainWindow))) return;
           // Clear cache before reloading for a true hard refresh
           await mainWindow.webContents.session.clearCache();
           await loadApp(mainWindow);
@@ -265,6 +297,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
+          if (!(await confirmReloadWhileRecording(mainWindow))) return;
           await loadUrl(mainWindow, mainWindow.webContents.getURL());
         }
       } catch (error) {
