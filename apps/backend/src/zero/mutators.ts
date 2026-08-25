@@ -133,6 +133,7 @@ import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
+import { releaseDevTicketNotifyService } from '@/services/release/releaseDevTicketNotifyService';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -6302,6 +6303,32 @@ export function createMutators(
               } catch (error) {
                 logger.error(
                   `[VersionReleaseMapping] failed to update deployedVersion for ticket ${params.id}:`,
+                  error,
+                );
+              }
+            });
+          }
+
+          // Mirror every release-ticket status change into the bundled dev
+          // tickets' threads. Keyed on the canonical statusV2 (never on board
+          // stage names — those are team-specific); the != guard means one
+          // message per genuine transition.
+          if (
+            params.statusV2 !== undefined
+            && params.statusV2 !== ticket.statusV2
+            && isReleaseTicket(ticket.ticketType as BaseTicketType | null)
+          ) {
+            const newStatus = params.statusV2 as TicketStatusV2;
+            asyncTasks.push(async () => {
+              try {
+                await releaseDevTicketNotifyService.notifyDevTicketsOnReleaseStatusChange({
+                  releaseTicketId: params.id,
+                  status: newStatus,
+                  workspaceId: authData.workspaceId,
+                });
+              } catch (error) {
+                logger.error(
+                  `[ReleaseDevNotify] failed to notify dev tickets for release ${params.id}:`,
                   error,
                 );
               }
