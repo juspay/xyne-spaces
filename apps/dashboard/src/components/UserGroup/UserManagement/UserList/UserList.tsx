@@ -19,7 +19,6 @@ import {
   matchesUserQuery,
 } from '../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../hooks/usePlatform';
-import { apiInstance } from '../../../../services/clients/apiClient';
 import { RemoveMemberDialog } from './RemoveMemberDialog';
 
 interface UserListProps {
@@ -122,27 +121,13 @@ export const UserList = ({
     const userId = removeTarget.id;
     setIsRemoving(true);
     try {
-      // Queue the handoff *before* the mapping is deleted: the backend refuses to
-      // reassign tickets for someone who is no longer a member of the group.
-      if (reassignTickets) {
-        try {
-          await apiInstance.post('/user-assignment-state/reassign-member-tickets', {
-            userId,
-            userGroupId,
-          });
-        } catch {
-          toast.error("Couldn't hand off their open tickets", {
-            description: 'Nothing changed. Try again, or remove them without reassigning.',
-            duration: 5000,
-          });
-          return;
-        }
-      }
-
+      // The handoff rides along with the removal: the server queues it only after the
+      // mapping delete commits, so a failed removal can never strand reassigned tickets.
       const result = await zero.mutate(
         mutators.userGroup.removeUsers({
           userGroupId: userGroupId,
           userIds: [userId],
+          reassignTickets,
         }),
       ).server;
       if (result.type === 'error') {

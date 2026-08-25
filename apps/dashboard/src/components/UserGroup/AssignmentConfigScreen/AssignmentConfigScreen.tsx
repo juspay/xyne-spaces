@@ -67,10 +67,12 @@ export const AssignmentConfigScreen = ({
   const [activeTab, setActiveTab] = useState<'availability' | 'visibility'>('availability');
   // Members switched off in this session who were opted in to a ticket handoff on save
   const [pendingReassignUserIds, setPendingReassignUserIds] = useState<Set<string>>(new Set());
-  // Handoff prompt raised by switching a member off. `previous` is the state Cancel restores.
+  // Handoff prompt raised by switching a member off. `previous` and `previousHasChanges`
+  // are the state Cancel restores.
   const [reassignPrompt, setReassignPrompt] = useState<{
     userId: string;
     previous: { onCall: boolean; isActive: boolean };
+    previousHasChanges: boolean;
   } | null>(null);
   const [reassignPromptChecked, setReassignPromptChecked] = useState(false);
 
@@ -336,12 +338,29 @@ export const AssignmentConfigScreen = ({
     });
   };
 
+  // The member's saved availability: only someone still switched on here has open
+  // tickets that saving this screen can strand.
+  const isActiveOnServer = (userId: string): boolean => {
+    const serverState = userAssignmentStates?.find((s: UserAssignmentState) => s.userId === userId);
+    return serverState?.isActiveForAssignment === true;
+  };
+
   // True only while a member who is still active on the server has been switched off
   // locally and not saved yet — the window in which the handoff opt-in is offered.
   const isDeactivatedInSession = (userId: string): boolean => {
-    const serverState = userAssignmentStates?.find((s: UserAssignmentState) => s.userId === userId);
-    if (serverState?.isActiveForAssignment !== true) return false;
+    if (!isActiveOnServer(userId)) return false;
     return localUserStates.get(userId)?.isActive === false;
+  };
+
+  // Single source of truth for the handoff promise, so the row badge can never advertise
+  // a handoff that save would skip — e.g. after the group setting is switched off, or
+  // after a concurrent edit syncs in and re-seeds the local switches.
+  const willReassignOnSave = (userId: string): boolean => {
+    return (
+      localReassignOnUnavailable &&
+      pendingReassignUserIds.has(userId) &&
+      isDeactivatedInSession(userId)
+    );
   };
 
   const handleToggleOnCall = (userId: string): void => {
@@ -371,9 +390,11 @@ export const AssignmentConfigScreen = ({
         newStates.set(userId, { onCall: false, isActive: false });
         // Deactivating strands their open tickets, so ask about the handoff the group
         // has opted into. Starts unchecked: tickets stay with them unless asked otherwise.
-        if (localReassignOnUnavailable) {
+        // Switching off someone already inactive on the server strands nothing, so they
+        // get no prompt — the same condition the handoff is filtered on at save.
+        if (localReassignOnUnavailable && isActiveOnServer(userId)) {
           setReassignPromptChecked(false);
-          setReassignPrompt({ userId, previous: currentState });
+          setReassignPrompt({ userId, previous: currentState, previousHasChanges: hasChanges });
         }
       } else {
         newStates.set(userId, { ...currentState, isActive: true });
@@ -768,9 +789,7 @@ export const AssignmentConfigScreen = ({
 
       // Queue handoffs only after the states above are persisted, so members
       // deactivated in this same save can't inherit each other's tickets.
-      const reassignTargets = localReassignOnUnavailable
-        ? [...pendingReassignUserIds].filter(isDeactivatedInSession)
-        : [];
+      const reassignTargets = [...pendingReassignUserIds].filter(willReassignOnSave);
       if (reassignTargets.length > 0) {
         const outcomes = await Promise.allSettled(
           reassignTargets.map(targetUserId =>
@@ -816,9 +835,12 @@ export const AssignmentConfigScreen = ({
   // Cancel undoes the switch that raised the prompt, leaving the member active.
   const cancelReassignPrompt = (): void => {
     if (reassignPrompt) {
-      const { userId, previous } = reassignPrompt;
+      const { userId, previous, previousHasChanges } = reassignPrompt;
       setLocalUserStates(prev => new Map(prev).set(userId, previous));
       setPendingReassign(userId, false);
+      // Undoing the only edit of the session leaves nothing to save; edits made before
+      // the switch keep the flag set.
+      setHasChanges(previousHasChanges);
     }
     setReassignPrompt(null);
   };
@@ -885,7 +907,7 @@ export const AssignmentConfigScreen = ({
                     <PauseCircle className='size-3.5 text-muted-foreground flex-shrink-0' />
                   </Tooltip>
                 )}
-                {pendingReassignUserIds.has(user.id) && (
+                {willReassignOnSave(user.id) && (
                   <span className='flex-shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground'>
                     Tickets will be reassigned
                   </span>

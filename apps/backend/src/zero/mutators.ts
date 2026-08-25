@@ -122,6 +122,7 @@ import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { notificationService } from '@/services/notificationService';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
@@ -7747,8 +7748,12 @@ export function createMutators(
         },
       ),
       removeUsers: defineMutator(
-        z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
-        async ({ tx, args: { userGroupId, userIds } }) => {
+        z.object({
+          userGroupId: z.string(),
+          userIds: z.array(z.string()),
+          reassignTickets: z.boolean().optional(),
+        }),
+        async ({ tx, args: { userGroupId, userIds, reassignTickets } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -7766,12 +7771,29 @@ export function createMutators(
           );
 
           // Delete the found mappings
+          const removedUserIds: string[] = [];
           for (const mapping of mappingsToRemove) {
             if (mapping) {
               await tx.mutate.user_group_mappings.delete({
                 id: mapping.id,
               });
+              removedUserIds.push(mapping.userId);
             }
+          }
+
+          // Hand the removed members' open tickets off only once the delete has committed:
+          // a queued reassignment cannot be cancelled, so it must never run for a removal
+          // that rolled back. Same policy as the member pause flow - the group must allow it.
+          if (
+            reassignTickets &&
+            userGroup.reassignOnUnavailable === true &&
+            removedUserIds.length > 0
+          ) {
+            awaitedPostCommitTasks.push(async () => {
+              for (const removedUserId of removedUserIds) {
+                await ticketReassignmentQueue.scheduleReassignment(removedUserId, userGroupId);
+              }
+            });
           }
         },
       ),
