@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.2](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.1...v1.219.0-release-20260825.2) (2026-08-25)
+
+
+### Reverts
+
+* Revert "feat: add recording participants (#849)" (#1026) ([0747ab8](https://github.com/juspay/xyne-spaces/commit/0747ab81bed84a50a776923a230fa8df52d024a7)), closes [#849](https://github.com/juspay/xyne-spaces/issues/849) [#1026](https://github.com/juspay/xyne-spaces/issues/1026)
+
 ## [1.219.0-release-20260825.1](https://github.com/juspay/xyne-spaces/compare/v1.218.3...v1.219.0-release-20260825.1) (2026-08-25)
 
 
