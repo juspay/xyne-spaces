@@ -640,9 +640,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       // Verify caller is the intended user. Fail closed: a missing callerUserId
-      // must not skip the check (it previously did, allowing impersonation).
-      if (!callerUserId || callerUserId !== writeUserId) {
-        log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${writeUserId}`);
+      // must not skip the check (it previously did, allowing impersonation). The
+      // intended-user (normal) vs same-org (automation) decision runs after the
+      // signature is verified below, since an automation card is owner-signed and
+      // approvable by anyone in the automation's org.
+      if (!callerUserId) {
+        log.error(`[flow-action] Unauthorized: no caller identity`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
       }
@@ -666,17 +669,32 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         params,
         userId: writeUserId,
       };
-      const signatureOk = verifyActionSignatureAny([actionPayload, legacyActionPayload], signature);
+      const automationActionPayload = { ...actionPayload, automation: true };
+      const isAutomationCard = verifyActionSignatureAny([automationActionPayload], signature);
+      const signatureOk = isAutomationCard || verifyActionSignatureAny([actionPayload, legacyActionPayload], signature);
       if (!signatureOk) {
         log.error("[flow-action] HMAC verification failed");
         res.json({ type: "error", message: "HMAC verification failed — action may have been tampered with" } satisfies AppActionResponse);
         return;
       }
-      const legacyWriteCard = !verifyActionSignatureAny([actionPayload], signature);
+      const legacyWriteCard = !verifyActionSignatureAny([actionPayload, automationActionPayload], signature);
 
       const writeUser = await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } });
       if (!writeUser?.orgId) {
         res.status(403).json({ type: "error", message: "Unable to resolve approving user's organization" } satisfies AppActionResponse);
+        return;
+      }
+      if (isAutomationCard) {
+        const caller = await prisma.user.findUnique({ where: { id: callerUserId }, select: { orgId: true, name: true } });
+        if (!caller?.orgId || caller.orgId !== writeUser.orgId) {
+          log.error(`[flow-action] automation approval denied: caller ${callerUserId} org ${caller?.orgId ?? "(none)"} != automation org ${writeUser.orgId}`);
+          res.status(403).json({ type: "error", message: "You must be in the automation's workspace to approve this action." } satisfies AppActionResponse);
+          return;
+        }
+        log.info(`[flow-action] automation write approved by ${callerUserId} (${caller.name?.trim() ?? ""}) — automation owner ${writeUserId} tool=${tool}`);
+      } else if (callerUserId !== writeUserId) {
+        log.error(`[flow-action] Unauthorized: caller ${callerUserId} != expected ${writeUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
       }
       if (legacyWriteCard && !(await consumeLegacyWriteCard(messageId, actionId))) {
