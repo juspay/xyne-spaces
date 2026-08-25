@@ -76,7 +76,7 @@ export async function ensureEgnyteServer() {
   const healthcheckSpec = { name: "list_filesystem_by_path", params: { path: "/" } };
   return prisma.mcpServer.upsert({
     where: { type: "egnyte" },
-    update: { writeToolPolicy: { mode: "allowlist", tools: writeTools }, healthcheckSpec, transport: "http" },
+    update: { writeToolPolicy: { mode: "allowlist", tools: writeTools }, healthcheckSpec, transport: "http", isOauth: true },
     create: {
       type: "egnyte",
       name: "Egnyte",
@@ -86,6 +86,7 @@ export async function ensureEgnyteServer() {
       writeToolPolicy: { mode: "allowlist", tools: writeTools },
       healthcheckSpec,
       connectorMeta: { scope: "global", mode: "self-serve" },
+      isOauth: true,
     },
   });
 }

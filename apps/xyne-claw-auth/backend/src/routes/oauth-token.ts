@@ -67,8 +67,8 @@ export function getOAuthProvider(serverType: string): OAuthTokenProvider | undef
  * `isOAuthServer` alone only recognised google/microsoft, so every self-serve
  * OAuth connector was mislabelled `oauth: false` by the /servers route.
  */
-export function isOAuthConnector(serverType: string, connectorMeta?: unknown): boolean {
-  return getOAuthProvider(serverType) !== undefined || isOAuthServer(serverType, connectorMeta);
+export function isOAuthConnector(serverType: string, connectorMeta?: unknown, isOauth?: boolean): boolean {
+  return getOAuthProvider(serverType) !== undefined || isOAuthServer(serverType, connectorMeta, isOauth);
 }
 
 export const oauthTokenRouter = buildOAuthTokenRouter(ALL_OAUTH_PROVIDERS);
