@@ -113,7 +113,13 @@ export class ToolFacadeServer {
       const message = err instanceof Error ? err.message : String(err);
       log.warn(`[LocalHarness] facade method ${body.method} failed: ${message}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32603, message } }));
+      res.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: body.id,
+          error: { code: -32603, message: 'Internal error' },
+        }),
+      );
     }
   }
 

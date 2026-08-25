@@ -1,4 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
+import rateLimit, { ipKeyGenerator, type RateLimitRequestHandler } from "express-rate-limit";
+import { createHash } from "node:crypto";
 import type { LocalHarnessDevice } from "@prisma/client";
 import type {
   LocalHarnessDeviceStatus,
@@ -36,6 +38,44 @@ const log = createLogger("local-harness-routes");
 const MAX_CONCURRENT_POLLS_PER_DEVICE = 2;
 const activePolls = new Map<string, number>();
 
+const RATE_WINDOW_MS = 5 * 60 * 1000;
+
+const deviceKey = (req: Request): string => {
+  const header = req.headers.authorization;
+  return header
+    ? createHash("sha256").update(header).digest("hex").slice(0, 32)
+    : ipKeyGenerator(req.ip ?? "unknown");
+};
+
+const tooManyRequests = { success: false, error: "Too many requests. Please slow down." };
+
+const pollLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: 120,
+  keyGenerator: deviceKey,
+  message: tooManyRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const bridgeLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: 900,
+  keyGenerator: deviceKey,
+  message: tooManyRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const userLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: 120,
+  keyGenerator: (req) => getRequesterId(req) ?? ipKeyGenerator(req.ip ?? "unknown"),
+  message: tooManyRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Graceful drain: on SIGTERM we stop parking new long-poll loops so in-flight
 // connections return `idle` quickly and the pod can exit without dropping a
 // claimed run. Wired from main.ts's shutdown handler.
@@ -55,6 +95,7 @@ function requireFeature(_req: Request, res: Response, next: NextFunction): void 
 
 const router = Router();
 router.use(requireFeature);
+router.use(userLimiter);
 
 function toDeviceStatus(device: LocalHarnessDevice): LocalHarnessDeviceStatus {
   return {
@@ -219,6 +260,8 @@ async function requireDevice(req: Request, res: Response, next: NextFunction): P
   next();
 }
 
+bridgeRouter.use(bridgeLimiter);
+bridgeRouter.use("/runs/next", pollLimiter);
 bridgeRouter.use(requireDevice);
 
 // Per-harness connect/disconnect from the desktop app. Device-token authed on
