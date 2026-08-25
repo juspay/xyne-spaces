@@ -22,11 +22,15 @@ const TTL_OPTIONS = API_KEY_TTL_CHOICES.map(days => ({
 const QUERY_KEY = ['sdk-keys'] as const;
 
 /**
- * Create and revoke API keys for the Spaces SDK.
+ * Create and remove API keys for the Spaces SDK.
  *
  * The plaintext key is shown exactly once, at creation. The list afterwards
  * carries only the last four characters — enough to tell two keys apart when
- * deciding which to revoke, and useless to anyone who sees the screen.
+ * deciding which to remove, and useless to anyone who sees the screen.
+ *
+ * Revoking a key stops it working on its very next request. The row stays in
+ * the list, marked, rather than disappearing — it is the audit trail, and a
+ * key that vanished would leave no way to see that it was ever revoked.
  *
  * `Dialog` renders its `title` and `description` hidden, for screen readers
  * only, so the visible heading belongs here.
@@ -37,7 +41,7 @@ export const ApiKeysModal = (): ReactElement => {
   const [ttlDays, setTtlDays] = useState<ApiKeyTtlDays>(30);
   const [revealed, setRevealed] = useState<CreatedSdkApiKey | null>(null);
   const [copied, setCopied] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [confirmingRevoke, setConfirmingRevoke] = useState<string | null>(null);
 
   const keys = useQuery({
     queryKey: QUERY_KEY,
@@ -58,20 +62,21 @@ export const ApiKeysModal = (): ReactElement => {
     },
   });
 
-  const removeKey = useMutation({
-    mutationFn: (id: string) => sdkKeysService.remove(id),
+  const revokeKey = useMutation({
+    mutationFn: (id: string) => sdkKeysService.revoke(id),
     onSuccess: () => {
-      toast.success('Key deleted');
-      setConfirmingDelete(null);
+      toast.success('Key revoked');
+      setConfirmingRevoke(null);
       void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
     },
     onError: (error: Error) => {
-      toast.error('Could not delete the key', { description: error.message });
+      toast.error('Could not revoke the key', { description: error.message });
     },
   });
 
   const rows: SdkApiKey[] = keys.data?.keys ?? [];
   const maxLiveKeys = keys.data?.maxLiveKeys ?? 2;
+  // Mirrors the backend's live-key count: neither expiry nor revocation holds a slot.
   const liveCount = rows.filter(key => !key.expired && !key.revoked).length;
   const atLimit = liveCount >= maxLiveKeys;
 
@@ -101,7 +106,7 @@ export const ApiKeysModal = (): ReactElement => {
                   Copy this key now — it will not be shown again.
                 </p>
                 <p className='mt-1 text-xs text-muted-foreground'>
-                  “{revealed.name}” expires {formatDate(revealed.expiresAt)}. If you lose it, delete
+                  “{revealed.name}” expires {formatDate(revealed.expiresAt)}. If you lose it, revoke
                   it and create another.
                 </p>
                 <div className='mt-3 flex items-center gap-2'>
@@ -160,7 +165,7 @@ export const ApiKeysModal = (): ReactElement => {
 
         <p className='text-xs text-muted-foreground'>
           {atLimit
-            ? `You have ${liveCount} of ${maxLiveKeys} active keys. Delete one to create another.`
+            ? `You have ${liveCount} of ${maxLiveKeys} active keys. Revoke one to create another.`
             : `You can hold ${maxLiveKeys} active keys at a time.`}
         </p>
 
@@ -191,33 +196,33 @@ export const ApiKeysModal = (): ReactElement => {
                   </p>
                 </div>
 
-                {key.revoked ? (
-                  // Nothing left to do to an already-revoked key — no delete
-                  // affordance, since revoking it again is a 404, not a no-op.
-                  <span className='shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground'>
-                    Revoked {formatDate(key.revokedAt ?? key.expiresAt)}
-                  </span>
-                ) : confirmingDelete === key.id ? (
-                  // Revoking is immediate and cannot be undone — anything using
-                  // this key stops working on its next request.
+                {confirmingRevoke === key.id ? (
                   <div className='flex shrink-0 items-center gap-1'>
-                    <span className='text-xs text-muted-foreground'>Delete?</span>
+                    <span className='text-xs text-muted-foreground'>
+                      Revoke — stops working immediately
+                    </span>
                     <Button
                       size='sm'
                       variant='destructive'
-                      disabled={removeKey.isPending}
-                      onClick={() => removeKey.mutate(key.id)}
+                      disabled={revokeKey.isPending}
+                      onClick={() => revokeKey.mutate(key.id)}
                     >
-                      Delete
+                      Revoke
                     </Button>
-                    <Button size='sm' variant='ghost' onClick={() => setConfirmingDelete(null)}>
+                    <Button size='sm' variant='ghost' onClick={() => setConfirmingRevoke(null)}>
                       Cancel
                     </Button>
                   </div>
                 ) : (
                   <>
-                    {key.expired ? (
+                    {/* Revoked wins over expired: it is the deliberate act, and
+                        the one worth showing when a key is both. */}
+                    {key.revoked ? (
                       <span className='shrink-0 rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive'>
+                        Revoked
+                      </span>
+                    ) : key.expired ? (
+                      <span className='shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground'>
                         Expired
                       </span>
                     ) : (
@@ -225,14 +230,17 @@ export const ApiKeysModal = (): ReactElement => {
                         {daysLeft(key.expiresAt)}d left
                       </span>
                     )}
-                    <Button
-                      size='sm'
-                      variant='ghost'
-                      aria-label={`Delete ${key.name}`}
-                      onClick={() => setConfirmingDelete(key.id)}
-                    >
-                      <Trash2 size={14} />
-                    </Button>
+                    {/* Nothing to revoke on a key that is already dead either way. */}
+                    {!key.revoked && !key.expired && (
+                      <Button
+                        size='sm'
+                        variant='ghost'
+                        aria-label={`Revoke ${key.name}`}
+                        onClick={() => setConfirmingRevoke(key.id)}
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    )}
                   </>
                 )}
               </li>

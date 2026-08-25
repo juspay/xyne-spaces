@@ -41,31 +41,46 @@ token:
 Authorization: Bearer xyne_sk_<base64url>
 ```
 
-### What a key contains
+### What a key is
 
-`xyne_sk_` followed by base64url of an AES-256-CBC blob holding the caller's
-**stable** identity:
+`xyne_sk_` followed by a JWT, signed with the same `JWT_SECRET` session cookies
+use, carrying the caller's **stable** identity:
 
 ```ts
 { sub, email, name, workspaceId, orgId, memberId }
 ```
 
-`role` and `orgRole` are deliberately **not** in the blob. They drive the mutator
-ACL, so they are re-read from `users` and `org_members` on every request — a
-demoted or deactivated user loses access immediately, rather than whenever
-somebody remembers to delete their key. Expiry lives on the row for the same
-reason: both are facts that can change after the key was handed out.
+A distinct `audience` claim (`xyne-sdk`, not `xyne-user`) keeps the two token
+kinds from being interchangeable despite sharing a secret — a session token
+presented here, or an SDK key presented as a session cookie, fails
+`jwt.verify`'s audience check before anything else is inspected.
+
+`role` and `orgRole` are **not** claims — session JWTs never carried them
+either. `apiKeyAuth` re-reads both from `users` and `org_members` on every
+request, the same way `extractAuthDataFromJWT` does for session callers, so a
+demoted or deactivated user loses access on their next request regardless of
+what their key still says.
 
 ### Where integrity comes from
 
-**The database row, not the cipher.** `encryptionService` is AES-CBC with no MAC,
-so ciphertext is malleable and a successful decrypt proves nothing on its own.
-Authentication is the exact-match lookup of the presented key against
-`sdk_api_keys.token`, which is `@unique`: a forged or tampered key matches no row
-and is rejected before any field inside it is trusted.
+Two things, and both must hold.
 
-That same lookup is the revocation point. Deleting the row disables the key on
-its next request.
+**The signature** proves the key is authentic. `jwt.verify` rejects anything not
+signed with `JWT_SECRET` before a single claim is trusted.
+
+**The `sdk_api_keys` row decides whether it is still allowed.** A JWT cannot be
+un-issued, so revocation has to live somewhere the server can change after the
+fact. `apiKeyAuth` looks the row up by its `token` on every request and refuses
+a key whose `status` is not `ACTIVE`, whose `expires_at` has passed, or whose
+row is missing entirely. `DELETE /api/sdk-keys/:id` sets `status = 'REVOKED'`
+rather than removing the row, so the key stops working on its very next request
+and the row survives as the audit trail.
+
+A signature that verifies is therefore necessary but not sufficient. The cost is
+one indexed read per request, alongside the two already done for `role` and
+`orgRole` — all three issued together, so it is one round trip rather than
+three. The benefit is that a leaked key can be killed immediately instead of
+being live until its TTL runs out.
 
 ### Scoping
 
@@ -79,14 +94,6 @@ Keys are minted at `POST /api/sdk-keys` (`routes/sdk-keys.ts`), which is
 **session**-authenticated: you cannot use an API key to mint another one. A user
 may hold **2 live keys**, choosing a lifetime of **30, 60, or 90 days** at
 creation. Neither an expired nor a revoked key occupies a slot.
-
-Deleting a key (`DELETE /api/sdk-keys/:id`) is a soft revoke: the row stays,
-`status` moves from `ACTIVE` to `REVOKED`, `revokedAt` records when. `apiKeyAuth`
-rejects a revoked key with the same message as a row that never existed —
-"Unknown or revoked API key" — so revocation carries no information a caller
-could use to distinguish the two. `status` is a plain `String` column rather
-than a Postgres enum: this repo's enums are frozen (`scripts/validate-no-new-enums.sh`),
-so a fixed value set is enforced app-side via `SDK_API_KEY_STATUSES` in `auth.ts`.
 
 ### Authorization
 
@@ -252,9 +259,9 @@ the controllers and `tenantScopeMiddleware` read identity from.
 |---|---|---|
 | `SDK_API_ENABLED` | `false` | Master switch. The router is not mounted when false |
 | `DATABASE_READ_REPLICA_POOL_URL` | — | Where reads go. Required in production; outside it, falls back to the primary pool |
-| `ENCRYPTION_KEY` | — | 32 bytes, hex. Already required by the app |
+| `JWT_SECRET` | — | Signs and verifies keys. Already required by the app for session tokens |
 
-No signing keys, no client registry, no callback URLs.
+No dedicated signing key, no client registry, no callback URLs.
 
 ---
 

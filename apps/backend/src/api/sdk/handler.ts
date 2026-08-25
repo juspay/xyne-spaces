@@ -83,7 +83,6 @@ export function errorHandler(
     method: req.method,
     path: req.originalUrl,
     userId: req.sdkAuth?.authData.sub,
-    keyId: req.sdkAuth?.keyId,
     err: apiError.cause ?? apiError,
   };
   if (isServerError) logger.error('[sdk] request failed', logPayload);

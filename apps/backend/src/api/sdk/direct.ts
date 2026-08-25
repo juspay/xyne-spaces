@@ -155,9 +155,12 @@ const ROUTES: readonly DirectRoute[] = [
    * Who the presented key acts as.
    *
    * The middleware has already resolved this, so it is a read of the request
-   * rather than a lookup. It exists because the key is an opaque encrypted blob:
-   * unlike a JWT there are no claims for a client to read, and several
-   * operations take the acting user's id as an argument.
+   * rather than a lookup. A key's own claims do not include `role` or
+   * `orgRole` — those are read fresh from the database on every request,
+   * deliberately, so this is the only way a caller gets the full picture. It
+   * also spares an SDK client from decoding a JWT itself, which this SDK has
+   * no crypto dependency to do safely. Several operations also take the
+   * acting user's id as an argument, which this is how a caller learns.
    */
   {
     method: 'get',

@@ -4,7 +4,9 @@ import { apiInstance } from '../clients/apiClient';
  * API keys for the public Spaces SDK.
  *
  * A key is workspace-scoped, because the user row that mints it is: someone
- * with access to two workspaces mints separately from each.
+ * with access to two workspaces mints separately from each. Revoking a key
+ * stops it working on its very next request — the backend checks the key's
+ * stored status on every call, not just its signature.
  */
 /** Lifetimes a key can be minted with, in days. Mirrors `API_KEY_TTL_CHOICES` on the backend. */
 export const API_KEY_TTL_CHOICES = [30, 60, 90] as const;
@@ -43,7 +45,8 @@ export const sdkKeysService = {
     return response.data;
   },
 
-  async remove(id: string): Promise<void> {
+  /** Revoke a key. It stops working immediately; the row stays as an audit trail. */
+  async revoke(id: string): Promise<void> {
     await apiInstance.delete(`/sdk-keys/${id}`);
   },
 };

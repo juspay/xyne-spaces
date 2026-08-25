@@ -14,7 +14,12 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { API_KEY_TTL_CHOICES, apiKeyExpiryFrom, mintApiKey } from '@/api/sdk/auth';
+import {
+  API_KEY_TTL_CHOICES,
+  SDK_API_KEY_STATUS,
+  apiKeyExpiryFrom,
+  mintApiKey,
+} from '@/api/sdk/auth';
 
 const router = Router();
 
@@ -47,9 +52,9 @@ function summarize(row: {
   name: string;
   token: string;
   status: string;
-  revokedAt: Date | null;
   createdAt: Date;
   expiresAt: Date;
+  revokedAt: Date | null;
 }): KeySummary {
   return {
     id: row.id,
@@ -57,17 +62,31 @@ function summarize(row: {
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
     hint: row.token.slice(-4),
+    // Derived, not stored: a key stops working the moment it passes its expiry
+    // whether or not anything has written a row to say so.
     expired: row.expiresAt.getTime() <= Date.now(),
-    revoked: row.status === 'REVOKED',
+    revoked: row.status === SDK_API_KEY_STATUS.REVOKED,
     revokedAt: row.revokedAt,
   };
 }
 
+/** Every column `summarize` reads. */
+const SUMMARY_SELECT = {
+  id: true,
+  name: true,
+  token: true,
+  status: true,
+  createdAt: true,
+  expiresAt: true,
+  revokedAt: true,
+} as const;
+
 /**
  * List the caller's keys.
  *
- * Expired and revoked keys are returned rather than hidden, so the list
+ * Expired and revoked keys are both returned rather than hidden, so the list
  * explains why a key stopped working instead of appearing to have lost it.
+ * Neither occupies one of the caller's live-key slots.
  */
 router.get('/', async (req: Request, res: Response) => {
   const user = req.user;
@@ -80,15 +99,7 @@ router.get('/', async (req: Request, res: Response) => {
     const rows = await db.sdkApiKey.findMany({
       where: { userId: user.id, workspaceId: user.workspaceId },
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        name: true,
-        token: true,
-        status: true,
-        revokedAt: true,
-        createdAt: true,
-        expiresAt: true,
-      },
+      select: SUMMARY_SELECT,
     });
 
     res.json({
@@ -104,10 +115,9 @@ router.get('/', async (req: Request, res: Response) => {
 /**
  * Mint a key and return it once.
  *
- * The plaintext value is in this response and nowhere else afterwards. It is
- * recoverable in principle — the column is reversibly encrypted — but the API
- * deliberately never returns it again, so a leaked key is replaced rather than
- * re-read.
+ * The plaintext value is in this response and nowhere else afterwards — it is
+ * a signed JWT, not reversibly stored, so there is no "show it again" to offer
+ * even in principle. A leaked key is replaced, not re-read.
  */
 router.post('/', async (req: Request, res: Response) => {
   const user = req.user;
@@ -125,19 +135,19 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    // Only live keys count against the limit: an expired or revoked one must
-    // never block minting its replacement.
+    // Only live keys count against the limit: neither an expired nor a revoked
+    // one must ever block minting its replacement.
     const liveKeys = await db.sdkApiKey.count({
       where: {
         userId: user.id,
         workspaceId: user.workspaceId,
-        status: 'ACTIVE',
+        status: SDK_API_KEY_STATUS.ACTIVE,
         expiresAt: { gt: new Date() },
       },
     });
     if (liveKeys >= MAX_LIVE_KEYS) {
       res.status(409).json({
-        error: `You already have ${MAX_LIVE_KEYS} active API keys. Delete one to create another.`,
+        error: `You already have ${MAX_LIVE_KEYS} active API keys. Revoke one to create another.`,
       });
       return;
     }
@@ -157,14 +167,18 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const token = mintApiKey({
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-      workspaceId: user.workspaceId,
-      orgId: orgMember.orgId,
-      memberId: user.memberId,
-    });
+    const expiresAt = apiKeyExpiryFrom(parsed.data.ttlDays);
+    const token = mintApiKey(
+      {
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        workspaceId: user.workspaceId,
+        orgId: orgMember.orgId,
+        memberId: user.memberId,
+      },
+      expiresAt,
+    );
 
     const row = await db.sdkApiKey.create({
       data: {
@@ -172,17 +186,9 @@ router.post('/', async (req: Request, res: Response) => {
         userId: user.id,
         workspaceId: user.workspaceId,
         token,
-        expiresAt: apiKeyExpiryFrom(parsed.data.ttlDays),
+        expiresAt,
       },
-      select: {
-        id: true,
-        name: true,
-        token: true,
-        status: true,
-        revokedAt: true,
-        createdAt: true,
-        expiresAt: true,
-      },
+      select: SUMMARY_SELECT,
     });
 
     logger.info('[sdk-keys] key created', { userId: user.id, keyId: row.id });
@@ -194,11 +200,17 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 /**
- * Revoke one of the caller's keys. Takes effect on the next request.
+ * Revoke one of the caller's keys.
  *
- * Soft: the row stays, `status` flips to `REVOKED`, `revokedAt` records when.
- * A hard delete would lose that — `GET /` couldn't tell "you deleted this" from
- * "this never existed," and there would be nothing left to audit.
+ * The key stops working on its very next request: `apiKeyAuth` reads this row
+ * every time and refuses anything not `ACTIVE`. The row is updated rather than
+ * deleted so it survives as the audit trail — who held a key and when it was
+ * taken away — and so a revoked token can never be resurrected by re-inserting
+ * the same string.
+ *
+ * Scoped by `userId` as well as `id`, so someone else's key id is a 404 rather
+ * than a revocation. Already-revoked keys are excluded from the match, which
+ * makes a repeat call a 404 instead of silently rewriting `revokedAt`.
  */
 router.delete('/:id', async (req: Request, res: Response) => {
   const user = req.user;
@@ -208,16 +220,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 
   try {
-    // Scoped by userId, workspaceId, and current status: an id belonging to
-    // someone else, or already revoked, is a no-op rather than a change.
     const { count } = await db.sdkApiKey.updateMany({
       where: {
         id: req.params['id'],
         userId: user.id,
         workspaceId: user.workspaceId,
-        status: 'ACTIVE',
+        status: SDK_API_KEY_STATUS.ACTIVE,
       },
-      data: { status: 'REVOKED', revokedAt: new Date() },
+      data: { status: SDK_API_KEY_STATUS.REVOKED, revokedAt: new Date() },
     });
 
     if (count === 0) {
@@ -229,7 +239,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     res.status(204).end();
   } catch (error) {
     logger.error('[sdk-keys] revoke failed', { userId: user.id, error });
-    res.status(500).json({ error: 'Failed to delete API key' });
+    res.status(500).json({ error: 'Failed to revoke API key' });
   }
 });
 

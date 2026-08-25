@@ -306,8 +306,8 @@ Mint a new one in the Spaces dashboard, under Apps → API keys and set XYNE_SPA
 
 | Code | Means |
 |---|---|
-| `unauthenticated` | No key configured, or the key was revoked |
-| `token_expired` | Past its chosen lifetime — mint another |
+| `unauthenticated` | No key configured, or it's malformed / not signed by this deployment |
+| `token_expired` | Past its chosen lifetime — mint another. Deleting a key in the dashboard does not do this early; see below |
 | `forbidden` | Your user is not allowed this. Not a bug in the tool |
 | `not_found` | Absent, or invisible to you — deliberately indistinguishable |
 | `validation_failed` | An argument the server rejects. The message names the field |
@@ -315,6 +315,11 @@ Mint a new one in the Spaces dashboard, under Apps → API keys and set XYNE_SPA
 | `upstream_unavailable` | Search or Claw is down. Retryable |
 
 Anything unexpected carries a `request_id` so a server-side failure can be correlated.
+
+A key can be revoked at any time from the dashboard, and stops working on its
+very next request — the server checks its stored status on every call, not just
+its signature. If a key leaks, revoke it; you do not have to wait out its
+lifetime.
 
 ---
 

@@ -96,11 +96,12 @@ exactly their workspace. It is not a service account and grants no elevation.
 Access is decided by the same per-table ACL the product runs behind, so a key
 cannot read a channel its owner cannot read.
 
-Three properties worth knowing before you deploy:
+Four properties worth knowing before you deploy:
 
 | | |
 |---|---|
-| **Short-lived** | 30, 60, or 90 days, chosen at creation. There is no refresh step, so lifetime is the bound on a leaked key |
+| **Short-lived** | 30, 60, or 90 days, chosen at creation. There is no refresh step |
+| **Revocable immediately** | Revoking a key in the dashboard stops it on its very next request. The server checks the key's stored status on every call, not just its signature |
 | **Live permissions** | Role changes take effect on the next request, not on rotation. Deactivate a user and their keys stop working |
 | **Single workspace** | Access to a second workspace requires a second key, minted there |
 
@@ -115,9 +116,10 @@ const me = await sdk.users.me();
 //   role, orgRole, keyExpiresAt }
 ```
 
-This is a request, not a local decode: a key is an opaque encrypted blob, not a
-JWT, so there are no claims to read client-side. Cache it — the identity behind a
-key does not change.
+This is a request, not a local decode: a key's claims don't include `role` or
+`orgRole` — those are read fresh from the database on every server-side
+request, deliberately, so this call is the only way to get a full picture.
+Cache it — the identity behind a key does not change.
 
 `keyExpiresAt` is ISO 8601. Long-running services should check it at startup and
 rotate ahead of time rather than discovering the expiry mid-request:

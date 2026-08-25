@@ -6,8 +6,8 @@ CREATE TABLE "non_zero"."sdk_api_keys" (
     "userId" TEXT NOT NULL,
     "token" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-    "revoked_at" TIMESTAMP(3),
     "expires_at" TIMESTAMP(3) NOT NULL,
+    "revoked_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -25,3 +25,6 @@ CREATE INDEX "sdk_api_keys_userId_idx" ON "non_zero"."sdk_api_keys"("userId");
 
 -- CreateIndex
 CREATE INDEX "sdk_api_keys_expires_at_idx" ON "non_zero"."sdk_api_keys"("expires_at");
+
+-- CreateIndex
+CREATE INDEX "sdk_api_keys_status_idx" ON "non_zero"."sdk_api_keys"("status");

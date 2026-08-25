@@ -963,22 +963,30 @@ model ScheduledMessage {
   @@schema("non_zero")
 }
 
-// API keys for the public Spaces SDK (/api/sdk).
+// API keys for the public Spaces SDK (/api/sdk). A key is a signed JWT, and
+// this row is the other half of authenticating one: the signature proves the
+// key is authentic, this row decides whether it is still allowed. Revoking a
+// key sets `status` here, which is what stops it working before its own
+// expiry — see auth.ts.
+//
+// `status` is a plain String rather than a Postgres enum, per the repo-wide
+// enum freeze (scripts/validate-no-new-enums.sh). Same shape as UserSession.
 model SdkApiKey {
   workspaceId String // denormalized tenant key (stamped on insert)
   id          String    @id @default(cuid())
   name        String
   userId      String
   token       String    @unique
-  status      String    @default("ACTIVE")
-  revokedAt   DateTime? @map("revoked_at")
+  status      String    @default("ACTIVE") // ACTIVE | REVOKED
   expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@index([workspaceId])
   @@index([userId])
   @@index([expiresAt])
+  @@index([status])
   @@map("sdk_api_keys")
   @@schema("non_zero")
 }
