@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TagMethod } from '@xyne/shared';
+import { toast } from 'sonner';
 import { tagsApi } from '../api/tagsApi';
+import { recordingService } from '../services/Recording/recordingService';
+import { logRecordingError } from '../utils/recordingUtils';
 
 /** Resolved `Tag id -> { tag, method }`, shared across mounts so scrolling never re-fetches. */
 const resolvedLabelCache = new Map<string, { tag: string; method: TagMethod }>();
@@ -35,6 +38,23 @@ export async function confirmRecordingLabelSuggestion(
   } catch (err) {
     markResolvedRecordingLabelMethod(id, revertMethod);
     throw err;
+  }
+}
+
+export async function applyRecordingLabelsChange(
+  externalId: string,
+  previousLabels: string[],
+  nextLabels: string[],
+  applyLocally: (labels: string[]) => void,
+  errorContext: string,
+): Promise<void> {
+  applyLocally(nextLabels);
+  try {
+    await recordingService.updateRecording(externalId, { labels: nextLabels });
+  } catch (err) {
+    logRecordingError(errorContext, err);
+    toast.error('Failed to update labels');
+    applyLocally(previousLabels);
   }
 }
 
@@ -88,6 +108,7 @@ async function resolveMissingLabels(ids: string[]): Promise<void> {
 export function useResolvedRecordingLabels(labelIds: string[]): {
   resolveLabel: (id: string) => string;
   resolveMethod: (id: string) => TagMethod;
+  isResolved: (id: string) => boolean;
   isResolving: boolean;
 } {
   const [cacheVersion, setCacheVersion] = useState(0);
@@ -138,5 +159,9 @@ export function useResolvedRecordingLabels(labelIds: string[]): {
     return (id: string): TagMethod => resolvedLabelCache.get(id)?.method ?? TagMethod.MANUAL;
   }, [cacheVersion]);
 
-  return { resolveLabel, resolveMethod, isResolving };
+  const isResolved = useMemo(() => {
+    return (id: string): boolean => resolvedLabelCache.has(id);
+  }, [cacheVersion]);
+
+  return { resolveLabel, resolveMethod, isResolved, isResolving };
 }

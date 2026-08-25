@@ -148,15 +148,15 @@ const RecordingsV2Screen = (): ReactElement => {
   // to their actual value once here so both the filter dropdown and the
   // per-row chips show real label names instead of raw ids. Every id is passed
   // in, including generated ones, since resolving is also what reveals the method.
-  const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(availableLabels);
+  const { resolveLabel, resolveMethod, isResolved } = useResolvedRecordingLabels(availableLabels);
 
   const isManualLabel = useCallback(
     (label: string): boolean => resolveMethod(label) === TagMethod.MANUAL,
     [resolveMethod],
   );
   const manualLabels = useMemo(
-    () => availableLabels.filter(isManualLabel),
-    [availableLabels, isManualLabel],
+    () => availableLabels.filter(isResolved).filter(isManualLabel),
+    [availableLabels, isResolved, isManualLabel],
   );
 
   /**
@@ -606,9 +606,10 @@ const RecordingsV2Screen = (): ReactElement => {
                           usersById,
                           currentUser?.id,
                         )}
-                        tags={row.recording.labels.filter(isManualLabel)}
+                        tags={row.recording.labels.filter(isResolved).filter(isManualLabel)}
                         suggestedTags={row.recording.labels.filter(
-                          label => resolveMethod(label) === TagMethod.AUTOMATED,
+                          label =>
+                            isResolved(label) && resolveMethod(label) === TagMethod.AUTOMATED,
                         )}
                         resolveLabel={resolveLabel}
                         currentUserId={currentUser?.id}

@@ -1725,7 +1725,10 @@ export class CallController {
       res.json({ success: true, labelIds });
     } catch (error) {
       logger.error(`[${callId}] Failed to generate recording labels`, error);
-      res.status(500).json({ success: false, error: 'Failed to generate recording labels' });
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to generate recording labels',
+      });
     }
   };
 

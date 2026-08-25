@@ -22,12 +22,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../../components/ui/dropdown-menu';
-import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
+import {
+  patchOatsRecordingLabels,
+  type OatsRecordingEntry,
+} from '../../../hooks/usePaginatedOatsRecordings';
 import {
   recordingService,
   type RecordingDetail,
 } from '../../../services/Recording/recordingService';
-import { confirmRecordingLabelSuggestion } from '../../../hooks/useResolvedRecordingLabels';
+import {
+  applyRecordingLabelsChange,
+  confirmRecordingLabelSuggestion,
+} from '../../../hooks/useResolvedRecordingLabels';
 import {
   calculateRecordingElapsedMs,
   formatElapsedTime,
@@ -257,7 +263,8 @@ const RecordingsV2Pill = ({
     if (isGeneratingLabels) return;
     setIsGeneratingLabels(true);
     try {
-      await recordingService.generateLabels(recording.externalId);
+      const labelIds = await recordingService.generateLabels(recording.externalId);
+      patchOatsRecordingLabels(recording.id, [...new Set([...recording.labels, ...labelIds])]);
     } catch (err) {
       logRecordingError('RecordingsV2Pill.generateLabels', err);
       toast.error('Failed to generate labels');
@@ -278,14 +285,14 @@ const RecordingsV2Pill = ({
   };
 
   const handleRejectSuggestion = async (labelId: string): Promise<void> => {
-    try {
-      await recordingService.updateRecording(recording.externalId, {
-        labels: recording.labels.filter(id => id !== labelId),
-      });
-    } catch (err) {
-      logRecordingError('RecordingsV2Pill.rejectSuggestion', err);
-      toast.error('Failed to dismiss label');
-    }
+    const nextLabels = recording.labels.filter(id => id !== labelId);
+    await applyRecordingLabelsChange(
+      recording.externalId,
+      recording.labels,
+      nextLabels,
+      labels => patchOatsRecordingLabels(recording.id, labels),
+      'RecordingsV2Pill.rejectSuggestion',
+    );
   };
 
   return (
