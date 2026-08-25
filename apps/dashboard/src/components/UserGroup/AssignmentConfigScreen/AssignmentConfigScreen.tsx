@@ -65,9 +65,14 @@ export const AssignmentConfigScreen = ({
   const [isRotationModalOpen, setIsRotationModalOpen] = useState(false);
   const [showDisableRotationWarning, setShowDisableRotationWarning] = useState(false);
   const [activeTab, setActiveTab] = useState<'availability' | 'visibility'>('availability');
-  // Members deactivated in this session whose open tickets should be handed off on save
+  // Members switched off in this session who were opted in to a ticket handoff on save
   const [pendingReassignUserIds, setPendingReassignUserIds] = useState<Set<string>>(new Set());
-  const [reassignPromptUserId, setReassignPromptUserId] = useState<string | null>(null);
+  // Handoff prompt raised by switching a member off. `previous` is the state Cancel restores.
+  const [reassignPrompt, setReassignPrompt] = useState<{
+    userId: string;
+    previous: { onCall: boolean; isActive: boolean };
+  } | null>(null);
+  const [reassignPromptChecked, setReassignPromptChecked] = useState(false);
 
   // Current time for active set calculation (updates every 5 minutes)
   const [currentTime, setCurrentTime] = useState(Date.now());
@@ -321,14 +326,22 @@ export const AssignmentConfigScreen = ({
 
   const boards = useMemo(() => allBoards || [], [allBoards]);
 
-  // Re-activating a member cancels the handoff queued when they were switched off
-  const clearPendingReassign = (userId: string): void => {
+  const setPendingReassign = (userId: string, shouldReassign: boolean): void => {
     setPendingReassignUserIds(prev => {
-      if (!prev.has(userId)) return prev;
+      if (prev.has(userId) === shouldReassign) return prev;
       const next = new Set(prev);
-      next.delete(userId);
+      if (shouldReassign) next.add(userId);
+      else next.delete(userId);
       return next;
     });
+  };
+
+  // True only while a member who is still active on the server has been switched off
+  // locally and not saved yet — the window in which the handoff opt-in is offered.
+  const isDeactivatedInSession = (userId: string): boolean => {
+    const serverState = userAssignmentStates?.find((s: UserAssignmentState) => s.userId === userId);
+    if (serverState?.isActiveForAssignment !== true) return false;
+    return localUserStates.get(userId)?.isActive === false;
   };
 
   const handleToggleOnCall = (userId: string): void => {
@@ -339,7 +352,7 @@ export const AssignmentConfigScreen = ({
       // If turning onCall ON, automatically set isActive to true
       if (!currentState.onCall) {
         newStates.set(userId, { onCall: true, isActive: true });
-        clearPendingReassign(userId);
+        setPendingReassign(userId, false);
       } else {
         newStates.set(userId, { ...currentState, onCall: false });
       }
@@ -356,15 +369,17 @@ export const AssignmentConfigScreen = ({
       // If turning isActive OFF, automatically set onCall to false as well
       if (currentState.isActive) {
         newStates.set(userId, { onCall: false, isActive: false });
-        // Deactivating strands their open tickets, so offer the handoff the
-        // group has opted into. Mirrors the member-side pause dialog.
+        // Deactivating strands their open tickets, so ask about the handoff the group
+        // has opted into. Starts unchecked: tickets stay with them unless asked otherwise.
         if (localReassignOnUnavailable) {
-          setReassignPromptUserId(userId);
+          setReassignPromptChecked(false);
+          setReassignPrompt({ userId, previous: currentState });
         }
       } else {
         newStates.set(userId, { ...currentState, isActive: true });
-        clearPendingReassign(userId);
       }
+      // Re-toggling always retires the previous answer; the dialog re-applies it on Save.
+      setPendingReassign(userId, false);
       setLocalUserStates(newStates);
       setHasChanges(true);
     }
@@ -753,7 +768,9 @@ export const AssignmentConfigScreen = ({
 
       // Queue handoffs only after the states above are persisted, so members
       // deactivated in this same save can't inherit each other's tickets.
-      const reassignTargets = localReassignOnUnavailable ? [...pendingReassignUserIds] : [];
+      const reassignTargets = localReassignOnUnavailable
+        ? [...pendingReassignUserIds].filter(isDeactivatedInSession)
+        : [];
       if (reassignTargets.length > 0) {
         const outcomes = await Promise.allSettled(
           reassignTargets.map(targetUserId =>
@@ -792,9 +809,28 @@ export const AssignmentConfigScreen = ({
     setHasChanges(true);
   };
 
-  const reassignPromptUser = reassignPromptUserId
-    ? users.find(u => u.id === reassignPromptUserId)
+  const reassignPromptUser = reassignPrompt
+    ? users.find(u => u.id === reassignPrompt.userId)
     : undefined;
+
+  // Cancel undoes the switch that raised the prompt, leaving the member active.
+  const cancelReassignPrompt = (): void => {
+    if (reassignPrompt) {
+      const { userId, previous } = reassignPrompt;
+      setLocalUserStates(prev => new Map(prev).set(userId, previous));
+      setPendingReassign(userId, false);
+    }
+    setReassignPrompt(null);
+  };
+
+  // Continue keeps the member switched off and records whatever the checkbox says; the
+  // screen's "Save changes" button is what actually persists it.
+  const confirmReassignPrompt = (): void => {
+    if (reassignPrompt) {
+      setPendingReassign(reassignPrompt.userId, reassignPromptChecked);
+    }
+    setReassignPrompt(null);
+  };
 
   const getUserLocalState = (userId: string): { onCall: boolean; isActive: boolean } => {
     return localUserStates.get(userId) || { onCall: false, isActive: false };
@@ -1516,40 +1552,47 @@ export const AssignmentConfigScreen = ({
 
       {/* Reassign-On-Deactivate Dialog */}
       <Dialog
-        open={reassignPromptUserId !== null}
+        open={reassignPrompt !== null}
         onOpenChange={open => {
-          if (!open) setReassignPromptUserId(null);
+          if (!open) cancelReassignPrompt();
         }}
         title='Reassign their open tickets?'
       >
         <div className='p-6'>
-          <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
+          <p className='text-[13px] leading-[1.5] text-muted-foreground'>
             {reassignPromptUser ? getUserDisplayName(reassignPromptUser) : 'This member'} will stop
             receiving new tickets in this group once you save. Their open tickets can be handed to
             another eligible member — if none is available, the tickets stay with them.
           </p>
 
-          <div className='flex justify-end gap-3'>
+          <div className='mt-4 space-y-1 rounded-lg border border-border bg-muted/30 p-3'>
+            <Checkbox
+              checked={reassignPromptChecked}
+              onChange={setReassignPromptChecked}
+              label='Reassign their existing open tickets'
+            />
+            <p className='pl-[26px] text-xs leading-[1.4] text-muted-foreground'>
+              If unchecked, they will still be excluded from new auto-assignment once you save.
+              Existing tickets will stay with them.
+            </p>
+          </div>
+
+          <div className='mt-6 flex justify-end gap-3'>
             <Button
               variant='secondary'
-              onClick={() => setReassignPromptUserId(null)}
+              onClick={cancelReassignPrompt}
               data-track-category='UserGroups'
-              data-track-name='KeepTicketsOnDeactivate'
+              data-track-name='CancelReassignOnDeactivate'
             >
-              Keep with them
+              Cancel
             </Button>
             <Button
-              onClick={() => {
-                if (reassignPromptUserId) {
-                  setPendingReassignUserIds(prev => new Set(prev).add(reassignPromptUserId));
-                }
-                setReassignPromptUserId(null);
-              }}
+              onClick={confirmReassignPrompt}
               data-track-category='UserGroups'
-              data-track-name='ReassignTicketsOnDeactivate'
-              data-track-metadata={JSON.stringify({ userGroupId })}
+              data-track-name='ConfirmReassignOnDeactivate'
+              data-track-metadata={JSON.stringify({ userGroupId, reassignPromptChecked })}
             >
-              Reassign tickets
+              Continue
             </Button>
           </div>
         </div>
