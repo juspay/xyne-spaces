@@ -1,3 +1,10 @@
+## [1.223.0](https://github.com/juspay/xyne-spaces/compare/v1.222.0...v1.223.0) (2026-08-25)
+
+
+### Features
+
+* add ordered encryption key rotation ([#764](https://github.com/juspay/xyne-spaces/issues/764)) ([5a7f29d](https://github.com/juspay/xyne-spaces/commit/5a7f29d92b18918a44c7d593ce566c0ddc885504))
+
 ## [1.222.0](https://github.com/juspay/xyne-spaces/compare/v1.221.0...v1.222.0) (2026-08-25)
 
 
