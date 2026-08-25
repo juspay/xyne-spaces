@@ -31,6 +31,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleDot,
+  EllipsisVertical,
   ExternalLink,
   FileText,
   Folder,
@@ -61,6 +62,12 @@ import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
 import Input from '../../components/ui/Input';
 import Textarea from '../../components/ui/Textarea';
 import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
@@ -236,6 +243,8 @@ export default function SdlcScreen(): ReactElement {
   const [renameTypeName, setRenameTypeName] = useState('');
   const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null);
   const [trackDialog, setTrackDialog] = useState(false);
+  // Set when the track dialog is editing an existing track instead of creating one.
+  const [trackEditId, setTrackEditId] = useState<string | null>(null);
   const [trackName, setTrackName] = useState('');
   const [trackDescription, setTrackDescription] = useState('');
   const [artifactTrack, setArtifactTrack] = useState<{ id: string; name: string } | null>(null);
@@ -1319,6 +1328,36 @@ export default function SdlcScreen(): ReactElement {
     if (response.type === 'error') throw new Error(response.error.message);
   };
 
+  const closeTrackDialog = (): void => {
+    setTrackDialog(false);
+    setTrackEditId(null);
+    setTrackName('');
+    setTrackDescription('');
+  };
+
+  const openTrackEditDialog = (track: { id: string; name: string; description: string }): void => {
+    setTrackEditId(track.id);
+    setTrackName(track.name);
+    setTrackDescription(track.description);
+    setTrackDialog(true);
+  };
+
+  const updateTrackDetailsAction = async (): Promise<void> => {
+    if (!trackEditId) return;
+    const description = trackDescription.trim();
+    await runTrackMutation(
+      zero.mutate(
+        mutators.sdlc.updateTrack({
+          trackId: trackEditId,
+          name: trackName.trim(),
+          description: description ? description : null,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
+    closeTrackDialog();
+  };
+
   const createTrackAction = async (): Promise<void> => {
     if (!repo || repo instanceof Error) return;
     const id = uuidv4();
@@ -1333,9 +1372,7 @@ export default function SdlcScreen(): ReactElement {
         }),
       ),
     );
-    setTrackDialog(false);
-    setTrackName('');
-    setTrackDescription('');
+    closeTrackDialog();
     if (repoId) {
       navigateWithinSdlc(`/sdlc/${repoId}/tracks`, `?track=${encodeURIComponent(id)}`);
     }
@@ -1487,7 +1524,12 @@ export default function SdlcScreen(): ReactElement {
           description='Workstreams that group PRDs and their conversations.'
           action={
             <Button
-              onClick={() => setTrackDialog(true)}
+              onClick={() => {
+                setTrackEditId(null);
+                setTrackName('');
+                setTrackDescription('');
+                setTrackDialog(true);
+              }}
               data-track-category='SdlcHub'
               data-track-name='NewTrackOpened'
             >
@@ -1505,13 +1547,21 @@ export default function SdlcScreen(): ReactElement {
                 tabIndex={0}
                 onClick={event => {
                   const target = event.target as HTMLElement;
-                  if (target.closest('[data-status-select], [role="listbox"], [role="option"]'))
+                  if (
+                    target.closest(
+                      '[data-status-select], [data-card-menu], [role="listbox"], [role="option"], [role="menu"], [role="menuitem"]',
+                    )
+                  )
                     return;
                   openTrack(track.id);
                 }}
                 onKeyDown={event => {
                   const target = event.target as HTMLElement;
-                  if (target.closest('[data-status-select], [role="listbox"], [role="option"]'))
+                  if (
+                    target.closest(
+                      '[data-status-select], [data-card-menu], [role="listbox"], [role="option"], [role="menu"], [role="menuitem"]',
+                    )
+                  )
                     return;
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
@@ -1527,35 +1577,69 @@ export default function SdlcScreen(): ReactElement {
                   <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
                     <Layers size={18} />
                   </div>
-                  <div data-status-select=''>
-                    <Select
-                      value={track.status}
-                      onValueChange={value =>
-                        void call(
-                          `track-status-${track.id}`,
-                          () => setTrackStatusAction(track.id, value),
-                          'Track updated',
-                        )
-                      }
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          'h-7 w-auto gap-1 rounded-full border-none px-2.5 text-xs font-medium shadow-none focus:ring-0',
-                          TRACK_STATUS_STYLES[track.status] ?? TRACK_STATUS_STYLES['ACTIVE'],
-                        )}
-                        onClick={event => event.stopPropagation()}
-                        onKeyDown={event => event.stopPropagation()}
-                        data-track-category='SdlcHub'
-                        data-track-name='TrackStatusChanged'
+                  <div className='flex items-center gap-1'>
+                    <div data-status-select=''>
+                      <Select
+                        value={track.status}
+                        onValueChange={value =>
+                          void call(
+                            `track-status-${track.id}`,
+                            () => setTrackStatusAction(track.id, value),
+                            'Track updated',
+                          )
+                        }
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value='ACTIVE'>Active</SelectItem>
-                        <SelectItem value='COMPLETED'>Completed</SelectItem>
-                        <SelectItem value='ARCHIVED'>Archived</SelectItem>
-                      </SelectContent>
-                    </Select>
+                        <SelectTrigger
+                          className={cn(
+                            'h-7 w-auto gap-1 rounded-full border-none px-2.5 text-xs font-medium shadow-none focus:ring-0',
+                            TRACK_STATUS_STYLES[track.status] ?? TRACK_STATUS_STYLES['ACTIVE'],
+                          )}
+                          onClick={event => event.stopPropagation()}
+                          onKeyDown={event => event.stopPropagation()}
+                          data-track-category='SdlcHub'
+                          data-track-name='TrackStatusChanged'
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value='ACTIVE'>Active</SelectItem>
+                          <SelectItem value='COMPLETED'>Completed</SelectItem>
+                          <SelectItem value='ARCHIVED'>Archived</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div data-card-menu=''>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type='button'
+                            aria-label='Track actions'
+                            onClick={event => event.stopPropagation()}
+                            onKeyDown={event => event.stopPropagation()}
+                            className='grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'
+                            data-track-category='SdlcHub'
+                            data-track-name='TrackActionsOpened'
+                          >
+                            <EllipsisVertical size={16} />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='end'>
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              openTrackEditDialog({
+                                id: track.id,
+                                name: track.name,
+                                description: track.description ?? '',
+                              })
+                            }
+                            data-track-category='SdlcHub'
+                            data-track-name='TrackEditOpened'
+                          >
+                            Edit
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 </div>
                 <h3 className='mt-4 truncate font-semibold'>{track.name}</h3>
@@ -2408,17 +2492,21 @@ export default function SdlcScreen(): ReactElement {
 
       <Dialog
         open={trackDialog}
-        onOpenChange={open => !open && setTrackDialog(false)}
-        title='New Track'
+        onOpenChange={open => !open && closeTrackDialog()}
+        title={trackEditId ? 'Edit Track' : 'New Track'}
       >
         <form
           className='p-6'
           onSubmit={event => {
             event.preventDefault();
+            if (trackEditId) {
+              void call('track-update', updateTrackDetailsAction, 'Track updated');
+              return;
+            }
             void call('track-create', createTrackAction, 'Track created');
           }}
         >
-          <h2 className='text-lg font-semibold'>New Track</h2>
+          <h2 className='text-lg font-semibold'>{trackEditId ? 'Edit Track' : 'New Track'}</h2>
           <label htmlFor='sdlc-track-name' className='mt-5 block text-sm font-medium'>
             Name
           </label>
@@ -2447,17 +2535,17 @@ export default function SdlcScreen(): ReactElement {
             data-track-name='TrackDescriptionChanged'
           />
           <div className='mt-6 flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={() => setTrackDialog(false)}>
+            <Button type='button' variant='outline' onClick={closeTrackDialog}>
               Cancel
             </Button>
             <Button
               type='submit'
-              loading={busy === 'track-create'}
+              loading={busy === (trackEditId ? 'track-update' : 'track-create')}
               disabled={!trackName.trim()}
               data-track-category='SdlcHub'
-              data-track-name='TrackCreated'
+              data-track-name={trackEditId ? 'TrackEdited' : 'TrackCreated'}
             >
-              Create Track
+              {trackEditId ? 'Save Changes' : 'Create Track'}
             </Button>
           </div>
         </form>
