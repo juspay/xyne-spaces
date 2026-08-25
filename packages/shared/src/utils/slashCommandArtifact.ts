@@ -2,6 +2,7 @@ import type { FlowComponent, FlowDefinition } from "../types/flowUI";
 import {
   flowDefinitionSchema,
   slashCommandArtifactPropsSchema,
+  type SlashCommandArtifactClosed,
   type SlashCommandArtifactEndedCall,
   type SlashCommandArtifactProps,
 } from "../validation/flowSchema";
@@ -275,16 +276,15 @@ export const getSlashCommandArtifactPreviewText = (
 };
 
 /**
- * Bake the summary of a finished call into the artifact's FlowJSON.
+ * Merge extra props into the artifact component of a FlowJSON message.
  *
- * Called once when a linked call ends — the same pattern the standard call
- * system message uses. Returns null when the content is not a recognised
- * artifact, so the caller can skip the write entirely rather than rewriting a
- * message it does not understand.
+ * Returns null when the content is not a recognised artifact, so the caller can
+ * skip the write entirely rather than rewriting a message it does not
+ * understand.
  */
-export const withSlashCommandArtifactEndedCall = (
+const withSlashCommandArtifactProps = (
   content: string,
-  endedCall: SlashCommandArtifactEndedCall,
+  props: Partial<SlashCommandArtifactProps>,
 ): string | null => {
   const parsed = parseSlashCommandArtifactMessage(content);
   if (!parsed) return null;
@@ -292,7 +292,7 @@ export const withSlashCommandArtifactEndedCall = (
   const patchComponents = (components: FlowComponent[]): FlowComponent[] =>
     components.map((component) => {
       if (component.type === "slash_command_artifact") {
-        return { ...component, props: { ...component.props, endedCall } };
+        return { ...component, props: { ...component.props, ...props } };
       }
       return component.children
         ? { ...component, children: patchComponents(component.children) }
@@ -304,3 +304,26 @@ export const withSlashCommandArtifactEndedCall = (
     components: patchComponents(parsed.flow.components),
   });
 };
+
+/**
+ * Bake the summary of a finished call into the artifact's FlowJSON.
+ *
+ * Called once when a linked call ends — the same pattern the standard call
+ * system message uses.
+ */
+export const withSlashCommandArtifactEndedCall = (
+  content: string,
+  endedCall: SlashCommandArtifactEndedCall,
+): string | null => withSlashCommandArtifactProps(content, { endedCall });
+
+/**
+ * Bake the "closed by its author" marker into the artifact's FlowJSON.
+ *
+ * The artifact row moves to a terminal status at the same time, which removes
+ * it from the ACTIVE-only subscription — this marker is what tells the card it
+ * was closed rather than never started.
+ */
+export const withSlashCommandArtifactClosed = (
+  content: string,
+  closed: SlashCommandArtifactClosed,
+): string | null => withSlashCommandArtifactProps(content, { closed });

@@ -188,7 +188,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
 
               {activeTab === 'automation' ? (
                 <div className='flex-1 min-w-0 overflow-hidden pt-12'>
-                  <AutomationTab channelId={channelId} form={form} />
+                  <AutomationTab channelId={channelId} />
                 </div>
               ) : (
                 <div className='flex-1 min-w-0 overflow-y-auto scrollbar-none pt-[28px] pb-[16px] px-6 md:px-12 lg:px-[86px]'>

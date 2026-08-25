@@ -87,7 +87,13 @@ export const StagesSubmenu = ({
           />
         </div>
       </div>
-      <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
+      <div
+        className='max-h-80 overflow-y-auto p-1'
+        role='listbox'
+        aria-multiselectable='true'
+        onWheel={e => e.stopPropagation()}
+        onTouchMove={e => e.stopPropagation()}
+      >
         {isLoading ? (
           <div className='p-8 text-center text-sm text-muted-foreground' aria-live='polite'>
             Loading status…

@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  GitBranch,
   History,
   Pencil,
   Power,
@@ -37,6 +38,7 @@ import {
 } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import {
+  fetchAutomationVersions,
   fetchOperators,
   fetchStepCatalog,
   fetchStepSchema,
@@ -158,6 +160,10 @@ export function AutomationBuilder({
   onAfterApprovalDecision,
   onBack,
   onShowRuns,
+  onShowVersionHistory,
+  onProposeChange,
+  onCancelFork,
+  readOnlyPreview = false,
 }: AutomationBuilderProps): React.ReactElement {
   const [name, setName] = useState(automation?.name ?? initialName ?? '');
   const [description, setDescription] = useState(
@@ -207,6 +213,23 @@ export function AutomationBuilder({
     queryFn: fetchOperators,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Lets the header show "which version am I looking at" (e.g. "v2 of 3"). Skipped
+  // in readOnlyPreview (the compare view), where the badge never renders.
+  const versionsQuery = useQuery({
+    queryKey: ['automation-versions', savedId],
+    queryFn: () => fetchAutomationVersions(savedId!),
+    enabled: !!savedId && !readOnlyPreview,
+    staleTime: 5 * 60 * 1000,
+  });
+  const versionPosition = useMemo(() => {
+    const versions = versionsQuery.data;
+    if (!versions || !savedId) return null;
+    // Versions come back newest-first; number chronologically (oldest = v1).
+    const indexFromNewest = versions.findIndex(v => v.id === savedId);
+    if (indexFromNewest === -1) return null;
+    return { number: versions.length - indexFromNewest, total: versions.length };
+  }, [versionsQuery.data, savedId]);
 
   const triggerSchemaQuery = useQuery({
     queryKey: ['automations', 'schema', 'trigger', config.trigger.type],
@@ -363,6 +386,7 @@ export function AutomationBuilder({
           createdAt: new Date(now).toISOString(),
           updatedAt: new Date(now).toISOString(),
           automationSeriesId: savedId ?? targetId,
+          eventType,
         },
         validation: validationResult,
       };
@@ -507,10 +531,13 @@ export function AutomationBuilder({
   });
 
   const handleProposeChangeNavigate = useCallback((): void => {
-    if (automation?.id) {
-      void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+    if (!automation) return;
+    if (onProposeChange) {
+      onProposeChange(automation);
+      return;
     }
-  }, [automation?.id, navigate]);
+    void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+  }, [automation, onProposeChange, navigate]);
 
   // Approve / Reject — only used in approval-review mode, when an admin
   // opens a PENDING_APPROVAL proposal from the inbox. The actual auth check
@@ -765,22 +792,24 @@ export function AutomationBuilder({
     <div className='flex h-full w-full flex-col bg-background'>
       <div className='flex flex-col gap-3 border-b border-border bg-background px-6 py-4'>
         <div className='flex items-center gap-3'>
-          <Tooltip content='Back to automations' side='bottom'>
-            <button
-              type='button'
-              onClick={onBack}
-              aria-label='Back to automations list'
-              data-track-category='automation-builder'
-              data-track-name='back-to-list'
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
-                'hover:text-foreground hover:bg-accent/40',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-              )}
-            >
-              <ArrowLeft className='size-4' aria-hidden='true' />
-            </button>
-          </Tooltip>
+          {!readOnlyPreview && (
+            <Tooltip content='Back to automations' side='bottom'>
+              <button
+                type='button'
+                onClick={onBack}
+                aria-label='Back to automations list'
+                data-track-category='automation-builder'
+                data-track-name='back-to-list'
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
+                  'hover:text-foreground hover:bg-accent/40',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                )}
+              >
+                <ArrowLeft className='size-4' aria-hidden='true' />
+              </button>
+            </Tooltip>
+          )}
           <InlineEditableText
             value={name}
             onChange={setName}
@@ -799,8 +828,30 @@ export function AutomationBuilder({
               {STATUS_LABEL[savedStatus] ?? savedStatus}
             </span>
           )}
+          {!editMode && !readOnlyPreview && versionPosition && (
+            <Tooltip
+              content={
+                versionPosition.total > 1
+                  ? `Version ${versionPosition.number} of ${versionPosition.total}`
+                  : 'Version 1'
+              }
+              side='bottom'
+            >
+              <button
+                type='button'
+                onClick={() => savedId && onShowVersionHistory?.(savedId)}
+                disabled={!onShowVersionHistory}
+                data-track-category='automation-builder'
+                data-track-name='header-version-indicator'
+                className='rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/40 disabled:pointer-events-none'
+              >
+                v{versionPosition.number}
+                {versionPosition.total > 1 ? ` / ${versionPosition.total}` : ''}
+              </button>
+            </Tooltip>
+          )}
 
-          {editMode ? (
+          {readOnlyPreview ? null : editMode ? (
             <>
               <Button
                 variant='outline'
@@ -815,7 +866,11 @@ export function AutomationBuilder({
                     return;
                   }
                   if (forkSourceAutomationId) {
-                    void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                    if (onCancelFork) {
+                      onCancelFork(forkSourceAutomationId);
+                    } else {
+                      void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                    }
                     return;
                   }
                   onBack();
@@ -849,6 +904,18 @@ export function AutomationBuilder({
                 >
                   <History className='size-4' />
                   Runs
+                </Button>
+              ) : null}
+              {savedId && onShowVersionHistory ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => onShowVersionHistory(savedId)}
+                  data-track-category='automation-builder'
+                  data-track-name='header-version-history'
+                >
+                  <GitBranch className='size-4' />
+                  Versions
                 </Button>
               ) : null}
               {savedId ? (
@@ -1017,9 +1084,9 @@ export function AutomationBuilder({
       <div
         className={cn(
           'flex-1 overflow-y-auto bg-muted/30',
-          !editMode && canEdit && 'cursor-pointer',
+          !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
         )}
-        {...(!editMode && canEdit
+        {...(!editMode && canEdit && !readOnlyPreview
           ? {
               onClick: (): void => {
                 if (forksOnEdit) setProposeChangeConfirmOpen(true);
@@ -1034,6 +1101,10 @@ export function AutomationBuilder({
             !editMode && 'pointer-events-none select-none opacity-90',
           )}
           aria-readonly={!editMode}
+          // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
+          // form fields from the tab order, so they could still be focused and typed
+          // into via keyboard. `inert` fully removes this subtree from focus/interaction.
+          inert={readOnlyPreview}
         >
           <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
           <RuleSummaryCard

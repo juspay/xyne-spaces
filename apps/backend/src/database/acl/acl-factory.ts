@@ -275,6 +275,10 @@ export class ACLFactory {
       return new ReposACL(ctx, prisma)
     case 'sdlcEntityLink':
       return new BaseQueryACL(ctx, prisma)
+    case 'sdlcArtifact':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcTrack':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':
@@ -501,7 +505,7 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
-    default:
+    case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
     }
   }

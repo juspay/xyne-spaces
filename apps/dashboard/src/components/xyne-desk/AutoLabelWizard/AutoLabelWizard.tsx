@@ -57,6 +57,7 @@ export interface AutoLabelWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   channelId: string;
+  isMember: boolean;
   onCreated?: (automations: Automation[]) => void;
 }
 
@@ -64,6 +65,7 @@ export function AutoLabelWizard({
   open,
   onOpenChange,
   channelId,
+  isMember,
   onCreated,
 }: AutoLabelWizardProps): React.ReactElement {
   const queryClient = useQueryClient();
@@ -92,9 +94,10 @@ export function AutoLabelWizard({
     enabled: open && !!channelId,
   });
 
-  const [catalog] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
-    enabled: !!channelId && open,
-  });
+  const [catalog] = useCachedQuery(
+    queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
+    { enabled: !!channelId && open },
+  );
 
   useEffect(() => {
     if (!open) return;

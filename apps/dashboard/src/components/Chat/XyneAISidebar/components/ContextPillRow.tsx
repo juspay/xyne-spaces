@@ -16,12 +16,12 @@ import {
   Globe,
   Hashtag,
   LockClose,
-  MicOn,
   MultipleCrossCancelDefault,
   Notebook,
   PhoneDefault,
   TicketToken,
 } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Avatar from '../../../ui/Avatar/Avatar';
 import useMeasure from '../../../../hooks/useMeasure';
@@ -693,7 +693,7 @@ export const ContextPillRow = ({
           {pillContent(
             <>
               <div className='flex-shrink-0'>
-                <MicOn className={CONTEXT_PILL_ICON_CLASS} />
+                <AudioLines className={CONTEXT_PILL_ICON_CLASS} />
               </div>
               <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
                 {recording.title}
@@ -702,7 +702,9 @@ export const ContextPillRow = ({
             onRecordingClick && (recording.externalId || recording.channelId)
               ? {
                   onClick: (): void => onRecordingClick(recording),
-                  ariaLabel: `Open recording ${recording.title}`,
+                  ariaLabel: recording.externalId
+                    ? `Open transcript for ${recording.title}`
+                    : `Open recording ${recording.title}`,
                   trackName: 'CLICK_RECORDING_CONTEXT_PILL',
                   trackMetadata: JSON.stringify({ recordingId: recording.id }),
                 }

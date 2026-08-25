@@ -10,7 +10,9 @@ const subscribe = (listener: () => void): (() => void) => {
   return () => listeners.delete(listener);
 };
 
-const getSnapshot = (): boolean => localStorage.getItem(AI_LANDING_KEY) === 'true';
+// Default ON: the Xyne AI landing page is shown on launch for everyone unless
+// the user has explicitly turned it off (stored as the string 'false').
+const getSnapshot = (): boolean => localStorage.getItem(AI_LANDING_KEY) !== 'false';
 
 export const useAILandingDefault = (): {
   aiLandingDefault: boolean;

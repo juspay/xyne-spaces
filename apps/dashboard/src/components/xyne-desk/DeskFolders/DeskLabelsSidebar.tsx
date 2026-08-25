@@ -42,6 +42,7 @@ const colorForName = (name: string): string => {
 
 interface DeskLabelsSidebarProps {
   channelId: string;
+  isMember: boolean;
   activeLabelId: string | null;
   onSelectLabel: (labelId: string, labelName: string) => void;
   onDeletedLabel?: (labelId: string) => void;
@@ -49,15 +50,17 @@ interface DeskLabelsSidebarProps {
 
 export const DeskLabelsSidebar = ({
   channelId,
+  isMember,
   activeLabelId,
   onSelectLabel,
   onDeletedLabel,
 }: DeskLabelsSidebarProps): ReactElement => {
   const zero = useZero();
   const queryClient = useQueryClient();
-  const [labels] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
-    enabled: !!channelId,
-  });
+  const [labels] = useCachedQuery(
+    queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
+    { enabled: !!channelId },
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [deleteImpact, setDeleteImpact] = useState<ConversationLabelDeleteImpact | null>(null);
