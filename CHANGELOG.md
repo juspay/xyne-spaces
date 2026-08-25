@@ -1,3 +1,17 @@
+## [1.219.2](https://github.com/juspay/xyne-spaces/compare/v1.219.1...v1.219.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* : inline changes for custom coulumns in table view ([#423](https://github.com/juspay/xyne-spaces/issues/423)) ([74ae4f3](https://github.com/juspay/xyne-spaces/commit/74ae4f33f34ba2efb55f2726df0fb3c79dadde3c))
+* bulk ticket update in desk ([#800](https://github.com/juspay/xyne-spaces/issues/800)) ([d3ffa50](https://github.com/juspay/xyne-spaces/commit/d3ffa5090ae00b78a18c46b02783a53ce79fdf99))
+* Custom emoji replacement breaks Slack alert HTML ([#1021](https://github.com/juspay/xyne-spaces/issues/1021)) ([15661de](https://github.com/juspay/xyne-spaces/commit/15661de8fa53a988debfe81c649b9c4e72a60000))
+
+
+### Reverts
+
+* Revert "feat: add recording participants (#849)" (#1024) ([2c7ead5](https://github.com/juspay/xyne-spaces/commit/2c7ead5d220fa8bb41183d5da7e89e5e1ad245d9)), closes [#849](https://github.com/juspay/xyne-spaces/issues/849) [#1024](https://github.com/juspay/xyne-spaces/issues/1024)
+
 ## [1.219.1](https://github.com/juspay/xyne-spaces/compare/v1.219.0...v1.219.1) (2026-08-25)
 
 
