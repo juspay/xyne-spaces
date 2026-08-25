@@ -1,6 +1,6 @@
 import type { Query } from '@rocicorp/zero';
 import type { Context, Schema } from '../../schema';
-import { ChannelScopeType, GuestEntity, WorkspaceRole } from '../../schema';
+import { CanvasVisibility, ChannelScopeType, GuestEntity, WorkspaceRole } from '../../schema';
 
 type GuestPredicate = (helpers: any) => any;
 
@@ -21,6 +21,35 @@ const nonDmParticipantChannelExists = (ctx: Context) => (exists: any) =>
 
 export const isGuestContext = (ctx: Context): boolean => ctx.role === WorkspaceRole.GUEST;
 
+export const applyCanvasVisibilityQueryFilter = (
+  query: any,
+  userId: string,
+  includePublicVisibility = true,
+) =>
+  query.where((helpers: any) =>
+    helpers.or(
+      helpers.cmp('createdBy', userId),
+      helpers.exists('participants', (participant: any) =>
+        participant.where(({ or, cmp, exists }: any) =>
+          or(
+            cmp('userId', userId),
+            exists('userGroup', (userGroup: any) =>
+              userGroup.whereExists('userGroupMappings', (mapping: any) =>
+                mapping.where('userId', userId),
+              ),
+            ),
+            exists('channel', (channel: any) =>
+              channel.whereExists('participants', (channelParticipant: any) =>
+                channelParticipant.where('userId', userId),
+              ),
+            ),
+          ),
+        ),
+      ),
+      ...(includePublicVisibility ? [helpers.cmp('visibility', CanvasVisibility.PUBLIC)] : []),
+    ),
+  );
+
 export const denyGuestSelect = <
   TTable extends keyof Schema['tables'],
   TReturn,
@@ -36,29 +65,29 @@ export const guestChannelAccessWhere = (ctx: Context): GuestPredicate => ({
   cmp,
   exists,
 }: any) =>
-  or(
-    directGuestAccessExists(ctx, GuestEntity.CHANNEL)(exists),
-    exists('participants', (participant: any) => participant.where('userId', '=', ctx.userID)),
-    and(
-      or(
-        cmp('scopeType', '=', ChannelScopeType.DM),
-        cmp('scopeType', '=', ChannelScopeType.GROUP_DM),
-      ),
+    or(
+      directGuestAccessExists(ctx, GuestEntity.CHANNEL)(exists),
       exists('participants', (participant: any) => participant.where('userId', '=', ctx.userID)),
-    ),
-  );
+      and(
+        or(
+          cmp('scopeType', '=', ChannelScopeType.DM),
+          cmp('scopeType', '=', ChannelScopeType.GROUP_DM),
+        ),
+        exists('participants', (participant: any) => participant.where('userId', '=', ctx.userID)),
+      ),
+    );
 
 export const guestProjectAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
-  or(
-    exists('channels', (channel: any) =>
-      channel.whereExists('guestAccess', (mapping: any) =>
-        mapping
-          .where('userId', '=', ctx.userID)
-          .where('accessibleEntityType', '=', GuestEntity.CHANNEL),
+    or(
+      exists('channels', (channel: any) =>
+        channel.whereExists('guestAccess', (mapping: any) =>
+          mapping
+            .where('userId', '=', ctx.userID)
+            .where('accessibleEntityType', '=', GuestEntity.CHANNEL),
+        ),
       ),
-    ),
-    nonDmParticipantChannelExists(ctx)(exists),
-  );
+      nonDmParticipantChannelExists(ctx)(exists),
+    );
 
 export const guestTicketAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
   or(
@@ -70,34 +99,34 @@ export const guestCanvasAccessWhere = (ctx: Context): GuestPredicate => ({
   cmp,
   exists,
 }: any) =>
-  or(
-    cmp('createdBy', '=', ctx.userID),
-    exists('participants', (participant: any) => participant.where('userId', '=', ctx.userID)),
-    exists('participants', (participant: any) =>
-      participant.whereExists('channel', (channel: any) =>
-        channel.where(guestChannelAccessWhere(ctx)),
+    or(
+      cmp('createdBy', '=', ctx.userID),
+      exists('participants', (participant: any) => participant.where('userId', '=', ctx.userID)),
+      exists('participants', (participant: any) =>
+        participant.whereExists('channel', (channel: any) =>
+          channel.where(guestChannelAccessWhere(ctx)),
+        ),
       ),
-    ),
-    directGuestAccessExists(ctx, GuestEntity.CANVAS)(exists),
-    exists('channel', (channel: any) =>
-      channel.whereExists('guestAccess', (mapping: any) =>
-        mapping
-          .where('userId', '=', ctx.userID)
-          .where('accessibleEntityType', '=', GuestEntity.CHANNEL),
+      directGuestAccessExists(ctx, GuestEntity.CANVAS)(exists),
+      exists('channel', (channel: any) =>
+        channel.whereExists('guestAccess', (mapping: any) =>
+          mapping
+            .where('userId', '=', ctx.userID)
+            .where('accessibleEntityType', '=', GuestEntity.CHANNEL),
+        ),
       ),
-    ),
-  );
+    );
 
 export const guestVisibleUserWhere = (ctx: Context): GuestPredicate => ({
   or,
   cmp,
   exists,
 }: any) =>
-  or(
-    cmp('id', '=', ctx.userID),
-    exists('channelParticipations', (channelParticipation: any) =>
-      channelParticipation.whereExists('channel', (channel: any) =>
-        channel.where('workspaceId', '=', ctx.workspaceId).where(guestChannelAccessWhere(ctx)),
+    or(
+      cmp('id', '=', ctx.userID),
+      exists('channelParticipations', (channelParticipation: any) =>
+        channelParticipation.whereExists('channel', (channel: any) =>
+          channel.where('workspaceId', '=', ctx.workspaceId).where(guestChannelAccessWhere(ctx)),
+        ),
       ),
-    ),
-  );
+    );

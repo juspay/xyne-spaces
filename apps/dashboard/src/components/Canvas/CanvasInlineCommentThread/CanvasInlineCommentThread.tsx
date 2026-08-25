@@ -16,6 +16,7 @@ import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logger, Event } from '../../../utils/logger';
 import { apiInstance } from '../../../services/clients/apiClient';
+import { MessageCardAttachmentThumbnails } from '../../Chat/MessageCard/MessageCardAttachmentThumbnails';
 import { MentionRenderer } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Avatar from '../../ui/Avatar/Avatar';
 import { InputBox } from '../../ui/InputBox';
@@ -25,6 +26,11 @@ import { formatRelativeCommentTime } from '../canvasCommentTime';
 import type { CanvasCommentAnchor } from '../CanvasCommentsPanel/CanvasCommentsPanel';
 import { OverlayZIndexContext } from '../../../contexts/OverlayZIndexContext';
 import type { CanvasCommentHighlightThread } from '../useCanvasCommentHighlights';
+import {
+  type CanvasCommentAttachment,
+  toPanelAttachments,
+  uploadCanvasCommentAttachments,
+} from '../canvasCommentAttachments';
 
 type UserLite = {
   id: string;
@@ -44,6 +50,7 @@ type CanvasComment = {
   deletedAt?: number | null;
   createdAt: number;
   createdByUser?: UserLite | null;
+  attachments?: readonly CanvasCommentAttachment[];
 };
 
 interface CanvasInlineCommentThreadProps {
@@ -210,7 +217,7 @@ export function CanvasInlineCommentThread({
     {
       enabled: Boolean(currentThreadId),
     },
-  );
+  ) as unknown as [CanvasComment[]];
 
   const initialComment = comments.find(comment => comment.isInitial);
   const replies = comments.filter(
@@ -344,10 +351,11 @@ export function CanvasInlineCommentThread({
     });
   };
 
-  const handleCreateThread = (body: string, mentionedUserIds: string[]): void => {
+  const handleCreateThread = (body: string, mentionedUserIds: string[], files: File[]): void => {
     if (!activeAnchor) return;
 
     const nextThreadId = uuidv4();
+    const commentId = uuidv4();
     if (onBeforeCreateThread?.(nextThreadId, activeAnchor) === false) {
       toast.error('Unable to attach comment to selected text');
       return;
@@ -356,7 +364,7 @@ export function CanvasInlineCommentThread({
     const mutationResult = zero.mutate(
       mutators.canvasComment.createThread({
         threadId: nextThreadId,
-        commentId: uuidv4(),
+        commentId,
         canvasId,
         blockId: activeAnchor.blockId,
         anchorText: activeAnchor.anchorText,
@@ -366,8 +374,17 @@ export function CanvasInlineCommentThread({
       }),
     );
     void mutationResult.server
-      .then(result => {
+      .then(async result => {
         if (result.type !== 'error') {
+          try {
+            await uploadCanvasCommentAttachments({ canvasId, commentId, files });
+          } catch (error) {
+            toast.error('Failed to upload comment attachments');
+            logger.error(Event.API_CALL_FAILED, {
+              reason: error,
+              context: 'canvas_inline_comment_attachment_upload',
+            });
+          }
           setCreatedThread({
             id: nextThreadId,
             blockId: activeAnchor.blockId,
@@ -393,22 +410,23 @@ export function CanvasInlineCommentThread({
       });
   };
 
-  const handleReply = (content: string, html: string): void => {
+  const handleReply = (content: string, html: string, files: File[]): void => {
     const body = content.trim();
-    if (!body) return;
+    if (!body && files.length === 0) return;
     const mentionedUserIds = extractMentionedUserIdsFromHtml(html, [
       ...selectedMentionIdsRef.current,
     ]);
     selectedMentionIdsRef.current.clear();
 
     if (!currentThread) {
-      handleCreateThread(body, mentionedUserIds);
+      handleCreateThread(body, mentionedUserIds, files);
       return;
     }
 
+    const commentId = uuidv4();
     const mutationResult = zero.mutate(
       mutators.canvasComment.reply({
-        commentId: uuidv4(),
+        commentId,
         threadId: currentThread.id,
         canvasId,
         body,
@@ -416,8 +434,17 @@ export function CanvasInlineCommentThread({
         timestamp: Date.now(),
       }),
     );
-    void mutationResult.server.then(result => {
+    void mutationResult.server.then(async result => {
       if (result.type !== 'error') {
+        try {
+          await uploadCanvasCommentAttachments({ canvasId, commentId, files });
+        } catch (error) {
+          toast.error('Failed to upload comment attachments');
+          logger.error(Event.API_CALL_FAILED, {
+            reason: error,
+            context: 'canvas_inline_comment_attachment_upload',
+          });
+        }
         sendMentionNotifications(mentionedUserIds);
       }
     });
@@ -543,6 +570,11 @@ export function CanvasInlineCommentThread({
                     allUsers,
                   )}
                 </p>
+                <MessageCardAttachmentThumbnails
+                  attachments={toPanelAttachments(comment.attachments)}
+                  className='ml-[33px] mt-1'
+                  trackCategory='CANVAS_COMMENT'
+                />
               </div>
             );
           })}
@@ -606,7 +638,7 @@ export function CanvasInlineCommentThread({
                 richText: false,
                 commands: false,
                 mentions: true,
-                fileAttachments: false,
+                fileAttachments: true,
                 emojiPicker: false,
               }}
               blockedExtensions={[
@@ -616,8 +648,11 @@ export function CanvasInlineCommentThread({
                 'codeBlock',
                 'blockquote',
               ]}
-              maxFiles={0}
+              maxFiles={5}
               disableDraftUpload
+              hideComposerTools
+              showAttachButtonWhenToolsHidden
+              attachmentMenuMode='filesOnly'
               hideVoiceInput
               compact
             />
