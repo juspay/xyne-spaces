@@ -36,6 +36,7 @@ const log = createLogger("xyne-spaces-tools");
 const RAW_ATTACHMENT_INLINE_LIMIT_BYTES = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INLINE_LIMIT_BYTES"] ?? 5 * 1024 * 1024,
 );
+const isOnyxBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true";
 const ATTACHMENT_INGEST_TIMEOUT_MS = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INGEST_TIMEOUT_MS"] ?? 120_000,
 );
@@ -7366,6 +7367,158 @@ function directError(prefix: string, e: unknown): ToolResult {
     : result;
 }
 
+// ── onyx-bench-search ────────────────────────────────────────────────────────
+// Dedicated search tool for EnterpriseRAG-Bench (§5 evaluation harness).
+// Searches the benchmark Vespa cluster (separate from prod) whose ~511k docs
+// span 9 enterprise source types (Slack, Gmail, Linear, Google Drive, HubSpot,
+// Fireflies, GitHub, Jira, Confluence). Available ONLY when ONYX_BENCH_VESPA=true.
+//
+// Ingestion maps source types to 4 Vespa schemas:
+//   slack        → chat_message (docType="slack")
+//   gmail        → mail         (docType="mail")
+//   jira/linear  → ticket       (docType="ticket")
+//   fireflies    → file         (docType="file", subApp="transcript")
+//   confluence/github/google_drive/hubspot → file (docType="file", subApp="knowledge_base")
+//
+// Each source type gets its own channel container: bench-ch-<workspaceId>-<sourceType>.
+// Source-type narrowing uses channelId (imported from channelRef on all 4 schemas)
+// since docType doesn't distinguish most source types.
+
+const BENCH_SOURCE_TYPES = [
+  "slack", "gmail", "linear", "google_drive", "hubspot",
+  "fireflies", "github", "jira", "confluence",
+] as const;
+
+/** The 4 content-bearing schemas the eval retrieval query targets. Mirrors
+ *  RETRIEVAL_SCHEMAS in the dataset branch's enterpriseRagEval.ts. */
+const BENCH_RETRIEVAL_SCHEMAS = "chat_message, file, mail, ticket";
+
+/** Extract sourceType from the bench channelId pattern `bench-ch-<ws>-<sourceType>`. */
+function sourceTypeFromChannelId(channelId: string | undefined): string | undefined {
+  if (!channelId || !channelId.startsWith("bench-ch-")) return undefined;
+  const rest = channelId.slice("bench-ch-".length);
+  const lastDash = rest.lastIndexOf("-");
+  if (lastDash < 0) return undefined;
+  return rest.slice(lastDash + 1);
+}
+
+const onyxBenchSearch: ToolDef = {
+  name: "onyx-bench-search",
+  description:
+    "Search the EnterpriseRAG-Bench corpus (~511k synthetic enterprise documents across 9 source types: " +
+    "Slack, Gmail, Linear, Google Drive, HubSpot, Fireflies, GitHub, Jira, Confluence). " +
+    "This is the fictional company \"Redwood Inference\" — use it to find documents relevant to the question.\n\n" +
+    "## How to use\n" +
+    "- Pass a `query` with the topic/keywords you're looking for.\n" +
+    "- Optionally narrow by `sourceType` (e.g. \"confluence\" for wikis, \"slack\" for chat messages).\n" +
+    "- Results include `docId`, `sourceType`, title, and a content snippet.\n" +
+    "- If the first search doesn't find the answer, try different keywords or broaden the sourceType.\n\n" +
+    "## Tips\n" +
+    "- Semantic questions may use roundabout phrasing — try multiple query formulations.\n" +
+    "- Project-related questions may require documents from different source types.\n" +
+    "- If information seems absent, say so — do not guess from superficially related documents.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "Free-text search query — keywords or natural language describing what you're looking for.",
+      },
+      sourceType: {
+        type: "string",
+        enum: [...BENCH_SOURCE_TYPES],
+        description:
+          "Narrow to one source type. slack (chat), gmail (email), linear (project tickets), " +
+          "google_drive (files), hubspot (CRM), fireflies (meeting transcripts), github (PRs), " +
+          "jira (support tickets), confluence (wikis/docs). Omit to search all source types.",
+      },
+      hits: {
+        type: "number",
+        minimum: 1,
+        maximum: 50,
+        default: 10,
+        description: "Max results to return (default 10, max 50).",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description: "Pagination offset.",
+      },
+    },
+    required: ["query"],
+  },
+  handler: withToolErrors("onyx-bench-search error", async (args, ctx) => {
+    if (!isOnyxBenchLane()) {
+      return err("onyx-bench-search requires ONYX_BENCH_VESPA=true.");
+    }
+    const query = String(args["query"] ?? "").trim();
+    if (!query) return err("query is required.");
+    const sourceType = args["sourceType"] != null ? String(args["sourceType"]) : undefined;
+    const hits = Math.min(Math.max(Number(args["hits"] ?? 10), 1), 50);
+    const offset = Math.max(Number(args["offset"] ?? 0), 0);
+    const vespaEndpoint = process.env["VESPA_QUERY_ENDPOINT"] ?? "";
+    if (!vespaEndpoint) return err("VESPA_QUERY_ENDPOINT is not set — cannot reach benchmark Vespa.");
+
+    const workspaceId = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
+    if (!workspaceId) return err("XYNE_SPACES_WORKSPACE_ID is not set — cannot scope benchmark search.");
+
+    // Build YQL — mirrors the eval retrieval query from enterpriseRagEval.ts:
+    //   select * from chat_message, file, mail, ticket
+    //   where ({grammar:"tokenize"} userInput(@query)) and workspaceId contains "..."
+    //
+    // sourceType narrowing: each source type gets its own channel container
+    // (bench-ch-<workspaceId>-<sourceType>), and channelId is imported from
+    // channelRef.docId on all 4 schemas. This is the ONLY reliable way to
+    // narrow by source type — docType doesn't distinguish (e.g. gmail→"mail",
+    // jira→"ticket", fireflies→"file").
+    const clauses: string[] = [`workspaceId contains "${esc(workspaceId)}"`];
+    if (sourceType) {
+      const benchChannelId = `bench-ch-${workspaceId}-${sourceType}`;
+      clauses.push(`channelId contains "${esc(benchChannelId)}"`);
+    }
+    const yql = `select * from ${BENCH_RETRIEVAL_SCHEMAS} where ({grammar:"tokenize"} userInput(@query)) and ${clauses.join(" and ")}`;
+
+    try {
+      const data = await queryDirect(
+        yql,
+        query,
+        ctx.userId,
+        hits,
+        offset,
+        vespaEndpoint,
+        "default_native",
+        undefined,
+        workspaceId,
+      );
+      const results = data.data.results ?? [];
+      if (results.length === 0) return ok(`No results found for "${query}".`);
+
+      const rendered = results.map((r, idx) => {
+        const sc = r.searchContext ?? {};
+        const st = sourceTypeFromChannelId(sc["channelId"] as string | undefined) ?? r.type;
+        const lines = [
+          `[${idx + 1}] ${r.title || st}`,
+          `  docId: ${r.id}`,
+          `  sourceType: ${st}`,
+        ];
+        if (r.context) {
+          const snippet = r.context.length > 500 ? r.context.slice(0, 500) + "…" : r.context;
+          lines.push(`  content: ${snippet}`);
+        }
+        return lines.join("\n");
+      }).join("\n\n");
+
+      return ok(
+        `Found ${data.data.totalCount ?? results.length} result(s):\n\n${rendered}` +
+        paginationFooter({ returned: results.length, limit: hits, offset, total: data.data.totalCount }),
+      );
+    } catch (e) {
+      return directError("onyx-bench-search error", e);
+    }
+  }),
+};
+
 // ── spaces-vespa-query ───────────────────────────────────────────────────────
 
 const spacesVespaQuery: ToolDef = {
@@ -8901,6 +9054,7 @@ const spacesDeskMetrics: ToolDef = {
 export const tools: ToolDef[] = [
   spacesWhoami,
   ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
+  ...(isOnyxBenchLane() ? [onyxBenchSearch] : []),
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,

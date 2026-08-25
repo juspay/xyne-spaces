@@ -282,7 +282,7 @@ export const CONFIG = {
    *   ONYX_EVAL_CLAW_TIMEOUT_MS the claw run timeout applied to the S2S call.
    *
    * The dispatch fires the SEEDED "onyx-ask-ai" agent row — slug hardcoded in
-   * the worker; bench tool narrowing (spaces-vespa-search only) is also
+   * the worker; bench tool narrowing (onyx-bench-search only) is also
    * programmatic. Retrieval reaches the benchmark Vespa DIRECTLY
    * (CONFIG.onyxVespaEndpoint) from the tool child — no spaces backend in the
    * path.
