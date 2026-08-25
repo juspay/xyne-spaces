@@ -17,9 +17,30 @@ import {
 import { logger } from '@/utils/logger';
 
 function base64UrlToBuffer(data: string): Buffer {
-  const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-  return Buffer.from(padded, 'base64');
+  return Buffer.from(data, 'base64url');
+}
+
+const ATTACHMENT_CONCURRENCY = 3;
+
+async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      try {
+        results[i] = { status: 'fulfilled', value: await fn(items[i]!) };
+      } catch (reason) {
+        results[i] = { status: 'rejected', reason };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 export async function preDownloadGmailAttachments(params: {
@@ -32,8 +53,10 @@ export async function preDownloadGmailAttachments(params: {
 
   const parts = googleService.parseEmailData(messageData).attachments ?? [];
 
-  const results = await Promise.allSettled(
-    parts.map(async (att): Promise<ExternalAttachment | null> => {
+  const results = await mapWithLimit(
+    parts,
+    ATTACHMENT_CONCURRENCY,
+    async (att): Promise<ExternalAttachment | null> => {
       // Inline part — bytes already on the payload.
       if (att.data) {
         return {
@@ -57,7 +80,7 @@ export async function preDownloadGmailAttachments(params: {
         };
       }
       return null;
-    }),
+    },
   );
 
   const attachments = results.flatMap((r, i) => {
