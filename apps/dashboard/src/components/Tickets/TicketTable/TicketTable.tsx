@@ -12,8 +12,10 @@ import {
   GridReadyEvent,
   ValueGetterParams,
 } from 'ag-grid-community';
+import type { IRowNode } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { isDeskChannelType } from '@xyne/shared';
+import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
 import { useActiveUsers, useUser, useUsers } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
@@ -31,7 +33,12 @@ import {
   TagsCellEditor,
 } from './CellEditor';
 import { BulkActionToolbar } from './BulkActionToolbar';
-import { dueDateToEta, useBulkTicketActions, type BulkTicketUpdates } from './useBulkTicketActions';
+import {
+  dueDateToEta,
+  MAX_BULK_TICKETS,
+  useBulkTicketActions,
+  type BulkTicketUpdates,
+} from './useBulkTicketActions';
 import { assigneeOptionToTicketUpdate, StatusOptions } from './TicketTableHelper';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useNavigate } from 'react-router-dom';
@@ -62,7 +69,26 @@ const IndexHeaderRenderer = (params: IHeaderParams) => {
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      params.api.selectAll();
+      // The grid holds every ticket the channel query returned — there is no page
+      // limit here as there is on the Desk list view — and the bulk bar fans out a
+      // mutation per selected row. Cap the SELECTION rather than the action so the
+      // toolbar's count stays honest about what will actually change.
+      const capped: IRowNode[] = [];
+      params.api.forEachNodeAfterFilterAndSort(node => {
+        if (capped.length < MAX_BULK_TICKETS) {
+          capped.push(node);
+        }
+      });
+      // Clear first: rows past the cap may already be selected by hand.
+      params.api.deselectAll();
+      params.api.setNodesSelected({ nodes: capped, newValue: true });
+
+      const total = params.api.getDisplayedRowCount();
+      if (total > MAX_BULK_TICKETS) {
+        toast.info(
+          `Selected the first ${MAX_BULK_TICKETS} of ${total} tickets — bulk actions apply to ${MAX_BULK_TICKETS} at a time.`,
+        );
+      }
     } else {
       params.api.deselectAll();
     }
@@ -73,8 +99,8 @@ const IndexHeaderRenderer = (params: IHeaderParams) => {
   useEffect(() => {
     const onSelectionChanged = () => {
       const selectedRows = params.api.getSelectedRows();
-      const totalRows = params.api.getDisplayedRowCount();
-      setAllSelected(selectedRows.length === totalRows && totalRows > 0);
+      const selectableRows = Math.min(params.api.getDisplayedRowCount(), MAX_BULK_TICKETS);
+      setAllSelected(selectedRows.length >= selectableRows && selectableRows > 0);
     };
 
     params.api.addEventListener('selectionChanged', onSelectionChanged);

@@ -18,6 +18,17 @@ export interface BulkActionTicket {
   projectId?: string | null | undefined;
 }
 
+/**
+ * Ceiling on one bulk action, matching `MAX_TICKETS` in the spaces-create-bulk-tickets
+ * MCP tool so both bulk paths bound a batch the same way.
+ *
+ * A bulk action fans out one mutation per ticket — two when a stage change rides along
+ * with other fields, one per tag for labels — and the table view's grid holds every
+ * ticket the channel query returned, so an uncapped select-all pushes an unbounded
+ * burst. The Desk list view pages at 50 and never reaches this.
+ */
+export const MAX_BULK_TICKETS = 100;
+
 export interface BulkTicketUpdates {
   /** Bare user id — see `assigneeOptionToTicketUpdate` for the encoded picker value. */
   assignedTo?: string | null;
@@ -85,6 +96,21 @@ const reportBulkErrors = async (pending: ReadonlyArray<Promise<string | null>>):
 };
 
 /**
+ * Trim a selection to `MAX_BULK_TICKETS`, naming what was left out.
+ *
+ * Trims rather than refuses: every call site clears the selection immediately after
+ * calling, so rejecting outright would drop the user's rows AND change nothing. The
+ * grid caps its own select-all, but a hand-built selection still arrives here uncapped.
+ */
+const capSelection = (tickets: readonly BulkActionTicket[]): readonly BulkActionTicket[] => {
+  if (tickets.length <= MAX_BULK_TICKETS) return tickets;
+  toast.info(
+    `Bulk actions apply to ${MAX_BULK_TICKETS} tickets at a time — updating the first ${MAX_BULK_TICKETS} of ${tickets.length}.`,
+  );
+  return tickets.slice(0, MAX_BULK_TICKETS);
+};
+
+/**
  * Mutation half of the multi-select bulk bar, shared by the ticket table (Projects
  * and the Desk table view) and the Desk list view so all three write through the
  * same board-aware paths.
@@ -148,7 +174,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       const { stage, ...fields } = updates;
       const hasFields = Object.keys(fields).length > 0;
       const pending: Array<Promise<string | null>> = [];
-      for (const ticket of tickets) {
+      for (const ticket of capSelection(tickets)) {
         if (stage) {
           pending.push(stageChange(ticket.id, ticket.boardId, stage.name, stage.statusV2));
         }
@@ -171,7 +197,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
   const applyTags = useCallback(
     (tickets: readonly BulkActionTicket[], tagNames: readonly string[]): void => {
       const pending: Array<Promise<string | null>> = [];
-      for (const ticket of tickets) {
+      for (const ticket of capSelection(tickets)) {
         if (!ticket.projectId) continue;
         for (const tagName of tagNames) {
           // The mutator no-ops when the ticket already carries the label, so
