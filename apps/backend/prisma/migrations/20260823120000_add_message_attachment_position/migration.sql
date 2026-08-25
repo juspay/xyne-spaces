@@ -5,21 +5,8 @@
 -- AlterTable
 ALTER TABLE "public"."message_attachments" ADD COLUMN "position" INTEGER;
 
--- Backfill existing rows: freeze the currently displayed order (createdAt asc, id asc)
--- as an explicit per-message position so ordering stays stable going forward.
-WITH ordered AS (
-  SELECT
-    "id",
-    ROW_NUMBER() OVER (
-      PARTITION BY "entityId"
-      ORDER BY "createdAt" ASC, "id" ASC
-    ) - 1 AS rn
-  FROM "public"."message_attachments"
-)
-UPDATE "public"."message_attachments" m
-SET "position" = o.rn
-FROM ordered o
-WHERE m."id" = o."id";
+-- No backfill: readers sort on (position, createdAt, id), so legacy rows with a null
+-- position keep the exact order they had before this column existed.
 
 -- Support ordered reads per entity.
 CREATE INDEX "message_attachments_entityId_position_idx"
