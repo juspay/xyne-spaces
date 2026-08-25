@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { toast } from 'sonner';
-import { apiInstance } from '../../../services/clients/apiClient';
+import { disconnectInstagramDesk, reconnectInstagramDesk } from '../../../services/clients/socialMediaDeskApi';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -26,7 +26,7 @@ export const InstagramDeskIntegrationCard = ({
 
   const handleDisconnect = async (): Promise<void> => {
     try {
-      await apiInstance.post(`/integrations/social-media/${channelId}/instagram/disconnect`);
+      await disconnectInstagramDesk(channelId);
       toast.success('Instagram account disconnected. DM history is preserved.');
       clearChannelConnectedEmailCache(channelId);
     } catch (err) {
@@ -47,11 +47,7 @@ export const InstagramDeskIntegrationCard = ({
 
     try {
       const isElectron = typeof window.electronAPI?.openExternal === 'function';
-      const res = await apiInstance.post<{ authUrl: string }>(
-        `/integrations/social-media/${channelId}/instagram/reconnect`,
-        { platform: isElectron ? 'electron' : 'web' },
-      );
-      const { authUrl } = res.data;
+      const authUrl = await reconnectInstagramDesk(channelId, isElectron ? 'electron' : 'web');
       if (isElectron && window.electronAPI?.openExternal) {
         window.electronAPI.openExternal(authUrl);
       } else {

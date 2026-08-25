@@ -113,6 +113,7 @@ export class ExternalMessageRepository {
     entityId: string;
     direction: MessageDirection;
     entityType?: ExternalEntityType;
+    messageTimestamp?: Date;
   }) {
     if (data.entityType && !data.entityId) {
       throw new Error('entityId is required when entityType is provided');
@@ -136,6 +137,7 @@ export class ExternalMessageRepository {
           direction: data.direction,
           entityId: data.entityId,
           ...(data.entityType && { entityType: data.entityType }),
+          ...(data.messageTimestamp && { messageTimestamp: data.messageTimestamp }),
         }
       });
     } catch (error) {
@@ -149,8 +151,8 @@ export class ExternalMessageRepository {
 
   /**
    * Find the latest ExternalMessage for a source whose externalThreadId
-   * starts with the given prefix (e.g. IGSID or "IGSID:"). Used by the
-   * Instagram 24-hour messaging-window check to find the active thread.
+   * externalThreadId starts with "{igsid}:" (colon-suffix format written by transformer.ts).
+   * Used by the Instagram 24-hour messaging-window check to find the active thread.
    */
   async findLatestForIgsid(externalSourceId: string, igsid: string) {
     return await this.db.externalMessage.findFirst({

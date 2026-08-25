@@ -116,12 +116,6 @@ export const metaGraphClient = {
     return { igUserId, username };
   },
 
-  // Kept for backward compatibility — callers that only need the ID.
-  async getIgUserId(accessToken: string): Promise<string> {
-    const { igUserId } = await this.getMe(accessToken);
-    return igUserId;
-  },
-
   // Fetch a message by mid — needed when webhook only delivers message_edit (num_edit=0).
   async getMessage(accessToken: string, mid: string): Promise<{
     id: string;

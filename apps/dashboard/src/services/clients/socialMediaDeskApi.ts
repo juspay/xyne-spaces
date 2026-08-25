@@ -3,7 +3,7 @@ import { apiInstance } from './apiClient';
 export async function startInstagramOAuth(input: {
   name: string;
   projectId: string;
-  boardId?: string;
+  boardId: string;
   assigneeUserGroupId?: string;
   visibility: 'PUBLIC' | 'PRIVATE';
   platform: 'web' | 'electron';

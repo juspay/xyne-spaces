@@ -46,9 +46,10 @@ export class InstagramFlow extends BaseFlow {
           // Keep timestamp in seconds so transformer.ts multiplies by 1000 once,
           // consistent with the standard message path above.
           const tsRaw = (messaging.timestamp as number | undefined) ?? Math.floor(Date.now() / 1000);
-          const fetched = accessToken
-            ? await metaGraphClient.getMessage(accessToken, edit.mid)
-            : null;
+          // Reuse the message already fetched by resolveMessageEditRecipient middleware (W2).
+          type FetchedMessage = Awaited<ReturnType<typeof metaGraphClient.getMessage>>;
+          const fetched: FetchedMessage = (entry as unknown as Record<string, unknown>)._resolvedMessage as FetchedMessage
+            ?? (accessToken ? await metaGraphClient.getMessage(accessToken, edit.mid) : null);
           if (fetched?.message !== undefined && fetched.from?.id) {
             const senderId = fetched.from.id;
             // Skip messages sent by the business itself (outbound DMs)

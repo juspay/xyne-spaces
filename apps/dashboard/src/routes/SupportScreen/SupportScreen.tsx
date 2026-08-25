@@ -2493,7 +2493,7 @@ const SupportScreen = (): ReactElement => {
           assigneeUserGroupId: rest.assigneeUserGroupId,
         }),
         visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-        platform: isElectron ? 'electron' : 'web',
+        platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
       })
         .then(authorizationUrl => {
           setShowCreateChannelModal(false);
@@ -5857,7 +5857,7 @@ export const SupportTicketDetail = ({
                   {emails.length > 0 &&
                     channel?.type !== ChannelType.SLACK &&
                     channel?.type !== ChannelType.APP &&
-                    channel?.type !== ChannelType.SOCIAL_MEDIA && (
+                    (channel?.type !== ChannelType.SOCIAL_MEDIA || channelIntegrationInfo.sourceType !== 'instagram') && (
                       <>
                         <div className='w-px h-4 bg-border' />
                         <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
@@ -6181,6 +6181,15 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
+            {channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
+              <InstagramCustomerHistory
+                channelId={channelId}
+                conversationId={conversationId}
+                onTicketClick={xyneId => {
+                  void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
+                }}
+              />
+            )}
             <div
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}

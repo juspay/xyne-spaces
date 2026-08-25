@@ -10,15 +10,14 @@ import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { metaGraphClient } from './metaGraphClient';
 import type { InstagramCredentials } from './types';
-
-const INSTAGRAM_REPLY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+import { INSTAGRAM_MAX_REPLY_LENGTH, INSTAGRAM_REPLY_WINDOW_MS } from './constants';
 
 export class InstagramReplySender extends BaseInteractionReplySender {
   async sendReply(context: InteractionReplyContext): Promise<NormalizedData> {
     const { source, externalThreadId, subject, body, userId, authorName } = context;
 
-    if (body.length > 1000) {
-      throw new InteractionReplyValidationError('Reply exceeds Instagram 1000-character limit');
+    if (body.length > INSTAGRAM_MAX_REPLY_LENGTH) {
+      throw new InteractionReplyValidationError(`Reply exceeds Instagram ${INSTAGRAM_MAX_REPLY_LENGTH}-character limit`);
     }
 
     // Enforce 24h reply window — Meta hard rule for DMs
