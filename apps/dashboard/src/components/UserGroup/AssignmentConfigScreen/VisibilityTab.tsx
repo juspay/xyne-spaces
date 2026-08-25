@@ -26,6 +26,7 @@ interface VisibilityTabProps {
   workloadMappings: readonly WorkloadMappingLike[] | null | undefined;
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
+  isCurrentUserGroupMember: boolean;
 }
 
 /**
@@ -41,6 +42,7 @@ export function VisibilityTab({
   workloadMappings,
   boardComplexityScores,
   expertiseMappings,
+  isCurrentUserGroupMember,
 }: VisibilityTabProps): ReactElement {
   const scoreRows = useMemo(
     () =>
@@ -56,6 +58,16 @@ export function VisibilityTab({
   );
 
   const selectedBoardName = boards.find(b => b.id === selectedBoardId)?.name;
+
+  if (!isCurrentUserGroupMember) {
+    return (
+      <div className='rounded-2xl border border-border bg-card p-8 text-center'>
+        <p className='text-[13px] text-muted-foreground'>
+          You need to be part of this user group to see member workloads.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>

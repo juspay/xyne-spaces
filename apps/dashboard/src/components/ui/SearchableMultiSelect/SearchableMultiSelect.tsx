@@ -78,6 +78,7 @@ export function SearchableMultiSelect({
         ? selectedValues.filter(selected => selected !== value)
         : [...selectedValues, value],
     );
+    setSearchValue('');
   };
 
   const handleOpenChange = (open: boolean): void => {

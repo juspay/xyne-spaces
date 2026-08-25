@@ -4,8 +4,10 @@ export type BaseRoute =
   | '/chat/dm'
   | '/chat/dir'
   | '/chat/bookmarks'
-  | '/chat/canvas'
+  | '/chat/drafts-sent'
   | '/chat/activity';
+
+const CHANNEL_ROUTE_SEGMENTS = ['dm', 'bookmarks', 'drafts-sent', 'activity'];
 
 /**
  * Hook to detect the current route context and build a context-aware navigation URL
@@ -22,7 +24,11 @@ export const useRouteContext = (): {
   const routeSegment =
     chatIndex !== -1 && chatIndex + 1 < pathSegments.length ? pathSegments[chatIndex + 1] : 'dir';
 
-  const baseRoute = `/chat/${routeSegment}` as BaseRoute;
+  const baseRoute = (
+    routeSegment && CHANNEL_ROUTE_SEGMENTS.includes(routeSegment)
+      ? `/chat/${routeSegment}`
+      : '/chat/dir'
+  ) as BaseRoute;
 
   const buildChannelRoute = (channelId: string, params?: Record<string, string>): string => {
     const route = `${baseRoute}/${channelId}`;

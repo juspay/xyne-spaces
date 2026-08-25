@@ -242,6 +242,52 @@ export class CallRepository {
   }
 
   /**
+   * Adopt an already-running call as a slash-command artifact's call.
+   *
+   * "Start call" on an artifact card is channel-scoped, so it lands on the
+   * channel's existing call whenever one is already live instead of creating a
+   * room. Without this the card would sit in its pending state forever and the
+   * artifact would never be completed when that call ends, because completion
+   * is driven off `calls.metadata.artifactMessageId`.
+   *
+   * Refuses to steal a call that already belongs to a different artifact — the
+   * first incident to claim it keeps it.
+   */
+  async linkArtifactToActiveCall(params: {
+    callId: string;
+    callExternalId: string;
+    channelId: string;
+    artifactMessageId: string;
+    metadata: Prisma.JsonValue | null;
+  }): Promise<boolean> {
+    const { callId, callExternalId, channelId, artifactMessageId, metadata } = params;
+    const existingArtifactMessageId = getArtifactMessageId(metadata);
+    if (existingArtifactMessageId) return existingArtifactMessageId === artifactMessageId;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.call.update({
+        where: { id: callId },
+        data: {
+          metadata: {
+            ...((metadata as CallMetadata | null) ?? {}),
+            artifactMessageId,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await setSlashCommandArtifactLifecycle(tx, {
+        messageId: artifactMessageId,
+        channelId,
+        status: MessageArtifactStatus.ACTIVE,
+        callExternalId,
+      });
+    });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
+    return true;
+  }
+
+  /**
    * Mirror a call transition onto the slash-command artifact that started it.
    * A no-op for every other call, which is why it can sit directly on the
    * shared end-of-call paths without altering their behavior.
@@ -288,6 +334,27 @@ export class CallRepository {
     const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
       UPDATE "calls"
       SET "markedItems" = "markedItems" || ${JSON.stringify(item)}::jsonb
+      WHERE "externalId" = ${externalId}
+    `;
+    return rowsUpdated > 0;
+  }
+
+  async addRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "recordingParticipants" =
+        array_append(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
+      WHERE "externalId" = ${externalId}
+        AND NOT (${userId} = ANY(COALESCE("recordingParticipants", ARRAY[]::TEXT[])))
+    `;
+    return rowsUpdated > 0;
+  }
+
+  async removeRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "recordingParticipants" =
+        array_remove(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
       WHERE "externalId" = ${externalId}
     `;
     return rowsUpdated > 0;

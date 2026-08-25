@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { isSdlcBaselineApprovalCurrent } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -26,7 +25,6 @@ import {
   deleteClawConversation,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
-import { BASELINE_DEFINITIONS } from '@/sdlc/baselineDefinitions';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
 import {
   buildSdlcAskAiContext,
@@ -110,6 +108,9 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // Per-run thinking level from the composer's dropdown. Absent = the agent's
+  // configured default (modelSettings.thinkingLevel or provider default).
+  thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -184,6 +185,11 @@ const XyneAIRequestSchemaV2 = z.object({
    *  no-ops the pin when it can't serve it, so an unservable id can't silently
    *  swap the model. */
   model: z.string().min(1).optional(),
+  /** Which provider the model pin rides: "litellm" = the agent's shared
+   *  LiteLLM credential, "spaces" = the keyless platform provider (the models
+   *  endpoint's pinProvider says which). Defaults to "litellm" for old
+   *  clients. */
+  modelProvider: z.enum(['litellm', 'spaces']).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -247,6 +253,7 @@ export class XyneAIControllerV2 {
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
       instant,
+      thinkingLevel,
       researchContext,
       research_context,
       attachments,
@@ -276,6 +283,7 @@ export class XyneAIControllerV2 {
       draftMode,
       provider,
       model,
+      modelProvider,
       agentSlug,
     } = parseResult.data;
 
@@ -371,67 +379,34 @@ export class XyneAIControllerV2 {
             name: sdlcRepo.name,
           };
         }
-        const [memories, contextLinks, channelCanvases] = await Promise.all([
-          sdlcRepo.projectId
-            ? db.knowledgeDocument.findMany({
-                where: { projectId: sdlcRepo.projectId },
-                select: { id: true, title: true, content: true, metadata: true },
-              })
-            : [],
-          db.sdlcEntityLink.findMany({
-            where: { repoId: sdlcRepo.id, relationType: 'CONTEXT' },
-            orderBy: { createdAt: 'desc' },
-            take: 50,
-            select: { targetType: true, targetId: true },
-          }),
-          db.canvas.findMany({
-            where: { channelId: effectiveChannelIds[0] },
-            select: { id: true, title: true, metadata: true, lastEditedAt: true },
-          }),
-        ]);
-        const currentKnowledgeDocumentIds = new Set(
-          channelCanvases.flatMap((canvas) => {
-            const metadata = canvas.metadata as Record<string, unknown> | null;
-            return metadata?.artifactKind === 'BASELINE' &&
-              typeof metadata.knowledgeDocumentId === 'string' &&
-              isSdlcBaselineApprovalCurrent({
-                approvedAt: typeof metadata.approvedAt === 'string' ? metadata.approvedAt : null,
-                lastEditedAt: canvas.lastEditedAt,
-              })
-              ? [metadata.knowledgeDocumentId]
-              : [];
-          })
-        );
+        const contextLinks = await db.sdlcEntityLink.findMany({
+          where: { repoId: sdlcRepo.id, relationType: 'CONTEXT' },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: { targetType: true, targetId: true },
+        });
         const selectedCanvas = effectiveCanvasId
-          ? channelCanvases.find((canvas) => canvas.id === effectiveCanvasId)
+          ? await db.canvas.findFirst({
+              where: { id: effectiveCanvasId, channelId: effectiveChannelIds[0] },
+              select: {
+                id: true,
+                title: true,
+                sdlcArtifact: { select: { artifactType: true } },
+              },
+            })
           : undefined;
         const selectedArtifact = resolveSdlcAskAiSelectedArtifact(
           selectedCanvas
             ? {
                 id: selectedCanvas.id,
                 title: selectedCanvas.title,
-                metadata: selectedCanvas.metadata as Record<string, unknown> | null,
+                artifactType: selectedCanvas.sdlcArtifact?.artifactType,
               }
-            : undefined,
-          sdlcRepo.id
+            : selectedCanvas,
         );
-        const approvedBaseline = memories
-          .filter((memory) => {
-            const metadata = memory.metadata as Record<string, unknown> | null;
-            return (
-              metadata?.repoId === sdlcRepo.id &&
-              typeof metadata.baselineKind === 'string' &&
-              currentKnowledgeDocumentIds.has(memory.id)
-            );
-          })
-          .sort((left, right) => {
-            const leftKind = String((left.metadata as Record<string, unknown>).baselineKind);
-            const rightKind = String((right.metadata as Record<string, unknown>).baselineKind);
-            return (
-              BASELINE_DEFINITIONS.findIndex((item) => item.kind === leftKind) -
-              BASELINE_DEFINITIONS.findIndex((item) => item.kind === rightKind)
-            );
-          });
+        // Baseline knowledge-document injection is disabled until the standalone
+        // baseline approval flow returns; READY baselines gate artifact creation instead.
+        const approvedBaseline: Array<{ title: string; content: string }> = [];
         const linkedContext = sdlcRepo.workspaceId
           ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
           : [];
@@ -560,7 +535,7 @@ export class XyneAIControllerV2 {
           // agentConfig: claw-auth merges that over the agent's stored config,
           // and its platform-key strip covers secrets but NOT `tools` /
           // `subagents` / `outputFormat`. A bare model id can't reach those.
-          ...(model && { providerOverride: { provider: 'litellm', model } }),
+          ...(model && { providerOverride: { provider: modelProvider ?? 'litellm', model } }),
           conversationId: effectiveConversationId || '',
           channelId: effectiveChannelIds[0] || '',
           canvasIds: effectiveCanvasIds,
@@ -573,6 +548,7 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          ...(thinkingLevel ? { thinkingLevel } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
@@ -1135,7 +1111,8 @@ export class XyneAIControllerV2 {
     try {
       const result = await listClawAgentModels(
         { headers: req.headers, userId },
-        req.params['slug']
+        req.params['slug'],
+        (req as any).user?.workspaceId
       );
       res.json(result);
     } catch (error) {
