@@ -145,7 +145,7 @@ export class TicketsResource extends Resource {
    *
    * `ticketsByProjectV2` has no server-side cursor — a project with hundreds
    * of tickets returns all of them in one response — so this fetches that and
-   * windows it. Defaults to the first 50. For filtered, view-scoped listing
+   * windows it. Defaults to the first 100, which is also the cap. For filtered, view-scoped listing
    * (by board, by assignee, by status) use {@link list} instead, which takes
    * those filters server-side.
    */
@@ -164,7 +164,7 @@ export class TicketsResource extends Resource {
    *
    * `ticketActivities` has no server-side cursor — a ticket's whole history
    * comes back in one response — so this fetches that and windows it.
-   * Defaults to the first 50, newest first. For several tickets at once, with
+   * Defaults to the first 100 (also the cap), newest first. For several tickets at once, with
    * a real server-side cursor, use {@link listActivitiesForTickets}.
    */
   async listActivities(ticketId: string, options?: PageOptions): Promise<Page<unknown>> {

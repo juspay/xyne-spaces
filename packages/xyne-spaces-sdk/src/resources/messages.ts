@@ -21,7 +21,7 @@ export class MessagesResource extends Resource {
    * thread in one response — so this fetches that full result and windows it
    * before returning. The fetch itself is not cheaper for a long thread; what
    * this buys is that a caller processes one page rather than holding an
-   * unbounded array. Defaults to the first 50 messages.
+   * unbounded array. Defaults to the first 100 messages, which is also the cap.
    *
    * @example
    * const page = await sdk.messages.listByConversation('conv-123');

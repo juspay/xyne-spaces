@@ -18,10 +18,21 @@
  * iterate an unbounded array just to render one page of it.
  */
 
-const DEFAULT_LIMIT = 50;
+/** Rows returned when a caller names no `limit`. */
+export const DEFAULT_LIMIT = 100;
+
+/**
+ * The most rows one page can hold, whatever a caller asks for.
+ *
+ * A larger `limit` is clamped to this rather than rejected: the number is a
+ * request for how much to hand back, not an assertion about the data, so
+ * failing a call over it would turn a harmless over-estimate into an error the
+ * caller has to write code around.
+ */
+export const MAX_LIMIT = 100;
 
 export interface PageOptions {
-  /** Rows to return. Defaults to 50. */
+  /** Rows to return. Defaults to 100, and is capped at 100. */
   limit?: number;
   /** Rows to skip before the returned page. Defaults to 0. */
   offset?: number;
@@ -38,9 +49,16 @@ export interface Page<T> {
   nextOffset: number;
 }
 
-/** Window an already-fetched array into one page. */
+/**
+ * Window an already-fetched array into one page.
+ *
+ * `limit` is clamped into `[1, MAX_LIMIT]` rather than validated — see
+ * {@link MAX_LIMIT}. The floor of 1 matters as much as the ceiling: a `limit`
+ * of 0 would otherwise return an empty page while `hasMore` stayed true,
+ * which reads as "there is more, ask again" and loops forever.
+ */
 export function paginate<T>(all: readonly T[], options?: PageOptions): Page<T> {
-  const limit = options?.limit ?? DEFAULT_LIMIT;
+  const limit = Math.max(1, Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT));
   const offset = Math.max(options?.offset ?? 0, 0);
   const items = all.slice(offset, offset + limit);
   return {

@@ -35,7 +35,7 @@ export class UsersResource extends Resource {
    *
    * `getUsers` has no server-side cursor — it returns the whole workspace
    * directory in one response — so this fetches that and windows it. Defaults
-   * to the first 50. `updatedAt` still narrows the fetched set server-side
+   * to the first 100, which is also the cap. `updatedAt` still narrows the fetched set server-side
    * before paging happens.
    *
    * @param options.updatedAt - Only return users updated after this timestamp (epoch ms)

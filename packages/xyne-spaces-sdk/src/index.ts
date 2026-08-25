@@ -142,6 +142,9 @@ export type {
 // underlying Zero query has no server-side cursor (see core/paginate.ts). The
 // cursor types below are the real thing, native to the operations that have one.
 export type { Page, PageOptions } from './core/paginate.js';
+// Exported so a caller can state its own ceiling against these rather than
+// hardcoding a number that silently stops matching if the cap moves.
+export { DEFAULT_LIMIT, MAX_LIMIT } from './core/paginate.js';
 export type { ConversationCursor } from './registry/conversations.js';
 export type { MessageCursor } from './registry/messages.js';
 export type { ActivityCursor } from './registry/activities.js';

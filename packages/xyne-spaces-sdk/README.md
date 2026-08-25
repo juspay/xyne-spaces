@@ -210,6 +210,35 @@ and delete anything you leave out — read the current set first:
 `conversations.togglePin`, and `canvases.toggleStarred` flip the current value.
 Read state first if you need a specific outcome.
 
+**Seven methods return a `Page<T>`, not an array.** `messages.listByConversation`,
+`messages.listByChannel`, `channels.listBrowsable`, `tickets.listByProject`,
+`tickets.listActivities`, `users.list`, and `users.listBasic` sit on Zero queries
+that have no server-side cursor — the operation returns every matching row in one
+response. Rather than hand back an unbounded array, those methods window it:
+
+```typescript
+const page = await sdk.messages.listByConversation(conversationId);
+page.items;       // the rows — at most 100
+page.total;       // how many the underlying result held
+page.hasMore;     // whether anything sits beyond this page
+page.nextOffset;  // pass as `offset` to get the next one
+
+const next = await sdk.messages.listByConversation(conversationId, {
+  offset: page.nextOffset,
+});
+```
+
+`limit` defaults to 100 and **100 is a hard cap** — a larger value is clamped, not
+rejected, since it is a request for how much to return rather than a claim about the
+data. `DEFAULT_LIMIT` and `MAX_LIMIT` are exported; prefer them over a literal `100`.
+
+Two things to know before you build on this. The windowing is **client-side**, so it
+does not make the request cheaper — the full result still crosses the wire each call,
+and looping to collect everything re-fetches it every time. And every other list
+method returns a plain array; this is exactly these seven, not a general convention.
+Where a real server-side cursor exists — `tickets.list`, `messages.listByUser`,
+`activities.listPaginated` — prefer it.
+
 **Search filters are plural; result types are singular.** `SearchOptions.type`
 takes `'messages'`, `'tickets'`, …; `SearchResult.type` returns `'message'`,
 `'ticket'`, …. Feeding a result type back as a filter fails with
