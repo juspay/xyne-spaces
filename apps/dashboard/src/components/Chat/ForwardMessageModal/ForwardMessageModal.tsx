@@ -40,6 +40,7 @@ import { InputBox } from '../../ui/InputBox';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { ForwardMessageFormProps, ForwardTarget, SelectionMode } from './ForwardMessageModal.types';
 import { toast } from 'sonner';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import {
   getDMParticipantIdsToFetch,
   getDMNames,
@@ -121,21 +122,42 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         const timestamp = Date.now();
 
         try {
-          zero.mutate(
-            mutators.conversations.forwardMessage({
-              targetChannelId: firstTarget.id,
-              originalMessageId: message.messageId,
-              optionalMessage: value.optionalMessageText.trim()
-                ? value.optionalMessageHtml
-                : undefined,
-              conversationId,
-              messageId,
-              timestamp,
-              conversationParticipantId: uuidv4(),
-            }),
+          // Await the SERVER result before reporting success. A bare/unawaited
+          // zero.mutate resolves optimistically on the client, so a server-side
+          // rejection (lock timeout, participant guard, "channel not found")
+          // silently rolls the write back AFTER the success toast has fired and
+          // the user has navigated away — the message never actually forwards
+          // and only a retry succeeds. surfaceMutationError awaits `.server`
+          // and inspects it (Zero resolves, not rejects, application errors).
+          const forwarded = await surfaceMutationError(
+            zero.mutate(
+              mutators.conversations.forwardMessage({
+                targetChannelId: firstTarget.id,
+                originalMessageId: message.messageId,
+                optionalMessage: value.optionalMessageText.trim()
+                  ? value.optionalMessageHtml
+                  : undefined,
+                conversationId,
+                messageId,
+                timestamp,
+                conversationParticipantId: uuidv4(),
+              }),
+            ),
+            'Failed to forward message',
           );
 
-          // Show success message
+          if (!forwarded) {
+            logger.error(Event.MESSAGE_FORWARD_FAILED, {
+              originalMessageId: message.messageId,
+              targetType: 'channel',
+              targetChannelId: firstTarget.id,
+            });
+            // Leave the modal open so the user can retry; surfaceMutationError
+            // has already shown the real error toast.
+            return;
+          }
+
+          // Only now is the forward durably persisted server-side.
           logger.info(Event.MESSAGE_FORWARDED, {
             originalMessageId: message.messageId,
             targetType: 'channel',
