@@ -8,6 +8,7 @@ import {
   BarChart4,
   AlertCircle,
   Check,
+  Sparkles,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -26,12 +27,14 @@ import {
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
 import {
+  AICategorySubmenu,
   DynamicFieldSubmenu,
   PrioritySubmenu,
   StagesSubmenu,
   UserSubmenu,
   UserGroupSubmenu,
 } from '../../Tickets/TicketFilters/Submenus';
+import { classificationApi } from '../../../api/classificationApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
 import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
 import {
@@ -88,6 +91,7 @@ export interface DeskMetricsDashboardProps {
   availableDesks?: DeskMetricsSelectableDesk[];
   customFieldDefinitions?: readonly ResolvedDisplayFormField[];
   availableStages?: readonly DeskMetricsStageOption[];
+  onTicketClick: (ticket: DeskMetricsTicketRow) => void;
 }
 
 /** Shows a checklist of tags for a category, derived from already-fetched breakdown data. */
@@ -438,9 +442,11 @@ const agentSortValue = (row: DeskMetricsAgentRow, key: AgentSortKey): string | n
 const MetricsAgentTable = ({
   agents,
   onDownload,
+  onAgentClick,
 }: {
   agents: DeskMetricsAgentRow[];
   onDownload: () => void;
+  onAgentClick: (assigneeId: string | null) => void;
 }): ReactElement => {
   const [sortKey, setSortKey] = useState<AgentSortKey>('assigned');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -590,9 +596,23 @@ const MetricsAgentTable = ({
                       <span className='flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase text-muted-foreground'>
                         {agentDisplayName(row).slice(0, 2)}
                       </span>
-                      <span className='max-w-[180px] truncate' title={agentDisplayName(row)}>
-                        {agentDisplayName(row)}
-                      </span>
+                      {row.assigneeId ? (
+                        <button
+                          type='button'
+                          onClick={() => onAgentClick(row.assigneeId)}
+                          data-track-category='DeskMetrics'
+                          data-track-name='OpenAgentOverview'
+                          data-track-metadata={JSON.stringify({ assigneeId: row.assigneeId })}
+                          className='max-w-[180px] truncate text-left hover:text-desk-accent hover:underline'
+                          title={agentDisplayName(row)}
+                        >
+                          {agentDisplayName(row)}
+                        </button>
+                      ) : (
+                        <span className='max-w-[180px] truncate' title={agentDisplayName(row)}>
+                          {agentDisplayName(row)}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right font-mono text-xs tabular-nums text-foreground'>
@@ -666,14 +686,22 @@ const MetricsAgentTable = ({
 const MetricsTicketTable = ({
   tickets,
   onDownload,
+  onTicketClick,
+  onAssigneeClick,
 }: {
   tickets: DeskMetricsTicketRow[];
   onDownload: () => void;
+  onTicketClick: (ticket: DeskMetricsTicketRow) => void;
+  onAssigneeClick: (assigneeId: string) => void;
 }): ReactElement => {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
   const pageRows = tickets.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const customFieldKeys = useMemo(() => getCustomFieldKeys(tickets), [tickets]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [tickets]);
 
   return (
     <div className='rounded-[12px] border border-desk-border bg-background dark:border-border'>
@@ -776,13 +804,60 @@ const MetricsTicketTable = ({
                 )}
               >
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
-                  {row.xyneId ?? row.ticketId.slice(0, 8)}
+                  {row.xyneId ? (
+                    <button
+                      type='button'
+                      onClick={() => onTicketClick(row)}
+                      data-track-category='DeskMetrics'
+                      data-track-name='OpenMetricsTicket'
+                      data-track-metadata={JSON.stringify({
+                        ticketId: row.ticketId,
+                        channelId: row.channelId,
+                        xyneId: row.xyneId,
+                      })}
+                      className='text-left hover:text-desk-accent hover:underline'
+                    >
+                      {row.xyneId}
+                    </button>
+                  ) : (
+                    row.ticketId.slice(0, 8)
+                  )}
                 </td>
                 <td className='px-4 py-2 text-foreground'>
-                  <div className='max-w-[200px] truncate'>{row.title ?? '—'}</div>
+                  {row.xyneId ? (
+                    <button
+                      type='button'
+                      onClick={() => onTicketClick(row)}
+                      data-track-category='DeskMetrics'
+                      data-track-name='OpenMetricsTicket'
+                      data-track-metadata={JSON.stringify({
+                        ticketId: row.ticketId,
+                        channelId: row.channelId,
+                        xyneId: row.xyneId,
+                      })}
+                      className='max-w-[200px] truncate text-left hover:text-desk-accent hover:underline'
+                    >
+                      {row.title ?? '—'}
+                    </button>
+                  ) : (
+                    <div className='max-w-[200px] truncate'>{row.title ?? '—'}</div>
+                  )}
                 </td>
                 <td className='px-4 py-2 text-xs text-muted-foreground'>
-                  <div className='max-w-[140px] truncate'>{row.assigneeName ?? 'Unassigned'}</div>
+                  {row.assigneeId ? (
+                    <button
+                      type='button'
+                      onClick={() => onAssigneeClick(row.assigneeId!)}
+                      data-track-category='DeskMetrics'
+                      data-track-name='FilterByTicketAssignee'
+                      data-track-metadata={JSON.stringify({ assigneeId: row.assigneeId })}
+                      className='max-w-[140px] truncate text-left hover:text-desk-accent hover:underline'
+                    >
+                      {row.assigneeName ?? 'Unassigned'}
+                    </button>
+                  ) : (
+                    <div className='max-w-[140px] truncate'>Unassigned</div>
+                  )}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2'>
                   <span
@@ -881,6 +956,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   availableDesks = [],
   customFieldDefinitions = [],
   availableStages = [],
+  onTicketClick,
 }) => {
   const { user } = useAuth();
   const {
@@ -893,6 +969,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedUserGroupIds,
     selectedTagCategory,
     selectedTagValues,
+    selectedAiCategories,
     selectedCustomFieldValues,
     setDateRange: persistDateRange,
     setSelectedAssigneeIds,
@@ -901,12 +978,16 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     setSelectedUserGroupIds,
     setSelectedTagCategory,
     setSelectedTagValues,
+    setSelectedAiCategories,
     setSelectedCustomFieldValues,
     comparedChannelIds,
     setComparedChannelIds,
+    chartView,
+    setChartView,
+    activeTab,
+    setActiveTab,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'agents' | 'desks'>('overview');
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
 
@@ -936,9 +1017,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
   );
 
-  const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee' | 'tags'>(
-    'priority',
-  );
   const [expandedChart, setExpandedChart] = useState<
     'priority' | 'trend' | 'assignee' | 'tags' | null
   >(null);
@@ -954,12 +1032,33 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   // Prevents mutually-exclusive tags (e.g. sentiment) from disappearing when
   // selecting one tag filters the cohort and the API stops returning the others.
   const [stableTagsInCategory, setStableTagsInCategory] = useState<string[]>([]);
+  const [availableAiCategories, setAvailableAiCategories] = useState<string[]>([]);
 
   useEffect(() => {
     setCustomFieldPopoverOpen(false);
     setActiveSubmenu(null);
-    if (!isMultiDesk) setActiveTab(current => (current === 'desks' ? 'overview' : current));
-  }, [isMultiDesk]);
+    if (!isMultiDesk && activeTab === 'desks') setActiveTab('overview');
+  }, [activeTab, isMultiDesk, setActiveTab]);
+
+  useEffect(() => {
+    if (!open || !channelId || isMultiDesk) {
+      setAvailableAiCategories([]);
+      return;
+    }
+    let cancelled = false;
+    setAvailableAiCategories([]);
+    classificationApi
+      .getAiCategories(channelId)
+      .then(categories => {
+        if (!cancelled) setAvailableAiCategories(categories);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableAiCategories([]);
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [open, channelId, isMultiDesk]);
 
   const customFieldDefinitionByName = useMemo(() => {
     const definitions = new Map<string, ResolvedDisplayFormField>();
@@ -1018,7 +1117,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     (!isMultiDesk && selectedStageNames.length > 0) ||
     selectedPriorities.length > 0 ||
     selectedUserGroupIds.length > 0 ||
+    selectedTagCategory !== null ||
     selectedTagValues.length > 0 ||
+    (!isMultiDesk && selectedAiCategories.length > 0) ||
     (!isMultiDesk && activeCustomFieldKeys.length > 0);
   const hasAnyFiltersActive = selectedAssigneeIds.length > 0 || hasMoreFiltersActive;
 
@@ -1046,6 +1147,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedPriorities,
     selectedUserGroupIds,
     selectedTagValues,
+    isMultiDesk ? [] : selectedAiCategories,
   );
 
   useEffect(() => {
@@ -1246,6 +1348,23 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     showDownloadCompleteToast(filename);
   }, [agents]);
 
+  const handleAssigneeClick = useCallback(
+    (assigneeId: string) => {
+      setSelectedAssigneeIds([assigneeId]);
+      setActiveTab('agents');
+    },
+    [setSelectedAssigneeIds, setActiveTab],
+  );
+
+  const handleAgentClick = useCallback(
+    (assigneeId: string | null) => {
+      if (!assigneeId) return;
+      setSelectedAssigneeIds([assigneeId]);
+      setActiveTab('overview');
+    },
+    [setSelectedAssigneeIds, setActiveTab],
+  );
+
   return (
     <Dialog
       open={open}
@@ -1357,7 +1476,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             onClick={e => {
                               e.stopPropagation();
                               setComparedChannelIds([]);
-                              setActiveTab(prev => (prev === 'desks' ? 'overview' : prev));
+                              if (activeTab === 'desks') setActiveTab('overview');
                             }}
                           />
                         ) : (
@@ -1844,6 +1963,61 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             </PopoverPrimitive.Root>
                           )}
                         {!isMultiDesk &&
+                          (!filterSearch || 'ai category'.includes(filterSearch.toLowerCase())) && (
+                            <PopoverPrimitive.Root
+                              open={activeSubmenu === '__aiCategory'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__aiCategory' : null)
+                              }
+                            >
+                              <PopoverPrimitive.Trigger asChild>
+                                <button
+                                  type='button'
+                                  className={cn(
+                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                    activeSubmenu === '__aiCategory' && 'bg-muted font-medium',
+                                  )}
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='OpenAICategoryFilterSubmenu'
+                                >
+                                  <div className='flex min-w-0 items-center gap-3'>
+                                    <Sparkles size={16} className='shrink-0' />
+                                    <span>AI Category</span>
+                                    {selectedAiCategories.length > 0 && (
+                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                    )}
+                                  </div>
+                                  <ChevronRight
+                                    size={16}
+                                    className='shrink-0 text-muted-foreground'
+                                  />
+                                </button>
+                              </PopoverPrimitive.Trigger>
+                              <PopoverPrimitive.Portal>
+                                <PopoverPrimitive.Content
+                                  side='right'
+                                  align='start'
+                                  sideOffset={4}
+                                  collisionPadding={12}
+                                  className='z-[70] outline-none'
+                                  data-custom-field-submenu='true'
+                                  onOpenAutoFocus={event => event.preventDefault()}
+                                >
+                                  <AICategorySubmenu
+                                    selectedCategories={selectedAiCategories}
+                                    onChange={setSelectedAiCategories}
+                                    availableCategories={[
+                                      ...new Set([
+                                        ...availableAiCategories,
+                                        ...selectedAiCategories,
+                                      ]),
+                                    ]}
+                                  />
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          )}
+                        {!isMultiDesk &&
                           availableCustomFields
                             .filter(
                               def =>
@@ -1929,6 +2103,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         setSelectedUserGroupIds([]);
                         setSelectedTagCategory(null);
                         setSelectedTagValues([]);
+                        setSelectedAiCategories([]);
                         clearAllCustomFieldFilters();
                       }}
                       className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
@@ -2201,7 +2376,11 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       </div>
                     </div>
 
-                    <MetricsAgentTable agents={agents} onDownload={handleDownloadAgents} />
+                    <MetricsAgentTable
+                      agents={agents}
+                      onDownload={handleDownloadAgents}
+                      onAgentClick={handleAgentClick}
+                    />
                   </>
                 )}
               </div>
@@ -2509,7 +2688,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
                     {/* Ticket table */}
                     {data.tickets.length > 0 && (
-                      <MetricsTicketTable tickets={data.tickets} onDownload={handleDownload} />
+                      <MetricsTicketTable
+                        tickets={data.tickets}
+                        onDownload={handleDownload}
+                        onTicketClick={onTicketClick}
+                        onAssigneeClick={handleAssigneeClick}
+                      />
                     )}
                   </>
                 )}

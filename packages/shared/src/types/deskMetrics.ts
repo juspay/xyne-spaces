@@ -10,6 +10,7 @@
 export interface DeskMetricsTicketRow {
   ticketId: string;
   xyneId: string | null;
+  channelId: string;
   title: string | null;
   createdAt: number; // epoch ms
   priority: string;

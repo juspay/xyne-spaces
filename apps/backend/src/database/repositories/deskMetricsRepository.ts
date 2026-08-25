@@ -121,6 +121,7 @@ export class DeskMetricsRepository {
       priorities,
       userGroupIds,
       tagValues,
+      aiCategories,
       customFieldFilter,
     } = params;
     const aiCategories = params.aiCategories ?? [];
@@ -855,6 +856,7 @@ export class DeskMetricsRepository {
       Array<{
         ticket_id: string;
         xyne_id: string | null;
+        channel_id: string;
         title: string | null;
         created_at: Date;
         priority: string;
@@ -912,6 +914,7 @@ export class DeskMetricsRepository {
         SELECT
           c."ticketId" AS ticket_id,
           t."xyneId" AS xyne_id,
+          t."channelId" AS channel_id,
           t.title,
           c.created_at,
           t.priority::text AS priority,
@@ -940,6 +943,7 @@ export class DeskMetricsRepository {
       return {
         ticketId: r.ticket_id,
         xyneId: r.xyne_id,
+        channelId: r.channel_id,
         title: r.title,
         createdAt: r.created_at.getTime(),
         priority: r.priority,

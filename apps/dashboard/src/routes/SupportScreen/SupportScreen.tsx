@@ -3388,6 +3388,11 @@ const SupportScreen = (): ReactElement => {
                   availableDesks={metricsSelectableDesks}
                   customFieldDefinitions={deskDynamicFields}
                   availableStages={availableStages}
+                  onTicketClick={ticket => {
+                    void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                      state: { ticketId: ticket.ticketId },
+                    });
+                  }}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
