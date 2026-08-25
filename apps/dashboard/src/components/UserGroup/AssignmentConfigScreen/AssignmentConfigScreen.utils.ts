@@ -1,14 +1,25 @@
 // Pure helpers for the Assignment Config "Visibility" tab.
-// Replicates the backend `pickBest` per-user score (assignmentEngine.ts) from
+// Replicates the backend `pickBest` ranking (assignmentEngine.ts) from
 // already-synced Zero data — no backend call:
 //   effectiveActiveTasks = weightedActiveTasks + (startOffset ?? 0)
-//   score = effectiveActiveTasks − expertiseBonus − (percentage − currentPct)
+//   WORKLOAD    → score = effectiveActiveTasks − expertiseBonus − percentDiff
+//                 (percentDiff = percentage − currentPct, and only when the board
+//                  has "Use percentage assignment" on; otherwise 0)
+//   ROUND_ROBIN → least-recently-assigned first (never-assigned members lead)
 //
 // startOffset is the cold-start fairness offset (see cold-start-fairness-design.md):
 // a one-time, persisted value on user_group_mappings that keeps a brand-new member's
 // effective load at parity with established peers instead of flooding them from 0.
 // It's a single aggregate per (user, group) — not per board — so it's added
 // unconditionally regardless of which board is selected.
+
+/** Mirrors `NEVER_ASSIGNED_RANK` in the backend engine. */
+const NEVER_ASSIGNED_RANK = -1;
+
+export interface AssignmentStateLike {
+  userId: string;
+  lastAssignedAt: number | null | undefined;
+}
 
 export interface WorkloadMappingLike {
   userId: string;
@@ -68,6 +79,8 @@ export interface AssignmentScoreRow<U> {
    * member is skipped for new assignments. Always false when no cap is set.
    */
   isAtCapacity: boolean;
+  /** When the engine last picked this member; null if never picked. */
+  lastAssignedAt: number | null;
 }
 
 /** boardId → weight (defaults to 1 when a board has no complexity score row). */
@@ -117,8 +130,9 @@ export function computeTotalTicketsOnBoard(
 }
 
 /**
- * Per-user tickets + engine score, sorted lowest-score-first (= assigned next).
- * When no board is selected, `score` is null and rows sort by weightedActiveTasks.
+ * Per-user tickets + engine score, sorted so the row assigned next comes first.
+ * Under WORKLOAD that is the lowest score (or lowest weighted load when no board
+ * is selected); under ROUND_ROBIN it is the least-recently-assigned member.
  */
 export function computeAssignmentScores<U extends { id: string }>(params: {
   users: readonly U[];
@@ -126,10 +140,12 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
   userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
+  assignmentStates?: readonly AssignmentStateLike[] | null | undefined;
   boards: readonly BoardLike[];
   selectedBoardId: string | null;
   /** user_groups.maxWorkload — group-level cap, or null/undefined when unlimited. */
   maxWorkload?: number | null;
+  isRoundRobin?: boolean;
 }): AssignmentScoreRow<U>[] {
   const {
     users,
@@ -137,9 +153,11 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
     boardComplexityScores,
     expertiseMappings,
     userGroupMappings,
+    assignmentStates,
     boards,
     selectedBoardId,
     maxWorkload,
+    isRoundRobin = false,
   } = params;
 
   const weightByBoard = buildWeightByBoard(boardComplexityScores);
@@ -152,6 +170,9 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   const expertiseByUser = new Map((expertiseMappings ?? []).map(e => [e.userId, e] as const));
   const startOffsetByUser = new Map(
     (userGroupMappings ?? []).map(m => [m.userId, m.startOffset ?? 0] as const),
+  );
+  const lastAssignedByUser = new Map(
+    (assignmentStates ?? []).map(s => [s.userId, s.lastAssignedAt] as const),
   );
 
   const rows = users
@@ -180,6 +201,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
 
       const isAtCapacity =
         maxWorkload !== null && maxWorkload !== undefined && weightedActiveTasks >= maxWorkload;
+      const lastAssignedAt = lastAssignedByUser.get(user.id) ?? null;
       return {
         user,
         userTickets,
@@ -190,9 +212,17 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         hasExpertise,
         score,
         isAtCapacity,
+        lastAssignedAt,
       };
     })
-    .sort((a, b) => (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks));
+    .sort((a, b) =>
+      isRoundRobin
+        ? // Same tiebreak chain as the backend `sortCandidates`.
+          (a.lastAssignedAt ?? NEVER_ASSIGNED_RANK) - (b.lastAssignedAt ?? NEVER_ASSIGNED_RANK) ||
+          a.weightedActiveTasks - b.weightedActiveTasks ||
+          a.user.id.localeCompare(b.user.id)
+        : (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks),
+    );
 
   const realScores = rows.map(r => r.score).filter((s): s is number => s !== null);
   const minScore = realScores.length > 0 ? Math.min(...realScores) : 0;

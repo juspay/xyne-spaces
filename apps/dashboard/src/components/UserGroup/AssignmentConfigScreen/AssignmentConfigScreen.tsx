@@ -18,7 +18,7 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useActiveUsers } from '../../../hooks/useUsers';
 import type { Board, UserAssignmentState } from '@xyne/shared';
-import { RotationInterval } from '@xyne/shared';
+import { AssignmentStrategy, RotationInterval } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
@@ -35,6 +35,25 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
   { value: 'WEEKLY' as RotationInterval, label: 'Weekly' },
   { value: 'BIWEEKLY' as RotationInterval, label: 'Bi-Weekly' },
   { value: 'MONTHLY' as RotationInterval, label: 'Monthly' },
+];
+
+const ASSIGNMENT_STRATEGY_OPTIONS: {
+  value: AssignmentStrategy;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'WORKLOAD' as AssignmentStrategy,
+    label: 'Workload based',
+    description:
+      'Picks whoever is carrying the least weighted work, taking board weight, expertise and share percentage into account.',
+  },
+  {
+    value: 'ROUND_ROBIN' as AssignmentStrategy,
+    label: 'Round robin',
+    description:
+      'Rotates through eligible members, picking whoever was assigned least recently. Ticket counts and share percentage are ignored, but max-ticket limits still apply — and where board expertise is set, rotation stays within the experts.',
+  },
 ];
 
 /** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
@@ -95,6 +114,9 @@ export const AssignmentConfigScreen = ({
   const [localReassignOnUnavailable, setLocalReassignOnUnavailable] = useState<boolean>(false);
   const [localMaxWorkloadEnabled, setLocalMaxWorkloadEnabled] = useState<boolean>(false);
   const [maxWorkloadInput, setMaxWorkloadInput] = useState<string>('');
+  const [localAssignmentStrategy, setLocalAssignmentStrategy] = useState<AssignmentStrategy>(
+    AssignmentStrategy.WORKLOAD,
+  );
   const [localRotationInterval, setLocalRotationInterval] = useState<RotationInterval>(
     RotationInterval.WEEKLY,
   );
@@ -317,12 +339,14 @@ export const AssignmentConfigScreen = ({
       const savedMaxWorkload = userGroup.maxWorkload ?? null;
       setLocalMaxWorkloadEnabled(savedMaxWorkload !== null);
       setMaxWorkloadInput(savedMaxWorkload !== null ? String(savedMaxWorkload) : '');
+      setLocalAssignmentStrategy(userGroup.assignmentStrategy ?? AssignmentStrategy.WORKLOAD);
     }
   }, [
     userGroup?.autoRotationEnabled,
     userGroup?.rotationInterval,
     userGroup?.reassignOnUnavailable,
     userGroup?.maxWorkload,
+    userGroup?.assignmentStrategy,
   ]);
 
   const boards = useMemo(() => allBoards || [], [allBoards]);
@@ -727,6 +751,8 @@ export const AssignmentConfigScreen = ({
 
       const reassignOnUnavailableChanged =
         localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
+      const assignmentStrategyChanged =
+        localAssignmentStrategy !== (userGroup?.assignmentStrategy ?? AssignmentStrategy.WORKLOAD);
 
       // null clears the cap; the mutator skips the field entirely when undefined.
       const nextMaxWorkload = localMaxWorkloadEnabled ? parsedMaxWorkload : null;
@@ -735,7 +761,7 @@ export const AssignmentConfigScreen = ({
       const pendingServerResults = [
         // Ordered before batchUpdate on purpose: its post-commit handoff reads both settings
         // from committed rows — reassignOnUnavailable gates it, maxWorkload caps candidates.
-        ...(reassignOnUnavailableChanged || maxWorkloadChanged
+        ...(reassignOnUnavailableChanged || maxWorkloadChanged || assignmentStrategyChanged
           ? [
               zero.mutate(
                 mutators.userGroup.update({
@@ -744,6 +770,7 @@ export const AssignmentConfigScreen = ({
                     reassignOnUnavailable: localReassignOnUnavailable,
                   }),
                   ...(maxWorkloadChanged && { maxWorkload: nextMaxWorkload }),
+                  ...(assignmentStrategyChanged && { assignmentStrategy: localAssignmentStrategy }),
                   timestamp: Date.now(),
                 }),
               ).server,
@@ -1121,6 +1148,55 @@ export const AssignmentConfigScreen = ({
 
           {activeTab === 'availability' && (
             <>
+              {/* Assignment strategy — how this group picks among its eligible members */}
+              <div className='rounded-2xl border border-border bg-card p-4'>
+                <div className='mb-4'>
+                  <h2 className='text-sm font-semibold text-foreground'>Assignment method</h2>
+                  <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                    How the next assignee is picked once availability and on-call filters have been
+                    applied.
+                  </p>
+                </div>
+
+                <div className='flex flex-wrap items-end justify-between gap-4 border-t border-border pt-4'>
+                  <div className='min-w-0 flex-1'>
+                    <span className='block text-[13px] font-medium text-foreground'>
+                      {ASSIGNMENT_STRATEGY_OPTIONS.find(o => o.value === localAssignmentStrategy)
+                        ?.label ?? 'Workload based'}
+                    </span>
+                    <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
+                      {
+                        ASSIGNMENT_STRATEGY_OPTIONS.find(o => o.value === localAssignmentStrategy)
+                          ?.description
+                      }
+                    </p>
+                  </div>
+                  <Select
+                    value={localAssignmentStrategy}
+                    onValueChange={value => {
+                      setLocalAssignmentStrategy(value as AssignmentStrategy);
+                      setHasChanges(true);
+                    }}
+                  >
+                    <SelectTrigger
+                      className='w-[220px]'
+                      aria-label='Assignment method'
+                      data-track-category='UserGroups'
+                      data-track-name='ChangeAssignmentStrategy'
+                    >
+                      <SelectValue placeholder='Select a method' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ASSIGNMENT_STRATEGY_OPTIONS.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
               {/* Group-Level Rotation Configuration */}
               <div className='rounded-2xl border border-border bg-card p-4'>
                 <div className='mb-4'>
@@ -1502,8 +1578,15 @@ export const AssignmentConfigScreen = ({
                     experts go first.
                   </li>
                   <li>
-                    <strong className='font-medium text-foreground'>Score</strong>: the lowest score
-                    gets the ticket —{' '}
+                    <strong className='font-medium text-foreground'>Assignment method</strong>:
+                    Workload based ranks eligible people by score; Round robin instead gives the
+                    ticket to whoever was assigned least recently, ignoring ticket counts and %
+                    share. Eligibility is unchanged either way — so where expertise is set, Round
+                    robin rotates only among the experts.
+                  </li>
+                  <li>
+                    <strong className='font-medium text-foreground'>Score</strong>: with Workload
+                    based, the lowest score gets the ticket —{' '}
                     <code className='font-mono text-xs'>
                       weightedActiveTasks − expertiseBonus − percentDiff
                     </code>
@@ -1542,6 +1625,10 @@ export const AssignmentConfigScreen = ({
               workloadMappings={userWorkloadMappings}
               boardComplexityScores={boardComplexityScores}
               expertiseMappings={expertiseMappings}
+              assignmentStates={userAssignmentStates}
+              // Local, not persisted: every other control on this screen previews
+              // unsaved edits, so switching method must re-rank this tab immediately.
+              isRoundRobin={localAssignmentStrategy === AssignmentStrategy.ROUND_ROBIN}
               isCurrentUserGroupMember={isCurrentUserGroupMember}
               userGroupMappings={userGroupMembers}
               maxWorkload={userGroup?.maxWorkload ?? null}
