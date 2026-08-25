@@ -2,9 +2,12 @@ import React, { createContext, useContext, useMemo } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useUserGroupMappings } from '../../../hooks/useUserGroup';
 import { IngestionStatus } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { CollectionRole, CollectionSummary } from '../../../services/Knowledge/collectionService';
+
+const ROLE_RANK: Record<CollectionRole, number> = { VIEWER: 1, EDITOR: 2, OWNER: 3 };
 
 // Lists every collection the caller can read across the whole workspace, in
 // a single Zero subscription. `scopedCollectionsWithItems` already treats
@@ -46,6 +49,11 @@ export const GlobalCollectionsProvider: React.FC<{ children: React.ReactNode }> 
 }) => {
   const { user } = useAuth();
   const channels = useAllVisibleChannels();
+  const userGroupMappings = useUserGroupMappings();
+  const userGroupIds = useMemo(
+    () => new Set(userGroupMappings.map(m => m.userGroupId)),
+    [userGroupMappings],
+  );
   const channelById = useMemo(() => {
     const m = new Map<string, { name: string; projectId: string | null }>();
     for (const ch of channels) {
@@ -64,7 +72,20 @@ export const GlobalCollectionsProvider: React.FC<{ children: React.ReactNode }> 
   const collections: GlobalCollection[] = useMemo(() => {
     if (!zeroCollections || !user) return [];
     return zeroCollections.map(col => {
-      const perm = col.permissions?.find(p => p.userId === user.id);
+      // Pick the highest role among any matching row — a direct grant, or a
+      // grant on a group this user belongs to. Without the group branch, a
+      // group-granted EDITOR shows as VIEWER here (write buttons hidden)
+      // even though the server mutators (resolveCollectionPermissionRole)
+      // would allow the write — client/server role mismatch.
+      let perm: NonNullable<typeof col.permissions>[number] | undefined;
+      for (const p of col.permissions ?? []) {
+        const matches =
+          p.userId === user.id || (p.userGroupId !== null && userGroupIds.has(p.userGroupId));
+        if (!matches) continue;
+        if (!perm || ROLE_RANK[p.role as CollectionRole] > ROLE_RANK[perm.role as CollectionRole]) {
+          perm = p;
+        }
+      }
       const isOwner = col.ownerId === user.id;
       // Public collections are read-only by default — EDITOR only comes
       // from an explicit CollectionPermission row (`perm` below).
@@ -115,7 +136,7 @@ export const GlobalCollectionsProvider: React.FC<{ children: React.ReactNode }> 
         ingestionStatus,
       };
     });
-  }, [zeroCollections, user, channelById]);
+  }, [zeroCollections, user, channelById, userGroupIds]);
 
   const value: GlobalCollectionsContextValue = useMemo(() => {
     const sorted = [...collections].sort((a, b) => a.name.localeCompare(b.name));

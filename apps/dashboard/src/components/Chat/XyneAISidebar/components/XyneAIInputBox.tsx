@@ -190,10 +190,12 @@ export interface XyneAIInputBoxProps {
   fileScopes?: { id: string; name: string }[];
   /** Replace the selected file set (id = each file's Vespa docId / fileId UUID). */
   onFileScopesChange?: (fileScopes: { id: string; name: string }[]) => void;
-  /** Folders scoped in from the collection picker. Resolved to their
-   *  recursive file list server-side, at send time (see
-   *  xyneAIControllerV2.ts) — Vespa's collectionId filter only ever matches
-   *  a doc's ROOT collection, so a folder id alone isn't filterable there. */
+  /** Folders scoped in from the collection picker. Sent to claw-auth as a
+   *  single 'folder' attached_context pointer per id — NOT expanded to a
+   *  recursive file list here (xyneAIControllerV2.ts doesn't do that);
+   *  claw-auth resolves it itself, at Vespa-query time, since Vespa's
+   *  collectionId filter only ever matches a doc's ROOT collection and
+   *  can't filter on a folder id directly. */
   folderScopes?: { id: string; name: string }[];
   onFolderScopesChange?: (folderScopes: { id: string; name: string }[]) => void;
   compactToolbar?: boolean;
@@ -366,11 +368,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     useEffect(() => {
       if (kbOpenNonce === undefined) return;
       if (kbOpenNonce === lastSeenOpenNonce.current) return;
-      lastSeenOpenNonce.current = kbOpenNonce;
-      if (!kbCollectionId) return;
-      autoAddedCollectionRemoved.current = false;
+      if (!kbCollectionId) {
+        lastSeenOpenNonce.current = kbOpenNonce;
+        return;
+      }
+      // collectionsList (Zero query) can still be hydrating on a fresh
+      // sidebar mount — don't mark this nonce as handled until the
+      // collection is actually found, so this effect retries on the next
+      // collectionsList update instead of silently dropping the chip.
       const collection = collectionsList.find(c => c.id === kbCollectionId);
       if (!collection) return;
+      lastSeenOpenNonce.current = kbOpenNonce;
+      autoAddedCollectionRemoved.current = false;
       const newCollection = [{ id: collection.id, name: collection.name }];
       setSelectedCollections(newCollection);
       onSelectedCollectionsChange?.(newCollection.map(c => c.id));
@@ -628,9 +637,22 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               ? folderScopes.filter(f => f.id !== folder.id)
               : [...folderScopes, { id: folder.id, name: folder.name }],
           );
+          if (!isSelected) {
+            // Same rationale as handleToggleFile: keep the folder's root
+            // collection in scope so the backend can resolve the folder id.
+            const col = navStack[0];
+            if (col) {
+              setSelectedCollections(prev => {
+                if (prev.some(c => c.id === col.id)) return prev;
+                const updated = [...prev, col];
+                onSelectedCollectionsChange?.(updated.map(c => c.id));
+                return updated;
+              });
+            }
+          }
         }, 220);
       },
-      [folderScopes, onFolderScopesChange],
+      [folderScopes, navStack, onFolderScopesChange, onSelectedCollectionsChange],
     );
 
     // Thread info state - track if user has removed it
@@ -2008,9 +2030,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           data-track-category='XyneAI'
                           data-track-name='SELECT_KB_FOLDER'
                         >
-                          <FolderDefault className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                          <FolderDefault className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                           <span className='flex-1 truncate'>{folder.name}</span>
-                          {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                          {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                           <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                         </button>
                       );
@@ -2029,9 +2051,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           data-track-name='SELECT_FILE_SCOPE'
                           data-track-metadata={JSON.stringify({ fileId: file.fileId })}
                         >
-                          <FileText className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                          <FileText className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                           <span className='flex-1 truncate'>{file.name}</span>
-                          {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                          {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                         </button>
                       );
                     })}
@@ -2067,9 +2089,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         data-track-name='SELECT_COLLECTION'
                         data-track-metadata={JSON.stringify({ collectionId: collection.id })}
                       >
-                        <Notebook className='w-4 h-4 text-[#7C3AED] flex-shrink-0' />
+                        <Notebook className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                         <span className='flex-1 truncate'>{collection.name}</span>
-                        {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                         <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
                       </button>
                     );

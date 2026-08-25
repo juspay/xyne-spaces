@@ -14,9 +14,11 @@ interface FileScope {
   id: string;
   name: string;
 }
-/** A folder scope — resolved to its recursive fileIds server-side, at send
- *  time (see xyneAIControllerV2.ts), since Vespa's collectionId filter only
- *  ever matches a doc's ROOT collection. The picker just tracks the id. */
+/** A folder scope. Sent to claw-auth as a single 'folder' attached_context
+ *  pointer — NOT expanded to a recursive file list here (xyneAIControllerV2.ts
+ *  doesn't do that); claw-auth resolves it itself, at Vespa-query time, since
+ *  Vespa's collectionId filter only ever matches a doc's ROOT collection.
+ *  The picker just tracks the id. */
 interface FolderScope {
   id: string;
   name: string;
@@ -182,9 +184,15 @@ export function ComposerCollectionPicker({
             ? folderScopes.filter(f => f.id !== folder.id)
             : [...folderScopes, { id: folder.id, name: folder.name }],
         );
+        // Keep the folder's root collection in scope too, same as file picks —
+        // the backend resolves a folder id against its root collection.
+        const root = navStack[0];
+        if (!isSelected && root && !collections.some(c => c.id === root.id)) {
+          onCollectionsChange([...collections, root]);
+        }
       }, 220);
     },
-    [folderScopes, onFolderScopesChange],
+    [folderScopes, collections, navStack, onFolderScopesChange, onCollectionsChange],
   );
 
   return (
@@ -200,7 +208,7 @@ export function ComposerCollectionPicker({
           // neighbouring ToolbarButtons so the row reads as one set. Files count
           // as a selection too: this picker sets both.
           collections.length > 0 || fileScopes.length > 0 || folderScopes.length > 0
-            ? 'bg-secondary text-[#7C3AED]'
+            ? 'bg-secondary text-claw-ai-fg'
             : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
         )}
         data-track-category='XyneAI'
@@ -265,9 +273,9 @@ export function ComposerCollectionPicker({
                         data-track-category='XyneAI'
                         data-track-name='SELECT_KB_FOLDER'
                       >
-                        <Folder className='h-4 w-4 flex-shrink-0 text-[#7C3AED]' />
+                        <Folder className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                         <span className='flex-1 truncate'>{folder.name}</span>
-                        {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                         <ChevronRight className='h-4 w-4 flex-shrink-0 text-muted-foreground' />
                       </button>
                     );
@@ -286,9 +294,9 @@ export function ComposerCollectionPicker({
                         data-track-category='XyneAI'
                         data-track-name='SELECT_FILE_SCOPE'
                       >
-                        <FileText className='h-4 w-4 flex-shrink-0 text-[#7C3AED]' />
+                        <FileText className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                         <span className='flex-1 truncate'>{file.name}</span>
-                        {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                       </button>
                     );
                   })}
@@ -321,9 +329,9 @@ export function ComposerCollectionPicker({
                       data-track-category='XyneAI'
                       data-track-name='SELECT_COLLECTION'
                     >
-                      <BookOpen className='h-4 w-4 flex-shrink-0 text-[#7C3AED]' />
+                      <BookOpen className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                       <span className='flex-1 truncate'>{collection.name}</span>
-                      {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                      {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                       <ChevronRight className='h-4 w-4 flex-shrink-0 text-muted-foreground' />
                     </button>
                   );
