@@ -7464,7 +7464,7 @@ const onyxBenchSearch: ToolDef = {
     if (!workspaceId) return err("XYNE_SPACES_WORKSPACE_ID is not set — cannot scope benchmark search.");
 
     // Build YQL — mirrors the eval retrieval query from enterpriseRagEval.ts:
-    //   select * from chat_message, file, mail, ticket
+    //   select * from sources chat_message, file, mail, ticket
     //   where ({grammar:"tokenize"} userInput(@query)) and workspaceId contains "..."
     //
     // sourceType narrowing: each source type gets its own channel container
@@ -7477,7 +7477,7 @@ const onyxBenchSearch: ToolDef = {
       const benchChannelId = `bench-ch-${workspaceId}-${sourceType}`;
       clauses.push(`channelId contains "${esc(benchChannelId)}"`);
     }
-    const yql = `select * from ${BENCH_RETRIEVAL_SCHEMAS} where ({grammar:"tokenize"} userInput(@query)) and ${clauses.join(" and ")}`;
+    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ({grammar:"tokenize"} userInput(@query)) and ${clauses.join(" and ")}`;
 
     try {
       const data = await queryDirect(
