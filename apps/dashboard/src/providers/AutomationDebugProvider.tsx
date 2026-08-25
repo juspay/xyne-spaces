@@ -2,15 +2,12 @@ import {
   useEffect,
   useState,
   useSyncExternalStore,
-  type PointerEvent as ReactPointerEvent,
   type ReactElement,
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   CheckCircle2,
-  Eye,
-  EyeOff,
   Hourglass,
   Loader2,
   MinusCircle,
@@ -30,7 +27,6 @@ import {
   STATUS_CLASSES,
 } from '../components/Automation/AutomationRuns/RunDetail/RunDetail';
 import type { AutomationRunStatus } from '../components/Automation/Automation.types';
-import { useVisibleReload } from '../hooks/useVisibleReload';
 
 interface AutomationDebugTarget {
   type: DebugEntityType;
@@ -74,51 +70,17 @@ const ENTITY_LABEL: Record<DebugEntityType, string> = {
   TICKET: 'this ticket',
 };
 
-const RAIL_WIDTH_KEY = 'xyne-debug-rail-width';
-const MIN_RAIL_WIDTH = 360;
-const MAX_RAIL_WIDTH = 720;
+const RAIL_WIDTH = 480;
 
 // "Debug automations" side rail: entity runs list, then a run's steps reuse
 // RunDetail (the real automation-runs page component) as-is.
 function AutomationDebugPanel(): ReactElement | null {
   const target = useSyncExternalStore(subscribeDebugTarget, () => debugTarget);
   const [selectedRun, setSelectedRun] = useState<DebugEntityRun | null>(null);
-  const [showIds, setShowIds] = useState(false);
-  const [width, setWidth] = useState(() => Number(localStorage.getItem(RAIL_WIDTH_KEY)) || 480);
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     setSelectedRun(null); // reset drilldown when opened on a new entity
-    setOpen(false);
-    if (!target) return;
-    const raf = requestAnimationFrame(() => setOpen(true)); // paint at 0 first, so the width change transitions
-    return () => cancelAnimationFrame(raf);
   }, [target]);
-
-  // Pointer capture, not document listeners: guarantees the release lands even when the
-  // button comes up outside the viewport, which a document 'mouseup' misses.
-  const startResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = width;
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-
-    let next = startWidth;
-    const onMove = (ev: PointerEvent): void => {
-      next = Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, startWidth - (ev.clientX - startX)));
-      setWidth(next);
-    };
-    const onUp = (): void => {
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onUp);
-      localStorage.setItem(RAIL_WIDTH_KEY, String(next));
-    };
-    el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onUp);
-  };
 
   if (!target) return null;
   const handleClose = (): void => {
@@ -130,27 +92,9 @@ function AutomationDebugPanel(): ReactElement | null {
     <aside
       aria-label='Debug automations'
       data-testid='automation-debug-rail'
-      style={{ width: open ? width : 0 }}
-      className='relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border bg-background shadow-xl transition-[width] duration-200 ease-out'
+      style={{ width: RAIL_WIDTH }}
+      className='flex h-full shrink-0 flex-col overflow-hidden border-l border-border bg-background shadow-xl'
     >
-      <div
-        role='slider'
-        aria-orientation='vertical'
-        aria-label='Resize debug panel'
-        aria-valuenow={width}
-        aria-valuemin={MIN_RAIL_WIDTH}
-        aria-valuemax={MAX_RAIL_WIDTH}
-        tabIndex={0}
-        onPointerDown={startResize}
-        onKeyDown={(e): void => {
-          const step = e.key === 'ArrowLeft' ? 16 : e.key === 'ArrowRight' ? -16 : 0;
-          if (!step) return;
-          const next = Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, width + step));
-          setWidth(next);
-          localStorage.setItem(RAIL_WIDTH_KEY, String(next));
-        }}
-        className='absolute left-0 top-0 h-full w-1 shrink-0 cursor-col-resize hover:bg-accent/50'
-      />
       {selectedRun ? (
         <>
           <div className='flex justify-end border-b border-border px-2 py-2'>
@@ -163,30 +107,19 @@ function AutomationDebugPanel(): ReactElement | null {
       ) : (
         <>
           <div className='flex items-center gap-3 border-b border-border px-6 py-4'>
-            <h1 className='flex flex-col text-sm text-foreground'>
+            <h1 className='flex min-w-0 flex-1 flex-col text-sm text-foreground'>
               <span className='flex items-center gap-1.5 font-semibold'>
                 <Zap className='size-4 text-amber-600 dark:text-amber-400' />
                 Debug automations
               </span>
-              {showIds && (
-                <span className='font-mono text-[11px] text-muted-foreground'>{target.id}</span>
-              )}
+              <span className='truncate font-mono text-[11px] text-muted-foreground'>
+                {target.id}
+              </span>
             </h1>
-            <button
-              type='button'
-              onClick={(): void => setShowIds(v => !v)}
-              aria-label={showIds ? 'Hide IDs' : 'Show IDs'}
-              title={showIds ? 'Hide IDs' : 'Show IDs'}
-              data-track-category='automation-run-debug'
-              data-track-name='debug-toggle-ids'
-              className='ml-auto flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/40 hover:text-foreground'
-            >
-              {showIds ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
-            </button>
             <CloseButton onClick={handleClose} />
           </div>
           <div className='flex-1 overflow-y-auto'>
-            <EntityRunsView target={target} showIds={showIds} onOpenRun={setSelectedRun} />
+            <EntityRunsView target={target} onOpenRun={setSelectedRun} />
           </div>
         </>
       )}
@@ -196,44 +129,36 @@ function AutomationDebugPanel(): ReactElement | null {
 
 function EntityRunsView({
   target,
-  showIds,
   onOpenRun,
 }: {
   target: AutomationDebugTarget;
-  showIds: boolean;
   onOpenRun: (run: DebugEntityRun) => void;
 }): ReactElement {
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ['automation-debug-runs', target.type, target.id],
     queryFn: () => fetchDebugEntityRuns(target.type, target.id, { limit: RUNS_LIMIT }),
     enabled: target.id !== '',
     refetchOnWindowFocus: false,
   });
-  const { reloading, reload } = useVisibleReload(refetch);
   const runs = data?.runs ?? [];
 
   return (
     <div className='flex flex-col'>
       <div className='flex items-start gap-2 border-b border-border px-6 py-3'>
         <p className='flex-1 text-xs text-muted-foreground'>
-          Automations that ran on {ENTITY_LABEL[target.type]}
-          {showIds ? <span className='font-mono'> ({target.id})</span> : null}. Pick one to see its
-          steps.
+          Automations that ran on {ENTITY_LABEL[target.type]}. Pick one to see its steps.
         </p>
         <button
           type='button'
-          onClick={reload}
-          disabled={reloading}
+          onClick={(): void => void refetch()}
+          disabled={isFetching}
           aria-label='Reload runs'
           title='Reload runs'
           data-track-category='automation-run-debug'
           data-track-name='debug-reload-runs'
-          className={cn(
-            'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/40 hover:text-foreground',
-            reloading && 'opacity-60',
-          )}
+          className='flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/40 hover:text-foreground'
         >
-          <RotateCw className={cn('size-3.5', reloading && 'animate-spin')} />
+          <RotateCw className={cn('size-3.5', isFetching && 'animate-spin')} />
         </button>
       </div>
       {isError ? (
