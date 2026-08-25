@@ -1,3 +1,10 @@
+## [1.206.0-release-20260821.5](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.4...v1.206.0-release-20260821.5) (2026-08-24)
+
+
+### Bug Fixes
+
+* appscreen and incoming webhook fix ([#948](https://github.com/juspay/xyne-spaces/issues/948)) ([68594dd](https://github.com/juspay/xyne-spaces/commit/68594dde123f86159a3be8c8d429d06f7ae4bbfe))
+
 ## [1.206.0-release-20260821.4](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.3...v1.206.0-release-20260821.4) (2026-08-24)
 
 
