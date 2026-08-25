@@ -1,3 +1,11 @@
+## [1.206.0-release-20260821.6](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.5...v1.206.0-release-20260821.6) (2026-08-25)
+
+
+### Bug Fixes
+
+* add retry logic while fetching mails and attachment in desk ([#1010](https://github.com/juspay/xyne-spaces/issues/1010)) ([babab08](https://github.com/juspay/xyne-spaces/commit/babab0808b09c6992d690947be24e89fa6db4dfe))
+* Custom emoji replacement breaks Slack alert HTML ([#1023](https://github.com/juspay/xyne-spaces/issues/1023)) ([b1462ea](https://github.com/juspay/xyne-spaces/commit/b1462eab4edb750bb3bc24a2d7706ab6576f89f7))
+
 ## [1.206.0-release-20260821.5](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.4...v1.206.0-release-20260821.5) (2026-08-24)
 
 
