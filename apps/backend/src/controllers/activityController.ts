@@ -6,6 +6,7 @@ import { UserSessionService } from '@/services/userSessionService';
 import { activityService } from '@/services/activity/activityService';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { resolveModule } from '@/services/hyperAnalytics/moduleRoutes';
+import { productMetricsService } from '@/services/hyperAnalytics/productMetricsService';
 
 export class ActivityController {
   private userSessionService: UserSessionService;
@@ -75,6 +76,22 @@ export class ActivityController {
               workspaceId: resolved.workspaceId,
               ...(platform && { platform }),
             });
+          }
+
+          // Dwell time on the surface the user just left, reusing the
+          // activity tracker's pageDurationSec + full previous path.
+          if (validated.previousPagePath && validated.pageDurationSec) {
+            const left = resolveModule(validated.previousPagePath);
+            if (left) {
+              productMetricsService.trackTimeSpent({
+                userId: validated.userId,
+                email: validated.userEmail,
+                module: left.module,
+                workspaceId: left.workspaceId,
+                durationSec: validated.pageDurationSec,
+                ...(platform && { platform }),
+              });
+            }
           }
         } catch (err) {
           logger.debug('[ModuleMetrics] track failed (non-blocking)', { error: err });

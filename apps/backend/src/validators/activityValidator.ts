@@ -25,6 +25,7 @@ export const ActivityPayloadSchema = z.object({
   activeDurationSec: z.number().min(0).optional(),
   pageDurationSec: z.number().min(0).optional(),
   previousPage: z.string().max(500).optional(),
+  previousPagePath: z.string().max(500).optional(),
   idleTimeSec: z.number().min(0).optional(),
   platform: z.string().max(200).optional(), // Added by backend from UserSession.deviceInfo
   triggerEvent: z.string().max(100).optional(),

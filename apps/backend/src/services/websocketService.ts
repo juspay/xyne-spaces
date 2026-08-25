@@ -13,6 +13,7 @@ import { notificationService } from '@/notification-service';
 import { type NotificationData } from './notificationService';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
+import { productMetricsService } from './hyperAnalytics/productMetricsService';
 import { repositories } from '@/database/repositories';
 
 
@@ -416,6 +417,19 @@ class WebSocketService {
       // Fire and forget - non-blocking
       activityTrackingService.saveActivityEvent(authoredEvent).catch(error => {
         logger.error('Error saving activity event from WebSocket:', authoredEvent, error);
+      });
+
+      // Mirror the click into the SudoQuery / ClickHouse product-metrics
+      // pipeline as a normalized feature event (non-blocking, best-effort).
+      productMetricsService.trackFeatureClick({
+        userId: socket.userId,
+        email: socket.userEmail,
+        eventCategory: authoredEvent.event_category,
+        eventName: authoredEvent.event_name,
+        eventLabel: authoredEvent.event_label,
+        url: authoredEvent.url,
+        ...(socket.workspaceId ? { workspaceId: socket.workspaceId } : {}),
+        platform: authoredEvent.platform,
       });
     });
 

@@ -19,7 +19,8 @@ export interface ActivityLogPayload {
   page: string; // Current URL path
   activeDurationSec?: number;
   pageDurationSec?: number; // Active seconds on current page (only in onIdle/onAction page_change)
-  previousPage?: string; // Previous page path (only on page_change)
+  previousPage?: string; // Previous page path, first segment (only on page_change)
+  previousPagePath?: string; // Full workspace-prefixed path of the page just left (only on page_change)
   idleTimeSec?: number; // Idle time in seconds
   platform?: string; // Platform info from UserSession.deviceInfo (set by backend)
   triggerEvent?: string; // DOM event that triggered the activity (e.g., 'mousemove', 'keydown', 'page_change')
