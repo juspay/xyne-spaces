@@ -3319,6 +3319,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           context: dispatchContext || null,
           progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
           callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          serverFallbackBody: dispatchPayload as unknown as Record<string, unknown>,
         });
       } catch (err) {
         if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
@@ -4715,6 +4716,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
+    localHarness?: {
+      provider: string;
+      harnessName: string;
+      label: string;
+      ownerName: string;
+      deviceName?: string;
+    };
+    localHarnessUnreachable?: boolean;
+    localHarnessProvider?: string;
     fastMode?: boolean;
     // Conversation identity claw ships on every callback (see
     // xyne-claw/src/routes/run.ts:1040-1046). Used by the conv-keyed
@@ -5519,9 +5529,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ctx.responseMode === "conversation"
     ) {
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
-      const notice = isQuota
-        ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-        : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+      const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
+      const notice = payload.localHarnessUnreachable
+        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+        : isQuota
+          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
       await spacesAppFetch("/chat/postMessage", {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
@@ -6668,8 +6681,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // buildThreadCitationMeta). Used by the copilot/pendingResponses posts
     // below, which deliver the answer via a different path than the normal
     // conversation branch (convMetadata) and would otherwise ship no citations.
+    const runOriginMeta: Record<string, unknown> = payload.localHarness
+      ? { clawRunOrigin: { kind: "local-harness", ...payload.localHarness } }
+      : {};
+
     const buildPostMetadata = (text: string): Record<string, unknown> => {
-      const meta: Record<string, unknown> = { contentFormat: "markdown" };
+      const meta: Record<string, unknown> = { contentFormat: "markdown", ...runOriginMeta };
       const tc = buildThreadCitationMeta(citationInvocations, text);
       if (tc) {
         meta["clawCitations"] = tc.clawCitations;
@@ -6858,6 +6875,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       );
       const convMetadata = {
         contentFormat: "markdown",
+        ...runOriginMeta,
         ...(threadCitationMeta
           ? {
               clawCitations: threadCitationMeta.clawCitations,

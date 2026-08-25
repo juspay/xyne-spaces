@@ -1674,6 +1674,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         context: resolvedContext.promptPrefix || null,
         progressUrl,
         callbackUrl,
+        serverFallbackBody: forwardBody,
       });
       runBody = { success: true, sessionId: dispatched.sessionId };
     } else if (CONFIG.clawSseTransport) {

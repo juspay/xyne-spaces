@@ -18,7 +18,14 @@ import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { getOrgId, getRequesterId, isOrgAdmin } from "../middleware/agent-acl.js";
 import { authenticatedProviders, isDeviceOnline, localHarnessRepository } from "../repositories/localHarnessRepository.js";
-import { callToolForRun, listToolsForRun, relayProgress, relayResult } from "../lib/local-harness.js";
+import {
+  callToolForRun,
+  listToolsForRun,
+  localHarnessProviderLabel,
+  recoverFailedLocalRun,
+  relayProgress,
+  relayResult,
+} from "../lib/local-harness.js";
 
 const log = createLogger("local-harness-routes");
 
@@ -301,7 +308,7 @@ async function ownedRun(req: Request<{ runId: string }>, res: Response) {
     res.status(404).json({ success: false, error: "Run not found" });
     return null;
   }
-  if (run.status === "done" || run.status === "failed" || run.status === "cancelled") {
+  if (run.status !== "queued" && run.status !== "claimed" && run.status !== "running") {
     res.status(409).json({ success: false, error: "Run already finished" });
     return null;
   }
@@ -368,6 +375,18 @@ bridgeRouter.post("/runs/:runId/result", async (req: Request<{ runId: string }>,
   }
   const result = req.body;
   res.json({ success: true });
+
+  if (result.status === "failed") {
+    const harness = localHarnessProviderLabel(run.provider);
+    const detail = result.error?.trim() ? `${harness} failed: ${result.error.trim()}` : `${harness} failed`;
+    if (await recoverFailedLocalRun(run, detail)) {
+      log.info(`[local-harness] run ${run.id} failed locally — handed to the server fallback (${detail})`);
+      return;
+    }
+    log.error(`[local-harness] run ${run.id} failed locally AND the server fallback failed — surfacing to the user`);
+    await relayResult(run, { ...result, error: detail }, { localHarnessUnreachable: true });
+    return;
+  }
 
   const won = await localHarnessRepository.finishRun(run.id, result.status, result.error).catch(() => false);
   if (!won) {

@@ -4,6 +4,8 @@ import { prisma } from "../db.js";
 
 export const LOCAL_HARNESS_ONLINE_WINDOW_MS = 90_000;
 
+const LIVE_RUN_STATUSES: string[] = ["queued", "claimed", "running"];
+
 export function generateDeviceToken(): string {
   return randomBytes(32).toString("base64url");
 }
@@ -251,19 +253,75 @@ export const localHarnessRepository = {
   findBySessionId: (sessionId: string): Promise<LocalHarnessRun | null> =>
     prisma.localHarnessRun.findUnique({ where: { sessionId } }),
 
-  expireStaleRuns: async (limit = 50): Promise<LocalHarnessRun[]> => {
-    const stale = await prisma.localHarnessRun.findMany({
-      where: { status: { in: ["queued", "claimed", "running"] }, expiresAt: { lt: new Date() } },
-      take: limit,
-    });
-    const expired: LocalHarnessRun[] = [];
-    for (const run of stale) {
-      const updated = await prisma.localHarnessRun.updateMany({
-        where: { id: run.id, status: { in: ["queued", "claimed", "running"] } },
-        data: { status: "failed", finishedAt: new Date(), error: "Local harness did not report a result in time" },
+  findAbandonedRuns: async (args: {
+    claimTimeoutMs: number;
+    limit?: number;
+  }): Promise<Array<{ run: LocalHarnessRun; reason: string }>> => {
+    const now = Date.now();
+    const limit = args.limit ?? 50;
+
+    const [stalled, inFlight] = await Promise.all([
+      prisma.localHarnessRun.findMany({
+        where: {
+          status: { in: LIVE_RUN_STATUSES },
+          OR: [
+            { expiresAt: { lt: new Date(now) } },
+            { status: "queued", createdAt: { lt: new Date(now - args.claimTimeoutMs) } },
+          ],
+        },
+        orderBy: { createdAt: "asc" },
+        take: limit,
+      }),
+      prisma.localHarnessRun.findMany({
+        where: { status: { in: ["claimed", "running"] } },
+        orderBy: { createdAt: "asc" },
+        take: limit,
+      }),
+    ]);
+
+    const abandoned: Array<{ run: LocalHarnessRun; reason: string }> = stalled.map((run) => ({
+      run,
+      reason:
+        run.expiresAt.getTime() < now
+          ? "the local harness never reported a result"
+          : "no local device picked the run up",
+    }));
+
+    const seen = new Set(abandoned.map(({ run }) => run.id));
+    const candidates = inFlight.filter((run) => !seen.has(run.id) && run.deviceId);
+    if (candidates.length > 0) {
+      const devices = await prisma.localHarnessDevice.findMany({
+        where: { id: { in: [...new Set(candidates.map((run) => run.deviceId as string))] } },
+        select: { id: true, lastSeenAt: true, revokedAt: true },
       });
-      if (updated.count > 0) expired.push(run);
+      const deviceById = new Map(devices.map((device) => [device.id, device]));
+      for (const run of candidates) {
+        const device = deviceById.get(run.deviceId as string);
+        if (device && (device.revokedAt || !isDeviceOnline(device, now))) {
+          abandoned.push({ run, reason: "the local device went offline mid-run" });
+        }
+      }
     }
-    return expired;
+
+    return abandoned;
+  },
+
+  beginFallback: async (runId: string): Promise<boolean> => {
+    const result = await prisma.localHarnessRun.updateMany({
+      where: { id: runId, status: { in: LIVE_RUN_STATUSES } },
+      data: { status: "failing_over" },
+    });
+    return result.count > 0;
+  },
+
+  settleFallback: async (runId: string, ok: boolean, error?: string): Promise<void> => {
+    await prisma.localHarnessRun.updateMany({
+      where: { id: runId, status: "failing_over" },
+      data: {
+        status: ok ? "failed_over" : "failed",
+        finishedAt: new Date(),
+        ...(error ? { error } : {}),
+      },
+    });
   },
 };

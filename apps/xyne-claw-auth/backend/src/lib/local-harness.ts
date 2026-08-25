@@ -7,6 +7,8 @@ import type {
 } from "xyne-claw-shared";
 import { LOCAL_HARNESS_PROVIDERS, LOCAL_HARNESS_PROTOCOL_VERSION, isLocalHarnessProvider } from "xyne-claw-shared";
 import { CONFIG } from "../config.js";
+import { prisma } from "../db.js";
+import { redisService } from "../redis.js";
 import { createLogger } from "../logger.js";
 import { mintSessionToken } from "./session-tokens.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
@@ -105,6 +107,7 @@ export async function dispatchLocalHarnessRun(args: {
   context: string | null;
   progressUrl: string;
   callbackUrl: string;
+  serverFallbackBody: Record<string, unknown>;
 }): Promise<{ sessionId: string; runId: string }> {
   const sessionId = randomUUID();
   const model = args.model ?? defaultModelForProvider(args.target.provider);
@@ -137,10 +140,72 @@ export async function dispatchLocalHarnessRun(args: {
     expiresAt: new Date(Date.now() + CONFIG.localHarnessRunTimeoutMs),
   });
 
+  await rememberServerFallback(run.id, args.serverFallbackBody);
+
   log.info(
     `[local-harness] run queued id=${run.id} session=${sessionId} agent=${args.agentSlug} provider=${args.target.provider} model=${model ?? "(cli default)"} device=${args.target.device.id}`,
   );
   return { sessionId, runId: run.id };
+}
+
+const FALLBACK_KEY_PREFIX = "local-harness-fallback:";
+
+function fallbackKey(runId: string): string {
+  return `${FALLBACK_KEY_PREFIX}${runId}`;
+}
+
+async function rememberServerFallback(runId: string, body: Record<string, unknown>): Promise<void> {
+  const ttlSeconds = Math.ceil(CONFIG.localHarnessRunTimeoutMs / 1000) + 600;
+  await redisService
+    .getConnection()
+    .set(fallbackKey(runId), JSON.stringify(body), "EX", ttlSeconds)
+    .catch((err: unknown) => {
+      log.warn(`[local-harness] could not stash server fallback for run=${runId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+}
+
+export async function failOverToServerRun(run: LocalHarnessRun, reason: string): Promise<boolean> {
+  const raw = await redisService.getConnection().get(fallbackKey(run.id)).catch(() => null);
+  if (!raw) {
+    log.warn(`[local-harness] no stashed server fallback for run=${run.id} — cannot recover (${reason})`);
+    await localHarnessRepository.settleFallback(run.id, false, reason);
+    return false;
+  }
+
+  try {
+    const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: raw,
+      signal: AbortSignal.timeout(30_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { success?: boolean; sessionId?: string; error?: string };
+    if (!res.ok || !body.success || !body.sessionId) {
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+
+    await redisService.getConnection().del(fallbackKey(run.id)).catch(() => {});
+    await localHarnessRepository.settleFallback(run.id, true, reason);
+    log.info(
+      `[local-harness] failed over to server run=${run.id} provider=${run.provider} agent=${run.agentSlug} ` +
+        `newSession=${body.sessionId} reason="${reason}"`,
+    );
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error(`[local-harness] server fallback dispatch failed run=${run.id} reason="${reason}": ${message}`);
+    await localHarnessRepository.settleFallback(run.id, false, `${reason}; server fallback also failed: ${message}`);
+    return false;
+  }
+}
+
+export async function recoverFailedLocalRun(run: LocalHarnessRun, reason: string): Promise<boolean> {
+  const owned = await localHarnessRepository.beginFallback(run.id).catch(() => null);
+  if (owned === false) return true;
+  return failOverToServerRun(run, reason);
 }
 
 export function flattenToolName(serverType: string, toolName: string): string {
@@ -268,6 +333,44 @@ function toCallbackStatus(status: "done" | "failed" | "cancelled"): "completed" 
   return status === "done" ? "completed" : status;
 }
 
+const PROVIDER_LABEL: Record<string, string> = {
+  "claude-code": "Claude Code",
+  "codex-cli": "Codex CLI",
+};
+
+export function localHarnessProviderLabel(provider: string): string {
+  return PROVIDER_LABEL[provider] ?? provider;
+}
+
+function possessive(name: string): string {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
+export interface LocalHarnessAttribution {
+  provider: string;
+  harnessName: string;
+  label: string;
+  ownerName: string;
+}
+
+export async function describeLocalHarnessRun(run: LocalHarnessRun): Promise<LocalHarnessAttribution> {
+  const harnessName = localHarnessProviderLabel(run.provider);
+
+  const user = await prisma.user
+    .findUnique({ where: { id: run.userId }, select: { name: true, email: true } })
+    .catch(() => null);
+
+  const fullName = user?.name?.trim() || user?.email?.split("@")[0] || "";
+  const ownerName = fullName.split(/\s+/)[0] ?? "";
+
+  return {
+    provider: run.provider,
+    harnessName,
+    label: ownerName ? `${possessive(ownerName)} ${harnessName}` : harnessName,
+    ownerName,
+  };
+}
+
 export async function relayResult(
   run: LocalHarnessRun,
   result: {
@@ -278,7 +381,12 @@ export async function relayResult(
     effectiveModel?: string;
     error?: string;
   },
+  opts: { localHarnessUnreachable?: boolean } = {},
 ): Promise<void> {
+  const localHarness = result.status === "done"
+    ? await describeLocalHarnessRun(run).catch(() => null)
+    : null;
+
   await fetch(run.callbackUrl, {
     method: "POST",
     headers: callbackHeaders(run),
@@ -289,6 +397,8 @@ export async function relayResult(
       userId: run.userId,
       provider: run.provider,
       model: result.effectiveModel ?? run.model ?? undefined,
+      ...(localHarness ? { localHarness } : {}),
+      ...(opts.localHarnessUnreachable ? { localHarnessUnreachable: true, localHarnessProvider: run.provider } : {}),
       ...(result.toolsUsed?.length ? { toolsUsed: result.toolsUsed } : {}),
       ...(result.tokenUsage ? { tokenUsage: result.tokenUsage } : {}),
       ...(result.error ? { error: result.error } : {}),
