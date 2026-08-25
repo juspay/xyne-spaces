@@ -4591,7 +4591,12 @@ export const mutators = defineMutators({
       },
     ),
     removeUsers: defineMutator(
-      z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
+      z.object({
+        userGroupId: z.string(),
+        userIds: z.array(z.string()),
+        // Server-only: the server queues the ticket handoff after the delete commits.
+        reassignTickets: z.boolean().optional(),
+      }),
       async ({ tx, args: { userGroupId, userIds } }) => {
         // Remove users from group
         // Find all mappings to be removed using individual queries
