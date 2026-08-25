@@ -7,6 +7,7 @@ import {
   Mic,
   MessageSquare,
   Zap,
+  Sparkles,
   Code2,
   Copy,
   CheckCircle2,
@@ -79,6 +80,7 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
+  { id: 'claw', label: 'Claw', icon: <Sparkles className='size-4' />, desktopOnly: true },
   {
     id: 'toolbar',
     label: 'Toolbar',
@@ -682,6 +684,13 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.setAiLandingDefault}
       />
     </div>
+  </div>
+);
+
+// ─── Claw ───────────────────────────────────────────────────────────────────
+const ClawSection: FC = () => (
+  <div className='space-y-4'>
+    <SectionHeader title='Claw' subtitle='How you reach Claw and where it lives' />
     <ClawOverlayToggle />
   </div>
 );
@@ -974,6 +983,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   calls: CallsSection,
   messaging: MessagingSection,
   launch: LaunchSection,
+  claw: ClawSection as FC<{ state: PreferencesState }>,
   toolbar: ToolbarSection,
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,

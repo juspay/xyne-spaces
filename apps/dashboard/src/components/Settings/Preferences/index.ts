@@ -8,6 +8,7 @@ export type PreferenceSection =
   | 'calls'
   | 'messaging'
   | 'launch'
+  | 'claw'
   | 'toolbar'
   | 'calendar'
   | 'password'

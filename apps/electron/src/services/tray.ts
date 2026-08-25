@@ -1,4 +1,4 @@
-import { Menu, Tray, nativeImage, type NativeImage } from 'electron';
+import { Menu, Tray, nativeImage, nativeTheme, type NativeImage } from 'electron';
 import path from 'path';
 import Store from 'electron-store';
 import log from 'electron-log/main';
@@ -13,8 +13,20 @@ import {
   stopRecording,
   type RecordingSnapshot,
 } from './recording-controller';
-import { RECORDING_SHORTCUT } from './global-shortcuts';
+import { RECORDING_SHORTCUT, getClawSpotlightShortcut } from './global-shortcuts';
 import { startPillRenderer, stopPillRenderer, updatePill } from './tray-pill-renderer';
+import {
+  repaintClawBadge,
+  startClawBadgeRenderer,
+  stopClawBadgeRenderer,
+  updateClawBadge,
+} from './claw-tray-badge';
+import {
+  getClawSessionSnapshot,
+  onClawSessionStateChange,
+  type ClawSessionSnapshot,
+} from './claw-session-controller';
+import { openClawSpotlight } from './claw-overlay-window';
 
 const PAUSED_TITLE = 'Paused';
 
@@ -25,6 +37,17 @@ let tray: Tray | null = null;
 let idleIcon: NativeImage | null = null;
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let unsubscribeRecordingState: (() => void) | null = null;
+let unsubscribeClawState: (() => void) | null = null;
+let lastRecording: RecordingSnapshot | null = null;
+let lastClaw: ClawSessionSnapshot | null = null;
+let clawBadgeInterval: ReturnType<typeof setInterval> | null = null;
+let themeListenerAttached = false;
+
+const CLAW_BADGE_REPAINT_MS = 120;
+
+function truncateLabel(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
 
 function formatElapsed(snapshot: RecordingSnapshot): string {
   const startTime = snapshot.startTime ?? Date.now();
@@ -49,7 +72,30 @@ async function openXyne(): Promise<void> {
   focusMainWindow();
 }
 
-function buildMenu(snapshot: RecordingSnapshot): Menu {
+function buildClawItems(claw: ClawSessionSnapshot): Electron.MenuItemConstructorOptions[] {
+  if (claw.status !== 'running' && claw.status !== 'needs-input') return [];
+
+  const items: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: claw.status === 'needs-input' ? 'Needs your input' : 'Working…',
+      enabled: false,
+    },
+  ];
+
+  if (claw.preview) {
+    items.push({ label: truncateLabel(claw.preview, 52), enabled: false });
+  }
+
+  items.push({
+    label: 'Open session',
+    click: () => void openClawSpotlight(),
+  });
+  items.push({ type: 'separator' });
+
+  return items;
+}
+
+function buildMenu(snapshot: RecordingSnapshot, claw: ClawSessionSnapshot): Menu {
   const template: Electron.MenuItemConstructorOptions[] = snapshot.active
     ? [
         {
@@ -77,9 +123,18 @@ function buildMenu(snapshot: RecordingSnapshot): Menu {
         },
       ];
 
+  const clawShortcut = getClawSpotlightShortcut();
+  const clawItems = buildClawItems(claw);
+
   return Menu.buildFromTemplate([
     ...template,
     { type: 'separator' },
+    ...clawItems,
+    {
+      label: 'Open Claw',
+      ...(clawShortcut ? { accelerator: clawShortcut, registerAccelerator: false } : {}),
+      click: () => void openClawSpotlight(),
+    },
     {
       label: 'Open Xyne',
       click: () => void openXyne(),
@@ -87,29 +142,60 @@ function buildMenu(snapshot: RecordingSnapshot): Menu {
   ]);
 }
 
-function syncTrayToState(snapshot: RecordingSnapshot): void {
+function applyTrayVisual(): void {
   if (!tray) return;
 
-  tray.setContextMenu(buildMenu(snapshot));
+  const recording = lastRecording ?? getRecordingSnapshot();
+  const claw = lastClaw ?? getClawSessionSnapshot();
+
+  tray.setContextMenu(buildMenu(recording, claw));
 
   if (timerInterval) {
     clearInterval(timerInterval);
     timerInterval = null;
   }
+  if (clawBadgeInterval) {
+    clearInterval(clawBadgeInterval);
+    clawBadgeInterval = null;
+  }
 
   if (process.platform !== 'darwin') return;
 
-  if (snapshot.active && snapshot.startTime) {
+  if (recording.active && recording.startTime) {
+    stopClawBadgeRenderer();
     startPillRenderer((image) => tray?.setImage(image));
-    void updatePill(formatLabel(snapshot), snapshot.paused);
-    if (snapshot.paused) return;
+    void updatePill(formatLabel(recording), recording.paused);
+    if (recording.paused) return;
     timerInterval = setInterval(() => {
-      void updatePill(formatLabel(snapshot), snapshot.paused);
+      void updatePill(formatLabel(recording), recording.paused);
     }, 1000);
-  } else {
-    stopPillRenderer();
-    if (idleIcon) tray.setImage(idleIcon);
+    return;
   }
+
+  stopPillRenderer();
+
+  if (claw.status === 'running' || claw.status === 'needs-input') {
+    const waiting = claw.status === 'needs-input';
+    startClawBadgeRenderer((image) => tray?.setImage(image));
+    void updateClawBadge(waiting, nativeTheme.shouldUseDarkColors);
+    if (!waiting) {
+      clawBadgeInterval = setInterval(repaintClawBadge, CLAW_BADGE_REPAINT_MS);
+    }
+    return;
+  }
+
+  stopClawBadgeRenderer();
+  if (idleIcon) tray.setImage(idleIcon);
+}
+
+function syncTrayToState(snapshot: RecordingSnapshot): void {
+  lastRecording = snapshot;
+  applyTrayVisual();
+}
+
+function syncTrayToClaw(snapshot: ClawSessionSnapshot): void {
+  lastClaw = snapshot;
+  applyTrayVisual();
 }
 
 function createTray(): void {
@@ -129,8 +215,16 @@ function createTray(): void {
   if (process.platform === 'win32') {
     tray.on('click', () => void openXyne());
   }
-  syncTrayToState(getRecordingSnapshot());
+  lastRecording = getRecordingSnapshot();
+  lastClaw = getClawSessionSnapshot();
+  applyTrayVisual();
   unsubscribeRecordingState = onRecordingStateChange(syncTrayToState);
+  unsubscribeClawState = onClawSessionStateChange(syncTrayToClaw);
+
+  if (!themeListenerAttached) {
+    themeListenerAttached = true;
+    nativeTheme.on('updated', () => applyTrayVisual());
+  }
 
   log.info('[Tray] Menu bar icon initialized');
 }
@@ -140,16 +234,32 @@ function destroyTray(): void {
     unsubscribeRecordingState();
     unsubscribeRecordingState = null;
   }
+  if (unsubscribeClawState) {
+    unsubscribeClawState();
+    unsubscribeClawState = null;
+  }
   if (timerInterval) {
     clearInterval(timerInterval);
     timerInterval = null;
   }
+  if (clawBadgeInterval) {
+    clearInterval(clawBadgeInterval);
+    clawBadgeInterval = null;
+  }
   stopPillRenderer();
+  stopClawBadgeRenderer();
   idleIcon = null;
+  lastRecording = null;
+  lastClaw = null;
   if (!tray) return;
   tray.destroy();
   tray = null;
   log.info('[Tray] Menu bar icon removed');
+}
+
+export function getTrayBounds(): Electron.Rectangle | null {
+  if (!tray || tray.isDestroyed()) return null;
+  return tray.getBounds();
 }
 
 export function isTrayVisible(): boolean {
