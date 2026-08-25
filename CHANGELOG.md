@@ -1,3 +1,17 @@
+## [1.218.0](https://github.com/juspay/xyne-spaces/compare/v1.217.1...v1.218.0) (2026-08-25)
+
+
+### Features
+
+* warn before a workspace switch or refresh stops an active recording ([#930](https://github.com/juspay/xyne-spaces/issues/930)) ([d461602](https://github.com/juspay/xyne-spaces/commit/d461602239bb33bd5cdd8bccd2f8008fdb52d50c))
+
+
+### Bug Fixes
+
+* correct baseRoute for routes without channel children ([#997](https://github.com/juspay/xyne-spaces/issues/997)) ([609bbd2](https://github.com/juspay/xyne-spaces/commit/609bbd2bbc2083994134f41817e150e0a25c7417))
+* image viewer fullscreen enlarge button ([#972](https://github.com/juspay/xyne-spaces/issues/972)) ([7d86f53](https://github.com/juspay/xyne-spaces/commit/7d86f53a035353dd44cb16cb7d46ce6025b011d8))
+* sev2 ui artifact fixes + channel level call ([#982](https://github.com/juspay/xyne-spaces/issues/982)) ([64f9d63](https://github.com/juspay/xyne-spaces/commit/64f9d63f44bcd11255e293de146ead8a3d8ab171))
+
 ## [1.217.1](https://github.com/juspay/xyne-spaces/compare/v1.217.0...v1.217.1) (2026-08-25)
 
 
