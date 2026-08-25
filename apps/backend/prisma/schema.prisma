@@ -703,6 +703,7 @@ model UserGroup {
   rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
   reassignOnUnavailable Boolean?         // When true, a member going unavailable triggers reassignment of their open tickets in this group
+  maxWorkload          Int?              // Max weighted workload Σ(tickets × board weight) per member; null = unlimited. At or above it, a member is skipped for assignment
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdBy   String?  // User ID of the group creator (no FK constraint; relationMode="prisma"). Nullable: pre-existing groups have no known creator.
@@ -980,6 +981,8 @@ model UserGroupMapping {
   responsibility String?             // Legacy column; new writes set roleId instead
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
+  startOffset    Int?                // Cold-start fairness offset, added once for brand-new members with zero prior workload history
+  isNotified     Boolean  @default(false) // Subscriber flag: when true, this member is notified whenever the group's maxWorkload cap blocks an assignment
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -1783,6 +1786,7 @@ model Channel {
   emails             Email[]
   boardMappings      ChannelBoardMapping[]
   sdlcRepos          Repo[] @relation("RepoSdlcChannel")
+  collectionPermissions CollectionPermission[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -2086,7 +2090,7 @@ model ConversationLabel {
   name        String
   color       String?  // hex color, mirrors Gmail label color
   channelId   String   // Channel (desk) scope — labels belong to a desk (no FK constraint)
-  projectId   String   // Project (denormalized from channel)
+  projectId   String?  // Project (denormalized from channel)
   workspaceId String   // Workspace for ACL optimization (denormalized from channel)
   createdBy   String   // Owner — labels are private to this user (no FK constraint)
   createdAt   DateTime @default(now())
@@ -2341,6 +2345,7 @@ model MessageAttachment {
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
   uploadStatus       String?                 // Tracks upload state
+  position           Int?                  // Display order within a message (lower = earlier); null for legacy rows
 
   // Relations
   conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
@@ -2349,6 +2354,7 @@ model MessageAttachment {
   @@index([conversationId])
   @@index([entityId])
   @@index([entityId, id])
+  @@index([entityId, position])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2575,12 +2581,11 @@ model SurfaceNudge {
   state       String            @default("ACTIVE")
   visibleTo   String?
   surfaceNudgeCountId String?
-  projectId   String
+  projectId   String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@index([sourceId, state])
-  @@index([projectId, state])
   @@index([surfaceNudgeCountId, state])
   @@index([createdAt])
   @@map("surface_nudges")
@@ -2767,6 +2772,7 @@ model EntityAccess {
   channelId           String?  // Shared with a channel (no FK constraint)
 
   entityUserAccess    String   @default("VIEW") // VIEW/EDIT/ADMIN/REVOKED (see EntityUserAccess in @xyne/shared; app-validated, no DB enum)
+  metadata            Json?    // Share-specific metadata
   createdAt           DateTime @default(now())
   updatedAt           DateTime
 
@@ -3628,6 +3634,10 @@ model CollectionPermission {
   collectionId String
   userId       String?
   userGroupId  String?
+  // Grants every current+future member of this channel access — always
+  // VIEWER (enforced in the grantPermission mutator), and only offered for
+  // workspace-scoped collections (no home channel of their own) in the UI.
+  channelId    String?
   role         String
   canShare     Boolean        @default(false)
   grantedBy    String?
@@ -3637,10 +3647,13 @@ model CollectionPermission {
   collection Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   user       User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
   userGroup  UserGroup?  @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+  channel    Channel?    @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   @@unique([collectionId, userId])
   @@unique([collectionId, userGroupId])
+  @@unique([collectionId, channelId])
   @@index([userGroupId])
+  @@index([channelId])
   @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
   @@map("collection_permissions")
   @@schema("public")
@@ -4001,13 +4014,12 @@ model SurfaceLink {
 
   linkKind    String
   createdBy   String
-  projectId   String
+  projectId   String?
   createdAt   DateTime        @default(now())
 
   @@unique([sourceType, sourceId, targetType, targetId, linkKind])
   @@index([sourceType, sourceId])
   @@index([targetType, targetId])
-  @@index([projectId])
   @@map("surface_links")
   @@schema("public")
 }

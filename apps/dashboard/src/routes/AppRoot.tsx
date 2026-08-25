@@ -119,6 +119,11 @@ import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
+import { isElectronApp } from '../utils/electronApp';
+import {
+  confirmRecordingInterrupt,
+  isRecordingInterruptible,
+} from '../components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -241,6 +246,7 @@ import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapPro
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
 import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
+import AutomationsScreen from './AutomationsScreen/AutomationsScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
@@ -353,9 +359,39 @@ const AppRoot = (): ReactElement => {
   // do not expose a reliable lid-close event, so retain only the actual page
   // unload safeguard below.
   useEffect(() => {
-    window.addEventListener('pagehide', stopRecordingForTeardown);
+    const handlePageHide = (): void => stopRecordingForTeardown();
+    window.addEventListener('pagehide', handlePageHide);
     return (): void => {
-      window.removeEventListener('pagehide', stopRecordingForTeardown);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, []);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (isElectronApp()) return;
+      if (!isRecordingInterruptible()) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return (): void => {
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => {
+    const interceptReload = (event: KeyboardEvent): void => {
+      if (isElectronApp()) return;
+      const isReloadCombo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r';
+      if (!isReloadCombo && event.key !== 'F5') return;
+      if (!isRecordingInterruptible()) return;
+      event.preventDefault();
+      void confirmRecordingInterrupt('reload').then(proceed => {
+        if (proceed) window.location.reload();
+      });
+    };
+    window.addEventListener('keydown', interceptReload, true);
+    return (): void => {
+      window.removeEventListener('keydown', interceptReload, true);
     };
   }, []);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
@@ -423,6 +459,8 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
+  const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
+  const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
@@ -459,6 +497,12 @@ const AppRoot = (): ReactElement => {
   // like "/<workspaceId>/ai" or "/<workspaceId>/ai/<sub>". Match that
   // structure rather than a leading "/ai" prefix (which never matches).
   const isOnAIPage = /^\/[^/]+\/ai(\/|$)/.test(location.pathname);
+  // /ai/knowledge is a KB browser (AIKnowledgeScreen), not the full-screen
+  // chat experience the isOnAIPage suppression below exists for — it has no
+  // embedded chat pane of its own, so "Ask AI" there needs the same global
+  // XyneAISidebar drawer /knowledge-base uses, or clicking it does nothing.
+  const isOnAIKnowledgePage = /^\/[^/]+\/ai\/knowledge(\/|$)/.test(location.pathname);
+  const isOnAIChatExperiencePage = isOnAIPage && !isOnAIKnowledgePage;
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -497,7 +541,11 @@ const AppRoot = (): ReactElement => {
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
   // so the host must not also show one (covers both /sdlc and /sdlc/<repoId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen && !isMobile && !isOnAIPage && !isSdlcRoute && !showSdlcDebuggerPanel;
+    isXyneAIDrawerOpen &&
+    !isMobile &&
+    !isOnAIChatExperiencePage &&
+    !isSdlcRoute &&
+    !showSdlcDebuggerPanel;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -523,12 +571,13 @@ const AppRoot = (): ReactElement => {
   // global XyneAISidebar must never be open there. Close it on any pathname
   // change that lands inside /ai — this covers both opening it elsewhere and
   // then navigating in, and any code path that tries to open it while here.
+  // /ai/knowledge is exempt — see isOnAIKnowledgePage above.
   useEffect(() => {
-    if (!isOnAIPage) return;
+    if (!isOnAIChatExperiencePage) return;
     if (xyneAIActor.getSnapshot().matches('open')) {
       xyneAIActor.send({ type: 'CLOSE' });
     }
-  }, [isOnAIPage, isXyneAIDrawerOpen]);
+  }, [isOnAIChatExperiencePage, isXyneAIDrawerOpen]);
 
   // Monitor for pathname changes to update XyneAI context when navigating
   useEffect(() => {
@@ -670,6 +719,8 @@ const AppRoot = (): ReactElement => {
                                     kbChannelId={xyneAIKbChannelId ?? ''}
                                     kbDocId={xyneAIKbDocId ?? ''}
                                     kbDocName={xyneAIKbDocName ?? ''}
+                                    kbFolderId={xyneAIKbFolderId ?? ''}
+                                    kbFolderName={xyneAIKbFolderName ?? ''}
                                     kbOpenNonce={xyneAIKbOpenNonce}
                                     researchContext={xyneAIResearchContext}
                                     initialQuery={xyneAIInitialQuery ?? undefined}
@@ -784,6 +835,8 @@ const AppRoot = (): ReactElement => {
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
                                       kbDocName={xyneAIKbDocName ?? ''}
+                                      kbFolderId={xyneAIKbFolderId ?? ''}
+                                      kbFolderName={xyneAIKbFolderName ?? ''}
                                       kbOpenNonce={xyneAIKbOpenNonce}
                                       researchContext={xyneAIResearchContext}
                                       initialQuery={xyneAIInitialQuery ?? undefined}
@@ -910,6 +963,8 @@ const AppRoot = (): ReactElement => {
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
                             kbDocName={xyneAIKbDocName ?? ''}
+                            kbFolderId={xyneAIKbFolderId ?? ''}
+                            kbFolderName={xyneAIKbFolderName ?? ''}
                             kbOpenNonce={xyneAIKbOpenNonce}
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}
@@ -920,7 +975,7 @@ const AppRoot = (): ReactElement => {
                         </div>
                       )}
                       {/* XyneAI Mobile Drawer */}
-                      {isMobile && !isInPanelWebview && !isOnAIPage && (
+                      {isMobile && !isInPanelWebview && !isOnAIChatExperiencePage && (
                         <Drawer
                           open={isXyneAIDrawerOpen}
                           onOpenChange={open => {
@@ -942,6 +997,8 @@ const AppRoot = (): ReactElement => {
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
                             kbDocName={xyneAIKbDocName ?? ''}
+                            kbFolderId={xyneAIKbFolderId ?? ''}
+                            kbFolderName={xyneAIKbFolderName ?? ''}
                             kbOpenNonce={xyneAIKbOpenNonce}
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}
@@ -1037,7 +1094,20 @@ export const router = createBrowserRouter(
                     { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
                     { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                     { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
-                    { path: 'knowledge', element: <AIKnowledgeScreen /> },
+                    {
+                      path: 'knowledge',
+                      element: <AIKnowledgeScreen />,
+                      children: [
+                        { index: true, element: <KnowledgeBaseV2Screen /> },
+                        {
+                          // Mirrors /knowledge-base's own file-viewer route so
+                          // opening a file from here stays under /ai/knowledge
+                          // instead of hopping to the standalone KB screen.
+                          path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                          element: <FileViewerLayout />,
+                        },
+                      ],
+                    },
                     {
                       path: 'organization',
                       element: (
@@ -1634,27 +1704,15 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'automations',
-                  element: <AutomationsListScreen />,
-                },
-                {
-                  path: 'automations/approvals',
-                  element: <AutomationApprovalsScreen />,
-                },
-                {
-                  path: 'automations/new',
-                  element: <AutomationBuilderScreen />,
-                },
-                {
-                  path: 'automations/:id',
-                  element: <AutomationBuilderScreen />,
-                },
-                {
-                  path: 'automations/:id/runs',
-                  element: <AutomationRunsScreen />,
-                },
-                {
-                  path: 'automations/:id/runs/:runId',
-                  element: <AutomationRunDetailScreen />,
+                  element: <AutomationsScreen />,
+                  children: [
+                    { index: true, element: <AutomationsListScreen /> },
+                    { path: 'approvals', element: <AutomationApprovalsScreen /> },
+                    { path: 'new', element: <AutomationBuilderScreen /> },
+                    { path: ':id', element: <AutomationBuilderScreen /> },
+                    { path: ':id/runs', element: <AutomationRunsScreen /> },
+                    { path: ':id/runs/:runId', element: <AutomationRunDetailScreen /> },
+                  ],
                 },
                 {
                   path: 'apps',

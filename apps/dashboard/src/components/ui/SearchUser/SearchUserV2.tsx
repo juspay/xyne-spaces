@@ -4,7 +4,11 @@ import { Hash, Lock, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
-import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import {
+  getUserDisplayName,
+  isUserDeactivated,
+  matchesUserQuery,
+} from '../../../utils/userDisplayName';
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
 import { StatusIndicator } from '../StatusIndicator';
@@ -125,11 +129,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       ? options.filter(opt => {
           // Always pass through current user when "self" is searched
           if (currentUserId && opt.id === currentUserId && isSelfSearch) return true;
-          const displayName = getUserDisplayName(opt);
-          return (
-            displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            opt.email?.toLowerCase().includes(searchQuery.toLowerCase())
-          );
+          return matchesUserQuery(opt, searchQuery);
         })
       : options;
 

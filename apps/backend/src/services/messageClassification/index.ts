@@ -82,10 +82,10 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
 
   const channel = await db.channel.findUnique({
     where: { id: conversation.channelId },
-    select: { id: true, projectId: true, workspaceId: true },
+    select: { id: true, workspaceId: true },
   });
-  if (!channel?.projectId) {
-    return { tagged: 0, skipped: 'no-project' };
+  if (!channel) {
+    return { tagged: 0, skipped: 'no-channel' };
   }
 
   // A ticket's title and description are usually the clearest statement of what the thread
@@ -161,7 +161,8 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
         },
       }),
     },
-    channel.projectId,
+    null,
+    channel.workspaceId,
     modelName,
   );
 
@@ -383,13 +384,19 @@ const coerce = (raw: string | null | undefined, valid: Set<string>): string | nu
 
 async function classifyThread(
   input: ClassifierInput,
-  projectId: string,
+  projectId: string | null,
+  workspaceId: string,
   modelName: string,
 ): Promise<Classification> {
-  const credential = await orgLLMCredentialService.getCredentialByProjectId(
-    projectId,
-    OrgLLMServiceAccountPurpose.DEFAULT,
-  );
+  const credential = projectId
+    ? await orgLLMCredentialService.getCredentialByProjectId(
+        projectId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      )
+    : await orgLLMCredentialService.getCredentialByWorkspaceId(
+        workspaceId,
+        OrgLLMServiceAccountPurpose.DEFAULT,
+      );
   if (!credential) {
     throw new Error('LiteLLM credentials are not configured for this organization');
   }

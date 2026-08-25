@@ -146,7 +146,7 @@ export interface CreateTicketPopoutDraft {
   popoutId: string;
   workspaceId?: string | null | undefined;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   tab?: string | null | undefined;
   sourceConversationId?: string | null | undefined;
   initialMessageId?: string | null | undefined;

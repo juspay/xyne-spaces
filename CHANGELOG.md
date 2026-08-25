@@ -1,3 +1,190 @@
+## [1.219.2](https://github.com/juspay/xyne-spaces/compare/v1.219.1...v1.219.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* : inline changes for custom coulumns in table view ([#423](https://github.com/juspay/xyne-spaces/issues/423)) ([74ae4f3](https://github.com/juspay/xyne-spaces/commit/74ae4f33f34ba2efb55f2726df0fb3c79dadde3c))
+* bulk ticket update in desk ([#800](https://github.com/juspay/xyne-spaces/issues/800)) ([d3ffa50](https://github.com/juspay/xyne-spaces/commit/d3ffa5090ae00b78a18c46b02783a53ce79fdf99))
+* Custom emoji replacement breaks Slack alert HTML ([#1021](https://github.com/juspay/xyne-spaces/issues/1021)) ([15661de](https://github.com/juspay/xyne-spaces/commit/15661de8fa53a988debfe81c649b9c4e72a60000))
+
+
+### Reverts
+
+* Revert "feat: add recording participants (#849)" (#1024) ([2c7ead5](https://github.com/juspay/xyne-spaces/commit/2c7ead5d220fa8bb41183d5da7e89e5e1ad245d9)), closes [#849](https://github.com/juspay/xyne-spaces/issues/849) [#1024](https://github.com/juspay/xyne-spaces/issues/1024)
+
+## [1.219.1](https://github.com/juspay/xyne-spaces/compare/v1.219.0...v1.219.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* preserve attachment order with explicit position column ([#920](https://github.com/juspay/xyne-spaces/issues/920)) ([2f7952c](https://github.com/juspay/xyne-spaces/commit/2f7952c790067ecd5ce02309f4d2104948259e5d))
+
+## [1.219.0](https://github.com/juspay/xyne-spaces/compare/v1.218.3...v1.219.0) (2026-08-25)
+
+
+### Features
+
+* personalized rank profile as default; feed channelWei… ([#916](https://github.com/juspay/xyne-spaces/issues/916)) ([63889cf](https://github.com/juspay/xyne-spaces/commit/63889cfac711939e79dcfd78b74b4d672300615c))
+
+
+### Bug Fixes
+
+* add retry logic while fetching mails and attachment in desk ([#1007](https://github.com/juspay/xyne-spaces/issues/1007)) ([52d7ce2](https://github.com/juspay/xyne-spaces/commit/52d7ce2e87c4e0c33c33dabb8668803ebabcdf19))
+
+## [1.218.3](https://github.com/juspay/xyne-spaces/compare/v1.218.2...v1.218.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* switch full-screen attachment viewer when clicking another video in the side thread panel ([#914](https://github.com/juspay/xyne-spaces/issues/914)) ([2d6dc06](https://github.com/juspay/xyne-spaces/commit/2d6dc065d8c42b861d93912af586c0eece7d4b39))
+
+## [1.218.2](https://github.com/juspay/xyne-spaces/compare/v1.218.1...v1.218.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* linearize channel derivation freezing the main thread on every click ([#699](https://github.com/juspay/xyne-spaces/issues/699)) ([ed29301](https://github.com/juspay/xyne-spaces/commit/ed293016762ba792753ae7b7aadd0d741c561e9f))
+
+## [1.218.1](https://github.com/juspay/xyne-spaces/compare/v1.218.0...v1.218.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* adding husky and ci check to avoid default case in acls ([#790](https://github.com/juspay/xyne-spaces/issues/790)) ([4692ae8](https://github.com/juspay/xyne-spaces/commit/4692ae8e4217ee3929c2e82aebe6b8bda302afea))
+
+## [1.218.0](https://github.com/juspay/xyne-spaces/compare/v1.217.1...v1.218.0) (2026-08-25)
+
+
+### Features
+
+* warn before a workspace switch or refresh stops an active recording ([#930](https://github.com/juspay/xyne-spaces/issues/930)) ([d461602](https://github.com/juspay/xyne-spaces/commit/d461602239bb33bd5cdd8bccd2f8008fdb52d50c))
+
+
+### Bug Fixes
+
+* correct baseRoute for routes without channel children ([#997](https://github.com/juspay/xyne-spaces/issues/997)) ([609bbd2](https://github.com/juspay/xyne-spaces/commit/609bbd2bbc2083994134f41817e150e0a25c7417))
+* image viewer fullscreen enlarge button ([#972](https://github.com/juspay/xyne-spaces/issues/972)) ([7d86f53](https://github.com/juspay/xyne-spaces/commit/7d86f53a035353dd44cb16cb7d46ce6025b011d8))
+* sev2 ui artifact fixes + channel level call ([#982](https://github.com/juspay/xyne-spaces/issues/982)) ([64f9d63](https://github.com/juspay/xyne-spaces/commit/64f9d63f44bcd11255e293de146ead8a3d8ab171))
+
+## [1.217.1](https://github.com/juspay/xyne-spaces/compare/v1.217.0...v1.217.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* minimize and maximize notetaker in web view ([#910](https://github.com/juspay/xyne-spaces/issues/910)) ([5a89186](https://github.com/juspay/xyne-spaces/commit/5a89186614ff6cec3aa21a35c12c9c0773db7917))
+
+## [1.217.0](https://github.com/juspay/xyne-spaces/compare/v1.216.0...v1.217.0) (2026-08-24)
+
+
+### Features
+
+* fixing url resolver to not attach s2s keys ([#986](https://github.com/juspay/xyne-spaces/issues/986)) ([6b756d8](https://github.com/juspay/xyne-spaces/commit/6b756d888e8c8eb7534d020e63bca7276f54ce06))
+
+## [1.216.0](https://github.com/juspay/xyne-spaces/compare/v1.215.0...v1.216.0) (2026-08-24)
+
+
+### Features
+
+* waveform identity and in-place transcript modal for recordings ([#976](https://github.com/juspay/xyne-spaces/issues/976)) ([00429b8](https://github.com/juspay/xyne-spaces/commit/00429b856c4f66b9c62ea326f8ba3297564b2101)), closes [#1a1a1](https://github.com/juspay/xyne-spaces/issues/1a1a1)
+
+## [1.215.0](https://github.com/juspay/xyne-spaces/compare/v1.214.0...v1.215.0) (2026-08-24)
+
+
+### Features
+
+* add share, download, and delete actions to recordings list ([#909](https://github.com/juspay/xyne-spaces/issues/909)) ([29288e2](https://github.com/juspay/xyne-spaces/commit/29288e2057bab41ce8d439e9c770bdfc9d96dd15))
+
+## [1.214.0](https://github.com/juspay/xyne-spaces/compare/v1.213.3...v1.214.0) (2026-08-24)
+
+
+### Features
+
+* model and thinking menu in the Ask AI composer and sidebar ([#950](https://github.com/juspay/xyne-spaces/issues/950)) ([1926330](https://github.com/juspay/xyne-spaces/commit/192633050017859fdfebab11cdd71e39b6850466))
+* unify share logic ([#960](https://github.com/juspay/xyne-spaces/issues/960)) ([1236739](https://github.com/juspay/xyne-spaces/commit/1236739a7cd2228a32f998af7fda1a7791bffdb4))
+
+## [1.213.3](https://github.com/juspay/xyne-spaces/compare/v1.213.2...v1.213.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* Add retry button for failed LLM calls ([#963](https://github.com/juspay/xyne-spaces/issues/963)) ([ba84cff](https://github.com/juspay/xyne-spaces/commit/ba84cffdd13c0442055ecdc73948b0e26443cb94))
+
+## [1.213.2](https://github.com/juspay/xyne-spaces/compare/v1.213.1...v1.213.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* prefill fields while creating subticket ([#877](https://github.com/juspay/xyne-spaces/issues/877)) ([b61ef24](https://github.com/juspay/xyne-spaces/commit/b61ef243e463f028075b50db84c09a802b2ec11f))
+
+## [1.213.1](https://github.com/juspay/xyne-spaces/compare/v1.213.0...v1.213.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* resolve mixed-case login emails ([#68](https://github.com/juspay/xyne-spaces/issues/68)) ([e572ead](https://github.com/juspay/xyne-spaces/commit/e572ead6e77b31674066de9f9ee5cfb7f158d9ba))
+
+## [1.213.0](https://github.com/juspay/xyne-spaces/compare/v1.212.0...v1.213.0) (2026-08-24)
+
+
+### Features
+
+* report PR ticket validation as a GitHub commit status ([#889](https://github.com/juspay/xyne-spaces/issues/889)) ([9e987a3](https://github.com/juspay/xyne-spaces/commit/9e987a324a94acec66ae9084d6a6c915ed6bbb27))
+
+## [1.212.0](https://github.com/juspay/xyne-spaces/compare/v1.211.3...v1.212.0) (2026-08-24)
+
+
+### Features
+
+* add /spec task command for ticket specification questions ([#921](https://github.com/juspay/xyne-spaces/issues/921)) ([b9142fe](https://github.com/juspay/xyne-spaces/commit/b9142fe656d6d6a97aee712ef9ef6cd1d9a3126c))
+
+## [1.211.3](https://github.com/juspay/xyne-spaces/compare/v1.211.2...v1.211.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* Remove meeting detection feature for recording and calls ([#892](https://github.com/juspay/xyne-spaces/issues/892)) ([a1b64b6](https://github.com/juspay/xyne-spaces/commit/a1b64b64642442798c47e1cf9bcc123e71485bc9))
+
+## [1.211.2](https://github.com/juspay/xyne-spaces/compare/v1.211.1...v1.211.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* appscreen and incoming webhook fix ([#919](https://github.com/juspay/xyne-spaces/issues/919)) ([7e37e36](https://github.com/juspay/xyne-spaces/commit/7e37e36cf781acadb88a4c849bd3e239b64b0cf5))
+
+## [1.211.1](https://github.com/juspay/xyne-spaces/compare/v1.211.0...v1.211.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* decoupling projects ([#622](https://github.com/juspay/xyne-spaces/issues/622)) ([d38d214](https://github.com/juspay/xyne-spaces/commit/d38d214459ca833bc4edabd60da444ec6a87b8f5))
+
+## [1.211.0](https://github.com/juspay/xyne-spaces/compare/v1.210.0...v1.211.0) (2026-08-24)
+
+
+### Features
+
+* add recording participants ([#849](https://github.com/juspay/xyne-spaces/issues/849)) ([72c95b0](https://github.com/juspay/xyne-spaces/commit/72c95b02cb2e333c9061b2b7c844c521b334f1ac))
+* enable the non-creators to share the recordings ([#878](https://github.com/juspay/xyne-spaces/issues/878)) ([1223e1f](https://github.com/juspay/xyne-spaces/commit/1223e1f1f4e4878b4abe9cb6882feb6cc8722527))
+
+
+### Bug Fixes
+
+* scribe  labels — pill redesign, transcript side panel trigger  ([#824](https://github.com/juspay/xyne-spaces/issues/824)) ([e66afd8](https://github.com/juspay/xyne-spaces/commit/e66afd88a191348cb2bee3f62c7a6f4a442659f6))
+
+## [1.210.0](https://github.com/juspay/xyne-spaces/compare/v1.209.9...v1.210.0) (2026-08-24)
+
+
+### Features
+
+* UI revamp of automation home screen ([#468](https://github.com/juspay/xyne-spaces/issues/468)) ([bb0ce4c](https://github.com/juspay/xyne-spaces/commit/bb0ce4c0419ba4df9ab11b06e0b24602487a8c6b))
+
+## [1.209.9](https://github.com/juspay/xyne-spaces/compare/v1.209.8...v1.209.9) (2026-08-24)
+
+
+### Bug Fixes
+
+* Fix visibility tab error for non-group admins ([#936](https://github.com/juspay/xyne-spaces/issues/936)) ([d77d9fd](https://github.com/juspay/xyne-spaces/commit/d77d9fd2db374b1e6ca06b05f51a9000992648a3))
+
 ## [1.209.8](https://github.com/juspay/xyne-spaces/compare/v1.209.7...v1.209.8) (2026-08-24)
 
 

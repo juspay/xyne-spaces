@@ -15,6 +15,7 @@ import { EmailChannelPreferenceRepository } from '@/database/repositories/emailC
 import { UserRepository } from '@/database/repositories/users';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { Prisma } from '@prisma/client';
 import {
   EmailType,
@@ -985,13 +986,9 @@ export class EmailController {
       try {
         let boardId: string | undefined =
           preference?.boardId ?? externalSource.boardId ?? undefined;
-        if (!boardId && channel.projectId) {
-          const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
-            orderBy: { createdAt: 'asc' },
-            select: { id: true },
-          });
-          boardId = firstBoard?.id;
+        if (!boardId) {
+          const resolved = await resolveChannelDefaultBoard(db, channelId);
+          boardId = resolved?.boardId;
         }
 
         const created = await emailService.createConversationWithEmail({

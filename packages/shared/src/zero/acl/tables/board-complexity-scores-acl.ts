@@ -18,11 +18,6 @@ export class BoardComplexityScoresACL extends BaseQueryACL<'board_complexity_sco
           .whereExists('project', (p) =>
             p.where(({ or, exists }) =>
               or(
-                exists('guestAccess', (m) =>
-                  m
-                    .where('userId', '=', this.ctx.userID)
-                    .where('accessibleEntityType', '=', GuestEntity.PROJECT),
-                ),
                 exists('channels', (ch) =>
                   ch.whereExists('guestAccess', (m) =>
                     m

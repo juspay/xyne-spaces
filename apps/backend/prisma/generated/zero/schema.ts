@@ -1255,7 +1255,7 @@ export const conversationLabelTable = table("conversation_labels")
     name: string(),
     color: string().optional(),
     channelId: string(),
-    projectId: string(),
+    projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1436,6 +1436,7 @@ export const messageAttachmentTable = table("message_attachments")
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: string().optional(),
+    position: number().optional(),
   })
   .primaryKey("id");
 
@@ -1562,7 +1563,7 @@ export const surfaceNudgeTable = table("surface_nudges")
     state: string(),
     visibleTo: string().optional(),
     surfaceNudgeCountId: string().optional(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1691,6 +1692,7 @@ export const entityAccessTable = table("entity_access")
     userGroupId: string().optional(),
     channelId: string().optional(),
     entityUserAccess: string(),
+    metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2251,6 +2253,7 @@ export const collectionPermissionTable = table("collection_permissions")
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
+    channelId: string().optional(),
     role: string(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -2490,7 +2493,7 @@ export const surfaceLinkTable = table("surface_links")
     targetId: string(),
     linkKind: string(),
     createdBy: string(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
   })
   .primaryKey("id");
@@ -4049,6 +4052,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: repoTable,
+  }),
+  collectionPermissions: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: collectionPermissionTable,
   })
 }));
 
@@ -4580,6 +4588,11 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ["userGroupId"],
     destField: ["id"],
     destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 

@@ -30,7 +30,7 @@ const TICKET_SEARCH_LIMIT = 20;
 
 /** Matches the header's other pills (date, labels, share). */
 const CHIP_CLASS_NAME =
-  'inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
+  'inline-flex h-6 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
 
 /**
  * Links a recording to exactly one ticket.
@@ -166,7 +166,7 @@ export function RecordingTicketLink({
       disableClientFiltering
       showIndicator={false}
       inputIcon={<LinkChainSlant className='size-3.5' aria-hidden='true' />}
-      inputClassName='h-7 gap-1.5 rounded-lg border border-dashed border-muted-foreground/40 px-3 text-xs font-normal text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+      inputClassName='h-6 gap-1.5 rounded-lg border border-dashed border-muted-foreground/40 px-3 text-xs font-normal text-muted-foreground hover:border-foreground/30 hover:text-foreground'
       testId='recording-ticket-link'
     />
   );

@@ -28,6 +28,13 @@ export interface ComposerContext {
   recordings: SelectedRecording[];
   collections: { id: string; name: string }[];
   fileScopes: { id: string; name: string }[];
+  /** A specific folder scoped in (not the whole collection, not one file).
+   *  Sent to claw-auth as a single 'folder' attached_context pointer — NOT
+   *  expanded to a recursive file list here (xyneAIControllerV2.ts doesn't
+   *  do that); claw-auth resolves it itself, at Vespa-query time, since
+   *  Vespa's collectionId filter only ever matches a doc's ROOT collection
+   *  and can't filter on a folder id directly. */
+  folderScopes: { id: string; name: string }[];
   research: ResearchContext | null;
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
@@ -35,6 +42,17 @@ export interface ComposerContext {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant: boolean;
+  /** Per-run model pin from the composer's model dropdown. The list comes from
+   *  the account's allowed models (the agent's shared LiteLLM key's /v1/models);
+   *  null = "Default" — the model configured in the DB. A pick is the source of
+   *  truth for the run: it overrides the agent's configured model. */
+  model: string | null;
+  /** Which provider the model pin rides — the models endpoint's pinProvider.
+   *  null when no model is picked. */
+  modelProvider: 'litellm' | 'spaces' | null;
+  /** Per-run thinking level from the composer's thinking dropdown.
+   *  null = the agent's configured default. */
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
 }
 
 export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
@@ -45,11 +63,15 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   recordings: [],
   collections: [],
   fileScopes: [],
+  folderScopes: [],
   research: null,
   webSearchEnabled: false,
   deepResearchEnabled: false,
   createCanvasEnabled: false,
   instant: false,
+  model: null,
+  modelProvider: null,
+  thinkingLevel: null,
 };
 
 /** True when the snapshot carries any context/toggle worth sending as overrides. */
@@ -62,11 +84,14 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.recordings.length > 0 ||
     ctx.collections.length > 0 ||
     ctx.fileScopes.length > 0 ||
+    ctx.folderScopes.length > 0 ||
     ctx.research !== null ||
     ctx.webSearchEnabled ||
     ctx.deepResearchEnabled ||
     ctx.createCanvasEnabled ||
-    ctx.instant
+    ctx.instant ||
+    ctx.model !== null ||
+    ctx.thinkingLevel !== null
   );
 }
 
@@ -81,6 +106,7 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     channelIds: ctx.channels.map(c => c.id),
     collectionIds: ctx.collections.map(c => c.id),
     fileIds: ctx.fileScopes.map(f => f.id),
+    folderIds: ctx.folderScopes.map(f => f.id),
     ticketIds: ctx.tickets.map(t => t.id),
     canvasIds: ctx.canvases.map(c => c.id),
     callIds: [...ctx.transcripts.map(t => t.id), ...ctx.recordings.map(r => r.id)],
@@ -95,6 +121,10 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     deepResearchEnabled: ctx.deepResearchEnabled,
     createCanvasEnabled: ctx.createCanvasEnabled,
     instant: ctx.instant,
+    ...(ctx.model
+      ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) }
+      : {}),
+    ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
     researchContext: ctx.research,
   };
 }

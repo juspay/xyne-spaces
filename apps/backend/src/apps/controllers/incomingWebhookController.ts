@@ -276,6 +276,9 @@ class IncomingWebhookController {
         res.status(400).send('invalid_payload');
         return;
       }
+      logger.info('[INCOMING-WEBHOOK] BODY', {
+        body: context.body,
+      });
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
@@ -358,14 +361,11 @@ class IncomingWebhookController {
             }
 
             const board = await repositories.boards.findById(context.webhook.boardId);
-            const channel = await repositories.channels.findById(context.channelId);
-            if (!board || !channel || board.projectId !== channel.projectId) {
-              logger.warn('[Incoming-Webhook] Invalid board/channel configuration for ticket webhook', {
+            if (!board) {
+              logger.warn('[Incoming-Webhook] Invalid board configuration for ticket webhook', {
                 webhookId: context.webhook.id,
                 boardId: context.webhook.boardId,
                 channelId: context.channelId,
-                boardProjectId: board?.projectId,
-                channelProjectId: channel?.projectId,
               });
               res.status(400).send('invalid_payload');
               return;
@@ -704,11 +704,6 @@ class IncomingWebhookController {
         const board = await repositories.boards.findById(effectiveBoardId);
         if (!board) {
           res.status(404).json({ error: 'Board not found' });
-          return;
-        }
-
-        if (board.projectId !== channel.projectId) {
-          res.status(400).json({ error: 'Board must belong to the same project as the selected channel' });
           return;
         }
 

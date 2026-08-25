@@ -374,12 +374,14 @@ class RecordingService {
     callId: string,
     targets: RecordingShareTarget[],
     access?: GrantableEntityUserAccess,
+    messageContent?: string,
   ): Promise<RecordingSharingResult> {
     const response: AxiosResponse<{ success: true } & RecordingSharingResult> =
       await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
         action: 'grant',
         targets,
         ...(access ? { access } : {}),
+        ...(messageContent?.trim() ? { messageContent: messageContent.trim() } : {}),
       });
     return response.data;
   }

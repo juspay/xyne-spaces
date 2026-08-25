@@ -560,8 +560,10 @@ export class CallController {
       // No pre-flight validation of artifactMessageId: every artifact write is
       // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
       // an id that does not belong to this channel matches zero rows.
+      // Not gated on conversationId — an artifact's call is channel-scoped even
+      // though the artifact message itself may live inside a thread.
       const linkedArtifactMessageId =
-        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
+        typeof artifactMessageId === 'string' ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -623,6 +625,20 @@ export class CallController {
               data: { metadata: restMeta as Prisma.InputJsonValue },
             });
             queueCallVespaFeed(existingCall.id, { source: CallVespaFeedSource.CallControllerInitiateCallClearRemovedByHostExistingRoom });
+          }
+
+          // A channel already running a call is the call this incident should
+          // use — adopt it rather than leaving the artifact card stuck pending.
+          if (linkedArtifactMessageId && existingCall.channelId) {
+            stage = 'existing_call_artifact_link';
+            const linked = await repositories.calls.linkArtifactToActiveCall({
+              callId: existingCall.id,
+              callExternalId: existingCall.externalId,
+              channelId: existingCall.channelId,
+              artifactMessageId: linkedArtifactMessageId,
+              metadata: existingCall.metadata,
+            });
+            logger.info(`[${existingCall.externalId}] artifact_link_on_existing_call | linked=${linked}, correlation_id=${correlationId}`);
           }
 
           // Room exists, generate token to join the existing call
@@ -733,7 +749,6 @@ export class CallController {
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
-        projectId: channel.projectId,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
         sttModel: sttModel || 'azure',
@@ -941,7 +956,6 @@ export class CallController {
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
-          projectId: channel.projectId,
           createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
@@ -1504,9 +1518,16 @@ export class CallController {
         }
       }
 
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const resolvedLabels = input.labels
+        ? await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels)
+        : undefined;
+
       await repositories.calls.update(call.id, {
         ...(input.title ? { title: input.title } : {}),
-        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(resolvedLabels ? { labels: resolvedLabels } : {}),
         ...(input.markedItems !== undefined
           ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
           : {}),

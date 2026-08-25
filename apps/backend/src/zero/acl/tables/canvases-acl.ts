@@ -12,7 +12,6 @@ import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
 import {
   hasGuestChannelAccess,
-  hasGuestProjectAccess,
 } from '../core/guest-access';
 
 export class CanvasesACL extends BaseACL<'canvases'> {
@@ -180,9 +179,7 @@ export class CanvasesACL extends BaseACL<'canvases'> {
       const channelAccess = canvas.channelId
         ? await hasGuestChannelAccess(this.ctx, tx, canvas.channelId)
         : false;
-      const projectAccess = canvas.projectId
-        ? await hasGuestProjectAccess(this.ctx, tx, canvas.projectId)
-        : false;
+      const projectAccess = false;
 
       if (!directCanvasAccess && !channelAccess && !projectAccess) {
         throw new MutationACLError(
