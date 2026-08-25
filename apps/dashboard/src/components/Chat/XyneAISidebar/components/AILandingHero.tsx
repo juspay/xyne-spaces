@@ -99,7 +99,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
 
   const buildAskAIThreadInfo = useCallback((card: RecapCard): ThreadInfo | null => {
     const firstCitation = Object.values(card.pointCitations ?? {}).find(
-      citation => citation.conversationId || citation.messageId,
+      citation => citation.conversationId,
     );
     const conversationId =
       firstCitation?.conversationId ?? card.drilldown.conversationId ?? undefined;

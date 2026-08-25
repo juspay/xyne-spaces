@@ -326,7 +326,7 @@ const RecapPanel = (): ReactElement => {
       drilldown?: { conversationId: string | null; messageId: string | null },
     ): ThreadInfo | null => {
       const firstCitation = Object.values(pointCitations ?? {}).find(
-        citation => citation.conversationId || citation.messageId,
+        citation => citation.conversationId,
       );
       const conversationId =
         firstCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
