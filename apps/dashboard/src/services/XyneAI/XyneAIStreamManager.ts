@@ -93,6 +93,8 @@ export interface StreamRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** Per-run thinking level (composer dropdown). Absent = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -114,6 +116,10 @@ export interface StreamRequest {
    *  agent's own default. Only meaningful on v2 (v1 resolves its model from
    *  env and ignores the field). */
   model?: string | undefined;
+  /** Which provider the model pin rides ("litellm" = the agent's own
+   *  credential, "spaces" = the platform allowed list). Only meaningful
+   *  alongside `model`. */
+  modelProvider?: 'litellm' | 'spaces';
   showInSidebar?: boolean | undefined;
 }
 
@@ -1052,6 +1058,7 @@ class XyneAIStreamManager {
           deepResearchEnabled: request.deepResearchEnabled ?? false,
           createCanvasEnabled: request.createCanvasEnabled ?? false,
           instant: request.instant ?? false,
+          ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {
@@ -1088,6 +1095,7 @@ class XyneAIStreamManager {
           ...(request.disableTools && { disableTools: true }),
           ...(request.agentSlug && { agentSlug: request.agentSlug }),
           ...(request.model && { model: request.model }),
+          ...(request.model && request.modelProvider && { modelProvider: request.modelProvider }),
         },
       },
     };

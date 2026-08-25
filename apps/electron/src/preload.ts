@@ -168,6 +168,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('recording:system-suspend', listener);
   },
 
+  onRecordingStopForTeardown: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:stop-for-teardown', listener);
+    return () => ipcRenderer.removeListener('recording:stop-for-teardown', listener);
+  },
+
   onRecordingResumeRequest: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('recording:resume-requested', listener);

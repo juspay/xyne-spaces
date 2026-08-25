@@ -565,8 +565,10 @@ export class CallController {
       // No pre-flight validation of artifactMessageId: every artifact write is
       // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
       // an id that does not belong to this channel matches zero rows.
+      // Not gated on conversationId — an artifact's call is channel-scoped even
+      // though the artifact message itself may live inside a thread.
       const linkedArtifactMessageId =
-        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
+        typeof artifactMessageId === 'string' ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -628,6 +630,20 @@ export class CallController {
               data: { metadata: restMeta as Prisma.InputJsonValue },
             });
             queueCallVespaFeed(existingCall.id, { source: CallVespaFeedSource.CallControllerInitiateCallClearRemovedByHostExistingRoom });
+          }
+
+          // A channel already running a call is the call this incident should
+          // use — adopt it rather than leaving the artifact card stuck pending.
+          if (linkedArtifactMessageId && existingCall.channelId) {
+            stage = 'existing_call_artifact_link';
+            const linked = await repositories.calls.linkArtifactToActiveCall({
+              callId: existingCall.id,
+              callExternalId: existingCall.externalId,
+              channelId: existingCall.channelId,
+              artifactMessageId: linkedArtifactMessageId,
+              metadata: existingCall.metadata,
+            });
+            logger.info(`[${existingCall.externalId}] artifact_link_on_existing_call | linked=${linked}, correlation_id=${correlationId}`);
           }
 
           // Room exists, generate token to join the existing call

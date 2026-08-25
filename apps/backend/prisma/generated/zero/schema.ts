@@ -1436,6 +1436,7 @@ export const messageAttachmentTable = table("message_attachments")
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: string().optional(),
+    position: number().optional(),
   })
   .primaryKey("id");
 
@@ -1692,6 +1693,7 @@ export const entityAccessTable = table("entity_access")
     userGroupId: string().optional(),
     channelId: string().optional(),
     entityUserAccess: string(),
+    metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
