@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { assertChannelMembership } from '@/utils/channelMembership';
-import { AttachmentEntityType, ChannelRole } from '@xyne/shared';
+import { AttachmentEntityType, AttachmentUploadStatus, ChannelRole } from '@xyne/shared';
 import { deskReportGenerationService, STUCK_PENDING_HOURS } from '@/services/deskReportGenerationService';
 import { storageService } from '@/services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
@@ -10,6 +10,13 @@ import { config } from '@/config/env';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 
 const channelParticipantRepo = new ChannelParticipantRepository();
+
+/** Maps the DB's uppercase enum to the lowercase status shape the frontend expects. */
+function toClientStatus(uploadStatus: string | null): 'pending' | 'completed' | 'failed' {
+  if (uploadStatus === AttachmentUploadStatus.COMPLETED) return 'completed';
+  if (uploadStatus === AttachmentUploadStatus.FAILED) return 'failed';
+  return 'pending';
+}
 
 async function canManageDeskReport(
   channelId: string,
@@ -57,7 +64,7 @@ export class DeskReportPanelController {
             entityType: AttachmentEntityType.DESK_REPORT,
             entityId: channelId,
             isDeleted: false,
-            uploadStatus: 'completed',
+            uploadStatus: AttachmentUploadStatus.COMPLETED,
           },
           orderBy: { createdAt: 'desc' },
         }),
@@ -71,8 +78,8 @@ export class DeskReportPanelController {
       // A 'pending' row older than this is a crashed/dropped run, not still
       // generating — don't show "Generating…" forever.
       const stuckCutoff = new Date(Date.now() - STUCK_PENDING_HOURS * 60 * 60 * 1000);
-      const isStuckPending = newest.uploadStatus === 'pending' && newest.createdAt < stuckCutoff;
-      const generating = newest.uploadStatus === 'pending' && !isStuckPending;
+      const isStuckPending = newest.uploadStatus === AttachmentUploadStatus.PENDING && newest.createdAt < stuckCutoff;
+      const generating = newest.uploadStatus === AttachmentUploadStatus.PENDING && !isStuckPending;
 
       if (!completed) {
         // Never had a completed report — surface the newest row's own state
@@ -81,7 +88,7 @@ export class DeskReportPanelController {
         res.json({
           success: true,
           data: {
-            status: isStuckPending ? 'failed' : (newest.uploadStatus ?? 'completed'),
+            status: isStuckPending ? 'failed' : toClientStatus(newest.uploadStatus),
             url: null,
             generatedAt: (metadata['generatedAt'] as string | undefined) ?? newest.createdAt.toISOString(),
             rangeDays: (metadata['rangeDays'] as number | undefined) ?? 1,
@@ -98,7 +105,7 @@ export class DeskReportPanelController {
       // Only surface an error if the newest attempt failed (or timed out) AND
       // it's not the one already represented by `completed` — i.e. a
       // regeneration attempt failed after this report was generated.
-      const newestFailed = (newest.uploadStatus === 'failed' || isStuckPending) && newest.id !== completed.id;
+      const newestFailed = (newest.uploadStatus === AttachmentUploadStatus.FAILED || isStuckPending) && newest.id !== completed.id;
       const newestMetadata = newestFailed ? ((newest.metadata as Record<string, unknown> | null) ?? {}) : null;
 
       res.json({
@@ -151,7 +158,7 @@ export class DeskReportPanelController {
           entityType: AttachmentEntityType.DESK_REPORT,
           entityId: channelId,
           isDeleted: false,
-          uploadStatus: 'completed',
+          uploadStatus: AttachmentUploadStatus.COMPLETED,
         },
         orderBy: { createdAt: 'desc' },
       });

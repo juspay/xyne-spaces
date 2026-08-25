@@ -5,7 +5,7 @@ import { config } from '@/config/env';
 import { runClawAgent, listS2SClawAgents } from '@/services/clawAgentService';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { storageService } from '@/services/storage';
-import { AttachmentEntityType } from '@xyne/shared';
+import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
 // A run with no callback (crash, dropped webhook) is reaped as failed past this age.
@@ -89,7 +89,7 @@ export class DeskReportGenerationService {
 
     // Refuse a second run while one's in flight. Plain check-then-write.
     const existingPending = await db.messageAttachment.findFirst({
-      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false, uploadStatus: 'pending' },
+      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false, uploadStatus: AttachmentUploadStatus.PENDING },
       orderBy: { createdAt: 'desc' },
     });
     if (existingPending) {
@@ -141,7 +141,7 @@ export class DeskReportGenerationService {
         storageProvider: config.fileStorage.provider,
         conversationId: null,
         workspaceId,
-        uploadStatus: 'failed',
+        uploadStatus: AttachmentUploadStatus.FAILED,
         metadata: { rangeDays, agentSlug, triggeredBy: 'cron', error: dispatchBlockedMessage },
       });
       return { channelId, success: false, error: dispatchBlockedMessage };
@@ -164,7 +164,7 @@ export class DeskReportGenerationService {
       storageProvider: config.fileStorage.provider,
       conversationId: null,
       workspaceId,
-      uploadStatus: 'pending',
+      uploadStatus: AttachmentUploadStatus.PENDING,
       metadata: {
         rangeDays,
         agentSlug: resolvedAgentSlug,
@@ -194,7 +194,7 @@ export class DeskReportGenerationService {
         channelId,
         agentSlug: resolvedAgentSlug,
       });
-      await this.markLatestPending(channelId, 'failed', 'Agent not installed for this workspace');
+      await this.markLatestPending(channelId, AttachmentUploadStatus.FAILED, 'Agent not installed for this workspace');
       return { channelId, success: false, error: 'Agent not installed for this workspace' };
     }
 
@@ -203,9 +203,9 @@ export class DeskReportGenerationService {
   }
 
   /** Flip the most recent pending row for a channel to failed, e.g. on dispatch failure. */
-  private async markLatestPending(channelId: string, status: 'failed', errorMessage?: string): Promise<void> {
+  private async markLatestPending(channelId: string, status: AttachmentUploadStatus.FAILED, errorMessage?: string): Promise<void> {
     const pending = await db.messageAttachment.findFirst({
-      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false, uploadStatus: 'pending' },
+      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false, uploadStatus: AttachmentUploadStatus.PENDING },
       orderBy: { createdAt: 'desc' },
     });
     if (!pending) return;
@@ -228,7 +228,7 @@ export class DeskReportGenerationService {
         entityType: DESK_REPORT_ENTITY_TYPE,
         entityId: channelId,
         isDeleted: false,
-        uploadStatus: 'pending',
+        uploadStatus: AttachmentUploadStatus.PENDING,
         createdAt: { lt: stuckCutoff },
       },
     });
@@ -236,7 +236,7 @@ export class DeskReportGenerationService {
       const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
       await db.messageAttachment.update({
         where: { id: row.id },
-        data: { uploadStatus: 'failed', metadata: { ...metadata, error: 'Generation timed out' } },
+        data: { uploadStatus: AttachmentUploadStatus.FAILED, metadata: { ...metadata, error: 'Generation timed out' } },
       });
     }
   }
@@ -250,10 +250,10 @@ export class DeskReportGenerationService {
       where: {
         entityType: DESK_REPORT_ENTITY_TYPE,
         isDeleted: false,
-        uploadStatus: 'pending',
+        uploadStatus: AttachmentUploadStatus.PENDING,
         createdAt: { lt: stuckCutoff },
       },
-      data: { uploadStatus: 'failed' },
+      data: { uploadStatus: AttachmentUploadStatus.FAILED },
     });
 
     const rows = await db.messageAttachment.findMany({
@@ -265,7 +265,7 @@ export class DeskReportGenerationService {
     // Group by channel so we can always spare each channel's newest completed row.
     const latestCompletedIdByChannel = new Map<string, string>();
     for (const row of rows) {
-      if (row.uploadStatus !== 'completed') continue;
+      if (row.uploadStatus !== AttachmentUploadStatus.COMPLETED) continue;
       if (!latestCompletedIdByChannel.has(row.entityId)) {
         latestCompletedIdByChannel.set(row.entityId, row.id); // rows are newest-first
       }

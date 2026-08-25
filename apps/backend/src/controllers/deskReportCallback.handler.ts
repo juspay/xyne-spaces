@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { uploadFiles } from '@/services/fileUploadService';
-import { AttachmentEntityType } from '@xyne/shared';
+import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 
 const ATTACHMENT_MARKER_PREFIX = '[ATTACHMENT:';
 const ATTACHMENT_HEADER_END = ']\n';
@@ -97,7 +97,7 @@ export async function handleDeskReportCallback(
           entityType: AttachmentEntityType.DESK_REPORT,
           entityId: channelId,
           isDeleted: false,
-          uploadStatus: 'pending',
+          uploadStatus: AttachmentUploadStatus.PENDING,
         },
       }),
     );
@@ -142,7 +142,7 @@ export async function handleDeskReportCallback(
         db.messageAttachment.update({
           where: { id: pending.id },
           data: {
-            uploadStatus: 'failed',
+            uploadStatus: AttachmentUploadStatus.FAILED,
             metadata: { ...metadata, error: errorMessage ?? 'No report produced' },
           },
         }),
@@ -170,7 +170,7 @@ export async function handleDeskReportCallback(
           size: uploaded.fileSize,
           mimetype: uploaded.mimeType,
           url: uploaded.fileUrl,
-          uploadStatus: 'completed',
+          uploadStatus: AttachmentUploadStatus.COMPLETED,
           metadata: { ...metadata, generatedAt: new Date().toISOString() },
         },
       }),
