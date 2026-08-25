@@ -318,12 +318,15 @@ router.post("/regenerate", async (req: Request, res: Response) => {
   const existing = await generatedContentRepository
     .findForBucket(userId, DAILY_BRIEF_KIND, dateBucket)
     .catch(() => null);
-  if (orgId) void recordDailyBriefRegeneration(userId, orgId, dateBucket, existing);
+  const attempt = orgId
+    ? await recordDailyBriefRegeneration(userId, orgId, dateBucket, existing)
+    : 1;
   send("start", { date: dateBucket });
   try {
     const result = await generateDailyBrief(userId, {
       signal: abort.signal,
       trigger: "regenerate",
+      attempt,
       onProgress: (label) => send("progress", { label }),
     });
     if (result) {

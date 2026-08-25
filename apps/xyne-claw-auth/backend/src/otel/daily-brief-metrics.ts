@@ -116,9 +116,10 @@ export function recordDailyBriefGenerated(
   trigger: DailyBriefTrigger,
   status: "ready" | "failed",
   durationMs: number,
+  attempt = 1,
 ): void {
   try {
-    const attributes = { trigger, status };
+    const attributes = { trigger, status, attempt: attemptBucket(attempt) };
     getDailyBriefGeneratedTotal().add(1, attributes);
     getGenerationDuration().record(durationMs, attributes);
   } catch {
@@ -187,6 +188,11 @@ function getRegenerationAttempts(): Counter {
   return _regenerationAttempts;
 }
 
+/** Bounded attempt bucket shared by the attempts counter and the completion counter. */
+function attemptBucket(attempt: number): string {
+  return attempt >= 4 ? "4+" : String(attempt);
+}
+
 /**
  * Count one regeneration request, the user behind it, and — the useful part —
  * which attempt of the day it is and what it is replacing. Best-effort.
@@ -198,11 +204,29 @@ export async function recordDailyBriefRegeneration(
   orgId: string,
   dateBucket: string,
   existing: { status: string; generatedAt: Date | null } | null,
-): Promise<void> {
+): Promise<number> {
   try {
     const redis = redisService.getConnection();
     const dayKey = dayAttemptKey(userId, dateBucket);
     const attempt = await redis.incr(dayKey);
+    void finishRegenerationRecord(userId, orgId, dateBucket, existing, attempt, dayKey);
+    return attempt;
+  } catch {
+    // metrics must never break a brief run
+    return 1;
+  }
+}
+
+async function finishRegenerationRecord(
+  userId: string,
+  orgId: string,
+  dateBucket: string,
+  existing: { status: string; generatedAt: Date | null } | null,
+  attempt: number,
+  dayKey: string,
+): Promise<void> {
+  try {
+    const redis = redisService.getConnection();
     await redis.expire(dayKey, DAY_ATTEMPT_TTL_SECONDS);
 
     const origin: RegenerationOrigin =
@@ -214,10 +238,7 @@ export async function recordDailyBriefRegeneration(
             ? "replacing_scheduled_brief"
             : "first_brief_of_day";
 
-    getRegenerationAttempts().add(1, {
-      attempt: attempt >= 4 ? "4+" : String(attempt),
-      origin,
-    });
+    getRegenerationAttempts().add(1, { attempt: attemptBucket(attempt), origin });
 
     const writes = redis.multi().incr(REGEN_COUNT_KEY).sadd(REGEN_USERS_KEY, userId);
     if (origin === "replacing_scheduled_brief") writes.sadd(DEFAULT_REJECTED_USERS_KEY, userId);
@@ -225,7 +246,9 @@ export async function recordDailyBriefRegeneration(
     // run has attempt >= 2 without being dissatisfied with anything.
     if (origin === "replacing_own_regeneration") writes.sadd(REPEAT_REGEN_USERS_KEY, userId);
     await writes.exec();
-    await recordDailyBriefActivity(userId, orgId, "regenerate", dateBucket);
+    const isRejection =
+      origin === "replacing_scheduled_brief" || origin === "replacing_own_regeneration";
+    await recordDailyBriefActivity(userId, orgId, "regenerate", dateBucket, isRejection);
   } catch {
     // metrics must never break a brief run
   }
@@ -237,19 +260,36 @@ export async function recordDailyBriefRegeneration(
  * and unbounded in lookback — a fixed-window sketch can be neither. Repeat activity
  * on the same day bumps `count` instead of adding a row, so the table stays bounded
  * at one row per user per day per kind however heavy the usage.
+ *
+ * @param isRejection increments `rejectionCount` alongside `count`.
  */
 export async function recordDailyBriefActivity(
   userId: string,
   orgId: string,
   kind: DailyBriefActivityKind,
   dateBucket: string,
+  isRejection = false,
 ): Promise<void> {
   try {
     const now = new Date();
+    const rejection = isRejection ? 1 : 0;
     await prisma.dailyBriefActivity.upsert({
       where: { userId_kind_dateBucket: { userId, kind, dateBucket } },
-      create: { userId, orgId, kind, dateBucket, count: 1, occurredAt: now, lastSeenAt: now },
-      update: { count: { increment: 1 }, lastSeenAt: now },
+      create: {
+        userId,
+        orgId,
+        kind,
+        dateBucket,
+        count: 1,
+        rejectionCount: rejection,
+        occurredAt: now,
+        lastSeenAt: now,
+      },
+      update: {
+        count: { increment: 1 },
+        rejectionCount: { increment: rejection },
+        lastSeenAt: now,
+      },
     });
   } catch {
     // metrics must never break a request
