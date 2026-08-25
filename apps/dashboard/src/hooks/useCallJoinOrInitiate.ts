@@ -8,18 +8,19 @@ import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { usePlatform } from './usePlatform';
 import { isSdlcSurface } from '../config';
 import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
+import type { CallUrlOverrides } from '../utils/callUrlOverrides';
 
 /**
  * Call setup a caller can request up front, applied by roomMachine as the call
- * connects. Every field is optional; omitting one keeps the existing default
- * (platform-derived view mode, user's saved mic/camera join preferences).
+ * connects. Optional; omitting it keeps the existing defaults (the user's saved
+ * mic/camera join preferences).
  */
 interface CallSetupOverrides {
-  viewMode?: 'full' | 'mini';
-  initialMicEnabled?: boolean;
-  initialCameraEnabled?: boolean;
-  initialPresentationMode?: boolean;
-  isUrlDrivenJoin?: boolean;
+  /**
+   * Present when the join was driven by a call URL's query params; carries what
+   * that URL asked for. roomMachine re-checks the CAC flag before acting on it.
+   */
+  callUrlOverrides?: CallUrlOverrides;
 }
 
 interface JoinCallParams extends CallSetupOverrides {
@@ -36,31 +37,6 @@ interface InitiateCallParams extends CallSetupOverrides {
   sdlcLink?: SdlcCallLink;
   onComplete?: () => void;
 }
-
-/**
- * Only forward the media fields the caller actually set — a literal `undefined`
- * and an absent key mean the same thing to roomMachine, but keeping them absent
- * matches how the other optional event fields are spread below.
- */
-const mediaOverrideFields = (
-  overrides: CallSetupOverrides,
-): Pick<
-  CallSetupOverrides,
-  'initialMicEnabled' | 'initialCameraEnabled' | 'initialPresentationMode' | 'isUrlDrivenJoin'
-> => ({
-  ...(overrides.initialMicEnabled !== undefined && {
-    initialMicEnabled: overrides.initialMicEnabled,
-  }),
-  ...(overrides.initialCameraEnabled !== undefined && {
-    initialCameraEnabled: overrides.initialCameraEnabled,
-  }),
-  ...(overrides.initialPresentationMode !== undefined && {
-    initialPresentationMode: overrides.initialPresentationMode,
-  }),
-  ...(overrides.isUrlDrivenJoin !== undefined && {
-    isUrlDrivenJoin: overrides.isUrlDrivenJoin,
-  }),
-});
 
 interface UseCallJoinOrInitiateReturn {
   joinCall: (params: JoinCallParams) => void;
@@ -118,8 +94,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           type: 'JOIN_CALL',
           callId: action.callId,
           zero,
-          viewMode: action.viewMode ?? (isMobile ? 'full' : 'mini'),
-          ...mediaOverrideFields(action),
+          viewMode: isMobile ? 'full' : 'mini',
+          ...(action.callUrlOverrides && { callUrlOverrides: action.callUrlOverrides }),
         });
 
         // Call completion callback after sending join event
@@ -130,8 +106,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           channelId: action.channelId,
           callType: CallType.AUDIO,
           zero,
-          viewMode: action.viewMode ?? (isMobile ? 'full' : 'mini'),
-          ...mediaOverrideFields(action),
+          viewMode: isMobile ? 'full' : 'mini',
+          ...(action.callUrlOverrides && { callUrlOverrides: action.callUrlOverrides }),
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
@@ -169,8 +145,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         type: 'JOIN_CALL',
         callId,
         zero,
-        viewMode: overrides.viewMode ?? (isMobile ? 'full' : 'mini'),
-        ...mediaOverrideFields(overrides),
+        viewMode: isMobile ? 'full' : 'mini',
+        ...(overrides.callUrlOverrides && { callUrlOverrides: overrides.callUrlOverrides }),
       });
       onComplete?.();
       return;
@@ -230,8 +206,8 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         channelId,
         callType: CallType.AUDIO,
         zero,
-        viewMode: overrides.viewMode ?? (isMobile ? 'full' : 'mini'),
-        ...mediaOverrideFields(overrides),
+        viewMode: isMobile ? 'full' : 'mini',
+        ...(overrides.callUrlOverrides && { callUrlOverrides: overrides.callUrlOverrides }),
         ...(targetUserIds && { targetUserIds }),
         ...(callDisplayName && { callDisplayName }),
         ...(conversationId && { conversationId }),

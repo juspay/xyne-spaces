@@ -8,27 +8,15 @@ import { queries } from '../zero/queries';
 import { useCallJoinOrInitiate } from './useCallJoinOrInitiate';
 import { useAuth } from './useAuth';
 import { useCallAutoJoinEnabled } from './callAutoJoinCacConfig';
+import {
+  isAutoJoinRequested,
+  parseCallUrlOverrides,
+  type CallUrlOverrides,
+} from '../utils/callUrlOverrides';
 import { CallOrigin } from '@xyne/shared';
 
 const RETRY_MIN_MS = 3000;
 const RETRY_MAX_MS = 30000;
-
-/**
- * The call URL API's query-parameter names. Exported because this is a public
- * contract — anything constructing these URLs (deep links, an unattended room
- * station's launcher) should reference these rather than re-spelling them, since
- * a typo here fails silently: the param is simply ignored.
- */
-export const CALL_URL_PARAMS = {
-  autoJoin: 'autoJoin',
-  mic: 'mic',
-  camera: 'camera',
-  viewMode: 'viewMode',
-  telepresence: 'telepresence',
-} as const;
-
-/** Value that turns on the flag-style params. */
-const FLAG_ON = '1';
 
 interface AutoJoinCall {
   externalId?: string;
@@ -39,14 +27,6 @@ interface UseCallAutoJoinOptions {
   channelId: string;
   isMember: boolean;
 }
-
-/** `on`/`off` -> boolean; anything else (including absent) -> undefined = "not requested". */
-const parseOnOff = (value: string | null): boolean | undefined =>
-  value === 'on' ? true : value === 'off' ? false : undefined;
-
-/** Anything but the two known layouts -> undefined, leaving the app's own default. */
-const parseViewMode = (value: string | null): 'full' | 'mini' | undefined =>
-  value === 'full' || value === 'mini' ? value : undefined;
 
 /**
  * Call URL API: lets an external system drive a call by navigating to a channel
@@ -60,33 +40,36 @@ const parseViewMode = (value: string | null): 'full' | 'mini' | undefined =>
  *                          isn't one, and keep retrying with backoff if dropped
  *   &mic=on|off            initial mic state, overriding the saved join preference
  *   &camera=on|off         initial camera state, likewise
- *   &viewMode=full|mini    call UI layout (default: platform-derived, mini on desktop)
  *   &telepresence=1        start the call already in presentation (telepresence)
  *                          mode. Subject to its own existing gate — the call view
  *                          honours it only for users the xyne_telepresence_config
  *                          CAC flag already allows, so this param cannot be used
- *                          to reach the feature without that permission.
+ *                          to reach the feature without that permission. This is
+ *                          also how an unattended display fills the screen —
+ *                          PresentationModeOverlay covers the viewport from either
+ *                          call layout, so there is no layout param to set.
  *
  * Deliberately no fullscreen param: the DOM Fullscreen API needs a user gesture,
  * which an unattended display has nobody to provide. Filling the screen is the
  * launcher's job instead — a browser started with `--kiosk`, or a window manager
  * rule — and that hides the browser chrome too, which the DOM API cannot.
  *
- * Everything is gated on the `call_auto_join_config` CAC flag; while that is off
- * these params are inert. No-ops entirely for URLs that don't carry them.
+ * Everything is gated on the `call_auto_join_config` CAC flag, twice: here, which
+ * stops a URL-driven join from starting, and again in roomMachine at the point an
+ * override is applied, so the machine never has to trust its input. Turning the
+ * flag off stops new joins and retries; it does not end a call already in
+ * progress. No-ops entirely for URLs that don't carry these params.
  */
 export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions): void => {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const isFeatureEnabled = useCallAutoJoinEnabled(user?.email);
 
-  const autoJoinRequested = searchParams.get(CALL_URL_PARAMS.autoJoin) === FLAG_ON;
-  const autoJoin = isFeatureEnabled && isMember && autoJoinRequested;
+  const autoJoin = isFeatureEnabled && isMember && isAutoJoinRequested(searchParams);
 
-  const micParam = parseOnOff(searchParams.get(CALL_URL_PARAMS.mic));
-  const cameraParam = parseOnOff(searchParams.get(CALL_URL_PARAMS.camera));
-  const viewMode = parseViewMode(searchParams.get(CALL_URL_PARAMS.viewMode));
-  const presentationMode = searchParams.get(CALL_URL_PARAMS.telepresence) === FLAG_ON;
+  // Serialised so the effect below can depend on the overrides by value —
+  // parseCallUrlOverrides builds a fresh object on every render.
+  const callUrlOverridesKey = JSON.stringify(parseCallUrlOverrides(searchParams));
 
   const [activeCalls] = useCachedQuery(queries.activeCallsInChannel({ channelId }));
   const stateSnapshot = useSelector(roomActor, state => state);
@@ -153,14 +136,10 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
 
     // The same setup is passed on every retry, not just the first join: each
     // attempt is a fresh JOIN_CALL/INITIATE_CALL into a machine whose context was
-    // cleared on disconnect, so the station comes back with the mic, camera and
-    // layout it was asked for rather than drifting to defaults after one blip.
+    // cleared on disconnect, so the station comes back with the mic and camera it
+    // was asked for rather than drifting to defaults after one blip.
     const callSetup = {
-      isUrlDrivenJoin: true,
-      ...(viewMode && { viewMode }),
-      ...(micParam !== undefined && { initialMicEnabled: micParam }),
-      ...(cameraParam !== undefined && { initialCameraEnabled: cameraParam }),
-      ...(presentationMode && { initialPresentationMode: true }),
+      callUrlOverrides: JSON.parse(callUrlOverridesKey) as CallUrlOverrides,
     };
 
     const timer = setTimeout(() => {
@@ -183,9 +162,6 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
     joinCall,
     initiateCall,
     machineState,
-    viewMode,
-    micParam,
-    cameraParam,
-    presentationMode,
+    callUrlOverridesKey,
   ]);
 };

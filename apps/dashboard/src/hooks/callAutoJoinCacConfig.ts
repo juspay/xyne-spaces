@@ -34,6 +34,26 @@ export const DEFAULT_CALL_AUTO_JOIN_CAC_CONFIG: CallAutoJoinCacConfig = {
 };
 
 /**
+ * The gate itself, as a plain function of the config and the user.
+ *
+ * Split out from the hook so the same decision can be made away from React —
+ * roomMachine re-checks it at the point it actually applies the override, rather
+ * than trusting that whoever sent the event had checked (see
+ * utils/callUrlOverrides). One rule, two call sites, no chance of them drifting.
+ */
+export function isCallAutoJoinAllowed(
+  config: CallAutoJoinCacConfig,
+  userEmail: string | null | undefined,
+): boolean {
+  if (!config.enabled) return false;
+  const allowed = config.allowedEmails ?? [];
+  if (allowed.length === 0) return true;
+
+  const normalizedEmail = userEmail?.toLowerCase();
+  return !!normalizedEmail && allowed.some(e => e.toLowerCase() === normalizedEmail);
+}
+
+/**
  * Whether the current user may drive calls via URL params.
  *
  * Note the fallback while CAC is loading or unreachable is `false` (deny), so a
@@ -47,10 +67,5 @@ export function useCallAutoJoinEnabled(userEmail: string | null | undefined): bo
     fallbackConfig: DEFAULT_CALL_AUTO_JOIN_CAC_CONFIG,
   });
 
-  if (!config.enabled) return false;
-  const allowed = config.allowedEmails ?? [];
-  if (allowed.length === 0) return true;
-
-  const normalizedEmail = userEmail?.toLowerCase();
-  return !!normalizedEmail && allowed.some(e => e.toLowerCase() === normalizedEmail);
+  return isCallAutoJoinAllowed(config, userEmail);
 }

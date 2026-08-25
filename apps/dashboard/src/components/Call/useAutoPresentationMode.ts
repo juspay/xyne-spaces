@@ -19,7 +19,10 @@ export function useAutoPresentationMode(
   isAllowed: boolean,
   setPresentationMode: (on: boolean) => void,
 ): void {
-  const requested = useSelector(roomActor, state => state.context.initialPresentationMode);
+  const requested = useSelector(
+    roomActor,
+    state => state.context.callUrlOverrides?.presentation ?? false,
+  );
   const callId = useSelector(roomActor, state => state.context.externalId);
   const appliedForCallRef = useRef<string | null>(null);
 
