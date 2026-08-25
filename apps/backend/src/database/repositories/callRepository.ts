@@ -339,27 +339,6 @@ export class CallRepository {
     return rowsUpdated > 0;
   }
 
-  async addRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
-    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
-      UPDATE "calls"
-      SET "recordingParticipants" =
-        array_append(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
-      WHERE "externalId" = ${externalId}
-        AND NOT (${userId} = ANY(COALESCE("recordingParticipants", ARRAY[]::TEXT[])))
-    `;
-    return rowsUpdated > 0;
-  }
-
-  async removeRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
-    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
-      UPDATE "calls"
-      SET "recordingParticipants" =
-        array_remove(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
-      WHERE "externalId" = ${externalId}
-    `;
-    return rowsUpdated > 0;
-  }
-
   async appendLabels(callId: string, labelIds: string[]): Promise<void> {
     if (labelIds.length === 0) return;
     const lockKey = `call-labels:${callId}`;
