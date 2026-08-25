@@ -8,7 +8,7 @@
  * `downloadAttachmentsForSource` for the validate + GCS upload pipeline.
  */
 
-import { GoogleService } from '@/services/googleService';
+import { GoogleService, getHttpStatus, isRetryableGmailError } from '@/services/googleService';
 import {
   ExternalAttachmentService,
   ExternalAttachment,
@@ -83,10 +83,17 @@ export async function preDownloadGmailAttachments(params: {
     },
   );
 
+  const stillThrottled = results.find(
+    r => r.status === 'rejected' && isRetryableGmailError(r.reason),
+  );
+  if (stillThrottled?.status === 'rejected') {
+    throw stillThrottled.reason;
+  }
+
   const attachments = results.flatMap((r, i) => {
     if (r.status === 'fulfilled') return r.value ? [r.value] : [];
     logger.warn(
-      `[GoogleAttachments] fetch failed for ${parts[i]?.filename}: ${r.reason instanceof Error ? r.reason.message : 'unknown'}`,
+      `[GoogleAttachments] ${parts[i]?.filename} unavailable (status ${getHttpStatus(r.reason) ?? 'unknown'}) — ingesting without it`,
     );
     return [];
   });

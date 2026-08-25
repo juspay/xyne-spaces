@@ -186,7 +186,10 @@ export class GoogleService {
       return response.data.data || null;
     } catch (error) {
       logger.error(`${TAG} Failed to fetch attachment ${attachmentId}`, error);
-      throw new Error(`Failed to fetch Gmail attachment: ${getErrorMessage(error)}`);
+      throw Object.assign(
+        new Error(`Failed to fetch Gmail attachment: ${getErrorMessage(error)}`),
+        { status: getHttpStatus(error), cause: error },
+      );
     }
   }
 
@@ -1201,7 +1204,7 @@ export function getHttpStatus(error: unknown): number | undefined {
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const GMAIL_MAX_ATTEMPTS = 4;
 
-function isRetryableGmailError(error: unknown): boolean {
+export function isRetryableGmailError(error: unknown): boolean {
   const status = getHttpStatus(error);
   if (status !== undefined && RETRYABLE_STATUSES.has(status)) return true;
   // Some Gmail paths report the per-user concurrency cap as 403.
