@@ -91,12 +91,19 @@ class TicketReassignmentQueue {
       // failed jobs (removeOnFail: false). Without this, one run that exhausted its
       // retries - or stalled out past maxStalledCount - would block every later
       // reassignment for the same pair forever, while callers still see success.
-      // Only terminal jobs are cleared: a waiting/active one is left alone so
-      // re-scheduling still collapses onto it instead of duplicating work.
-      const existing = await this.queue.getJob(jobId);
-      if (existing && ((await existing.isFailed()) || (await existing.isCompleted()))) {
-        await existing.remove();
-        logger.warn(`⚠️ [TICKET-REASSIGNMENT] Cleared stale job ${jobId} before re-enqueue`);
+      // Best effort: waiting/active/delayed jobs are left alone so re-scheduling still
+      // collapses onto them, and losing the race to an active job is harmless.
+      try {
+        const existing = await this.queue.getJob(jobId);
+        if (existing && ((await existing.isFailed()) || (await existing.isCompleted()))) {
+          await existing.remove();
+          logger.warn(`⚠️ [TICKET-REASSIGNMENT] Cleared stale job ${jobId} before re-enqueue`);
+        }
+      } catch (error) {
+        logger.warn(
+          `⚠️ [TICKET-REASSIGNMENT] Could not clear existing job ${jobId}; continuing to enqueue:`,
+          error
+        );
       }
 
       await this.queue.add(
