@@ -23,12 +23,12 @@ export class ConnectMemberSyncService {
     // runAsSystem: this sync runs in whatever tenant context triggered the write (often the
     // GUEST's), but it must resolve HOST-workspace channels/users too. Without it, a cross-org
     // add can't resolve the foreign member and the shadow silently never updates.
-    const channel = await runAsSystem(() =>
-      db.channel.findUnique({
+    const channel = await runAsSystem(async () => {
+      return await db.channel.findUnique({
         where: { id: channelId },
         select: { isConnectEnabled: true },
-      }),
-    );
+      });
+    });
     return channel?.isConnectEnabled === true;
   }
 
@@ -43,12 +43,12 @@ export class ConnectMemberSyncService {
    */
   private async resolveHostChannelId(channelId: string): Promise<string | null> {
     if (await this.isConnectHost(channelId)) return channelId;
-    const link = await runAsSystem(() =>
-      db.connectChannel.findFirst({
+    const link = await runAsSystem(async () => {
+      return await db.connectChannel.findFirst({
         where: { guestChannelId: channelId, status: 'ACTIVE' },
         select: { hostChannelId: true },
-      }),
-    );
+      });
+    });
     return link?.hostChannelId ?? null;
   }
 
@@ -60,12 +60,12 @@ export class ConnectMemberSyncService {
    * for a departed cross-org user and they stay tombstoned though re-added as a participant.
    */
   private async resolveUserWorkspace(userId: string): Promise<string | null> {
-    const user = await runAsSystem(() =>
-      db.user.findUnique({
+    const user = await runAsSystem(async () => {
+      return await db.user.findUnique({
         where: { id: userId },
         select: { workspaceId: true },
-      }),
-    );
+      });
+    });
     return user?.workspaceId ?? null;
   }
 
@@ -277,33 +277,33 @@ export class ConnectMemberSyncService {
     // runAsSystem on all reads: a HOST channel's participants/users must resolve even when
     // reconcile runs in the guest's tenant context (else foreign members are silently skipped).
     // 1 query: current participants.
-    const participants = await runAsSystem(() =>
-      db.channelParticipant.findMany({
+    const participants = await runAsSystem(async () => {
+      return await db.channelParticipant.findMany({
         where: { channelId },
         select: { userId: true },
-      }),
-    );
+      });
+    });
     const participantIds = participants.map((p) => p.userId);
     const participantSet = new Set(participantIds);
 
     // 1 query: batch-resolve home workspaces (foreign-org users included, via runAsSystem).
     const users = participantIds.length
-      ? await runAsSystem(() =>
-          db.user.findMany({
+      ? await runAsSystem(async () => {
+          return await db.user.findMany({
             where: { id: { in: participantIds } },
             select: { id: true, workspaceId: true },
-          }),
-        )
+          });
+        })
       : [];
     const wsByUser = new Map(users.map((u) => [u.id, u.workspaceId]));
 
     // 1 query: existing shadow rows for this channel.
-    const existing = await runAsSystem(() =>
-      db.connectChannelMember.findMany({
+    const existing = await runAsSystem(async () => {
+      return await db.connectChannelMember.findMany({
         where: { channelId },
         select: { userId: true, leftAt: true },
-      }),
-    );
+      });
+    });
     const existingIds = new Set(existing.map((m) => m.userId));
 
     const now = new Date();

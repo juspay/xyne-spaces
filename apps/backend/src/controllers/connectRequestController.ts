@@ -59,12 +59,12 @@ export class ConnectRequestController {
       const user = req.user;
       if (!user) { res.status(401).json({ error: 'Unauthorized' }); return; }
       // Must be a participant of the (host) channel in the caller's workspace.
-      const participant = await runAsSystem(() =>
-        db.channelParticipant.findUnique({
+      const participant = await runAsSystem(async () => {
+        return await db.channelParticipant.findUnique({
           where: { channelId_userId: { channelId, userId: user.id } },
           select: { id: true },
-        }),
-      );
+        });
+      });
       if (!participant) { res.status(403).json({ error: 'Not a participant of this channel' }); return; }
       const requests = await connectRequestService.listByEntity(channelId);
       res.status(200).json({ requests: requests.map(toDto) });
@@ -209,9 +209,9 @@ export class ConnectRequestController {
 
   private async assertChannelCreatorOrAdmin(req: Request, channelId: string): Promise<boolean> {
     const user = req.user!;
-    const channel = await runAsSystem(() =>
-      db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true, createdBy: true } }),
-    );
+    const channel = await runAsSystem(async () => {
+      return await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true, createdBy: true } });
+    });
     if (!channel || channel.workspaceId !== user.workspaceId) return false;
     return channel.createdBy === user.id || isAdminOrOwner(user.role, user.orgRole);
   }

@@ -45,12 +45,12 @@ export class ConnectRequestService {
     const email = params.inviteEmail.trim().toLowerCase();
     if (!email) throw new Error('inviteEmail is required');
 
-    const channel = await runAsSystem(() =>
-      db.channel.findUnique({
+    const channel = await runAsSystem(async () => {
+      return await db.channel.findUnique({
         where: { id: params.entityId },
         select: { workspaceId: true, isConnectEnabled: true, name: true },
-      }),
-    );
+      });
+    });
     if (!channel) throw new Error('Channel not found');
     if (channel.workspaceId !== params.inviterWorkspaceId) {
       throw new Error('You can only invite from your own workspace’s channel');
@@ -58,12 +58,12 @@ export class ConnectRequestService {
     if (!channel.isConnectEnabled) {
       throw new Error('Turn on “Connect channel” for this channel before inviting external people');
     }
-    const participant = await runAsSystem(() =>
-      db.channelParticipant.findUnique({
+    const participant = await runAsSystem(async () => {
+      return await db.channelParticipant.findUnique({
         where: { channelId_userId: { channelId: params.entityId, userId: params.inviterUserId } },
         select: { id: true },
-      }),
-    );
+      });
+    });
     if (!participant) throw new Error('Only channel participants can invite external people');
 
     const live = await this.repo.findLiveByEntityAndEmail(params.entityId, email);
@@ -113,25 +113,24 @@ export class ConnectRequestService {
       throw new Error('You cannot join a connect channel as its host workspace');
     }
 
-    const membership = await runAsSystem(() =>
-      db.user.findFirst({
+    const guestMember = await runAsSystem(async () => {
+      return await db.user.findFirst({
         where: {
-          id: params.guestUserId,
+          email: { equals: req.inviteEmail, mode: 'insensitive' },
           workspaceId: params.guestWorkspaceId,
           status: 'ACTIVE',
           leftAt: null,
         },
-        select: { id: true, email: true },
-      }),
-    );
-    if (!membership) {
+        select: { id: true },
+      });
+    });
+    if (!guestMember) {
+      logger.warn(
+        `[guestAccept] membership miss: email=${req.inviteEmail} guestWorkspaceId=${params.guestWorkspaceId}`,
+      );
       throw new Error('You are not an active member of the selected workspace');
     }
-    // Defence-in-depth: the resolved membership's email must be the invited email (the guestUserId is the
-    // caller's own id, but pin it to the invite so a member of the right org can't accept on another's behalf).
-    if (membership.email.toLowerCase() !== req.inviteEmail.toLowerCase()) {
-      throw new Error(`This invitation is for ${req.inviteEmail}`);
-    }
+    const guestUserId = guestMember.id;
 
     // Already-linked org (§10): that org previously connected → org trust exists, skip the guest-admin
     // gate and just add this user as a member, straight to ACTIVE.
@@ -140,11 +139,11 @@ export class ConnectRequestService {
       await this.addGuestMemberToExistingConnect(
         existingLink.hostChannelId,
         existingLink.guestChannelId,
-        params.guestUserId,
+        guestUserId,
       );
       return this.repo.update(req.id, {
         status: CONNECT_REQUEST_STATUS.ACTIVE,
-        guestUserId: params.guestUserId,
+        guestUserId,
         guestWorkspaceId: params.guestWorkspaceId,
         guestEntityConfig: params.guestEntityConfig,
         guestAcceptedAt: new Date(),
@@ -154,7 +153,7 @@ export class ConnectRequestService {
 
     return this.repo.update(req.id, {
       status: CONNECT_REQUEST_STATUS.AWAITING_GUEST_ADMIN,
-      guestUserId: params.guestUserId,
+      guestUserId,
       guestWorkspaceId: params.guestWorkspaceId,
       guestEntityConfig: params.guestEntityConfig,
       guestAcceptedAt: new Date(),
@@ -205,15 +204,15 @@ export class ConnectRequestService {
     if (!req) throw new Error('Invitation not found');
     await this.assertNotExpired(req);
 
-    const [channel, workspace] = await runAsSystem(() =>
-      Promise.all([
+    const [channel, workspace] = await runAsSystem(async () => {
+      return await Promise.all([
         db.channel.findUnique({
           where: { id: req.entityId },
           select: { name: true, visibility: true },
         }),
         db.workspace.findUnique({ where: { id: req.hostWorkspaceId }, select: { name: true } }),
-      ]),
-    );
+      ]);
+    });
     return {
       inviteEmail: req.inviteEmail,
       status: req.status,

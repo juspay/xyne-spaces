@@ -774,6 +774,15 @@ async function createNonParticipantSystemMessages(
     // Combine individual user IDs with group member user IDs and deduplicate
     const allMentionedUserIds = [...new Set([...mentionedUserIds, ...groupMemberIds])];
 
+    const npLinkedAsHost = await tx.run(
+      zql.connect_channel.where('hostChannelId', channelId).where('status', 'ACTIVE').one(),
+    );
+    const npLinkedAsPointer = npLinkedAsHost
+      ? null
+      : await tx.run(zql.connect_channel.where('guestChannelId', channelId).where('status', 'ACTIVE').one());
+    const npIsConnectChannel =
+      channel?.isConnectEnabled === true || Boolean(npLinkedAsHost) || Boolean(npLinkedAsPointer);
+
     // Check which mentioned users are NOT channel participants
     const nonParticipants: Array<{ userId: string; userName: string }> = [];
 
@@ -787,6 +796,11 @@ async function createNonParticipantSystemMessages(
         // User is not a participant - get their name
         const user = await tx.run(zql.users.where('id', userId).one());
         if (user) {
+          // External user on a plain channel → not addable; skip so no "Add them" banner is shown for them.
+          if (!npIsConnectChannel && user.workspaceId !== workspaceId) {
+            logger.info(`⛔ [NON-PARTICIPANT] Skipping external user ${userId} on non-connect channel ${channelId}`);
+            continue;
+          }
           nonParticipants.push({
             userId: user.id,
             userName: user.displayName || user.name,
@@ -4082,6 +4096,22 @@ export function createMutators(
               }
             }
 
+            // Slack-Connect fence (§15): EXTERNAL (cross-workspace) people may ONLY enter a channel through
+            // the connect invite flow — never this @tag "Add them" path. The `channel.addParticipants` mutator
+            // and the SearchUser picker already enforce this; this is the sibling add path (§2/§14) that must
+            // match, else it's a loophole to inject a foreign user into a plain channel. Connect channels are
+            // exempt (they legitimately hold cross-org members, gated by their own flow).
+            const linkedAsHost = await tx.run(
+              zql.connect_channel.where('hostChannelId', channelId).where('status', 'ACTIVE').one(),
+            );
+            const linkedAsPointer = linkedAsHost
+              ? null
+              : await tx.run(
+                  zql.connect_channel.where('guestChannelId', channelId).where('status', 'ACTIVE').one(),
+                );
+            const isConnectChannel =
+              channel.isConnectEnabled === true || Boolean(linkedAsHost) || Boolean(linkedAsPointer);
+
             // Add users to channel (with validation)
             const validUsers = [];
 
@@ -4089,6 +4119,11 @@ export function createMutators(
               // Verify user exists
               const user = await tx.run(zql.users.where('id', userId).one());
               if (!user) continue;
+
+              // Non-connect channel: refuse a foreign-workspace user (the loophole this closes).
+              if (!isConnectChannel && user.workspaceId !== channel.workspaceId) {
+                continue;
+              }
 
               const participantId = uuidv4();
               const channelUserStatusId = uuidv4();
