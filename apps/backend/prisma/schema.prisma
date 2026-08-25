@@ -2714,7 +2714,6 @@ model Call {
   instanceDate     DateTime?   // For recurring instances
   recordingEnabled Boolean     @default(false)
   recordingUrl     String?     // GCS path: recordings/{callId}.mp4
-  recordingParticipants String[] @default([])
   transcript       String?     // Call transcript
   aiSummary        String?     // AI-generated summary
   startedAt        DateTime    @default(now())

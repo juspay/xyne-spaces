@@ -428,8 +428,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
         ...prev,
         title: recordingRow.title || prev.title,
         labels: recordingRow.labels ?? prev.labels,
-        recordingParticipants: recordingRow.recordingParticipants ?? prev.recordingParticipants,
-        shares: recordingRow.shares ?? prev.shares,
         linkedTicketId,
         linkedTicketMessageId:
           typeof rawLinkedTicketMessageId === 'string' ? rawLinkedTicketMessageId : null,

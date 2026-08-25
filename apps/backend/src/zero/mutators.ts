@@ -4568,7 +4568,6 @@ export function createMutators(
             updatedAt: now,
             labels: [],
             markedItems: [],
-            recordingParticipants: [],
             xyneManaged: false,
             metadata: {
               systemMessageId,
