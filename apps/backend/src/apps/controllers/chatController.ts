@@ -373,7 +373,7 @@ export class ChatController {
       if (!bodyResult.success) {
         res.status(400).json({
           error: `Validation error`,
-          code: 'VALIDATION_ERROR',
+          code: 'VALIDATION__ERROR',
           details: bodyResult.error.errors,
         });
         return;
