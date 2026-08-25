@@ -261,6 +261,10 @@ const envSchema = Joi.object({
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
+  ENABLE_DESK_REPORT_SCHEDULER: Joi.boolean().default(true),
+  DESK_REPORT_GENERATION_CRON: Joi.string().default('30 22 * * *'), //4:00 IST daily
+  DESK_REPORT_CLEANUP_CRON: Joi.string().default('30 21 * * *'), //3:00 IST daily
+  DESK_REPORT_RETENTION_DAYS: Joi.number().default(3),
   RECENT_VISITED_LOOKBACK_DAYS: Joi.number().integer().min(1).default(7),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
@@ -922,6 +926,12 @@ export const config = {
     generationCron: envVars.RECAP_GENERATION_CRON,
     cleanupCron: envVars.RECAP_CLEANUP_CRON,
     retentionDays: envVars.RECAP_RETENTION_DAYS,
+  },
+  deskReportScheduler: {
+    enabled: envVars.ENABLE_DESK_REPORT_SCHEDULER,
+    generationCron: envVars.DESK_REPORT_GENERATION_CRON,
+    cleanupCron: envVars.DESK_REPORT_CLEANUP_CRON,
+    retentionDays: envVars.DESK_REPORT_RETENTION_DAYS,
   },
   otel: {
     metricsEnabled: envVars.ENABLE_OTEL_METRICS,

@@ -44,6 +44,7 @@ import {
   BarChart4Icon,
   CalendarDays,
   BarChart3,
+  FileText,
   Circle,
   UserPlus,
   Info as InfoIcon,
@@ -196,6 +197,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
+import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -1159,6 +1161,7 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1426,6 +1429,10 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     setIsMetricsOpen(searchParams.get('metrics') === 'open');
+  }, [searchParams]);
+
+  useEffect(() => {
+    setIsReportOpen(searchParams.get('report') === 'open');
   }, [searchParams]);
 
   useEffect(() => {
@@ -2749,6 +2756,35 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         )}
+                      {isSelectedChannelJoined &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
+                        channelPreference?.deskReportEnabled && (
+                          <Tooltip content='Desk report' side='bottom'>
+                            <button
+                              onClick={() => {
+                                const base = selectedChannelId
+                                  ? `${supportBase}/${selectedChannelId}`
+                                  : supportBase;
+                                if (isReportOpen) {
+                                  void navigate(base, { replace: true });
+                                } else {
+                                  void navigate(`${base}?report=open`);
+                                }
+                              }}
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isReportOpen
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='OpenDeskReport'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <FileText size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -3388,6 +3424,19 @@ const SupportScreen = (): ReactElement => {
                   availableDesks={metricsSelectableDesks}
                   customFieldDefinitions={deskDynamicFields}
                   availableStages={availableStages}
+                />
+              )}
+              {isReportOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                <DeskReportPanel
+                  open
+                  onClose={() => {
+                    const base = selectedChannelId
+                      ? `${supportBase}/${selectedChannelId}`
+                      : supportBase;
+                    void navigate(base, { replace: true });
+                  }}
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
