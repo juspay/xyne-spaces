@@ -18,7 +18,7 @@ import { buildRouter } from './routes';
 const store = new MigrationStore();
 const queues = new MigrationQueues();
 const engine = new SlackMigrationEngine();
-const service = new SlackMigrationService(store, queues);
+const service = new SlackMigrationService(store, queues, engine);
 
 if (config.runSlackMigrationWorkers) {
   // Ensure the migration bucket exists before workers run (idempotent; auto-creates in fake-gcs).

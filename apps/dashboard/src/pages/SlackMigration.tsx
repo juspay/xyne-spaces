@@ -49,6 +49,7 @@ const ADMIN_NOTES = [
   'Stop is graceful (stops at the next conversation) and leaves the job resumable.',
   'A stopped or failed job can be resumed; it never re-fetches or re-ingests what is already done.',
   'Delete is destructive: it removes the job and its collected data. Deleting a completed DM lets that person submit again.',
+  'If a job fails, resume it — or delete it and have the submitter re-submit. Members can do this for their own jobs too.',
 ];
 
 // ── status vocabulary ───────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ type Tone = 'muted' | 'blue' | 'amber' | 'violet' | 'orange' | 'red' | 'green';
 
 const STATUS: Record<MigrationStatus, { label: string; tone: Tone }> = {
   SUBMITTED: { label: 'Queued', tone: 'muted' },
+  QUEUED: { label: 'Queued', tone: 'muted' },
   COLLECTING: { label: 'Collecting', tone: 'blue' },
   AWAITING_APPROVAL: { label: 'Awaiting approval', tone: 'amber' },
   INGESTING: { label: 'Ingesting', tone: 'violet' },
@@ -129,6 +131,8 @@ const activeStage = (j: MigrationJobView): number => {
     case 'SUBMITTED':
     case 'COLLECTING':
       return 0;
+    case 'QUEUED':
+      return j.phase === 'ingest' ? 2 : 0; // queued to (re)run in its current phase
     case 'AWAITING_APPROVAL':
       return j.phase === 'ingest' ? 2 : 1; // approved ⇒ ingest gate
     case 'INGESTING':
@@ -242,7 +246,7 @@ function Stepper({ job }: { job: MigrationJobView }): React.JSX.Element {
 function PhaseProgress({ job }: { job: MigrationJobView }): React.JSX.Element | null {
   const { total, collected, ingested } = job.progress;
   if (total === 0 && job.status === 'SUBMITTED') return null;
-  const ingestPhase = job.phase === 'ingest';
+  const ingestPhase = job.phase === 'ingest' && job.status !== 'AWAITING_APPROVAL';
   const tone = TONE[job.status === 'COMPLETED' ? 'green' : ingestPhase ? 'violet' : 'blue'];
 
   // Slack gives no channel message total, but every message has a ts, so show progress
@@ -408,6 +412,17 @@ function JobCard({
         </div>
       )}
 
+      {job.issues && job.issues.length > 0 && (
+        <div className='mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400'>
+          <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
+          <span className='break-words'>
+            {job.issues.length} conversation{job.issues.length > 1 ? 's' : ''} not fully migrated —{' '}
+            {job.issues[0]?.reason}
+            {job.issues.length > 1 ? ` (+${job.issues.length - 1} more)` : ''}
+          </span>
+        </div>
+      )}
+
       <div className='mt-4 flex items-center justify-between border-t border-border pt-3'>
         <div className='flex items-center gap-4 text-xs text-muted-foreground'>
           <span>
@@ -517,8 +532,9 @@ function GuideRail({
                 ask a workspace admin to add you, then reopen the link.
               </>,
               <>
-                Click <span className='font-medium text-foreground'>Install App</span> and approve
-                the permissions.
+                Click <span className='font-medium text-foreground'>Install</span> or{' '}
+                <span className='font-medium text-foreground'>Re-install</span> to your workspace —
+                you’ll get the token.
               </>,
               <>
                 Copy your <span className='font-medium text-foreground'>User OAuth token</span>{' '}
@@ -544,8 +560,9 @@ function GuideRail({
                 A channel the bot isn’t in is rejected.
               </>,
               <>
-                You must be a <span className='font-medium text-foreground'>member</span> of the
-                channel you’re migrating.
+                You must be a <span className='font-medium text-foreground'>member</span> of{' '}
+                <span className='font-medium text-foreground'>both</span> the Slack channel and the
+                destination Xyne channel.
               </>,
               <>One migration per channel at a time — request again once it completes.</>,
             ]}
@@ -597,10 +614,15 @@ export default function SlackMigration(): React.JSX.Element {
         setIsAdmin(true);
         setAll(adminJobs);
         setIngest(await slackMigrationApi.ingestionStatus());
-      } catch {
-        setIsAdmin(false);
+      } catch (e) {
+        // Only a real 403 means "not an admin"; a transient 5xx/network blip must not hide the panel.
+        if ((e as { response?: { status?: number } })?.response?.status === 403) {
+          setIsAdmin(false);
+          setAll(null);
+        }
       }
       setUnreachable(false); // a successful poll clears the banner
+      setError(null);
       return true;
     } catch (e) {
       const down = isServiceDown(e);
@@ -879,8 +901,12 @@ export default function SlackMigration(): React.JSX.Element {
               {mine.length > 0 && (
                 <section className='space-y-3'>
                   <h2 className='text-sm font-semibold text-foreground'>Your migrations</h2>
+                  <p className='text-xs text-muted-foreground'>
+                    If a migration fails, delete it and submit again. You can resume or delete your
+                    own jobs here — or ask an admin to do it for you.
+                  </p>
                   {mine.map(job => (
-                    <JobCard key={job.id} job={job} />
+                    <JobCard key={job.id} job={job} actions={<OwnerActions job={job} busy={busy} run={run} />} />
                   ))}
                 </section>
               )}
@@ -982,6 +1008,53 @@ function IngestionControl({
   );
 }
 
+// Actions the submitter gets on their OWN jobs: resume a stopped/failed one, or delete it (when not running).
+function OwnerActions({
+  job,
+  busy,
+  run,
+}: {
+  job: MigrationJobView;
+  busy: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<boolean>;
+}): React.JSX.Element {
+  const [pending, setPending] = useState<string | null>(null);
+  const act = (key: string, fn: () => Promise<unknown>): void => {
+    setPending(key);
+    void run(fn).finally(() => setPending(null));
+  };
+  const canResume = job.status === 'STOPPED' || job.status === 'FAILED';
+  const canDelete = job.status !== 'COLLECTING' && job.status !== 'INGESTING';
+  return (
+    <>
+      {canResume && (
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={busy}
+          loading={pending === 'resume'}
+          onClick={() => act('resume', () => slackMigrationApi.resumeMine(job.id))}
+        >
+          <RotateCcw className='size-3.5' />
+          Resume
+        </Button>
+      )}
+      {canDelete && (
+        <Button
+          variant='ghost'
+          size='sm'
+          disabled={busy}
+          loading={pending === 'remove'}
+          onClick={() => act('remove', () => slackMigrationApi.removeMine(job.id))}
+          className='text-destructive hover:text-destructive'
+        >
+          <Trash2 className='size-3.5' />
+        </Button>
+      )}
+    </>
+  );
+}
+
 function AdminActions({
   job,
   busy,
@@ -991,8 +1064,13 @@ function AdminActions({
   busy: boolean;
   run: (fn: () => Promise<unknown>) => Promise<boolean>;
 }): React.JSX.Element {
+  const [pending, setPending] = useState<string | null>(null);
+  const act = (key: string, fn: () => Promise<unknown>): void => {
+    setPending(key);
+    void run(fn).finally(() => setPending(null));
+  };
   const canApprove = job.status === 'AWAITING_APPROVAL' && job.phase === 'collect';
-  const canStop = job.status === 'COLLECTING' || job.status === 'INGESTING';
+  const canStop = job.status === 'COLLECTING' || job.status === 'INGESTING' || job.status === 'QUEUED';
   const canResume = job.status === 'STOPPED' || job.status === 'FAILED';
   return (
     <>
@@ -1000,7 +1078,8 @@ function AdminActions({
         <Button
           size='sm'
           disabled={busy}
-          onClick={() => void run(() => slackMigrationApi.approve(job.id))}
+          loading={pending === 'approve'}
+          onClick={() => act('approve', () => slackMigrationApi.approve(job.id))}
         >
           <Check className='size-3.5' />
           Approve
@@ -1011,7 +1090,8 @@ function AdminActions({
           variant='outline'
           size='sm'
           disabled={busy}
-          onClick={() => void run(() => slackMigrationApi.stop(job.id))}
+          loading={pending === 'stop'}
+          onClick={() => act('stop', () => slackMigrationApi.stop(job.id))}
         >
           <Square className='size-3.5' />
           Stop
@@ -1022,7 +1102,8 @@ function AdminActions({
           variant='outline'
           size='sm'
           disabled={busy}
-          onClick={() => void run(() => slackMigrationApi.resume(job.id))}
+          loading={pending === 'resume'}
+          onClick={() => act('resume', () => slackMigrationApi.resume(job.id))}
         >
           <RotateCcw className='size-3.5' />
           Resume
@@ -1032,7 +1113,8 @@ function AdminActions({
         variant='ghost'
         size='sm'
         disabled={busy}
-        onClick={() => void run(() => slackMigrationApi.remove(job.id))}
+        loading={pending === 'remove'}
+        onClick={() => act('remove', () => slackMigrationApi.remove(job.id))}
         className='text-destructive hover:text-destructive'
       >
         <Trash2 className='size-3.5' />

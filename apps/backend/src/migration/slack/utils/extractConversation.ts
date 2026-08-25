@@ -306,7 +306,7 @@ async function processBatch<T>(
  * @param allowedBots - Array of bot names (case-insensitive) to include (default: [])
  * @param includeBotMessages - When allowedBots is empty, include all (non-ignored) bot messages (default: false)
  */
-function isHumanMessage(
+export function isHumanMessage(
   message: any,
   context: 'channel' | 'thread' = 'channel',
   allowedBots: string[] = [],

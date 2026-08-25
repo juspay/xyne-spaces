@@ -1,7 +1,7 @@
 import { PassThrough } from 'stream';
 import readline from 'readline';
 import fetch from 'node-fetch';
-import { WebClient } from '@slack/web-api';
+import { WebClient, LogLevel } from '@slack/web-api';
 import { ChannelRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -21,6 +21,7 @@ import {
   transformMessage,
   collectRawFiles,
   fetchPinnedMessageTimestamps,
+  isHumanMessage,
   type UserInfoCache,
 } from '@/migration/slack/utils/extractConversation';
 import type { SlackMessage } from '@/migration/slack/utils/extractConversation';
@@ -39,8 +40,33 @@ const REQUEST_TIMEOUT_MS = config.slackMigration.requestTimeoutMs;
 const INGEST_MESSAGE_DELAY_MS = config.slackMigration.ingestMessageDelayMs;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Route the Slack SDK's own diagnostics (esp. rate-limit "A rate limit was exceeded … retry in N seconds")
+// into our logs, so a stalled collection can be attributed to throttling vs. a genuinely hung request.
+const sdkLogger = {
+  debug: () => undefined,
+  info: (...m: unknown[]) => logger.info(`[SlackMigration:sdk] ${m.map(String).join(' ')}`),
+  warn: (...m: unknown[]) => logger.warn(`[SlackMigration:sdk] ${m.map(String).join(' ')}`),
+  error: (...m: unknown[]) => logger.error(`[SlackMigration:sdk] ${m.map(String).join(' ')}`),
+  setLevel: () => undefined,
+  getLevel: () => LogLevel.INFO,
+  setName: () => undefined,
+};
 // Per-request timeout so a hung page aborts (SDK retries) instead of wedging collection.
-const slackClient = (token: string) => new WebClient(token, { timeout: REQUEST_TIMEOUT_MS });
+const slackClient = (token: string) => new WebClient(token, { timeout: REQUEST_TIMEOUT_MS, logger: sdkLogger });
+
+// Time a Slack call and warn (with method + context) when it runs long, so a stall points at the exact culprit.
+async function timed<T>(label: string, ctx: Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    const out = await fn();
+    const ms = Date.now() - start;
+    if (ms >= 5000) logger.warn(`[SlackMigration] slow ${label}`, { ms, ...ctx });
+    return out;
+  } catch (e) {
+    logger.warn(`[SlackMigration] ${label} errored`, { ms: Date.now() - start, ...ctx, error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+}
 
 /** Slack-hosted file we can fetch with the user token; external/tombstoned/deleted have no bytes and stay metadata-only. */
 const isDownloadableSlackFile = (f: any): boolean =>
@@ -174,7 +200,7 @@ export class SlackMigrationEngine {
     return members;
   }
 
-  async collectConversation(token: string, conv: CollectedConversation, gcsPrefix: string, startDate?: string, onProgress?: (p: { messages: number; newestTs: number; oldestTs: number }) => Promise<void>): Promise<number> {
+  async collectConversation(token: string, conv: CollectedConversation, gcsPrefix: string, startDate?: string, onProgress?: (p: { messages: number; newestTs: number; oldestTs: number }) => Promise<void>): Promise<{ messages: number; outcome: 'ok' | 'truncated' | 'skipped'; reason?: string }> {
     const client = slackClient(token);
     const oldest = oldestFromStartDate(startDate);
     const pinned = await fetchPinnedMessageTimestamps(client, conv.id).catch(() => new Set<string>());
@@ -183,13 +209,20 @@ export class SlackMigrationEngine {
       path: paths.conversation(gcsPrefix, conv.id), contentType: 'application/octet-stream',
     });
     let count = 0;
+    let outcome: 'ok' | 'truncated' | 'skipped' = 'ok';
+    let reason: string | undefined;
     // history pages newest → oldest: newestTs fixes after page 1, oldestTs marches toward window start — drives the progress bar.
     let newestTs = 0;
     let oldestTs = Infinity;
     let cursor: string | undefined;
+    let page = 0;
+    logger.info('[SlackMigration] collecting conversation', { convId: conv.id, isMpim: conv.isMpim, members: conv.members.length });
     try {
       do {
-        const r = await client.conversations.history({ channel: conv.id, limit: PAGE, cursor, inclusive: true, oldest });
+        const r = await timed('conversations.history', { convId: conv.id, page: page + 1, cursor: !!cursor }, () =>
+          client.conversations.history({ channel: conv.id, limit: PAGE, cursor, inclusive: true, oldest }));
+        page += 1;
+        logger.info('[SlackMigration] history page', { convId: conv.id, page, messages: (r.messages ?? []).length, running: count });
         for (const m of r.messages ?? []) {
           await this.prefetchFiles(token, m, gcsPrefix);
           if (((m as { reply_count?: number }).reply_count ?? 0) > 0 && (m as { ts?: string }).ts) {
@@ -208,15 +241,24 @@ export class SlackMigrationEngine {
       } while (cursor);
     } catch (err) {
       if (!isSkippableConversationError(err)) throw err;
-      logger.warn('[SlackMigration] skipping inaccessible conversation', {
-        conversationId: conv.id, error: slackErrorCode(err),
-      });
+      const code = slackErrorCode(err);
+      if (code === 'channel_not_found') {
+        outcome = 'skipped';
+        reason = 'Channel not found on Slack (deleted or inaccessible).';
+      } else {
+        // not_in_channel: mid-collection ⇒ truncated (keep what we have); before any page ⇒ skipped.
+        outcome = count > 0 ? 'truncated' : 'skipped';
+        reason = count > 0
+          ? `Lost access after ~${count} messages (bot removed from the channel).`
+          : 'Bot is not in the channel.';
+      }
+      logger.warn('[SlackMigration] conversation not fully collected', { conversationId: conv.id, error: code, outcome });
     } finally {
       stream.end();
     }
     await done;
     await this.writeJson(paths.pins(gcsPrefix, conv.id), [...pinned]);
-    return count;
+    return { messages: count, outcome, reason };
   }
 
   /** Reference dumps so ingestion resolves users/groups/channels offline (no Slack). */
@@ -270,7 +312,8 @@ export class SlackMigrationEngine {
     const replies: unknown[] = [];
     let cursor: string | undefined;
     do {
-      const r = await client.conversations.replies({ channel: channelId, ts, limit: PAGE, cursor });
+      const r = await timed('conversations.replies', { channelId, ts }, () =>
+        client.conversations.replies({ channel: channelId, ts, limit: PAGE, cursor }));
       for (const m of r.messages ?? []) {
         if ((m as { ts?: string }).ts === ts) continue; // conversations.replies includes the parent first
         await this.prefetchFiles(token, m, gcsPrefix);
@@ -288,6 +331,7 @@ export class SlackMigrationEngine {
     const url = file.url_private_download || file.url_private;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FILE_TIMEOUT_MS);
+    const startedAt = Date.now();
     try {
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'Xyne-Spaces-Backend/1.0' },
@@ -300,10 +344,18 @@ export class SlackMigrationEngine {
         });
         return undefined;
       }
-      await this.storage.uploadStreamToPath(encryptStream(res.body as NodeJS.ReadableStream), {
+      const body = res.body as NodeJS.ReadableStream;
+      // node-fetch emits the abort/socket error on the body stream out-of-band; without a listener it becomes an
+      // uncaught exception that can crash the pod. Handle it here so a slow/aborted download is contained, not fatal.
+      body.on('error', (err: unknown) => logger.warn('[SlackMigration] attachment stream aborted — skipping', {
+        id: file.id, error: err instanceof Error ? err.message : String(err),
+      }));
+      await this.storage.uploadStreamToPath(encryptStream(body), {
         path: dest,
         contentType: 'application/octet-stream',
       });
+      const ms = Date.now() - startedAt;
+      if (ms >= 5000) logger.warn('[SlackMigration] slow attachment download', { id: file.id, ms });
       // Full gs://bucket/key URI so ingestion reads the migration bucket, not the default attachment storage.
       return this.storage.buildStorageUri(dest);
     } catch (e) {
@@ -333,7 +385,7 @@ export class SlackMigrationEngine {
     };
   }
 
-  async loadConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference): Promise<number> {
+  async loadConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, onProgress?: () => void): Promise<{ ingested: number; failed: number }> {
     return runAsServiceActor('slack-migration', job.workspaceId, async () => {
       const userRepo = new UserRepository();
       const channelRepo = new ChannelRepository();
@@ -366,13 +418,13 @@ export class SlackMigrationEngine {
       let dmOwnerId: string | undefined;
       const dmOtherIds: string[] = [];
       if (isChannel) {
-        if (!job.channelInput?.xyneChannelId) return 0;
+        if (!job.channelInput?.xyneChannelId) return { ingested: 0, failed: 0 };
       } else {
         dmOwnerId = job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined;
-        if (!dmOwnerId) return 0;
+        if (!dmOwnerId) return { ingested: 0, failed: 0 };
         if (!isSelfDm) {
           for (const m of conv.members) if (m !== job.ownerSlackId) { const id = await resolve(m); if (id) dmOtherIds.push(id); }
-          if (dmOtherIds.length === 0) return 0;
+          if (dmOtherIds.length === 0) return { ingested: 0, failed: 0 };
         }
       }
 
@@ -387,11 +439,14 @@ export class SlackMigrationEngine {
           if (!line.trim()) continue;
           let raw: unknown;
           try { raw = JSON.parse(line); } catch { continue; }
+          // Drop Slack system messages ("X joined the channel", topic changes) and env-ignored bots,
+          // matching the existing /sync flow (isHumanMessage); real bot content is still kept.
+          if (!isHumanMessage(raw, 'channel', [], true)) continue;
           out.push(await transformMessage(raw as never, (raw as { _replies?: never[] })._replies, cache, true, true, true, pinnedTs, job.workspaceId, ''));
         }
         return out;
       });
-      if (messages.length === 0) return 0;
+      if (messages.length === 0) return { ingested: 0, failed: 0 };
 
       // Channel → the requester's chosen Xyne channel. DM → find/create it (only now we know it has messages, so an empty DM never pins to the top).
       const channelId = isChannel
@@ -426,16 +481,17 @@ export class SlackMigrationEngine {
         if (newest) await channelRepo.setLastActivity(channelId, newest);
       }
 
-      await ingestConversationSlack({
+      const ingestResult = await ingestConversationSlack({
         slackMessages: messages,
         externalSourceName: `${isChannel ? 'channelMigration' : 'dmMigration'}-${channelId}`,
         channelId,
         workspaceId: job.workspaceId,
         botToken: 'slack-migration-offline',
         interMessageDelayMs: INGEST_MESSAGE_DELAY_MS,
+        onProgress,
       });
       await channelRepo.recalculateLastActivityFromMessages(channelId);
-      return messages.length;
+      return { ingested: messages.length, failed: ingestResult.errorDetails?.length ?? 0 };
     });
   }
 

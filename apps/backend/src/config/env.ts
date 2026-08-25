@@ -89,6 +89,7 @@ const envSchema = Joi.object({
   MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(1000),      // pause between paged Slack calls during collection
   MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(200000),  // per-attachment download timeout
   MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
+  MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
   MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -631,6 +632,7 @@ export const config = {
     pageDelayMs: envVars.MIGRATION_SLACK_PAGE_DELAY_MS,
     fileTimeoutMs: envVars.MIGRATION_SLACK_FILE_TIMEOUT_MS,
     requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
+    stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
     ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
   },
   gcs: {

@@ -7,6 +7,7 @@ const BASE = API_BASE_URL.replace(/\/api\/?$/, '/migrate/api/migration/slack-mig
 export type MigrationType = 'DM' | 'CHANNEL';
 export type MigrationStatus =
   | 'SUBMITTED'
+  | 'QUEUED'
   | 'COLLECTING'
   | 'AWAITING_APPROVAL'
   | 'INGESTING'
@@ -41,6 +42,7 @@ export interface MigrationJobView {
   updatedAt: number;
   completedAt?: number;
   error?: string;
+  issues?: { conversationId: string; kind: 'skipped' | 'truncated' | 'ingest-error'; reason: string }[];
 }
 
 interface Envelope<T> {
@@ -92,6 +94,14 @@ export const slackMigrationApi = {
 
   remove: async (id: string): Promise<void> => {
     await apiInstance.delete(`${BASE}/migration-jobs/${id}`);
+  },
+
+  // Owner self-service (own jobs only).
+  resumeMine: async (id: string): Promise<MigrationJobView> =>
+    unwrap((await apiInstance.post<Envelope<MigrationJobView>>(`${BASE}/mine/${id}/resume`)).data),
+
+  removeMine: async (id: string): Promise<void> => {
+    await apiInstance.delete(`${BASE}/mine/${id}`);
   },
 
   // Ingestion control, gated by SLACK-MIGRATION-INGEST.

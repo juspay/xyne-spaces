@@ -7,7 +7,7 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { isMigrationEncryptionConfigured } from './migrationCrypto';
 import { config } from '@/config/env';
 import { getWorkspaceIdByTeamId } from '@/migration/slack/slackMigrationBotConfig';
-import { storageService } from '@/services/storage';
+import { SlackMigrationEngine } from './engine';
 import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
 import {
@@ -32,7 +32,11 @@ export class HttpError extends Error {
 const gcsPrefix = (id: string) => `slack-migration/${id}`;
 
 export class SlackMigrationService {
-  constructor(private readonly store: MigrationStore, private readonly queues: MigrationQueues) {}
+  constructor(
+    private readonly store: MigrationStore,
+    private readonly queues: MigrationQueues,
+    private readonly engine: SlackMigrationEngine,
+  ) {}
 
   async submitDm(actor: Actor, tokenInput: string): Promise<MigrationJobView> {
     this.assertEncryptionReady();
@@ -97,18 +101,34 @@ export class SlackMigrationService {
     if (!ch?.is_member) {
       throw new HttpError(422, 'BOT_NOT_IN_CHANNEL', `The Xyne Spaces bot isn't in #${slackChannelName}. In Slack, open the channel and run "/invite @Xyne Spaces", then submit again.`);
     }
-    const submitterSlackId = actor.email
-      ? await slack.users.lookupByEmail({ email: actor.email }).then((r) => (r.user as { id?: string } | undefined)?.id).catch(() => undefined)
-      : undefined;
-    if (submitterSlackId) {
-      const members = await this.channelMemberIds(slack, input.slackChannelId).catch(() => null);
-      if (members && !members.includes(submitterSlackId)) {
-        throw new HttpError(403, 'NOT_A_CHANNEL_MEMBER', `You're not a member of #${slackChannelName}. Join the channel in Slack, then request the migration.`);
-      }
+    // Fail CLOSED: the requester must be a verified member of the Slack channel. If we can't
+    // resolve their Slack id or the member list, reject — never skip the check.
+    if (!actor.email) throw new HttpError(403, 'IDENTITY_UNVERIFIED', 'Cannot verify your Slack identity — sign in again.');
+    let submitterSlackId: string | undefined;
+    try {
+      const r = await slack.users.lookupByEmail({ email: actor.email });
+      submitterSlackId = (r.user as { id?: string } | undefined)?.id;
+    } catch {
+      throw new HttpError(403, 'IDENTITY_UNVERIFIED', 'Could not verify your Slack account (the migration bot may be missing the users:read.email scope). Ask an admin to grant it.');
+    }
+    if (!submitterSlackId) throw new HttpError(403, 'NOT_A_CHANNEL_MEMBER', `No Slack account matches ${actor.email}.`);
+    let members: string[];
+    try {
+      members = await this.channelMemberIds(slack, input.slackChannelId);
+    } catch {
+      throw new HttpError(502, 'MEMBERSHIP_CHECK_FAILED', `Couldn't verify who's in #${slackChannelName} — please try again.`);
+    }
+    if (!members.includes(submitterSlackId)) {
+      throw new HttpError(403, 'NOT_A_CHANNEL_MEMBER', `You're not a member of #${slackChannelName}. Join it in Slack, then request the migration.`);
     }
     const xyneChannel = await new ChannelRepository().findById(input.xyneChannelId);
     if (!xyneChannel || xyneChannel.workspaceId !== actor.workspaceId) {
       throw new HttpError(422, 'CHANNEL_NOT_FOUND', `No Xyne channel found for id ${input.xyneChannelId} in this workspace.`);
+    }
+    // Must be a member of the DESTINATION Xyne channel — not just the workspace — or anyone
+    // could dump a private Slack channel into a channel they don't belong to.
+    if (!(await repositories.channelParticipants.isParticipant(input.xyneChannelId, actor.userId))) {
+      throw new HttpError(403, 'NOT_A_CHANNEL_MEMBER', `You must be a member of the destination Xyne channel "${xyneChannel.name}" to migrate into it.`);
     }
 
     const job = this.build(MigrationType.CHANNEL, actor, actor.workspaceId, auth.team_id as string, {
@@ -134,8 +154,8 @@ export class SlackMigrationService {
     return members;
   }
 
-  async approve(id: string): Promise<MigrationJobView> {
-    const job = await this.mustGet(id);
+  async approve(id: string, actor: Actor): Promise<MigrationJobView> {
+    const job = await this.mustGet(id, actor);
     if (job.status !== MigrationStatus.AWAITING_APPROVAL) {
       throw new HttpError(409, 'INVALID_STATE', `Only a migration awaiting approval can be approved (current: ${job.status})`);
     }
@@ -144,8 +164,12 @@ export class SlackMigrationService {
     return toView(updated);
   }
 
-  async stop(id: string): Promise<MigrationJobView> {
-    const job = await this.mustGet(id);
+  async stop(id: string, actor: Actor): Promise<MigrationJobView> {
+    const job = await this.mustGet(id, actor);
+    if (job.status === MigrationStatus.QUEUED) {
+      await this.queues.removeJob(job.currentQueue, id).catch(() => undefined);
+      return toView(await this.store.update(id, { status: MigrationStatus.STOPPED, stopReason: 'admin' }));
+    }
     if (![MigrationStatus.COLLECTING, MigrationStatus.INGESTING].includes(job.status)) {
       throw new HttpError(409, 'INVALID_STATE', `Only a running migration can be stopped (current: ${job.status})`);
     }
@@ -153,28 +177,36 @@ export class SlackMigrationService {
     return toView(await this.store.update(id, { stopRequested: true, stopReason: 'admin' }));
   }
 
-  async resume(id: string): Promise<MigrationJobView> {
-    const job = await this.mustGet(id);
+  async resume(id: string, actor: Actor, requireOwner = false): Promise<MigrationJobView> {
+    const job = await this.mustGet(id, actor);
+    if (requireOwner) this.assertOwner(job, actor);
     if (![MigrationStatus.STOPPED, MigrationStatus.FAILED].includes(job.status)) {
       throw new HttpError(409, 'INVALID_STATE', `Only a stopped or failed migration can be resumed (current: ${job.status})`);
     }
     // Admin-stopped ⇒ front (resumes next); failed/pod-killed ⇒ end (don't block others). §5.9
     const position = job.status === MigrationStatus.STOPPED ? 'front' : 'end';
-    const updated = await this.store.update(id, { stopRequested: false, stopReason: undefined });
+    const updated = await this.store.update(id, { status: MigrationStatus.QUEUED, stopRequested: false, stopReason: undefined });
     await this.queues.enqueue(job.currentQueue, id, position);
     return toView(updated);
   }
 
-  async remove(id: string): Promise<void> {
-    const job = await this.mustGet(id);
-    if (job.status !== MigrationStatus.COMPLETED) {
-      await this.deleteGcs(job.gcsPrefix); // completed jobs already deleted their data
+  async remove(id: string, actor: Actor, requireOwner = false): Promise<void> {
+    const job = await this.mustGet(id, actor);
+    if (requireOwner) this.assertOwner(job, actor);
+    if ([MigrationStatus.COLLECTING, MigrationStatus.INGESTING].includes(job.status)) {
+      throw new HttpError(409, 'INVALID_STATE', 'Stop the migration before deleting it.');
     }
+    if (job.status !== MigrationStatus.COMPLETED) {
+      await this.engine.deletePrefix(job.gcsPrefix); // completed jobs already deleted their data
+    }
+    await this.queues.removeJob(QueueName.COLLECTION, id).catch(() => undefined);
+    await this.queues.removeJob(QueueName.INGESTION, id).catch(() => undefined);
     await this.store.delete(id);
   }
 
-  async listForAdmin(limit = 50, offset = 0): Promise<MigrationJobView[]> {
-    return (await this.store.list(limit, offset)).map(toView);
+  async listForAdmin(actor: Actor, limit = 500): Promise<MigrationJobView[]> {
+    // Scope to the caller's workspace — slackmig:index is global, so filter after fetch.
+    return (await this.store.list(limit, 0)).filter((j) => j.workspaceId === actor.workspaceId).map(toView);
   }
 
   async getMineList(actor: Actor): Promise<MigrationJobView[]> {
@@ -184,12 +216,18 @@ export class SlackMigrationService {
   // Generic queue controls are COLLECTION-only; ingestion must use the gated
   // start/stop so blanket-admin endpoints can't bypass SLACK-MIGRATION-INGEST.
   pauseQueue(name: QueueName): Promise<void> {
-    if (name === QueueName.INGESTION) throw new HttpError(403, 'FORBIDDEN', 'Use the gated Stop Ingestion control for the ingestion queue.');
+    this.assertControllableQueue(name);
     return this.queues.pause(name);
   }
   resumeQueue(name: QueueName): Promise<void> {
-    if (name === QueueName.INGESTION) throw new HttpError(403, 'FORBIDDEN', 'Use the gated Start Ingestion control for the ingestion queue.');
+    this.assertControllableQueue(name);
     return this.queues.resume(name);
+  }
+  // Only the collection queue is controllable here (ingestion is gated separately). An unknown name
+  // (the route casts `req.params.queue as QueueName` unvalidated) must be a clean 400, not a raw 500.
+  private assertControllableQueue(name: QueueName): void {
+    if (name === QueueName.INGESTION) throw new HttpError(403, 'FORBIDDEN', 'Use the gated Start/Stop Ingestion control for the ingestion queue.');
+    if (name !== QueueName.COLLECTION) throw new HttpError(400, 'VALIDATION_ERROR', `Unknown queue "${name}".`);
   }
 
   // ── Ingestion control (gated by the SLACK-MIGRATION-INGEST resource) ─────────
@@ -199,6 +237,13 @@ export class SlackMigrationService {
   /** True if the user holds the ingestion permission (drives the UI + guards start/stop). */
   async canIngest(userId: string): Promise<boolean> {
     const resource = await repositories.resources.findByName('SLACK-MIGRATION-INGEST');
+    if (!resource) return false;
+    return repositories.resourceAccess.hasAccess(userId, resource.id, AccessType.ADMIN);
+  }
+
+  /** TICKET-MIGRATION admins manage Slack migrations too — this gates the admin panel alongside the workspace role. */
+  async hasMigrationAdminResource(userId: string): Promise<boolean> {
+    const resource = await repositories.resources.findByName('TICKET-MIGRATION');
     if (!resource) return false;
     return repositories.resourceAccess.hasAccess(userId, resource.id, AccessType.ADMIN);
   }
@@ -256,15 +301,17 @@ export class SlackMigrationService {
     return toView(job);
   }
 
-  private async mustGet(id: string): Promise<MigrationJob> {
+  private async mustGet(id: string, actor: Actor): Promise<MigrationJob> {
     const job = await this.store.findById(id);
-    if (!job) throw new HttpError(404, 'NOT_FOUND', 'Migration not found');
+    // 404 (not 403) for another workspace's job — don't leak that the id exists.
+    if (!job || job.workspaceId !== actor.workspaceId) throw new HttpError(404, 'NOT_FOUND', 'Migration not found');
     return job;
   }
 
-  private async deleteGcs(prefix: string): Promise<void> {
-    // storageService is bucket-scoped; confirm the exact prefix-delete method in @xyne/storage.
-    // storageService is bucket-scoped; confirm the exact prefix-delete method in @xyne/storage.
-    await (storageService as unknown as { deleteByPrefix?: (p: string) => Promise<void> }).deleteByPrefix?.(prefix);
+  /** For member (non-admin) actions: the caller must be the person who submitted the job. */
+  private assertOwner(job: MigrationJob, actor: Actor): void {
+    if (job.submittedByUserId !== actor.userId) {
+      throw new HttpError(403, 'FORBIDDEN', 'You can only manage your own migration.');
+    }
   }
 }

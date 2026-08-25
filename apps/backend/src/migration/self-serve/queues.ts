@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { redisService } from '@/services/redisService';
+import { getBaseRedisOptions } from '@/services/redisFactory';
 import { QueueName } from './types';
 
 interface JobRef { migrationId: string; }
@@ -13,7 +13,7 @@ export class MigrationQueues {
       this.queues.set(
         name,
         new Bull<JobRef>(name, {
-          redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+          redis: { ...getBaseRedisOptions('bullmq'), lazyConnect: false },
           defaultJobOptions: { attempts: 1, removeOnComplete: true, removeOnFail: true },
           settings: { lockDuration: 5 * 60_000, stalledInterval: 30_000, maxStalledCount: 1 },
         }),
@@ -21,11 +21,36 @@ export class MigrationQueues {
     }
   }
 
-  enqueue(name: QueueName, migrationId: string, position: 'front' | 'end'): Promise<Bull.Job<JobRef>> {
-    return this.queue(name).add(
+  async enqueue(name: QueueName, migrationId: string, position: 'front' | 'end'): Promise<Bull.Job<JobRef>> {
+    const q = this.queue(name);
+    await this.evict(q, migrationId);
+    return q.add(
       { migrationId },
       { jobId: migrationId, ...(position === 'front' ? { lifo: true } : {}) },
     );
+  }
+
+  async removeJob(name: QueueName, migrationId: string): Promise<void> {
+    await this.evict(this.queue(name), migrationId);
+  }
+
+  async hasJob(name: QueueName, migrationId: string): Promise<boolean> {
+    return (await this.queue(name).getJob(migrationId)) != null;
+  }
+
+  /** Bull's view of a job: 'active' | 'waiting' | 'delayed' | 'completed' | 'failed' | 'stuck', or null if absent. */
+  async jobState(name: QueueName, migrationId: string): Promise<string | null> {
+    const job = await this.queue(name).getJob(migrationId);
+    return job ? job.getState() : null;
+  }
+
+  private async evict(q: Bull.Queue<JobRef>, migrationId: string): Promise<void> {
+    const existing = await q.getJob(migrationId);
+    if (!existing) return;
+    await existing.remove().catch(async () => {
+      await existing.moveToFailed({ message: 'superseded' }, true).catch(() => undefined);
+      await existing.remove().catch(() => undefined);
+    });
   }
 
   process(name: QueueName, handler: (migrationId: string) => Promise<void>): void {

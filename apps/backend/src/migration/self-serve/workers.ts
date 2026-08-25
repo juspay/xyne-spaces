@@ -1,3 +1,4 @@
+import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
@@ -7,6 +8,7 @@ import { MigrationJob, MigrationStatus, MigrationType, QueueName } from './types
 const HEARTBEAT_MS = 15_000;
 const RECONCILE_EVERY_MS = 60_000;
 const RECLAIM_STALE_MS = 90_000; // several missed heartbeats ⇒ the pod that owned the job is gone
+const STALL_LIMIT_MS = config.slackMigration.stallLimitMs; // live heartbeat but no forward progress ⇒ worker wedged
 
 /** Bull processors for the two queues, each with lifecycle + heartbeat + cooperative stop. */
 export class MigrationWorkers {
@@ -26,13 +28,49 @@ export class MigrationWorkers {
     void this.reconcile().catch(() => undefined);
   }
 
-  /** Re-enqueue running jobs whose owning pod died (heartbeat went stale). */
+  /** Recover running jobs that a live worker can no longer make progress on: pod died (stale heartbeat) → re-enqueue;
+   *  or wedged/looping (fresh heartbeat, no progress) → fail resumably. */
   private async reconcile(): Promise<void> {
     const now = Date.now();
     for (const job of await this.store.list(1000, 0)) {
+      // Queued/submitted jobs live in Bull, not here — but recover one whose Bull entry was lost (e.g. a crash
+      // between the store write and enqueue) so it can't sit stranded forever. Only re-enqueue if genuinely absent.
+      if (job.status === MigrationStatus.QUEUED || job.status === MigrationStatus.SUBMITTED) {
+        if (now - job.updatedAt >= RECLAIM_STALE_MS && !(await this.queues.hasJob(job.currentQueue, job.id))) {
+          logger.warn('[SlackMigration] re-enqueuing stranded job (no queue entry)', { id: job.id, status: job.status });
+          await this.queues.enqueue(job.currentQueue, job.id, 'end').catch(() => undefined);
+        }
+        continue;
+      }
       const running = job.status === MigrationStatus.COLLECTING || job.status === MigrationStatus.INGESTING;
       if (!running) continue;
-      if (now - (job.heartbeatAt ?? 0) < RECLAIM_STALE_MS) continue; // a live worker still owns it
+      // Status says running — but is a worker actually processing it? If Bull has it sitting in the wait/delayed
+      // queue (bumped back by a restart/stall, or a resume jumped ahead), the "Collecting/Ingesting" status is
+      // stale. Show it as QUEUED so two jobs never both look like they're running.
+      const bstate = await this.queues.jobState(job.currentQueue, job.id);
+      if (bstate && bstate !== 'active') {
+        await this.store.update(job.id, { status: MigrationStatus.QUEUED }).catch(() => undefined);
+        continue;
+      }
+      if (now - (job.heartbeatAt ?? 0) < RECLAIM_STALE_MS) {
+        // A live worker still owns it — but is it actually progressing? A fresh heartbeat with no forward progress
+        // means the worker is wedged on an unresponsive upstream (e.g. a socket killed by a laptop sleep) or stuck
+        // retrying. We can't preempt the locked Bull job, so surface it as FAILED (resumable) rather than let it
+        // masquerade as "running" forever. Threshold is generous so normal Slack rate-limit backoffs don't trip it.
+        const lastProgress = job.progressAt ?? job.createdAt;
+        if (now - lastProgress >= STALL_LIMIT_MS) {
+          const minutes = Math.round((now - lastProgress) / 60_000);
+          logger.error('[SlackMigration] migration stalled — live heartbeat but no progress; marking failed (resumable)', {
+            id: job.id, status: job.status, stalledForMin: minutes,
+          });
+          await this.store.update(job.id, {
+            status: MigrationStatus.FAILED,
+            error: `Stalled: no progress for ~${minutes} min (worker likely wedged on an unresponsive Slack connection). Resume to retry from the last checkpoint.`,
+          }).catch(() => undefined);
+        }
+        continue;
+      }
+      // Heartbeat is stale ⇒ the owning pod is gone.
       if (job.stopRequested) {
         // Owning pod died before honoring the stop — finalize to STOPPED (resumable) instead of leaving it hung.
         logger.warn('[SlackMigration] finalizing stop for orphaned migration after restart', { id: job.id, status: job.status });
@@ -42,8 +80,8 @@ export class MigrationWorkers {
       logger.warn('[SlackMigration] reclaiming orphaned migration after restart', {
         id: job.id, status: job.status, queue: job.currentQueue,
       });
+      await this.store.update(job.id, { status: MigrationStatus.QUEUED }).catch(() => undefined); // waiting to resume, not running
       await this.queues.enqueue(job.currentQueue, job.id, 'end');
-      await this.store.heartbeat(job.id).catch(() => undefined); // don't re-reclaim before the worker starts
     }
   }
 
@@ -55,10 +93,12 @@ export class MigrationWorkers {
     logger.info('[SlackMigration] collection started', { id: job.id, type: job.type });
 
     await this.engine.collectDirectory(token, job.gcsPrefix);
+    await this.store.markProgress(job.id).catch(() => undefined);
     await this.engine.collectUsergroups(token, job.gcsPrefix);
     await this.engine.collectChannels(token, job.gcsPrefix);
     const conversations = await this.engine.listConversations(token, job.type, job.channelInput);
     await this.engine.writeManifest(job.gcsPrefix, conversations);
+    await this.store.markProgress(job.id).catch(() => undefined);
     await this.store.update(job.id, { checkpoint: { ...job.checkpoint, totalConversations: conversations.length } });
     logger.info('[SlackMigration] collecting conversations', { id: job.id, total: conversations.length });
 
@@ -75,13 +115,23 @@ export class MigrationWorkers {
         return void this.store.update(job.id, { status: MigrationStatus.STOPPED });
       }
       if (done.has(conv.id)) continue;
-      const messages = await this.engine.collectConversation(
+      const result = await this.engine.collectConversation(
         token, conv, job.gcsPrefix, job.channelInput?.startDate,
         isChannel
           ? (p) => this.store.setChannelProgress(job.id, { messages: p.messages, start: windowStart, end: p.newestTs, through: p.oldestTs })
-          : undefined,
+          : () => this.store.markProgress(job.id), // DMs: per-page progress signal so the stall watchdog isn't tripped mid-conversation
       );
-      await this.store.addCollected(job.id, conv.id, isChannel ? 0 : messages); // channel count already live via setChannelProgress
+      if (result.outcome === 'skipped') {
+        // Inaccessible on Slack — don't migrate it. A channel job is a single conversation, so fail
+        // the whole job; a DM job records the skip and keeps going with the rest.
+        if (isChannel) throw new Error(result.reason ?? 'Channel is inaccessible on Slack.');
+        await this.store.addIssue(job.id, { conversationId: conv.id, kind: 'skipped', reason: result.reason ?? 'Inaccessible on Slack.' });
+        continue;
+      }
+      await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); // channel count already live via setChannelProgress
+      if (result.outcome === 'truncated') {
+        await this.store.addIssue(job.id, { conversationId: conv.id, kind: 'truncated', reason: result.reason ?? 'Partial — lost Slack access mid-collection.' });
+      }
     }
 
     // Collection done → approval gate; drop the token immediately (§5.7).
@@ -93,7 +143,14 @@ export class MigrationWorkers {
     // Idempotency: never re-ingest a completed job (its GCS data is already deleted).
     if ([MigrationStatus.SUBMITTED, MigrationStatus.COLLECTING, MigrationStatus.COMPLETED].includes(job.status)) return;
     await this.store.update(job.id, { status: MigrationStatus.INGESTING });
-    const conversations = await this.engine.readManifest(job.gcsPrefix);
+    let conversations;
+    try {
+      conversations = await this.engine.readManifest(job.gcsPrefix);
+    } catch {
+      await this.store.update(job.id, { status: MigrationStatus.COMPLETED, completedAt: Date.now() });
+      logger.warn('[SlackMigration] ingest manifest missing — finalizing as complete', { id: job.id });
+      return;
+    }
     logger.info('[SlackMigration] ingestion started', { id: job.id, total: conversations.length });
     // Build the offline reference once per job so ingestion resolves users/usergroups/channels from the dumps, never Slack.
     const ref = await this.engine.buildOfflineReference(job.gcsPrefix);
@@ -105,13 +162,17 @@ export class MigrationWorkers {
         return void this.store.update(job.id, { status: MigrationStatus.STOPPED });
       }
       if (done.has(conv.id)) continue;
-      await this.engine.loadConversation(job, conv, ref);
-      await this.store.addIngested(job.id, conv.id);
+      const loaded = await this.engine.loadConversation(job, conv, ref, () => void this.store.markProgress(job.id).catch(() => undefined));
+      if (loaded.failed > 0) {
+        await this.store.addIssue(job.id, { conversationId: conv.id, kind: 'ingest-error', reason: `${loaded.failed} message(s) couldn't be migrated (unresolved sender or attachment).` });
+      } else {
+        await this.store.addIngested(job.id, conv.id);
+      }
     }
 
-    await this.engine.announceMigration(job); // opt-in Slack notice; no-op unless enabled
-    await this.engine.deletePrefix(job.gcsPrefix);
     await this.store.update(job.id, { status: MigrationStatus.COMPLETED, completedAt: Date.now() });
+    await this.engine.announceMigration(job).catch((err) => logger.warn('[SlackMigration] announce failed (non-fatal)', { id: job.id, error: err instanceof Error ? err.message : String(err) }));
+    await this.engine.deletePrefix(job.gcsPrefix).catch(() => undefined);
     logger.info('[SlackMigration] ingestion complete', { id: job.id, total: conversations.length });
   }
 
@@ -120,6 +181,7 @@ export class MigrationWorkers {
     const job = await this.store.findById(id);
     if (!job) return;
     logger.info('[SlackMigration] worker picked up job', { id, queue: job.currentQueue, status: job.status });
+    await this.store.markProgress(id).catch(() => undefined); // fresh stall window on pickup — don't inherit a prior attempt's stale progressAt
     const heartbeat = setInterval(() => void this.store.heartbeat(id).catch(() => undefined), HEARTBEAT_MS);
     heartbeat.unref?.();
     try {

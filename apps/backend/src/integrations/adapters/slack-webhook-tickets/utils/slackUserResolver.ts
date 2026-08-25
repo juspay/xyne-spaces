@@ -316,6 +316,15 @@ async function resolveApiUser(
     undefined;
 
   if (!slackUser?.profile?.email) {
+    // Offline migration: an author with no email (deactivated / external / missing scope) still has
+    // a name in the dump — create a best-effort placeholder so the message keeps its sender instead
+    // of being silently dropped. The live path (no offline ref) is unchanged.
+    const offline = slackOfflineReference();
+    if (offline?.createUser) {
+      const name = displayName || `Slack user ${slackUserId}`;
+      const dbUserId = await offline.createUser(`slack-${slackUserId}@migrated.invalid`, name, !!slackUser?.deleted);
+      if (dbUserId) return { dbUserId, displayName: name };
+    }
     return { displayName };
   }
   const userRepo = new UserRepository();

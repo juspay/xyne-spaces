@@ -44,6 +44,7 @@ export interface IngestConversationSlackInput {
   skipChannelMigratedUpdate?: boolean;
   /** Pause (ms) between messages to cap DB/Vespa-queue rate (self-serve migration); 0/undefined = unpaced. */
   interMessageDelayMs?: number;
+  onProgress?: () => void;
 }
 
 export interface IngestConversationSlackResult {
@@ -305,7 +306,7 @@ export const findOrCreateApp = async (
 export async function ingestConversationSlack(
   input: IngestConversationSlackInput
 ): Promise<IngestConversationSlackResult> {
-  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false, interMessageDelayMs = 0 } = input;
+  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false, interMessageDelayMs = 0, onProgress } = input;
 
   logger.info('[IngestSlack] Starting ingestion', {
     externalSourceName,
@@ -363,8 +364,9 @@ export async function ingestConversationSlack(
 
       try {
         const externalAttachments: ExternalAttachment[] = slackFiles
-          // Offline migration (no userToken): only prefetched files are attachable; skip rest to avoid 403 on url_private.
-          .filter((file) => file.prefetchedStoragePath || userToken)
+          // Keep if prefetched (self-serve offline) or it has a url_private to fetch. Gating on
+          // userToken dropped attachments for callers without one; download failures skip downstream.
+          .filter((file) => file.prefetchedStoragePath || file.url_private)
           .map((file) =>
             file.prefetchedStoragePath
               ? { fileName: file.name, mimeType: file.mimetype, size: file.size, storageSourcePath: file.prefetchedStoragePath, storageSourceEncrypted: true }
@@ -524,7 +526,9 @@ export async function ingestConversationSlack(
     };
 
     // Process all messages
+    let ingestProgress = 0;
     for (const slackMessage of slackMessages) {
+      if (++ingestProgress % 200 === 0) onProgress?.();
       try {
         // Skip main message ingestion if onlyReplies is true
         if (!onlyReplies) {

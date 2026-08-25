@@ -5,6 +5,7 @@ export enum MigrationType {
 
 export enum MigrationStatus {
   SUBMITTED = 'SUBMITTED',
+  QUEUED = 'QUEUED',
   COLLECTING = 'COLLECTING',
   AWAITING_APPROVAL = 'AWAITING_APPROVAL',
   INGESTING = 'INGESTING',
@@ -31,6 +32,13 @@ export interface ChannelInput {
   announceInSlack?: boolean;
 }
 
+/** A conversation that couldn't be fully collected — surfaced so a partial migration isn't shown as complete. */
+export interface MigrationIssue {
+  conversationId: string;
+  kind: 'skipped' | 'truncated' | 'ingest-error';
+  reason: string;
+}
+
 export interface MigrationJob {
   id: string;
   type: MigrationType;
@@ -53,11 +61,13 @@ export interface MigrationJob {
   stats: { conversations: number; messages: number };
   stopRequested: boolean;
   stopReason?: 'admin' | 'system';
-  heartbeatAt: number;
+  heartbeatAt: number;          // liveness: bumped by the heartbeat ticker AND every write
+  progressAt?: number;          // forward progress: bumped only when a page/conversation actually advances — drives the stall watchdog
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
   error?: string;
+  issues?: MigrationIssue[]; // conversations that couldn't be fully collected (Slack-side)
 }
 
 /** Public projection — never carries the token. */
@@ -73,6 +83,7 @@ export interface MigrationJobView {
   stats: { conversations: number; messages: number };
   progress: { total: number; collected: number; ingested: number };
   channel?: { slackId: string; xyneId: string; slackName?: string; xyneName?: string; startDate?: string; announceInSlack?: boolean; windowStart?: number; windowEnd?: number; collectedThrough?: number };
+  issues?: MigrationIssue[];
   heartbeatAt: number;
   createdAt: number;
   updatedAt: number;
@@ -111,4 +122,5 @@ export const toView = (j: MigrationJob): MigrationJobView => ({
   updatedAt: j.updatedAt,
   completedAt: j.completedAt,
   error: j.error,
+  issues: j.issues,
 });
