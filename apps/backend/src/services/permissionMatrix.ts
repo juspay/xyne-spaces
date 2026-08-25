@@ -27,6 +27,7 @@ export type ResourceName =
   | 'SUPPORT'
   | 'PRODUCT-INSIGHTS'
   | 'LISTPROJECTS'
+  | 'RELEASEMANAGER'
   | 'CHANNELS'
   | 'CANVASES'
   | 'WORKSPACE'
@@ -95,6 +96,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'PROJECTS', accessType: AccessType.ADMIN },
     { resourceName: 'PRODUCT-INSIGHTS', accessType: AccessType.ADMIN },
     { resourceName: 'LISTPROJECTS', accessType: AccessType.ADMIN },
+    { resourceName: 'RELEASEMANAGER', accessType: AccessType.ADMIN },
     { resourceName: 'CHANNELS', accessType: AccessType.ADMIN },
     { resourceName: 'CANVASES', accessType: AccessType.ADMIN },
     { resourceName: 'WORKSPACE', accessType: AccessType.ADMIN },
@@ -119,6 +121,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'PROJECTS', accessType: AccessType.ADMIN },
     { resourceName: 'PRODUCT-INSIGHTS', accessType: AccessType.ADMIN },
     { resourceName: 'LISTPROJECTS', accessType: AccessType.ADMIN },
+    { resourceName: 'RELEASEMANAGER', accessType: AccessType.ADMIN },
     { resourceName: 'CHANNELS', accessType: AccessType.ADMIN },
     { resourceName: 'CANVASES', accessType: AccessType.ADMIN },
     { resourceName: 'WORKSPACE', accessType: AccessType.ADMIN },

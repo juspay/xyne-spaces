@@ -37,6 +37,9 @@ interface BoardsTableProps {
   // Fired on row click (outside the action buttons). Rows are styled
   // cursor-pointer, so without a handler they look clickable but do nothing.
   onBoardClick?: (board: BoardWithStages) => void;
+  // When set, the release group header shows "Workflow & Fields" (board field
+  // editor) instead of the repo-config edit — repo config lives elsewhere.
+  onWorkflowFields?: (board: BoardWithStages) => void;
 }
 
 type RowKind =
@@ -53,6 +56,7 @@ export const BoardsTable = ({
   applicationBoardIds,
   applicationByBoardId,
   onBoardClick,
+  onWorkflowFields,
 }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
@@ -224,7 +228,9 @@ export const BoardsTable = ({
                     <div className='flex items-center justify-end gap-2'>
                       <Button
                         variant='secondary'
-                        onClick={() => onEdit(mainBoard)}
+                        onClick={() =>
+                          onWorkflowFields ? onWorkflowFields(mainBoard) : onEdit(mainBoard)
+                        }
                         data-testid='edit-board-button'
                         data-track-category='Board'
                         data-track-name='Edit_Board_Table'
@@ -234,7 +240,9 @@ export const BoardsTable = ({
                         })}
                       >
                         <Edit2 size={14} />
-                        {getBoardEditLabel(mainBoard, applicationBoardIds)}
+                        {onWorkflowFields
+                          ? 'Workflow & Fields'
+                          : getBoardEditLabel(mainBoard, applicationBoardIds)}
                       </Button>
                     </div>
                   </td>

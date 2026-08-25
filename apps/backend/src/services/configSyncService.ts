@@ -215,6 +215,25 @@ export class ConfigSyncService {
         logger.info('VESPA resource already exists');
       }
 
+      // Gates the Release Manager tab + endpoints. Admins grant it per-user so
+      // release access is decoupled from workspace admin/owner privilege.
+      const releaseManagerResource = await prisma.resource.findUnique({
+        where: { name: 'RELEASEMANAGER' }
+      });
+
+      if (!releaseManagerResource) {
+        logger.info('Creating RELEASEMANAGER resource');
+        await prisma.resource.create({
+          data: {
+            name: 'RELEASEMANAGER',
+            description: 'Release Manager tab and repository commit-analysis endpoints (/api/commits/analyze/*)'
+          }
+        });
+        logger.info('Successfully created RELEASEMANAGER resource');
+      } else {
+        logger.info('RELEASEMANAGER resource already exists');
+      }
+
       // Log final group distribution (only for this workspace)
       const groups = await prisma.userGroup.findMany({
         where: { workspaceId }

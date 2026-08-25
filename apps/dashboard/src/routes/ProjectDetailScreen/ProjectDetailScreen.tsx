@@ -177,13 +177,6 @@ const ProjectDetailScreen = (): ReactElement => {
     () => new Set(applicationByBoardId.keys()),
     [applicationByBoardId],
   );
-  const nonReleaseBoards = useMemo(
-    () =>
-      (boards ?? []).filter(
-        b => b.boardType !== BoardType.RELEASE && !applicationBoardIds.has(b.id),
-      ),
-    [boards, applicationBoardIds],
-  );
   const boardNamesById = useMemo(
     () => Object.fromEntries((boards ?? []).map(board => [board.id, board.name])),
     [boards],
@@ -220,10 +213,6 @@ const ProjectDetailScreen = (): ReactElement => {
   const openRepositoryConfig = (mainBoardId: string): void => {
     setReleaseBoardFlow({ kind: 'edit-main', mainBoardId });
     setShowReleaseConfigModal(true);
-  };
-  const openRepositoryWorkflow = (mainBoardId: string): void => {
-    const board = boards?.find(b => b.id === mainBoardId);
-    if (board) setEditingBoard(board);
   };
 
   const editingFlowBoardPlan = useMemo<FlowPlan | null>(() => {
@@ -543,11 +532,13 @@ const ProjectDetailScreen = (): ReactElement => {
               {/* Boards Tab Content */}
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
-                  boards={fromReleaseManager ? nonReleaseBoards : boards}
+                  boards={boards}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
-                  {...(fromReleaseManager ? {} : { applicationBoardIds, applicationByBoardId })}
+                  applicationBoardIds={applicationBoardIds}
+                  applicationByBoardId={applicationByBoardId}
+                  {...(fromReleaseManager ? { onWorkflowFields: setEditingBoard } : {})}
                   {...(workspaceId && projectId
                     ? {
                         onBoardClick: (board: BoardWithStages) =>
@@ -562,7 +553,8 @@ const ProjectDetailScreen = (): ReactElement => {
                   <Tabs.Content value='release' className='outline-none'>
                     {repositories.length === 0 ? (
                       <div className='rounded-lg border border-dashed border-border bg-muted/40 px-4 py-10 text-center text-sm text-muted-foreground'>
-                        No repositories yet. Connect a repository to ship releases from this project.
+                        No repositories yet. Connect a repository to ship releases from this
+                        project.
                       </div>
                     ) : (
                       <div className='space-y-2.5'>
@@ -586,13 +578,6 @@ const ProjectDetailScreen = (): ReactElement => {
                             <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
                               {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
                             </span>
-                            <Button
-                              variant='outline'
-                              size='sm'
-                              onClick={() => openRepositoryWorkflow(repo.mainBoardId)}
-                            >
-                              Workflow & Fields
-                            </Button>
                             <Button
                               variant='outline'
                               size='sm'

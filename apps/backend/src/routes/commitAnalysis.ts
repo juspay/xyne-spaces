@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { authMiddleware } from '@/middleware/auth';
+import { authorize } from '@/middleware/authorize';
 import { CommitAnalysisController } from '@/controllers/commitAnalysisController';
 import { testRepoConnection } from '@/services/release/repoInspector';
-import { BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
+import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { FormsRepository } from '@/database/repositories/formsRepository';
@@ -90,7 +90,8 @@ router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<vo
     res.json({ success: result.success, canvasUrl: result.canvasUrl, error: result.error });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error(`[CommitAnalysis] re-run failed for ticket=${ticketId}: ${msg}`);
+    const safeTicketId = String(ticketId).replace(/[\r\n]/g, '');
+    logger.error(`[CommitAnalysis] re-run failed for ticket=${safeTicketId}: ${msg}`);
     res.status(500).json({ error: msg });
   }
 });
@@ -117,12 +118,13 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
     res.json({ repos });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error(`[CommitAnalysis] repos fetch failed for release=${releaseId}: ${msg}`);
+    const safeReleaseId = String(releaseId).replace(/[\r\n]/g, '');
+    logger.error(`[CommitAnalysis] repos fetch failed for release=${safeReleaseId}: ${msg}`);
     res.status(500).json({ error: msg });
   }
 });
 
-router.post('/test-connection', authMiddleware.requireAdminOrOwner, async (req: Request, res: Response): Promise<void> => {
+router.post('/test-connection', authorize('RELEASEMANAGER', AccessType.READ), async (req: Request, res: Response): Promise<void> => {
   const { repoUrl, vcsProvider } = req.body as { repoUrl?: string; vcsProvider?: string };
   if (!repoUrl || !vcsProvider) {
     res.status(400).json({ ok: false, message: 'repoUrl and vcsProvider are required' });
