@@ -1,5 +1,7 @@
 // Maps each trigger event type to the payload key holding its entity id, for stamping
-// WorkflowExecution.entityType/.entityId. WEBHOOK is absent: it has no entity id.
+// WorkflowExecution.entityType/.entityId. Only the types the debug panel can query are
+// listed; WEBHOOK has no entity id at all. Add a type here when the panel learns to ask
+// for it — runs stamped before that point simply won't be correlated.
 const TRIGGER_ENTITY_ID_KEY: Readonly<Record<string, string>> = {
   TICKET_CREATED: 'ticketId',
   TICKET_UPDATED: 'ticketId',
@@ -7,8 +9,6 @@ const TRIGGER_ENTITY_ID_KEY: Readonly<Record<string, string>> = {
   EMAIL_RECEIVED: 'emailId',
   EMAIL_SENT: 'emailId',
   MESSAGE_RECEIVED: 'messageId',
-  CALL_EVENT: 'callId',
-  TAG_GENERATED: 'sourceId',
 };
 
 interface DebugEntity {

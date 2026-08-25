@@ -4,13 +4,13 @@ const DEBUG_STORAGE_KEY = 'xyne-debug-settings';
 
 export interface DebugSettings {
   showSendIndicators: boolean;
-  /** Gate for "Debug automations". `null` (unset) is treated as off. */
-  debugAutomations: boolean | null;
+  /** Gate for the "Debug automations" action on messages, mails, and tickets. */
+  debugAutomations: boolean;
 }
 
 const DEFAULT_DEBUG_SETTINGS: DebugSettings = {
   showSendIndicators: true,
-  debugAutomations: null,
+  debugAutomations: false,
 };
 
 // Module-level store (same pattern as useSearchMode) so every consumer shares
@@ -79,5 +79,5 @@ export const useDebugSettings = () => {
 
 /** Shorthand for entry points that only need the gate, not the full settings object. */
 export function useDebugAutomationsEnabled(): boolean {
-  return useDebugSettings().settings.debugAutomations === true;
+  return useDebugSettings().settings.debugAutomations;
 }

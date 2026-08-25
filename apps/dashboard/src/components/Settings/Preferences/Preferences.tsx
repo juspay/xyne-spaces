@@ -862,7 +862,7 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
             </div>
             <Switch
               id='debug-automations'
-              checked={state.debugSettings.debugAutomations === true}
+              checked={state.debugSettings.debugAutomations}
               onCheckedChange={state.toggleDebugAutomations}
             />
           </div>

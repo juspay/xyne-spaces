@@ -785,29 +785,8 @@ interface DebugRunRow {
   id: string;
   automationId: string;
   automationName: string | null;
-  automationStatus: string | null;
   status: string;
   startedAt: Date;
-  completedAt: Date | null;
-}
-
-function toDebugRunRow(
-  exec: { id: string; workflowId: string; status: string; createdAt: Date; updatedAt: Date },
-  workflow: { workflowName: string | null; status: string } | undefined,
-): DebugRunRow {
-  const inProgress =
-    exec.status === AutomationRunStatus.RUNNING ||
-    exec.status === AutomationRunStatus.SCHEDULED ||
-    exec.status === 'EXTERNAL_WAIT';
-  return {
-    id: exec.id,
-    automationId: exec.workflowId,
-    automationName: workflow?.workflowName ?? null,
-    automationStatus: workflow?.status ?? null,
-    status: exec.status,
-    startedAt: exec.createdAt,
-    completedAt: inProgress ? null : exec.updatedAt,
-  };
 }
 
 router.get('/debug/runs', async (req: Request, res: Response) => {
@@ -837,7 +816,7 @@ router.get('/debug/runs', async (req: Request, res: Response) => {
         entityType: { in: ENTITY_EVENT_TYPES[type] },
         entityId,
       },
-      select: { id: true, workflowId: true, status: true, createdAt: true, updatedAt: true },
+      select: { id: true, workflowId: true, status: true, createdAt: true },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: parseListLimit(req.query['limit']),
     });
@@ -851,11 +830,17 @@ router.get('/debug/runs', async (req: Request, res: Response) => {
         id: { in: [...new Set(executions.map(e => e.workflowId))] },
         workspaceId: auth.workspaceId,
       },
-      select: { id: true, workflowName: true, status: true },
+      select: { id: true, workflowName: true },
     });
-    const workflowById = new Map(workflows.map(w => [w.id, w]));
+    const nameByWorkflowId = new Map(workflows.map(w => [w.id, w.workflowName]));
 
-    const runs = executions.map(exec => toDebugRunRow(exec, workflowById.get(exec.workflowId)));
+    const runs: DebugRunRow[] = executions.map(exec => ({
+      id: exec.id,
+      automationId: exec.workflowId,
+      automationName: nameByWorkflowId.get(exec.workflowId) ?? null,
+      status: exec.status,
+      startedAt: exec.createdAt,
+    }));
     res.json({ success: true, data: { runs }, timestamp: new Date().toISOString() });
   } catch (err) {
     logger.error('[automations] debug/runs failed:', err);

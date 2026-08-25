@@ -510,10 +510,8 @@ export interface DebugEntityRun {
   id: string;
   automationId: string;
   automationName: string | null;
-  automationStatus: string | null;
   status: string;
   startedAt: string;
-  completedAt: string | null;
 }
 
 export function fetchDebugEntityRuns(
