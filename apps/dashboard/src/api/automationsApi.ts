@@ -501,3 +501,29 @@ export function fetchAutomationRun(executionId: string): Promise<RunDetail> {
     ),
   );
 }
+
+// ─── Debug: runs triggered by a message/mail/ticket (steps reuse fetchAutomationRun above) ───
+
+export type DebugEntityType = 'MESSAGE' | 'EMAIL' | 'TICKET';
+
+export interface DebugEntityRun {
+  id: string;
+  automationId: string;
+  automationName: string | null;
+  status: string;
+  startedAt: string;
+}
+
+export function fetchDebugEntityRuns(
+  type: DebugEntityType,
+  id: string,
+  opts: { limit?: number } = {},
+): Promise<{ runs: DebugEntityRun[] }> {
+  const params = new URLSearchParams({ type, id });
+  if (opts.limit !== null && opts.limit !== undefined) params.set('limit', String(opts.limit));
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ runs: DebugEntityRun[] }>>(
+      `/automations/debug/runs?${params.toString()}`,
+    ),
+  );
+}

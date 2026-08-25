@@ -1,6 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { WorkflowEventType } from '@xyne/shared';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
 import { ConditionOperator } from '../types/operators';
@@ -21,6 +22,7 @@ import {
   workflowExecutionToRun,
   workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
+  DESK_AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
   triggerTypeToEventType,
   workflowToAutomation,
@@ -750,6 +752,102 @@ router.get('/claw/agents', async (_req: Request, res: Response) => {
   }
 });
 
+// ─── Debug: entity runs (auth + workspace scoped only) ────────────────────
+// entityType/entityId are stamped at enqueue time (EventRouter.emit), so this is one
+// indexed lookup. Runs enqueued before those columns existed are not correlated and
+// simply don't appear. Registered before `/:automationId/runs`.
+
+type DebugEntityType = 'MESSAGE' | 'EMAIL' | 'TICKET';
+
+const DEBUG_ENTITY_TYPES: ReadonlySet<DebugEntityType> = new Set([
+  'MESSAGE',
+  'EMAIL',
+  'TICKET',
+]);
+
+const ENTITY_EVENT_TYPES: Record<DebugEntityType, WorkflowEventType[]> = {
+  MESSAGE: [WorkflowEventType.MESSAGE_RECEIVED],
+  EMAIL: [WorkflowEventType.EMAIL_RECEIVED, WorkflowEventType.EMAIL_SENT],
+  TICKET: [
+    WorkflowEventType.TICKET_CREATED,
+    WorkflowEventType.TICKET_UPDATED,
+    WorkflowEventType.TICKET_COMMENTED,
+  ],
+};
+
+function parseDebugEntityType(raw: unknown): DebugEntityType | null {
+  return typeof raw === 'string' && DEBUG_ENTITY_TYPES.has(raw as DebugEntityType)
+    ? (raw as DebugEntityType)
+    : null;
+}
+
+interface DebugRunRow {
+  id: string;
+  automationId: string;
+  automationName: string | null;
+  status: string;
+  startedAt: Date;
+}
+
+router.get('/debug/runs', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const type = parseDebugEntityType(req.query['type']);
+    if (!type) {
+      res.status(400).json({ success: false, error: '`type` (MESSAGE|EMAIL|TICKET) is required' });
+      return;
+    }
+    const entityId = typeof req.query['id'] === 'string' ? (req.query['id'] as string) : null;
+    if (!entityId) {
+      res.status(400).json({ success: false, error: '`id` is required' });
+      return;
+    }
+
+    // Both workflow types: EventRouter fires desk auto-label rules alongside general automations.
+    const executions = await db.workflowExecution.findMany({
+      where: {
+        workspaceId: auth.workspaceId,
+        workflowType: { in: [AUTOMATION_WORKFLOW_TYPE, DESK_AUTOMATION_WORKFLOW_TYPE] },
+        entityType: { in: ENTITY_EVENT_TYPES[type] },
+        entityId,
+      },
+      select: { id: true, workflowId: true, status: true, createdAt: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: parseListLimit(req.query['limit']),
+    });
+    if (executions.length === 0) {
+      res.json({ success: true, data: { runs: [] }, timestamp: new Date().toISOString() });
+      return;
+    }
+
+    const workflows = await db.workflow.findMany({
+      where: {
+        id: { in: [...new Set(executions.map(e => e.workflowId))] },
+        workspaceId: auth.workspaceId,
+      },
+      select: { id: true, workflowName: true },
+    });
+    const nameByWorkflowId = new Map(workflows.map(w => [w.id, w.workflowName]));
+
+    const runs: DebugRunRow[] = executions.map(exec => ({
+      id: exec.id,
+      automationId: exec.workflowId,
+      automationName: nameByWorkflowId.get(exec.workflowId) ?? null,
+      status: exec.status,
+      startedAt: exec.createdAt,
+    }));
+    res.json({ success: true, data: { runs }, timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('[automations] debug/runs failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to list debug runs' });
+  }
+});
+
 const RUN_STATUS_FILTER_VALUES: ReadonlySet<string> = new Set(
   Object.values(AutomationRunStatus),
 );
@@ -841,10 +939,11 @@ router.get(
     const { executionId } = req.params;
 
     // Scope by workspaceId so a user cannot read another tenant's run detail.
+    // Both types, matching /debug/runs — else a desk run lists fine but 404s when opened.
     const execution = await db.workflowExecution.findFirst({
       where: {
         id: executionId,
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workflowType: { in: [AUTOMATION_WORKFLOW_TYPE, DESK_AUTOMATION_WORKFLOW_TYPE] },
         workspaceId: auth.workspaceId,
       },
     });

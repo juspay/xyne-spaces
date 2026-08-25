@@ -79,6 +79,8 @@ export class WorkflowRerunService {
         parentWorkflowExecution: { connect: { id: rootExecution.id } },
         sourceStepsId: null,
         createdBy: rootExecution.createdBy,
+        entityType: rootExecution.entityType,
+        entityId: rootExecution.entityId,
       }
     });
 
@@ -140,6 +142,8 @@ export class WorkflowRerunService {
         parentWorkflowExecution: { connect: { id: executionToUse.id } },
         sourceStepsId: null,
         createdBy: executionToUse.createdBy,
+        entityType: executionToUse.entityType,
+        entityId: executionToUse.entityId,
       }
     });
 
