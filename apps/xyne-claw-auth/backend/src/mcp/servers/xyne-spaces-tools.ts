@@ -1347,6 +1347,8 @@ const spacesTickets: ToolDef = {
     "given values. Returns structured ticket details including assignee, tags, stage, channel ID, conversation ID, " +
     "createdAt, and updatedAt, plus (when set) the resolver + close time, last editor, first-response time, ticket type, " +
     "AI triage labels, owning group, due date (ETA), archived status, and related/duplicate tickets — the full lifecycle in one call. " +
+    "Archived tickets are EXCLUDED from every filtered query (matching the Spaces UI); only a direct `ticketId`/`xyneId` " +
+    "lookup can return one. " +
     "Prefer this over spaces-search for ticket queries — it returns richer, more accurate data.",
   inputSchema: {
     type: "object",
@@ -1557,7 +1559,7 @@ const spacesTickets: ToolDef = {
         });
       }
 
-      const baseWhere: Record<string, unknown> = {};
+      const baseWhere: Record<string, unknown> = { isArchived: { equals: false } };
       if (args["status"]) baseWhere["statusV2"] = { equals: args["status"] };
       if (args["priority"]) baseWhere["priority"] = { equals: args["priority"] };
       if (args["boardId"]) baseWhere["boardId"] = { equals: args["boardId"] };
@@ -1701,7 +1703,7 @@ const spacesTickets: ToolDef = {
             const rows = (await interact({
               model: "ticket",
               operation: "findMany",
-              where: { assignments: participantSome(p) },
+              where: { assignments: participantSome(p), isArchived: { equals: false } },
               take: 1000,
             })) as Array<{ id: string }>;
             return new Set(rows.map((r) => r.id));
