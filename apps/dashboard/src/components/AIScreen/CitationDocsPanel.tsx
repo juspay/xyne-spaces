@@ -489,8 +489,8 @@ export function CitationDocsPanel(): ReactElement | null {
             <button
               type='button'
               onClick={openActiveSource}
-              aria-label='Open the full page'
-              title='Open the full page'
+              aria-label='Jump to Source'
+              title='Jump to Source'
               className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
               data-track-category='ask-ai'
               data-track-name='citation-docs-open-source'
