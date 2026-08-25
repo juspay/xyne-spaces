@@ -1,6 +1,5 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { MaximizeTwoArrow } from '@xyne/icons';
 import type { FlowComponent } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { buttonVariants } from '../../ui/Button/Button';
@@ -50,11 +49,10 @@ export const AgentSummaryNode: React.FC<{ node: FlowComponent; children?: React.
   return (
     <CardShell style={node.style}>
       <div className='flex flex-col gap-4 rounded-b-[11px] border-b border-border bg-card/80 px-3 pb-4 pt-3'>
-        <div className='flex h-6 items-center gap-2 pl-1'>
-          <span className='min-w-0 flex-1 truncate text-sm font-medium leading-5 tracking-[-0.5px] text-muted-foreground'>
+        <div className='flex h-6 items-center pl-1'>
+          <span className='min-w-0 truncate text-sm font-medium leading-5 tracking-[-0.5px] text-muted-foreground'>
             {props?.label ?? `${total} ${total === 1 ? 'agent' : 'agents'} available`}
           </span>
-          <MaximizeTwoArrow size={16} className='shrink-0 text-muted-foreground' aria-hidden />
         </div>
 
         {agents.length > 0 && (
