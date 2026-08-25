@@ -65,6 +65,7 @@ import {
   CollectionRole,
   VCSProviderType,
   ReleaseTrackingMode,
+  MessageArtifactStatus,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
@@ -81,6 +82,10 @@ import {
   rethrowCanvasFolderNameConflict,
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
+import {
+  createSdlcLinkSchema,
+  sdlcDiscussionSchema,
+} from '../sdlc.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
   validateFieldBranches,
@@ -98,6 +103,7 @@ import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
+import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
@@ -179,6 +185,10 @@ import {
   updateInitialMessageMdReaction,
 } from './messageMetadata.js';
 import { updateTicketMdFromZero } from '../utils/ticketMetadata.js';
+import {
+  parseSlashCommandArtifactMessage,
+  withSlashCommandArtifactClosed,
+} from '../utils/slashCommandArtifact.js';
 import { stringFromFormValue } from '../tickets/utils.js';
 
 async function getConversationSeenCutoffAt(
@@ -331,29 +341,6 @@ async function hasCanvasVersionEditAccess(
     }
   }
 
-  // Batch query: fetch projectIds for all participant channels 
-  if (channelIds.length > 0) {
-    const channels = await tx.run(
-      zql.channels.where(({ cmp }) => cmp('id', 'IN', channelIds)),
-    );
-    const projectIds = channels
-      .map(ch => ch.projectId)
-      .filter((id): id is string => Boolean(id));
-
-    if (projectIds.length > 0) {
-      const projectGuestAccess = await tx.run(
-        zql.guest_access
-          .where('userId', userId)
-          .where('workspaceId', ctx.workspaceId)
-          .where('accessibleEntityType', GuestEntity.PROJECT)
-          .where(({ cmp }) => cmp('accessibleEntityId', 'IN', projectIds)),
-      );
-      if (projectGuestAccess.length > 0) {
-        return true;
-      }
-    }
-  }
-
   return false;
 }
 
@@ -399,6 +386,16 @@ async function deleteConversationWithParticipants(
     participants.map(participant =>
       tx.mutate.conversation_participants.delete({ id: participant.id })
     )
+  );
+
+  const discussionLinks = await tx.run(
+    zql.sdlc_entity_links
+      .where('targetType', 'CONVERSATION')
+      .where('targetId', conversationId)
+      .where('relationType', 'DISCUSSION'),
+  );
+  await Promise.all(
+    discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
   );
 
   await tx.mutate.conversations.delete({ conversationId });
@@ -1647,11 +1644,21 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
         attachmentIds: z.array(z.string()).optional(),
+        sdlcDiscussion: sdlcDiscussionSchema.optional(),
       }),
       async ({
         tx,
         ctx,
-        args: { channelId, content, type, conversationId, messageId, timestamp, attachmentIds },
+        args: {
+          channelId,
+          content,
+          type,
+          conversationId,
+          messageId,
+          timestamp,
+          attachmentIds,
+          sdlcDiscussion,
+        },
       }) => {
         if (content === '') {
           throw new Error('Message content or files are required to start a conversation');
@@ -1742,6 +1749,21 @@ export const mutators = defineMutators({
             createdAt: now,
           }),
         });
+
+        if (sdlcDiscussion) {
+          await tx.mutate.sdlc_entity_links.insert({
+            id: sdlcDiscussion.linkId,
+            workspaceId: ctx.workspaceId,
+            repoId: sdlcDiscussion.repoId,
+            sourceType: sdlcDiscussion.ownerType,
+            sourceId: sdlcDiscussion.ownerId,
+            targetType: 'CONVERSATION',
+            targetId: conversationId,
+            relationType: 'DISCUSSION',
+            createdBy: ctx.userID,
+            createdAt: now,
+          });
+        }
 
         await tx.mutate.messages.insert({
           messageId,
@@ -2237,6 +2259,28 @@ export const mutators = defineMutators({
           throw new Error("Channel doesn't exists");
         }
 
+        // One open artifact per thread. A thread is a single incident's workspace,
+        // so a second /sev2 inside it would fork the responders across two cards
+        // and two calls. The channel is unrestricted — that is where a genuinely
+        // separate incident belongs.
+        const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+        if (outgoingArtifact) {
+          const openArtifact = await tx.run(
+            zql.message_artifacts
+              // channelId first: it is the only selective index on this table.
+              .where('channelId', conversation.channelId)
+              .where('conversationId', conversationId)
+              .where('command', outgoingArtifact.definition.command)
+              .where('status', MessageArtifactStatus.ACTIVE)
+              .one(),
+          );
+          if (openArtifact) {
+            throw new Error(
+              `A ${outgoingArtifact.definition.badge} is already open in this thread`,
+            );
+          }
+        }
+
         let hasAttachments = false;
         if (attachmentIds !== undefined) {
           // Explicit list from a pending-message-aware caller: transfer only
@@ -2462,6 +2506,57 @@ export const mutators = defineMutators({
             await updateInitialMessageMdField(tx, { messageId }, { content, edited: true });
           }
         }
+      },
+    ),
+    /**
+     * Close a slash-command artifact (e.g. decline a SEV2) without ever running
+     * a call. Only the message's author may do it.
+     *
+     * Two writes, both required: the artifact row moves to a terminal status so
+     * the banner and channel indicator clear for everyone, and the closed marker
+     * is baked into the message's FlowJSON so the card still renders as finished
+     * once the row has left the ACTIVE-only artifact subscription.
+     */
+    closeSlashCommandArtifact: defineMutator(
+      z.object({ messageId: z.string(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { messageId, timestamp } }) => {
+        const message = await resolveMessage(tx, messageId);
+        if (!message) {
+          throw new Error('Message not available');
+        }
+        if (message.senderId !== ctx.userID) {
+          throw new Error('Only the author can close this incident');
+        }
+        if (!parseSlashCommandArtifactMessage(message.content)) {
+          throw new Error('Message is not a slash command artifact');
+        }
+
+        const artifact = await tx.run(
+          zql.message_artifacts.where('messageId', messageId).one(),
+        );
+        if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
+          throw new Error('This incident is already closed');
+        }
+
+        const content = withSlashCommandArtifactClosed(message.content, {
+          closedAt: timestamp,
+          closedBy: ctx.userID,
+        });
+        if (!content) {
+          throw new Error('Message is not a slash command artifact');
+        }
+
+        if (artifact) {
+          await tx.mutate.message_artifacts.update({
+            id: artifact.id,
+            status: MessageArtifactStatus.CANCELLED,
+            updatedAt: timestamp,
+          });
+        }
+        // Deliberately not `edited: true` — closing is a lifecycle transition,
+        // not an edit, and must not raise a "message edited" notification.
+        await tx.mutate.messages.update({ messageId, content });
+        await updateInitialMessageMdField(tx, { messageId }, { content });
       },
     ),
     updateShowInChannel: defineMutator(
@@ -4079,6 +4174,8 @@ export const mutators = defineMutators({
           kanbanPosition?: string | null;
         }
 
+        const currentTicket = await tx.run(zql.tickets.where('id', id).one());
+        if (!currentTicket) throw new Error('Ticket not found');
         const updateData: TicketUpdateData = {
           updatedBy: ctx.userID,
           updatedAt: updatedAt,
@@ -5668,8 +5765,10 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
+        const sdlcArtifact = await tx.run(zql.sdlc_artifacts.where('artifactId', id).one());
+        const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
 
-        if (!canEdit && !(isMoveOperation && isChannelAdmin)) {
+        if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
           throw new Error('You do not have permission to edit this canvas');
         }
         const {
@@ -5734,6 +5833,16 @@ export const mutators = defineMutators({
       if (canvas.createdBy !== ctx.userID) {
         throw new Error('Only the creator can delete the canvas');
       }
+
+      const discussionLinks = await tx.run(
+        zql.sdlc_entity_links
+          .where('sourceType', 'CANVAS')
+          .where('sourceId', id)
+          .where('relationType', 'DISCUSSION'),
+      );
+      await Promise.all(
+        discussionLinks.map(link => tx.mutate.sdlc_entity_links.delete({ id: link.id })),
+      );
 
       await tx.mutate.canvases.delete({ id });
     }),
@@ -6541,29 +6650,28 @@ export const mutators = defineMutators({
           throw new Error('Folder name is required');
         }
 
-        if (!projectId && channelId) {
-          throw new Error('Channel folders must belong to a project');
+        // Channel folders no longer require a project (the channel canvas UI has
+        // no project grouping), but the channel itself must still be valid and
+        // not archived. A projectId is optional; when present it must match.
+        if (channelId) {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error('Channel not found');
+          }
+
+          if (channel.isArchived) {
+            throw new Error('Channel is archived');
+          }
+
+          if (projectId && channel.projectId !== projectId) {
+            throw new Error('Channel does not belong to project');
+          }
         }
 
         if (projectId) {
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
             throw new Error('Project not found');
-          }
-
-          if (channelId) {
-            const channel = await tx.run(zql.channels.where('id', channelId).one());
-            if (!channel) {
-              throw new Error('Channel not found');
-            }
-
-            if (channel.isArchived) {
-              throw new Error('Channel is archived');
-            }
-
-            if (channel.projectId !== projectId) {
-              throw new Error('Channel does not belong to project');
-            }
           }
         }
 
@@ -6573,7 +6681,9 @@ export const mutators = defineMutators({
             .where('name', cleanName)
             .where(({ and, cmp }) =>
               channelId
-                ? and(cmp('projectId', '=', projectId as string), cmp('channelId', '=', channelId))
+                ? projectId
+                  ? and(cmp('projectId', '=', projectId), cmp('channelId', '=', channelId))
+                  : and(cmp('projectId', 'IS', null), cmp('channelId', '=', channelId))
                 : projectId
                   ? and(cmp('projectId', '=', projectId), cmp('channelId', 'IS', null))
                   : and(
@@ -6658,10 +6768,12 @@ export const mutators = defineMutators({
               .where('name', cleanName)
               .where(({ and, cmp }) =>
                 folder.channelId
-                  ? and(
-                    cmp('projectId', '=', folder.projectId as string),
-                    cmp('channelId', '=', folder.channelId),
-                  )
+                  ? folder.projectId
+                    ? and(
+                      cmp('projectId', '=', folder.projectId),
+                      cmp('channelId', '=', folder.channelId),
+                    )
+                    : and(cmp('projectId', 'IS', null), cmp('channelId', '=', folder.channelId))
                   : folder.projectId
                     ? and(cmp('projectId', '=', folder.projectId), cmp('channelId', 'IS', null))
                     : and(
@@ -7249,7 +7361,6 @@ export const mutators = defineMutators({
                   targetId: entityId,
                   linkKind: SurfaceLinkKind.RELATES_TO,
                   createdBy: ctx.userID,
-                  projectId: nudge.projectId,
                   createdAt: timestamp,
                 });
               }
@@ -7730,6 +7841,152 @@ export const mutators = defineMutators({
             baseBranch: newBaseBranch,
           });
         }
+      },
+    ),
+  },
+  sdlc: {
+    createLink: defineMutator(
+      createSdlcLinkSchema.extend({
+        id: z.string(),
+        repoId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        const sourceExists = args.sourceType === 'CANVAS'
+          ? Boolean(await tx.run(
+              zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one(),
+            ))
+          : args.sourceType === 'TICKET'
+            ? Boolean(await tx.run(
+                zql.tickets.where('id', args.sourceId).where('channelId', repo.channelId).one(),
+              ))
+            : args.sourceType === 'CHANNEL'
+              ? args.sourceId === repo.channelId
+              : false;
+        if (!sourceExists) {
+          throw new Error('Relationship source does not belong to this SDLC repository');
+        }
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          repoId: args.repoId,
+          sourceType: args.sourceType,
+          sourceId: args.sourceId,
+          targetType: args.targetType,
+          targetId: args.targetId,
+          relationType: args.relationType,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+        });
+      },
+    ),
+    deleteLink: defineMutator(
+      z.object({ repoId: z.string(), linkId: z.string() }),
+      async ({ tx, ctx, args: { repoId, linkId } }) => {
+        const repo = await tx.run(zql.repos.where('id', repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        const link = await tx.run(
+          zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one(),
+        );
+        if (!link) {
+          throw new Error('SDLC relationship not found');
+        }
+        await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+      },
+    ),
+
+    createTrack: defineMutator(
+      z.object({
+        id: z.string(),
+        repoId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        description: z.string().trim().max(2000).optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        await tx.mutate.sdlc_tracks.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          repoId: args.repoId,
+          name: args.name,
+          description: args.description,
+          status: 'ACTIVE',
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+    updateTrack: defineMutator(
+      z.object({
+        trackId: z.string(),
+        name: z.string().trim().min(1).max(120).optional(),
+        description: z.string().trim().max(2000).nullable().optional(),
+        status: sdlcTrackStatusSchema.optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
+        if (!track) {
+          throw new Error('SDLC track not found');
+        }
+        const repo = await tx.run(zql.repos.where('id', track.repoId).one());
+        if (!repo?.channelId) {
+          throw new Error('SDLC repository not found');
+        }
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', repo.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Repository membership required');
+        }
+        await tx.mutate.sdlc_tracks.update({
+          id: args.trackId,
+          ...(args.name !== undefined ? { name: args.name } : {}),
+          ...(args.description !== undefined ? { description: args.description } : {}),
+          ...(args.status !== undefined ? { status: args.status } : {}),
+          updatedAt: args.timestamp,
+        });
       },
     ),
   },
@@ -8830,7 +9087,6 @@ export const mutators = defineMutators({
           name: trimmed,
           ...(color ? { color } : {}),
           channelId,
-          projectId: channel.projectId,
           workspaceId: channel.workspaceId,
           createdBy: ctx.userID,
           createdAt: timestamp,
@@ -8875,7 +9131,6 @@ export const mutators = defineMutators({
             name: trimmed,
             ...(args.color ? { color: args.color } : {}),
             channelId: args.channelId,
-            projectId: channel.projectId,
             workspaceId: channel.workspaceId,
             createdBy: ctx.userID,
             createdAt: now,
@@ -9345,6 +9600,7 @@ export const mutators = defineMutators({
         autoDraftAgentSlug: z.string().optional().nullable(),
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
+        appWebhookDeliveryEnabled: z.boolean().optional(),
       }),
       async ({
         tx,
@@ -9361,6 +9617,7 @@ export const mutators = defineMutators({
           autoDraftAgentSlug,
           metricsEnabled,
           frtStageNames,
+          appWebhookDeliveryEnabled,
         },
       }) => {
         const existing = await tx.run(
@@ -9379,6 +9636,7 @@ export const mutators = defineMutators({
             ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+            ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
           });
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -9404,6 +9662,7 @@ export const mutators = defineMutators({
             priorityClassificationThreshold: 0.5,
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
+            appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
           });
         }
       },

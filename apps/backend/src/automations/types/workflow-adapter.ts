@@ -24,6 +24,7 @@ export interface AutomationView {
   createdAt: Date;
   updatedAt: Date;
   automationSeriesId: string | null;
+  eventType: WorkflowEventType;
 }
 
 /** What the run-history list renders. No context blobs — see AutomationRunView. */
@@ -92,6 +93,7 @@ export function workflowToAutomation(workflow: Workflow): AutomationView {
     createdAt: workflow.createdAt,
     updatedAt: workflow.updatedAt,
     automationSeriesId: workflow.automationSeriesId ?? null,
+    eventType: triggerTypeToEventType(workflow.eventType),
   };
 }
 

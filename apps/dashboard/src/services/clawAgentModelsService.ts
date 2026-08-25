@@ -19,6 +19,10 @@ export interface ClawAgentModelsResult {
   models: ClawAgentModel[];
   /** The agent's configured model, used to label the "Default" row. */
   defaultModel: string | null;
+  /** Which providerOverride.provider a pick from this list must be sent with:
+   *  "litellm" = the agent's shared credential, "spaces" = the keyless
+   *  platform provider (the workspace's synced allowed-model list). */
+  pinProvider: 'litellm' | 'spaces';
 }
 
 export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgentModelsResult> {
@@ -26,10 +30,15 @@ export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgent
     success: boolean;
     data: ClawAgentModel[];
     defaultModel: string | null;
+    pinProvider?: 'litellm' | 'spaces';
   }>(`/xyne-ai/agents/${encodeURIComponent(agentSlug)}/models`);
   const result = response.data;
   if (!result.success) {
     throw new Error('Failed to fetch models');
   }
-  return { models: result.data ?? [], defaultModel: result.defaultModel ?? null };
+  return {
+    models: result.data ?? [],
+    defaultModel: result.defaultModel ?? null,
+    pinProvider: result.pinProvider ?? 'litellm',
+  };
 }

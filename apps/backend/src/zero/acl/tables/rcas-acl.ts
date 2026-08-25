@@ -42,9 +42,12 @@ export class RcasACL extends BaseACL<'rcas'> {
       throw new MutationACLError('RCA update failed: RCA does not exist', 'rcas');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'rcas');
+    // Gate on the stored row's ticket channel — non-participants of the ticket's
+    // private channel must not tamper with the RCA.
+    await this.verifyTicketAccess(row.ticketId, tx);
     // ticketId can be repointed on update — re-verify access to the new ticket.
     if (args.ticketId !== undefined) {
-      await this.verifyTicketAccess(args.ticketId as string, tx);
+      await this.verifyTicketAccess(args.ticketId, tx);
     }
   }
 
@@ -54,6 +57,7 @@ export class RcasACL extends BaseACL<'rcas'> {
       throw new MutationACLError('RCA delete failed: RCA does not exist', 'rcas');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'rcas');
+    await this.verifyTicketAccess(row.ticketId, tx);
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'rcas'>>, _tx: Transaction<Schema>): Promise<void> {

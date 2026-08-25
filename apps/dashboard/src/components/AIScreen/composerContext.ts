@@ -35,6 +35,17 @@ export interface ComposerContext {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant: boolean;
+  /** Per-run model pin from the composer's model dropdown. The list comes from
+   *  the account's allowed models (the agent's shared LiteLLM key's /v1/models);
+   *  null = "Default" — the model configured in the DB. A pick is the source of
+   *  truth for the run: it overrides the agent's configured model. */
+  model: string | null;
+  /** Which provider the model pin rides — the models endpoint's pinProvider.
+   *  null when no model is picked. */
+  modelProvider: 'litellm' | 'spaces' | null;
+  /** Per-run thinking level from the composer's thinking dropdown.
+   *  null = the agent's configured default. */
+  thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
 }
 
 export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
@@ -50,6 +61,9 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   deepResearchEnabled: false,
   createCanvasEnabled: false,
   instant: false,
+  model: null,
+  modelProvider: null,
+  thinkingLevel: null,
 };
 
 /** True when the snapshot carries any context/toggle worth sending as overrides. */
@@ -66,7 +80,9 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.webSearchEnabled ||
     ctx.deepResearchEnabled ||
     ctx.createCanvasEnabled ||
-    ctx.instant
+    ctx.instant ||
+    ctx.model !== null ||
+    ctx.thinkingLevel !== null
   );
 }
 
@@ -95,6 +111,10 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     deepResearchEnabled: ctx.deepResearchEnabled,
     createCanvasEnabled: ctx.createCanvasEnabled,
     instant: ctx.instant,
+    ...(ctx.model
+      ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) }
+      : {}),
+    ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
     researchContext: ctx.research,
   };
 }

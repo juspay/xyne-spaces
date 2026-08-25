@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus, TagMethod } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -242,6 +242,52 @@ export class CallRepository {
   }
 
   /**
+   * Adopt an already-running call as a slash-command artifact's call.
+   *
+   * "Start call" on an artifact card is channel-scoped, so it lands on the
+   * channel's existing call whenever one is already live instead of creating a
+   * room. Without this the card would sit in its pending state forever and the
+   * artifact would never be completed when that call ends, because completion
+   * is driven off `calls.metadata.artifactMessageId`.
+   *
+   * Refuses to steal a call that already belongs to a different artifact — the
+   * first incident to claim it keeps it.
+   */
+  async linkArtifactToActiveCall(params: {
+    callId: string;
+    callExternalId: string;
+    channelId: string;
+    artifactMessageId: string;
+    metadata: Prisma.JsonValue | null;
+  }): Promise<boolean> {
+    const { callId, callExternalId, channelId, artifactMessageId, metadata } = params;
+    const existingArtifactMessageId = getArtifactMessageId(metadata);
+    if (existingArtifactMessageId) return existingArtifactMessageId === artifactMessageId;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.call.update({
+        where: { id: callId },
+        data: {
+          metadata: {
+            ...((metadata as CallMetadata | null) ?? {}),
+            artifactMessageId,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await setSlashCommandArtifactLifecycle(tx, {
+        messageId: artifactMessageId,
+        channelId,
+        status: MessageArtifactStatus.ACTIVE,
+        callExternalId,
+      });
+    });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
+    return true;
+  }
+
+  /**
    * Mirror a call transition onto the slash-command artifact that started it.
    * A no-op for every other call, which is why it can sit directly on the
    * shared end-of-call paths without altering their behavior.
@@ -291,6 +337,70 @@ export class CallRepository {
       WHERE "externalId" = ${externalId}
     `;
     return rowsUpdated > 0;
+  }
+
+  async addRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "recordingParticipants" =
+        array_append(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
+      WHERE "externalId" = ${externalId}
+        AND NOT (${userId} = ANY(COALESCE("recordingParticipants", ARRAY[]::TEXT[])))
+    `;
+    return rowsUpdated > 0;
+  }
+
+  async removeRecordingParticipant(externalId: string, userId: string): Promise<boolean> {
+    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "recordingParticipants" =
+        array_remove(COALESCE("recordingParticipants", ARRAY[]::TEXT[]), ${userId})
+      WHERE "externalId" = ${externalId}
+    `;
+    return rowsUpdated > 0;
+  }
+
+  async appendLabels(callId: string, labelIds: string[]): Promise<void> {
+    if (labelIds.length === 0) return;
+    const lockKey = `call-labels:${callId}`;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const call = await tx.call.findUnique({ where: { id: callId }, select: { labels: true } });
+      if (!call) return;
+
+      const relevantIds = [...new Set([...call.labels, ...labelIds])];
+      const tags = await tx.tag.findMany({
+        where: { id: { in: relevantIds }, sourceId: callId, isDeleted: false },
+        select: { id: true, tag: true, method: true },
+      });
+      const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+      
+      const resolve = (id: string): { slug: string; method: TagMethod } => {
+        const tag = tagById.get(id);
+        return tag ? { slug: tag.tag, method: tag.method as TagMethod } : { slug: id, method: TagMethod.MANUAL };
+      };
+
+      const bySlug = new Map<string, string>();
+
+      for (const id of call.labels) {
+        const { slug, method } = resolve(id);
+        if (method === TagMethod.LLM) continue;
+        bySlug.set(slug, id);
+      }
+
+      for (const id of labelIds) {
+        const { slug } = resolve(id);
+        if (bySlug.has(slug)) continue;
+        bySlug.set(slug, id);
+      }
+
+      const labels = [...bySlug.values()];
+      await tx.call.update({ where: { id: callId }, data: { labels } });
+    });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
   }
 
   async findById(id: string): Promise<Call | null> {

@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useRef, useStat
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { IngestionStatus } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { CollectionRole, CollectionSummary } from '../../../services/Knowledge/collectionService';
 
@@ -18,6 +19,15 @@ export interface GlobalCollection extends CollectionSummary {
    *  existing /knowledge-base/<projectId>/<channelId>/<collectionId> URL. */
   projectId: string | null;
   isPrivate: boolean;
+  /** Total number of (latest, non-deleted) files across the whole collection. */
+  fileTotal: number;
+  /** How many of those files have finished ingesting (COMPLETED/NONE). */
+  fileIngested: number;
+  /** How many files failed ingestion. */
+  fileFailed: number;
+  /** Collection-level rollup used for the root ingestion spinner: FAILED when
+   *  any file failed, PROCESSING while any file is still ingesting, else null. */
+  ingestionStatus: IngestionStatus | null;
 }
 
 interface GlobalCollectionsContextValue {
@@ -41,8 +51,9 @@ const ChannelCollectionsLoader: React.FC<ChannelCollectionsLoaderProps> = React.
     const { user } = useAuth();
     const enabled = !!user && !!channelId;
     const [zeroCollections, { type: queryType }] = useCachedQuery(
-      queries.scopedCollections({ scopeType: 'CHANNEL', scopeId: channelId }),
-      enabled,
+      queries.scopedCollectionsWithItems({ scopeType: 'CHANNEL', scopeId: channelId }),
+      // Object form required — a bare boolean is ignored by useCachedQuery.
+      { enabled },
     );
 
     const loading = enabled && queryType !== 'complete';
@@ -59,6 +70,33 @@ const ChannelCollectionsLoader: React.FC<ChannelCollectionsLoaderProps> = React.
         const perm = col.permissions?.find(p => p.userId === user.id);
         const isOwner = col.ownerId === user.id;
         const defaultRole = isOwner ? 'OWNER' : col.isPrivate ? 'VIEWER' : 'EDITOR';
+
+        // Roll the collection's files up into an ingestion summary. Normalize
+        // casing the same way IngestStatusV2 does so status never slips through.
+        const items = col.allItems ?? [];
+        const fileTotal = items.length;
+        let fileFailed = 0;
+        let filePending = 0;
+        let fileProcessing = 0;
+        for (const it of items) {
+          const s = (it.ingestionStatus ?? '').toUpperCase() as IngestionStatus;
+          if (s === IngestionStatus.FAILED) fileFailed += 1;
+          else if (s === IngestionStatus.PROCESSING) fileProcessing += 1;
+          else if (s === IngestionStatus.PENDING) filePending += 1;
+        }
+        const fileIngested = fileTotal - fileFailed - fileProcessing - filePending;
+        // Loader colour: blue as soon as any file is actively PROCESSING; grey
+        // while everything in-flight is still only queued (PENDING); red alert
+        // when nothing is in-flight but something failed; nothing when settled.
+        const ingestionStatus =
+          fileProcessing > 0
+            ? IngestionStatus.PROCESSING
+            : filePending > 0
+              ? IngestionStatus.PENDING
+              : fileFailed > 0
+                ? IngestionStatus.FAILED
+                : null;
+
         return {
           id: col.id,
           name: col.name,
@@ -70,6 +108,10 @@ const ChannelCollectionsLoader: React.FC<ChannelCollectionsLoaderProps> = React.
           scopeId: channelId,
           projectId,
           isPrivate: col.isPrivate ?? false,
+          fileTotal,
+          fileIngested,
+          fileFailed,
+          ingestionStatus,
         };
       });
     }, [zeroCollections, user, channelId, projectId]);

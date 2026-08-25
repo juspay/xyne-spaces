@@ -27,7 +27,7 @@ import {
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
-import { aiProvisioningService } from '@/services/aiProvisioningService';
+import { setOnboardingCookie } from '@/utils/onboardingCookie';
 
 /**
  * Result type for single workspace auto-login
@@ -45,6 +45,7 @@ type AutoLoginResult = {
   };
   sessionId: string | null;
   jwtToken: string;
+  isNewUser: boolean;
 };
 
 export class AuthV2Controller {
@@ -139,7 +140,7 @@ export class AuthV2Controller {
     platform: 'web' | 'mobile' | 'electron'
   ): Promise<AutoLoginResult> {
     // Create/get workspace user
-    const { user: workspaceUser } = await this.userService.createOrGetWorkspaceUser({
+    const { user: workspaceUser, isNewUser } = await this.userService.createOrGetWorkspaceUser({
       providerUserId: googleUserData.googleId,
       email: googleUserData.email,
       name: googleUserData.name,
@@ -188,7 +189,7 @@ export class AuthV2Controller {
       memberId: workspaceUser.orgMemberId,
     });
 
-    return { workspaceUser, sessionId, jwtToken };
+    return { workspaceUser, sessionId, jwtToken, isNewUser };
   }
 
   /**
@@ -600,7 +601,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -627,6 +628,11 @@ export class AuthV2Controller {
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
           maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'lax' as const,
         });
 
         // Legacy cookie for backward compatibility with older dashboards
@@ -955,7 +961,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -980,6 +986,11 @@ export class AuthV2Controller {
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
           maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'strict' as const,
         });
 
         res.cookie('user_session_id', sessionId, {
@@ -1238,7 +1249,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { workspaceUser, sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { workspaceUser, sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -1263,6 +1274,11 @@ export class AuthV2Controller {
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
           maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction || isMobileNative,
+          sameSite: (isMobileNative ? 'none' : 'lax') as 'none' | 'lax',
         });
 
         if (sessionId) {
@@ -1497,18 +1513,6 @@ export class AuthV2Controller {
         authProvider: provider,
       });
 
-      if (isNewUser) {
-        try {
-          await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
-        } catch (error) {
-          logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
-            userId: workspaceUser.id,
-            workspaceId,
-            error,
-          });
-        }
-      }
-
       // Check if user is inactive or has left the workspace
       if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
         res.status(403).json({
@@ -1595,15 +1599,11 @@ export class AuthV2Controller {
         });
       }
 
-      // Set is_new_user cookie for new users (readable by frontend)
+      setOnboardingCookie(res, isNewUser, {
+        secure: isProduction,
+        sameSite: 'strict' as const,
+      });
       if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: isProduction,
-          sameSite: 'strict' as const,
-          path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-        });
         logger.info(`[LOGIN-WORKSPACE] Set is_new_user cookie for new user: ${workspaceUser.email}`);
       }
 
@@ -1690,7 +1690,7 @@ export class AuthV2Controller {
         picture: oauthUserData.picture,
       };
 
-      const { organization, workspace, workspaceUser } = await this.userService.createOrganizationWithUser(
+      const { organization, workspace, workspaceUser, isNewUser } = await this.userService.createOrganizationWithUser(
         userData,
         orgName,
         workspaceName,
@@ -1782,13 +1782,10 @@ export class AuthV2Controller {
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       });
 
-      // Set is_new_user cookie for new users (readable by frontend)
-      res.cookie('is_new_user', 'true', {
-        httpOnly: false,
+      setOnboardingCookie(res, isNewUser, {
         secure: isProduction,
         sameSite: 'strict' as const,
-        path: '/',
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       // Clear pending auth cookie
@@ -1818,7 +1815,7 @@ export class AuthV2Controller {
           role: workspaceUser.role,
           workspaceId: workspaceUser.workspaceId
         },
-        isNewUser: true,
+        isNewUser,
         selfDmChannelId,
         landingChannelId: workspaceRecord?.landingChannelId ?? null,
       });
@@ -2149,11 +2146,11 @@ export class AuthV2Controller {
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
+        const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
+
+        setOnboardingCookie(res, isNewUser, {
           secure: isProduction,
           sameSite: 'strict' as const,
-          path: '/',
           maxAge: 24 * 60 * 60 * 1000,
         });
 
@@ -2294,8 +2291,11 @@ export class AuthV2Controller {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
       res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-      res.cookie('is_new_user', 'true', {
-        httpOnly: false, secure: isProduction, sameSite: 'strict' as const, path: '/', maxAge: 24 * 60 * 60 * 1000,
+      const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
+      setOnboardingCookie(res, isNewUser, {
+        secure: isProduction,
+        sameSite: 'strict' as const,
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       logger.info(`[CREATE-WORKSPACE-AUTH] Created org ${organization.orgId} / workspace ${workspace.id} for ${currentUser.email}`);
@@ -2310,7 +2310,7 @@ export class AuthV2Controller {
           picture: workspaceUser.picture,
           workspaceId: workspaceUser.workspaceId,
         },
-        isNewUser: true,
+        isNewUser,
         selfDmChannelId,
         landingChannelId: workspaceRecord?.landingChannelId ?? null,
       });

@@ -467,12 +467,15 @@ export class SearchService {
         false,
         {}
       );
-      // When enabled, effectiveWorkspaceId is passed to YqlBuilder so the top-level
-      // `workspaceId contains @ws` guard scopes the `user`/`transcript` branches to the
-      // caller's workspace. The flag is controlled remotely via Superposition.
+      // Passes effectiveWorkspaceId to YqlBuilder, so the top-level `workspaceId contains
+      // @ws` guard bounds the `user`/`transcript` branches to the caller's workspace.
+      // Those two branches carry no per-app guard of their own, so this is the only thing
+      // scoping them; it defaults on and the Superposition flag exists to turn it off, not
+      // to turn it on. A document ingested without a workspaceId will not match while this
+      // is enabled, so the schema has to be backfilled before the results are complete.
       const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
         'enableWorkSpaceFiltering',
-        false,
+        true,
         {}
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);

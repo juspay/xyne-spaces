@@ -845,7 +845,10 @@ export const TicketFiltersDropdown = ({
                       (item.id !== 'boards' || showBoardsFilter) &&
                       (item.id !== 'stages' || selectedBoards.length > 0) &&
                       (item.id !== 'prReviewers' || hasPrReviewers === true) &&
-                      (item.id !== 'qaAssigned' || hasQaAssigned === true),
+                      (item.id !== 'qaAssigned' || hasQaAssigned === true) &&
+                      // A channel view is already scoped to a single channel, so a
+                      // "Source channels" filter is meaningless there.
+                      (item.id !== 'sourceChannels' || !channelId),
                   )
                   .map(item => {
                     const Icon = item.icon;

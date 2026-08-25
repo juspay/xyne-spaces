@@ -33,6 +33,7 @@ export function NoteTakerOverlayHost(): ReactElement {
   // hide the overlay when live recording detail screen entered.
   const isViewingThisRecording =
     Boolean(externalId) && pathname.replace(/\/+$/, '').endsWith(`/recordings/${externalId}`);
+  const isOnRecordingsSection = /^\/[^/]+\/recordings(\/|$)/.test(pathname);
 
   const handleStop = useCallback((): void => {
     const stoppedRecordingId = externalId;
@@ -67,6 +68,11 @@ export function NoteTakerOverlayHost(): ReactElement {
   const isElectron = isElectronApp();
 
   useEffect(() => {
+    if (!isElectron || !isActive) return;
+    sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: !isOnRecordingsSection });
+  }, [isElectron, isActive, isOnRecordingsSection]);
+
+  useEffect(() => {
     if (!isElectron) return;
     window.electronAPI?.ipcSend?.('recording:set-minimized', isActive && isMinimized);
   }, [isElectron, isActive, isMinimized]);
@@ -84,10 +90,17 @@ export function NoteTakerOverlayHost(): ReactElement {
     sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: true });
   }, []);
 
+  const handleExpand = useCallback((): void => {
+    sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false });
+  }, []);
+
+  const shouldRenderOverlay =
+    isActive && startTime !== null && !isViewingThisRecording && (!isMinimized || !isElectron);
+
   return (
     <>
       <AnimatePresence initial={false}>
-        {isActive && startTime !== null && !isViewingThisRecording && !isMinimized && (
+        {shouldRenderOverlay && (
           <NoteTakerOverlay
             key='floating-recording-transcript'
             status={status}
@@ -105,7 +118,12 @@ export function NoteTakerOverlayHost(): ReactElement {
             onPause={() => sendRecordingEvent({ type: 'pauseRecording' })}
             onResume={() => sendRecordingEvent({ type: 'resumeRecording' })}
             onMarkMoment={markMoment}
-            onMinimize={isElectron ? handleMinimize : undefined}
+            isMinimized={isMinimized}
+            onMinimize={handleMinimize}
+            onExpand={handleExpand}
+            onTitleUpdated={(nextTitle: string) =>
+              sendRecordingEvent({ type: 'setTitle', title: nextTitle })
+            }
           />
         )}
       </AnimatePresence>

@@ -13,7 +13,7 @@ import {
   getDMParticipantIdsToFetch,
 } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
-import { rankChannelsByAffinity } from '../../hooks/useSearchMetrics';
+import { rankChannelsByAffinity } from '../../utils/rankingUtils';
 import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
@@ -224,8 +224,11 @@ const GlobalCommandMenu = ({
     void affinityVersion;
     if (!channelData.length) return { starred: [], channels: [], directMessages: [] };
 
+    // Index visible channels by id once (O(n)); the previous `.find` inside this
+    // `.map` was O(n * m) over ~749 all x ~431 visible channels per recompute.
+    const visibleById = new Map(visibleAllChannels.map(vc => [vc.id, vc]));
     const visibleChannels = channelData.map(channel => {
-      const vc = visibleAllChannels.find(vc => vc.id === channel.id);
+      const vc = visibleById.get(channel.id);
       if (vc) {
         return vc;
       }

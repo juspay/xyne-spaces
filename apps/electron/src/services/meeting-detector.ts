@@ -5,6 +5,7 @@ import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 import { showMeetingPopup, hideMeetingPopup } from './meeting-popup-window';
+import { isMicOwnedByXyne } from './recording-controller';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -264,6 +265,15 @@ class MeetingDetectorService {
     const active = event.active ?? false;
 
     if (active && !this.currentMeeting) {
+      // A Xyne call or recording is what just turned the mic on. Bail out before
+      // identifying anything — checkProcesses() would otherwise match a Zoom or
+      // Teams that is merely open in the background.
+      if (isMicOwnedByXyne()) {
+        log.info('[MeetingDetector] Xyne call/recording in progress — ignoring mic activation');
+        Logger.info(ElectronEvent.MEETING_POPUP_SKIPPED_RECORDING, { via: 'mic-activation' }, 'MeetingDetector');
+        return;
+      }
+
       log.info('[MeetingDetector] Mic became active — identifying meeting app');
       Logger.info(
         ElectronEvent.MEETING_MIC_ACTIVE,
