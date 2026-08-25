@@ -92,7 +92,7 @@ export class MigrationWorkers {
     await this.store.update(job.id, { status: MigrationStatus.COLLECTING });
     logger.info('[SlackMigration] collection started', { id: job.id, type: job.type });
 
-    await this.engine.collectDirectory(token, job.gcsPrefix);
+    const directory = await this.engine.collectDirectory(token, job.gcsPrefix);
     await this.store.markProgress(job.id).catch(() => undefined);
     await this.engine.collectUsergroups(token, job.gcsPrefix);
     await this.engine.collectChannels(token, job.gcsPrefix);
@@ -100,16 +100,18 @@ export class MigrationWorkers {
     await this.engine.writeManifest(job.gcsPrefix, conversations);
     await this.store.markProgress(job.id).catch(() => undefined);
     await this.store.update(job.id, { checkpoint: { ...job.checkpoint, totalConversations: conversations.length } });
-    logger.info('[SlackMigration] collecting conversations', { id: job.id, total: conversations.length });
+    logger.info('[SlackMigration] collection plan ready', { id: job.id, users: Object.keys(directory).length, conversations: conversations.length });
 
     const done = new Set(job.checkpoint.collectedConversationIds);
+    const PROGRESS_EVERY = 25;
+    let collected = 0, messages = 0, skipped = 0, truncated = 0;
     // A channel is a single conversation (conversation bar meaningless) and Slack gives no message total, so report progress
     // through the date window [start, newest message], where start = chosen startDate or the channel's creation ts.
     const isChannel = job.type === MigrationType.CHANNEL;
     const windowStart = job.channelInput?.startDate
       ? Math.floor(Date.parse(job.channelInput.startDate) / 1000)
       : (job.slackChannelCreated ?? 0);
-    for (const conv of conversations) {
+    for (const [index, conv] of conversations.entries()) {
       if (await this.store.isStopRequested(job.id)) {
         logger.info('[SlackMigration] stop requested — halting at next conversation', { id: job.id, queue: job.currentQueue });
         return void this.store.update(job.id, { status: MigrationStatus.STOPPED });
@@ -125,18 +127,27 @@ export class MigrationWorkers {
         // Inaccessible on Slack — don't migrate it. A channel job is a single conversation, so fail
         // the whole job; a DM job records the skip and keeps going with the rest.
         if (isChannel) throw new Error(result.reason ?? 'Channel is inaccessible on Slack.');
+        skipped += 1;
         await this.store.addIssue(job.id, { conversationId: conv.id, kind: 'skipped', reason: result.reason ?? 'Inaccessible on Slack.' });
         continue;
       }
       await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); // channel count already live via setChannelProgress
+      collected += 1;
+      messages += result.messages;
       if (result.outcome === 'truncated') {
+        truncated += 1;
         await this.store.addIssue(job.id, { conversationId: conv.id, kind: 'truncated', reason: result.reason ?? 'Partial — lost Slack access mid-collection.' });
+      }
+      if (conversations.length > PROGRESS_EVERY && (index + 1) % PROGRESS_EVERY === 0) {
+        logger.info('[SlackMigration] collection progress', { id: job.id, done: index + 1, total: conversations.length, messages });
       }
     }
 
     // Collection done → approval gate; drop the token immediately (§5.7).
     await this.store.update(job.id, { status: MigrationStatus.AWAITING_APPROVAL, encryptedToken: undefined });
-    logger.info('[SlackMigration] collection complete → awaiting approval', { id: job.id, total: conversations.length });
+    logger.info('[SlackMigration] collection complete → awaiting approval', {
+      id: job.id, conversations: conversations.length, collected, messages, skipped, truncated,
+    });
   }
 
   private async ingest(job: MigrationJob): Promise<void> {

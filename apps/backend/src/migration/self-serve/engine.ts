@@ -216,13 +216,13 @@ export class SlackMigrationEngine {
     let oldestTs = Infinity;
     let cursor: string | undefined;
     let page = 0;
-    logger.info('[SlackMigration] collecting conversation', { convId: conv.id, isMpim: conv.isMpim, members: conv.members.length });
+    logger.debug('[SlackMigration] collecting conversation', { convId: conv.id, isMpim: conv.isMpim, members: conv.members.length });
     try {
       do {
         const r = await timed('conversations.history', { convId: conv.id, page: page + 1, cursor: !!cursor }, () =>
           client.conversations.history({ channel: conv.id, limit: PAGE, cursor, inclusive: true, oldest }));
         page += 1;
-        logger.info('[SlackMigration] history page', { convId: conv.id, page, messages: (r.messages ?? []).length, running: count });
+        logger.debug('[SlackMigration] history page', { convId: conv.id, page, messages: (r.messages ?? []).length, running: count });
         for (const m of r.messages ?? []) {
           await this.prefetchFiles(token, m, gcsPrefix);
           if (((m as { reply_count?: number }).reply_count ?? 0) > 0 && (m as { ts?: string }).ts) {
