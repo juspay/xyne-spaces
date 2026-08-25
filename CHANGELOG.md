@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.3](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.2...v1.219.0-release-20260825.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* Custom emoji replacement breaks Slack alert HTML ([#1022](https://github.com/juspay/xyne-spaces/issues/1022)) ([4f364d8](https://github.com/juspay/xyne-spaces/commit/4f364d857ecb01515816b30f9f5833c8a3c1599f))
+
 ## [1.219.0-release-20260825.2](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.1...v1.219.0-release-20260825.2) (2026-08-25)
 
 
