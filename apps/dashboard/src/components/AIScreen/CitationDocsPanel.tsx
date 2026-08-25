@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Panel, ResizableGroup, Separator, usePanelRef } from '../ui/Resizable/Resizable';
 import {
   ChevronDown,
@@ -6,6 +7,7 @@ import {
   MessageSquare,
   PanelRightClose,
   PanelRightOpen,
+  SquareArrowOutUpRight,
   SquarePen,
   Ticket,
   X,
@@ -355,9 +357,23 @@ function CitationDocView({ doc }: { doc: CitationDoc }): ReactElement {
  */
 export function CitationDocsPanel(): ReactElement | null {
   const ctx = useCitationDocs();
+  const navigate = useNavigate();
   if (!ctx || ctx.docs.length === 0) return null;
   const { docs, activeId, setActive, closeDoc, closeAll, collapsed, setCollapsed } = ctx;
   const active = activeId ?? docs[docs.length - 1]?.id ?? null;
+  const activeDoc = docs.find(d => d.id === active) ?? null;
+  // "Open the full page" — navigate to the citation's real route for full
+  // context. In-app paths go through the router (same tab); a rare absolute URL
+  // opens in a new tab. The in-panel view stays the default; this is opt-in.
+  const openActiveSource = (): void => {
+    const url = activeDoc?.sourceUrl;
+    if (!url) return;
+    if (/^https?:\/\//.test(url)) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      void navigate(url);
+    }
+  };
 
   // Collapsed: a thin re-open rail instead of the tab strip + viewer — the
   // open docs stay in state, just not rendered, so re-expanding restores them.
@@ -460,6 +476,19 @@ export function CitationDocsPanel(): ReactElement | null {
         </div>
 
         <div className='flex flex-shrink-0 items-center gap-0.5 pl-1'>
+          {activeDoc?.sourceUrl && (
+            <button
+              type='button'
+              onClick={openActiveSource}
+              aria-label='Open the full page'
+              title='Open the full page'
+              className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+              data-track-category='ask-ai'
+              data-track-name='citation-docs-open-source'
+            >
+              <SquareArrowOutUpRight className='h-4 w-4' />
+            </button>
+          )}
           <button
             type='button'
             onClick={() => setCollapsed(true)}
@@ -485,8 +514,17 @@ export function CitationDocsPanel(): ReactElement | null {
         </div>
       </div>
 
-      {/* Stacked viewers — only the active one is visible; the rest stay mounted
-          (hidden) so switching tabs doesn't reload the PDF or lose scroll. */}
+      {/* Stacked viewers — only the active one is shown; the rest stay mounted
+          AND laid out (so the PDF/canvas keep their measured size and scroll and
+          don't reload on tab switch). Inactive layers are hidden with
+          `opacity:0` + `pointer-events:none` rather than `visibility:hidden`:
+          the embedded views (Radix / BlockNote / thread) set
+          `visibility:visible` on their own inner nodes, which overrides an
+          ancestor's `hidden` and bleeds the inactive tab through during a
+          switch. An ancestor `opacity:0` forms a compositing group a descendant
+          can't undo, so nothing leaks; and unlike `display:none` it keeps the
+          layer sized so the viewers don't re-measure to 0. The active layer sits
+          on top (z-10) and is opaque so it fully occludes the stack. */}
       <div className='relative min-h-0 flex-1'>
         {docs.map(doc => {
           const isActive = doc.id === active;
@@ -495,10 +533,11 @@ export function CitationDocsPanel(): ReactElement | null {
               key={doc.id}
               aria-hidden={!isActive}
               style={{
-                visibility: isActive ? 'visible' : 'hidden',
+                opacity: isActive ? 1 : 0,
                 pointerEvents: isActive ? 'auto' : 'none',
+                zIndex: isActive ? 10 : 0,
               }}
-              className='absolute inset-0'
+              className='absolute inset-0 bg-background'
             >
               <CitationDocView doc={doc} />
             </div>

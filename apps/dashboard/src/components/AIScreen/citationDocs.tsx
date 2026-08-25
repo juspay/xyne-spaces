@@ -32,6 +32,11 @@ import type { ClawCitation } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 interface CitationDocBase {
   id: string;
   title: string;
+  /** In-app route this citation points at (from `buildClawCitationUrl`). Lets
+   *  the panel offer an "open the full page" action for full context — the
+   *  in-panel view stays the default. Absent when the citation had no linkable
+   *  route. */
+  sourceUrl?: string;
   navSeq: number;
 }
 
@@ -100,6 +105,16 @@ export function panelDocFromCitation(
   url: string | null | undefined,
 ): OpenDocInput | null {
   if (!citation) return null;
+  const doc = buildPanelDoc(citation, url);
+  if (!doc) return null;
+  // Carry the route so the panel can offer "open the full page" for context.
+  return url ? { ...doc, sourceUrl: url } : doc;
+}
+
+function buildPanelDoc(
+  citation: ClawCitation,
+  url: string | null | undefined,
+): OpenDocInput | null {
   switch (citation.kind) {
     case 'collection-item':
       return kbFileDocFromCitation(citation, url);
