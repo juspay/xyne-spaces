@@ -1,3 +1,10 @@
+## [1.219.1](https://github.com/juspay/xyne-spaces/compare/v1.219.0...v1.219.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* preserve attachment order with explicit position column ([#920](https://github.com/juspay/xyne-spaces/issues/920)) ([2f7952c](https://github.com/juspay/xyne-spaces/commit/2f7952c790067ecd5ce02309f4d2104948259e5d))
+
 ## [1.219.0](https://github.com/juspay/xyne-spaces/compare/v1.218.3...v1.219.0) (2026-08-25)
 
 
