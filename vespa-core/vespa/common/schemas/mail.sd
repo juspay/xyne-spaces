@@ -42,6 +42,12 @@ schema mail {
       indexing: attribute
     }
 
+    # One-hot of channelRef ({"channel:<id>": 1}), fed by the backend
+    # (mapper.ts channelWeightedSetFor); read by personalization rank profiles.
+    field channelWeightedSet type tensor<float>(key{}) {
+      indexing: attribute | summary
+    }
+
   # This will map the useremail with the docId, which is required for the Url construction
   # every users has different docId for the same mail
     field userMap type map<string,string>{

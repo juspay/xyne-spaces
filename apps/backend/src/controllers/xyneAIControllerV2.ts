@@ -108,6 +108,9 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // Per-run thinking level from the composer's dropdown. Absent = the agent's
+  // configured default (modelSettings.thinkingLevel or provider default).
+  thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -182,6 +185,11 @@ const XyneAIRequestSchemaV2 = z.object({
    *  no-ops the pin when it can't serve it, so an unservable id can't silently
    *  swap the model. */
   model: z.string().min(1).optional(),
+  /** Which provider the model pin rides: "litellm" = the agent's shared
+   *  LiteLLM credential, "spaces" = the keyless platform provider (the models
+   *  endpoint's pinProvider says which). Defaults to "litellm" for old
+   *  clients. */
+  modelProvider: z.enum(['litellm', 'spaces']).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -245,6 +253,7 @@ export class XyneAIControllerV2 {
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
       instant,
+      thinkingLevel,
       researchContext,
       research_context,
       attachments,
@@ -274,6 +283,7 @@ export class XyneAIControllerV2 {
       draftMode,
       provider,
       model,
+      modelProvider,
       agentSlug,
     } = parseResult.data;
 
@@ -525,7 +535,7 @@ export class XyneAIControllerV2 {
           // agentConfig: claw-auth merges that over the agent's stored config,
           // and its platform-key strip covers secrets but NOT `tools` /
           // `subagents` / `outputFormat`. A bare model id can't reach those.
-          ...(model && { providerOverride: { provider: 'litellm', model } }),
+          ...(model && { providerOverride: { provider: modelProvider ?? 'litellm', model } }),
           conversationId: effectiveConversationId || '',
           channelId: effectiveChannelIds[0] || '',
           canvasIds: effectiveCanvasIds,
@@ -538,6 +548,7 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          ...(thinkingLevel ? { thinkingLevel } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
@@ -1100,7 +1111,8 @@ export class XyneAIControllerV2 {
     try {
       const result = await listClawAgentModels(
         { headers: req.headers, userId },
-        req.params['slug']
+        req.params['slug'],
+        (req as any).user?.workspaceId
       );
       res.json(result);
     } catch (error) {

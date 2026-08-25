@@ -65,6 +65,7 @@ import {
   CollectionRole,
   VCSProviderType,
   ReleaseTrackingMode,
+  MessageArtifactStatus,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
@@ -184,6 +185,10 @@ import {
   updateInitialMessageMdReaction,
 } from './messageMetadata.js';
 import { updateTicketMdFromZero } from '../utils/ticketMetadata.js';
+import {
+  parseSlashCommandArtifactMessage,
+  withSlashCommandArtifactClosed,
+} from '../utils/slashCommandArtifact.js';
 import { stringFromFormValue } from '../tickets/utils.js';
 
 async function getConversationSeenCutoffAt(
@@ -2254,6 +2259,28 @@ export const mutators = defineMutators({
           throw new Error("Channel doesn't exists");
         }
 
+        // One open artifact per thread. A thread is a single incident's workspace,
+        // so a second /sev2 inside it would fork the responders across two cards
+        // and two calls. The channel is unrestricted — that is where a genuinely
+        // separate incident belongs.
+        const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+        if (outgoingArtifact) {
+          const openArtifact = await tx.run(
+            zql.message_artifacts
+              // channelId first: it is the only selective index on this table.
+              .where('channelId', conversation.channelId)
+              .where('conversationId', conversationId)
+              .where('command', outgoingArtifact.definition.command)
+              .where('status', MessageArtifactStatus.ACTIVE)
+              .one(),
+          );
+          if (openArtifact) {
+            throw new Error(
+              `A ${outgoingArtifact.definition.badge} is already open in this thread`,
+            );
+          }
+        }
+
         let hasAttachments = false;
         if (attachmentIds !== undefined) {
           // Explicit list from a pending-message-aware caller: transfer only
@@ -2479,6 +2506,57 @@ export const mutators = defineMutators({
             await updateInitialMessageMdField(tx, { messageId }, { content, edited: true });
           }
         }
+      },
+    ),
+    /**
+     * Close a slash-command artifact (e.g. decline a SEV2) without ever running
+     * a call. Only the message's author may do it.
+     *
+     * Two writes, both required: the artifact row moves to a terminal status so
+     * the banner and channel indicator clear for everyone, and the closed marker
+     * is baked into the message's FlowJSON so the card still renders as finished
+     * once the row has left the ACTIVE-only artifact subscription.
+     */
+    closeSlashCommandArtifact: defineMutator(
+      z.object({ messageId: z.string(), timestamp: z.number() }),
+      async ({ tx, ctx, args: { messageId, timestamp } }) => {
+        const message = await resolveMessage(tx, messageId);
+        if (!message) {
+          throw new Error('Message not available');
+        }
+        if (message.senderId !== ctx.userID) {
+          throw new Error('Only the author can close this incident');
+        }
+        if (!parseSlashCommandArtifactMessage(message.content)) {
+          throw new Error('Message is not a slash command artifact');
+        }
+
+        const artifact = await tx.run(
+          zql.message_artifacts.where('messageId', messageId).one(),
+        );
+        if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
+          throw new Error('This incident is already closed');
+        }
+
+        const content = withSlashCommandArtifactClosed(message.content, {
+          closedAt: timestamp,
+          closedBy: ctx.userID,
+        });
+        if (!content) {
+          throw new Error('Message is not a slash command artifact');
+        }
+
+        if (artifact) {
+          await tx.mutate.message_artifacts.update({
+            id: artifact.id,
+            status: MessageArtifactStatus.CANCELLED,
+            updatedAt: timestamp,
+          });
+        }
+        // Deliberately not `edited: true` — closing is a lifecycle transition,
+        // not an edit, and must not raise a "message edited" notification.
+        await tx.mutate.messages.update({ messageId, content });
+        await updateInitialMessageMdField(tx, { messageId }, { content });
       },
     ),
     updateShowInChannel: defineMutator(
@@ -4378,6 +4456,7 @@ export const mutators = defineMutators({
         alias: z.string().optional(),
         description: z.string().optional(),
         reassignOnUnavailable: z.boolean().optional(),
+        maxWorkload: z.number().int().positive().nullable().optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4393,6 +4472,7 @@ export const mutators = defineMutators({
           alias,
           description,
           reassignOnUnavailable,
+          maxWorkload,
           userResponsibilityUpdates,
           userRoleUpdates,
           timestamp,
@@ -4404,6 +4484,7 @@ export const mutators = defineMutators({
           ...(alias !== undefined && { alias }),
           ...(description !== undefined && { description }),
           ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+          ...(maxWorkload !== undefined && { maxWorkload }),
           updatedAt: timestamp,
         });
 
@@ -4561,6 +4642,7 @@ export const mutators = defineMutators({
               ? { roleId, ...(responsibility ? { responsibility } : {}) }
               : { responsibility: UserResponsibility.MEMBER }),
             onCallSetNumbers: [],
+            isNotified: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -7465,6 +7547,7 @@ export const mutators = defineMutators({
             z.object({
               userId: z.string(),
               onCallSetNumbers: z.array(z.number()),
+              isNotified: z.boolean().optional(),
             }),
           )
           .optional(),
@@ -7560,6 +7643,7 @@ export const mutators = defineMutators({
               await tx.mutate.user_group_mappings.update({
                 id: existingMapping.id,
                 onCallSetNumbers: mapping.onCallSetNumbers,
+                ...(mapping.isNotified !== undefined && { isNotified: mapping.isNotified }),
                 updatedAt: now,
               });
             }

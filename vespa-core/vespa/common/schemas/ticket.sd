@@ -30,6 +30,12 @@ schema ticket {
       indexing: attribute
     }
 
+    # One-hot of channelRef ({"channel:<id>": 1}), fed by the backend
+    # (mapper.ts channelWeightedSetFor); read by personalization rank profiles.
+    field channelWeightedSet type tensor<float>(key{}) {
+      indexing: attribute | summary
+    }
+
     field projectRef type reference<project> {
       indexing: attribute
     }
