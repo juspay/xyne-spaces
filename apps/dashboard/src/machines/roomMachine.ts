@@ -38,7 +38,9 @@ import { toast } from 'sonner';
 import { MACOS_PRIVACY_URLS } from '../constants/permissions';
 import {
   CALL_MEDIA_QUALITY_CONFIG,
+  CALL_VIDEO_CODEC,
   getCallMediaQualitySettings,
+  isSvcCodec,
 } from '../hooks/useCallMediaQualitySettings';
 import {
   reactNativeBridge,
@@ -1124,6 +1126,10 @@ export const roomMachine = setup({
         const screenShareQuality =
           CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.screenShareQuality];
 
+        // Publish codec test knob — flip CALL_VIDEO_CODEC to try vp8/vp9/av1.
+        const videoCodec = CALL_VIDEO_CODEC;
+        const useSvc = isSvcCodec(videoCodec);
+
         const room = new Room({
           adaptiveStream: false,
           dynacast: true,
@@ -1140,6 +1146,11 @@ export const roomMachine = setup({
             noiseSuppression: true,
           },
           publishDefaults: {
+            videoCodec,
+            // SVC codecs (vp9/av1) publish one layered stream and need a vp8
+            // backup for subscribers that can't decode them. Non-SVC codecs
+            // take neither and fall back to simulcast.
+            ...(useSvc ? { backupCodec: true, scalabilityMode: 'L3T3_KEY' } : {}),
             screenShareEncoding: {
               maxBitrate: screenShareQuality.maxBitrate,
               maxFramerate: screenShareQuality.frameRate,

@@ -35,6 +35,23 @@ const DEFAULT_SETTINGS: CallMediaQualitySettings = {
   screenShareQuality: '2160p',
 };
 
+/**
+ * Test knob for the publish codec. Flip this to try codecs end-to-end.
+ *   'vp8'  - LiveKit default, most compatible, simulcast (no SVC)
+ *   'vp9'  - better compression, uses SVC + VP8 backup
+ *   'av1'  - best compression, highest encoder CPU, uses SVC + VP8 backup
+ *   'h264' - hardware-friendly, no SVC
+ */
+export type CallVideoCodec = 'vp8' | 'vp9' | 'av1' | 'h264';
+
+export const CALL_VIDEO_CODEC: CallVideoCodec = 'av1';
+
+// VP9/AV1 support scalable video coding (SVC) — a single graceful-degradation
+// stream. VP8/H.264 use simulcast instead and take no scalabilityMode/backupCodec.
+const SVC_CODECS: readonly CallVideoCodec[] = ['vp9', 'av1'];
+
+export const isSvcCodec = (codec: CallVideoCodec): boolean => SVC_CODECS.includes(codec);
+
 const listeners = new Set<() => void>();
 
 const subscribe = (listener: () => void): (() => void) => {
