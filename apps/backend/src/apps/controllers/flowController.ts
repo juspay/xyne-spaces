@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
+import { getEphemeralFlow } from '../utils/ephemeralFlowStore';
 import { SsrfBlockedError } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
@@ -62,14 +63,25 @@ export class FlowController {
     }
 
     try {
-      // 3. Look up the message to get the appId (stored in <xyne-flow> content tag)
+      // 3. Look up the message to get the appId (stored in <xyne-flow> content tag).
+      // Ephemeral messages are never persisted, so fall back to the store written
+      // at post time — which also names the one user allowed to act on them.
       const message = await repositories.messages.findById(messageId);
-      if (!message) {
-        res.status(404).json({ error: `Message not found: ${messageId}` });
-        return;
+      let content = message?.content;
+      if (!content) {
+        const ephemeral = await getEphemeralFlow(messageId);
+        if (!ephemeral) {
+          res.status(404).json({ error: `Message not found: ${messageId}` });
+          return;
+        }
+        if (ephemeral.visibleTo !== userId) {
+          res.status(403).json({ error: 'Not permitted to act on this message' });
+          return;
+        }
+        content = ephemeral.content;
       }
 
-      const appId = parseAppIdFromContent(message.content);
+      const appId = parseAppIdFromContent(content);
       if (!appId) {
         res.status(400).json({ error: 'Message is not a flow UI message or missing appId' });
         return;

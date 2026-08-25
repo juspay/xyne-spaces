@@ -1,5 +1,6 @@
 import type { ChatActionResponse } from "@/apps/types";
 import type {
+	SlackChatPostEphemeralResponse,
 	SlackChatPostMessageResponse,
 	SlackChatUpdateResponse,
 } from "../types";
@@ -23,6 +24,17 @@ export function transformPostMessageResponse(
 			text,
 			...(username ? { username } : {}),
 		},
+	};
+}
+
+export function transformPostEphemeralResponse(
+	messageId: string,
+	channelId: string,
+): SlackChatPostEphemeralResponse {
+	return {
+		ok: true,
+		channel: channelId,
+		message_ts: messageId,
 	};
 }
 
