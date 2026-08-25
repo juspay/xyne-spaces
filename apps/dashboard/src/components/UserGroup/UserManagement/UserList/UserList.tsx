@@ -15,6 +15,8 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../hooks/usePlatform';
+import { apiInstance } from '../../../../services/clients/apiClient';
+import { RemoveMemberDialog } from './RemoveMemberDialog';
 
 interface UserListProps {
   users: User[];
@@ -43,11 +45,18 @@ export const UserList = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const isCreateMode = !userGroupId;
   const { isMobile } = usePlatform();
+  const [removeTarget, setRemoveTarget] = useState<User | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
   // Get users matching search query (for adding)
   const searchResults = useUserSearch(searchTerm, 10);
 
   // Fetch workspace roles for the role dropdown
   const [roles] = useCachedQuery(queries.roles({}));
+
+  // The group setting decides whether removing a member can hand their open tickets off
+  const [userGroup] = useCachedQuery(queries.getUserGroupById({ userGroupId: userGroupId ?? '' }), {
+    enabled: !isCreateMode,
+  });
 
   // Filter existing users by search term
   const filteredUsers = useMemo(() => {
@@ -97,21 +106,56 @@ export const UserList = ({
     }
   };
 
-  const handleRemoveUser = (userId: string): void => {
-    // Create mode: use callback
+  const handleRemoveUser = (user: User): void => {
+    // Create mode: nothing is persisted yet, so there are no tickets to hand off
     if (isCreateMode) {
-      onRemoveUser?.(userId);
+      onRemoveUser?.(user.id);
       return;
     }
 
-    // Edit mode: call API
+    // Edit mode: confirm first — removal orphans the member's open tickets
+    setRemoveTarget(user);
+  };
+
+  const confirmRemoveUser = async (reassignTickets: boolean): Promise<void> => {
+    if (!removeTarget || !userGroupId) return;
+
+    const userId = removeTarget.id;
+    setIsRemoving(true);
     try {
-      zero.mutate(
+      // Queue the handoff *before* the mapping is deleted: the backend refuses to
+      // reassign tickets for someone who is no longer a member of the group.
+      if (reassignTickets) {
+        try {
+          await apiInstance.post('/user-assignment-state/reassign-member-tickets', {
+            userId,
+            userGroupId,
+          });
+        } catch {
+          toast.error("Couldn't hand off their open tickets", {
+            description: 'Nothing changed. Try again, or remove them without reassigning.',
+            duration: 5000,
+          });
+          return;
+        }
+      }
+
+      const result = await zero.mutate(
         mutators.userGroup.removeUsers({
           userGroupId: userGroupId,
           userIds: [userId],
         }),
-      );
+      ).server;
+      if (result.type === 'error') {
+        throw new Error(result.error.message || 'Failed to remove user from group.');
+      }
+
+      if (reassignTickets) {
+        toast.success('Member removed', {
+          description: 'Their open tickets are being handed to other eligible members.',
+        });
+      }
+      setRemoveTarget(null);
       onUserRemove?.();
     } catch (error) {
       toast.error(
@@ -119,6 +163,8 @@ export const UserList = ({
           ? error.message
           : 'Failed to remove user from group. Please try again.',
       );
+    } finally {
+      setIsRemoving(false);
     }
   };
 
@@ -225,9 +271,10 @@ export const UserList = ({
                           {/* Remove Button */}
                           {!disabled && (
                             <Button
+                              type='button'
                               variant='ghost'
                               size='sm'
-                              onClick={() => void handleRemoveUser(user.id)}
+                              onClick={() => handleRemoveUser(user)}
                               className='shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity'
                               data-track-category='UserGroups'
                               data-track-name='RemoveUserFromGroup'
@@ -292,6 +339,7 @@ export const UserList = ({
                           </div>
                         </div>
                         <Button
+                          type='button'
                           variant='outline'
                           size='sm'
                           onClick={() => void handleAddUser(user)}
@@ -318,6 +366,15 @@ export const UserList = ({
           </div>
         )}
       </div>
+
+      <RemoveMemberDialog
+        user={removeTarget}
+        canReassignTickets={userGroup?.reassignOnUnavailable === true}
+        isRemoving={isRemoving}
+        onCancel={() => setRemoveTarget(null)}
+        onConfirm={reassignTickets => void confirmRemoveUser(reassignTickets)}
+        userGroupId={userGroupId}
+      />
     </div>
   );
 };
