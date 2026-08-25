@@ -111,7 +111,7 @@ export const UserList = ({
       return;
     }
 
-    // Edit mode: confirm first — removal orphans the member's open tickets
+    // Edit mode: confirm first — their open tickets stay with them unless handed off
     setRemoveTarget(user);
   };
 

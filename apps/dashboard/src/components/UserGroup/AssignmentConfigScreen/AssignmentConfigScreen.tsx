@@ -338,8 +338,8 @@ export const AssignmentConfigScreen = ({
     });
   };
 
-  // The member's saved availability: only someone still switched on here has open
-  // tickets that saving this screen can strand.
+  // Zero data, so it includes un-flushed optimistic edits: read before mutating, never
+  // after, or post-save it just reports the value we wrote.
   const isActiveOnServer = (userId: string): boolean => {
     const serverState = userAssignmentStates?.find((s: UserAssignmentState) => s.userId === userId);
     return serverState?.isActiveForAssignment === true;
@@ -399,7 +399,7 @@ export const AssignmentConfigScreen = ({
       } else {
         newStates.set(userId, { ...currentState, isActive: true });
       }
-      // Re-toggling always retires the previous answer; the dialog re-applies it on Save.
+      // Re-toggling always retires the previous answer; Continue records the new one.
       setPendingReassign(userId, false);
       setLocalUserStates(newStates);
       setHasChanges(true);
