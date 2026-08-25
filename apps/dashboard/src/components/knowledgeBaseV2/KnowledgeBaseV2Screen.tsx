@@ -968,9 +968,11 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   };
 
   // ── Ask AI ──────────────────────────────────────────────────────────
-  // Only rendered when `!isAtRoot` (i.e. a collection is open), so we always
-  // have a real collectionId to scope to. The channelId comes from the global
-  // collections cache because V2 doesn't carry it in the URL.
+  // Rendered at every level, including the root Knowledge listing (isAtRoot,
+  // no collectionId) — the tooltip has dedicated copy for that case. At root
+  // there's nothing to scope to, so just open a fresh, unscoped chat instead
+  // of silently no-oping. The channelId comes from the global collections
+  // cache because V2 doesn't carry it in the URL.
   //
   // Inside a sub-folder (spParentId set), attach BOTH chips — the folder
   // (for scope) and its collection (for context) — same "harmless overlap"
@@ -978,7 +980,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // and one of its folders together. At the collection root there's no
   // folder to add, so just the collection chip shows, as before.
   const handleOpenAI = useCallback((): void => {
-    if (!collectionId) return;
+    if (!collectionId) {
+      xyneAIActor.send({ type: 'OPEN', startFreshChat: true });
+      return;
+    }
     const owning = globalCollections.byId(collectionId);
     const currentFolder = spParentId ? nodes[spParentId] : undefined;
     xyneAIActor.send({
@@ -1180,7 +1185,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // circular icon is the primary action; this is a secondary, more
   // discoverable prompt right where you're about to look for it while
   // browsing.
-  const askAiPill = !isAtRoot ? (
+  const askAiPill = (
     <button
       type='button'
       onClick={handleOpenAI}
@@ -1191,7 +1196,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       <XyneAIStar size={14} />
       Ask AI
     </button>
-  ) : null;
+  );
 
   const mainContent = (
     <main ref={mainRef} className='relative flex-1 overflow-auto px-5 py-5'>

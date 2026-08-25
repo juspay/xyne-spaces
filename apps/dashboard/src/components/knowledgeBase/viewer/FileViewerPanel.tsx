@@ -319,30 +319,10 @@ export const FileViewerPanel: React.FC<{
     // `bg-background` is the shared page surface, so the file panel sits on
     // the same colour as the listing it came from.
     <div className='h-full w-full flex flex-col bg-background' ref={contentRef}>
-      {/* Slim toolbar — back / filename · meta / download. Mirrors
-          xyne-search's PdfViewer top bar; no gradient, no Ask-AI. */}
-      <div className='flex flex-shrink-0 items-center gap-3 border-b border-border bg-background px-5 py-2.5'>
-        <button
-          type='button'
-          onClick={handleBackNavigation}
-          aria-label='Back'
-          title='Back'
-          className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
-          data-track-category='knowledge-base'
-          data-track-name='file-viewer-back'
-        >
-          <ArrowLeft className='h-4 w-4' strokeWidth={1.75} />
-        </button>
-
-        <div className='min-w-0 flex flex-1 items-baseline gap-2'>
-          <span className='truncate text-[13.5px] font-medium text-foreground' title={file.name}>
-            {file.name}
-          </span>
-          <span className='flex-shrink-0 text-[12px] text-muted-foreground'>
-            {extLabel(file.name)} · {formatBytes(file.size)}
-          </span>
-        </div>
-
+      {/* Two-row toolbar, mirroring KnowledgeBaseV2Screen's header/breadcrumbRow
+          split: an actions row (Ask AI / Vespa / Share / Download) with the
+          divider, then a nav row below it (back / filename · meta). */}
+      <div className='flex flex-shrink-0 items-center justify-end gap-2 border-b border-border bg-background px-5 py-2.5'>
         {onOpenChat && (
           <Tooltip content='Ask AI about this file' side='bottom'>
             <button
@@ -402,6 +382,29 @@ export const FileViewerPanel: React.FC<{
         >
           <Download className='h-4 w-4' strokeWidth={1.75} />
         </button>
+      </div>
+
+      <div className='flex min-w-0 items-center gap-2 px-5 py-2.5'>
+        <button
+          type='button'
+          onClick={handleBackNavigation}
+          aria-label='Back'
+          title='Back'
+          className='grid h-7 w-7 flex-shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+          data-track-category='knowledge-base'
+          data-track-name='file-viewer-back'
+        >
+          <ArrowLeft className='h-3.5 w-3.5' strokeWidth={1.75} />
+        </button>
+
+        <div className='min-w-0 flex flex-1 items-baseline gap-2'>
+          <span className='truncate text-[13.5px] font-medium text-foreground' title={file.name}>
+            {file.name}
+          </span>
+          <span className='flex-shrink-0 text-[12px] text-muted-foreground'>
+            {extLabel(file.name)} · {formatBytes(file.size)}
+          </span>
+        </div>
       </div>
 
       <div className='flex min-h-0 flex-1 bg-background'>
