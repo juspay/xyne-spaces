@@ -764,153 +764,155 @@ const AppRoot = (): ReactElement => {
                         </main>
                       ) : (
                         <XyneCalendarSidebarHost isAskAIOpen={isXyneAIDrawerOpen}>
-                        {showXyneAIPanel ||
-                        showSdlcDebuggerPanel ||
-                        browserPanelState === 'open' ||
-                        webviewState === 'closed' ||
-                        webviewState === 'idle' ? (
-                        <div className='flex flex-col h-screen'>
-                          <ResizableGroup
-                            orientation='horizontal'
-                            className='flex-1 no-scrollbar overflow-auto'
-                            autoSaveId='app-root-browser'
-                            panelIds={
-                              showSdlcDebuggerPanel
-                                ? ['app-root-left', 'app-root-sdlc-debugger']
-                                : showXyneAIPanel
-                                  ? ['app-root-left', 'app-root-xyneai']
-                                  : showBrowserPanel
-                                    ? ['app-root-left', 'app-root-browser']
-                                    : ['app-root-left']
-                            }
-                          >
-                            <Panel
-                              id='app-root-left'
-                              panelRef={browserPanelLeftRef}
-                              defaultSize={
-                                showXyneAIPanel
-                                  ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
-                                  : showSdlcDebuggerPanel || showBrowserPanel
-                                    ? '65%'
-                                    : '100%'
-                              }
-                            >
-                              <div
-                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                          {showXyneAIPanel ||
+                          showSdlcDebuggerPanel ||
+                          browserPanelState === 'open' ||
+                          webviewState === 'closed' ||
+                          webviewState === 'idle' ? (
+                            <div className='flex flex-col h-screen'>
+                              <ResizableGroup
+                                orientation='horizontal'
+                                className='flex-1 no-scrollbar overflow-auto'
+                                autoSaveId='app-root-browser'
+                                panelIds={
+                                  showSdlcDebuggerPanel
+                                    ? ['app-root-left', 'app-root-sdlc-debugger']
+                                    : showXyneAIPanel
+                                      ? ['app-root-left', 'app-root-xyneai']
+                                      : showBrowserPanel
+                                        ? ['app-root-left', 'app-root-browser']
+                                        : ['app-root-left']
+                                }
                               >
-                                <AppSidebar />
-                                <main className='flex-1 no-scrollbar overflow-auto'>
-                                  <EditWarningModal />
-                                  <Outlet />
-                                </main>
-                              </div>
-                            </Panel>
-                            {showSdlcDebuggerPanel ? (
-                              <>
-                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                                  <div
-                                    id='panel-resize-divider'
-                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                                  ></div>
-                                </Separator>
                                 <Panel
-                                  id='app-root-sdlc-debugger'
-                                  defaultSize='35%'
-                                  minSize='30%'
-                                  maxSize='55%'
-                                >
-                                  <SdlcDebuggerPanel />
-                                </Panel>
-                              </>
-                            ) : showXyneAIPanel ? (
-                              <>
-                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                                  <div
-                                    id='panel-resize-divider'
-                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                                  ></div>
-                                </Separator>
-                                <Panel
-                                  id='app-root-xyneai'
-                                  panelRef={xyneAIRightPanelRef}
-                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                                  minSize={
-                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
+                                  id='app-root-left'
+                                  panelRef={browserPanelLeftRef}
+                                  defaultSize={
+                                    showXyneAIPanel
+                                      ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
+                                      : showSdlcDebuggerPanel || showBrowserPanel
+                                        ? '65%'
+                                        : '100%'
                                   }
                                 >
-                                  <XyneAISidebarZIndexShell>
-                                    <XyneAISidebar
-                                      channelId={xyneAIChannelId}
-                                      threadInfo={xyneAIThreadInfo}
-                                      startFreshChat={xyneAIStartFreshChat}
-                                      canvasInfo={xyneAICanvasInfo}
-                                      initialContextSelections={xyneAIInitialContextSelections}
-                                      contextOpenNonce={xyneAIContextOpenNonce}
-                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                      kbChannelId={xyneAIKbChannelId ?? ''}
-                                      kbDocId={xyneAIKbDocId ?? ''}
-                                      kbDocName={xyneAIKbDocName ?? ''}
-                                      kbFolderId={xyneAIKbFolderId ?? ''}
-                                      kbFolderName={xyneAIKbFolderName ?? ''}
-                                      kbOpenNonce={xyneAIKbOpenNonce}
-                                      researchContext={xyneAIResearchContext}
-                                      initialQuery={xyneAIInitialQuery ?? undefined}
-                                      autoSendNonce={xyneAIAutoSendNonce}
-                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                                    />
-                                  </XyneAISidebarZIndexShell>
-                                </Panel>
-                              </>
-                            ) : (
-                              showBrowserPanel && (
-                                <>
-                                  <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                                  </Separator>
-                                  <Panel
-                                    id='app-root-browser'
-                                    panelRef={browserPanelRightRef}
-                                    defaultSize='35%'
-                                    maxSize='50%'
+                                  <div
+                                    className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                                   >
-                                    <div className='h-full'>
-                                      <BrowserPanel />
-                                    </div>
-                                  </Panel>
-                                </>
-                              )
-                            )}
-                          </ResizableGroup>
-                        </div>
-                      ) : (
-                        // WebView is open - show panel layout with WebView
-                        <div className='flex flex-col h-screen'>
-                          <ResizableGroup
-                            orientation='horizontal'
-                            className='flex-1 overflow-hidden'
-                            autoSaveId='app-root'
-                          >
-                            <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
-                              <div
-                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                                    <AppSidebar />
+                                    <main className='flex-1 no-scrollbar overflow-auto'>
+                                      <EditWarningModal />
+                                      <Outlet />
+                                    </main>
+                                  </div>
+                                </Panel>
+                                {showSdlcDebuggerPanel ? (
+                                  <>
+                                    <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                                      <div
+                                        id='panel-resize-divider'
+                                        className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+                                      ></div>
+                                    </Separator>
+                                    <Panel
+                                      id='app-root-sdlc-debugger'
+                                      defaultSize='35%'
+                                      minSize='30%'
+                                      maxSize='55%'
+                                    >
+                                      <SdlcDebuggerPanel />
+                                    </Panel>
+                                  </>
+                                ) : showXyneAIPanel ? (
+                                  <>
+                                    <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
+                                      <div
+                                        id='panel-resize-divider'
+                                        className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+                                      ></div>
+                                    </Separator>
+                                    <Panel
+                                      id='app-root-xyneai'
+                                      panelRef={xyneAIRightPanelRef}
+                                      defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                      maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                      minSize={
+                                        isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
+                                      }
+                                    >
+                                      <XyneAISidebarZIndexShell>
+                                        <XyneAISidebar
+                                          channelId={xyneAIChannelId}
+                                          threadInfo={xyneAIThreadInfo}
+                                          startFreshChat={xyneAIStartFreshChat}
+                                          canvasInfo={xyneAICanvasInfo}
+                                          initialContextSelections={xyneAIInitialContextSelections}
+                                          contextOpenNonce={xyneAIContextOpenNonce}
+                                          kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                          kbChannelId={xyneAIKbChannelId ?? ''}
+                                          kbDocId={xyneAIKbDocId ?? ''}
+                                          kbDocName={xyneAIKbDocName ?? ''}
+                                          kbOpenNonce={xyneAIKbOpenNonce}
+                                          researchContext={xyneAIResearchContext}
+                                          initialQuery={xyneAIInitialQuery ?? undefined}
+                                          autoSendNonce={xyneAIAutoSendNonce}
+                                          onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                        />
+                                      </XyneAISidebarZIndexShell>
+                                    </Panel>
+                                  </>
+                                ) : (
+                                  showBrowserPanel && (
+                                    <>
+                                      <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                        <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                      </Separator>
+                                      <Panel
+                                        id='app-root-browser'
+                                        panelRef={browserPanelRightRef}
+                                        defaultSize='35%'
+                                        maxSize='50%'
+                                      >
+                                        <div className='h-full'>
+                                          <BrowserPanel />
+                                        </div>
+                                      </Panel>
+                                    </>
+                                  )
+                                )}
+                              </ResizableGroup>
+                            </div>
+                          ) : (
+                            // WebView is open - show panel layout with WebView
+                            <div className='flex flex-col h-screen'>
+                              <ResizableGroup
+                                orientation='horizontal'
+                                className='flex-1 overflow-hidden'
+                                autoSaveId='app-root'
                               >
-                                <AppSidebar />
-                                <main className='flex-1 no-scrollbar overflow-auto'>
-                                  <EditWarningModal />
-                                  <Outlet />
-                                </main>
-                              </div>
-                            </Panel>
-                            <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                              <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                            </Separator>
-                            <Panel id='app-root-webview' panelRef={rightPanelRef} defaultSize='50%'>
-                              <WebView />
-                            </Panel>
-                          </ResizableGroup>
-                        </div>
-                      )}
+                                <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
+                                  <div
+                                    className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                                  >
+                                    <AppSidebar />
+                                    <main className='flex-1 no-scrollbar overflow-auto'>
+                                      <EditWarningModal />
+                                      <Outlet />
+                                    </main>
+                                  </div>
+                                </Panel>
+                                <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                  <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                </Separator>
+                                <Panel
+                                  id='app-root-webview'
+                                  panelRef={rightPanelRef}
+                                  defaultSize='50%'
+                                >
+                                  <WebView />
+                                </Panel>
+                              </ResizableGroup>
+                            </div>
+                          )}
                         </XyneCalendarSidebarHost>
                       )}
                       {/* Global overlays and IPC handlers — skipped in the panel
