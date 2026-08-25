@@ -118,6 +118,7 @@ export const DESK_METRIC_KEYS = [
   'tickets',
 ] as const;
 export type DeskMetricKey = (typeof DESK_METRIC_KEYS)[number];
+export const DEFAULT_DESK_METRIC_KEYS: DeskMetricKey[] = ['frt', 'rt', 'csat', 'counts'];
 
 /** A metrics run with only the requested slices populated. */
 export interface DeskMetricsPartial {
@@ -165,6 +166,7 @@ export interface DeskMetricsCustomFieldBreakdown {
   field: string;
   multiValue: boolean;
   values: Array<{ value: string; tickets: number }>;
+  truncated?: boolean;
 }
 
 /** One desk the caller can read metrics for. */

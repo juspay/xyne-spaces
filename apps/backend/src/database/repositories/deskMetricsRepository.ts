@@ -34,6 +34,7 @@ import { logger } from '@/utils/logger';
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_BREAKDOWN_VALUES_PER_FIELD = 25;
 
 const activeTicketFilter = (assigneeIds: string[] = []): Prisma.Sql => {
   const assigneeCondition =
@@ -726,12 +727,20 @@ export class DeskMetricsRepository {
         WITH ${cohortCte},
         ${this.dedupedFieldValuesCte()},
         ${this.expandedFieldValuesCte()}
-        SELECT field_name, bool_or(multi_value) AS multi_value, value,
-               COUNT(DISTINCT ticket_id)::int AS tickets
-        FROM expanded_cf
-        WHERE field_name IN (${Prisma.join(fields)})
-          AND value IS NOT NULL AND value <> ''
-        GROUP BY field_name, value
+        SELECT field_name, multi_value, value, tickets
+        FROM (
+          SELECT field_name, bool_or(multi_value) AS multi_value, value,
+                 COUNT(DISTINCT ticket_id)::int AS tickets,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY field_name
+                   ORDER BY COUNT(DISTINCT ticket_id) DESC, value ASC
+                 ) AS rn
+          FROM expanded_cf
+          WHERE field_name IN (${Prisma.join(fields)})
+            AND value IS NOT NULL AND value <> ''
+          GROUP BY field_name, value
+        ) ranked
+        WHERE rn <= ${MAX_BREAKDOWN_VALUES_PER_FIELD + 1}
         ORDER BY field_name ASC, tickets DESC, value ASC
       `
     );
@@ -747,7 +756,15 @@ export class DeskMetricsRepository {
       entry.values.push({ value: r.value, tickets: r.tickets });
       byField.set(r.field_name, entry);
     }
-    return [...byField.values()];
+    return [...byField.values()].map(entry =>
+      entry.values.length > MAX_BREAKDOWN_VALUES_PER_FIELD
+        ? {
+            ...entry,
+            values: entry.values.slice(0, MAX_BREAKDOWN_VALUES_PER_FIELD),
+            truncated: true,
+          }
+        : entry,
+    );
   }
 
   private async resolvedStageNamesForChannel(channelId: string): Promise<string[]> {
