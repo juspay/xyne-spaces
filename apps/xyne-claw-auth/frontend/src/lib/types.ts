@@ -114,7 +114,7 @@ export interface AgentLight {
   readonly delegationTier?: "standard" | "orchestrator";
   readonly ownerUserId: string | null;
   readonly createdBy?: string | null;
-  readonly orgId?: string;
+  readonly orgId?: string | null;
   readonly orgName?: string | null;
   readonly enabled: boolean;
   readonly isDefault?: boolean;

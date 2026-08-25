@@ -69,7 +69,7 @@ router.get("/", async (req: Request, res: Response) => {
         res.status(403).json({ success: false, error: "Only admins, the owner, or contributors can view all runs for this agent" });
         return;
       }
-      const allRuns = await agentRunRepository.listAllForAgent(agentSlug, access.agent.orgId, userId, {
+      const allRuns = await agentRunRepository.listAllForAgent(agentSlug, access.agent.orgId ?? orgId!, userId, {
         ...(status ? { status } : {}),
         ...(conversationId ? { conversationId } : {}),
         limit,
@@ -227,7 +227,7 @@ router.get("/by-agent/:slug", requireS2S, async (req: Request<{ slug: string }>,
     if (!orgId) {
       const matches = await prisma.agent.findMany({ where: { slug }, select: { orgId: true }, take: 2 });
       if (matches.length === 1) {
-        orgId = matches[0]!.orgId;
+        orgId = matches[0]!.orgId ?? undefined;
       } else if (matches.length > 1) {
         log.error(`[runs/by-agent] ambiguous slug across orgs; refusing (slug=${slug})`);
       }

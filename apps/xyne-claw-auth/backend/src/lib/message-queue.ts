@@ -89,7 +89,7 @@ export interface QueuedMessage {
   userId: string;
   senderName?: string;
   agentSlug: string;
-  orgId?: string;
+  orgId?: string | undefined;
   workspaceId?: string;
   task: string;
   eventType: string;

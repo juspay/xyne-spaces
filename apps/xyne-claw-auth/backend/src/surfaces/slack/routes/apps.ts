@@ -274,7 +274,7 @@ router.post("/agents/:slug/sync-app", requireUserAuth, async (req: Request, res:
       res.status(404).json({ success: false, error: "Existing Slack app not found for agent" });
       return;
     }
-    const connection = await getOrgSlackConnection(agent.orgId, surface.id);
+    const connection = await getOrgSlackConnection(agent.orgId ?? getOrgId(req)!, surface.id);
     if (!connection || !hasUsableSlackConfigToken(connection)) {
       res.status(503).json({ success: false, error: "Connect Slack with an app configuration token first" });
       return;
@@ -312,7 +312,7 @@ router.post("/agents/:slug/sync-app", requireUserAuth, async (req: Request, res:
       data: {
         appId,
         installUrl: await createAgentInstallUrl({
-          orgId: agent.orgId,
+          orgId: agent.orgId ?? getOrgId(req)!,
           userId,
           surfaceAgentId: surfaceAgent.id,
           clientId,
@@ -357,14 +357,14 @@ router.post("/agents/:slug/create-app", requireUserAuth, async (req: Request, re
       }
       // Deleting an app in the Slack console emits no webhook — verify the app
       // still exists before reusing it, else fall through and mint a fresh one.
-      const stillExists = await slackAppStillExists(agent.orgId, surface.id, existingAppId);
+      const stillExists = await slackAppStillExists(agent.orgId ?? getOrgId(req)!, surface.id, existingAppId);
       if (stillExists) {
         res.json({
           success: true,
           data: {
             appId: existingAppId,
             installUrl: await createAgentInstallUrl({
-              orgId: agent.orgId,
+              orgId: agent.orgId ?? getOrgId(req)!,
               userId,
               surfaceAgentId: existingSurfaceAgent.id,
               clientId: existingClientId,
@@ -379,7 +379,7 @@ router.post("/agents/:slug/create-app", requireUserAuth, async (req: Request, re
     if (recreate && existingAppId) {
       log.warn(`[surfaces-slack] Replacing per-agent Slack app ${existingAppId}`);
     }
-    const connection = await getOrgSlackConnection(agent.orgId, surface.id);
+    const connection = await getOrgSlackConnection(agent.orgId ?? getOrgId(req)!, surface.id);
     if (!connection || !hasUsableSlackConfigToken(connection)) {
       res.status(503).json({ success: false, error: "Connect Slack with an app configuration token first" });
       return;
@@ -435,7 +435,7 @@ router.post("/agents/:slug/create-app", requireUserAuth, async (req: Request, re
       createdByUserId: userId,
     });
     const installUrl = await createAgentInstallUrl({
-      orgId: agent.orgId,
+      orgId: agent.orgId ?? getOrgId(req)!,
       userId,
       surfaceAgentId: surfaceAgent.id,
       clientId,
@@ -506,7 +506,7 @@ router.post("/agents/:slug/register-command", requireUserAuth, async (req: Reque
     }
     const conflicting = await findCommandConflict({
       surfaceId: surface.id,
-      orgId: agent.orgId,
+      orgId: agent.orgId ?? getOrgId(req)!,
       commandName,
       excludeAgentId: agent.id,
     });
@@ -517,7 +517,7 @@ router.post("/agents/:slug/register-command", requireUserAuth, async (req: Reque
       });
       return;
     }
-    const umbrella = await findUmbrellaApp(agent.orgId, surface.id);
+    const umbrella = await findUmbrellaApp(agent.orgId ?? getOrgId(req)!, surface.id);
     if (!umbrella) {
       res.status(503).json({
         success: false,
@@ -525,7 +525,7 @@ router.post("/agents/:slug/register-command", requireUserAuth, async (req: Reque
       });
       return;
     }
-    const tokenRow = await getOrgSlackConnection(agent.orgId, surface.id);
+    const tokenRow = await getOrgSlackConnection(agent.orgId ?? getOrgId(req)!, surface.id);
     if (!tokenRow || !hasUsableSlackConfigToken(tokenRow)) {
       res.status(503).json({ success: false, error: "Connect Slack with an app configuration token first" });
       return;

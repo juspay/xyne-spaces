@@ -920,8 +920,11 @@ model Agent {
   delegationTier        String                     @default("standard")
   ownerUserId           String?
   owner                 User?                      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  orgId                 String
-  org                   Organization               @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  /// NULL for platform agents (scope="platform"): they belong to no tenant
+  /// org. Runtime org context (billing, catalogs, creds) always comes from
+  /// the CALLER's org — see resolveRunOrgId usage in routes/run.ts.
+  orgId                 String?
+  org                   Organization?              @relation(fields: [orgId], references: [id], onDelete: Restrict)
   enabled               Boolean                    @default(true)
   isDefault             Boolean                    @default(false)
   color                 String                     @default("#6366f1")

@@ -452,7 +452,7 @@ async function resolveAgent(
       modelId?: string | undefined;
       agentConfig: Record<string, unknown>;
       config?: unknown;
-      orgId: string;
+      orgId: string | null;
       delegationTier: "standard" | "orchestrator";
       spacesAppId?: string | null;
       spacesAppToken?: string | null;
@@ -954,6 +954,16 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       return;
     }
 
+    // Org context for everything this run TOUCHES (run rows, chat messages,
+    // catalogs, creds, brief slug). Platform agents have orgId=NULL — they
+    // belong to no tenant org — so the caller's org is used. runtimeOrgId is
+    // guaranteed set whenever resolveAgent succeeded (it 400s otherwise).
+    const runOrgId = agent.orgId ?? runtimeOrgId;
+    if (!runOrgId) {
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
+
     // Invocation whitelist — the universal chokepoint for CLI / service-token /
     // external-API runs (they all enter here). Enforced on the RESOLVED caller
     // (resolved.userId), in addition to any service-token scope gate. Refused
@@ -1118,7 +1128,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       try {
         const userInstructions = await userAgentInstructionRepository.getEnabledText(
           resolved.userId,
-          agent.orgId,
+          runOrgId,
           instructionAgentSlug,
         );
         if (userInstructions) {
@@ -1156,7 +1166,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     // always sees the current agents without any hardcoded list in the prompt.
     if (agentSlug === "claw") {
       try {
-        const catalog = await buildAgentCatalog(resolved.userId, agent.orgId);
+        const catalog = await buildAgentCatalog(resolved.userId, runOrgId);
         additionalInstructions = additionalInstructions ? `${catalog}\n\n${additionalInstructions}` : catalog;
       } catch (catalogErr) {
         log.warn(
@@ -1194,7 +1204,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const requestedSubagentNames = parseToolsConfig(mergedAgentConfig)?.subagents ?? [];
     const customSubagents =
       requestedSubagentNames.length > 0
-        ? await resolveCustomSubagentsForRun(prisma, requestedSubagentNames, agent.orgId)
+        ? await resolveCustomSubagentsForRun(prisma, requestedSubagentNames, runOrgId)
         : [];
 
     // A2A delegation. Standard-tier callers list requested callee slugs under
@@ -1210,12 +1220,12 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     const runningUserIsAdmin = await isClawAdmin(resolved.userId);
     const callableAgents =
       agent.delegationTier === "orchestrator"
-        ? await resolveOrchestratorCallableAgentsForRun(prisma, agent.id, agent.orgId, {
+        ? await resolveOrchestratorCallableAgentsForRun(prisma, agent.id, runOrgId, {
             runningUserId: resolved.userId,
             isAdmin: runningUserIsAdmin,
           })
         : requestedCalleeSlugs.length > 0
-          ? await resolveCallableAgentsForRun(prisma, agent.id, requestedCalleeSlugs, agent.orgId, {
+          ? await resolveCallableAgentsForRun(prisma, agent.id, requestedCalleeSlugs, runOrgId, {
               runningUserId: resolved.userId,
               isAdmin: runningUserIsAdmin,
             })
@@ -1374,7 +1384,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           conversationId: conversationId ?? "",
           task: task.trim(),
           agentId: agent.id,
-          agentOrgId: agent.orgId,
+          agentOrgId: runOrgId,
           agentSlug: agentSlug || "assistant",
           responseMode: "conversation",
           appToken,
@@ -1444,7 +1454,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       // Lazy (only when a brief run is actually requested): the configured brief
       // agent is per-org (Organization.dailyBriefAgentSlug), falling back to the
       // deployment default — resolved by the single source of truth in dailyBrief.ts.
-      agentDailyBriefOptIn = agentSlug === (await resolveBriefAgentSlug(agent.orgId));
+      agentDailyBriefOptIn = agentSlug === (await resolveBriefAgentSlug(runOrgId));
     }
     const effectiveMode: "plan" | "auto" | "daily_brief" | undefined =
       requestedMode === "plan"
@@ -1569,7 +1579,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             sessionId,
             userId: resolved.userId,
             agentSlug: agentSlug || "assistant",
-            orgId: agent.orgId,
+            orgId: runOrgId,
             triggerSource: defaultTriggerSource,
             task: task.trim(),
             ...(conversationId ? { conversationId } : {}),
@@ -1650,7 +1660,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             userId: resolved.userId,
             role: "user",
             content: task.trim(),
-            orgId: agent.orgId,
+            orgId: runOrgId,
           });
         } catch (msgErr) {
           log.warn(
@@ -1673,7 +1683,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             sessionId,
             userId: resolved.userId,
             agentSlug: agentSlug || "assistant",
-            orgId: agent.orgId,
+            orgId: runOrgId,
             triggerSource: defaultTriggerSource,
             task: task.trim(),
             ...(conversationId ? { conversationId } : {}),
@@ -1861,7 +1871,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             userId: resolved.userId,
             role: "user",
             content: task.trim(),
-            orgId: agent.orgId,
+            orgId: runOrgId,
           });
         } catch (msgErr) {
           log.warn(
@@ -1884,7 +1894,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
             sessionId,
             userId: resolved.userId,
             agentSlug: agentSlug || "assistant",
-            orgId: agent.orgId,
+            orgId: runOrgId,
             triggerSource: defaultTriggerSource,
             task: task.trim(),
             ...(conversationId ? { conversationId } : {}),
@@ -1963,7 +1973,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           userId: resolved.userId,
           role: "user",
           content: task.trim(),
-          orgId: agent.orgId,
+          orgId: runOrgId,
         });
       } catch (msgErr) {
         log.warn("[run] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : msgErr);
@@ -1991,7 +2001,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           sessionId: body.sessionId,
           userId: resolved.userId,
           agentSlug: agentSlug || "assistant",
-          orgId: agent.orgId,
+          orgId: runOrgId,
           triggerSource: defaultTriggerSource,
           task: task.trim(),
           ...(conversationId ? { conversationId } : {}),

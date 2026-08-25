@@ -20,13 +20,15 @@ const QUEUE_NAME = "agent-run-recovery";
 interface RecoveryDispatchPayload {
   userId: string;
   task: string;
+  /** May be undefined for platform-agent dispatches (agent orgId is NULL);
+   *  registration is skipped by the orgId guard below in that case. */
   // Stable idempotency key (= rootSessionId) sent to xyne-claw so a re-dispatch
   // of an already-completed run is detected via its GCS result marker and NOT
   // re-executed. Injected in registerRunRecovery.
   idempotencyKey?: string;
   conversationId: string;
   agentSlug: string;
-  orgId: string;
+  orgId: string | undefined;
   eventType: string;
   traceId: string;
   callbackUrl: string;

@@ -267,7 +267,7 @@ export function AdminPageV3({ userId }: Props) {
   const loadSlackAgentStatuses = useCallback(async () => {
     setSlackStatusesReady(false);
     try {
-      const orgIds = [...new Set(agents.map((agent) => agent.orgId))];
+      const orgIds = [...new Set(agents.map((agent) => agent.orgId ?? undefined))];
       const results = await Promise.allSettled(orgIds.map((orgId) => listSlackAgentStatuses(orgId)));
       const rows = results.flatMap((result, index) => {
         if (result.status === "fulfilled") return result.value;
@@ -856,7 +856,7 @@ export function AdminPageV3({ userId }: Props) {
   const handleCreateSlackApp = useCallback(async (agent: AgentLight) => {
     setSlackCreatingSlug(agent.slug);
     try {
-      const created = await createSlackAgentApp(agent.slug, agent.orgId);
+      const created = await createSlackAgentApp(agent.slug, agent.orgId ?? undefined);
       setSlackAgentStatuses((current) => {
         const existing = current[agent.id];
         return {
@@ -894,7 +894,7 @@ export function AdminPageV3({ userId }: Props) {
   const openFreshSlackInstall = useCallback(async (agent: AgentLight) => {
     setSlackCreatingSlug(agent.slug);
     try {
-      const created = await createSlackAgentApp(agent.slug, agent.orgId);
+      const created = await createSlackAgentApp(agent.slug, agent.orgId ?? undefined);
       setSlackAgentStatuses((current) => {
         const existing = current[agent.id];
         return {
@@ -938,7 +938,7 @@ export function AdminPageV3({ userId }: Props) {
   const updateSlackAppAndReinstall = useCallback(async (agent: AgentLight) => {
     setSlackCreatingSlug(agent.slug);
     try {
-      const synced = await syncSlackAgentApp(agent.slug, agent.orgId);
+      const synced = await syncSlackAgentApp(agent.slug, agent.orgId ?? undefined);
       if (slackFocusListenerRef.current) {
         window.removeEventListener("focus", slackFocusListenerRef.current);
       }
@@ -962,7 +962,7 @@ export function AdminPageV3({ userId }: Props) {
 
   const handleRemoveSlackRegistration = useCallback(async (agent: AgentLight) => {
     try {
-      await removeSlackAgentRegistration(agent.slug, agent.orgId);
+      await removeSlackAgentRegistration(agent.slug, agent.orgId ?? undefined);
       setSlackAgentStatuses((current) => {
         const next = { ...current };
         delete next[agent.id];

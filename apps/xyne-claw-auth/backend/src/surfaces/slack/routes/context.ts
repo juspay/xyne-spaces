@@ -13,7 +13,7 @@ import { objectPayload } from "./shared.js";
 
 export interface ResolvedSlackAgent {
   userId: string;
-  agent: { id: string; slug: string; name: string; orgId: string };
+  agent: { id: string; slug: string; name: string; orgId: string | null };
 }
 
 export type SlackAgentResolution =
@@ -44,7 +44,9 @@ export async function resolveSlackAgentRequest(req: Request): Promise<SlackAgent
   if (!agent) return { ok: false, status: 404, error: "Agent not found" };
 
   const platformAdmin = await isClawAdmin(userId);
-  if (!platformAdmin && (sessionOrgId !== agent.orgId || !(await isOrgAdmin(userId, agent.orgId)))) {
+  // Platform agents have orgId=NULL and no org-admin — they always fail the
+  // org-match branch and stay read-only here (same 404 posture as before).
+  if (!platformAdmin && (!agent.orgId || sessionOrgId !== agent.orgId || !(await isOrgAdmin(userId, agent.orgId)))) {
     return { ok: false, status: 404, error: "Agent not found" };
   }
 

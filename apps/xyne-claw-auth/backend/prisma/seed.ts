@@ -1376,26 +1376,35 @@ For implementation work, modify only the pinned repository and requested branch,
   // Platform agents are visible across ALL orgs and cannot be edited, deleted,
   // promoted, or demoted. Users must clone (duplicate) them to customize.
   // Only the seed script can create platform-scope agents — the API rejects
-  // scope: "platform" on create.
-  await prisma.agent.upsert({
-    where: { orgId_slug: { orgId: defaultOrg.id, slug: "platform-assistant" } },
-    create: {
-      slug: "platform-assistant",
-      orgId: defaultOrg.id,
-      name: "Platform Assistant",
-      description: "A platform-level agent accessible across all orgs. Read-only — duplicate it to your own agent to customize.",
-      systemPrompt: [
-        "You are the **Platform Assistant** — a general-purpose helper available to all organizations.",
-        "",
-        "You can help with research, drafting, summarization, and answering questions across a wide range of topics.",
-        "Be concise, accurate, and helpful.",
-      ].join("\n"),
-      scope: "platform",
-      color: "#8b5cf6",
-      config: {},
-    },
-    update: {},
+  // scope: "platform" on create. orgId is NULL: they belong to no tenant org.
+  const platformAssistant = await prisma.agent.findFirst({
+    where: { slug: "platform-assistant", orgId: null },
+    select: { id: true },
   });
+  if (platformAssistant) {
+    await prisma.agent.update({
+      where: { id: platformAssistant.id },
+      data: {},
+    });
+  } else {
+    await prisma.agent.create({
+      data: {
+        slug: "platform-assistant",
+        orgId: null,
+        name: "Platform Assistant",
+        description: "A platform-level agent accessible across all orgs. Read-only — duplicate it to your own agent to customize.",
+        systemPrompt: [
+          "You are the **Platform Assistant** — a general-purpose helper available to all organizations.",
+          "",
+          "You can help with research, drafting, summarization, and answering questions across a wide range of topics.",
+          "Be concise, accurate, and helpful.",
+        ].join("\n"),
+        scope: "platform",
+        color: "#8b5cf6",
+        config: {},
+      },
+    });
+  }
   console.log("[seed] Upserted platform-assistant agent (scope: platform)");
 
   // Seed doctor-agent (Xyne Doctor — autonomous bug fixer)

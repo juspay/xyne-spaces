@@ -302,7 +302,7 @@ type AppActionResponse =
 
 async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: string, orgId?: string): Promise<{
   id: string;
-  orgId: string;
+  orgId: string | null;
   slug: string;
   spacesAppToken: string | null;
   spacesAppUserId: string | null;
@@ -1451,7 +1451,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             channelId: proposalChannelId,
             userId: callerUserId,
             agentSlug: targetAgent.slug,
-            orgId: targetAgent.orgId,
+            orgId: targetAgent.orgId ?? undefined,
             task,
             eventType: "APP_MENTIONED",
             ts: Date.now(),
@@ -1493,7 +1493,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         task,
         conversationId: proposalConversationId,
         agentSlug: targetAgent.slug,
-        orgId: targetAgent.orgId,
+        orgId: targetAgent.orgId ?? undefined,
         eventType: "APP_MENTIONED",
         traceId,
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
@@ -1959,7 +1959,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             conversationId: goalConversationId,
             channelId: goalChannelId,
             agentSlug: goalAgentSlug,
-            orgId: agent.orgId,
+            orgId: agent.orgId ?? goalUser!.orgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
             fastMode: fastModeEnabled,
           };
@@ -2002,7 +2002,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               channelId: goalChannelId,
               userId: goalUserId,
               agentSlug: goalAgentSlug,
-              orgId: agent.orgId,
+              orgId: agent.orgId ?? goalUser!.orgId,
               condition: intercept.condition,
               runPayload: dispatchPayload as Parameters<typeof persistGoalStart>[0]["runPayload"],
             }).catch((err) => {

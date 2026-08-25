@@ -103,7 +103,8 @@ function resolveGatewayTenantForRequest(): string | null {
 async function resolveSessionAgentOrgId(userId: string, spacesAppId?: string): Promise<string | undefined> {
   if (spacesAppId) {
     const agent = await prisma.agent.findUnique({ where: { spacesAppId }, select: { orgId: true } });
-    return agent?.orgId;
+    // Platform agents have orgId=NULL — fall through to the caller's org.
+    if (agent?.orgId) return agent.orgId;
   }
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
   return user?.orgId;

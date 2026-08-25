@@ -988,6 +988,13 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    // Platform agents have orgId=NULL — chat rows, runs, and per-user agent
+    // config are attributed to the CALLER's org instead.
+    const chatOrgId = agent.orgId ?? getOrgId(req);
+    if (!chatOrgId) {
+      res.status(400).json({ success: false, error: "orgId is required" });
+      return;
+    }
     // Invocation whitelist — dashboard chat surface. Same rule as every other
     // entry point; refused like a disabled/absent agent.
     if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
@@ -1137,7 +1144,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       const userMsg = await chatMessageRepository.create({
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: requestedParent?.id ?? null,
-        orgId: agent.orgId,
+        orgId: chatOrgId,
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
@@ -1152,7 +1159,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       const userMsg = await chatMessageRepository.create({
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: userParentId,
-        orgId: agent.orgId,
+        orgId: agent.orgId ?? chatOrgId,
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
@@ -1183,7 +1190,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const assistantMsg = await chatMessageRepository.create({
       conversationId, agentSlug: slug, userId, role: "assistant", content: "", status: "running",
       parentId: assistantParentId,
-      orgId: agent.orgId,
+      orgId: agent.orgId ?? chatOrgId,
     });
 
     // If this turn requires a branched PI session, clone it now (S2S to claw).
@@ -1303,7 +1310,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     //   1. user's personal provider (userAgentConfig + userProviderCredentials)
     //   2. agent-level shared provider (agent.config.provider + agentProviderCredentials)
     //   3. "spaces" / LiteLLM platform default
-    const userAgentConfig = await userAgentConfigRepository.findByUserAndAgent(userId, agent.orgId, slug).catch(() => null);
+    const userAgentConfig = await userAgentConfigRepository.findByUserAndAgent(userId, agent.orgId ?? chatOrgId, slug).catch(() => null);
     const rawPersonalProvider = userAgentConfig?.provider;
     // "spaces" is the platform-default sentinel, not a real personal credential —
     // saving it should not override the agent-level providerOrder/credentials.
@@ -1503,7 +1510,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         sessionId: runBody.sessionId,
         userId,
         agentSlug: slug,
-        orgId: agent.orgId,
+        orgId: agent.orgId ?? chatOrgId,
         triggerSource: "chat",
         task: message.trim(),
         conversationId,
@@ -1922,7 +1929,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         conversationId: req.params.convId,
         agentSlug: req.params.slug,
         userId,
-        orgId: agent.orgId,
+        orgId: agent.orgId ?? callbackOrgId,
         content: finalContent,
         status: finalStatus,
         ...(attachments?.length ? { attachments } : {}),

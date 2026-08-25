@@ -136,7 +136,13 @@ export async function processAgentRange(
   const agentRow = await prisma.agent.findUnique({
     where: { orgId_slug: { orgId, slug: agentSlug } },
     select: { orgId: true, systemPrompt: true },
+  }) ?? await prisma.agent.findFirst({
+    // Platform agents have orgId=NULL — the run's org (from AgentRun rows) is
+    // the attribution context for curation.
+    where: { slug: agentSlug, scope: "platform" },
+    select: { orgId: true, systemPrompt: true },
   });
+  const agentOrgId = agentRow?.orgId ?? orgId;
   if (!agentRow) {
     log.warn(`[failure-curator-worker] missing agent slug=${agentSlug} orgId=${orgId}; skipping curator run`);
     return { emitted: -1, advanceTo: null };
@@ -162,7 +168,7 @@ export async function processAgentRange(
   // 3. Pull contextWindow for pattern context (NOT used as evidence by the LLM)
   const ctxSince = new Date(Math.max(now.getTime() - MAX_CONTEXT_WINDOW_DAYS * 24 * 60 * 60 * 1000, 0));
   const context = await prisma.agentRun.findMany({
-    where: { orgId: agentRow.orgId, agentSlug, completedAt: { gte: ctxSince, lt: now } },
+    where: { orgId: agentOrgId, agentSlug, completedAt: { gte: ctxSince, lt: now } },
     select: { sessionId: true, status: true, task: true, totalMs: true, completedAt: true, llmTotalMs: true, toolMs: true, llmRetries: true, lastRetryReason: true, result: true, error: true },
     orderBy: { completedAt: "desc" },
     take: MAX_CONTEXT_SESSIONS,
@@ -172,7 +178,7 @@ export async function processAgentRange(
   // 5. Call claw curator
   // Resolve the ORG's key so the distill call bills the org (org-identity, no user
   // context). Miss → undefined → claw skips (no server-key fallback).
-  const orgLitellmApiKey = await resolveOrgLitellmApiKey(agentRow.orgId).catch(() => undefined);
+  const orgLitellmApiKey = await resolveOrgLitellmApiKey(agentOrgId).catch(() => undefined);
   const payload = {
     agentSlug,
     systemPrompt: agentRow?.systemPrompt ?? undefined,
@@ -214,14 +220,14 @@ export async function processAgentRange(
   const newWatermark = negatives.reduce((m, n) => (n.completedAt.getTime() > m.getTime() ? n.completedAt : m), since);
   let emitted = 0;
   for (const c of candidates) {
-    const merged = await dedupeMergeOrInsert(agentSlug, agentRow.orgId, c);
+    const merged = await dedupeMergeOrInsert(agentSlug, agentOrgId, c);
     if (merged === "inserted") emitted++;
   }
 
   // 7. Advance watermark only if caller asked. Backfill skips this so the
   //    hourly worker's incremental scan isn't disturbed.
   if (advanceWatermark) {
-    const existingState = await prisma.agentCuratorState.findFirst({ where: { orgId: agentRow.orgId, agentSlug } });
+    const existingState = await prisma.agentCuratorState.findFirst({ where: { orgId: agentOrgId, agentSlug } });
     if (existingState) {
       await prisma.agentCuratorState.update({
         where: { agentSlug: existingState.agentSlug },
@@ -237,7 +243,7 @@ export async function processAgentRange(
         await prisma.agentCuratorState.create({
           data: {
             agentSlug,
-            orgId: agentRow.orgId,
+            orgId: agentOrgId,
             lastProcessedAt: newWatermark,
             lastRunAt: now,
             invocationCount: 1,
@@ -291,7 +297,7 @@ export async function backfillFailureCurator(opts: {
     agentPairs = await prisma.agent.findMany({
       where: { slug: opts.agentSlug },
       select: { orgId: true, slug: true },
-    }).then((rows) => rows.map((row) => ({ orgId: row.orgId, agentSlug: row.slug })));
+    }).then((rows) => rows.map((row) => ({ orgId: row.orgId, agentSlug: row.slug })).filter((pair): pair is { orgId: string; agentSlug: string } => pair.orgId !== null));
   } else {
     agentPairs = await prisma.$queryRaw<Array<{ orgId: string; agentSlug: string }>>`
       SELECT DISTINCT "orgId", "agentSlug" FROM "agent_runs"

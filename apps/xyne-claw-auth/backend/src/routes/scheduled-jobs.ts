@@ -292,7 +292,7 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
     const agent = await prisma.agent.findFirst({
-      where: { slug: agentSlug, orgId: requestOrgId },
+      where: { slug: agentSlug, OR: [{ orgId: requestOrgId }, { scope: "platform" }] },
       select: { orgId: true },
     });
     if (!agent) {
@@ -375,7 +375,8 @@ router.post("/", async (req: Request, res: Response) => {
         label: label ?? null,
         workspaceId: workspaceId ?? null,
         replyMode: replyMode ?? "thread",
-        orgId: agent.orgId,
+        // Platform agents have orgId=NULL — attribute the job to the requester's org.
+        orgId: agent.orgId ?? requestOrgId,
       },
     });
 

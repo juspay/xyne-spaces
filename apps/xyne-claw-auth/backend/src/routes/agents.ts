@@ -906,7 +906,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
       });
     }
 
-    const agent = await agentRepository.update(req.params.slug, existing.orgId, data);
+    const agent = await agentRepository.update(req.params.slug, existing.orgId ?? getOrgId(req)!, data);
 
     // Model-settings audit — which model actually serves this agent's runs.
     // Written only when config.modelSettings really changed, so the
@@ -917,7 +917,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
         agentId: existing.id,
         agentName: existing.name,
         agentSlug: existing.slug,
-        orgId: existing.orgId,
+        orgId: existing.orgId ?? getOrgId(req)!,
         actorUserId: requesterId ?? undefined,
         beforeConfig: existing.config,
         afterConfig: normalizedConfig,
@@ -1237,7 +1237,7 @@ router.post(
         return;
       }
       const callee = await prisma.agent.findUnique({
-        where: { orgId_slug: { orgId: caller.orgId, slug: calleeHandle } },
+        where: { orgId_slug: { orgId: caller.orgId ?? getOrgId(req)!, slug: calleeHandle } },
         select: {
           id: true,
           slug: true,
@@ -1549,7 +1549,7 @@ router.delete("/:slug", requireAgentOwnerOrAdmin, async (req: Request<{ slug: st
       return;
     }
 
-    await agentRepository.delete(req.params.slug, agent.orgId);
+    await agentRepository.delete(req.params.slug, agent.orgId ?? getOrgId(req)!);
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -1592,7 +1592,7 @@ router.post("/:slug/request", async (req: Request<{ slug: string }>, res: Respon
     const existing = await agentRequestRepository.findPending(agent.id, requestType);
     if (existing) { res.status(409).json({ success: false, error: "A pending request already exists" }); return; }
 
-    const request = await agentRequestRepository.create({ agentId: agent.id, agentSlug: agent.slug, requestType, requesterId, orgId: agent.orgId ?? getOrgId(req) ?? null });
+    const request = await agentRequestRepository.create({ agentId: agent.id, agentSlug: agent.slug, requestType, requesterId, orgId: agent.orgId ?? getOrgId(req)! });
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -1893,7 +1893,7 @@ router.post("/:slug/clone", async (req: Request<{ slug: string }>, res: Response
       agentSlug: agent.slug,
       requestType: "clone",
       requesterId,
-      orgId: agent.orgId ?? getOrgId(req) ?? null,
+      orgId: agent.orgId ?? getOrgId(req)!,
       // Carry the requester's chosen name so the clone the owner approves later
       // uses it (falls back to "<source> (Copy)" when unset).
       requestedName: name?.trim() || null,
@@ -2121,7 +2121,7 @@ router.post("/:slug/promote", requireClawAdmin, async (req: Request<{ slug: stri
       return;
     }
 
-    const updated = await agentRepository.update(req.params.slug, agent.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
+    const updated = await agentRepository.update(req.params.slug, agent.orgId ?? getOrgId(req)!, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -2158,7 +2158,7 @@ router.post("/:slug/demote", requireClawAdmin, async (req: Request<{ slug: strin
       return;
     }
 
-    const updated = await agentRepository.update(req.params.slug, agent.orgId, { scope: "personal", promotedBy: null, promotedAt: null });
+    const updated = await agentRepository.update(req.params.slug, agent.orgId ?? getOrgId(req)!, { scope: "personal", promotedBy: null, promotedAt: null });
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -2571,7 +2571,7 @@ router.post("/:slug/create-app", requireAgentOwnerOrAdmin, async (req: Request<{
     const body = (await createRes.json()) as { id?: string };
     if (!body.id) { res.status(500).json({ success: false, error: "Spaces did not return app ID" }); return; }
 
-    await agentRepository.update(req.params.slug, agent.orgId, { spacesAppId: body.id });
+    await agentRepository.update(req.params.slug, agent.orgId ?? getOrgId(req)!, { spacesAppId: body.id });
 
     log.info(`[agents] Created Spaces App ${body.id} for ${req.params.slug}`);
     res.json({ success: true, data: { spacesAppId: body.id } });
@@ -2619,7 +2619,7 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     }
 
     const encToken = encrypt(body.jwtToken, CONFIG.encryptionKey);
-    await agentRepository.update(req.params.slug, agent.orgId, {
+    await agentRepository.update(req.params.slug, agent.orgId ?? getOrgId(req)!, {
       spacesAppUserId: appUserId,
       spacesAppToken: `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`,
     });
@@ -2786,7 +2786,7 @@ router.post("/:slug/grant-permissions", requireAgentOwnerOrAdmin, async (req: Re
         } catch { /* keep prior appUserId */ }
       }
       const encToken = encrypt(body.jwtToken, CONFIG.encryptionKey);
-      await agentRepository.update(req.params.slug, agent.orgId, {
+      await agentRepository.update(req.params.slug, agent.orgId ?? getOrgId(req)!, {
         spacesAppToken: `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`,
         ...(appUserId ? { spacesAppUserId: appUserId } : {}),
       });
@@ -2857,7 +2857,7 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/get-user-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
+    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId ?? getOrgId(req)!, req.params.slug);
     res.json({
       success: true,
       data: { provider: config?.provider ?? "spaces" },
@@ -2877,7 +2877,7 @@ router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
     }
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/upsert-user-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider }, agent.orgId);
+    const config = await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider }, agent.orgId ?? getOrgId(req)!);
     res.json({ success: true, data: { provider: config.provider } });
   } catch (err) {
     log.error("[agents] upsert user-config error:", err);
@@ -2891,7 +2891,7 @@ router.get("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ 
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/get-chain-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
+    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId ?? getOrgId(req)!, req.params.slug);
     res.json({ success: true, data: config?.chainConfig ?? null });
   } catch (err) {
     log.error("[agents] get chain-config error:", err);
@@ -2905,7 +2905,7 @@ router.put("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ 
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/upsert-chain-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { chainConfig }, agent.orgId);
+    await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { chainConfig }, agent.orgId ?? getOrgId(req)!);
 
     res.json({ success: true, data: chainConfig });
   } catch (err) {
@@ -2918,7 +2918,7 @@ router.delete("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { res.json({ success: true }); return; }
-    await userAgentConfigRepository.delete(req.params.userId, agent.orgId, req.params.slug);
+    await userAgentConfigRepository.delete(req.params.userId, agent.orgId ?? getOrgId(req)!, req.params.slug);
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
@@ -3075,7 +3075,7 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
       // Also flip this agent's provider to copilot
       const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
       if (!agent) { logAgentScopedMiss(req, "agents/copilot-login-poll", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-      await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider: "copilot" }, agent.orgId);
+      await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider: "copilot" }, agent.orgId ?? getOrgId(req)!);
 
       // Cleanup Redis
       await redis.del(key);

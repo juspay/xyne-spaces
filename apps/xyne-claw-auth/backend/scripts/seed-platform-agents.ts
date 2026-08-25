@@ -10,28 +10,22 @@
  * POST /agents route rejects `scope: "platform"` — only this seed script can
  * create them.
  *
- * `orgId` is still required by the schema (NOT NULL + @@unique([orgId, slug])),
- * so each platform agent is anchored to one org for the unique constraint;
- * cross-org visibility comes from the OR clause, not from a null org.
+ * `orgId` is NULL for platform agents (nullable since
+ * 20260825120000_agents_orgid_nullable): NULL *is* the platform scope. Runtime
+ * org context for platform-agent runs (billing, catalogs, creds) comes from
+ * the CALLER's org at dispatch — never from this row.
  *
- * Idempotent: upserts on (orgId, slug). If `ask-ai` / `digital-twin` already
- * exist (e.g. as `scope: "global"` from prisma/seed.ts), the update branch
- * promotes them to `scope: "platform"` and refreshes the prompt + config.
+ * Idempotent: finds by (slug, orgId NULL) and creates/updates. If `ask-ai` /
+ * `digital-twin` already exist as platform rows, refreshes prompt + config.
  *
  * Usage:
  *   npx tsx --env-file=.env scripts/seed-platform-agents.ts
  *   npx tsx --env-file=.env scripts/seed-platform-agents.ts --dry-run
- *
- * Optional env:
- *   PLATFORM_AGENT_ORG_NAME  Org name to anchor the platform agents to
- *                            (default: "Juspay", matching prisma/seed.ts).
  */
 
 import { PrismaClient, type Prisma } from "@prisma/client";
 
 const prisma = new PrismaClient();
-
-const DEFAULT_ORG_NAME = process.env.PLATFORM_AGENT_ORG_NAME || "Juspay";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent definitions. Prompts and configs mirror prisma/seed.ts so platform
@@ -284,31 +278,7 @@ function parseDryRun(argv: string[]): boolean {
   return argv.includes("--dry-run");
 }
 
-async function resolveOrg(orgName: string) {
-  const org = await prisma.organization.findUnique({
-    where: { name: orgName },
-    select: { id: true, name: true },
-  });
-  if (org) return org;
 
-  // Fallback: first org in the deployment. Platform visibility is cross-org
-  // regardless of which org anchors the row, so any org satisfies the
-  // NOT NULL + unique constraint.
-  const first = await prisma.organization.findFirst({
-    orderBy: { createdAt: "asc" },
-    select: { id: true, name: true },
-  });
-  if (!first) {
-    throw new Error(
-      `No organization found. Pass -DPLATFORM_AGENT_ORG_NAME=<name> ` +
-        `or create an org first (prisma/seed.ts creates the default "${DEFAULT_ORG_NAME}" org).`,
-    );
-  }
-  console.warn(
-    `[seed-platform-agents] Org "${orgName}" not found; anchoring to first org "${first.name}" (${first.id}).`,
-  );
-  return first;
-}
 
 async function main(): Promise<void> {
   const dryRun = parseDryRun(process.argv.slice(2));
@@ -316,12 +286,11 @@ async function main(): Promise<void> {
     `\n${dryRun ? "[dry-run] " : ""}Seeding platform-level agents (scope: "platform")…\n`,
   );
 
-  const org = await resolveOrg(DEFAULT_ORG_NAME);
-  console.log(`[seed-platform-agents] Anchor org: ${org.name} (${org.id})`);
-
   for (const def of PLATFORM_AGENTS) {
-    const existing = await prisma.agent.findUnique({
-      where: { orgId_slug: { orgId: org.id, slug: def.slug } },
+    // orgId=NULL is the platform scope — upsert by (slug, NULL) since the
+    // orgId_slug compound unique key can't target NULLs.
+    const existing = await prisma.agent.findFirst({
+      where: { slug: def.slug, orgId: null },
       select: { id: true, scope: true },
     });
 
@@ -335,27 +304,19 @@ async function main(): Promise<void> {
       continue;
     }
 
-    await prisma.agent.upsert({
-      where: { orgId_slug: { orgId: org.id, slug: def.slug } },
-      create: {
-        slug: def.slug,
-        orgId: org.id,
-        name: def.name,
-        description: def.description,
-        systemPrompt: def.systemPrompt,
-        scope: "platform",
-        color: def.color,
-        config: def.config as Prisma.InputJsonValue,
-      },
-      update: {
-        name: def.name,
-        description: def.description,
-        systemPrompt: def.systemPrompt,
-        scope: "platform",
-        color: def.color,
-        config: def.config as Prisma.InputJsonValue,
-      },
-    });
+    const data = {
+      name: def.name,
+      description: def.description,
+      systemPrompt: def.systemPrompt,
+      scope: "platform",
+      color: def.color,
+      config: def.config as Prisma.InputJsonValue,
+    };
+    if (existing) {
+      await prisma.agent.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.agent.create({ data: { slug: def.slug, orgId: null, ...data } });
+    }
 
     const note = existing
       ? existing.scope === "platform"
@@ -371,7 +332,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `\n✅ Done. ${PLATFORM_AGENTS.length} platform agents anchored to org "${org.name}".\n` +
+    `\n✅ Done. ${PLATFORM_AGENTS.length} platform agents (orgId: NULL).\n` +
       `   They are now visible to every org (scope: "platform"). Read-only via the API —\n` +
       `   users duplicate an agent to customize it.\n`,
   );

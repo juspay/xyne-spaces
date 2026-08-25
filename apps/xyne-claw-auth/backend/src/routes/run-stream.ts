@@ -398,7 +398,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    const orgId = agentRow.orgId;
+    // Platform agents have orgId=NULL — attribute the stream to the caller's org.
+    const orgId = agentRow.orgId ?? requestOrgId;
 
     const sdlcResolution = slug === "sdlc-agent"
       ? await resolveSdlcRepositoryForUser(

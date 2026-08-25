@@ -1791,7 +1791,7 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       sessionId: `upload-${now.getTime()}-${filename}`.slice(0, 200),
       userId,
       agentSlug,
-      orgId: agent.orgId,
+      orgId: agent.orgId ?? getOrgId(req)!,
       conversationId: null,
       channelId: null,
       task: `Knowledge upload "${filename}" — extract durable, reusable facts and guidelines from this document for the agent's memory.`,
@@ -1805,7 +1805,7 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       completedAt: now,
     };
 
-    const orgLitellmApiKey = await resolveOrgLitellmApiKey(agent.orgId).catch(() => undefined);
+    const orgLitellmApiKey = await resolveOrgLitellmApiKey(agent.orgId ?? getOrgId(req)!).catch(() => undefined);
     const reviewIds = await curateApprovedTranscript(transcript, reviewDate, orgLitellmApiKey);
 
     logger.info("[memory] /upload-md curated agent document", {
@@ -2435,7 +2435,7 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
       config["memoryApprovalStrategy"] = "HUMAN_ONLY";
     }
 
-    await agentRepository.update(agentSlug, agent.orgId, { config: config as Prisma.InputJsonValue });
+    await agentRepository.update(agentSlug, agent.orgId ?? getOrgId(req)!, { config: config as Prisma.InputJsonValue });
 
     logger.info("[memory] Agent enrolled in memory", {
       agentSlug,
@@ -2479,7 +2479,7 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
     const config = { ...((agent.config as Record<string, unknown>) ?? {}) };
     config["memoryEnabled"] = false;
 
-    await agentRepository.update(agentSlug, agent.orgId, { config: config as Prisma.InputJsonValue });
+    await agentRepository.update(agentSlug, agent.orgId ?? getOrgId(req)!, { config: config as Prisma.InputJsonValue });
 
     logger.info("[memory] Agent unenrolled from memory", {
       agentSlug,
@@ -2675,7 +2675,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
 
     setImmediate(async () => {
       try {
-        const orgLitellmApiKey = await resolveOrgLitellmApiKey(agent.orgId).catch(() => undefined);
+        const orgLitellmApiKey = await resolveOrgLitellmApiKey(agent.orgId ?? getOrgId(req)!).catch(() => undefined);
         // Session-ingest path (2026-07-17, default ON): parse + clean on claw
         // (no LLM), then retain the transcript DIRECTLY — the uploader is the
         // owner/admin, so the upload itself is the approval, and the memory
@@ -2750,7 +2750,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
           sessionId,
           userId,
           agentSlug,
-          orgId: agent.orgId,
+          orgId: agent.orgId ?? getOrgId(req)!,
           conversationId: null,
           channelId: null,
           task: `${source.charAt(0).toUpperCase() + source.slice(1)} session upload "${filename}"`,

@@ -1120,7 +1120,8 @@ interface ResolvedAgent {
   slug: string;
   /** Display name — the text a leftover "@Display Name" mention carries. */
   name: string;
-  orgId: string;
+  /** NULL for platform agents: org context then comes from the dispatch/user. */
+  orgId: string | null;
   appToken: string;
   spacesAppId: string;
   spacesAppUserId: string;
@@ -2954,7 +2955,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       task,
       conversationId: payload.conversationId,
       agentSlug: runAgentSlug,
-      orgId: agent.orgId,
+      orgId: agent.orgId ?? undefined,
       eventType,
       traceId,
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
@@ -3221,6 +3222,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // relooper for each subsequent turn (task is overwritten with the
       // relooper template each loop).
       if (pendingGoalStart) {
+        const goalOrgId = agent.orgId ?? dispatchPayload.orgId;
+        if (!goalOrgId) {
+          log.warn(`[webhook/goal] org context missing for session=${body.sessionId} — skipping goal persistence`);
+        } else {
         await persistGoalStart({
           conversationId: payload.conversationId,
           channelId: payload.channelId ?? null,
@@ -3228,7 +3233,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
           userId: targetUserId,
           agentSlug: agent.slug,
-          orgId: agent.orgId,
+          // Goals attribute to the dispatched run's org (platform agent orgId is NULL).
+          orgId: goalOrgId,
           condition: pendingGoalStart.condition,
           // dispatchPayload is JSON-safe by construction (strings / arrays /
           // plain objects only); the cast satisfies Prisma's InputJsonValue
@@ -3237,6 +3243,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         }).catch((err) => {
           log.warn("Failed to persist /goal start — loop will not auto-continue", { error: err instanceof Error ? err.message : String(err) });
         });
+        }
       }
 
       // AgentRun + user ChatMessage writes are owned by the /run handler this
@@ -3535,7 +3542,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
         select: { orgId: true },
       })
       : null;
-    queuedOrgId = agent?.orgId;
+    queuedOrgId = agent?.orgId ?? undefined;
   }
   if (!queuedOrgId) {
     throw new Error(`/internal/run queued redispatch missing orgId for conv=${msg.conversationId} agent=${msg.agentSlug} user=${msg.userId}`);
@@ -3917,7 +3924,7 @@ export async function handleAutomationWebhook(
         ...(payload.channelName ? { channelName: payload.channelName } : {}),
         userId: clawUserId,
         agentSlug,
-        orgId: agent.orgId,
+        orgId: agent.orgId ?? undefined,
         ...(workspaceId ? { workspaceId } : {}),
         task: task!,
         eventType: "automation",
@@ -4233,7 +4240,7 @@ export async function handleAutomationWebhook(
       task: task!,
       conversationId: payload.conversationId ?? "",
       agentSlug,
-      orgId: agent.orgId,
+      orgId: agent.orgId ?? undefined,
       eventType: "automation",
       traceId: "",
       callbackUrl: clawCallbackUrl!,
@@ -5084,7 +5091,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               task: failureTask,
               conversationId: ctx.conversationId,
               agentSlug: chain.onFailure.triggerAgent,
-              orgId: failureAgentRow.orgId,
+              orgId: failureAgentRow.orgId ?? undefined,
               eventType: "APP_MENTIONED",
               traceId: ctx.traceId ?? runBody.sessionId,
               callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
@@ -6786,7 +6793,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             task: interpolatedTask,
             context: handoffContext,
             agentSlug: targetAgentSlug,
-            orgId: targetAgentRow.orgId,
+            orgId: targetAgentRow.orgId ?? undefined,
             channelId: ctx.channelId,
             ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
@@ -6827,7 +6834,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             context: handoffContext,
             conversationId: ctx.conversationId,
             agentSlug: targetAgentSlug,
-            orgId: targetAgentRow.orgId,
+            orgId: targetAgentRow.orgId ?? undefined,
             eventType: "APP_MENTIONED",
             traceId: ctx.traceId ?? runBody.sessionId,
             ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),

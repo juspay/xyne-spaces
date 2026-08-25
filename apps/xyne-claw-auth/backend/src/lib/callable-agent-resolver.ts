@@ -110,13 +110,13 @@ export async function hydrateCallableAgentSpec(
     { id: callee.id, config: callee.config },
     identityMode === "user" && userId
       ? { userId }
-      : identityMode === "callee_app"
+      : identityMode === "callee_app" && callee.orgId
         ? { orgId: callee.orgId }
         : undefined,
   );
   const requestedSubagents = parseToolsConfig(agentConfig)?.subagents ?? [];
   const customSubagents = requestedSubagents.length > 0
-    ? await resolveCustomSubagentsForRun(prisma, requestedSubagents, callee.orgId)
+    ? await resolveCustomSubagentsForRun(prisma, requestedSubagents, callee.orgId ?? undefined)
     : [];
   const skills = callee.skills.map((as) => ({
     slug: as.skill.slug,
@@ -327,12 +327,17 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
   const caller = await prisma.agent.findUnique({
     where: { orgId_slug: { orgId: user.orgId, slug: args.callerSlug } },
     select: { id: true, orgId: true, delegationTier: true, enabled: true },
+  }) ?? await prisma.agent.findFirst({
+    // Platform agents have orgId=NULL — the running user's org is the context.
+    where: { slug: args.callerSlug, scope: "platform" },
+    select: { id: true, orgId: true, delegationTier: true, enabled: true },
   });
+  const callerOrgId = caller?.orgId ?? user.orgId;
   if (!caller || !caller.enabled) return { error: "Caller agent not found or disabled", status: 404 };
   if (caller.delegationTier !== "orchestrator") return { error: "Caller is not orchestrator-tier", status: 403 };
 
   let callee = await prisma.agent.findUnique({
-    where: { orgId_slug: { orgId: caller.orgId, slug: args.calleeSlug } },
+    where: { orgId_slug: { orgId: callerOrgId, slug: args.calleeSlug } },
     include: { skills: { include: { skill: { include: { files: true } } } } },
   });
   if (!callee) {
@@ -348,7 +353,7 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
   const visible = await prisma.agent.findFirst({
     where: {
       id: callee.id,
-      OR: [{ orgId: caller.orgId }, { scope: "platform" }],
+      OR: [{ orgId: callerOrgId }, { scope: "platform" }],
       ...visibleAgentWhereForRunningUser(args.userId, admin),
     },
     select: { id: true },
@@ -356,7 +361,7 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
   if (!visible) return { error: "Callee is not visible to the running user", status: 403 };
 
   if (callee.scope === "global" || callee.scope === "platform") {
-    return { spec: await hydrateCallableAgentSpec(prisma, callee, "user", args.userId), callerOrgId: caller.orgId };
+    return { spec: await hydrateCallableAgentSpec(prisma, callee, "user", args.userId), callerOrgId };
   }
 
   const grant = await prisma.agentDelegationGrant.findUnique({
@@ -374,6 +379,6 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
       grant.identityMode === "callee_app" ? "callee_app" : "user",
       args.userId,
     ),
-    callerOrgId: caller.orgId,
+    callerOrgId,
   };
 }
