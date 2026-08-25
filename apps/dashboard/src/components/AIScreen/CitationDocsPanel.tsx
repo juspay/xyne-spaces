@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Panel, ResizableGroup, Separator, usePanelRef } from '../ui/Resizable/Resizable';
 import {
@@ -358,9 +358,17 @@ function CitationDocView({ doc }: { doc: CitationDoc }): ReactElement {
 export function CitationDocsPanel(): ReactElement | null {
   const ctx = useCitationDocs();
   const navigate = useNavigate();
+  // Ref on the active tab so it auto-scrolls into view in the horizontally
+  // scrollable strip whenever it changes (opening / switching a tab that's
+  // off-screen would otherwise leave the active tab hidden).
+  const activeTabRef = useRef<HTMLDivElement | null>(null);
+  const docs = ctx?.docs ?? [];
+  const active = ctx?.activeId ?? docs[docs.length - 1]?.id ?? null;
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
   if (!ctx || ctx.docs.length === 0) return null;
-  const { docs, activeId, setActive, closeDoc, closeAll, collapsed, setCollapsed } = ctx;
-  const active = activeId ?? docs[docs.length - 1]?.id ?? null;
+  const { setActive, closeDoc, closeAll, collapsed, setCollapsed } = ctx;
   const activeDoc = docs.find(d => d.id === active) ?? null;
   // "Open the full page" — navigate to the citation's real route for full
   // context. In-app paths go through the router (same tab); a rare absolute URL
@@ -440,6 +448,7 @@ export function CitationDocsPanel(): ReactElement | null {
             return (
               <div
                 key={doc.id}
+                ref={isActive ? activeTabRef : undefined}
                 className={cn(
                   'flex h-7 max-w-[220px] flex-shrink-0 items-center rounded pr-1 transition-colors',
                   isActive ? 'bg-secondary' : 'hover:bg-secondary/60',
