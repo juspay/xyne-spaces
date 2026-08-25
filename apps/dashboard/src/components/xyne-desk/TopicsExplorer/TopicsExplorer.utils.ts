@@ -444,13 +444,43 @@ const toDayKey = (ms: number): string => {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 };
 
-/** Daily counts per node, zero-filled so a quiet day reads as 0 rather than a gap. */
-export const buildTrend = (nodes: TopicNode[], days: number, endMs: number): TrendSeries[] => {
-  // Walk calendar days, not fixed milliseconds — a DST day is 23 or 25 hours long.
+/** First millisecond of the trend window, walking calendar days back from `endMs`. */
+const trendStartMs = (days: number, endMs: number): number => {
   const cursor = new Date(endMs);
   cursor.setHours(0, 0, 0, 0);
   cursor.setDate(cursor.getDate() - (days - 1));
-  const startMs = cursor.getTime();
+  return cursor.getTime();
+};
+
+/**
+ * Highest single-day count across every node — the shared Y domain.
+ *
+ * Counts directly instead of calling buildTrend and reducing over the result:
+ * that allocated a TrendSeries plus a `days`-long point array per node, so a
+ * level with 300 groups built ~9,000 throwaway objects to read one number.
+ */
+export const maxDailyCount = (nodes: TopicNode[], days: number, endMs: number): number => {
+  const startMs = trendStartMs(days, endMs);
+  const byDay = new Map<string, number>();
+  let max = 1;
+  for (const node of nodes) {
+    byDay.clear();
+    for (const ticket of node.tickets) {
+      if (ticket.createdAt < startMs) continue;
+      const key = toDayKey(ticket.createdAt);
+      const next = (byDay.get(key) ?? 0) + 1;
+      byDay.set(key, next);
+      if (next > max) max = next;
+    }
+  }
+  return max;
+};
+
+/** Daily counts per node, zero-filled so a quiet day reads as 0 rather than a gap. */
+export const buildTrend = (nodes: TopicNode[], days: number, endMs: number): TrendSeries[] => {
+  // Walk calendar days, not fixed milliseconds — a DST day is 23 or 25 hours long.
+  const startMs = trendStartMs(days, endMs);
+  const cursor = new Date(startMs);
   const dayKeys: string[] = [];
   for (let i = 0; i < days; i += 1) {
     dayKeys.push(toDayKey(cursor.getTime()));

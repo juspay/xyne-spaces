@@ -42,11 +42,69 @@ export interface TopicsTrendPanelProps {
 }
 
 /**
- * The right-hand trend list, memoized as a unit so unrelated parent state (page,
- * filters, drill path) does not rebuild eight charts. Note `hovered` is a prop,
- * so hovering still re-renders them — moving the highlight to CSS would fix that.
+ * One row, memoized individually. Hovering changes `isHovered` on exactly two
+ * rows, so only those re-render — memoizing the list as a whole did not help,
+ * because `hovered` is a prop of the list and rebuilt all eight charts on every
+ * pointer move across either panel.
  */
-const TopicsTrendPanelBase = ({
+const TrendRowBase = ({
+  row,
+  max,
+  isHovered,
+  onHover,
+  onSelect,
+}: {
+  row: TopicsTrendRow;
+  max: number;
+  isHovered: boolean;
+  onHover: (key: string | null) => void;
+  onSelect: (key: string) => void;
+}): ReactElement => (
+  <button
+    type='button'
+    onClick={() => onSelect(row.key)}
+    onMouseEnter={() => onHover(row.key)}
+    onMouseLeave={() => onHover(null)}
+    className={cn(
+      'grid w-full grid-cols-[minmax(96px,150px)_1fr] items-center gap-3 border-b border-border/60 px-4 py-2 text-left transition-colors last:border-b-0',
+      isHovered ? 'bg-accent/50' : 'hover:bg-accent/30',
+    )}
+    data-track-category='TOPICS_EXPLORER'
+    data-track-name='SELECT_GROUP_ROW'
+  >
+    <span className='flex min-w-0 items-center gap-2'>
+      <span className='h-2.5 w-2.5 shrink-0 rounded-full' style={{ background: row.colour }} />
+      <span className='truncate text-sm' title={row.label}>
+        {row.label}
+      </span>
+    </span>
+
+    <span className='block h-11'>
+      <ResponsiveContainer width='100%' height='100%'>
+        <AreaChart data={row.points} margin={{ top: 3, right: 0, bottom: 0, left: 0 }}>
+          {/* Shared domain: per-row scaling makes 12 look like 1,500. */}
+          <YAxis hide domain={[0, max]} />
+          <Tooltip cursor={false} content={<TrendTooltipContent />} />
+          <Area
+            dataKey='count'
+            type='monotone'
+            stroke={row.colour}
+            fill={row.colour}
+            fillOpacity={0.25}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </span>
+  </button>
+);
+
+const TrendRow = memo(TrendRowBase);
+
+/** The right-hand trend list. */
+export const TopicsTrendPanel = ({
   rows,
   max,
   hovered,
@@ -55,48 +113,14 @@ const TopicsTrendPanelBase = ({
 }: TopicsTrendPanelProps): ReactElement => (
   <div className='min-h-0 flex-1 overflow-y-auto'>
     {rows.map(row => (
-      <button
+      <TrendRow
         key={row.key}
-        type='button'
-        onClick={() => onSelect(row.key)}
-        onMouseEnter={() => onHover(row.key)}
-        onMouseLeave={() => onHover(null)}
-        className={cn(
-          'grid w-full grid-cols-[minmax(96px,150px)_1fr] items-center gap-3 border-b border-border/60 px-4 py-2 text-left transition-colors last:border-b-0',
-          hovered === row.key ? 'bg-accent/50' : 'hover:bg-accent/30',
-        )}
-        data-track-category='TOPICS_EXPLORER'
-        data-track-name='SELECT_GROUP_ROW'
-      >
-        <span className='flex min-w-0 items-center gap-2'>
-          <span className='h-2.5 w-2.5 shrink-0 rounded-full' style={{ background: row.colour }} />
-          <span className='truncate text-sm' title={row.label}>
-            {row.label}
-          </span>
-        </span>
-
-        <span className='block h-11'>
-          <ResponsiveContainer width='100%' height='100%'>
-            <AreaChart data={row.points} margin={{ top: 3, right: 0, bottom: 0, left: 0 }}>
-              {/* Shared domain: per-row scaling makes 12 look like 1,500. */}
-              <YAxis hide domain={[0, max]} />
-              <Tooltip cursor={false} content={<TrendTooltipContent />} />
-              <Area
-                dataKey='count'
-                type='monotone'
-                stroke={row.colour}
-                fill={row.colour}
-                fillOpacity={0.25}
-                strokeWidth={1.5}
-                dot={false}
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </span>
-      </button>
+        row={row}
+        max={max}
+        isHovered={hovered === row.key}
+        onHover={onHover}
+        onSelect={onSelect}
+      />
     ))}
   </div>
 );
-
-export const TopicsTrendPanel = memo(TopicsTrendPanelBase);

@@ -42,6 +42,7 @@ import {
   distinctValues,
   groupLevel,
   labelFor,
+  maxDailyCount,
   templateFor,
   ticketsForKey,
   usefulDimensions,
@@ -332,11 +333,7 @@ export const TopicsExplorer = ({
   // Y domain spans EVERY group at this level, not just the page — per-page
   // scaling drew a group peaking at 8 as tall as one peaking at 1,500.
   const trendMax = useMemo(
-    () =>
-      buildTrend(allNodes, trendDays, endMs).reduce(
-        (max, series) => series.points.reduce((m, p) => Math.max(m, p.count), max),
-        1,
-      ),
+    () => maxDailyCount(allNodes, trendDays, endMs),
     [allNodes, trendDays, endMs],
   );
 
