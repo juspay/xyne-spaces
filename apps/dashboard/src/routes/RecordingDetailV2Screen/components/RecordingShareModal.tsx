@@ -34,7 +34,7 @@ const MENTION_USER_LIMIT = 20;
 const MENTION_GROUP_LIMIT = 10;
 
 export interface RecordingShareModalProps {
-  recording: RecordingDetail;
+  recording: Pick<RecordingDetail, 'externalId' | 'createdByUserId'>;
   onClose?: () => void;
   onTicketLinkUpdated?: (ticketLink: RecordingTicketLinkState) => void;
 }

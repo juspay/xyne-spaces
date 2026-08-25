@@ -119,6 +119,11 @@ import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
+import { isElectronApp } from '../utils/electronApp';
+import {
+  confirmRecordingInterrupt,
+  isRecordingInterruptible,
+} from '../components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -354,9 +359,39 @@ const AppRoot = (): ReactElement => {
   // do not expose a reliable lid-close event, so retain only the actual page
   // unload safeguard below.
   useEffect(() => {
-    window.addEventListener('pagehide', stopRecordingForTeardown);
+    const handlePageHide = (): void => stopRecordingForTeardown();
+    window.addEventListener('pagehide', handlePageHide);
     return (): void => {
-      window.removeEventListener('pagehide', stopRecordingForTeardown);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, []);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (isElectronApp()) return;
+      if (!isRecordingInterruptible()) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return (): void => {
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => {
+    const interceptReload = (event: KeyboardEvent): void => {
+      if (isElectronApp()) return;
+      const isReloadCombo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r';
+      if (!isReloadCombo && event.key !== 'F5') return;
+      if (!isRecordingInterruptible()) return;
+      event.preventDefault();
+      void confirmRecordingInterrupt('reload').then(proceed => {
+        if (proceed) window.location.reload();
+      });
+    };
+    window.addEventListener('keydown', interceptReload, true);
+    return (): void => {
+      window.removeEventListener('keydown', interceptReload, true);
     };
   }, []);
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));

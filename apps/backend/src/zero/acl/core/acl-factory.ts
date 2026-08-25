@@ -18,6 +18,7 @@ import { ConversationParticipantsACL } from '../tables/conversation-participants
 import { ConversationsACL } from '../tables/conversations-acl';
 import { MessageAttachmentsACL } from '../tables/message-attachments-acl';
 import { MessagesACL } from '../tables/messages-acl';
+import { MessageArtifactsACL } from '../tables/message-artifacts-acl';
 import { NotificationPreferencesACL } from '../tables/notification-preferences-acl';
 import { OrgMembersACL } from '../tables/org-members-acl';
 import { OrganizationsACL } from '../tables/organizations-acl';
@@ -234,7 +235,7 @@ export class ACLFactory {
       case 'messages':
         return new MessagesACL(ctx);
       case 'message_artifacts':
-        return new BaseACL(ctx, table);
+        return new MessageArtifactsACL(ctx, table);
       case 'models':
         return new ModelsACL(ctx);
       case 'notification_preferences':

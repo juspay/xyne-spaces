@@ -3991,24 +3991,29 @@ img.inline-emoji,
    and role="option" on its rows ([cmdk-item]) via cmdk. Those already use design
    tokens (bg-background list, text-foreground/-muted-foreground rows, its own
    cmdk-active-row selection), so this hardcoded dark must not override them.
-   Mirrors the [role="option"]:not([cmdk-item]) exclusion below. */
-[data-theme="midnight"] [role="listbox"]:not([cmdk-list]) {
+   Mirrors the [role="option"]:not([cmdk-item]) exclusion below.
+
+   [data-theme-tokens] is the general opt-out: any listbox already built on the
+   design tokens marks itself with it and keeps its own surface, hover and
+   selected colours instead of these hardcoded ones. */
+[data-theme="midnight"] [role="listbox"]:not([cmdk-list]):not([data-theme-tokens]) {
   background-color: #1a1a1a !important;
   border-color: #374151 !important;
 }
 
-[data-theme="midnight"] [role="option"]:not([cmdk-item]) {
+[data-theme="midnight"] [role="option"]:not([cmdk-item]):not([data-theme-tokens]) {
   color: #d1d5db !important;
 }
 
-[data-theme="midnight"] [role="option"]:not([cmdk-item]):hover {
+[data-theme="midnight"] [role="option"]:not([cmdk-item]):not([data-theme-tokens]):hover {
   background-color: #2a2d30 !important;
 }
 
 /* Select/combobox dropdown options. Excludes cmd+K rows ([cmdk-item]) so they keep the
    documented gray-resting / blue-navigated two-tier above — otherwise this !important blue
    overrides the resting gray and resting vs. navigated become indistinguishable in midnight. */
-[data-theme="midnight"] [role="option"][aria-selected="true"]:not([cmdk-item]) {
+[data-theme="midnight"]
+  [role="option"][aria-selected="true"]:not([cmdk-item]):not([data-theme-tokens]) {
   background-color: rgba(37, 99, 235, 0.2) !important;
   color: #60a5fa !important;
 }
