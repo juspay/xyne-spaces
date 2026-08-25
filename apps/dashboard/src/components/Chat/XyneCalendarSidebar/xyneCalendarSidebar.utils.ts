@@ -13,11 +13,8 @@ import {
   isExternalCalendarEvent,
   isExternalCalendarEventForUser,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
-import {
-  getDMSearchableNames,
-  isDMChannel,
-  parseDMParticipantIds,
-} from '../ChatDirectory/ChatDirectory.utils';
+import { isDMChannel, parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 type XyneCalendarBadgeCall = Pick<
   Call,
@@ -103,7 +100,9 @@ export const getXyneCalendarChannelPresentation = (
 
   const participantIds = parseDMParticipantIds(channel);
   const isSelfDm = participantIds.length === 1 && participantIds[0] === currentUserId;
-  const names = getDMSearchableNames(channel, currentUserId, usersById);
+  const names = participantIds
+    .filter(id => id !== currentUserId)
+    .map(id => getUserDisplayName(usersById.get(id)));
 
   return {
     label: isSelfDm ? 'You' : names.join(', ') || 'Direct message',
