@@ -29,7 +29,6 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
-  SparkleAi01,
   type PikaIconProps,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
@@ -38,6 +37,7 @@ import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
 import type { usePermissions } from '../../hooks/usePermissions';
 import { AccessType } from '@xyne/shared';
+import { XyneAISidebarIcon } from '../icons/xyne-ai';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
@@ -64,11 +64,25 @@ export interface NavigationItem {
   iconSize?: number;
 }
 
+// Adapts XyneAISidebarIcon — a plain {color?, size?: number} SVG component,
+// not a pika-icon — to the PikaIcon shape NavigationItem.icon requires.
+// PikaIconProps.size is `number | string`, so it's coerced rather than
+// widening XyneAISidebarIcon's own signature. Pika-only props (variant/
+// strokeWidth/...) are dropped: this glyph has no stroke/variant concept and
+// renders identically regardless of active state, unlike every other item.
+const XyneAINavIcon: PikaIcon = ({ size, color }) =>
+  createElement(XyneAISidebarIcon, {
+    // exactOptionalPropertyTypes rejects an explicit `undefined` for an
+    // optional prop — omit the key entirely instead of assigning it.
+    ...(typeof size === 'number' ? { size } : {}),
+    ...(color !== undefined ? { color } : {}),
+  });
+
 // Items are listed toolbar-first: the default toolbar paths come first in the
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
-  { path: '/ai', label: 'Xyne AI', icon: SparkleAi01 },
+  { path: '/ai', label: 'Xyne AI', icon: XyneAINavIcon },
   { path: '/chat/dir', label: 'Chat', icon: Hashtag },
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn },
