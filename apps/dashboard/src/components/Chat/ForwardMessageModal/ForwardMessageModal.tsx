@@ -122,13 +122,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         const timestamp = Date.now();
 
         try {
-          // Local-first, exactly like sendMessage(): fire the mutator WITHOUT
-          // awaiting the round-trip, report success optimistically, and observe
-          // the real outcome in the background. Awaiting `.server` here would
-          // freeze the modal for the full statement-lock-timeout window (~30s)
-          // on the very failure this targets, and would also fire on transient
-          // `zero`-type errors that Replicache auto-retries — a false "Failed"
-          // that leads the user to re-forward and create a duplicate.
+          // Fire without awaiting (like sendMessage) and observe the outcome below.
           const mutation = zero.mutate(
             mutators.conversations.forwardMessage({
               targetChannelId: firstTarget.id,
@@ -143,7 +137,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             }),
           );
 
-          // Optimistic success — instant, as before.
+          // Show success message
           logger.info(Event.MESSAGE_FORWARDED, {
             originalMessageId: message.messageId,
             targetType: 'channel',
@@ -163,11 +157,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           // Navigate to the channel
           void navigate(`/chat/dir/${firstTarget.id}`);
 
-          // Surface a GENUINE (non-transient) forward failure after the fact.
-          // subscribeSendLifecycle ignores `zero`-type transient errors (Zero
-          // still persists on reconnect) and only fires onAppError for a real
-          // mutator rejection — e.g. the reported lock timeout — so the failure
-          // is no longer silently swallowed while a duplicate is avoided.
+          // Surface a real mutator rejection; transient zero errors are ignored
+          // since Zero still persists those on reconnect.
           subscribeSendLifecycle(mutation, () => {
             logger.error(Event.MESSAGE_FORWARD_FAILED, {
               originalMessageId: message.messageId,
