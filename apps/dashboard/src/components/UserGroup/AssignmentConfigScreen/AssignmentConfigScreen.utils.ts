@@ -1,13 +1,10 @@
 // Pure helpers for the Assignment Config "Visibility" tab.
-// Recomputes the backend `pickBest` scoring (assignmentEngine.ts) from
+// Replicates the backend `pickBest` per-user score (assignmentEngine.ts) from
 // already-synced Zero data — no backend call:
 //   effectiveActiveTasks = weightedActiveTasks + (startOffset ?? 0)
-//   score = effectiveActiveTasks − expertiseBonus − percentDiff
-//           (percentDiff = percentage − currentPct, and only when the board has
-//            "Use percentage assignment" on; otherwise 0)
-//
-// The resulting rows are then ordered by the same `comparatorFor(strategy)` the
-// engine ranks with, so this preview cannot drift from what the engine will pick.
+//   score = effectiveActiveTasks − expertiseBonus − (percentage − currentPct)
+// Rows are then ordered by the same `comparatorFor(strategy)` the engine ranks
+// with, so this preview cannot drift from what the engine will pick.
 //
 // startOffset is the cold-start fairness offset (see cold-start-fairness-design.md):
 // a one-time, persisted value on user_group_mappings that keeps a brand-new member's
@@ -15,7 +12,7 @@
 // It's a single aggregate per (user, group) — not per board — so it's added
 // unconditionally regardless of which board is selected.
 
-import { AssignmentStrategy, comparatorFor, type RankableAssignee } from '@xyne/shared';
+import { AssignmentStrategy, comparatorFor } from '@xyne/shared';
 
 export interface AssignmentStateLike {
   userId: string;
@@ -130,32 +127,6 @@ export function computeTotalTicketsOnBoard(
     .reduce((sum, w) => sum + (w.activeTasks ?? 0), 0);
 }
 
-/** What the shared comparator needs from a row, before display-shifting. */
-interface RankableRow {
-  user: { id: string };
-  weightedActiveTasks: number;
-  effectiveActiveTasks: number;
-  score: number | null;
-  lastAssignedAt: number | null;
-}
-
-/**
- * `score` is null until a board is selected, so effective load stands in — it is
- * exactly what the engine scores on once the board-specific terms are zero.
- */
-const toRankable = (row: RankableRow): RankableAssignee => ({
-  userId: row.user.id,
-  score: row.score ?? row.effectiveActiveTasks,
-  weightedActiveTasks: row.weightedActiveTasks,
-  lastAssignedAt: row.lastAssignedAt,
-});
-
-/** Sort rows exactly as the engine ranks candidates under `strategy`. */
-const withStrategy = (strategy: AssignmentStrategy) => {
-  const compare = comparatorFor(strategy);
-  return (a: RankableRow, b: RankableRow) => compare(toRankable(a), toRankable(b));
-};
-
 /**
  * Per-user tickets + engine score, ordered by `strategy` so the row the engine
  * would assign next comes first.
@@ -200,6 +171,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   const lastAssignedByUser = new Map(
     (assignmentStates ?? []).map(s => [s.userId, s.lastAssignedAt] as const),
   );
+  const compare = comparatorFor(strategy);
 
   const rows = users
     .map(user => {
@@ -241,7 +213,14 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         lastAssignedAt,
       };
     })
-    .sort(withStrategy(strategy));
+    // `score` is null until a board is selected, so effective load stands in —
+    // exactly what the engine scores on once the board-specific terms are zero.
+    .sort((a, b) =>
+      compare(
+        { ...a, userId: a.user.id, score: a.score ?? a.effectiveActiveTasks },
+        { ...b, userId: b.user.id, score: b.score ?? b.effectiveActiveTasks },
+      ),
+    );
 
   const realScores = rows.map(r => r.score).filter((s): s is number => s !== null);
   const minScore = realScores.length > 0 ? Math.min(...realScores) : 0;

@@ -149,13 +149,9 @@ async function resolveStartOffsets(
 // ─── Ranking strategy ────────────────────────────────────────────────────────
 
 /**
- * How a group ranks its eligible candidates, and what must happen once a pick is
- * made.
- *
- * WORKLOAD is stateless; ROUND_ROBIN has to advance a cursor. Bundling `commit`
- * into the strategy is what keeps the branching out of the engine: every call
- * site ranks and commits unconditionally, and WORKLOAD's commit is a no-op.
- * Adding a third method means adding one object here, not editing the engine.
+ * How a group ranks its eligible candidates, and what happens once a pick is
+ * made. Bundling `commit` here is what keeps branching out of the engine: call
+ * sites rank and commit unconditionally, and WORKLOAD's commit is a no-op.
  */
 interface RankingStrategy {
   readonly name: AssignmentStrategy;
@@ -191,18 +187,16 @@ const WORKLOAD_STRATEGY: RankingStrategy = {
 };
 
 /**
- * Least-recently-assigned first, with the cursor read once up front so ranking
- * stays a pure sort over a snapshot.
+ * Least-recently-assigned first; the cursor is read once so ranking stays a pure
+ * sort over a snapshot.
  *
  * KNOWN LIMITATION — `commit` moves the cursor at *evaluation* time, not once the
- * assignment is durable, and writes via Prisma outside any caller transaction
- * (`evaluateAssignmentRule` runs inside Zero mutator transactions at
- * mutators.ts:5964 and :6367). If the caller then rolls back, retries, or fails
- * to persist, the member's turn is consumed for a ticket they never received.
- * Reads and writes are also not atomic, so two concurrent evaluations for the
- * same group can pick the same member. Making the pick claim-based (a
- * conditional update inside the caller's transaction, after persist) is the fix;
- * it needs every call site to opt in, so it is not done here.
+ * assignment is durable, and writes outside any caller transaction (this runs
+ * inside Zero mutator transactions at mutators.ts:5964 and :6367). A caller that
+ * rolls back consumes a member's turn for a ticket they never received, and two
+ * concurrent evaluations can pick the same member. The fix is a claim-based
+ * conditional update inside the caller's transaction, which needs every call
+ * site to opt in — so it is not done here.
  */
 function createRoundRobinStrategy(userStates: UserAssignmentState[]): RankingStrategy {
   const cursorByUserId = new Map<string, number | null>(
@@ -248,10 +242,7 @@ function createRoundRobinStrategy(userStates: UserAssignmentState[]): RankingStr
   };
 }
 
-/**
- * Exhaustive by construction: a new AssignmentStrategy member fails to compile
- * until it is built here.
- */
+/** Exhaustive: a new AssignmentStrategy fails to compile until built here. */
 const STRATEGY_BUILDERS: Record<
   AssignmentStrategy,
   (userStates: UserAssignmentState[]) => RankingStrategy
@@ -265,11 +256,7 @@ const STRATEGY_BUILDERS: Record<
 const sanitizeForLog = (value: string | null | undefined): string =>
   String(value).replace(/\p{Cc}+/gu, ' ').slice(0, 200);
 
-/**
- * The strategy a group ranks by. Anything unrecognised — including groups that
- * predate the column — falls back to WORKLOAD, so today's behaviour is the
- * default.
- */
+/** Anything unrecognised (incl. groups predating the column) falls back to WORKLOAD. */
 function createRankingStrategy(
   userGroupId: string,
   group: { assignmentStrategy?: string | null } | null | undefined,
@@ -277,8 +264,8 @@ function createRankingStrategy(
 ): RankingStrategy {
   const strategy = parseAssignmentStrategy(group?.assignmentStrategy);
   if (strategy === null) {
-    // Both fallbacks are silent-by-design failure modes — a group configured for
-    // ROUND_ROBIN would quietly assign by workload — so say so in the log.
+    // Silent-by-design failure: a group set to ROUND_ROBIN would quietly assign
+    // by workload — so say so in the log.
     const safeGroupId = sanitizeForLog(userGroupId);
     logger.warn(
       group

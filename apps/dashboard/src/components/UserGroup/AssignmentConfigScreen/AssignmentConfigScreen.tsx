@@ -37,23 +37,9 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
   { value: 'MONTHLY' as RotationInterval, label: 'Monthly' },
 ];
 
-const ASSIGNMENT_STRATEGY_OPTIONS: {
-  value: AssignmentStrategy;
-  label: string;
-  description: string;
-}[] = [
-  {
-    value: 'WORKLOAD' as AssignmentStrategy,
-    label: 'Workload based',
-    description:
-      'Picks whoever is carrying the least weighted work, taking board weight, expertise and share percentage into account.',
-  },
-  {
-    value: 'ROUND_ROBIN' as AssignmentStrategy,
-    label: 'Round robin',
-    description:
-      'Rotates through eligible members, picking whoever was assigned least recently. Ticket counts and share percentage are ignored, but max-ticket limits still apply — and where board expertise is set, rotation stays within the experts.',
-  },
+const ASSIGNMENT_STRATEGY_OPTIONS: { value: AssignmentStrategy; label: string }[] = [
+  { value: 'WORKLOAD' as AssignmentStrategy, label: 'Workload based' },
+  { value: 'ROUND_ROBIN' as AssignmentStrategy, label: 'Round robin' },
 ];
 
 /** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
@@ -1158,42 +1144,33 @@ export const AssignmentConfigScreen = ({
                   </p>
                 </div>
 
-                <div className='flex flex-wrap items-end justify-between gap-4 border-t border-border pt-4'>
-                  <div className='min-w-0 flex-1'>
-                    <span className='block text-[13px] font-medium text-foreground'>
-                      {ASSIGNMENT_STRATEGY_OPTIONS.find(o => o.value === localAssignmentStrategy)
-                        ?.label ?? 'Workload based'}
-                    </span>
-                    <p className='mt-1 text-xs leading-[1.4] text-muted-foreground'>
-                      {
-                        ASSIGNMENT_STRATEGY_OPTIONS.find(o => o.value === localAssignmentStrategy)
-                          ?.description
-                      }
-                    </p>
-                  </div>
-                  <Select
-                    value={localAssignmentStrategy}
-                    onValueChange={value => {
-                      setLocalAssignmentStrategy(value as AssignmentStrategy);
-                      setHasChanges(true);
-                    }}
-                  >
-                    <SelectTrigger
-                      className='w-[220px]'
-                      aria-label='Assignment method'
-                      data-track-category='UserGroups'
-                      data-track-name='ChangeAssignmentStrategy'
+                <div className='flex flex-wrap items-end gap-3 border-t border-border pt-4'>
+                  <div className='flex flex-col gap-2'>
+                    <span className='text-[13px] font-medium text-foreground'>Method</span>
+                    <Select
+                      value={localAssignmentStrategy}
+                      onValueChange={value => {
+                        setLocalAssignmentStrategy(value as AssignmentStrategy);
+                        setHasChanges(true);
+                      }}
                     >
-                      <SelectValue placeholder='Select a method' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ASSIGNMENT_STRATEGY_OPTIONS.map(option => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                      <SelectTrigger
+                        className='w-[200px]'
+                        aria-label='Assignment method'
+                        data-track-category='UserGroups'
+                        data-track-name='ChangeAssignmentStrategy'
+                      >
+                        <SelectValue placeholder='Select a method' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ASSIGNMENT_STRATEGY_OPTIONS.map(option => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
 

@@ -90,11 +90,8 @@ export enum RotationInterval {
 }
 
 /**
- * How a user group picks the next assignee among its eligible members.
- * - WORKLOAD: lowest weighted-active-tasks score wins (expertise + percentage aware).
- * - ROUND_ROBIN: least-recently-assigned member wins.
- * Eligibility filtering (responsibility, on-call/active, channel participation,
- * maxTickets cap) is identical for both.
+ * How a user group ranks its eligible members: WORKLOAD picks the lowest score,
+ * ROUND_ROBIN the least recently assigned. See utils/assignmentRanking.
  */
 // @ts-ignore TS1294
 export enum AssignmentStrategy {

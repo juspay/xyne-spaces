@@ -43,10 +43,9 @@ interface VisibilityTabProps {
 
 /**
  * "Visibility" tab of the Assignment Configuration screen: per-user open tickets
- * and whichever ranking the group's assignment method uses — engine score under
- * Workload based, last-assigned time under Round robin. The first row is the one
- * assigned next. Read-only; shares the selected board with the Availability tab
- * via `selectedBoardId` / `onSelectBoard`.
+ * ranked by the group's assignment method, first row assigned next. Read-only;
+ * shares the selected board with the Availability tab via `selectedBoardId` /
+ * `onSelectBoard`.
  */
 export function VisibilityTab({
   users,
