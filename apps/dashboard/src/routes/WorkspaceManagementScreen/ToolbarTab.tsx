@@ -1,18 +1,15 @@
-import { ReactElement, useEffect, useState } from 'react';
-import { Save, Search, Shield } from 'lucide-react';
-import { Switch } from '../../components/ui/Switch';
-import { Button } from '../../components/ui/Button/Button';
+import { ReactElement, useState } from 'react';
+import { Search, Shield } from 'lucide-react';
 import Input from '../../components/ui/Input/Input';
 import { useSelf } from '../../hooks/useUsers';
-import { useZero } from '../../hooks/useZero';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
-import { mutators } from '../../zero/mutators';
+import { useDisabledToolbarPaths } from '../../hooks/useDisabledToolbarPaths';
 import { cn } from '../../utils/classNames';
 import { WorkspaceRole } from '@xyne/shared';
-import { NAVIGATION_ITEMS, TOOLBAR_ITEM_DESCRIPTIONS } from '../../components/AppSidebar/navigationConfig';
+import {
+  NAVIGATION_ITEMS,
+  TOOLBAR_ITEM_DESCRIPTIONS,
+} from '../../components/AppSidebar/navigationConfig';
 import { PATH_TO_RESOURCE } from '../../components/AppSidebar/utils/resourceMapping';
-import { toast } from 'sonner';
 
 const Card = ({
   children,
@@ -26,43 +23,14 @@ const Card = ({
   </div>
 );
 
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every(v => typeof v === 'string');
-
-const sameSet = (a: Set<string>, b: Set<string>): boolean =>
-  a.size === b.size && [...a].every(v => b.has(v));
-
 interface ToolbarTabProps {
   isActive?: boolean;
 }
 
 export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): ReactElement => {
   const self = useSelf();
-  const z = useZero();
-  const workspaceId = self?.workspaceId;
   const isAdmin = self?.role === WorkspaceRole.ADMIN || self?.role === WorkspaceRole.OWNER;
-
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
-    enabled: !!workspaceId,
-  });
-
-  const workspaceMetadata =
-    workspace?.metadata && typeof workspace.metadata === 'object' && !Array.isArray(workspace.metadata)
-      ? (workspace.metadata as Record<string, unknown>)
-      : undefined;
-  const savedDisabledPaths = new Set(
-    isStringArray(workspaceMetadata?.disabledToolbarPaths) ? workspaceMetadata.disabledToolbarPaths : [],
-  );
-
-  const [draftDisabledPaths, setDraftDisabledPaths] = useState<Set<string>>(savedDisabledPaths);
-
-  // Sync draft from server state when it changes (e.g. on load, or another admin's edit).
-  useEffect(() => {
-    setDraftDisabledPaths(savedDisabledPaths);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.metadata]);
-
-  const hasChanges = !sameSet(draftDisabledPaths, savedDisabledPaths);
+  const disabledPaths = useDisabledToolbarPaths();
 
   // Permission-gated items (e.g. Roles, Workspace Management) are already restricted by the
   // user/role permission system — a regular member can never see them regardless of this
@@ -73,27 +41,6 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
   const visibleItems = manageableItems.filter(item =>
     item.label.toLowerCase().includes(searchQuery.trim().toLowerCase()),
   );
-
-  const handleToggleItem = (path: string, enabled: boolean): void => {
-    setDraftDisabledPaths(prev => {
-      const next = new Set(prev);
-      if (enabled) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const handleSave = (): void => {
-    if (!workspaceId) return;
-    z.mutate(
-      mutators.workspace.update({
-        workspaceId,
-        timestamp: Date.now(),
-        updates: { disabledToolbarPaths: [...draftDisabledPaths] },
-      }),
-    );
-    toast.success('Toolbar settings saved');
-  };
 
   if (!isAdmin) {
     return (
@@ -110,24 +57,15 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
   return (
     <div className='space-y-6'>
       <div className='space-y-4'>
-        <div className='flex items-start justify-between gap-4'>
-          <div>
-            <h2 className='text-lg font-semibold text-foreground'>Toolbar items</h2>
-            <p className='text-sm text-muted-foreground'>
-              Control which sidebar items are available to members of this workspace. Members can
-              still choose to hide enabled items for themselves under Preferences → Toolbar, but
-              items disabled here are unavailable to everyone.
-            </p>
-          </div>
-          <div className='flex items-center gap-3 shrink-0'>
-            {hasChanges && (
-              <span className='text-sm text-amber-600 whitespace-nowrap'>Unsaved changes</span>
-            )}
-            <Button onClick={handleSave} disabled={!hasChanges} className='gap-2'>
-              <Save className='w-4 h-4' />
-              Save Changes
-            </Button>
-          </div>
+        <div>
+          <h2 className='text-lg font-semibold text-foreground'>Toolbar items</h2>
+          <p className='text-sm text-muted-foreground'>
+            Which sidebar items are available to members of this workspace. Members can still choose
+            to hide enabled items for themselves under Preferences → Toolbar, but items disabled
+            here are unavailable to everyone. Managed centrally via Superposition
+            (disabled_toolbar_paths, targeted per workspace) — contact your ops team to change the
+            list for this workspace.
+          </p>
         </div>
         <Card className='p-4'>
           <div className='relative mb-3'>
@@ -148,7 +86,7 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
             )}
             {visibleItems.map(item => {
               const Icon = item.icon;
-              const enabled = !draftDisabledPaths.has(item.path);
+              const enabled = !disabledPaths.has(item.path);
               return (
                 <div
                   key={item.path}
@@ -167,11 +105,16 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
                       )}
                     </div>
                   </div>
-                  <Switch
-                    aria-label={`${enabled ? 'Disable' : 'Enable'} ${item.label} for this workspace`}
-                    checked={enabled}
-                    onCheckedChange={value => handleToggleItem(item.path, value)}
-                  />
+                  <span
+                    className={cn(
+                      'shrink-0 text-xs font-medium px-2 py-1 rounded-full',
+                      enabled
+                        ? 'bg-emerald-500/10 text-emerald-600'
+                        : 'bg-muted-foreground/10 text-muted-foreground',
+                    )}
+                  >
+                    {enabled ? 'Enabled' : 'Disabled'}
+                  </span>
                 </div>
               );
             })}

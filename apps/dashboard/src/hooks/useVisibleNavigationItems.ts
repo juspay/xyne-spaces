@@ -34,12 +34,9 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
     const withoutGuestBlocked = isGuest
       ? permittedItems.filter(item => item.path !== '/claw-agents')
       : permittedItems;
-    let visibleItems = showClawDashboard
+    const visibleItems = showClawDashboard
       ? withoutGuestBlocked
       : withoutGuestBlocked.filter(item => item.path !== '/claw-agents');
-    if (disabledToolbarPaths) {
-      visibleItems = visibleItems.filter(item => !disabledToolbarPaths.has(item.path));
-    }
-    return visibleItems;
+    return visibleItems.filter(item => !disabledToolbarPaths.has(item.path));
   }, [permissions, canManageOwnUserGroups, showClawDashboard, isGuest, disabledToolbarPaths]);
 };

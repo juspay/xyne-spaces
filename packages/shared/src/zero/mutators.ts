@@ -10930,26 +10930,12 @@ export const mutators = defineMutators({
         updates: z.object({
           name: z.string().optional(),
           description: z.string().optional(),
-          disabledToolbarPaths: z.array(z.string()).optional(),
         }),
       }),
       async ({ tx, args: { workspaceId, timestamp, updates } }) => {
-        const { disabledToolbarPaths, ...columnUpdates } = updates;
-
-        let metadataUpdate: Record<string, unknown> | undefined;
-        if (disabledToolbarPaths !== undefined) {
-          const workspace = await tx.run(zql.workspaces.where('id', workspaceId).one());
-          const existingMetadata =
-            workspace?.metadata && typeof workspace.metadata === 'object' && !Array.isArray(workspace.metadata)
-              ? (workspace.metadata as Record<string, unknown>)
-              : {};
-          metadataUpdate = { ...existingMetadata, disabledToolbarPaths };
-        }
-
         await tx.mutate.workspaces.update({
           id: workspaceId,
-          ...columnUpdates,
-          ...(metadataUpdate !== undefined ? { metadata: metadataUpdate as ReadonlyJSONValue } : {}),
+          ...updates,
           updatedAt: timestamp,
         });
       },
