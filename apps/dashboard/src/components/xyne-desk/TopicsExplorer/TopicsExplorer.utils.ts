@@ -1,8 +1,12 @@
 import { UNASSIGNED_FILTER_VALUE } from '../../../zero/queries';
 import type { TicketFilters } from '../../Tickets/TicketFilters/types';
 
-export const TREND_DAYS = 30;
-export const DEFAULT_RANGE_DAYS = 30;
+/**
+ * Longest range the panel offers, and the range it opens on. The rollup runs
+ * client-side over synced rows, so the window stays short enough that one desk's
+ * tickets fit under the row cap; the trend charts the whole range for the same reason.
+ */
+export const MAX_RANGE_DAYS = 30;
 export const MAX_DEPTH = 4;
 export const MS_PER_DAY = 86_400_000;
 /** Key used when a ticket has no value for a dimension. */

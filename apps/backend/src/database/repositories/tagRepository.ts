@@ -244,8 +244,8 @@ export class TagRepository {
    *
    * Where `findConversationIdsByEmailTags` answers "which threads match this
    * filter?", this is the grouping read: the caller gets the tag values themselves
-   * so it can bucket tickets by category. `truncated` reports the `rowCap` being
-   * hit, so the client can warn rather than silently under-report.
+   * so it can bucket tickets by category. At `rowCap` the tail is cut and
+   * `truncated` says so, so the client warns rather than silently under-report.
    */
   async findGeneratedTagsByConversation(
     channelId: string,
@@ -254,9 +254,6 @@ export class TagRepository {
     end: Date,
     rowCap = 50000,
   ): Promise<{ rows: { conversationId: string; tagCategory: string; tag: string }[]; truncated: boolean }> {
-    // Fetch one extra row so a full page can be distinguished from an exact fit.
-    const limit = rowCap + 1;
-
     const rows = await this.db.$queryRaw<{ conversationId: string; tagCategory: string; tag: string }[]>`
       SELECT DISTINCT
         e."conversationId" AS "conversationId",
@@ -274,29 +271,20 @@ export class TagRepository {
       -- Deterministic: without an ORDER BY, a truncated result is an arbitrary
       -- subset that can differ between refetches, so the groupings would shift.
       ORDER BY "conversationId", "tagCategory", "tag"
-      LIMIT ${limit}
+      -- One over the cap, so a full page is distinguishable from an exact fit.
+      LIMIT ${rowCap + 1}
     `;
 
     const truncated = rows.length > rowCap;
-    let complete = rows;
-    if (truncated) {
-      // Cutting at an arbitrary row hands back a conversation carrying only some
-      // of its tags, which reads as real data. The ORDER BY groups each
-      // conversation together, so dropping the trailing partial one leaves the
-      // rest whole — unless it fills the cap, where that would leave nothing.
-      const kept = rows.slice(0, rowCap);
-      const last = kept[kept.length - 1]?.conversationId;
-      const trimmed = kept.filter(row => row.conversationId !== last);
-      complete = trimmed.length > 0 ? trimmed : kept;
-    }
+    const capped = truncated ? rows.slice(0, rowCap) : rows;
 
     logger.info('[TAG-REPO] findGeneratedTagsByConversation success', {
       channelId,
-      count: complete.length,
+      count: capped.length,
       truncated,
     });
 
-    return { rows: complete, truncated };
+    return { rows: capped, truncated };
   }
 }
 

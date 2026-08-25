@@ -1569,6 +1569,11 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+  // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
+  const canExploreTopics =
+    isSelectedChannelJoined &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.metricsEnabled;
 
   const metricsSelectableDesks = useMemo(
     () =>
@@ -2874,30 +2879,28 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         )}
-                      {isSelectedChannelJoined &&
-                        selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.metricsEnabled && (
-                          <Tooltip content='Topics explorer' side='bottom'>
-                            <button
-                              onClick={() => {
-                                const base = `${supportBase}/${selectedChannelId}`;
-                                if (isTopicsOpen) void navigate(base, { replace: true });
-                                else void navigate(`${base}?topics=open`);
-                              }}
-                              className={cn(
-                                'p-1.5 rounded transition-colors',
-                                isTopicsOpen
-                                  ? 'bg-muted text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                              )}
-                              data-track-category='Support'
-                              data-track-name='OpenTopicsExplorer'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <GridDashboard01 size={16} />
-                            </button>
-                          </Tooltip>
-                        )}
+                      {canExploreTopics && (
+                        <Tooltip content='Topics explorer' side='bottom'>
+                          <button
+                            onClick={() => {
+                              const base = `${supportBase}/${selectedChannelId}`;
+                              if (isTopicsOpen) void navigate(base, { replace: true });
+                              else void navigate(`${base}?topics=open`);
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isTopicsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenTopicsExplorer'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <GridDashboard01 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -3613,21 +3616,17 @@ const SupportScreen = (): ReactElement => {
                   channelName={selectedChannelName ?? undefined}
                 />
               )}
-              {isTopicsOpen &&
-                selectedChannelId &&
-                selectedChannelId !== ALL_CHANNELS_ID &&
-                isSelectedChannelJoined &&
-                channelPreference?.metricsEnabled && (
-                  <TopicsExplorer
-                    open
-                    onClose={() =>
-                      void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
-                    }
-                    channelId={selectedChannelId}
-                    channelName={selectedChannelName ?? undefined}
-                    supportBase={supportBase}
-                  />
-                )}
+              {isTopicsOpen && selectedChannelId && canExploreTopics && (
+                <TopicsExplorer
+                  open
+                  onClose={() =>
+                    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
+                  }
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
+                  supportBase={supportBase}
+                />
+              )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                 {!selectedChannelId ? (
                   <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>

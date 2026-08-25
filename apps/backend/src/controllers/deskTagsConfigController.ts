@@ -14,6 +14,17 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
 import { tagRepository } from '@/database/repositories/tagRepository';
 
+/**
+ * Epoch-ms query param as a Date, or null when it is missing or unusable. The
+ * empty-string guard matters: Number('') is 0, so `?startMs=` would otherwise
+ * read as epoch 0 and scan all history.
+ */
+const epochMsToDate = (raw: unknown): Date | null => {
+  const ms = typeof raw === 'string' && raw ? Number(raw) : NaN;
+  const date = new Date(ms);
+  return Number.isFinite(ms) && !Number.isNaN(date.getTime()) ? date : null;
+};
+
 export class DeskTagsConfigController {
   private channelParticipantRepo = new ChannelParticipantRepository();
   private channelRepo = new ChannelRepository();
@@ -240,23 +251,12 @@ export class DeskTagsConfigController {
     const userId = await this.assertAccess(req, res, channelId);
     if (!userId) return;
 
-    // Empty strings are rejected before Number(): Number('') is 0, so `?startMs=`
-    // would otherwise be accepted as epoch 0 and scan all history.
-    const rawStart = req.query['startMs'];
-    const rawEnd = req.query['endMs'];
-    const startMs = typeof rawStart === 'string' && rawStart ? Number(rawStart) : NaN;
-    const endMs = typeof rawEnd === 'string' && rawEnd ? Number(rawEnd) : NaN;
-    const start = new Date(startMs);
-    const end = new Date(endMs);
-
-    const invalid =
-      !Number.isFinite(startMs) || !Number.isFinite(endMs) || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())
-        ? 'startMs and endMs are required, valid epoch-millisecond values'
-        : startMs > endMs
-          ? 'startMs must be less than or equal to endMs'
-          : null;
-    if (invalid) {
-      res.status(400).json({ error: invalid });
+    const start = epochMsToDate(req.query['startMs']);
+    const end = epochMsToDate(req.query['endMs']);
+    if (!start || !end || start > end) {
+      res.status(400).json({
+        error: 'startMs and endMs must be epoch-millisecond values, with startMs before endMs',
+      });
       return;
     }
 

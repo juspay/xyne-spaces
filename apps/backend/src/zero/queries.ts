@@ -146,7 +146,7 @@ export const ASSIGNEE_INVERT_MARKER = '!invert';
 
 // Ceiling on rows `topicsExplorerTickets` syncs into the browser. Zero has no
 // aggregation, so the Topics Explorer counts client-side; without a cap the
-// 90-day preset on a busy desk would sync a quarter of tickets at once.
+// panel's longest range on a busy desk would sync tens of thousands at once.
 export const TOPICS_EXPLORER_TICKET_LIMIT = 20000;
 
 export interface ParsedAssigneeFilter {

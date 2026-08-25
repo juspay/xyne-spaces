@@ -27,12 +27,11 @@ import { TopicsFilterBar } from './TopicsFilterBar';
 import { TopicsTreemap } from './TopicsTreemap';
 import { TopicsTrendPanel } from './TopicsTrendPanel';
 import {
-  DEFAULT_RANGE_DAYS,
   MAX_DEPTH,
   MAX_BOXES,
+  MAX_RANGE_DAYS,
   NONE_KEY,
   MS_PER_DAY,
-  TREND_DAYS,
   applyTicketFilters,
   buildDimensions,
   buildTrend,
@@ -61,6 +60,9 @@ import {
 
 const PAGER_BUTTON =
   'flex h-6 w-6 items-center justify-center rounded border border-border transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent';
+const PANEL = 'flex min-h-[320px] flex-col overflow-hidden rounded-xl border border-border bg-card';
+const PANEL_HEADER = 'flex items-baseline justify-between border-b border-border px-4 py-2';
+const PANEL_TITLE = 'text-xs font-medium uppercase tracking-wide text-muted-foreground';
 
 /** Combine a calendar date with an HH:mm time into an epoch-ms bound. */
 const dateTimeMs = (date: Date, time: string, isEnd: boolean): number => {
@@ -118,7 +120,7 @@ export const TopicsExplorer = ({
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => {
     const end = new Date();
     const start = new Date();
-    start.setDate(start.getDate() - (DEFAULT_RANGE_DAYS - 1));
+    start.setDate(start.getDate() - (MAX_RANGE_DAYS - 1));
     return { startDate: start, endDate: end };
   });
   const [startTime, setStartTime] = useState('00:00');
@@ -310,16 +312,15 @@ export const TopicsExplorer = ({
     [allNodes, safePage],
   );
 
-  // Never chart more days than were queried: 30 buckets over a 7-day range would
-  // render 23 fabricated zeros that read as a volume collapse.
-  const trendDays = Math.min(rangeDays, TREND_DAYS);
-  const trend = useMemo(() => buildTrend(nodes, trendDays, endMs), [nodes, trendDays, endMs]);
+  // Charts exactly the queried range: MAX_RANGE_DAYS keeps it short enough that a
+  // fixed bucket count would only ever fabricate zeros past the end of the range.
+  const trend = useMemo(() => buildTrend(nodes, rangeDays, endMs), [nodes, rangeDays, endMs]);
 
   // Y domain spans EVERY group at this level, not just the page — per-page
   // scaling drew a group peaking at 8 as tall as one peaking at 1,500.
   const trendMax = useMemo(
-    () => maxDailyCount(allNodes, trendDays, endMs),
-    [allNodes, trendDays, endMs],
+    () => maxDailyCount(allNodes, rangeDays, endMs),
+    [allNodes, rangeDays, endMs],
   );
 
   const currentDim = dimensionFor(dimensions, activeDims[depth]);
@@ -345,17 +346,13 @@ export const TopicsExplorer = ({
     });
   }, [nodes, scoped.length, isOverlapping]);
 
-  /** One trend row per group, in the same order and shade as the tiles. */
-  const rowsWithTrend = useMemo(
-    () =>
-      nodes.map((node, i) => ({
-        key: node.key,
-        label: node.label,
-        colour: swatchFor(i).fill,
-        points: trend[i] ?? [],
-      })),
-    [nodes, trend],
-  );
+  /** One trend row per tile, so the two panels cannot drift in order or shade. */
+  const rowsWithTrend = tiles.map((tile, i) => ({
+    key: tile.nodeKey,
+    label: tile.name,
+    colour: tile.fill,
+    points: trend[i] ?? [],
+  }));
 
   // No useMemo: templateFor indexes a module-level table, so the reference is already stable.
   const layout = templateFor(tiles.length);
@@ -476,13 +473,18 @@ export const TopicsExplorer = ({
     setPage(0);
   }, []);
 
-  /** Regrouping likewise invalidates both the drill path and the page. */
+  /**
+   * Regroup, keeping the first `keepLevels` drilled steps. Only the levels at or
+   * below the one that changed are invalidated — the keys above it were produced
+   * by dimensions that did not move, so dropping them threw the user back to the
+   * root for an edit that did not touch their branch.
+   */
   const regroup = useCallback(
-    (next: DimensionKey[]): void => {
+    (next: DimensionKey[], keepLevels: number): void => {
       setDims(next);
-      showPath([]);
+      showPath(validPath.slice(0, keepLevels));
     },
-    [showPath],
+    [showPath, validPath],
   );
 
   const onTileClick = useCallback(
@@ -558,6 +560,7 @@ export const TopicsExplorer = ({
                   dateRange={dateRange}
                   startTime={startTime}
                   endTime={endTime}
+                  maxDays={MAX_RANGE_DAYS}
                   onChange={(dr, st, et) => {
                     setDateRange(dr);
                     setStartTime(st);
@@ -587,7 +590,7 @@ export const TopicsExplorer = ({
                     onChange={e => {
                       const next = [...activeDims];
                       next[level] = e.target.value as DimensionKey;
-                      regroup(next);
+                      regroup(next, level);
                     }}
                     className={selectClass}
                     aria-label={`Group level ${level + 1}`}
@@ -606,7 +609,12 @@ export const TopicsExplorer = ({
                   {activeDims.length > 1 && (
                     <button
                       type='button'
-                      onClick={() => regroup(activeDims.filter((_, i) => i !== level))}
+                      onClick={() =>
+                        regroup(
+                          activeDims.filter((_, i) => i !== level),
+                          level,
+                        )
+                      }
                       // 24x24 hit area: the bare glyph was under the WCAG 2.5.8 minimum.
                       className='flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground'
                       aria-label={`Remove level ${level + 1}`}
@@ -624,11 +632,9 @@ export const TopicsExplorer = ({
                   type='button'
                   onClick={() => {
                     const unused = available.find(k => !activeDims.includes(k));
-                    // This level's groups are unchanged, so the path survives.
-                    if (unused) {
-                      setDims([...activeDims, unused]);
-                      setPage(0);
-                    }
+                    // Appending a level leaves every existing level untouched, so the
+                    // whole drill path survives.
+                    if (unused) regroup([...activeDims, unused], validPath.length);
                   }}
                   className='rounded-md border border-dashed border-border px-2 py-1 text-sm text-muted-foreground hover:text-foreground'
                   data-track-category='TOPICS_EXPLORER'
@@ -704,11 +710,9 @@ export const TopicsExplorer = ({
               overflow-hidden ancestor, leaving the second unreachable. */}
           <div className='grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto px-6 pb-6 lg:grid-cols-[3fr_2fr]'>
             {/* Left: treemap */}
-            <section className='flex min-h-[320px] flex-col overflow-hidden rounded-xl border border-border bg-card'>
-              <header className='flex items-baseline justify-between border-b border-border px-4 py-2'>
-                <h3 className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
-                  {currentDim.label}
-                </h3>
+            <section className={PANEL}>
+              <header className={PANEL_HEADER}>
+                <h3 className={PANEL_TITLE}>{currentDim.label}</h3>
                 <nav
                   aria-label='Topic pages'
                   className='flex items-center gap-2 text-xs text-muted-foreground'
@@ -777,12 +781,10 @@ export const TopicsExplorer = ({
             </section>
 
             {/* Right: one trend row per group, same order and shade as the tiles */}
-            <section className='flex min-h-[320px] flex-col overflow-hidden rounded-xl border border-border bg-card'>
-              <header className='flex items-baseline justify-between border-b border-border px-4 py-2'>
-                <h3 className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
-                  Daily volume
-                </h3>
-                <span className='text-xs text-muted-foreground'>last {trendDays} days</span>
+            <section className={PANEL}>
+              <header className={PANEL_HEADER}>
+                <h3 className={PANEL_TITLE}>Daily volume</h3>
+                <span className='text-xs text-muted-foreground'>last {rangeDays} days</span>
               </header>
 
               <TopicsTrendPanel
