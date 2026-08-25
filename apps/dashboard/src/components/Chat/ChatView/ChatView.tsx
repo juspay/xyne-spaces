@@ -24,11 +24,7 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
-import {
-  useChannel,
-  useGetChannelUserStatus,
-  useChannelParticipation,
-} from '../../../hooks/useChannels';
+import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -98,8 +94,7 @@ const ChatView = (): ReactElement => {
   const { groupId } = useParams<{ groupId?: string }>();
   const isGroupPanelOpen = !!groupId;
 
-  // Track conversation-opened once per navigation (gated on the channelId
-  // change ref so it does not re-fire on data updates).
+  // Track conversation-opened once per navigation (gated on the channelId change ref).
   useEffect(() => {
     if (prevChannelIdRef.current === channelId) return;
     prevChannelIdRef.current = channelId;
@@ -119,15 +114,7 @@ const ChatView = (): ReactElement => {
     });
   }, [channel, channelId, context.userID, zero]);
 
-  // Reopen a closed DM when navigating to it.
-  //
-  // A closed DM is absent from the XState channel-status map (that map is
-  // seeded from userVisibleChannelsV3, which filters isClosed=false), so
-  // useChannelParticipation resolves its status via a fallback query that
-  // lands a render *after* channelId changes. We therefore key this effect on
-  // channelUserStatus and use a per-channel "attempted" ref instead of the
-  // single-shot navigation ref, so the reopen still fires on the render where
-  // the closed status first becomes available.
+  // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.
   const reopenAttemptedForRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!channel || !channelId) return;
@@ -136,11 +123,10 @@ const ChatView = (): ReactElement => {
       channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
     if (!isDM) return;
 
-    // Already handled this channel during the current visit.
+    // Already handled this channel this visit.
     if (reopenAttemptedForRef.current === channelId) return;
 
-    // Status not resolved yet (closed DMs load via a fallback query). Wait —
-    // this effect re-runs when channelUserStatus changes.
+    // Status not resolved yet (closed DMs load via a fallback query); this effect re-runs when it changes.
     if (channelUserStatus === undefined) return;
 
     reopenAttemptedForRef.current = channelId;
