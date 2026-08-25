@@ -15627,10 +15627,9 @@ export function createMutators(
           userGroupId: z.string().optional(),
           channelId: z.string().optional(),
           role: z.nativeEnum(CollectionRole),
-          canShare: z.boolean(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, collectionId, userId, userGroupId, channelId, role, canShare, timestamp } }) => {
+        async ({ tx, args: { id, collectionId, userId, userGroupId, channelId, role, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', collectionId).one());
           if (!collection) {
             throw new Error('Collection not found');
@@ -15701,7 +15700,11 @@ export function createMutators(
             await tx.mutate.collection_permissions.update({
               id: existing.id,
               role,
-              canShare,
+              // Dead field — nothing reads canShare anymore (sharing is
+              // purely role-based, see the escalation check above). Kept at
+              // the Prisma column default since it's still NOT NULL; not
+              // threaded through as a caller-supplied argument.
+              canShare: false,
               updatedAt: timestamp,
             });
           } else {
@@ -15713,7 +15716,7 @@ export function createMutators(
               userGroupId,
               channelId,
               role,
-              canShare,
+              canShare: false,
               grantedBy: authData.sub,
               createdAt: timestamp,
               updatedAt: timestamp,

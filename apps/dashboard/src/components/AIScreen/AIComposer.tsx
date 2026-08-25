@@ -135,7 +135,7 @@ function ContextPill({
       <span
         className={cn(
           'max-w-[140px] truncate text-[12.5px] font-medium',
-          accent ? 'text-[#7C3AED]' : 'text-foreground',
+          accent ? 'text-claw-ai-fg' : 'text-foreground',
         )}
       >
         {label}
@@ -692,7 +692,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {collections.map(collection => (
                 <ContextPill
                   key={`co-${collection.id}`}
-                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={collection.name}
                   accent
                   onRemove={() => setCollections(prev => prev.filter(c => c.id !== collection.id))}
@@ -701,7 +701,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {fileScopes.map(fs => (
                 <ContextPill
                   key={`fs-${fs.id}`}
-                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={fs.name}
                   accent
                   onRemove={() => setFileScopes(prev => prev.filter(f => f.id !== fs.id))}
@@ -710,7 +710,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {folderScopes.map(folder => (
                 <ContextPill
                   key={`fo-${folder.id}`}
-                  icon={<Folder className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<Folder className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={folder.name}
                   accent
                   onRemove={() => setFolderScopes(prev => prev.filter(f => f.id !== folder.id))}

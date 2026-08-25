@@ -261,10 +261,12 @@ const XyneAISidebar = ({
   useEffect(() => {
     setFileScopes(kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : []);
   }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
-  // Folder scope(s) — multi-select, from the collection picker. Resolved to
-  // their recursive file list server-side, at send time (see
-  // xyneAIControllerV2.ts) — Vespa's collectionId filter only ever matches a
-  // doc's ROOT collection, so a folder id alone isn't filterable there.
+  // Folder scope(s) — multi-select, from the collection picker. Sent to
+  // claw-auth as a single 'folder' attached_context pointer per id — NOT
+  // expanded to a recursive file list here (xyneAIControllerV2.ts doesn't do
+  // that); claw-auth resolves it itself, at Vespa-query time, since Vespa's
+  // collectionId filter only ever matches a doc's ROOT collection and can't
+  // filter on a folder id directly.
   // Seeded with the folder Ask AI was opened from (browsing inside a
   // sub-folder in the KB screen, not its root); re-synced below like
   // fileScopes so re-opening Ask AI from a folder re-attaches the chip even

@@ -210,27 +210,16 @@ export const ShareCollectionModal = ({
     [zero, collectionId],
   );
 
-  // Determine what roles the current user can assign. OWNER is a real,
-  // multi-holder role here (like EDITOR/VIEWER) — the creator
-  // (activeCollection.ownerId) is a separate, permanent label shown on their
-  // row, not the only person who can act as owner. Anyone with an explicit
-  // role can share; the only real limit is role escalation — you can't grant
-  // a role higher than your own, and only owners can grant OWNER.
-  const allowedRoles = useMemo(() => {
-    if (!collectionRole) return [];
-
-    if (collectionRole === 'OWNER') {
-      return ['VIEWER', 'EDITOR', 'OWNER'] as CollectionRole[];
-    }
-    if (collectionRole === 'EDITOR') {
-      return ['VIEWER', 'EDITOR'] as CollectionRole[];
-    }
-    if (collectionRole === 'VIEWER') {
-      return ['VIEWER'] as CollectionRole[];
-    }
-
-    return [];
-  }, [collectionRole]);
+  // Determine what roles the current user can assign. The backend
+  // (grantPermission) actually allows any explicit role to share, capped by
+  // escalation — but the invite/role-change UI below is gated to `isManager`
+  // (collectionRole === 'OWNER') only, so an EDITOR or VIEWER can never
+  // reach a point where this value is used. Reflects that reality directly
+  // instead of computing EDITOR/VIEWER cases that are dead code here.
+  const allowedRoles = useMemo(
+    () => (collectionRole === 'OWNER' ? (['VIEWER', 'EDITOR', 'OWNER'] as CollectionRole[]) : []),
+    [collectionRole],
+  );
 
   const handleClose = useCallback(() => {
     if (!isLoading) {
@@ -413,7 +402,6 @@ export const ShareCollectionModal = ({
                   collectionId,
                   userId: selectedUser.id,
                   role: (userPermissions[selectedUser.id] ?? 'VIEWER') as CollectionRoleEnum,
-                  canShare: true,
                   timestamp,
                 }),
               ).server,
@@ -426,7 +414,6 @@ export const ShareCollectionModal = ({
                   collectionId,
                   userGroupId: selectedGroup.id,
                   role: (groupPermissions[selectedGroup.id] ?? 'VIEWER') as CollectionRoleEnum,
-                  canShare: true,
                   timestamp,
                 }),
               ).server,
@@ -439,7 +426,6 @@ export const ShareCollectionModal = ({
                   collectionId,
                   channelId: selectedChannel.id,
                   role: 'VIEWER' as CollectionRoleEnum,
-                  canShare: true,
                   timestamp,
                 }),
               ).server,
@@ -452,7 +438,6 @@ export const ShareCollectionModal = ({
                   collectionId,
                   ...(row.userId ? { userId: row.userId } : { userGroupId: row.userGroupId! }),
                   role: (pendingAccessRoles[row.id] ?? row.role) as CollectionRoleEnum,
-                  canShare: true,
                   timestamp,
                 }),
               ).server,
@@ -629,7 +614,7 @@ export const ShareCollectionModal = ({
                   {selectedUsers.map(user => (
                     <div
                       key={user.id}
-                      className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
+                      className='flex items-center justify-between p-3 gap-3 border border-border rounded-md bg-muted/40'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <div className='flex-shrink-0'>
@@ -722,7 +707,7 @@ export const ShareCollectionModal = ({
                   {selectedGroups.map(group => (
                     <div
                       key={group.id}
-                      className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
+                      className='flex items-center justify-between p-3 gap-3 border border-border rounded-md bg-muted/40'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <div className='flex-shrink-0'>
@@ -795,7 +780,7 @@ export const ShareCollectionModal = ({
                   {selectedChannels.map(channel => (
                     <div
                       key={channel.id}
-                      className='flex items-center justify-between p-3 g-3 border border-border rounded-md bg-muted/40'
+                      className='flex items-center justify-between p-3 gap-3 border border-border rounded-md bg-muted/40'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <div className='flex-shrink-0'>

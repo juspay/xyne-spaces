@@ -29,9 +29,11 @@ export interface ComposerContext {
   collections: { id: string; name: string }[];
   fileScopes: { id: string; name: string }[];
   /** A specific folder scoped in (not the whole collection, not one file).
-   *  Resolved to its recursive file list server-side, at send time (see
-   *  xyneAIControllerV2.ts) — Vespa's collectionId filter only ever matches
-   *  a doc's ROOT collection, so a folder id alone isn't filterable there. */
+   *  Sent to claw-auth as a single 'folder' attached_context pointer — NOT
+   *  expanded to a recursive file list here (xyneAIControllerV2.ts doesn't
+   *  do that); claw-auth resolves it itself, at Vespa-query time, since
+   *  Vespa's collectionId filter only ever matches a doc's ROOT collection
+   *  and can't filter on a folder id directly. */
   folderScopes: { id: string; name: string }[];
   research: ResearchContext | null;
   webSearchEnabled: boolean;

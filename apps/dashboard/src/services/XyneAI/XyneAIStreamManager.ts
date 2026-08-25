@@ -78,8 +78,10 @@ export interface StreamRequest {
   channelIds: string[];
   collectionIds?: string[];
   fileIds?: string[];
-  /** Folder scopes from the composer picker — resolved to their recursive
-   *  file list server-side (see xyneAIControllerV2.ts). */
+  /** Folder scopes from the composer picker. Sent to claw-auth as a single
+   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
+   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
+   *  at Vespa-query time. */
   folderIds?: string[];
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
