@@ -15,7 +15,7 @@ import { db } from '@/database/client';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
-import { buildSupportPath } from '../urlHelpers';
+import { buildSupportPath, postOAuthRedirect } from '../urlHelpers';
 import { ExternalSourcePlatform } from '../../core/types';
 import {
   googlePlayClient,
@@ -86,16 +86,6 @@ async function validatePackages(
       }
     }),
   );
-}
-
-function postOAuthRedirect(
-  frontendUrl: string,
-  path: string,
-  platform: 'web' | 'electron'
-): string {
-  return platform === 'electron'
-    ? `${frontendUrl}/launch?path=${encodeURIComponent(path)}`
-    : `${frontendUrl}${path}`;
 }
 
 function redirectToDesk(

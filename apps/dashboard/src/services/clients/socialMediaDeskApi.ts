@@ -3,7 +3,7 @@ import { apiInstance } from './apiClient';
 export async function startInstagramOAuth(input: {
   name: string;
   projectId: string;
-  boardId?: string;
+  boardId: string;
   assigneeUserGroupId?: string;
   visibility: 'PUBLIC' | 'PRIVATE';
   platform: 'web' | 'electron';
@@ -86,6 +86,10 @@ export async function reconnectSocialMediaDesk(
     { platform },
   );
   return response.data.authorizationUrl;
+}
+
+export async function disconnectInstagramDesk(channelId: string): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/instagram/disconnect`);
 }
 
 export async function reconnectInstagramDesk(

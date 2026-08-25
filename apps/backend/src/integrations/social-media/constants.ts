@@ -6,10 +6,10 @@ export const SOCIAL_MEDIA_SOURCE_TYPES = {
 export type SocialMediaSourceType =
   (typeof SOCIAL_MEDIA_SOURCE_TYPES)[keyof typeof SOCIAL_MEDIA_SOURCE_TYPES];
 
+
 export const SOCIAL_MEDIA_INTERACTION_TYPES = {
   REVIEW: 'REVIEW',
   DM: 'DM',
   REPLY: 'REPLY',
-  COMMENT: 'COMMENT',
-  MENTION: 'MENTION',
 } as const;
+

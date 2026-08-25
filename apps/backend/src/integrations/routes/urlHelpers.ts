@@ -38,3 +38,13 @@ export function buildReturnPathOrSupportPath(
   }
   return buildSupportPath(workspaceId, channelId, query);
 }
+
+export function postOAuthRedirect(
+  frontendUrl: string,
+  path: string,
+  platform: 'web' | 'electron',
+): string {
+  return platform === 'electron'
+    ? `${frontendUrl}/launch?path=${encodeURIComponent(path)}`
+    : `${frontendUrl}${path}`;
+}
