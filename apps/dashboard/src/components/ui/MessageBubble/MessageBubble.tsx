@@ -43,6 +43,7 @@ import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
 import { BotBubble } from '../../Chat/BotBubble';
+import { AgentFeedbackButtons } from '../../Chat/AgentFeedbackButtons';
 import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
@@ -670,6 +671,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const sender = useUser(message.senderId);
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
+  // Agent-authored message → eligible for 👍/👎 feedback (telemetry-only, no DB).
+  const isAgentMessage =
+    isBotMessage ||
+    sender?.userType === UserType.APP ||
+    sender?.userType === UserType.BOT;
   const { baseRoute } = useRouteContext();
   const location = useLocation();
   const actionableCount = useMemo(
@@ -1615,6 +1621,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   toggleReaction={toggleReaction}
                   messageId={message.messageId}
                 />
+              )}
+              {!contentOnly && isAgentMessage && !isMe && (
+                <div className='mt-1'>
+                  <AgentFeedbackButtons
+                    messageId={message.messageId}
+                    {...(sender?.name && { agentName: sender.name })}
+                  />
+                </div>
               )}
             </div>
           )}

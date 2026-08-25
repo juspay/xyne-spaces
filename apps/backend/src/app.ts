@@ -40,6 +40,7 @@ import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
 import reactionRoutes from '@/routes/reactionRoutes';
+import messageFeedbackRoutes from '@/routes/messageFeedback';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
@@ -483,6 +484,7 @@ export class App {
     this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
+    this.app.use('/api/messages', authMiddleware.authenticate, messageFeedbackRoutes); // Agent-response feedback (telemetry-only)
 
     // Claw MCP route (user + app auth) — must be before /api/calls
     this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);

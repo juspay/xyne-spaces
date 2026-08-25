@@ -120,6 +120,7 @@ export const Event = {
   MESSAGE_DELETE_FAILED: 'message_delete_failed',
   MESSAGE_FORWARDED: 'message_forwarded',
   MESSAGE_FORWARD_FAILED: 'message_forward_failed',
+  AGENT_FEEDBACK: 'agent_feedback',
   API_CALL_SUCCESSFUL: 'api_call_successful',
   API_CALL_FAILED: 'api_call_failed',
   WEBSOCKET_CONNECTED: 'websocket_connection_successful',
