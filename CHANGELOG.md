@@ -1,3 +1,10 @@
+## [1.221.0](https://github.com/juspay/xyne-spaces/compare/v1.220.0...v1.221.0) (2026-08-25)
+
+
+### Features
+
+* backfill isOverdue column in tickets ([#497](https://github.com/juspay/xyne-spaces/issues/497)) ([04402f7](https://github.com/juspay/xyne-spaces/commit/04402f71ba25ad5c1593af300d2c8db52f4f0bcb))
+
 ## [1.220.0](https://github.com/juspay/xyne-spaces/compare/v1.219.2...v1.220.0) (2026-08-25)
 
 
