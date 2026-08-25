@@ -22,6 +22,7 @@ import {
 } from '../services/deskMetricsAggregator.js';
 import { logger } from '../utils/logger.js';
 import {
+  DEFAULT_DESK_METRIC_KEYS,
   DESK_METRIC_KEYS,
   DESK_METRICS_MAX_AGGREGATE_DESKS,
   TicketPriority,
@@ -332,8 +333,10 @@ export class DeskMetricsController {
         return;
       }
 
-      const metrics: DeskMetricKey[] = body.metrics ?? [...DESK_METRIC_KEYS];
       const includeTickets = body.includeTickets ?? 0;
+      const metricsDefaulted = body.metrics === undefined;
+      const metrics: DeskMetricKey[] = body.metrics ?? [...DEFAULT_DESK_METRIC_KEYS];
+      if (includeTickets > 0 && !metrics.includes('tickets')) metrics.push('tickets');
       const wanted = new Set(metrics);
       const filters = {
         assigneeIds: body.assigneeIds ?? [],
@@ -351,6 +354,7 @@ export class DeskMetricsController {
       const desks: DeskMetricsDeskSummary[] = [];
       const skipped: DeskMetricsSkippedDesk[] = [];
       let anyDeskTruncated = false;
+      let desksWithoutFrtStages = 0;
 
       // Sequential, matching getAggregateMetrics — bounds peak DB connections.
       for (const channelId of channelIds) {
@@ -373,10 +377,12 @@ export class DeskMetricsController {
           }
 
           const channel = await this.channelRepo.findById(channelId);
+          const frtStageNames = this.parseFrtStageNames(preference);
+          if (frtStageNames.length === 0) desksWithoutFrtStages += 1;
           const partial = await deskMetricsRepository.queryMetrics({
             channelId,
             timeRange,
-            frtStageNames: this.parseFrtStageNames(preference),
+            frtStageNames,
             metrics,
             includeTickets,
             ...(body.customFieldBreakdown
@@ -405,12 +411,15 @@ export class DeskMetricsController {
       }
 
       if (contributions.length === 0) {
-        const status = skipped.some(desk => desk.reason === 'error') ? 500 : 403;
+        const hasError = skipped.some(desk => desk.reason === 'error');
+        const hasForbidden = skipped.some(desk => desk.reason === 'forbidden');
+        const status = hasError ? 500 : hasForbidden ? 403 : 404;
         res.status(status).json({
-          error:
-            status === 500
-              ? 'Failed to compute desk metrics'
-              : 'None of the selected desks have metrics available',
+          error: hasError
+            ? 'Failed to compute desk metrics'
+            : hasForbidden
+              ? 'You are not a member of the requested desk(s)'
+              : 'No such desk. Check the channelId, or list the available desks first.',
           skipped,
         });
         return;
@@ -447,8 +456,10 @@ export class DeskMetricsController {
           wanted,
           contributions.length,
           result.ticketsTruncated === true,
-          desks.filter(d => !d.metricsEnabled).length,
+          desksWithoutFrtStages,
           result.customFieldBreakdown ?? [],
+          result.tickets !== undefined,
+          metricsDefaulted,
         ),
       };
 
@@ -472,13 +483,15 @@ export class DeskMetricsController {
     wanted: Set<DeskMetricKey>,
     deskCount: number,
     ticketsTruncated: boolean,
-    unconfiguredDeskCount: number,
+    desksWithoutFrtStages: number,
     customFieldBreakdown: DeskMetricsCustomFieldBreakdown[],
+    ticketsReturned: boolean,
+    metricsDefaulted: boolean,
   ): string[] {
     const notes: string[] = [];
 
-    const cohortKeys = ['frt', 'rt', 'counts', 'priority', 'agents', 'tags', 'tickets'].filter(k =>
-      wanted.has(k as DeskMetricKey),
+    const cohortKeys = ['frt', 'rt', 'counts', 'priority', 'agents', 'tags', 'tickets'].filter(
+      k => wanted.has(k as DeskMetricKey) && (k !== 'tickets' || ticketsReturned),
     );
     if (cohortKeys.length > 0) {
       notes.push(
@@ -506,6 +519,15 @@ export class DeskMetricsController {
         'rt.avgSeconds is creation to the LAST resolution event (so a reopened-then-reclosed ticket ' +
           'measures to the final close). Tickets still open are excluded entirely, so a low average ' +
           'over a small resolvedTickets count is survivorship bias, not good performance.',
+      );
+    }
+    if (wanted.has('trend')) {
+      notes.push(
+        'trend.opened and trend.closed are NOT counted the same way. opened counts tickets CREATED ' +
+          'in that bucket; closed counts every ticket resolved in it whatever its age, including ' +
+          'ones opened long before the range. On a backlog-clearing day closed can far exceed ' +
+          'opened. Never divide one by the other for a resolution rate, a percentage, or a backlog ' +
+          'trajectory — read them as two independent series.',
       );
     }
     if (wanted.has('agents')) {
@@ -537,6 +559,24 @@ export class DeskMetricsController {
           '"not classified", never as a real category.',
       );
     }
+    if (metricsDefaulted) {
+      const omitted = DESK_METRIC_KEYS.filter(k => !wanted.has(k));
+      notes.push(
+        `No \`metrics\` were requested, so this is the default set (${[...wanted].join(', ')}). ` +
+          `NOT computed: ${omitted.join(', ')} — they are available, just ask for them by name. ` +
+          'Do not tell the user this desk has no tag, category, agent or custom-field data on the ' +
+          'strength of this response.',
+      );
+    }
+    const truncatedFields = customFieldBreakdown.filter(b => b.truncated).map(b => b.field);
+    if (truncatedFields.length > 0) {
+      notes.push(
+        `customFieldBreakdown for ${truncatedFields.join(', ')} was TRUNCATED to the top values by ` +
+          'ticket count — the field has more distinct values than were returned, so this is not a ' +
+          'complete distribution and the counts shown do not add up to the cohort. A field like ' +
+          'this (an id or free text) is usually not worth breaking down at all.',
+      );
+    }
     const multiValueFields = customFieldBreakdown.filter(b => b.multiValue).map(b => b.field);
     if (multiValueFields.length > 0) {
       notes.push(
@@ -545,11 +585,13 @@ export class DeskMetricsController {
           'to the ticket total. Read them as "tickets mentioning X", never as a split of the whole.',
       );
     }
-    if (unconfiguredDeskCount > 0) {
+    if (desksWithoutFrtStages > 0 && wanted.has('frt')) {
       notes.push(
-        `${unconfiguredDeskCount} desk(s) here never enabled the metrics dashboard, so their ` +
-          'first-response stop stages are probably unset. That makes frt null (unknown) rather ' +
-          'than zero — report it as not configured, never as "no responses".',
+        `${desksWithoutFrtStages} desk(s) here have no configured first-response stop stages, so ` +
+          'for them frt falls back to the time of the first OUTBOUND EMAIL. That is a real ' +
+          'measurement, not a missing one — report the number, and mention only that the desk has ' +
+          'not chosen its own stop condition. Do not call it unconfigured and do not omit the desk ' +
+          'from a comparison.',
       );
     }
     return notes;
