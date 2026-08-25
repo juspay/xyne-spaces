@@ -1147,8 +1147,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           {
             const limit = BACKEND_RESULTS_LIMIT;
             const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
-            const effectiveRankProfile =
-              rankProfile || allDefaultRankProfile;
+            const effectiveRankProfile = rankProfile || allDefaultRankProfile;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -1611,8 +1610,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       {
         const currentOffset = currentPagination.offset;
         const pageSize = BACKEND_RESULTS_LIMIT;
-        const effectiveRankProfile =
-          rankProfile || allDefaultRankProfile;
+        const effectiveRankProfile = rankProfile || allDefaultRankProfile;
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,

@@ -12,7 +12,10 @@ import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { Channel } from '@xyne/shared';
-import { useCmdkDefaultRankProfiles, cmdkTabKeyForDocType } from '../../../hooks/useCmdkSearchConfig';
+import {
+  useCmdkDefaultRankProfiles,
+  cmdkTabKeyForDocType,
+} from '../../../hooks/useCmdkSearchConfig';
 
 interface SearchFilterBarProps {
   filters: SearchResultsFilters;
