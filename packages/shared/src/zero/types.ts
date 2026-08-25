@@ -111,6 +111,7 @@ export enum AttachmentEntityType {
   TICKET = 'TICKET',
   CHAT = 'CHAT',
   CANVAS = 'CANVAS',
+  CANVAS_COMMENT = 'CANVAS_COMMENT',
   DRAFT = 'DRAFT',
   DELAYED_MESSAGE = 'DELAYED_MESSAGE',
   EMAIL = 'EMAIL',

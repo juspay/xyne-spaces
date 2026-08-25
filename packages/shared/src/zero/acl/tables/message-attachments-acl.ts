@@ -1,16 +1,54 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import { ChannelVisibility } from '../../schema';
+import { CanvasVisibility, ChannelVisibility } from '../../schema';
 import { AttachmentEntityType } from '../../types';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
 import {
   SCALAR,
   channelAccessArgs,
-  channelAccessWhere,
   scalarChannelBody,
 } from '../core/channel-access';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
+
+const canvasVisibleToUser = (userId: string) => (canvas: any) =>
+  canvas.where(({ or, cmp, exists }: any) =>
+    or(
+      cmp('createdBy', userId),
+      cmp('visibility', CanvasVisibility.PUBLIC),
+      exists('participants', (participant: any) =>
+        participant.where(({ or, cmp, exists }: any) =>
+          or(
+            cmp('userId', userId),
+            exists('userGroup', (userGroup: any) =>
+              userGroup.whereExists('userGroupMappings', (mapping: any) =>
+                mapping.where('userId', userId),
+              ),
+            ),
+            exists('channel', (channel: any) =>
+              channel.whereExists('participants', (channelParticipant: any) =>
+                channelParticipant.where('userId', userId),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+const canvasCommentAttachmentVisibleToUser =
+  (userId: string) =>
+  ({ and, cmp, exists }: any) =>
+    and(
+      cmp('entityType', '=', AttachmentEntityType.CANVAS_COMMENT),
+      exists('canvasComment', (comment: any) =>
+        comment
+          .where('deletedAt', 'IS', null)
+          .whereExists('thread', (thread: any) =>
+            thread.whereExists('canvas', canvasVisibleToUser(userId)),
+          ),
+      ),
+    );
 
 export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
   constructor(ctx: Context) {
@@ -42,6 +80,7 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
                   .where(guestChannelAccessWhere(this.ctx)),
               ),
             ),
+            canvasCommentAttachmentVisibleToUser(this.ctx.userID)({ and, cmp, exists }),
           ),
         );
     }
@@ -105,6 +144,7 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
                 ),
             ),
           ),
+          canvasCommentAttachmentVisibleToUser(this.ctx.userID)({ and, cmp, exists }),
         ),
       );
   }
