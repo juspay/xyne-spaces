@@ -1,3 +1,4 @@
+import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { isAgentInvocableBy } from "xyne-claw-shared";
@@ -143,6 +144,18 @@ const internalRouter = Router();
 // ran, but withhold the returned content (a tool's result carries the user's
 // private Spaces data — message/DM/channel text). See the All Runs ACL.
 const REDACTED_TOOL_RESULT = "[result hidden — another user's run]";
+
+/**
+ * An awakened run (heartbeat / reflex) is owned by the agent's own bot
+ * identity, not by a person, so there is no user privacy for the cross-user
+ * redaction to protect — and an admin needs to read exactly what it did.
+ * See lib/agent-owned-runs.ts.
+ */
+function shouldRedactRun(crossUser: boolean, runUserId: string | null | undefined, requesterId: string, triggerSource?: string | null): boolean {
+  if (!crossUser) return false;
+  if (runUserId === requesterId) return false;
+  return !isAgentOwnedRun(triggerSource);
+}
 
 /**
  * Strip RESULT bodies from a run's tool invocations while preserving every
@@ -2288,7 +2301,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         const visibleInvocations = withoutFollowUpRecorderInvocations(invocations as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[linkedId] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2325,7 +2338,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         // chips sharing the Spaces mark cost one copy, not N.
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2475,7 +2488,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(invs as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2491,7 +2504,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(
           r.toolInvocations as unknown[],
         );
-        return crossUser && r.userId !== userId
+        return shouldRedactRun(crossUser, r.userId, userId, r.triggerSource)
           ? redactToolResults(visibleInvocations)
           : visibleInvocations;
       });
@@ -2519,7 +2532,10 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     if (evt.agentSlug && evt.agentSlug !== slug) return; // scope to this agent
     if (!allow(evt.userId)) return;
     let data: LiveEvent = evt;
-    if (evt.type === "invocation" && crossUser && evt.userId !== userId) {
+    // Same rule as the stored transcript above — without this an awakened run
+    // streamed its tool results pre-redacted and only became readable after it
+    // completed and the viewer refetched from Postgres.
+    if (evt.type === "invocation" && shouldRedactRun(crossUser, evt.userId, userId, evt.triggerSource)) {
       data = { ...evt, toolInvocation: redactToolResults([evt.toolInvocation])[0] };
     }
     try {
@@ -2734,11 +2750,21 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         aclRuns.filter((r) => r.usedUserToken && r.userId !== requesterId).map((r) => r.sessionId),
       );
       const ownerBySession = new Map(aclRuns.map((r) => [r.sessionId, r.userId]));
-      const ownsSession = (sid: string | undefined): boolean => !!sid && ownerBySession.get(sid) === requesterId;
+      // Awakened runs have no human owner, so "readable" for them means the
+      // admin can read them — that IS the audit trail for an agent acting
+      // unattended. See lib/agent-owned-runs.ts.
+      const agentOwnedSessions = new Set(
+        aclRuns.filter((r) => isAgentOwnedRun(r.triggerSource)).map((r) => r.sessionId),
+      );
+      const readable = (sid: string | undefined, ownerUserId?: string | null): boolean =>
+        ownerUserId === requesterId ||
+        (!!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId));
+      const ownsSession = (sid: string | undefined): boolean =>
+        !!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId);
 
       const d = body.data;
       const hideDebugSession = d.debugSession?.sessionId ? hiddenSessionIds.has(d.debugSession.sessionId) : false;
-      const debugSessionOwned = d.debugSession?.userId === requesterId;
+      const debugSessionOwned = readable(d.debugSession?.sessionId, d.debugSession?.userId);
       body.data = {
         ...d,
         debugSession: hideDebugSession
@@ -2754,7 +2780,9 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         runs: (d.runs ?? [])
           .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
           .map((r) =>
-            r.data?.userId === requesterId ? r : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
+            readable(r.data?.sessionId, r.data?.userId)
+              ? r
+              : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
           ),
         subagents: (d.subagents ?? [])
           .filter((s) => !hiddenSessionIds.has(s.data?.parentSessionId ?? ""))

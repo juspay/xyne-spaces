@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
 import { errMsg } from "../lib/errors.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
@@ -700,6 +701,28 @@ async function loadSlackSurfaceCredentials(
   };
 }
 
+/**
+ * Add a tool to the agent's `direct` allowlist for THIS run only.
+ *
+ * `apps-send-message` never appears in the agent tool picker (it acts as the
+ * bot identity, so it is deliberately not offered for interactive runs), which
+ * means a strict `tools.direct` allowlist always excludes it. For an AWAKENED
+ * run that is fatal rather than merely restrictive: nobody is in a thread to
+ * receive the agent's final answer, so this tool is the ONLY way it can speak.
+ * Without it the agent reasons correctly, decides to reply, finds no tool, and
+ * says nothing — the whole feature is inert. (Observed live 2026-08-25.)
+ *
+ * Per-run and in-memory: the stored agent config is untouched, and interactive
+ * runs of the same agent are unaffected.
+ */
+function withDirectTool(config: AgentToolsConfig, toolName: string): AgentToolsConfig {
+  const direct = Array.isArray(config.direct)
+    ? config.direct.filter((value): value is string => typeof value === "string")
+    : [];
+  if (direct.includes(toolName)) return config;
+  return { ...config, direct: [...direct, toolName] };
+}
+
 function withSubagent(config: AgentToolsConfig, subagentName: string): AgentToolsConfig {
   const subagents = Array.isArray(config.subagents)
     ? config.subagents.filter((value): value is string => typeof value === "string")
@@ -714,7 +737,7 @@ function withSubagent(config: AgentToolsConfig, subagentName: string): AgentTool
  * override forwarded to claw, so without this a surface-default virtual group
  * is created and then immediately filtered back out.
  */
-async function withSurfaceDefaultToolsConfig(
+export async function withSurfaceDefaultToolsConfig(
   config: AgentToolsConfig | undefined,
   sessionId: string,
   sessionSpacesAppId?: string,
@@ -763,6 +786,15 @@ async function withSurfaceDefaultToolsConfig(
       log.info(`[mcp/tools] spaces default injected from session spacesAppId (run-context absent) app=${sessionSpacesAppId}`);
     }
     effective = withSubagent(effective, "spaces");
+  }
+
+  // An awakened run (heartbeat / reflex) has no thread its answer is posted
+  // into, so the bot-identity send tool is its only voice. Grant it for this
+  // run regardless of the agent's stored allowlist; the write POLICY
+  // (observe / reply / act, plus shadow) still governs whether the call is
+  // permitted — see awakening/write-policy.ts, enforced at /mcp/call.
+  if (runCtx?.triggerSource === "heartbeat" || runCtx?.triggerSource === "reflex") {
+    effective = withDirectTool(effective, AWAKENING_SEND_TOOL);
   }
 
   return effective;
@@ -1569,6 +1601,21 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         `[mcp/call] user=${userId} server=${serverType} tool=${tool} permission=${effectivePermission}${requiresApproval ? " (gateway approval required, forced ask)" : ""}`,
       );
 
+      // Hard deny. Distinct from "ask": there is no approval that unblocks it,
+      // because there is nobody to ask. Used by unattended runs (an awakened
+      // agent in shadow or observe mode) where a write must be impossible
+      // rather than merely queued behind a card no human will ever click.
+      if (effectivePermission === "deny") {
+        log.info(`[mcp/call] denied ${serverType}/${tool} for user=${userId} (permission=deny)`);
+        res.json({
+          success: true,
+          data: {
+            content: `Blocked: this run is not permitted to call ${tool}. It is running without write access; describe what you would have done instead.`,
+          },
+        });
+        return;
+      }
+
       if (effectivePermission === "ask") {
         const action = { serverType, tool, params: params ?? {}, userId };
         const signature = signAction(action);
@@ -1700,6 +1747,21 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         isWriteTool,
       },
     );
+
+    // Hard deny. Distinct from "ask": there is no approval that unblocks it,
+    // because there is nobody to ask. Used by unattended runs (an awakened
+    // agent in shadow or observe mode) where a write must be impossible
+    // rather than merely queued behind a card no human will ever click.
+    if (effectivePermission === "deny") {
+      log.info(`[mcp/call] denied ${serverType}/${tool} for user=${userId} (permission=deny)`);
+      res.json({
+        success: true,
+        data: {
+          content: `Blocked: this run is not permitted to call ${tool}. It is running without write access; describe what you would have done instead.`,
+        },
+      });
+      return;
+    }
 
     if (effectivePermission === "ask") {
       const validationError = await validateWriteAction(serverType, tool, effectiveParams, {

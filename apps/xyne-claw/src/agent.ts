@@ -48,6 +48,7 @@ import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
 import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
 import { installToolBudget } from "./tool-budget.js";
+import { installAwakeningInbox } from "./awakening-inbox.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
 
 const log = createLogger("agent");
@@ -1780,6 +1781,14 @@ export interface RunTaskOptions {
     isRequested: () => boolean;
     registerSummaryRequest: (requestSummary: () => Promise<boolean>) => void;
   } | undefined;
+  /** Awakened run (heartbeat / reflex). Presence enables live event injection
+   *  and tells the run it was not triggered by a human. */
+  awakening?: {
+    kind: string;
+    writePolicy: string;
+    shadow: boolean;
+    injectEnabled?: boolean;
+  } | undefined;
 }
 
 const FAST_MODE_ACTIVE_TOOLS_CUSTOM_TYPE = "xyne.fastMode.activeToolSet";
@@ -1847,6 +1856,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     resumedFromHandoff,
     handoff,
     gracefulInterrupt,
+    awakening,
   } = opts;
   let lastHandoffTurn = 0;
   const recordHandoffBoundary = (turn: number): void => {
@@ -2340,6 +2350,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const toolBudget = installToolBudget(session.agent, {
     sessionId: sessionId ?? conversationId ?? "unknown",
   });
+
+  // Awakened runs pull new events in at turn boundaries so the agent can adapt
+  // mid-task. Installed after the tool budget so both hooks chain (each wraps
+  // the previous beforeToolCall rather than replacing it).
+  if (awakening?.injectEnabled && sessionId) {
+    installAwakeningInbox(session.agent, { sessionId });
+  }
 
   // verifyResponses: wire the submit-response tool's evidence accessor to the
   // live transcript. Set BEFORE any prompt so the tool — which verifies inside

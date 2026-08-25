@@ -53,12 +53,14 @@ export function isFlowSchemaRejection(err: unknown): boolean {
   );
 }
 
-function resolveBaseUrl(override?: string): string {
-  const raw = override
-    ?? process.env["XYNE_SPACES_URL"]
-    ?? process.env["SPACES_BACKEND_URL"]
-    ?? "";
-  return raw.replace(/\/+$/, "");
+// `??` alone is not enough here: the adapter always writes XYNE_SPACES_URL into
+// the child's env, so a credential set without a `url` leaves it defined-but-
+// empty, which shadows SPACES_BACKEND_URL and takes the whole server down with
+// "Spaces base URL is not configured". Treat blank as unset at every level.
+export function resolveBaseUrl(override?: string): string {
+  const candidates = [override, process.env["XYNE_SPACES_URL"], process.env["SPACES_BACKEND_URL"]];
+  const raw = candidates.find((value) => typeof value === "string" && value.trim().length > 0) ?? "";
+  return raw.trim().replace(/\/+$/, "");
 }
 
 // Extract Spaces userId from the JWT token's `sub` claim (user tokens)

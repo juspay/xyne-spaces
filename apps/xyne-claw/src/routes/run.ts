@@ -468,6 +468,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     mode,
     experiment: rawExperiment,
     planContinuation,
+    awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = req.body as {
     userId?: string;
@@ -529,6 +530,16 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
     contextFiles?: Array<{ path: string; content: string }>;
+    /** Set by claw-auth's awakening dispatcher for an unattended run. */
+    awakening?: {
+      kind: string;
+      writePolicy: string;
+      shadow: boolean;
+      injectEnabled?: boolean;
+      windowStartMs?: number;
+      windowEndMs?: number;
+      entryPath?: string;
+    };
     additionalInstructions?: string;
     researchContext?: {
       type: string;
@@ -852,6 +863,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       planContinuation,
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
+      awakening,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
@@ -978,6 +990,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         planContinuation,
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
+        awakening,
       );
     } catch (err) {
       processTaskError = err;
@@ -1081,6 +1094,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     shouldGenerateFollowUpSuggestions,
     typeof callbackUrl === "string" ? callbackUrl : undefined,
+    awakening,
   ).finally(() => {
     if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
     if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
@@ -1532,6 +1546,16 @@ async function processTask(
   planContinuation?: boolean,
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
+  /** Present when claw-auth woke this agent on its own (heartbeat / reflex). */
+  awakening?: {
+    kind: string;
+    writePolicy: string;
+    shadow: boolean;
+    injectEnabled?: boolean;
+    windowStartMs?: number;
+    windowEndMs?: number;
+    entryPath?: string;
+  },
 ): Promise<void> {
   // Query prefetch (opt-in, `agentConfig.prefetchContext`). Fired at the TOP of
   // the run so the fast-model extractor overlaps the expensive setup that
@@ -4037,6 +4061,16 @@ async function processTask(
             if (active) active.requestGracefulInterruptSummary = requestSummary;
           },
         },
+        ...(awakening
+          ? {
+              awakening: {
+                kind: awakening.kind,
+                writePolicy: awakening.writePolicy,
+                shadow: awakening.shadow,
+                ...(awakening.injectEnabled !== undefined ? { injectEnabled: awakening.injectEnabled } : {}),
+              },
+            }
+          : {}),
       });
 
     // Capture provider-fallback context so an empty FINAL result can tell the

@@ -43,6 +43,7 @@ import {
   type ProviderConfig,
 } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
+import { withAwakeningSendTool } from "../awakening/send-tool.js";
 import { redisService } from "../redis.js";
 import {
   requireAuth,
@@ -188,7 +189,7 @@ function requireRunCaller(req: Request, res: Response, next: NextFunction): void
   return requireUserAuth(req, res, next);
 }
 
-type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack";
+type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
@@ -771,7 +772,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       }
       req.body = sanitized;
     }
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, generateFollowUpSuggestions } = req.body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, generateFollowUpSuggestions } = req.body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -805,6 +806,7 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
       recordingRefs?: RunRecordingRef[];
       contextFiles?: Array<{ path: string; content: string }>;
+      skills?: Array<{ slug?: string; name: string; description?: string; content: string }>;
       attachedContext?: Array<{
         type: "channel" | "ticket" | "canvas" | "call";
         id: string;
@@ -1370,6 +1372,80 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       ? injectedCallbackUrl
       : (callbackUrl ?? injectedCallbackUrl);
 
+    // Same S2S trust rule as skills: only an internal caller (the awakening
+    // dispatcher) may declare a run unattended, since the block governs the
+    // run's write policy and its live-injection wiring.
+    const awakeningBlock =
+      s2sKeyMatches(req.headers["x-s2s-key"]) &&
+      (req.body as { awakening?: unknown }).awakening &&
+      typeof (req.body as { awakening?: unknown }).awakening === "object"
+        ? ((req.body as { awakening?: Record<string, unknown> }).awakening as Record<string, unknown>)
+        : undefined;
+
+    // An AWAKENED run (heartbeat / reflex) must have its SessionContext in place
+    // BEFORE claw is dispatched: claw lists its MCP tools within milliseconds of
+    // the POST returning, and that listing reads the context to decide app-mode
+    // vs user-mode and to grant the bot-identity send tool. Writing the context
+    // after the dispatch resolves is a race the run usually loses — the agent
+    // then comes up with no way to speak at all.
+    //
+    // `awakening` is only honoured from an S2S caller (see awakeningBlock), so
+    // this cannot be used to self-declare an unattended run from a browser.
+    if (awakeningBlock) {
+      try {
+        const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
+        const appToken =
+          ciphertext && iv && authTag ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
+        const kind = String((awakeningBlock as Record<string, unknown>)["kind"] ?? "");
+        const { setSession } = await import("./webhook.js");
+        await setSession(sessionId, {
+          mentionedUserId: agent.spacesAppUserId ?? "",
+          senderId: agent.spacesAppUserId ?? "",
+          senderName: agentSlug || "assistant",
+          channelId: "",
+          channelName: "",
+          conversationId: conversationId ?? "",
+          task: task.trim(),
+          agentId: agent.id,
+          agentOrgId: agent.orgId,
+          agentSlug: agentSlug || "assistant",
+          responseMode: "conversation",
+          // Read by routes/mcp.ts: app-mode Spaces tools + the send tool.
+          triggerSource: kind === "reflex" ? "reflex" : "heartbeat",
+          isAutomation: true,
+          // The agent posts through tools, choosing thread and wording itself;
+          // its final answer is an operator log line, not a channel message.
+          suppressThreadReply: true,
+          appToken,
+          spacesAppId: agent.spacesAppId ?? "",
+          spacesAppUserId: agent.spacesAppUserId ?? "",
+          ...(traceId ? { traceId } : {}),
+        });
+      } catch (sessionErr) {
+        log.warn(
+          `[run] failed to store awakening session context sessionId=${sessionId}:`,
+          sessionErr instanceof Error ? sessionErr.message : sessionErr,
+        );
+      }
+    }
+
+    // Grant the bot-identity send tool for THIS run only. claw re-applies the
+    // agent's tools allowlist against the config forwarded here
+    // (applyAgentToolFilter in xyne-claw/src/routes/run.ts), so listing the
+    // tool at the claw-auth MCP boundary is not enough on its own — claw would
+    // strip it right back out of the palette. `apps-send-message` is never in
+    // the picker, so a strict allowlist always excludes it, and an awakened run
+    // has no thread its final answer is posted into: without this the agent
+    // decides to reply, finds no tool, and says nothing.
+    //
+    // Mirrors withSurfaceDefaultToolsConfig in routes/mcp.ts; both are per-run
+    // and leave the stored agent config untouched. The write POLICY
+    // (observe / reply / act, plus shadow) still governs whether a call is
+    // permitted — see awakening/write-policy.ts, enforced at /mcp/call.
+    if (awakeningBlock) {
+      mergedAgentConfig = withAwakeningSendTool(mergedAgentConfig);
+    }
+
     if (injectedCallbackUrl) {
       try {
         const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
@@ -1470,6 +1546,34 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     // Shared request body for both transports. SSE consumers (run-stream.ts)
     // pass progressUrl/callbackUrl too — claw ignores them in SSE mode since
     // the response stream IS the channel.
+    // Caller-supplied skills, merged with the agent's attached ones.
+    //
+    // S2S ONLY. A skill's content becomes agent instructions, so accepting one
+    // from a browser session would let any user rewrite what their agent is
+    // told to do for that run. Trusted internal callers (the awakening
+    // dispatcher, which inlines its operating contract rather than depending
+    // on a per-org seeded row) are the only ones allowed to add them.
+    const callerSkills =
+      s2sKeyMatches(req.headers["x-s2s-key"]) && Array.isArray(bodySkills)
+        ? bodySkills.filter(
+            (sk): sk is { slug?: string; name: string; description?: string; content: string } =>
+              !!sk && typeof sk.name === "string" && typeof sk.content === "string",
+          )
+        : [];
+    const agentSkills = agent.skills ?? [];
+    // Agent-attached skills win a slug collision — an org's own skill must not
+    // be silently shadowed by a caller-supplied one.
+    const takenSlugs = new Set(agentSkills.map((sk) => sk.slug ?? sk.name));
+    const mergedSkills = [
+      ...agentSkills,
+      ...callerSkills.map((sk) => ({
+        slug: sk.slug ?? sk.name,
+        name: sk.name,
+        description: sk.description ?? "",
+        content: sk.content,
+      })).filter((sk) => !takenSlugs.has(sk.slug)),
+    ];
+
     const forwardBody = {
       sessionId,
       idempotencyKey,
@@ -1499,7 +1603,8 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         ? { providerConfigs: effectiveProviderConfigs }
         : {}),
       ...(cwd ? { cwd } : {}),
-      ...(agent.skills ? { skills: agent.skills } : {}),
+      ...(mergedSkills.length > 0 ? { skills: mergedSkills } : {}),
+      ...(awakeningBlock ? { awakening: awakeningBlock } : {}),
       ...(progressUrl ? { progressUrl } : {}),
       ...(attachments?.length ? { attachments } : {}),
       ...(normalizedRecordingRefs.length ? { recordingRefs: normalizedRecordingRefs } : {}),
