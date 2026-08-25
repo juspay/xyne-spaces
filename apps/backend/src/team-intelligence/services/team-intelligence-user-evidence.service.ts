@@ -181,9 +181,9 @@ class TeamIntelligenceUserEvidenceService {
         where: {
           workspaceId,
           lastActivityAt: { gte: start, lt: end },
-          // Confidentiality: never send personal (DM / group-DM) conversations
-          // to the LLM. Only channel conversations are eligible as evidence.
-          channel: { scopeType: { notIn: ['DM', 'GROUP_DM'] } },
+          // Confidentiality: only public channel conversations are eligible as
+          // evidence. DMs, group-DMs, and private channels are excluded.
+          channel: { scopeType: { notIn: ['DM', 'GROUP_DM'] }, visibility: 'PUBLIC' },
           OR: [
             { createdBy: userId },
             { participants: { some: { userId } } },
