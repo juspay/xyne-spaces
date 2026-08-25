@@ -2376,11 +2376,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     slotToken = slot;
     if (!slot) {
       const slotOwner = await getSlotOwner(payload.conversationId, runAgentSlug).catch(() => null);
-      const sameUserActiveRun =
-        !explicitQueueOnly &&
-        slotOwner?.userId === targetUserId &&
-        slotOwner.sessionId
-          ? { sessionId: slotOwner.sessionId }
+      const activeRunToInterrupt =
+        !explicitQueueOnly && slotOwner?.sessionId
+          ? { sessionId: slotOwner.sessionId, ownerUserId: slotOwner.userId }
           : null;
       const queuedMsg: QueuedMessage = {
         eventId: (payload as { messageId?: string }).messageId ?? traceId,
@@ -2393,16 +2391,16 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         orgId: agent.orgId,
         task,
         eventType,
-        queueReason: sameUserActiveRun ? "interrupt_followup" : explicitQueueOnly ? "explicit_queue" : "busy",
-        interruptMode: sameUserActiveRun ? "interrupt_with_reply" : "queue_only",
+        queueReason: activeRunToInterrupt ? "interrupt_followup" : explicitQueueOnly ? "explicit_queue" : "busy",
+        interruptMode: activeRunToInterrupt ? "interrupt_with_reply" : "queue_only",
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
       let interruptRequested = false;
-      if (enq.enqueued && sameUserActiveRun) {
+      if (enq.enqueued && activeRunToInterrupt) {
         try {
           const interruptRes = await fetch(
-            `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sameUserActiveRun.sessionId)}/interrupt-with-reply`,
+            `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(activeRunToInterrupt.sessionId)}/interrupt-with-reply`,
             {
               method: "POST",
               headers: {
@@ -2415,13 +2413,13 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           interruptRequested = interruptRes.ok;
           if (!interruptRes.ok) {
             const body = await interruptRes.text().catch(() => "");
-            log.warn(`[msg-queue] interrupt-with-reply rejected session=${sameUserActiveRun.sessionId} status=${interruptRes.status} body=${body.slice(0, 200)}`);
+            log.warn(`[msg-queue] interrupt-with-reply rejected session=${activeRunToInterrupt.sessionId} owner=${activeRunToInterrupt.ownerUserId ?? "?"} by=${targetUserId} status=${interruptRes.status} body=${body.slice(0, 200)}`);
           }
         } catch (err) {
           log.warn("Failed to request interrupt-with-reply", { error: errMsg(err) });
         }
       }
-      const notice = sameUserActiveRun && interruptRequested
+      const notice = activeRunToInterrupt && interruptRequested
         ? `⏸️ I’ll wrap up my current reply first, then continue with your new message.`
         : enq.enqueued
           ? explicitQueueOnly
