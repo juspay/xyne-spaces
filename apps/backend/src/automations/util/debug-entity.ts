@@ -11,7 +11,7 @@ const TRIGGER_ENTITY_ID_KEY: Readonly<Record<string, string>> = {
   TAG_GENERATED: 'sourceId',
 };
 
-export interface DebugEntity {
+interface DebugEntity {
   entityType: string;
   entityId: string;
 }

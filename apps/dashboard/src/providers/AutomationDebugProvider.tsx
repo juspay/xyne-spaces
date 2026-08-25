@@ -73,8 +73,6 @@ const ENTITY_LABEL: Record<DebugEntityType, string> = {
   EMAIL: 'this email',
   TICKET: 'this ticket',
 };
-// Per-entity caveat about what the backend can correlate; none needed today.
-const ENTITY_SCOPE_NOTE: Partial<Record<DebugEntityType, string>> = {};
 
 const RAIL_WIDTH_KEY = 'xyne-debug-rail-width';
 const MIN_RAIL_WIDTH = 360;
@@ -221,7 +219,6 @@ function EntityRunsView({
           Automations that ran on {ENTITY_LABEL[target.type]}
           {showIds ? <span className='font-mono'> ({target.id})</span> : null}. Pick one to see its
           steps.
-          {ENTITY_SCOPE_NOTE[target.type] ? <> {ENTITY_SCOPE_NOTE[target.type]}</> : null}
         </p>
         <button
           type='button'
