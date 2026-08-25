@@ -3,7 +3,6 @@
  */
 
 import {
-	asRows,
 	boundedLimit,
 	cleanText,
 	indented,
@@ -17,46 +16,32 @@ import {
 	timeLine,
 	toIST,
 } from "../render.js";
+import type {
+	Channel,
+	ChannelParticipant,
+	ChannelScopeType,
+	ChannelUserStatus,
+	ChannelVisibility,
+} from "@xyne/spaces-sdk";
+import type { Related } from "../render.js";
+import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
-/** A `channel_user_status` row, with the channel it points at joined in. */
-interface ChannelStatusRow {
-	channelId?: string;
-	unreadCount?: number;
-	isStarred?: boolean;
-	lastViewedAt?: number;
-	selectedBoardId?: string | null;
-	channel?: ChannelRow | ChannelRow[] | null;
-}
-
-interface ChannelRow {
-	id?: string;
-	name?: string;
-	description?: string | null;
-	type?: string;
-	scopeType?: string;
-	visibility?: string;
-	createdBy?: string;
-	projectId?: string;
+/**
+ * `userVisibleChannelsV3` joins the channel, and the channel joins
+ * `channel_stats`. The SDK types columns only, so the joins are declared here
+ * and only the joins — every column stays checked against the Zero schema.
+ */
+type ChannelRow = Channel & {
 	participantCount?: number;
-	isArchived?: boolean;
-	lastActivityAt?: number;
-	addUserPolicy?: string | null;
-	createdAt?: number;
-	updatedAt?: number;
-	/** Joined by the query. Carries the membership count that is actually kept up to date. */
-	channelStats?: Record<string, unknown> | Record<string, unknown>[] | null;
-}
+	channelStats?: Related<Record<string, unknown>>;
+};
 
-/** Zero returns a `.related()` singular as an object or a one-element array. */
-function firstRelated<T>(value: T | T[] | null | undefined): T | undefined {
-	if (Array.isArray(value)) return value[0];
-	return value ?? undefined;
-}
+type ChannelStatusRow = ChannelUserStatus & { channel?: Related<ChannelRow> };
 
 function renderChannel(status: ChannelStatusRow, index: number): string | undefined {
-	const channel = firstRelated(status.channel);
+	const channel = first(status.channel);
 	if (!channel?.id) return undefined;
 
 	const flags = [channel.isArchived ? "archived" : "", status.isStarred ? "starred" : ""].filter(Boolean);
@@ -72,7 +57,7 @@ function renderChannel(status: ChannelStatusRow, index: number): string | undefi
 	// From `channel_stats`, not `Channel.participantCount` — the scalar on the
 	// channel is unmaintained and reads 0 for every row. The stats row is joined
 	// by the query already, so this costs nothing.
-	const stats = firstRelated(channel.channelStats);
+	const stats = first(channel.channelStats);
 	const memberCount = typeof stats?.["participantCount"] === "number" ? (stats["participantCount"] as number) : undefined;
 	if (memberCount !== undefined) stat.push(`${memberCount} members`);
 	if (typeof status.unreadCount === "number" && status.unreadCount > 0) stat.push(`${status.unreadCount} unread`);
@@ -130,18 +115,14 @@ const channelsList: ToolDef = {
 		},
 		additionalProperties: false,
 	},
-	catalog: [
-		{ name: "userVisibleChannelsV3", sends: [] },
-		{ name: "userVisibleEmailChannels", sends: [] },
-	],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const limit = boundedLimit(args, 50, 200);
 		const offset = offsetOf(args);
 
-		const rows = asRows<ChannelStatusRow>(await client.catalogQuery("userVisibleChannelsV3"));
+		const rows = (await sdk.channels.list()) as ChannelStatusRow[];
 		if (optionalBoolean(args, "include_email_channels") === true) {
-			rows.push(...asRows<ChannelStatusRow>(await client.catalogQuery("userVisibleEmailChannels")));
+			rows.push(...((await sdk.channels.listEmail()) as ChannelStatusRow[]));
 		}
 
 		const nameFilter = optionalString(args, "name")?.toLowerCase();
@@ -152,7 +133,7 @@ const channelsList: ToolDef = {
 		const starredOnly = optionalBoolean(args, "starred_only") === true;
 
 		const matched = rows.filter((row) => {
-			const channel = firstRelated(row.channel);
+			const channel = first(row.channel);
 			if (!channel?.id) return false;
 			if (nameFilter && !(channel.name ?? "").toLowerCase().includes(nameFilter)) return false;
 			if (scopeType && channel.scopeType !== scopeType) return false;
@@ -165,7 +146,7 @@ const channelsList: ToolDef = {
 
 		// Most recently active first: an agent asking "what channels are there"
 		// almost always wants the live ones at the top.
-		matched.sort((a, b) => (firstRelated(b.channel)?.lastActivityAt ?? 0) - (firstRelated(a.channel)?.lastActivityAt ?? 0));
+		matched.sort((a, b) => (first(b.channel)?.lastActivityAt ?? 0) - (first(a.channel)?.lastActivityAt ?? 0));
 
 		const page = matched.slice(offset, offset + limit);
 		const rendered = page.map((row, i) => renderChannel(row, offset + i + 1)).filter((v): v is string => v !== undefined);
@@ -175,13 +156,7 @@ const channelsList: ToolDef = {
 
 // ── spaces_channel_participants ─────────────────────────────────────────────
 
-interface ParticipantRow {
-	id?: string;
-	channelId?: string;
-	userId?: string;
-	role?: string;
-	joinedAt?: number;
-}
+type ParticipantRow = ChannelParticipant;
 
 const channelParticipants: ToolDef = {
 	name: "spaces_channel_participants",
@@ -202,15 +177,14 @@ const channelParticipants: ToolDef = {
 		required: ["channel_id"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "channelParticipants", sends: ["channelId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const channelId = String(args["channel_id"] ?? "").trim();
 		if (!channelId) throw new Error("Missing required parameter: channel_id");
 		const limit = boundedLimit(args, 100, 500);
 		const offset = offsetOf(args);
 
-		const rows = asRows<ParticipantRow>(await client.catalogQuery("channelParticipants", { channelId }));
+		const rows: ParticipantRow[] = await sdk.channels.listParticipants(channelId);
 		const role = optionalString(args, "role");
 		const nameFilter = optionalString(args, "name")?.toLowerCase();
 
@@ -277,9 +251,8 @@ const channelCreate: ToolDef = {
 		required: ["project_id"],
 		additionalProperties: false,
 	},
-	direct: [{ method: "post", path: "/channels" }],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const projectId = String(args["project_id"] ?? "").trim();
 		if (!projectId) throw new Error("Missing required parameter: project_id");
 		const scopeType = optionalString(args, "scope_type") ?? "DEFAULT";
@@ -294,7 +267,7 @@ const channelCreate: ToolDef = {
 		if (scopeType === "DM") {
 			const requested = optionalString(args, "dm_user");
 			if (!requested) throw new Error("scope_type 'DM' needs dm_user — the other person's email or user id.");
-			scopeId = await users.toUserId(client, requested);
+			scopeId = await users.toUserId(sdk, requested);
 			if (!scopeId) throw new Error(`No Spaces user matches "${requested}".`);
 		}
 
@@ -302,24 +275,23 @@ const channelCreate: ToolDef = {
 		const participants: string[] = [];
 		const unresolved: string[] = [];
 		for (const value of requested) {
-			const id = await users.toUserId(client, value);
+			const id = await users.toUserId(sdk, value);
 			if (id) participants.push(id);
 			else unresolved.push(value);
 		}
 
-		const created = await client.direct<Record<string, unknown>>("POST", "/channels", {
-			body: {
-				projectId,
-				scopeType,
-				...(name ? { name } : {}),
-				...(scopeId ? { scopeId } : {}),
-				visibility: optionalString(args, "visibility") ?? "PUBLIC",
-				...(optionalString(args, "description") ? { description: optionalString(args, "description") } : {}),
-				...(participants.length > 0 ? { participants } : {}),
-			},
+		// The registry already normalises `channelId ?? id` in its mapResult.
+		const created = await sdk.channels.create({
+			projectId,
+			scopeType: scopeType as ChannelScopeType,
+			...(name ? { name } : {}),
+			...(scopeId ? { scopeId } : {}),
+			visibility: (optionalString(args, "visibility") ?? "PUBLIC") as ChannelVisibility,
+			...(optionalString(args, "description") ? { description: optionalString(args, "description")! } : {}),
+			...(participants.length > 0 ? { participants } : {}),
 		});
 
-		const channelId = String(created["channelId"] ?? created["id"] ?? "");
+		const channelId = created.id;
 		const note = unresolved.length > 0 ? `\n\nNot added — no user matched: ${unresolved.join(", ")}` : "";
 		const label = name ? `#${name}` : "the direct message";
 		return ok(`Created ${label}.\n  Channel ID: ${channelId}\n  Members added: ${participants.length}${note}`);

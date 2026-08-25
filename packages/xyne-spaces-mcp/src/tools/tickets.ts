@@ -3,9 +3,7 @@
  * both read and change.
  */
 
-import { now } from "../client.js";
 import {
-	asRows,
 	boundedLimit,
 	cleanText,
 	indented,
@@ -21,49 +19,36 @@ import {
 	timeLine,
 	toIST,
 } from "../render.js";
+import {
+	MAX_LIMIT,
+	type Ticket,
+	type TicketPriority,
+	type TicketStatusV2,
+	type TicketViewMode,
+} from "@xyne/spaces-sdk";
+import type { Related } from "../render.js";
+import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
 const STATUSES = ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"] as const;
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
 
-interface TicketRow {
-	id?: string;
-	xyneId?: string;
-	title?: string;
-	description?: string;
-	statusV2?: string;
-	priority?: string;
-	stageName?: string;
-	boardId?: string;
-	projectId?: string;
-	userGroupId?: string;
-	channelId?: string;
-	conversationId?: string;
-	assignedTo?: string | null;
-	createdBy?: string;
-	updatedBy?: string;
-	ticketType?: string | null;
-	eta?: number | null;
-	isArchived?: boolean;
-	closedAt?: number | null;
-	closedBy?: string | null;
-	statusUpdatedAt?: number;
-	createdAt?: number;
-	updatedAt?: number;
-	project?: { name?: string; code?: string } | Array<{ name?: string; code?: string }> | null;
+/**
+ * `ticketDetailsByIdV2` pulls in seven `.related()` collections that the SDK's
+ * `Ticket` does not declare — it types columns only. Intersecting keeps every
+ * column checked against the real Zero schema and hand-declares only the joins.
+ */
+type TicketRow = Ticket & {
+	project?: Related<{ name?: string; code?: string }>;
 	tagMappings?: Array<{ tagId?: string; name?: string }> | null;
-	assignments?: Array<{ userId?: string; role?: { name?: string } | Array<{ name?: string }> }> | null;
-	referencesOut?: Array<{ targetTicket?: { xyneId?: string } | Array<{ xyneId?: string }> }> | null;
-	referencesIn?: Array<{ sourceTicket?: { xyneId?: string } | Array<{ xyneId?: string }> }> | null;
+	assignments?: Array<{ userId?: string; role?: Related<{ name?: string }> }> | null;
+	referencesOut?: Array<{ targetTicket?: Related<{ xyneId?: string }> }> | null;
+	referencesIn?: Array<{ sourceTicket?: Related<{ xyneId?: string }> }> | null;
 	stageEtaEntries?: Array<{ stageName?: string; eta?: number }> | null;
 	ticketStageRequests?: Array<{ status?: string; toStageName?: string }> | null;
 	rcas?: Array<{ id?: string; summary?: string }> | null;
-}
-
-function first<T>(value: T | T[] | null | undefined): T | undefined {
-	return Array.isArray(value) ? value[0] : (value ?? undefined);
-}
+};
 
 /**
  * Render one ticket, emitting every field that is set.
@@ -197,9 +182,8 @@ const ticketsList: ToolDef = {
 		},
 		additionalProperties: false,
 	},
-	catalog: [{ name: "ticketsQueryV2", sends: ["viewMode", "projectId", "boardId", "userId", "groupId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const viewMode = optionalString(args, "view_mode") ?? "my-tickets";
 		const limit = boundedLimit(args, 25, 200);
 		const offset = offsetOf(args);
@@ -207,7 +191,7 @@ const ticketsList: ToolDef = {
 		const projectId = optionalString(args, "project_id");
 		const boardId = optionalString(args, "board_id");
 		const groupId = optionalString(args, "group_id");
-		const userId = await users.toUserId(client, optionalString(args, "user_id"));
+		const userId = await users.toUserId(sdk, optionalString(args, "user_id"));
 
 		// The query silently drops the filter when a view mode's companion
 		// argument is absent, so 'user-tickets' with no user returns the whole
@@ -231,20 +215,18 @@ const ticketsList: ToolDef = {
 			);
 		}
 
-		const rows = asRows<TicketRow>(
-			await client.catalogQuery("ticketsQueryV2", {
-				viewMode,
-				...(projectId ? { projectId } : {}),
-				...(boardId ? { boardId } : {}),
-				...(userId ? { userId } : {}),
-				...(groupId ? { groupId } : {}),
-			}),
-		);
+		const rows = (await sdk.tickets.list({
+			viewMode: viewMode as TicketViewMode,
+			...(projectId ? { projectId } : {}),
+			...(boardId ? { boardId } : {}),
+			...(userId ? { userId } : {}),
+			...(groupId ? { groupId } : {}),
+		})) as TicketRow[];
 
 		const statuses = optionalStringArray(args, "status");
 		const priorities = optionalStringArray(args, "priority");
 		const stageName = optionalString(args, "stage_name");
-		const assignedTo = await users.toUserId(client, optionalString(args, "assigned_to"));
+		const assignedTo = await users.toUserId(sdk, optionalString(args, "assigned_to"));
 		const unassignedOnly = optionalBoolean(args, "unassigned_only") === true;
 		const includeArchived = optionalBoolean(args, "include_archived") === true;
 
@@ -280,16 +262,13 @@ const ticketsSearch: ToolDef = {
 		},
 		additionalProperties: false,
 	},
-	catalog: [{ name: "ticketsSearch", sends: ["search", "limit"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const limit = boundedLimit(args, 20, 100);
-		const rows = asRows<TicketRow>(
-			await client.catalogQuery("ticketsSearch", {
-				...(optionalString(args, "query") ? { search: optionalString(args, "query") } : {}),
-				limit,
-			}),
-		);
+		const rows = (await sdk.tickets.search({
+			...(optionalString(args, "query") ? { search: optionalString(args, "query")! } : {}),
+			limit,
+		})) as TicketRow[];
 		const rendered = rows.map((row, i) => renderTicket(row, i + 1));
 		return list("ticket(s)", rendered, { returned: rendered.length, limit, offset: 0 });
 	},
@@ -312,12 +291,10 @@ const ticketGet: ToolDef = {
 		required: ["ticket_id"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "ticketDetailsByIdV2", sends: ["ticketId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const ticketId = requiredString(args, "ticket_id");
-		const rows = asRows<TicketRow>(await client.catalogQuery("ticketDetailsByIdV2", { ticketId }));
-		const row = rows[0];
+		const row = (await sdk.tickets.getDetails(ticketId)) as TicketRow | null;
 		if (!row) {
 			return ok(
 				`No ticket found with id ${ticketId}. If you have a key like PLAT-1234, look it up with ` +
@@ -356,14 +333,14 @@ const ticketActivities: ToolDef = {
 		required: ["ticket_id"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "ticketActivities", sends: ["ticketId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const ticketId = requiredString(args, "ticket_id");
 		const limit = boundedLimit(args, 50, 200);
 		const offset = offsetOf(args);
 
-		const rows = asRows<ActivityRow>(await client.catalogQuery("ticketActivities", { ticketId }));
+		const activities = await sdk.tickets.listActivities(ticketId, { limit, offset });
+		const rows = activities.items as ActivityRow[];
 		const rendered = rows.slice(offset, offset + limit).map((row, i) => {
 			const lines: string[] = [];
 			if (row.value !== undefined && row.value !== null) {
@@ -419,47 +396,51 @@ const ticketCreate: ToolDef = {
 		required: ["title", "description", "project_id", "channel_id"],
 		additionalProperties: false,
 	},
-	direct: [{ method: "post", path: "/tickets" }],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const title = requiredString(args, "title");
 		const description = requiredString(args, "description");
 		const projectId = requiredString(args, "project_id");
 		const channelId = requiredString(args, "channel_id");
 
 		const requestedAssignee = optionalString(args, "assigned_to");
-		const assignedTo = await users.toUserId(client, requestedAssignee);
+		const assignedTo = await users.toUserId(sdk, requestedAssignee);
 		if (requestedAssignee && !assignedTo) throw new Error(`No Spaces user matches "${requestedAssignee}".`);
 
 		const eta = optionalString(args, "eta");
-		const created = await client.direct<Record<string, unknown>>("POST", "/tickets", {
-			body: {
-				title,
-				description,
-				projectId,
-				channelId,
-				...(optionalString(args, "board_id") ? { boardId: optionalString(args, "board_id") } : {}),
-				...(assignedTo ? { assignedTo } : {}),
-				priority: optionalString(args, "priority") ?? "MEDIUM",
-				statusV2: optionalString(args, "status") ?? "TODO",
-				...(optionalString(args, "stage_name") ? { stageName: optionalString(args, "stage_name") } : {}),
-				...(optionalString(args, "ticket_type") ? { ticketType: optionalString(args, "ticket_type") } : {}),
-				...(optionalStringArray(args, "tags") ? { tags: optionalStringArray(args, "tags") } : {}),
-				...(eta ? { eta: Date.parse(eta) } : {}),
-				...(optionalString(args, "user_group_id") ? { userGroupId: optionalString(args, "user_group_id") } : {}),
-				...(optionalString(args, "parent_ticket_id") ? { parentTicketId: optionalString(args, "parent_ticket_id") } : {}),
-				...(optionalStringArray(args, "draft_attachment_ids")
-					? { draftAttachmentIds: optionalStringArray(args, "draft_attachment_ids") }
-					: {}),
-			},
-		});
+		// `CreateTicketResponse` declares { id, conversationId, xyneId }, but the
+		// controller returns the full detail — stage and status included — so
+		// the two extra fields are read through a widened local type rather
+		// than dropped from the output.
+		const created = (await sdk.tickets.create({
+			title,
+			description,
+			projectId,
+			channelId,
+			...(optionalString(args, "board_id") ? { boardId: optionalString(args, "board_id")! } : {}),
+			...(assignedTo ? { assignedTo } : {}),
+			priority: (optionalString(args, "priority") ?? "MEDIUM") as TicketPriority,
+			statusV2: (optionalString(args, "status") ?? "TODO") as TicketStatusV2,
+			...(optionalString(args, "stage_name") ? { stageName: optionalString(args, "stage_name")! } : {}),
+			...(optionalString(args, "ticket_type") ? { ticketType: optionalString(args, "ticket_type")! } : {}),
+			...(optionalStringArray(args, "tags") ? { tags: optionalStringArray(args, "tags")! } : {}),
+			// `CreateTicketInput.eta` is `Date | string`, where the raw route took
+			// epoch ms. The column is a DateTime, so passing the ISO string
+			// through is the more correct of the two.
+			...(eta ? { eta } : {}),
+			...(optionalString(args, "user_group_id") ? { userGroupId: optionalString(args, "user_group_id")! } : {}),
+			...(optionalString(args, "parent_ticket_id") ? { parentTicketId: optionalString(args, "parent_ticket_id")! } : {}),
+			...(optionalStringArray(args, "draft_attachment_ids")
+				? { draftAttachmentIds: optionalStringArray(args, "draft_attachment_ids")! }
+				: {}),
+		})) as { id?: string; xyneId?: string; conversationId?: string; stageName?: string; status?: string };
 
 		return ok(
 			[
-				`Created ${String(created["xyneId"] ?? "(no key)")}: ${title}`,
-				`  Ticket ID: ${String(created["id"] ?? "(none)")}`,
-				`  Stage: ${String(created["stageName"] ?? "(none)")} · Status: ${String(created["status"] ?? "?")}`,
-				`  Conversation ID: ${String(created["conversationId"] ?? "(none)")}`,
+				`Created ${created.xyneId ?? "(no key)"}: ${title}`,
+				`  Ticket ID: ${created.id ?? "(none)"}`,
+				`  Stage: ${created.stageName ?? "(none)"} · Status: ${created.status ?? "?"}`,
+				`  Conversation ID: ${created.conversationId ?? "(none)"}`,
 			].join("\n"),
 		);
 	},
@@ -500,27 +481,28 @@ const ticketUpdate: ToolDef = {
 	},
 	// `updatedAt` is required: the client supplies it so the optimistic and
 	// server runs of the mutator persist the same timestamp.
-	catalog: [{ name: "ticket.update", sends: ["id", "updatedAt"] }],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const id = requiredString(args, "ticket_id");
 
 		const requestedAssignee = optionalString(args, "assigned_to");
-		const assignedTo = await users.toUserId(client, requestedAssignee);
+		const assignedTo = await users.toUserId(sdk, requestedAssignee);
 		if (requestedAssignee && !assignedTo) throw new Error(`No Spaces user matches "${requestedAssignee}".`);
 
 		const eta = optionalString(args, "eta");
 		const isArchived = optionalBoolean(args, "is_archived");
 		const changes: Record<string, unknown> = {
-			...(optionalString(args, "title") ? { title: optionalString(args, "title") } : {}),
-			...(optionalString(args, "description") ? { description: optionalString(args, "description") } : {}),
-			...(optionalString(args, "status") ? { statusV2: optionalString(args, "status") } : {}),
-			...(optionalString(args, "priority") ? { priority: optionalString(args, "priority") } : {}),
+			...(optionalString(args, "title") ? { title: optionalString(args, "title")! } : {}),
+			...(optionalString(args, "description") ? { description: optionalString(args, "description")! } : {}),
+			...(optionalString(args, "status") ? { statusV2: optionalString(args, "status") as TicketStatusV2 } : {}),
+			...(optionalString(args, "priority") ? { priority: optionalString(args, "priority") as TicketPriority } : {}),
 			...(assignedTo ? { assignedTo } : {}),
-			...(optionalString(args, "stage_name") ? { stageName: optionalString(args, "stage_name") } : {}),
-			...(optionalString(args, "ticket_type") ? { ticketType: optionalString(args, "ticket_type") } : {}),
-			...(optionalString(args, "user_group_id") ? { userGroupId: optionalString(args, "user_group_id") } : {}),
-			...(optionalString(args, "board_id") ? { boardId: optionalString(args, "board_id") } : {}),
+			...(optionalString(args, "stage_name") ? { stageName: optionalString(args, "stage_name")! } : {}),
+			...(optionalString(args, "ticket_type") ? { ticketType: optionalString(args, "ticket_type")! } : {}),
+			...(optionalString(args, "user_group_id") ? { userGroupId: optionalString(args, "user_group_id")! } : {}),
+			...(optionalString(args, "board_id") ? { boardId: optionalString(args, "board_id")! } : {}),
+			// Epoch ms here, unlike `create` — this path is a Zero mutator writing
+			// the column directly rather than a controller parsing a date.
 			...(eta ? { eta: Date.parse(eta) } : {}),
 			...(isArchived !== undefined ? { isArchived } : {}),
 		};
@@ -529,7 +511,8 @@ const ticketUpdate: ToolDef = {
 			throw new Error("Nothing to change — pass at least one field besides ticket_id.");
 		}
 
-		await client.catalogMutate("ticket.update", { id, updatedAt: now(), ...changes });
+		// The SDK stamps `updatedAt`.
+		await sdk.tickets.update(id, changes);
 		return ok(`Updated ticket ${id}.\n  Changed: ${Object.keys(changes).join(", ")}`);
 	},
 };
@@ -573,42 +556,31 @@ const ticketTransition: ToolDef = {
 	// `now` and `updatedAt` are caller-supplied timestamps, and `formValuesJson`
 	// is an encoded string rather than an object — the mutator argument type
 	// cannot carry arbitrary nested JSON.
-	catalog: [
-		{ name: "ticketRowById", sends: ["ticketId"] },
-		{ name: "getBoardById", sends: ["boardId"] },
-		{ name: "stagesByBoard", sends: ["boardId"] },
-		{ name: "nonLinear.transition", sends: ["ticketId", "toStageName", "now"] },
-		{ name: "ticket.update", sends: ["id", "updatedAt"] },
-	],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const ticketId = requiredString(args, "ticket_id");
 		const toStageName = requiredString(args, "to_stage_name");
 		const formValues = args["form_values"];
 
-		const ticket = asRows<TicketRow>(await client.catalogQuery("ticketRowById", { ticketId }))[0];
+		const ticket = await sdk.tickets.getRow(ticketId);
 		if (!ticket) throw new Error(`No ticket found with id ${ticketId}.`);
 		if (!ticket.boardId) throw new Error(`Ticket ${ticketId} is not on a board, so it has no stages.`);
 
-		const board = asRows<{ boardType?: string }>(
-			await client.catalogQuery("getBoardById", { boardId: ticket.boardId }),
-		)[0];
+		const board = await sdk.boards.get(ticket.boardId);
 
 		if (board?.boardType === "NON_LINEAR") {
-			await client.catalogMutate("nonLinear.transition", {
+			// The SDK supplies `now`.
+			await sdk.tickets.transitionStage(
 				ticketId,
 				toStageName,
-				now: now(),
-				...(formValues && typeof formValues === "object" ? { formValuesJson: JSON.stringify(formValues) } : {}),
-			});
+				formValues && typeof formValues === "object" ? { formValuesJson: JSON.stringify(formValues) } : {},
+			);
 		} else {
 			// `nonLinear.transition` applies the target stage's `defaultTicketStatusV2`
 			// as part of the move. `ticket.update` does not derive it, so it is
 			// resolved and passed explicitly — otherwise moving a ticket to Done
 			// would leave its status on TODO, and the two paths would disagree.
-			const stages = asRows<{ name?: string; defaultTicketStatusV2?: string }>(
-				await client.catalogQuery("stagesByBoard", { boardId: ticket.boardId }),
-			);
+			const stages = await sdk.boards.listStages(ticket.boardId);
 			const target = stages.find((stage) => stage.name === toStageName);
 			if (!target) {
 				const names = stages.map((stage) => stage.name).filter(Boolean);
@@ -616,9 +588,7 @@ const ticketTransition: ToolDef = {
 					`"${toStageName}" is not a stage on this ticket's board. Stages are: ${names.join(", ") || "(none)"}.`,
 				);
 			}
-			await client.catalogMutate("ticket.update", {
-				id: ticketId,
-				updatedAt: now(),
+			await sdk.tickets.update(ticketId, {
 				stageName: toStageName,
 				...(target.defaultTicketStatusV2 ? { statusV2: target.defaultTicketStatusV2 } : {}),
 			});

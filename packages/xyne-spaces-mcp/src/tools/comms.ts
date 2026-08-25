@@ -7,7 +7,6 @@
  */
 
 import {
-	asRows,
 	boundedLimit,
 	cleanText,
 	indented,
@@ -22,12 +21,13 @@ import {
 	timeLine,
 	toIST,
 } from "../render.js";
+import { MAX_LIMIT, type Activity, type Call, type Canvas } from "@xyne/spaces-sdk";
+import type { Related } from "../render.js";
+import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
-function first<T>(value: T | T[] | null | undefined): T | undefined {
-	return Array.isArray(value) ? value[0] : (value ?? undefined);
-}
+
 
 // ── spaces_notifications_list ───────────────────────────────────────────────
 
@@ -56,48 +56,37 @@ const notificationsList: ToolDef = {
 	name: "spaces_notifications_list",
 	description:
 		"List your Xyne Spaces notifications, newest first — mentions, replies, reactions, ticket changes, canvas " +
-		"mentions and call invites. Use it to answer 'what needs my attention' or 'what did I miss'. Filter to " +
-		"unread_only for a catch-up, or to classification ACTIONABLE for the ones Spaces judged to need a response. " +
-		"Each entry names the source and carries the ids to follow it — conversation id for a mention, ticket id for " +
-		"a ticket change — so you can go straight to spaces_messages_list or spaces_ticket_get. Mark one done with " +
+		"mentions and call invites. Use it to answer 'what needs my attention' or 'what did I miss'. Narrow it with " +
+		"types, e.g. 'mentioned_user' for just mentions. Each entry shows whether it is unread and how Spaces " +
+		"classified it, and carries the ids to follow it — conversation id for a mention, ticket id for a ticket " +
+		"change — so you can go straight to spaces_messages_list or spaces_ticket_get. Mark one done with " +
 		"spaces_notifications_mark_read.",
 	inputSchema: {
 		type: "object",
 		properties: {
-			unread_only: { type: "boolean", description: "Only unread notifications." },
-			classification: {
-				type: "array",
-				items: { type: "string", enum: ["ACTIONABLE", "FYI", "SKIP", "PENDING", "PROCESSING", "ERROR"] },
-				description: "Keep only these Spaces-assigned classifications. ACTIONABLE is the one worth acting on.",
-			},
 			types: {
 				type: "array",
 				items: { type: "string" },
 				description:
 					"Restrict to these action types, e.g. 'mentioned_user', 'group_mention', 'replied', 'added', 'created'.",
 			},
-			limit: { type: "number", minimum: 1, maximum: 200, default: 30, description: "Max notifications (default 30, max 200)." },
+			limit: { type: "number", minimum: 1, maximum: 100, default: 30, description: "Max notifications (default 30, max 100)." },
 		},
 		additionalProperties: false,
 	},
-	// `start` is `.nullable()` rather than `.optional()`, and `types` is a
-	// required array where empty means "no filter" — both must be sent.
-	catalog: [{ name: "userActivitiesPaginatedV2", sends: ["limit", "start", "types", "classification", "isRead"] }],
-	async handler(args, client) {
-		await users.prime(client);
-		const limit = boundedLimit(args, 30, 200);
-		const unreadOnly = optionalBoolean(args, "unread_only");
-		const classification = optionalStringArray(args, "classification");
+	// `unread_only` and `classification` are gone: the backend query accepts
+	// both, but the SDK's `activities.listPaginated` forwards only
+	// limit/start/types, and this package does not reach past the SDK. Each row
+	// still renders its read state and classification, so the information is
+	// present — it just cannot be filtered on server-side any more.
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
+		const limit = boundedLimit(args, 30, MAX_LIMIT);
 
-		const rows = asRows<ActivityRow>(
-			await client.catalogQuery("userActivitiesPaginatedV2", {
-				limit,
-				start: null,
-				types: optionalStringArray(args, "types") ?? [],
-				...(classification ? { classification } : {}),
-				...(unreadOnly === true ? { isRead: false } : {}),
-			}),
-		);
+		const rows = (await sdk.activities.listPaginated({
+			limit,
+			types: optionalStringArray(args, "types") ?? [],
+		})) as ActivityRow[];
 
 		const rendered = rows.map((row, i) => {
 			const ticket = first(row.ticket);
@@ -154,11 +143,10 @@ const notificationsMarkRead: ToolDef = {
 		required: ["notification_id"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "activities.markAsRead", sends: ["activityId"] }],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const activityId = requiredString(args, "notification_id");
-		await client.catalogMutate("activities.markAsRead", { activityId });
+		await sdk.activities.markAsRead(activityId);
 		return ok(`Marked notification ${activityId} as read.`);
 	},
 };
@@ -209,33 +197,21 @@ const emailsList: ToolDef = {
 	// Two calls: the thread ids first, then their emails. `getEmailsForConversationsV2`
 	// takes ids rather than a channel, so a caller with only a channel id would
 	// otherwise have to make the first call themselves.
-	catalog: [
-		{ name: "channelLatestMultipleConversationsV3", sends: ["channelId", "isMember", "limit"] },
-		{ name: "getEmailsForConversationsV2", sends: ["conversationIds", "channelId", "isMember"] },
-	],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const channelId = requiredString(args, "channel_id");
 		const limit = boundedLimit(args, 20, 100);
 		const offset = offsetOf(args);
 
 		let conversationIds = optionalStringArray(args, "conversation_ids");
 		if (!conversationIds) {
-			const threads = asRows<{ conversationId?: string }>(
-				await client.catalogQuery("channelLatestMultipleConversationsV3", {
-					channelId,
-					isMember: true,
-					limit: limit + offset,
-				}),
-			);
+			const threads = await sdk.conversations.listLatestByChannel(channelId, { limit: limit + offset });
 			conversationIds = threads.map((t) => t.conversationId).filter((v): v is string => !!v);
 		}
 
 		if (conversationIds.length === 0) return ok(`No email threads found in channel ${channelId}.`);
 
-		const rows = asRows<EmailRow>(
-			await client.catalogQuery("getEmailsForConversationsV2", { conversationIds, channelId, isMember: true }),
-		);
+		const rows = (await sdk.email.listForConversations(conversationIds, channelId, true)) as EmailRow[];
 		rows.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 
 		const rendered = rows.slice(offset, offset + limit).map((row, i) => {
@@ -309,23 +285,18 @@ const callsList: ToolDef = {
 	},
 	// Three near-identical result shapes behind one tool, because "list my
 	// meetings" is one question whose answer depends only on when they are.
-	catalog: [
-		{ name: "userScheduledCallsV2", sends: [] },
-		{ name: "userActiveCalls", sends: [] },
-		{ name: "userCallHistoryV2", sends: ["limit", "start"] },
-	],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const scope = optionalString(args, "scope") ?? "scheduled";
 		const limit = boundedLimit(args, 25, 100);
 		const offset = offsetOf(args);
 
 		const rows =
 			scope === "history"
-				? asRows<CallRow>(await client.catalogQuery("userCallHistoryV2", { limit: limit + offset, start: null }))
+				? ((await sdk.calls.listHistory({ limit: limit + offset })) as CallRow[])
 				: scope === "active"
-					? asRows<CallRow>(await client.catalogQuery("userActiveCalls"))
-					: asRows<CallRow>(await client.catalogQuery("userScheduledCallsV2"));
+					? ((await sdk.calls.listActive()) as CallRow[])
+					: ((await sdk.calls.listScheduled()) as CallRow[]);
 
 		const rendered = rows.slice(offset, offset + limit).map((row, i) => {
 			const lines: string[] = [];
@@ -401,10 +372,9 @@ const draftsList: ToolDef = {
 		},
 		additionalProperties: false,
 	},
-	catalog: [{ name: "userDrafts", sends: [] }],
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const limit = boundedLimit(args, 25, 100);
-		const rows = asRows<DraftRow>(await client.catalogQuery("userDrafts"));
+		const rows = (await sdk.messages.listDrafts({ limit })) as DraftRow[];
 		const channelId = optionalString(args, "channel_id");
 		const matched = channelId ? rows.filter((r) => r.channelId === channelId) : rows;
 		matched.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
@@ -545,26 +515,19 @@ const canvasesList: ToolDef = {
 		type: "object",
 		properties: {
 			channel_id: { type: "string", description: "List canvases belonging to this channel instead of your own." },
-			include_archived: { type: "boolean", default: false, description: "Include archived canvases." },
 			limit: { type: "number", minimum: 1, maximum: 100, default: 25, description: "Max canvases (default 25, max 100)." },
 		},
 		additionalProperties: false,
 	},
-	catalog: [
-		{ name: "userCanvasesPaginated", sends: ["limit", "start"] },
-		{ name: "channelCanvasesPaginated", sends: ["channelId", "limit", "start"] },
-	],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const limit = boundedLimit(args, 25, 100);
 		const channelId = optionalString(args, "channel_id");
-		const includeArchived = optionalBoolean(args, "include_archived") === true;
+
 
 		const rows = channelId
-			? asRows<CanvasRow>(
-					await client.catalogQuery("channelCanvasesPaginated", { channelId, limit, start: null, includeArchived }),
-				)
-			: asRows<CanvasRow>(await client.catalogQuery("userCanvasesPaginated", { limit, start: null, includeArchived }));
+			? ((await sdk.canvases.listByChannel(channelId, { limit })) as CanvasRow[])
+			: ((await sdk.canvases.list({ limit })) as CanvasRow[]);
 
 		const rendered = rows.map((row, i) => {
 			const lines: string[] = [];
@@ -607,12 +570,11 @@ const canvasGet: ToolDef = {
 		required: ["canvas_id"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "getCanvas", sends: ["canvasId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const canvasId = requiredString(args, "canvas_id");
-		const rows = asRows<CanvasRow>(await client.catalogQuery("getCanvas", { canvasId }));
-		const row = rows[0];
+		// Nullable single in the SDK, where the old client normalised it to a list.
+		const row = (await sdk.canvases.get(canvasId)) as CanvasRow | null;
 		if (!row) return ok(`No canvas found with id ${canvasId}.`);
 
 		const lines: string[] = [];

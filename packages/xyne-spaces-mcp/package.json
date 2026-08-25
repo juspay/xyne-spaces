@@ -12,15 +12,15 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node scripts/check-operations.mjs",
-    "build": "tsc && npm run check",
+    "build": "tsc",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@xyne/spaces-sdk": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

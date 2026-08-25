@@ -9,6 +9,7 @@
  */
 
 import { ok, optionalNumber, optionalString, record, requiredString } from "../render.js";
+import { NotFoundError } from "@xyne/spaces-sdk";
 import type { ToolDef } from "./shared.js";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "canceled", "error"]);
@@ -43,10 +44,9 @@ const listAgents: ToolDef = {
 		"find the right slug — an unknown slug is rejected. Uses the same API key as every other tool; there is no " +
 		"separate Claw login.",
 	inputSchema: { type: "object", properties: {}, additionalProperties: false },
-	direct: [{ method: "get", path: "/claw/agents" }],
-	async handler(_args, client) {
-		const raw = await client.direct<unknown>("GET", "/claw/agents");
-		const agents = Array.isArray(raw) ? (raw as ClawAgent[]) : [];
+	async handler(_args, { sdk }) {
+		// The registry already guards against a non-array response.
+		const agents = (await sdk.claw.listAgents()) as unknown as ClawAgent[];
 		if (agents.length === 0) return ok("No Claw agents are available to this deployment.");
 
 		const rendered = agents.map((agent, i) => {
@@ -91,23 +91,20 @@ const run: ToolDef = {
 		required: ["agent", "task"],
 		additionalProperties: false,
 	},
-	direct: [
-		{ method: "post", path: "/claw/runs" },
-		{ method: "get", path: "/claw/runs/:sessionId" },
-	],
 	write: true,
-	async handler(args, client) {
+	// Deliberately not `sdk.claw.runAndWait`: that helper has no tolerance for
+	// the brief 404 between dispatch and the run row existing, no `wait: false`
+	// path, and a timeout message that does not name spaces_claw_get_run.
+	async handler(args, { sdk }) {
 		const agent = requiredString(args, "agent");
 		const task = requiredString(args, "task");
 
-		const dispatched = await client.direct<{ sessionId?: string }>("POST", "/claw/runs", {
-			body: {
-				agent,
-				task,
-				...(optionalString(args, "context") ? { context: optionalString(args, "context") } : {}),
-				...(optionalString(args, "channel_id") ? { channelId: optionalString(args, "channel_id") } : {}),
-				...(optionalString(args, "conversation_id") ? { conversationId: optionalString(args, "conversation_id") } : {}),
-			},
+		const dispatched = await sdk.claw.run({
+			agent,
+			task,
+			...(optionalString(args, "context") ? { context: optionalString(args, "context")! } : {}),
+			...(optionalString(args, "channel_id") ? { channelId: optionalString(args, "channel_id")! } : {}),
+			...(optionalString(args, "conversation_id") ? { conversationId: optionalString(args, "conversation_id")! } : {}),
 		});
 
 		const sessionId = dispatched.sessionId;
@@ -126,7 +123,7 @@ const run: ToolDef = {
 		while (Date.now() < deadline) {
 			await sleep(pollMs);
 			try {
-				const status = await client.direct<ClawRun>("GET", `/claw/runs/${encodeURIComponent(sessionId)}`);
+				const status = (await sdk.claw.getRun(sessionId)) as unknown as ClawRun;
 				sawRun = true;
 				if (status.status && TERMINAL.has(status.status.toLowerCase())) {
 					if (status.status.toLowerCase() === "completed") {
@@ -136,8 +133,9 @@ const run: ToolDef = {
 				}
 			} catch (error) {
 				// A run can 404 briefly between dispatch and the row being written.
-				const message = error instanceof Error ? error.message : String(error);
-				if (sawRun || !message.includes("404")) throw error;
+				// Typed now, rather than sniffed out of the message text — the
+				// SDK's message is the server's and will not contain "404".
+				if (sawRun || !(error instanceof NotFoundError)) throw error;
 			}
 			pollMs = Math.min(Math.floor(pollMs * 1.5), 10_000);
 		}
@@ -165,10 +163,9 @@ const getRun: ToolDef = {
 		required: ["session_id"],
 		additionalProperties: false,
 	},
-	direct: [{ method: "get", path: "/claw/runs/:sessionId" }],
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const sessionId = requiredString(args, "session_id");
-		const status = await client.direct<ClawRun>("GET", `/claw/runs/${encodeURIComponent(sessionId)}`);
+		const status = (await sdk.claw.getRun(sessionId)) as unknown as ClawRun;
 		const lines = [`  Status: ${status.status ?? "unknown"}`];
 		if (status.error) lines.push(`  Error: ${status.error}`);
 		if (status.result) {

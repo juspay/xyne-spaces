@@ -21,7 +21,12 @@ a time.
 ```bash
 export XYNE_SPACES_API_KEY="xyne_sk_…"
 export XYNE_SPACES_BASE_URL="https://spaces.xyne.juspay.net"   # optional; this is the default
+export XYNE_SPACES_TIMEOUT_MS=120000                           # optional; this is the default
 ```
+
+`XYNE_SPACES_TIMEOUT_MS` matters on a large workspace. Several of these operations
+return an entire result set in one response — the user directory, a project's tickets —
+and the underlying SDK aborts a request that outlives its timeout.
 
 …or a file, which keeps the key out of a committed config:
 
@@ -227,7 +232,7 @@ guessing at "Done" or "In Progress".
 
 | Tool | Required | Returns |
 |---|---|---|
-| `spaces_notifications_list` | — | Mentions, replies, ticket changes. Filter `unread_only` or `classification: ["ACTIONABLE"]` |
+| `spaces_notifications_list` | — | Mentions, replies, ticket changes. Narrow with `types`; each row shows its read state and classification |
 | `spaces_notifications_mark_read` | `notification_id` | Marks one read |
 | `spaces_emails_list` | `channel_id` | Emails in a desk or shared-inbox channel, with bodies |
 | `spaces_calls_list` | — | Calls by `scope`: `scheduled`, `active`, or `history` (with recordings, transcripts, AI summaries) |
@@ -287,7 +292,7 @@ spaces_user_messages  { user: "someone@company.com", after: "2026-08-14T00:00:00
 **Triage what needs you**
 
 ```
-spaces_notifications_list       { unread_only: true, classification: ["ACTIONABLE"] }
+spaces_notifications_list       { types: ["mentioned_user"] }
 spaces_messages_list            { conversation_id }        ← from any notification
 spaces_notifications_mark_read  { notification_id }
 ```
@@ -318,7 +323,9 @@ The API speaks five codes, one per status:
 The 400 message is written for a person to read, so surface it rather than
 retrying. A 500 message is deliberately generic; the detail is server-side.
 
-Anything unexpected carries a `request_id` so a server-side failure can be correlated.
+Anything unexpected carries the server's error code in parentheses. The `request_id` is
+no longer surfaced: it is on the HTTP response, and `SdkError` does not carry it
+through. Quote the message and the code when reporting a server-side failure.
 
 A key can be revoked at any time from the dashboard, and stops working on its
 very next request — the server checks its stored status on every call, not just
@@ -339,28 +346,29 @@ second login — the Spaces backend relays to Claw with the deployment's own cre
 ## Development
 
 ```bash
-npm run build       # tsc, then the conformance check
-npm run check       # the check alone (needs a prior build)
+npm run build
 npm run typecheck
 ```
 
-Nothing in this package is type-checked against the server: a catalog operation is a
-string in a request body, so `"ticketDetailsByIdV2"` and a typo compile identically.
-`scripts/check-operations.mjs` is what makes that safe. It parses the backend's real
-`queries.ts`, `mutators.ts` and `api/sdk/direct.ts` and asserts:
+Operation names and argument shapes used to be strings this package hand-declared, so
+`"ticketDetailsByIdV2"` and a typo compiled identically — which is why there was a
+script parsing the backend's `queries.ts` to check them. Calling the SDK makes that a
+compile error instead, and the SDK carries its own gate over the whole catalog:
 
-1. every catalog operation a tool names still exists;
-2. every argument that operation **requires** is one the tool actually sends —
-   `.nullable()` counts as required, `.optional()` and `.default()` do not;
-3. every direct route a tool calls is still mounted;
-4. the search enums still match `@xyne/spaces-contract`.
+```bash
+cd ../xyne-spaces-sdk && npm run verify   # typecheck + coverage + contract-check
+```
 
-Check 2 is the one that earns its keep. Zero's optimistic-write model makes operations
-demand arguments no caller would think of — a required `isMember` the query never reads,
-a `start` that must be explicitly `null`, a caller-generated `messageId` and `timestamp`.
-Getting one wrong produces `"Validation failed: Required, Required"` at runtime, naming
-neither the operation nor the argument. This turns that into a build failure that names
-both.
+`npm run coverage` there asserts every one of the backend's catalog operations is either
+exposed or excluded with a written reason, and that the arguments each one requires are
+the ones the registry sends. That is strictly wider than what this package could check
+on its own, which only ever covered the ~30 operations these tools happened to name.
+
+**One thing the old script did that nothing replaces yet:** it verified that the direct
+routes (`/me`, `/search`, `/channels`, `/tickets`, `/claw/*`) were still mounted in
+`api/sdk/direct.ts`. The SDK's `contract-check` has a `routeBodies()` function that
+looks like it does this, but it reads a path that does not exist and is never called —
+so route existence is currently unverified. Worth fixing in the SDK.
 
 ### Adding a tool
 
@@ -391,15 +399,22 @@ the shared vocabulary: `toIST`, `cleanText`, `indented`, `paginationFooter`, and
 ```
 src/
   index.ts        server wiring, dispatch, read-only filter
-  client.ts       config, auth, HTTP to /api/sdk, error mapping
+  config.ts       credential resolution, and building the SDK client
+  errors.ts       turning a thrown SdkError into prose a model can act on
   render.ts       formatting vocabulary shared by every renderer
   tools/
-    shared.ts     ToolDef, and the user directory (id → name, email → id)
+    shared.ts     ToolDef, ToolContext, and the user directory (id → name, email → id)
     identity.ts   whoami, search
     channels.ts   threads.ts   messages.ts
     tickets.ts    lookups.ts   comms.ts   claw.ts
 ```
 
-The only runtime dependency is `@modelcontextprotocol/sdk`. There is deliberately no
-dependency on `@xyne/spaces-sdk`: this server speaks HTTP to the same endpoints, which
-keeps it publishable as a standalone binary.
+Two runtime dependencies: `@modelcontextprotocol/sdk` for the protocol, and
+`@xyne/spaces-sdk` for every call to Spaces. Nothing here speaks HTTP directly.
+
+That second dependency replaced a hand-written HTTP client plus a build-time script
+that re-parsed the backend's `queries.ts` to check the operation names and arguments
+this package was sending. The SDK owns both now: an operation name is a typed method,
+its arguments are a typed parameter, and the ones Zero's optimistic-write model demands
+but no caller would think of — a `messageId`, a `timestamp`, a `start` that must be
+explicitly `null` — are filled in by the SDK's registry rather than by each tool.

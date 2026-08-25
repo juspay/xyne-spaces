@@ -2,9 +2,7 @@
  * Messages: reading a thread, and saying something in one.
  */
 
-import { newId, now } from "../client.js";
 import {
-	asRows,
 	boundedLimit,
 	cleanText,
 	formatBytes,
@@ -18,6 +16,9 @@ import {
 	requiredString,
 	toIST,
 } from "../render.js";
+import { MAX_LIMIT, type Message, type MessageType } from "@xyne/spaces-sdk";
+import type { Related } from "../render.js";
+import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
@@ -28,29 +29,15 @@ interface AttachmentRow {
 	fileSize?: number;
 }
 
-interface MessageRow {
-	messageId?: string;
-	conversationId?: string;
-	childConversationId?: string | null;
-	senderId?: string;
-	content?: string;
-	msgType?: string;
-	hasAttachment?: boolean;
-	edited?: boolean;
-	isDeleted?: boolean;
-	showInChannel?: boolean;
-	visibleTo?: string | null;
-	isSent?: boolean;
-	nudgeCount?: number | null;
-	createdAt?: number;
+/**
+ * `conversationMessagesV2` joins attachments; the SDK types columns only.
+ * `conversation` was joined by the old Zero-backed sender query and no longer
+ * arrives — see `spaces_user_messages`.
+ */
+type MessageRow = Message & {
 	attachments?: AttachmentRow[] | null;
-	/** Joined by `messagesBySenderPaginated`, so a message can name its channel. */
-	conversation?: { channelId?: string } | Array<{ channelId?: string }> | null;
-}
-
-function first<T>(value: T | T[] | null | undefined): T | undefined {
-	return Array.isArray(value) ? value[0] : (value ?? undefined);
-}
+	conversation?: Related<{ channelId?: string }>;
+};
 
 /**
  * Render one message with everything set on it.
@@ -115,18 +102,34 @@ const messagesList: ToolDef = {
 		required: ["conversation_id"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "conversationMessagesV2", sends: ["conversationId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const conversationId = requiredString(args, "conversation_id");
-		const limit = boundedLimit(args, 50, 200);
+		const limit = boundedLimit(args, 50, MAX_LIMIT);
 		const offset = offsetOf(args);
+		const newestFirst = optionalBoolean(args, "newest_first") === true;
 
-		const rows = asRows<MessageRow>(await client.catalogQuery("conversationMessagesV2", { conversationId }));
-		const ordered = optionalBoolean(args, "newest_first") === true ? [...rows].reverse() : rows;
-		const page = ordered.slice(offset, offset + limit);
+		// The SDK windows from the front and caps at 100, so "newest first" can
+		// no longer be `reverse()` on the whole thread. The first call is what
+		// reports `total` — the true length of the underlying result — and that
+		// is what the window from the end is computed against.
+		const head = (await sdk.messages.listByConversation(conversationId, { limit, offset })) as unknown as {
+			items: MessageRow[];
+			total: number;
+		};
+
+		let page = head.items;
+		if (newestFirst && head.total > 0) {
+			const from = Math.max(0, head.total - offset - limit);
+			const tail = (await sdk.messages.listByConversation(conversationId, {
+				limit,
+				offset: from,
+			})) as unknown as { items: MessageRow[] };
+			page = [...tail.items].reverse();
+		}
+
 		const rendered = page.map((row, i) => renderMessage(row, offset + i + 1));
-		return list("message(s)", rendered, { returned: rendered.length, limit, offset, total: rows.length });
+		return list("message(s)", rendered, { returned: rendered.length, limit, offset, total: head.total });
 	},
 };
 
@@ -169,26 +172,22 @@ const messageSend: ToolDef = {
 		required: ["conversation_id", "content"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "messages.send", sends: ["conversationId", "content", "type", "messageId", "timestamp"] }],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const conversationId = requiredString(args, "conversation_id");
 		const content = requiredString(args, "content");
-		const messageId = newId();
 		const showInChannel = optionalBoolean(args, "show_in_channel");
 		const attachmentIds = Array.isArray(args["attachment_ids"])
 			? (args["attachment_ids"] as unknown[]).map(String)
 			: undefined;
 
-		await client.catalogMutate("messages.send", {
+		// The SDK generates the message id, the timestamp, and the child thread
+		// id that surfacing a reply in the channel requires.
+		const { messageId } = await sdk.messages.send({
 			conversationId,
 			content,
-			type: optionalString(args, "type") ?? "USER",
-			messageId,
-			timestamp: now(),
-			// Surfacing a reply in the channel creates a child thread row, whose id
-			// the caller has to pick for the same reason it picks the message id.
-			...(showInChannel !== undefined ? { showInChannel, childConversationId: newId() } : {}),
+			type: (optionalString(args, "type") ?? "USER") as MessageType,
+			...(showInChannel !== undefined ? { showInChannel } : {}),
 			...(attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : {}),
 		});
 
@@ -213,12 +212,11 @@ const messageUpdate: ToolDef = {
 		required: ["message_id", "content"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "messages.update", sends: ["messageId", "content"] }],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const messageId = requiredString(args, "message_id");
 		const content = requiredString(args, "content");
-		await client.catalogMutate("messages.update", { messageId, content });
+		await sdk.messages.update(messageId, content);
 		return ok(`Edited message ${messageId}.`);
 	},
 };
@@ -246,23 +244,16 @@ const messageReact: ToolDef = {
 		required: ["message_id", "emoji"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "messages.react", sends: ["messageId", "emojiName", "action", "timestamp", "reactionId", "countId"] }],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const messageId = requiredString(args, "message_id");
 		const emojiName = requiredString(args, "emoji").replace(/:/g, "");
 		const action = optionalString(args, "action") === "remove" ? "remove" : "add";
 
-		await client.catalogMutate("messages.react", {
-			messageId,
-			emojiName,
-			action,
-			timestamp: now(),
-			// Only meaningful when adding; harmless on remove, where the server
-			// finds the existing rows by (message, user, emoji).
-			reactionId: newId(),
-			countId: newId(),
-		});
+		// Two methods rather than one `action` argument; the SDK generates the
+		// reaction and count ids that adding requires.
+		if (action === "add") await sdk.messages.addReaction(messageId, emojiName);
+		else await sdk.messages.removeReaction(messageId, emojiName);
 
 		return ok(`${action === "add" ? "Added" : "Removed"} :${emojiName}: on message ${messageId}.`);
 	},
@@ -271,14 +262,21 @@ const messageReact: ToolDef = {
 // ── spaces_user_messages ────────────────────────────────────────────────────
 
 /**
- * `messagesBySenderPaginated` exists for exactly this tool.
+ * "Everything person X wrote", newest first.
  *
- * Before it, "everything person X wrote last week" could only be approximated by
- * fanning relevance-ranked searches across date windows — and a window that came
- * back empty was indistinguishable from one that had been truncated. This is a
- * plain ordered scan with real cursors, so a quiet week reads as a quiet week.
- * The read ACL still applies: it surfaces nothing the caller could not already
- * see, it only makes the ordering and paging trustworthy.
+ * This used to be a Zero query (`messagesBySenderPaginated`) with real cursors.
+ * That query was removed and the operation now routes through Vespa, ordered by
+ * `newest` rather than ranked by relevance, so the ordering guarantee survives
+ * and it is still not a relevance search. Two things did change with it, both
+ * visible to a caller:
+ *
+ *   - date bounds are truncated to whole days, because the search API takes a
+ *     date rather than a timestamp;
+ *   - the channel a message belongs to is no longer joined, so a result names
+ *     its thread but not its channel. `spaces_thread_get` resolves the rest.
+ *
+ * The read ACL still applies either way: this surfaces nothing the caller could
+ * not already see.
  */
 const userMessages: ToolDef = {
 	name: "spaces_user_messages",
@@ -301,55 +299,53 @@ const userMessages: ToolDef = {
 				description: "Only messages at or after this time. ISO 8601, e.g. '2026-08-01T00:00:00Z'.",
 			},
 			before: { type: "string", description: "Only messages at or before this time. ISO 8601." },
-			limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max messages (default 50, max 200)." },
+			limit: { type: "number", minimum: 1, maximum: 100, default: 50, description: "Max messages (default 50, max 100)." },
+			offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
 		},
 		additionalProperties: false,
 	},
-	// `start` is `.nullable()`, not `.optional()` — it has to be sent, as null,
-	// to page from the beginning. Omitting it fails validation.
-	catalog: [
-		{ name: "messagesBySenderPaginated", sends: ["userId", "limit", "start"] },
-		{ name: "userSentMessagesPaginated", sends: ["limit", "start"] },
-	],
-	async handler(args, client) {
-		await users.prime(client);
-		const limit = boundedLimit(args, 50, 200);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
+		const limit = boundedLimit(args, 50, MAX_LIMIT);
+		const offset = offsetOf(args);
 		const requested = optionalString(args, "user");
-		const userId = await users.toUserId(client, requested);
+		const userId = await users.toUserId(sdk, requested);
 		if (requested && !userId) throw new Error(`No Spaces user matches "${requested}".`);
 
 		const after = optionalString(args, "after");
 		const before = optionalString(args, "before");
-		const bounds = {
-			...(after ? { after: Date.parse(after) } : {}),
-			...(before ? { before: Date.parse(before) } : {}),
-		};
 
-		// With no user named, the caller means themselves — and there is a query
-		// bound to the caller, which saves resolving an id first.
+		// With no user named the caller means themselves, and `listMine` is bound
+		// to the caller — which saves resolving an id, and is still the Zero
+		// query, so it takes no date bounds.
 		const rows = userId
-			? asRows<MessageRow>(
-					await client.catalogQuery("messagesBySenderPaginated", { userId, limit, start: null, ...bounds }),
-				)
-			: asRows<MessageRow>(await client.catalogQuery("userSentMessagesPaginated", { limit, start: null }));
+			? ((await sdk.messages.listByUser({
+					userId,
+					limit,
+					offset,
+					...(after ? { after: Date.parse(after) } : {}),
+					...(before ? { before: Date.parse(before) } : {}),
+				})) as MessageRow[])
+			: ((await sdk.messages.listMine({ limit })) as MessageRow[]);
 
+		let page = rows;
 		if (!userId && (after || before)) {
-			// `userSentMessagesPaginated` takes no date bounds, so filter here rather
-			// than silently ignoring what the caller asked for.
+			// Filter here rather than silently ignoring what the caller asked for.
 			const lower = after ? Date.parse(after) : Number.NEGATIVE_INFINITY;
 			const upper = before ? Date.parse(before) : Number.POSITIVE_INFINITY;
-			rows.splice(0, rows.length, ...rows.filter((r) => (r.createdAt ?? 0) >= lower && (r.createdAt ?? 0) <= upper));
+			page = rows.filter((r) => (r.createdAt ?? 0) >= lower && (r.createdAt ?? 0) <= upper);
 		}
 
-		const rendered = rows.map((row, i) => {
-			const text = renderMessage(row, i + 1);
-			const conversation = first(row.conversation);
-			const channelId = conversation?.channelId;
+		const rendered = page.map((row, i) => {
+			const text = renderMessage(row, offset + i + 1);
+			// Only the Zero-backed `listMine` still joins the conversation; the
+			// Vespa path does not, so this is absent there rather than wrong.
+			const channelId = first(row.conversation)?.channelId;
 			return channelId ? `${text}\n  Channel ID: ${channelId}` : text;
 		});
 
-		const whose = userId ? users.name(userId) ?? userId : "you";
-		return list(`message(s) from ${whose}`, rendered, { returned: rendered.length, limit, offset: 0 });
+		const whose = userId ? (users.name(userId) ?? userId) : "you";
+		return list(`message(s) from ${whose}`, rendered, { returned: rendered.length, limit, offset });
 	},
 };
 

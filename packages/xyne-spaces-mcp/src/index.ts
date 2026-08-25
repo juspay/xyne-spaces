@@ -17,13 +17,14 @@ import {
 	type CallToolResult,
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { describeError, KEY_SOURCE, resolveConfig, SpacesClient } from "./client.js";
+import { createSpacesSdk, KEY_SOURCE, resolveConfig } from "./config.js";
+import { describeError, MissingApiKeyError } from "./errors.js";
 import { asObject, err } from "./render.js";
-import type { ToolDef } from "./tools/shared.js";
+import type { ToolContext, ToolDef } from "./tools/shared.js";
 import { allTools } from "./tools/index.js";
 
 const config = resolveConfig();
-const client = new SpacesClient(config);
+const ctx: ToolContext = { sdk: createSpacesSdk(config), baseUrl: config.baseUrl };
 
 /**
  * `XYNE_SPACES_READONLY` removes write tools from the listing rather than
@@ -68,10 +69,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 		return err(`Unknown tool: ${name}`) as CallToolResult;
 	}
 
+	// Checked here rather than per call: the SDK would omit the Authorization
+	// header and let the server answer 401, which is a round trip to learn
+	// something already known — and it would fail this way while offline too.
+	if (!config.apiKey) {
+		return err(describeError(new MissingApiKeyError(), config.baseUrl)) as CallToolResult;
+	}
+
 	try {
-		return (await tool.handler(asObject(request.params.arguments), client)) as CallToolResult;
+		return (await tool.handler(asObject(request.params.arguments), ctx)) as CallToolResult;
 	} catch (error) {
-		return err(describeError(error)) as CallToolResult;
+		return err(describeError(error, config.baseUrl)) as CallToolResult;
 	}
 });
 

@@ -266,3 +266,30 @@ export function asRows<T = Record<string, unknown>>(raw: unknown): T[] {
 	if (raw && typeof raw === "object") return [raw as T];
 	return [];
 }
+
+/**
+ * A Zero `.related()` join, as it actually arrives.
+ *
+ * A singular relation comes back either as the object or as a one-element
+ * array depending on the query, and an absent one as null or undefined. The
+ * SDK's row types declare none of these — they are columns only — so tool
+ * files intersect this onto them for the relations their renderers read.
+ */
+export type Related<T> = T | T[] | null | undefined;
+
+/** First element of a `Related<T>`, whichever shape it arrived in. */
+export function first<T>(value: Related<T>): T | undefined {
+	return Array.isArray(value) ? value[0] : (value ?? undefined);
+}
+
+/**
+ * Assign only when defined.
+ *
+ * `exactOptionalPropertyTypes` is on in this package, so `{ priority: maybe }`
+ * does not typecheck against `priority?: string` when `maybe` is
+ * `string | undefined`. Conditional spreads work but are unreadable twenty
+ * times over, which is roughly how many optional fields `SearchOptions` has.
+ */
+export function put<T extends object, K extends keyof T>(target: T, key: K, value: T[K] | undefined): void {
+	if (value !== undefined) target[key] = value;
+}

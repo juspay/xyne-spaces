@@ -16,6 +16,8 @@ import {
 	record,
 	toIST,
 } from "../render.js";
+import { MAX_LIMIT, type SearchOptions } from "@xyne/spaces-sdk";
+import { put } from "../render.js";
 import type { ToolDef } from "./shared.js";
 
 /**
@@ -52,9 +54,8 @@ const whoami: ToolDef = {
 		"tool that takes a user takes the id returned here, and an API key is opaque so there is no way to read it " +
 		"locally. Also the quickest way to confirm the server is configured and the key is live.",
 	inputSchema: { type: "object", properties: {}, additionalProperties: false },
-	direct: [{ method: "get", path: "/me" }],
-	async handler(_args, client) {
-		const me = await client.direct<Record<string, unknown>>("GET", "/me");
+	async handler(_args, { sdk, baseUrl }) {
+		const me = (await sdk.users.me()) as unknown as Record<string, unknown>;
 		const lines = [
 			`  User ID: ${String(me["id"] ?? "(unknown)")}`,
 			`  Email: ${String(me["email"] ?? "(unknown)")}`,
@@ -73,7 +74,7 @@ const whoami: ToolDef = {
 			"  Pass the User ID above wherever a tool asks for a user — assignee on spaces_ticket_update, " +
 				"user_id on spaces_tickets_list. Tools that take a person also accept an email address.",
 		);
-		return ok(`Signed in to Xyne Spaces at ${client.baseUrl}:\n${lines.join("\n")}`);
+		return ok(`Signed in to Xyne Spaces at ${baseUrl}:\n${lines.join("\n")}`);
 	},
 };
 
@@ -280,41 +281,48 @@ const search: ToolDef = {
 		},
 		additionalProperties: false,
 	},
-	direct: [{ method: "get", path: "/search" }],
-	async handler(args, client) {
-		const limit = boundedLimit(args, 20, 200);
+	async handler(args, { sdk }) {
+		const limit = boundedLimit(args, 20, MAX_LIMIT);
 		const offset = offsetOf(args);
 
-		const payload = await client.direct<SearchPayload>("GET", "/search", {
-			query: {
-				q: optionalString(args, "query") ?? "",
-				type: optionalStringArray(args, "type"),
-				apps: optionalStringArray(args, "apps"),
-				in: optionalStringArray(args, "in"),
-				from: optionalStringArray(args, "from"),
-				withUser: optionalStringArray(args, "with_user"),
-				mentions: optionalStringArray(args, "mentions"),
-				projectId: optionalStringArray(args, "project_id"),
-				status: optionalStringArray(args, "status"),
-				priority: optionalString(args, "priority"),
-				board: optionalString(args, "board"),
-				stage: optionalString(args, "stage"),
-				assignee: optionalString(args, "assignee"),
-				tags: optionalString(args, "tags"),
-				after: optionalString(args, "after"),
-				before: optionalString(args, "before"),
-				on: optionalString(args, "on"),
-				range: optionalString(args, "range"),
-				orderBy: optionalString(args, "order_by"),
-				onlyMyChannels: optionalBoolean(args, "only_my_channels"),
-				includeBotMessages: optionalBoolean(args, "include_bot_messages"),
-				// An empty string is what asks the server for a flat ranked list.
-				// Sent explicitly because the server's own default groups by type.
-				groupBy: optionalBoolean(args, "group_by_type") === true ? undefined : "",
-				limit,
-				offset,
-			},
-		});
+		// `exactOptionalPropertyTypes` is on here and `SearchOptions` has ~20
+		// optional fields, so `{ priority: maybeUndefined }` does not compile.
+		// `put` assigns only what is defined.
+		const options: SearchOptions = { q: optionalString(args, "query") ?? "", limit, offset };
+		// `SearchType`/`SearchApp` are declared in the SDK but not re-exported from
+		// its entry point, so the parameter types are read off `SearchOptions`
+		// rather than restated — a value added server-side then shows up here as
+		// a compile error instead of a runtime `validation_failed`.
+		put(options, "type", optionalStringArray(args, "type") as SearchOptions["type"]);
+		put(options, "apps", optionalStringArray(args, "apps") as SearchOptions["apps"]);
+		put(options, "in", optionalStringArray(args, "in"));
+		put(options, "from", optionalStringArray(args, "from"));
+		put(options, "withUser", optionalStringArray(args, "with_user"));
+		put(options, "mentions", optionalStringArray(args, "mentions"));
+		put(options, "projectId", optionalStringArray(args, "project_id"));
+		put(options, "status", optionalStringArray(args, "status"));
+		put(options, "priority", optionalString(args, "priority"));
+		put(options, "board", optionalString(args, "board"));
+		put(options, "stage", optionalString(args, "stage"));
+		put(options, "assignee", optionalString(args, "assignee"));
+		put(options, "tags", optionalString(args, "tags"));
+		put(options, "after", optionalString(args, "after"));
+		put(options, "before", optionalString(args, "before"));
+		put(options, "on", optionalString(args, "on"));
+		put(options, "range", optionalString(args, "range"));
+		put(options, "orderBy", optionalString(args, "order_by") as SearchOptions["orderBy"]);
+		put(options, "onlyMyChannels", optionalBoolean(args, "only_my_channels"));
+		put(options, "includeBotMessages", optionalBoolean(args, "include_bot_messages"));
+		// An empty string is what asks the server for a flat ranked list. Sent
+		// explicitly because the server's own default groups by type — and the
+		// SDK's query builder preserves "" rather than dropping it as falsy.
+		if (optionalBoolean(args, "group_by_type") !== true) options.groupBy = "";
+
+		// `SearchResponse` declares { results, total, facets? }, which is not
+		// what the endpoint returns — grouping, totalCount and the per-hit
+		// searchContext this tool renders are all absent from it. Cast to the
+		// real shape rather than widening the SDK's public type.
+		const payload = (await sdk.search.query(options)) as unknown as SearchPayload;
 
 		if (payload.grouped && Array.isArray(payload.groups)) {
 			const blocks: string[] = [];

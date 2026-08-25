@@ -2,9 +2,7 @@
  * Threads (conversations): a channel holds threads, a thread holds messages.
  */
 
-import { newId, now } from "../client.js";
 import {
-	asRows,
 	boundedLimit,
 	cleanText,
 	indented,
@@ -16,6 +14,9 @@ import {
 	requiredString,
 	timeLine,
 } from "../render.js";
+import type { Conversation, MessageType } from "@xyne/spaces-sdk";
+import type { Related } from "../render.js";
+import { first } from "../render.js";
 import type { ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
@@ -28,29 +29,18 @@ interface MessageRef {
 	isDeleted?: boolean;
 }
 
-interface ConversationRow {
-	conversationId?: string;
-	channelId?: string;
-	createdBy?: string;
-	initialMessageId?: string;
-	parentMessageId?: string | null;
-	lastActivityAt?: number;
-	replyCount?: number;
-	pinned?: boolean;
-	ticketId?: string | null;
-	callId?: string | null;
-	threadType?: string | null;
-	createdAt?: number;
-	initialMessage?: MessageRef | MessageRef[] | null;
-	parentMessage?: MessageRef | MessageRef[] | null;
+/**
+ * `channelLatestMultipleConversationsV3` joins the opening and parent message,
+ * participants, the linked ticket, and attachments. The SDK's `Conversation`
+ * types columns only, so the joins are declared here — and only the joins.
+ */
+type ConversationRow = Conversation & {
+	initialMessage?: Related<MessageRef>;
+	parentMessage?: Related<MessageRef>;
 	participants?: Array<{ userId?: string }> | null;
-	ticket?: Record<string, unknown> | Record<string, unknown>[] | null;
+	ticket?: Related<Record<string, unknown>>;
 	initialMessageAttachments?: Array<Record<string, unknown>> | null;
-}
-
-function first<T>(value: T | T[] | null | undefined): T | undefined {
-	return Array.isArray(value) ? value[0] : (value ?? undefined);
-}
+};
 
 function renderThread(row: ConversationRow, index: number): string {
 	const opener = first(row.initialMessage);
@@ -114,23 +104,17 @@ const threadsList: ToolDef = {
 		required: ["channel_id"],
 		additionalProperties: false,
 	},
-	// `isMember` is required by the schema even though the query body ignores it;
-	// it is a hint to Zero's ACL layer. `limit` is required too — neither has a
-	// default, and omitting either fails with "Validation failed: Required".
-	catalog: [{ name: "channelLatestMultipleConversationsV3", sends: ["channelId", "isMember", "limit"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	// The SDK's registry supplies `isMember` (a hint to Zero's ACL layer) and
+	// the required `limit`, so neither is passed here.
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const channelId = requiredString(args, "channel_id");
 		const limit = boundedLimit(args, 20, 100);
 		const offset = offsetOf(args);
 
-		const rows = asRows<ConversationRow>(
-			await client.catalogQuery("channelLatestMultipleConversationsV3", {
-				channelId,
-				isMember: true,
-				limit: limit + offset,
-			}),
-		);
+		const rows = (await sdk.conversations.listLatestByChannel(channelId, {
+			limit: limit + offset,
+		})) as ConversationRow[];
 		rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
 		const page = rows.slice(offset, offset + limit);
 		const rendered = page.map((row, i) => renderThread(row, offset + i + 1));
@@ -155,13 +139,12 @@ const threadGet: ToolDef = {
 		required: ["conversation_id"],
 		additionalProperties: false,
 	},
-	catalog: [{ name: "getConversationById", sends: ["conversationId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const conversationId = requiredString(args, "conversation_id");
-		// A `.one()` query returns the object directly rather than a list.
-		const rows = asRows<ConversationRow>(await client.catalogQuery("getConversationById", { conversationId }));
-		const row = rows[0];
+		// Nullable single in the SDK, where the old client normalised it into a
+		// one-element array.
+		const row = (await sdk.conversations.get(conversationId)) as ConversationRow | null;
 		if (!row) return ok(`No thread found with conversation id ${conversationId}.`);
 		return ok(renderThread(row, 1));
 	},
@@ -202,28 +185,20 @@ const threadCreate: ToolDef = {
 		required: ["channel_id", "content"],
 		additionalProperties: false,
 	},
-	// The thread and its first message are both rows this call creates, so Zero
-	// expects the caller to pick their ids and supply the timestamp.
-	catalog: [
-		{ name: "conversations.send", sends: ["channelId", "content", "type", "conversationId", "messageId", "timestamp"] },
-	],
 	write: true,
-	async handler(args, client) {
+	async handler(args, { sdk }) {
 		const channelId = requiredString(args, "channel_id");
 		const content = requiredString(args, "content");
-		const conversationId = newId();
-		const messageId = newId();
 		const attachmentIds = Array.isArray(args["attachment_ids"])
 			? (args["attachment_ids"] as unknown[]).map(String)
 			: undefined;
 
-		await client.catalogMutate("conversations.send", {
+		// The SDK generates both ids and the timestamp, and returns the ids —
+		// which is what this tool hands back to the model to chain on.
+		const { conversationId, messageId } = await sdk.conversations.create({
 			channelId,
 			content,
-			type: optionalString(args, "type") ?? "USER",
-			conversationId,
-			messageId,
-			timestamp: now(),
+			type: (optionalString(args, "type") ?? "USER") as MessageType,
 			...(attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : {}),
 		});
 

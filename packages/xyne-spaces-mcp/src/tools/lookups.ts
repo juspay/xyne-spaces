@@ -8,7 +8,6 @@
  */
 
 import {
-	asRows,
 	boundedLimit,
 	cleanText,
 	indented,
@@ -20,21 +19,14 @@ import {
 	requiredString,
 	timeLine,
 } from "../render.js";
+import { MAX_LIMIT, type Board, type Project, type Stage, type User as SdkUser } from "@xyne/spaces-sdk";
+import type { Related } from "../render.js";
 import type { ToolDef } from "./shared.js";
 import { users } from "./shared.js";
 
 // ── spaces_projects_list ────────────────────────────────────────────────────
 
-interface ProjectRow {
-	id?: string;
-	name?: string;
-	code?: string;
-	description?: string | null;
-	type?: string;
-	createdBy?: string;
-	createdAt?: number;
-	updatedAt?: number | null;
-}
+type ProjectRow = Project;
 
 const projectsList: ToolDef = {
 	name: "spaces_projects_list",
@@ -52,12 +44,11 @@ const projectsList: ToolDef = {
 		},
 		additionalProperties: false,
 	},
-	catalog: [{ name: "getAllProjectsList", sends: [] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const limit = boundedLimit(args, 100, 200);
 		const offset = offsetOf(args);
-		const rows = asRows<ProjectRow>(await client.catalogQuery("getAllProjectsList"));
+		const rows: ProjectRow[] = await sdk.projects.listLite();
 
 		const filter = optionalString(args, "name")?.toLowerCase();
 		const matched = filter
@@ -84,27 +75,12 @@ const projectsList: ToolDef = {
 
 // ── spaces_board_stages ─────────────────────────────────────────────────────
 
-interface StageRow {
-	id?: string;
-	name?: string;
-	sequenceNumber?: number;
-	eta?: number | null;
-	defaultTicketStatusV2?: string;
-	requestApprovalOnEntry?: boolean | null;
-}
-
-interface BoardRow {
-	id?: string;
-	name?: string;
-	description?: string | null;
-	boardType?: string;
-	projectId?: string;
-	createdBy?: string;
-	releaseTrackingMode?: string | null;
-	createdAt?: number;
-	updatedAt?: number | null;
-	stages?: StageRow[] | null;
-}
+/**
+ * `boardsByProject` pulls stages through a Zero `.related()`, which the SDK's
+ * `Board` does not declare — it types columns only. Intersecting keeps every
+ * column checked against the real schema and hand-declares just the join.
+ */
+type BoardRow = Board & { stages?: Related<Stage> };
 
 const boardStages: ToolDef = {
 	name: "spaces_board_stages",
@@ -125,11 +101,10 @@ const boardStages: ToolDef = {
 	},
 	// `boardsByProject` already pulls stages through a relation, so boards and
 	// their stages arrive together rather than needing a call per board.
-	catalog: [{ name: "boardsByProject", sends: ["projectId"] }],
-	async handler(args, client) {
-		await users.prime(client);
+	async handler(args, { sdk }) {
+		await users.prime(sdk);
 		const projectId = requiredString(args, "project_id");
-		const rows = asRows<BoardRow>(await client.catalogQuery("boardsByProject", { projectId }));
+		const rows = (await sdk.boards.listByProject(projectId)) as BoardRow[];
 
 		const filter = optionalString(args, "board_name")?.toLowerCase();
 		const matched = filter ? rows.filter((r) => (r.name ?? "").toLowerCase().includes(filter)) : rows;
@@ -144,7 +119,9 @@ const boardStages: ToolDef = {
 			if (detail.length > 0) lines.push(`  ${detail.join(" · ")}`);
 			if (board.createdBy) lines.push(`  Created by: ${users.label(board.createdBy)}`);
 
-			const stages = [...(board.stages ?? [])].sort((a, b) => (a.sequenceNumber ?? 0) - (b.sequenceNumber ?? 0));
+			const stages = [...(Array.isArray(board.stages) ? board.stages : board.stages ? [board.stages] : [])].sort(
+				(a, b) => (a.sequenceNumber ?? 0) - (b.sequenceNumber ?? 0),
+			);
 			if (stages.length > 0) {
 				lines.push(`  Stages (${stages.length}), in order:`);
 				for (const stage of stages) {
@@ -176,17 +153,8 @@ const boardStages: ToolDef = {
 
 // ── spaces_users_list ───────────────────────────────────────────────────────
 
-interface UserRow {
-	id?: string;
-	name?: string;
-	displayName?: string;
-	email?: string;
-	role?: string;
-	status?: string;
-	isActive?: boolean;
-	title?: string;
-	updatedAt?: number;
-}
+/** `title` and `isActive` are real columns the SDK's `User` does not declare. */
+type UserRow = SdkUser & { title?: string; isActive?: boolean };
 
 const usersList: ToolDef = {
 	name: "spaces_users_list",
@@ -200,16 +168,18 @@ const usersList: ToolDef = {
 		type: "object",
 		properties: {
 			search: { type: "string", description: "Case-insensitive partial match on name, display name, or email." },
-			limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max people (default 50, max 200)." },
+			limit: { type: "number", minimum: 1, maximum: 100, default: 50, description: "Max people (default 50, max 100)." },
 			offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
 		},
 		additionalProperties: false,
 	},
-	catalog: [{ name: "getUsersV2", sends: [] }],
-	async handler(args, client) {
-		const limit = boundedLimit(args, 50, 200);
+	async handler(args, { sdk }) {
+		const limit = boundedLimit(args, 50, MAX_LIMIT);
 		const offset = offsetOf(args);
-		const rows = asRows<UserRow>(await client.catalogQuery("getUsersV2", {}));
+		// The directory is already paged and cached for the process; reuse it
+		// rather than paying for another full walk per call.
+		await users.prime(sdk);
+		const rows = users.all() as UserRow[];
 
 		const search = optionalString(args, "search")?.toLowerCase();
 		const matched = search
