@@ -6,6 +6,7 @@ CREATE TABLE "daily_brief_activity" (
     "kind" TEXT NOT NULL,
     "dateBucket" TEXT NOT NULL,
     "count" INTEGER NOT NULL DEFAULT 1,
+    "rejectionCount" INTEGER NOT NULL DEFAULT 0,
     "occurredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
