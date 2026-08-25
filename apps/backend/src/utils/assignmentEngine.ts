@@ -260,6 +260,11 @@ const STRATEGY_BUILDERS: Record<
   [AssignmentStrategy.ROUND_ROBIN]: createRoundRobinStrategy,
 };
 
+// Strip control characters (incl. CR/LF) so user-derived text can't forge log
+// lines. Same shape as the sanitizer in git-providers/github/apis.ts.
+const sanitizeForLog = (value: string | null | undefined): string =>
+  String(value).replace(/\p{Cc}+/gu, ' ').slice(0, 200);
+
 /**
  * The strategy a group ranks by. Anything unrecognised — including groups that
  * predate the column — falls back to WORKLOAD, so today's behaviour is the
@@ -274,10 +279,11 @@ function createRankingStrategy(
   if (strategy === null) {
     // Both fallbacks are silent-by-design failure modes — a group configured for
     // ROUND_ROBIN would quietly assign by workload — so say so in the log.
+    const safeGroupId = sanitizeForLog(userGroupId);
     logger.warn(
       group
-        ? `[Assignment] User group ${userGroupId} has unrecognised assignmentStrategy '${group.assignmentStrategy}'; falling back to ${AssignmentStrategy.WORKLOAD}`
-        : `[Assignment] User group ${userGroupId} not readable in this context; falling back to ${AssignmentStrategy.WORKLOAD}`,
+        ? `[Assignment] User group ${safeGroupId} has unrecognised assignmentStrategy '${sanitizeForLog(group.assignmentStrategy)}'; falling back to ${AssignmentStrategy.WORKLOAD}`
+        : `[Assignment] User group ${safeGroupId} not readable in this context; falling back to ${AssignmentStrategy.WORKLOAD}`,
     );
   }
   return STRATEGY_BUILDERS[strategy ?? AssignmentStrategy.WORKLOAD](userStates);
@@ -835,9 +841,7 @@ async function pickBest(
     return {
       userId,
       score: effectiveActiveTasks - expertBonus - percentDiff,
-      details: {
-        weightedActiveTasks, startOffset, effectiveActiveTasks, expertBonus, hasExpertise: expert, percentage, maxTickets, userTickets, currentPct, percentDiff,
-      },
+      details: { weightedActiveTasks, startOffset, effectiveActiveTasks, expertBonus, hasExpertise: expert, percentage, maxTickets, userTickets, currentPct, percentDiff },
     };
   };
 
