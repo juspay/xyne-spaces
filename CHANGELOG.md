@@ -1,3 +1,15 @@
+## [1.219.0-release-20260825.1](https://github.com/juspay/xyne-spaces/compare/v1.218.3...v1.219.0-release-20260825.1) (2026-08-25)
+
+
+### Features
+
+* personalized rank profile as default; feed channelWei… ([#916](https://github.com/juspay/xyne-spaces/issues/916)) ([63889cf](https://github.com/juspay/xyne-spaces/commit/63889cfac711939e79dcfd78b74b4d672300615c))
+
+
+### Bug Fixes
+
+* add retry logic while fetching mails and attachment in desk ([#1007](https://github.com/juspay/xyne-spaces/issues/1007)) ([52d7ce2](https://github.com/juspay/xyne-spaces/commit/52d7ce2e87c4e0c33c33dabb8668803ebabcdf19))
+
 ## [1.218.3](https://github.com/juspay/xyne-spaces/compare/v1.218.2...v1.218.3) (2026-08-25)
 
 
