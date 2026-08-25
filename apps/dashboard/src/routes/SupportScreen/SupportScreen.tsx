@@ -2907,7 +2907,6 @@ const SupportScreen = (): ReactElement => {
                           <DeskFilterTrigger id='assignee' active={hasAssigneeFilter} />
                           <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
                           <DeskFilterTrigger id='stages' active={hasStagesFilter} />
-                          <span />
                         </div>
                         {viewMode === 'table' && (
                           <>
