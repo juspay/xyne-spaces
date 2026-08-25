@@ -9054,7 +9054,7 @@ const spacesDeskMetrics: ToolDef = {
 export const tools: ToolDef[] = [
   spacesWhoami,
   ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
-  ...(isOnyxBenchLane() ? [onyxBenchSearch] : []),
+  onyxBenchSearch,
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,
