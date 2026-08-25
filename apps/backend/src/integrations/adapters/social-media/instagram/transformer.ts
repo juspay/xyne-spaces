@@ -4,10 +4,8 @@ import { BaseTransformer } from '@/integrations/core/baseTransformer';
 import type { NormalizedData, ParseResult } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
-import { INSTAGRAM_MESSAGE_ID_FIELD, INSTAGRAM_SENDER_FIELD } from './constants';
+import { INSTAGRAM_MESSAGE_ID_FIELD, INSTAGRAM_REPLY_WINDOW_MS, INSTAGRAM_SENDER_FIELD } from './constants';
 import type { InstagramWebhookMessaging } from './types';
-
-const WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export class InstagramTransformer extends BaseTransformer<unknown, NormalizedData[]> {
   private externalMessageRepo = new ExternalMessageRepository();
@@ -60,8 +58,9 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     // If the customer last messaged > 24h ago the window has expired; treat this
     // DM as the start of a new conversation so a new ticket is created.
     const latest = await this.externalMessageRepo.findLatestForIgsid(source.id, igsid);
-    const windowExpired =
-      !latest || Date.now() - latest.createdAt.getTime() > WINDOW_MS;
+    const latestTime = latest?.messageTimestamp ?? latest?.createdAt;
+    const newMessageTime = new Date(messaging.timestamp * 1000).getTime();
+    const windowExpired = !latestTime || newMessageTime - latestTime.getTime() > INSTAGRAM_REPLY_WINDOW_MS;
 
     // A unique suffix creates a new thread (new ticket); the bare IGSID
     // appends to the existing active thread.
@@ -70,10 +69,10 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     // duplicates when Meta delivers multiple events in rapid succession).
     // Anchor to the message's own timestamp so two messages sent in the same
     // 24h window always hash to the same thread ID, regardless of server time.
-    const windowStart = Math.floor(new Date(messaging.timestamp * 1000).getTime() / WINDOW_MS) * WINDOW_MS;
-    const externalThreadId = windowExpired
-      ? `${igsid}:${windowStart}`
-      : latest.externalThreadId;
+    const windowStart = Math.floor(new Date(messaging.timestamp * 1000).getTime() / INSTAGRAM_REPLY_WINDOW_MS) * INSTAGRAM_REPLY_WINDOW_MS;
+    const externalThreadId = latest && !windowExpired
+      ? latest.externalThreadId
+      : `${igsid}:${windowStart}`;
 
     const result: NormalizedData = {
       externalId: `${source.id}:${mid}`,

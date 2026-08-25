@@ -217,6 +217,7 @@ import { CallParticipantsSelectionModal } from '../../components/Call/CallPartic
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
+import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
@@ -1827,7 +1828,7 @@ const SupportScreen = (): ReactElement => {
       dlEmail,
       slackChannelId,
       installedAppId,
-      platform: _formPlatform,
+      platform: formPlatform,
       applications,
       socialMediaProvider,
       channelType: _submittedChannelType,
@@ -1837,13 +1838,17 @@ const SupportScreen = (): ReactElement => {
 
     if (deskType === 'SOCIAL_MEDIA') {
       if (socialMediaProvider === 'instagram') {
+        if (!rest.boardId) {
+          toast.error('A board is required for Instagram setup');
+          return;
+        }
         void startInstagramOAuth({
           name: rest.name,
           projectId: rest.projectId,
-          ...(rest.boardId !== undefined && { boardId: rest.boardId }),
+          boardId: rest.boardId,
           ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
           visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-          platform: isElectron ? 'electron' : 'web',
+          platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
         })
           .then(authUrl => {
             setShowCreateChannelModal(false);
@@ -1871,7 +1876,7 @@ const SupportScreen = (): ReactElement => {
           assigneeUserGroupId: rest.assigneeUserGroupId,
         }),
         visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-        platform: isElectron ? 'electron' : 'web',
+        platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
       })
         .then(authorizationUrl => {
           setShowCreateChannelModal(false);
@@ -4507,7 +4512,7 @@ export const SupportTicketDetail = ({
                   {emails.length > 0 &&
                     channel?.type !== ChannelType.SLACK &&
                     channel?.type !== ChannelType.APP &&
-                    channel?.type !== ChannelType.SOCIAL_MEDIA && (
+                    (channel?.type !== ChannelType.SOCIAL_MEDIA || channelIntegrationInfo.sourceType !== 'instagram') && (
                       <>
                         <div className='w-px h-4 bg-border' />
                         <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
@@ -4867,6 +4872,15 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
+            {channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
+              <InstagramCustomerHistory
+                channelId={channelId}
+                conversationId={conversationId}
+                onTicketClick={xyneId => {
+                  void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
+                }}
+              />
+            )}
             <div
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
@@ -4878,8 +4892,8 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this message…'
-                    maxLength={1000}
+                    placeholder={channelIntegrationInfo.sourceType === 'instagram' ? 'Reply to this message…' : 'Reply to this review…'}
+                    maxLength={channelIntegrationInfo.sourceType === 'instagram' ? 1000 : 350}
                     trackingCategory='social-media-composer'
                   />
                 ) : null

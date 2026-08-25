@@ -6,7 +6,6 @@ import { config as appConfig } from '@/config/env';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
 import { ExternalSourcePlatform } from '../core/types';
-import { SOCIAL_MEDIA_SOURCE_TYPES } from '../social-media/constants';
 import { socialMediaService } from '../social-media/socialMediaService';
 import {
   authorizeSocialMediaManager,
@@ -62,128 +61,6 @@ router.post(
         error,
       });
       res.status(500).json({ error: 'Failed to send reply' });
-    }
-  },
-);
-
-// GET /:channelId/customer-history?conversationId=xxx
-// Returns previous tickets from the same Instagram customer (IGSID) in this channel.
-router.get(
-  '/:channelId/customer-history',
-  authV2Middleware.authenticate,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const workspaceId = req.user!.workspaceId!;
-      const { channelId } = req.params;
-      const conversationId = typeof req.query.conversationId === 'string' ? req.query.conversationId : '';
-
-      if (!conversationId) {
-        res.status(400).json({ error: 'conversationId is required' });
-        return;
-      }
-
-      if (!(await canAccessSocialMediaChannel(channelId, req.user!.id, workspaceId))) {
-        res.status(403).json({ error: 'Access denied' });
-        return;
-      }
-
-      const source = await db.externalSource.findFirst({
-        where: {
-          channelId,
-          workspaceId,
-          sourceType: { in: Object.values(SOCIAL_MEDIA_SOURCE_TYPES) },
-          isActive: true,
-        },
-        select: { id: true },
-      });
-      if (!source) {
-        res.json({ igsid: null, tickets: [] });
-        return;
-      }
-
-      const emails = await db.email.findMany({
-        where: { conversationId },
-        select: { id: true },
-      });
-      const emailIds = emails.map(e => e.id);
-
-      const extMsg = emailIds.length > 0
-        ? await db.externalMessage.findFirst({
-            where: {
-              externalSourceId: source.id,
-              entityType: 'EMAIL',
-              direction: 'INCOMING',
-              entityId: { in: emailIds },
-            },
-            select: { externalThreadId: true },
-          })
-        : null;
-
-      if (!extMsg) {
-        res.json({ igsid: null, tickets: [] });
-        return;
-      }
-
-      const igsid = extMsg.externalThreadId.split(':')[0];
-      if (!igsid) {
-        res.json({ igsid: null, tickets: [] });
-        return;
-      }
-
-      const relatedExtMsgs = await db.externalMessage.findMany({
-        where: {
-          externalSourceId: source.id,
-          externalThreadId: { startsWith: `${igsid}:` },
-          direction: 'INCOMING',
-          entityType: 'EMAIL',
-        },
-        distinct: ['externalThreadId'],
-        select: { entityId: true },
-      });
-
-      const relatedEmailIds = relatedExtMsgs
-        .map(m => m.entityId)
-        .filter((id): id is string => !!id && !emailIds.includes(id));
-
-      const relatedEmails = relatedEmailIds.length > 0
-        ? await db.email.findMany({
-            where: { id: { in: relatedEmailIds } },
-            select: { conversationId: true },
-          })
-        : [];
-
-      const relatedConversationIds = [...new Set(
-        relatedEmails
-          .map(e => e.conversationId)
-          .filter((id): id is string => !!id && id !== conversationId),
-      )];
-
-      if (relatedConversationIds.length === 0) {
-        res.json({ igsid, tickets: [] });
-        return;
-      }
-
-      const tickets = await db.ticket.findMany({
-        where: {
-          conversationId: { in: relatedConversationIds },
-          channelId,
-        },
-        select: {
-          id: true,
-          xyneId: true,
-          title: true,
-          stageName: true,
-          createdAt: true,
-          conversationId: true,
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-      });
-
-      res.json({ igsid, tickets });
-    } catch (error) {
-      logger.error(`${TAG} Failed to fetch customer history`, { error });
-      res.status(500).json({ error: 'Failed to fetch customer history' });
     }
   },
 );
@@ -264,7 +141,7 @@ router.post(
           channelId: req.params.channelId,
           workspaceId,
           sourceType: {
-            in: [ExternalSourcePlatform.GOOGLE_PLAY, SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM],
+            in: [ExternalSourcePlatform.GOOGLE_PLAY, ExternalSourcePlatform.INSTAGRAM],
           },
         },
         data: { isActive: false },

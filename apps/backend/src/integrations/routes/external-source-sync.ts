@@ -59,19 +59,6 @@ router.get(
   },
 );
 
-/**
- * Generic Instagram webhook endpoint
- * POST /api/external-source-sync/instagram/ingest
- *
- * Meta's app-level webhook sends ALL Instagram DM events to a SINGLE URL.
- * adapterResolver resolves to the Instagram adapter by platform name.
- * authenticate calls adapter.getSourceNameFromDB(body) → "instagram-<igUserId>"
- * then looks up the right ExternalSource and handles HMAC — same as per-source flow.
- */
-// Resolve the correct ExternalSource for Instagram message_edit.num_edit=0 events.
-// These fire from the SENDER's subscription (entry[0].id = sender), not the recipient's.
-// We call getMessage(mid) with each active IG token to find the actual recipient, then
-// inject _resolvedRecipientId into the entry so getSourceNameFromDB returns the right name.
 function requireValidHubSignature(req: Request, res: Response, next: NextFunction): void {
   const sigHeader = req.headers['x-hub-signature-256'];
   const sig = Array.isArray(sigHeader) ? (sigHeader[0] ?? '') : (sigHeader ?? '');
@@ -110,6 +97,8 @@ async function resolveMessageEditRecipient(req: Request, _res: Response, next: N
           const recipientId = fetched?.to?.data?.[0]?.id;
           if (recipientId === src.externalIdentifier) {
             entry._resolvedRecipientId = recipientId;
+            // Cache the fetched message so flow.ts can reuse it without a second Meta API call.
+            entry._resolvedMessage = fetched;
             logger.info('[IG ingest] Resolved message_edit recipient', { mid, recipientId });
             break;
           }
@@ -127,67 +116,24 @@ async function resolveMessageEditRecipient(req: Request, _res: Response, next: N
   next();
 }
 
-router.post(
-  '/instagram/ingest',
-  (req, _res, next) => { req.params.sourceName = 'instagram'; next(); },
-  requireValidHubSignature,
-  resolveMessageEditRecipient,
-  adapterResolver,
-  authenticate,
-  async (req: Request, res: Response) => {
-    const startTime = Date.now();
-    try {
-      const rawBodyReq = req as RawBodyRequest;
-      const { sourceName, adapter, source } = rawBodyReq;
-
-      if (!adapter || !sourceName) {
-        return res.status(500).json({ error: 'Adapter or sourceName missing' });
-      }
-
-      let ingestWorkspaceId: string | null = source?.workspaceId ?? null;
-      if (!ingestWorkspaceId && source?.channelId) {
-        const channel = await db.channel.findUnique({
-          where: { id: source.channelId },
-          select: { workspaceId: true },
-        });
-        ingestWorkspaceId = channel?.workspaceId ?? null;
-      }
-      if (!ingestWorkspaceId) {
-        logger.error('[Instagram] ingest with no resolvable workspaceId', { sourceName });
-        throw new Error(`No resolvable workspaceId for source ${sourceName}`);
-      }
-
-      const results = await runAsServiceActor('external-source-ingest', ingestWorkspaceId,
-        () => externalSourceCore.ingest(adapter, sourceName, req.body, source),
-      );
-
-      logger.info(`[Instagram] Generic webhook processed in ${Date.now() - startTime}ms`, {
-        sourceName, resultCount: results.length,
-      });
-      return res.status(200).json(results);
-    } catch (error) {
-      logger.error('[Instagram] Generic webhook error:', error);
-      return res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-);
-
 /**
- * External source sync endpoint
  * POST /api/external-source-sync/:sourceName/ingest
  *
- * Flow:
- * 1. adapterResolver - Resolve adapter from sourceName
- * 2. authenticate - Authenticate using adapter.authenticate()
- * 3. handler - Orchestrate preprocess → transform → sync
- *
- * Note: express.json() with verify callback is applied at app level
- * This provides both req.body (parsed) and req.rawBody (raw string)
+ * Unified webhook ingestion endpoint for all external sources.
+ * Instagram adds two pre-auth middlewares gated on sourceName:
+ *   1. requireValidHubSignature — verifies Meta HMAC-SHA256 signature
+ *   2. resolveMessageEditRecipient — resolves recipient for message_edit.num_edit=0 events
+ * Both must run before adapterResolver so the recipient id is known when getSourceNameFromDB runs.
+ * Meta's configured webhook URL (/instagram/ingest) routes here with sourceName='instagram'.
  */
 router.post(
   '/:sourceName/ingest',
-  adapterResolver, // Resolve adapter, attach to req
-  authenticate, // Authenticate using req.adapter
+  (req: Request, res: Response, next: NextFunction) =>
+    req.params.sourceName === 'instagram' ? requireValidHubSignature(req, res, next) : next(),
+  (req: Request, res: Response, next: NextFunction) =>
+    req.params.sourceName === 'instagram' ? resolveMessageEditRecipient(req, res, next) : next(),
+  adapterResolver,
+  authenticate,
   async (req, res: Response) => {
     const startTime = Date.now();
 

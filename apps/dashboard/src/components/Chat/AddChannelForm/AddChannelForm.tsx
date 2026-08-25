@@ -288,8 +288,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         if (deskType === DeskType.APP && !selectedInstalledAppId) return;
         if (
           deskType === DeskType.SOCIAL_MEDIA &&
-          socialMediaProvider === 'google-play' &&
-          (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)
+          ((socialMediaProvider === 'google-play' &&
+            (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)) ||
+            (socialMediaProvider === 'instagram' && !value.boardId))
         )
           return;
       }
@@ -407,6 +408,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       deskType === DeskType.SOCIAL_MEDIA &&
       socialMediaProvider === 'google-play' &&
       (!areGooglePlayApplicationsValid(googlePlayApplications) || !boardIdValue)) ||
+    (requireConnector &&
+      deskType === DeskType.SOCIAL_MEDIA &&
+      socialMediaProvider === 'instagram' &&
+      !boardIdValue) ||
     (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
@@ -439,6 +444,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           googlePlayApplications.length
         )
           return 'Android package names must be unique';
+        if (!boardIdValue) return 'Please select a board';
+      }
+      if (deskType === DeskType.SOCIAL_MEDIA && socialMediaProvider === 'instagram') {
         if (!boardIdValue) return 'Please select a board';
       }
       if (deskType === DeskType.CALL && !ozonetelConfig?.configured)

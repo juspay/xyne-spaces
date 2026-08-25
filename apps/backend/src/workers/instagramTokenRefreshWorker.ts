@@ -3,7 +3,7 @@ import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { metaGraphClient } from '@/integrations/adapters/social-media/instagram/metaGraphClient';
 import type { InstagramCredentials } from '@/integrations/adapters/social-media/instagram/types';
-import { SOCIAL_MEDIA_SOURCE_TYPES } from '@/integrations/social-media/constants';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 const TAG = '[InstagramTokenRefreshWorker]';
 
@@ -16,7 +16,7 @@ class InstagramTokenRefreshWorker {
 
     const sources = await db.externalSource.findMany({
       where: {
-        sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM,
+        sourceType: ExternalSourcePlatform.INSTAGRAM,
         isActive: true,
       },
       select: { id: true, credentials: true },

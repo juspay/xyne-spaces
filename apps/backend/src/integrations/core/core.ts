@@ -367,6 +367,7 @@ export class ExternalSourceCore {
         entityId: resolvedEntityId,
         direction: MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
+        messageTimestamp: normalizedData.metadata.timestamp,
       });
     }
 

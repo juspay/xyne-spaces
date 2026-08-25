@@ -130,7 +130,7 @@ const envSchema = Joi.object({
   META_IG_APP_ID: Joi.string().allow('').default(''), // Instagram App ID (for Instagram Login OAuth)
   META_IG_APP_SECRET: Joi.string().allow('').default(''), // Instagram App Secret (for Instagram Login OAuth)
   META_IG_REDIRECT_URI: Joi.string().allow('').default(''), // Override redirect URI for Instagram OAuth (e.g. ngrok URL in local dev)
-  ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER: Joi.boolean().default(true), // default true — tokens must refresh or channels go dark
+  ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER: Joi.boolean().default(false),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration

@@ -10,16 +10,16 @@ import {
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { encrypt, decrypt } from '@/services/encryptionService';
+import { encrypt } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { buildSupportPath } from '../urlHelpers';
-import { SOCIAL_MEDIA_SOURCE_TYPES } from '../../social-media/constants';
+import { buildSupportPath, postOAuthRedirect } from '../urlHelpers';
+import { ExternalSourcePlatform } from '../../core/types';
 import { metaGraphClient } from '../../adapters/social-media/instagram/metaGraphClient';
 import { instagramOAuthStateService } from '../../adapters/social-media/instagram/oauthStateService';
 import type { InstagramCredentials } from '../../adapters/social-media/instagram/types';
-import { authorizeSocialMediaManager } from './access';
+import { authorizeSocialMediaManager, canAccessSocialMediaChannel } from './access';
 
 const TAG = '[InstagramRoutes]';
 const router = express.Router();
@@ -29,7 +29,7 @@ const IG_AUTH_BASE = 'https://www.instagram.com';
 const startSchema = z.object({
   name: z.string().trim().min(1).max(120),
   projectId: z.string().min(1),
-  boardId: z.preprocess(v => (typeof v === 'string' ? v.trim() || undefined : undefined), z.string().min(1).optional()),
+  boardId: z.string().min(1),
   assigneeUserGroupId: z.preprocess(v => (typeof v === 'string' ? v.trim() || undefined : undefined), z.string().min(1).optional()),
   visibility: z.enum(['PUBLIC', 'PRIVATE', 'public', 'private']).default('PUBLIC'),
   platform: z.enum(['web', 'electron']).default('web'),
@@ -37,12 +37,6 @@ const startSchema = z.object({
 
 function callbackUri(req: Request): string {
   return config.META_IG_REDIRECT_URI || `${getBackendUrl(req)}/api/integrations/social-media/instagram/oauth/callback`;
-}
-
-function postOAuthRedirect(frontendUrl: string, path: string, platform: 'web' | 'electron'): string {
-  return platform === 'electron'
-    ? `${frontendUrl}/launch?path=${encodeURIComponent(path)}`
-    : `${frontendUrl}${path}`;
 }
 
 function redirectToDesk(
@@ -85,12 +79,10 @@ router.post(
           where: { id: input.projectId, workspaceId },
           select: { id: true },
         }),
-        input.boardId
-          ? db.board.findFirst({
-              where: { id: input.boardId, projectId: input.projectId, workspaceId },
-              select: { id: true },
-            })
-          : Promise.resolve(null),
+        db.board.findFirst({
+          where: { id: input.boardId, projectId: input.projectId, workspaceId },
+          select: { id: true },
+        }),
         input.assigneeUserGroupId
           ? db.userGroup.findFirst({
               where: { id: input.assigneeUserGroupId, workspaceId, isActive: true },
@@ -107,7 +99,7 @@ router.post(
         res.status(404).json({ error: 'Project not found' });
         return;
       }
-      if (input.boardId && !board) {
+      if (!board) {
         res.status(404).json({ error: 'Board not found' });
         return;
       }
@@ -175,7 +167,7 @@ router.post(
           select: { boardId: true, assigneeUserGroupId: true },
         }),
         db.externalSource.findFirst({
-          where: { channelId, workspaceId, sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM },
+          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM },
           select: { externalIdentifier: true },
         }),
       ]);
@@ -320,7 +312,7 @@ router.get(
           logger.warn(`${TAG} Reconnect rejected: account mismatch. Expected igUserId=${state.expectedIgUserId}, got ${igUserId}`);
           // Fetch the stored username so the error message can tell the user exactly which account to use.
           const existingSource = await db.externalSource.findFirst({
-            where: { channelId: state.channelId, workspaceId: state.workspaceId, sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM },
+            where: { channelId: state.channelId, workspaceId: state.workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM },
             select: { displayName: true },
           });
           const expectedHandle = existingSource?.displayName ? `@${existingSource.displayName}` : 'the original account';
@@ -337,7 +329,7 @@ router.get(
           where: {
             channelId: state.channelId,
             workspaceId: state.workspaceId,
-            sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM,
+            sourceType: ExternalSourcePlatform.INSTAGRAM,
           },
           data: {
             credentials: encryptedCredentials,
@@ -359,7 +351,7 @@ router.get(
       const existingSource = await db.externalSource.findFirst({
         where: {
           workspaceId: state.workspaceId,
-          sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM,
+          sourceType: ExternalSourcePlatform.INSTAGRAM,
           externalIdentifier: igUserId,
         },
         select: { id: true },
@@ -425,7 +417,7 @@ router.get(
         const source = await tx.externalSource.create({
           data: {
             name: sourceName,
-            sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM,
+            sourceType: ExternalSourcePlatform.INSTAGRAM,
             displayName: igUsername || state.channelName,
             channelId: channel.id,
             externalIdentifier: igUserId,
@@ -490,7 +482,7 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM,
+          sourceType: ExternalSourcePlatform.INSTAGRAM,
         },
         data: { isActive: false, credentials: '' },
       });
@@ -543,33 +535,16 @@ router.post(
       logger.info(`${TAG} Data deletion request received`, { igUserId });
 
       if (igUserId) {
-        // Deactivate all Instagram sources whose stored credentials contain this igUserId.
-        // We decrypt each credential to match — acceptable volume since deletion is rare.
-        const sources = await db.externalSource.findMany({
+        // externalIdentifier stores igUserId directly (set at channel creation) — no decryption needed.
+        const result = await db.externalSource.updateMany({
           where: {
-            sourceType: SOCIAL_MEDIA_SOURCE_TYPES.INSTAGRAM,
+            sourceType: ExternalSourcePlatform.INSTAGRAM,
+            externalIdentifier: igUserId,
             isActive: true,
           },
-          select: { id: true, credentials: true },
+          data: { isActive: false, credentials: '' },
         });
-
-        const toDeactivate: string[] = [];
-        for (const src of sources) {
-          try {
-            const creds = JSON.parse(decrypt(src.credentials)) as InstagramCredentials;
-            if (creds.igUserId === igUserId) toDeactivate.push(src.id);
-          } catch {
-            // Skip sources with unreadable credentials.
-          }
-        }
-
-        if (toDeactivate.length > 0) {
-          await db.externalSource.updateMany({
-            where: { id: { in: toDeactivate } },
-            data: { isActive: false, credentials: '' },
-          });
-          logger.info(`${TAG} Deactivated ${toDeactivate.length} source(s) for igUserId=${igUserId}`);
-        }
+        logger.info(`${TAG} Deactivated ${result.count} source(s) for igUserId=${igUserId}`);
       }
 
       const confirmationCode = `xyne-del-${Date.now()}`;
@@ -580,6 +555,97 @@ router.post(
     } catch (error) {
       logger.error(`${TAG} Data deletion callback failed`, { error });
       res.status(500).json({ error: 'Data deletion request failed' });
+    }
+  },
+);
+
+// GET /:channelId/customer-history?conversationId=xxx
+// Returns previous tickets from the same Instagram customer (identified by IGSID) in this channel.
+router.get(
+  '/:channelId/customer-history',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const workspaceId = req.user!.workspaceId!;
+      const { channelId } = req.params;
+      const conversationId = typeof req.query.conversationId === 'string' ? req.query.conversationId : '';
+
+      if (!conversationId) {
+        res.status(400).json({ error: 'conversationId is required' });
+        return;
+      }
+
+      if (!(await canAccessSocialMediaChannel(channelId, req.user!.id, workspaceId))) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
+
+      const source = await db.externalSource.findFirst({
+        where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM, isActive: true },
+        select: { id: true },
+      });
+      if (!source) {
+        res.json({ igsid: null, tickets: [] });
+        return;
+      }
+
+      const emails = await db.email.findMany({ where: { conversationId }, select: { id: true } });
+      const emailIds = emails.map(e => e.id);
+
+      const extMsg = emailIds.length > 0
+        ? await db.externalMessage.findFirst({
+            where: {
+              externalSourceId: source.id,
+              entityType: 'EMAIL',
+              direction: 'INCOMING',
+              entityId: { in: emailIds },
+            },
+            select: { externalThreadId: true },
+          })
+        : null;
+
+      if (!extMsg) { res.json({ igsid: null, tickets: [] }); return; }
+
+      const igsid = extMsg.externalThreadId.split(':')[0];
+      if (!igsid) { res.json({ igsid: null, tickets: [] }); return; }
+
+      const relatedExtMsgs = await db.externalMessage.findMany({
+        where: {
+          externalSourceId: source.id,
+          externalThreadId: { startsWith: `${igsid}:` },
+          direction: 'INCOMING',
+          entityType: 'EMAIL',
+        },
+        distinct: ['externalThreadId'],
+        select: { entityId: true },
+      });
+
+      const relatedEmailIds = relatedExtMsgs
+        .map(m => m.entityId)
+        .filter((id): id is string => !!id && !emailIds.includes(id));
+
+      const relatedConversationIds = [
+        ...new Set(
+          (relatedEmailIds.length > 0
+            ? await db.email.findMany({ where: { id: { in: relatedEmailIds } }, select: { conversationId: true } })
+            : []
+          ).map(e => e.conversationId).filter((id): id is string => !!id && id !== conversationId),
+        ),
+      ];
+
+      if (relatedConversationIds.length === 0) { res.json({ igsid, tickets: [] }); return; }
+
+      const tickets = await db.ticket.findMany({
+        where: { conversationId: { in: relatedConversationIds }, channelId },
+        select: { id: true, xyneId: true, title: true, stageName: true, createdAt: true, conversationId: true },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      });
+
+      res.json({ igsid, tickets });
+    } catch (error) {
+      logger.error(`${TAG} Failed to fetch customer history`, { error });
+      res.status(500).json({ error: 'Failed to fetch customer history' });
     }
   },
 );

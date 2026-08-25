@@ -1327,7 +1327,7 @@ export class EmailService {
 
     // Enqueue tag generation for this email (fire-and-forget — must not block ingestion).
     // Priority 1 (high) so live inbound emails are always processed before bulk historical fetches.
-    // Skip social media channels — Instagram DMs are short texts that don't benefit from LLM tagging.
+    // Skip social media channels — DMs and reviews are short texts that don't benefit from LLM tagging.
     if (config.enableTagGenerationPipeline && channel.type !== ChannelType.SOCIAL_MEDIA) {
       void tagGenerationPipeline.addGenerationJob({
         sourceId: email.id,
