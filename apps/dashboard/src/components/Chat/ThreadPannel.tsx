@@ -14,7 +14,7 @@ import { useChannel, useChannelParticipation } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
-import { X, FileText, ClipboardCheck, Hash, Tag as TagIcon, ChevronRight } from 'lucide-react';
+import { X, FileText, ClipboardCheck, Hash, Tag as TagIcon, ChevronRight, Forward } from 'lucide-react';
 import {
   ArrowLeft,
   ArrowTurnDownRight,
@@ -99,6 +99,8 @@ import { ThreadRecordingButton } from '../Call/ThreadRecordingButton/ThreadRecor
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
+import { Dialog } from '../ui/Dialog/Dialog';
+import { ForwardThreadForm } from './ForwardMessageModal/ForwardThreadModal';
 
 type TabType = 'thread' | 'details' | 'files' | 'rca';
 type UnderTicketTabType = 'replies' | 'rca';
@@ -309,6 +311,7 @@ export const ThreadMessages = ({
     isThreadParticipant,
   );
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
+  const [isForwardThreadModalOpen, setIsForwardThreadModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, currentUser?.id ?? '');
   const isDmThread =
@@ -1333,6 +1336,20 @@ export const ThreadMessages = ({
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                   )}
+                  {derivedConversationId && !channel?.isArchived && messages.length > 0 && (
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={() => setIsForwardThreadModalOpen(true)}
+                      data-track-category='THREAD_PANEL'
+                      data-track-name='FORWARD_THREAD'
+                      data-track-metadata={JSON.stringify({
+                        conversationId: derivedConversationId,
+                      })}
+                    >
+                      <Forward size={16} className='shrink-0' />
+                      <span className='flex-1'>Forward thread</span>
+                    </DropdownMenuItem>
+                  )}
                   {!isMobile && !channel?.isArchived && (
                     <DropdownMenuItem
                       className='gap-2'
@@ -1702,6 +1719,20 @@ export const ThreadMessages = ({
                           </DropdownMenuSubContent>
                         </DropdownMenuSub>
                       )}
+                      {derivedConversationId && !channel?.isArchived && messages.length > 0 && (
+                        <DropdownMenuItem
+                          className='gap-2'
+                          onClick={() => setIsForwardThreadModalOpen(true)}
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='FORWARD_THREAD'
+                          data-track-metadata={JSON.stringify({
+                            conversationId: derivedConversationId,
+                          })}
+                        >
+                          <Forward size={16} className='shrink-0' />
+                          <span className='flex-1'>Forward thread</span>
+                        </DropdownMenuItem>
+                      )}
                       {!isMobile && !channel?.isArchived && (
                         <DropdownMenuItem
                           className='gap-2'
@@ -1823,6 +1854,22 @@ export const ThreadMessages = ({
             onContextItemToggle={handleContextItemToggle}
             onContextSelectionConfirm={handleContextConfirm}
           />
+        )}
+
+        {isForwardThreadModalOpen && derivedConversationId && (
+          <Dialog
+            open={isForwardThreadModalOpen}
+            onOpenChange={setIsForwardThreadModalOpen}
+            onOpenAutoFocus={event => event.preventDefault()}
+          >
+            <ForwardThreadForm
+              conversationId={derivedConversationId}
+              channelId={derivedChannelId}
+              messages={messages}
+              onCancel={() => setIsForwardThreadModalOpen(false)}
+              onSuccess={() => setIsForwardThreadModalOpen(false)}
+            />
+          </Dialog>
         )}
 
         {/* Schedule Call Modal */}

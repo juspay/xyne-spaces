@@ -68,7 +68,7 @@ import {
   MessageArtifactStatus,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
-import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
+import { createForwardedMessageXml, createForwardedThreadXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getNudgeActionBehavior } from '../nudges.js';
 import {
   parseTicketMd,
@@ -1822,6 +1822,138 @@ export const mutators = defineMutators({
         await updateInitialMessageMdField(tx, { messageId }, { content, edited: true });
       },
     ),
+    forwardThread: defineMutator(
+      z.object({
+        sourceConversationId: z.string(),
+        targetChannelId: z.string(),
+        optionalMessage: z.string().max(10000, 'Optional message too long').optional(),
+        conversationId: z.string(),
+        messageId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          sourceConversationId,
+          targetChannelId,
+          optionalMessage,
+          conversationId,
+          messageId,
+          timestamp,
+        },
+      }) => {
+        const sourceConversation = await tx.run(
+          zql.conversations.where('conversationId', sourceConversationId).one(),
+        );
+        if (!sourceConversation) throw new Error('Source thread not found');
+
+        const originParticipation = await tx.run(
+          zql.channel_participants
+            .where('channelId', sourceConversation.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!originParticipation) {
+          throw new Error('You are not a participant of the source thread channel');
+        }
+
+        const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
+        if (!targetChannel) throw new Error('Target channel not found');
+
+        const targetParticipation = await tx.run(
+          zql.channel_participants
+            .where('channelId', targetChannelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!targetParticipation) {
+          throw new Error('You are not a participant of the target channel');
+        }
+
+        const sourceMessages = await tx.run(
+          zql.messages
+            .where('conversationId', sourceConversationId)
+            .where(({ or, cmp }) =>
+              or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)),
+            )
+            .orderBy('createdAt', 'asc')
+            .related('attachments'),
+        );
+        if (sourceMessages.length === 0) throw new Error('Source thread has no visible messages');
+
+        const previewSourceMessages = sourceMessages.slice(0, 8);
+        const senderIds = Array.from(new Set(previewSourceMessages.map(m => m.senderId)));
+        const senders = await Promise.all(
+          senderIds.map(async senderId => tx.run(zql.users.where('id', senderId).one())),
+        );
+        const senderById = new Map(senders.filter(Boolean).map(sender => [sender!.id, sender!]));
+        const rootMessage = sourceMessages.find(m => m.messageId === sourceConversation.initialMessageId) ?? sourceMessages[0]!;
+        const rootSender = senderById.get(rootMessage.senderId) ?? await tx.run(zql.users.where('id', rootMessage.senderId).one());
+        const attachmentCount = sourceMessages.reduce((sum, msg) => sum + (msg.attachments?.length ?? 0), 0);
+
+        const xmlContent = createForwardedThreadXml({
+          originalConversationId: sourceConversation.conversationId,
+          originalChannelId: sourceConversation.channelId,
+          originalInitialMessageId: sourceConversation.initialMessageId,
+          originalCreatedAt: rootMessage.createdAt,
+          originalSenderId: rootMessage.senderId,
+          originalSenderName: rootSender?.name || 'Unknown User',
+          optionalText: optionalMessage || null,
+          previewMessages: previewSourceMessages.map(msg => ({
+            messageId: msg.messageId,
+            senderId: msg.senderId,
+            senderName: senderById.get(msg.senderId)?.name || 'Unknown User',
+            createdAt: msg.createdAt,
+            content: msg.isDeleted ? 'This message was deleted' : msg.content,
+            attachmentCount: msg.attachments?.length ?? 0,
+          })),
+          totalMessageCount: sourceMessages.length,
+          replyCount: Math.max(0, sourceMessages.length - 1),
+          attachmentCount,
+        });
+
+        await tx.mutate.conversations.insert({
+          conversationId,
+          channelId: targetChannelId,
+          workspaceId: ctx.workspaceId,
+          createdBy: ctx.userID,
+          initialMessageId: messageId,
+          lastActivityAt: timestamp,
+          replyCount: 0,
+          pinned: false,
+          metadata: {},
+          createdAt: timestamp,
+          initial_message_md: buildInitialMessageMd({
+            messageId,
+            conversationId,
+            workspaceId: ctx.workspaceId,
+            senderId: ctx.userID,
+            content: xmlContent,
+            msgType: MessageType.FORWARDED,
+            hasAttachment: false,
+            createdAt: timestamp,
+          }),
+        });
+
+        await tx.mutate.messages.insert({
+          messageId,
+          conversationId,
+          workspaceId: ctx.workspaceId,
+          senderId: ctx.userID,
+          content: xmlContent,
+          msgType: MessageType.FORWARDED,
+          hasAttachment: false,
+          edited: false,
+          isDeleted: false,
+          isSent: true,
+          showInChannel: false,
+          createdAt: timestamp,
+          metadata: {},
+        });
+      },
+    ),
+
     togglePin: defineMutator(
       z.object({ conversationId: z.string() }),
       async ({ tx, args: { conversationId } }) => {
