@@ -1898,8 +1898,10 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       const p = effectiveParams;
       const targetAgent = p["targetAgent"] as string;
       const task = p["task"] as string;
-      const convId = p["conversationId"] as string | undefined;
-      const chanId = p["channelId"] as string | undefined;
+      const { getSession: getParentSession } = await import("./webhook.js");
+      const parentCtx = await getParentSession(req.params.sessionId).catch(() => null);
+      const convId = (p["conversationId"] as string | undefined) ?? parentCtx?.conversationId;
+      const chanId = (p["channelId"] as string | undefined) ?? parentCtx?.channelId;
 
       if (!targetAgent || !task) {
         res.status(400).json({ success: false, error: "targetAgent and task are required" });
