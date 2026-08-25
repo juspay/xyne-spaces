@@ -87,9 +87,15 @@ export class ConnectRequestController {
       const updated = await connectRequestService.hostAdminApprove(request.id, user.id);
       const inviteLink = this.buildConnectAcceptLink(req, updated.inviteToken);
       if (config.env === 'development') {
+        // Dev: skip email, log + return the link so it can be opened directly.
         logger.info(`[ConnectRequest] DEV — invite link for ${updated.inviteEmail}: ${inviteLink}`);
+      } else {
+        const emailResult = await connectRequestService.sendHostApprovedInviteEmail(updated, inviteLink);
+        if (!emailResult.success) {
+          await connectRequestService.revertHostApprove(updated.id);
+          throw new Error(`Failed to send connect invitation email: ${emailResult.error}`);
+        }
       }
-      // Dev: return the link so it can be opened directly. (Prod: email it; omit from response.)
       res.status(200).json({
         request: toDto(updated),
         ...(config.env === 'development' ? { inviteLink } : {}),

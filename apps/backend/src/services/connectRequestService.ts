@@ -12,6 +12,10 @@ import { ProjectRepository } from '../database/repositories/projectRepository';
 import { connectChannelService } from './connectChannelService';
 import { runAsSystem } from '../database/tenant/context';
 import { logger } from '../utils/logger';
+import { config } from '../config/env';
+import { emailService } from './email/factory';
+import type { EmailResult } from './email/base-email-service';
+import { connectInviteEmailHtml, connectInviteEmailText } from './email/templates/connect-invite';
 
 /** Guest's captured channel config (survives rejection; used to materialize the pointer at ACTIVE). */
 interface GuestEntityConfig {
@@ -89,6 +93,66 @@ export class ConnectRequestService {
       hostAdminApprovedBy: adminUserId,
       hostAdminApprovedAt: new Date(),
       expiresAt: new Date(Date.now() + this.GUEST_ACCEPT_TTL_MS),
+    });
+  }
+
+  /**
+   * Prod-mode email sent right after `hostAdminApprove` (state is now AWAITING_GUEST). Mirrors
+   * `invitationService.sendInvitationEmail`, but with connect-channel wording. Cross-workspace reads
+   * (channel + host workspace + inviter) run under `runAsSystem`. Never throws — returns the EmailResult
+   * so the caller can decide whether to roll the approval back.
+   */
+  async sendHostApprovedInviteEmail(req: ConnectRequest, inviteLink: string): Promise<EmailResult> {
+    const { channelName, hostWorkspaceName, inviterName } = await runAsSystem(async () => {
+      const [channel, workspace, inviter] = await Promise.all([
+        db.channel.findUnique({ where: { id: req.entityId }, select: { name: true } }),
+        db.workspace.findUnique({ where: { id: req.hostWorkspaceId }, select: { name: true } }),
+        db.user.findUnique({ where: { id: req.invitedBy }, select: { name: true } }),
+      ]);
+      return {
+        channelName: channel?.name ?? 'a shared channel',
+        hostWorkspaceName: workspace?.name ?? 'another workspace',
+        inviterName: inviter?.name ?? null,
+      };
+    });
+
+    const params = {
+      inviterName,
+      hostWorkspaceName,
+      channelName,
+      inviteLink,
+      frontendUrl: config.frontendUrl,
+    };
+    const result = await emailService.sendEmail({
+      to: req.inviteEmail,
+      subject: `${hostWorkspaceName} invited you to a shared channel on Xyne Spaces`,
+      html: connectInviteEmailHtml(params),
+      text: connectInviteEmailText(params),
+    });
+
+    if (result.success) {
+      logger.info(
+        `[ConnectRequest] invite email sent to ${req.inviteEmail} (request ${req.id}), messageId: ${result.messageId}`,
+      );
+    } else {
+      logger.error(
+        `[ConnectRequest] failed to send invite email to ${req.inviteEmail} (request ${req.id}): ${result.error}`,
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Undo `hostAdminApprove` — used when the prod invite email fails to send, so the request goes back to
+   * AWAITING_HOST_ADMIN (link is dead) and the admin can retry, keeping state consistent (mirrors the
+   * regular invitation flow deleting the invitation on email failure).
+   */
+  async revertHostApprove(requestId: string): Promise<void> {
+    await this.repo.update(requestId, {
+      status: CONNECT_REQUEST_STATUS.AWAITING_HOST_ADMIN,
+      hostAdminApprovedBy: null,
+      hostAdminApprovedAt: null,
+      expiresAt: null,
     });
   }
 
