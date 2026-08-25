@@ -196,6 +196,10 @@ export interface ElectronAPI {
     detect: () => Promise<LocalHarnessInstallation[]>;
     connect: () => Promise<LocalHarnessStatus>;
     disconnect: () => Promise<LocalHarnessStatus>;
+    setProviderEnabled: (
+      provider: LocalHarnessInstallation['provider'],
+      enabled: boolean,
+    ) => Promise<LocalHarnessStatus>;
   };
   saveErrorReportFile?(
     fileName: string,
@@ -215,6 +219,8 @@ export interface LocalHarnessInstallation {
   binaryPath: string;
   version: string;
   authenticated: boolean;
+  /** Whether the user connected this harness on this device. */
+  enabled?: boolean;
 }
 
 export interface LocalHarnessStatus {

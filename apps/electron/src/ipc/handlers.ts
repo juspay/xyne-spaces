@@ -36,7 +36,7 @@ import {
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
-import { localHarnessBridge } from '../services/local-harness';
+import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -729,7 +729,19 @@ export function setupIpcHandlers(): void {
 
   ipcMain.handle('local-harness:detect', async (event) => {
     requireLocalHarness(event);
-    return localHarnessBridge.refreshInstallations();
+    return localHarnessBridge.rescan();
+  });
+
+  ipcMain.handle('local-harness:set-provider', async (event, provider: unknown, enabled: unknown) => {
+    requireLocalHarness(event);
+    if (!LOCAL_HARNESS_PROVIDERS.includes(provider as LocalHarnessProvider)) {
+      throw new Error('Unknown local harness provider');
+    }
+    return localHarnessBridge.setProviderEnabled(
+      provider as LocalHarnessProvider,
+      enabled === true,
+      await xyneCookieHeader(),
+    );
   });
 
   ipcMain.handle('local-harness:connect', async (event) => {

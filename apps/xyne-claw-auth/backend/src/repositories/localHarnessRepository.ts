@@ -22,16 +22,35 @@ export function isDeviceOnline(device: Pick<LocalHarnessDevice, "lastSeenAt">, n
   return !!device.lastSeenAt && now - device.lastSeenAt.getTime() < LOCAL_HARNESS_ONLINE_WINDOW_MS;
 }
 
+// Providers this device can actually run right now: the CLI is signed in AND the
+// user has connected that harness here. `enabled === undefined` means the device
+// was registered before per-harness pairing shipped, when connecting paired every
+// signed-in CLI at once — keep those working instead of silently going dark.
 export function authenticatedProviders(device: Pick<LocalHarnessDevice, "installations">): string[] {
   const installations = Array.isArray(device.installations) ? device.installations : [];
   return installations.flatMap((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const record = entry as Record<string, unknown>;
-    return record["authenticated"] === true && typeof record["provider"] === "string" ? [record["provider"]] : [];
+    if (record["authenticated"] !== true || record["enabled"] === false) return [];
+    return typeof record["provider"] === "string" ? [record["provider"]] : [];
   });
 }
 
 export const localHarnessRepository = {
+  // Per-user default harness. Set in onboarding / Claw Settings; consulted for
+  // every agent this user runs that has no per-agent override of its own.
+  getUserDefaultProvider: async (userId: string): Promise<string | null> => {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { localHarnessDefaultProvider: true },
+    });
+    return user?.localHarnessDefaultProvider ?? null;
+  },
+
+  setUserDefaultProvider: async (userId: string, provider: string | null): Promise<void> => {
+    await prisma.user.update({ where: { id: userId }, data: { localHarnessDefaultProvider: provider } });
+  },
+
   // Workspace all/selected policy. Stored on Organization.metadata.localHarness
   // .mode so no dedicated table/migration is needed. 'all' = every mention-driven
   // run may route to an online device; 'selected' = only agents that explicitly
@@ -139,6 +158,15 @@ export const localHarnessRepository = {
 
   touchDevice: (deviceId: string): Promise<unknown> =>
     prisma.localHarnessDevice.update({ where: { id: deviceId }, data: { lastSeenAt: new Date() } }),
+
+  // Per-harness connect/disconnect. Authed by the device token the app already
+  // holds, so toggling one harness does NOT rotate the pairing token the way a
+  // re-registration would (that would 401 the in-flight long-poll).
+  updateInstallations: (deviceId: string, installations: Prisma.InputJsonValue): Promise<unknown> =>
+    prisma.localHarnessDevice.update({
+      where: { id: deviceId },
+      data: { installations, lastSeenAt: new Date() },
+    }),
 
   enqueueRun: (args: {
     sessionId: string;

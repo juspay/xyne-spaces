@@ -18,6 +18,7 @@ export type {
   LocalHarnessProvider,
   LocalHarnessInstallation,
   LocalHarnessDeviceRegistration,
+  LocalHarnessInstallationSync,
   LocalHarnessDeviceCredential,
   LocalHarnessDeviceStatus,
   LocalHarnessRunEnvelope,
@@ -40,6 +41,7 @@ export {
   isLocalHarnessRunResult,
   isLocalHarnessProgressEvent,
   isLocalHarnessDeviceRegistration,
+  isLocalHarnessInstallationSync,
 } from "./types/local-harness.js";
 export {
   normalizeSkillContent,

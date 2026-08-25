@@ -278,13 +278,7 @@ const OnboardingScreen: React.FC = () => {
         );
 
       case 'localHarness':
-        return (
-          <LocalHarnessOnboardingStep
-            installations={localHarnesses}
-            userId={targetUserId}
-            onNext={nextStep}
-          />
-        );
+        return <LocalHarnessOnboardingStep installations={localHarnesses} onNext={nextStep} />;
 
       case 'profile':
         return (

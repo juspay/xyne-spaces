@@ -12,6 +12,9 @@ export interface LocalHarnessInstallation {
   binaryPath: string;
   version: string;
   authenticated: boolean;
+  // Whether the user connected THIS harness on THIS device. Each harness pairs
+  // independently, so Claude Code can be on while Codex CLI stays off.
+  enabled?: boolean;
 }
 
 export interface LocalHarnessDeviceRegistration {

@@ -61,6 +61,7 @@ model User {
   twinBehaviorSignals                  TwinBehaviorSignal[]
   localHarnessDevices                  LocalHarnessDevice[]
   localHarnessRuns                     LocalHarnessRun[]
+  localHarnessDefaultProvider          String?
 
   /// Daily Brief opt-in (morning digest). When true, the leader-locked daily
   /// cron enqueues a brief-generation job for this user; when false the cron

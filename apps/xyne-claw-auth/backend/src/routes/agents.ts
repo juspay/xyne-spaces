@@ -2740,7 +2740,10 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
     const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
     res.json({
       success: true,
-      data: { provider: config?.provider ?? "spaces" },
+      // `inherited` separates "never picked one" from an explicit "spaces" pick.
+      // Both report provider "spaces", but only the former follows the user's
+      // account-wide default harness (User.localHarnessDefaultProvider).
+      data: { provider: config?.provider ?? "spaces", inherited: !config },
     });
   } catch (err) {
     log.error("[agents] get user-config error:", err);

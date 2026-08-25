@@ -3292,7 +3292,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           providerOrder: Array.isArray(rawAgentOrder)
             ? rawAgentOrder.filter((p): p is string => typeof p === "string")
             : [],
-          personalProvider: selectedPersonalProvider,
+          personalProvider: rawPersonalProvider,
         }).catch((err: unknown) => {
           log.warn("Local-harness resolution failed — using server run", {
             error: err instanceof Error ? err.message : String(err),

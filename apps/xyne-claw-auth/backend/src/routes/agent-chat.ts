@@ -1642,7 +1642,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       userId,
       orgId: agent.orgId,
       providerOrder: configuredProviderOrder,
-      personalProvider: selectedPersonalProvider,
+      personalProvider: rawPersonalProvider,
     }).catch((err: unknown) => {
       log.warn("[agent-chat] local-harness resolution failed — using server run:", err instanceof Error ? err.message : err);
       return undefined;

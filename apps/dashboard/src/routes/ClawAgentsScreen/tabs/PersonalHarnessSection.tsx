@@ -6,12 +6,27 @@ import { useAuth } from '@/hooks/useAuth';
 import type { LocalHarnessInstallation } from '@/types/electron';
 import {
   clearUserAgentProvider,
+  getLocalHarnessDefaultProvider,
   getUserAgentProvider,
   setUserAgentProvider,
 } from '@/services/claw/localHarnessService';
-import { isLocalHarnessProvider, PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
+import { PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
 
-const WORKSPACE_DEFAULT = 'spaces';
+/** Clearing the per-agent row is how an agent follows the account-wide default. */
+const INHERIT = '__inherit__';
+const HOSTED = 'spaces';
+
+/* eslint-disable @typescript-eslint/naming-convention */
+// PROVIDER_DISPLAY spells these "Claude Code (this device)", which reads badly
+// once the row already says "this device" — use the bare product name here.
+const HARNESS_LABEL: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  'codex-cli': 'Codex CLI',
+};
+/* eslint-enable @typescript-eslint/naming-convention */
+
+const providerLabel = (provider: string): string =>
+  HARNESS_LABEL[provider] ?? PROVIDER_DISPLAY[provider] ?? provider;
 
 interface Props {
   agentSlug: string;
@@ -23,7 +38,8 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
   const api = typeof window !== 'undefined' ? window.electronAPI?.localHarness : undefined;
 
   const [installations, setInstallations] = useState<LocalHarnessInstallation[]>([]);
-  const [current, setCurrent] = useState<string>(WORKSPACE_DEFAULT);
+  const [accountDefault, setAccountDefault] = useState<string | null>(null);
+  const [current, setCurrent] = useState<string>(INHERIT);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -33,12 +49,14 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
       return;
     }
     try {
-      const [found, provider] = await Promise.all([
-        api.getStatus().then(s => s.installations.filter(i => i.authenticated)),
-        getUserAgentProvider(agentSlug, userId).catch(() => WORKSPACE_DEFAULT),
+      const [found, config, preferred] = await Promise.all([
+        api.getStatus().then(status => status.installations.filter(i => i.authenticated)),
+        getUserAgentProvider(agentSlug, userId).catch(() => null),
+        getLocalHarnessDefaultProvider().catch(() => null),
       ]);
       setInstallations(found);
-      setCurrent(provider || WORKSPACE_DEFAULT);
+      setAccountDefault(preferred);
+      setCurrent(!config || config.inherited ? INHERIT : config.provider);
     } catch {
       setInstallations([]);
     } finally {
@@ -52,18 +70,24 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
 
   if (!api || loading || installations.length === 0) return null;
 
+  // With no account default, an explicit "spaces" row and no row at all route
+  // identically, so they share one option rather than two rows meaning the same.
+  const effective = !accountDefault && current === HOSTED ? INHERIT : current;
+
   const choose = async (value: string): Promise<void> => {
-    if (saving || value === current) return;
+    if (saving || value === effective) return;
     setSaving(true);
     const previous = current;
     setCurrent(value);
     try {
-      if (value === WORKSPACE_DEFAULT) await clearUserAgentProvider(agentSlug, userId);
+      if (value === INHERIT) await clearUserAgentProvider(agentSlug, userId);
       else await setUserAgentProvider(agentSlug, userId, value);
       toast.success(
-        value === WORKSPACE_DEFAULT
-          ? 'Your runs use the workspace default again'
-          : `Your runs of this agent will use ${PROVIDER_DISPLAY[value] ?? value}`,
+        value === INHERIT
+          ? 'This agent follows your default again'
+          : value === HOSTED
+            ? 'Your runs of this agent stay on Xyne’s servers'
+            : `Your runs of this agent will use ${providerLabel(value)}`,
       );
     } catch (err) {
       setCurrent(previous);
@@ -74,13 +98,34 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
   };
 
   const options = [
-    { value: WORKSPACE_DEFAULT, label: 'Workspace default', detail: 'Runs on Xyne’s servers.' },
-    ...installations.map(i => ({
-      value: i.provider,
-      label: PROVIDER_DISPLAY[i.provider] ?? i.provider,
-      detail: i.version ? `${i.version} · this device` : 'this device',
+    {
+      value: INHERIT,
+      label: accountDefault
+        ? `Use my default (${providerLabel(accountDefault)})`
+        : 'Workspace default',
+      detail: accountDefault ? 'Set in Claw Agents → Settings.' : 'Runs on Xyne’s servers.',
+    },
+    ...installations.map(install => ({
+      value: install.provider,
+      label: providerLabel(install.provider),
+      detail: install.version ? `${install.version} · this device` : 'this device',
     })),
+    ...(accountDefault
+      ? [{ value: HOSTED, label: 'Xyne’s servers', detail: 'Ignore my default for this agent.' }]
+      : []),
   ];
+
+  // A provider picked on another surface (a personal Anthropic/Codex key, a
+  // harness that has since been disconnected) still has to render as THE
+  // selection — otherwise this list would show "inherit" and one stray click
+  // would clear a setting the user never touched here.
+  if (effective !== INHERIT && !options.some(option => option.value === effective)) {
+    options.push({
+      value: effective,
+      label: providerLabel(effective),
+      detail: 'your current pick for this agent',
+    });
+  }
 
   return (
     <section className='flex max-w-2xl flex-col gap-3'>
@@ -94,10 +139,13 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
         </p>
       </div>
 
-      <div className='flex flex-col'>
+      <div
+        className='flex flex-col'
+        role='radiogroup'
+        aria-label='Where your runs of this agent go'
+      >
         {options.map((option, i) => {
-          const selected =
-            option.value === current || (i === 0 && !isLocalHarnessProvider(current));
+          const selected = option.value === effective;
           return (
             <button
               key={option.value}

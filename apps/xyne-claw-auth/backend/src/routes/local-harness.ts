@@ -8,14 +8,16 @@ import type {
 } from "xyne-claw-shared";
 import {
   isLocalHarnessDeviceRegistration,
+  isLocalHarnessInstallationSync,
   isLocalHarnessProgressEvent,
+  isLocalHarnessProvider,
   isLocalHarnessRunResult,
   isLocalHarnessToolCallRequest,
 } from "xyne-claw-shared";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { getOrgId, getRequesterId, isOrgAdmin } from "../middleware/agent-acl.js";
-import { isDeviceOnline, localHarnessRepository } from "../repositories/localHarnessRepository.js";
+import { authenticatedProviders, isDeviceOnline, localHarnessRepository } from "../repositories/localHarnessRepository.js";
 import { callToolForRun, listToolsForRun, relayProgress, relayResult } from "../lib/local-harness.js";
 
 const log = createLogger("local-harness-routes");
@@ -116,6 +118,41 @@ router.delete("/devices/:deviceId", async (req: Request<{ deviceId: string }>, r
   res.json({ success: true });
 });
 
+// Per-user default harness — "use this harness for all my agents". Written by
+// onboarding and by the Local harness card in Claw Settings; read by
+// resolveLocalHarnessTarget for every agent the user has no override on.
+router.get("/preferences", async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "Authentication required" });
+    return;
+  }
+  const defaultProvider = await localHarnessRepository.getUserDefaultProvider(userId).catch(() => null);
+  res.json({ success: true, data: { defaultProvider } });
+});
+
+router.put("/preferences", async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "Authentication required" });
+    return;
+  }
+  const defaultProvider = (req.body as { defaultProvider?: unknown } | null)?.defaultProvider ?? null;
+  if (defaultProvider !== null && !isLocalHarnessProvider(defaultProvider)) {
+    res.status(400).json({ success: false, error: "defaultProvider must be a local harness provider or null" });
+    return;
+  }
+  try {
+    await localHarnessRepository.setUserDefaultProvider(userId, defaultProvider);
+  } catch (err) {
+    log.error("[local-harness] failed to save default provider:", err);
+    res.status(500).json({ success: false, error: "Failed to save your default harness" });
+    return;
+  }
+  log.info(`[local-harness] user default harness user=${userId} provider=${defaultProvider ?? "(none)"}`);
+  res.json({ success: true, data: { defaultProvider } });
+});
+
 router.get("/workspace-settings", async (req: Request, res: Response) => {
   const orgId = getOrgId(req);
   if (!orgId) {
@@ -177,6 +214,31 @@ async function requireDevice(req: Request, res: Response, next: NextFunction): P
 
 bridgeRouter.use(requireDevice);
 
+// Per-harness connect/disconnect from the desktop app. Device-token authed on
+// purpose: re-POSTing /devices would rotate the pairing token and 401 the
+// long-poll this same app has in flight.
+bridgeRouter.put("/installations", async (req: Request, res: Response) => {
+  const device = req.localHarnessDevice!;
+  if (!isLocalHarnessInstallationSync(req.body)) {
+    res.status(400).json({ success: false, error: "Invalid installations payload" });
+    return;
+  }
+  try {
+    await localHarnessRepository.updateInstallations(device.id, req.body.installations as unknown as never);
+  } catch (err) {
+    log.error(`[local-harness] installation sync failed device=${device.id}:`, err);
+    res.status(500).json({ success: false, error: "Failed to update installations" });
+    return;
+  }
+  log.info(
+    `[local-harness] installations synced device=${device.id} enabled=[${req.body.installations
+      .filter((i) => i.authenticated && i.enabled !== false)
+      .map((i) => i.provider)
+      .join(",")}]`,
+  );
+  res.json({ success: true });
+});
+
 bridgeRouter.get("/runs/next", async (req: Request, res: Response) => {
   const device = req.localHarnessDevice!;
   await localHarnessRepository.touchDevice(device.id).catch(() => {});
@@ -197,13 +259,7 @@ bridgeRouter.get("/runs/next", async (req: Request, res: Response) => {
   activePolls.set(device.id, inflight + 1);
   try {
 
-  const providers = (Array.isArray(device.installations) ? device.installations : [])
-    .map((entry) => {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
-      const record = entry as Record<string, unknown>;
-      return record["authenticated"] === true && typeof record["provider"] === "string" ? record["provider"] : null;
-    })
-    .filter((p): p is string => p !== null);
+  const providers = authenticatedProviders(device);
 
   const deadline = Date.now() + CONFIG.localHarnessPollTimeoutMs;
   let aborted = false;

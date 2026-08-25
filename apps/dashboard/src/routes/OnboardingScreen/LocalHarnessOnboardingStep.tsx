@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import type { LocalHarnessInstallation } from '../../types/electron';
-import { findDefaultAgent, setUserAgentProvider } from '../../services/claw/localHarnessService';
+import { setLocalHarnessDefaultProvider } from '../../services/claw/localHarnessService';
 
 /* eslint-disable @typescript-eslint/naming-convention */
 const HARNESS_LABEL: Record<LocalHarnessInstallation['provider'], string> = {
@@ -30,17 +30,16 @@ type Phase = 'idle' | 'connecting' | 'connected';
 
 interface Props {
   installations: LocalHarnessInstallation[];
-  userId: string;
   onNext: () => void;
 }
 
-const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, userId, onNext }) => {
+const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) => {
   const [selected, setSelected] = useState<LocalHarnessInstallation['provider']>(
     installations[0]?.provider ?? 'claude-code',
   );
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [wiredAgent, setWiredAgent] = useState<string | null>(null);
+  const [appliedToAll, setAppliedToAll] = useState(false);
   const [machine, setMachine] = useState({ name: 'This machine', platform: '' });
 
   useEffect(() => {
@@ -75,13 +74,17 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, userId, on
     setPhase('connecting');
     setError(null);
     try {
-      await api.connect();
+      await api.setProviderEnabled(selected, true);
 
-      const agent = await findDefaultAgent(userId).catch(() => null);
-      if (agent) {
-        await setUserAgentProvider(agent.slug, userId, selected);
-        setWiredAgent(agent.name);
-      }
+      // Picking a harness here is the answer to "run my agents on my machine",
+      // so it becomes the account-wide default rather than wiring one agent.
+      // A failure here still leaves a usable connection — say so instead of
+      // promising every agent will route locally.
+      setAppliedToAll(
+        await setLocalHarnessDefaultProvider(selected)
+          .then(() => true)
+          .catch(() => false),
+      );
 
       setPhase('connected');
       setTimeout(onNext, 1400);
@@ -102,8 +105,8 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, userId, on
             {installations.length === 1
               ? `${HARNESS_LABEL[installations[0]!.provider]} is signed in here.`
               : 'Two coding CLIs are signed in here.'}{' '}
-            Connect and your agents think on this {noun}, on your own plan. Tools, permissions and
-            approvals stay in Xyne.
+            Connect and every agent you run thinks on this {noun}, on your own plan. Tools,
+            permissions and approvals stay in Xyne.
           </p>
         </header>
 
@@ -212,10 +215,10 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, userId, on
         {phase === 'connected' ? (
           <p className='flex items-start gap-2 text-sm text-foreground'>
             <Check className='mt-0.5 size-4 shrink-0 text-emerald-600' strokeWidth={2.5} />
-            {wiredAgent ? (
+            {appliedToAll ? (
               <span>
-                Connected. <span className='font-medium'>{wiredAgent}</span> will run on this {noun}
-                .
+                Connected. <span className='font-medium'>All your agents</span> will run on this{' '}
+                {noun}.
               </span>
             ) : (
               <span>

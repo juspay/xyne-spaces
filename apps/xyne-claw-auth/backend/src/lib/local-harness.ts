@@ -33,13 +33,32 @@ export async function resolveLocalHarnessTarget(args: {
   userId: string;
   orgId: string;
   providerOrder: string[];
+  /**
+   * RAW UserAgentConfig.provider for this agent — `undefined` when the user
+   * never picked one. An explicit hosted pick ("spaces"/"claude"/"codex"/
+   * "copilot") is a per-agent opt-out, so the user's account-wide default
+   * harness is skipped for it.
+   */
   personalProvider?: string | undefined;
 }): Promise<{ provider: LocalHarnessProvider; device: LocalHarnessDevice } | undefined> {
   if (!CONFIG.localHarnessEnabled) return undefined;
 
-  const ordered = [args.personalProvider, ...args.providerOrder].filter(
-    (p): p is LocalHarnessProvider => isLocalHarnessProvider(p),
-  );
+  // Account-wide default (onboarding / Claw Settings "use for all my agents").
+  // Ranks below the per-agent pick and above the agent's own providerOrder: it
+  // is the user's preference, and a personal preference already outranks agent
+  // config everywhere else.
+  const userDefault =
+    args.personalProvider === undefined
+      ? await localHarnessRepository.getUserDefaultProvider(args.userId).catch(() => null)
+      : null;
+
+  const ordered = [
+    ...new Set(
+      [args.personalProvider, userDefault, ...args.providerOrder].filter(
+        (p): p is LocalHarnessProvider => isLocalHarnessProvider(p),
+      ),
+    ),
+  ];
   if (ordered.length === 0) {
     // Workspace policy decides whether an agent with no explicit local-harness
     // provider order may still auto-route to an online device. 'all' opts every
@@ -47,6 +66,9 @@ export async function resolveLocalHarnessTarget(args: {
     // the LOCAL_HARNESS_DEFAULT_ALL env only when the org has no stored setting.
     const mode = (await localHarnessRepository.getOrgHarnessMode(args.orgId).catch(() => null))
       ?? (CONFIG.localHarnessDefaultAll ? "all" : "selected");
+    // A per-agent pick of ANY provider — including "spaces", which means "use
+    // the agent's own configuration, not my personal one" — opts this agent out
+    // of the blanket auto-route.
     if (mode !== "all" || args.personalProvider) return undefined;
     const devices = await localHarnessRepository.listOnlineDevices(args.userId).catch(() => [] as LocalHarnessDevice[]);
     for (const device of devices) {

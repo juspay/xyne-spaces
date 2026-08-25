@@ -56,3 +56,5 @@ ALTER TABLE "local_harness_runs"
 ALTER TABLE "local_harness_runs"
     ADD CONSTRAINT "local_harness_runs_deviceId_fkey"
     FOREIGN KEY ("deviceId") REFERENCES "local_harness_devices"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE "users" ADD COLUMN "localHarnessDefaultProvider" TEXT;

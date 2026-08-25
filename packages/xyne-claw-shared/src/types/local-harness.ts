@@ -20,6 +20,20 @@ export interface LocalHarnessInstallation {
   binaryPath: string;
   version: string;
   authenticated: boolean;
+  /**
+   * Whether the user has connected THIS harness on THIS device. Each harness is
+   * paired independently, so a device can have Claude Code connected while Codex
+   * CLI stays off. Absent on devices registered before per-harness pairing —
+   * treat `undefined` as connected so those keep working (see
+   * `authenticatedProviders`).
+   */
+  enabled?: boolean;
+}
+
+/** Device-token authed installation refresh (per-harness connect/disconnect). */
+export interface LocalHarnessInstallationSync {
+  protocolVersion: number;
+  installations: LocalHarnessInstallation[];
 }
 
 export interface LocalHarnessDeviceRegistration {
@@ -136,22 +150,33 @@ export function isLocalHarnessProgressEvent(v: unknown): v is LocalHarnessProgre
   }
 }
 
-export function isLocalHarnessDeviceRegistration(v: unknown): v is LocalHarnessDeviceRegistration {
-  if (!v || typeof v !== "object") return false;
-  const r = v as Record<string, unknown>;
-  if (r["protocolVersion"] !== LOCAL_HARNESS_PROTOCOL_VERSION) return false;
-  if (typeof r["deviceName"] !== "string" || !r["deviceName"].trim()) return false;
-  if (typeof r["platform"] !== "string" || !r["platform"].trim()) return false;
-  const installations = r["installations"];
-  if (!Array.isArray(installations)) return false;
-  return installations.every((i) => {
+function isInstallationArray(v: unknown): v is LocalHarnessInstallation[] {
+  if (!Array.isArray(v)) return false;
+  return v.every((i) => {
     if (!i || typeof i !== "object") return false;
     const inst = i as Record<string, unknown>;
     return (
       isLocalHarnessProvider(inst["provider"]) &&
       typeof inst["binaryPath"] === "string" &&
       typeof inst["version"] === "string" &&
-      typeof inst["authenticated"] === "boolean"
+      typeof inst["authenticated"] === "boolean" &&
+      (inst["enabled"] === undefined || typeof inst["enabled"] === "boolean")
     );
   });
+}
+
+export function isLocalHarnessDeviceRegistration(v: unknown): v is LocalHarnessDeviceRegistration {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  if (r["protocolVersion"] !== LOCAL_HARNESS_PROTOCOL_VERSION) return false;
+  if (typeof r["deviceName"] !== "string" || !r["deviceName"].trim()) return false;
+  if (typeof r["platform"] !== "string" || !r["platform"].trim()) return false;
+  return isInstallationArray(r["installations"]);
+}
+
+export function isLocalHarnessInstallationSync(v: unknown): v is LocalHarnessInstallationSync {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  if (r["protocolVersion"] !== LOCAL_HARNESS_PROTOCOL_VERSION) return false;
+  return isInstallationArray(r["installations"]);
 }
