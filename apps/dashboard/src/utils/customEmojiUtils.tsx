@@ -100,10 +100,47 @@ const renderEmoji = (
   return <span className={`${unicodeSizeClass} leading-none`}>{emojiName}</span>;
 };
 
+
+/**
+ * Convert a single custom-emoji <img> element to its :shortcode: text.
+ * Tolerates alt/title stored as either the bare name ("party") or ":party:".
+ */
+const emojiImageToShortcode = (img: Element): string => {
+  const raw = img.getAttribute('alt') || img.getAttribute('title') || '';
+  const name = raw.replace(/^:+|:+$/g, '').trim();
+  return name ? `:${name}:` : '';
+};
+
+/**
+ * In-place: replace every custom-emoji <img data-emoji="true"> inside `root`
+ * with a :shortcode: text node. Used by the native copy handler so a text
+ * selection containing custom emoji serializes to :name: instead of dropping
+ * the image entirely.
+ */
+const replaceEmojiImagesWithShortcodes = (root: ParentNode): void => {
+  root.querySelectorAll('img[data-emoji="true"]').forEach(img => {
+    img.replaceWith(document.createTextNode(emojiImageToShortcode(img)));
+  });
+};
+
+/**
+ * Return a copy of `html` with every custom-emoji <img> replaced by :shortcode:.
+ * Used by the "Copy message" action so BOTH the text/html and text/plain
+ * clipboard flavors carry the shortcode in a single clipboard write.
+ */
+const replaceEmojiHtmlWithShortcodes = (html: string): string => {
+  if (!html || !html.includes('data-emoji="true"')) return html;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  replaceEmojiImagesWithShortcodes(doc.body);
+  return doc.body.innerHTML;
+};
+
 export {
   getEmojiDisplayName,
   parseCustomEmoji,
   isCustomEmoji,
   renderEmoji,
   convertCustomEmojiUrls,
+  replaceEmojiImagesWithShortcodes,
+  replaceEmojiHtmlWithShortcodes,
 };
