@@ -467,7 +467,7 @@ export class ACLFactory {
     case 'scheduledMessage':
       return new ScheduledMessagesACL(ctx, prisma)
     case 'sdkApiKey':
-      return new UnscopedACL(ctx, prisma)
+      return new BaseQueryACL(ctx, prisma)
     case 'sessionRecordingFile':
       return new BaseQueryACL(ctx, prisma)
     case 'stagePRStatusMapping':
@@ -532,11 +532,6 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
-    default:
-    // Exhaustiveness check: if a new model is added to the schema but not
-      // handled here, TypeScript will flag it at compile time. At runtime,
-      // fall back to UnscopedACL to avoid breaking queries.
-      return new UnscopedACL(ctx, prisma)
     }
   }
 }
