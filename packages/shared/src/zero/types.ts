@@ -96,7 +96,6 @@ export enum EntityType {
 }
 
 export enum GuestEntity {
-  PROJECT = 'PROJECT',
   CHANNEL = 'CHANNEL',
   CANVAS = 'CANVAS',
 }
@@ -632,6 +631,7 @@ export enum NotificationType {
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
+  COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
 }
 
 // @ts-ignore TS1294
@@ -730,6 +730,9 @@ export enum ChannelType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  // SDLC repository channel: system-managed, hidden from the chat surfaces
+  // the same way SUPPORT channels are (inline type checks).
+  SDLC = 'SDLC',
 }
 
 // @ts-ignore TS1294

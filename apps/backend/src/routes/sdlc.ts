@@ -12,6 +12,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { sdlcQueue } from '@/queues/sdlcQueue';
 import { SdlcHubService, sdlcWiki, type SdlcActor } from '@/sdlc';
 import { sdlcVcs } from '@/sdlc/vcs';
+import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
 import { DatabaseClient } from '@/database/client';
 import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
 
@@ -109,45 +110,17 @@ router.get(
       },
       orderBy: { name: 'asc' },
     });
-    const accessStates = new Map(
-      await Promise.all(
-        repositories.map(
-          async (repository) =>
-            [repository.id, await sdlcQueue.accessCheckState(repository.id)] as const
-        )
-      )
-    );
     res.status(200).json({
       success: true,
       repositories: repositories.map((repository) => {
         const parsed = sdlcVcs.parseRepository('GITHUB', repository.canonicalUrl || repository.url);
-        const accessState = accessStates.get(repository.id);
-        const result =
-          accessState?.result &&
-          typeof accessState.result === 'object' &&
-          !Array.isArray(accessState.result)
-            ? (accessState.result as Record<string, unknown>)
-            : {};
-        const evidence =
-          result['evidence'] &&
-          typeof result['evidence'] === 'object' &&
-          !Array.isArray(result['evidence'])
-            ? (result['evidence'] as Record<string, unknown>)
-            : {};
-        const hasCapabilities =
-          Array.isArray(repository.accessCapabilities) && repository.accessCapabilities.length > 0;
+        const access = deriveAccessStatus(repository.accessCapabilities);
         return {
           ...repository,
-          accessJobStatus:
-            accessState?.status === 'NOT_CHECKED' && hasCapabilities
-              ? 'READY'
-              : (accessState?.status ?? (hasCapabilities ? 'READY' : 'NOT_CHECKED')),
-          accessJobErrorMessage: accessState?.errorMessage ?? null,
+          accessJobStatus: access.status,
+          accessJobErrorMessage: access.errorMessage,
           provider: parsed.provider,
-          visibility:
-            typeof evidence.repositoryVisibility === 'string'
-              ? evidence.repositoryVisibility
-              : null,
+          visibility: access.visibility,
           configuredBaseBranch:
             Array.isArray(repository.baseBranch) && typeof repository.baseBranch[0] === 'string'
               ? repository.baseBranch[0]
@@ -162,12 +135,12 @@ router.post(
   '/repositories/:repoId/access-check',
   route(async (req, res) => {
     const input = checkSdlcRepositoryAccessSchema.parse(req.body ?? {});
-    const result = await sdlcVcs.queueRepositoryCheck(
+    const result = await sdlcVcs.checkRepositoryAccess(
       actorFromRequest(req),
       req.params.repoId,
       input
     );
-    res.status(result.queued ? 202 : 200).json({ success: true, ...result });
+    res.status(200).json({ success: true, ...result });
   })
 );
 
@@ -313,18 +286,6 @@ router.delete(
   route(async (req, res) => {
     await sdlcHub.unlinkContext(actorFromRequest(req), req.params.repoId, req.params.linkId);
     res.status(204).send();
-  })
-);
-
-router.post(
-  '/repositories/:repoId/baseline/:canvasId/approve',
-  route(async (req, res) => {
-    const approval = await sdlcHub.approveBaseline(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.canvasId
-    );
-    res.status(200).json({ success: true, approval });
   })
 );
 

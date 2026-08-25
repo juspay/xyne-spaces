@@ -26,6 +26,7 @@ import {
   focusMainWindow,
   markRendererReady,
   resumeRecordingFromOutside,
+  setCallActive,
   setOverlayMinimized,
   setRecordingPillEnabled,
   setRecordingStarting,
@@ -455,7 +456,7 @@ export function setupIpcHandlers(): void {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
-      if (process.platform === 'darwin') app.dock.bounce('critical');
+      if (process.platform === 'darwin') app.dock?.bounce('critical');
     }
   });
 
@@ -643,6 +644,11 @@ export function setupIpcHandlers(): void {
     if (!isMainWindowSender(event)) return;
     if (theme !== 'light' && theme !== 'dark') return;
     setRecordingPillTheme(theme);
+  });
+
+  ipcMain.on('call:state-changed', (event, inCall: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    setCallActive(!!inCall);
   });
 
   ipcMain.on('recording:renderer-ready', (event) => {

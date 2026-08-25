@@ -2,7 +2,6 @@ import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   FileText,
-  Folder,
   Hash,
   Loader2,
   RefreshCw,
@@ -19,7 +18,7 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { cn } from '../../utils/classNames';
 import { useSelf } from '../../hooks/useUsers';
 
-type GuestEntityType = 'PROJECT' | 'CHANNEL' | 'CANVAS';
+type GuestEntityType = 'CHANNEL' | 'CANVAS';
 
 type GuestAccessGrant = {
   id: string;
@@ -75,8 +74,6 @@ const formatDate = (value: string): string =>
 
 const getEntityIcon = (type: GuestEntityType): ReactElement => {
   switch (type) {
-    case 'PROJECT':
-      return <Folder className='w-4 h-4' />;
     case 'CHANNEL':
       return <Hash className='w-4 h-4' />;
     case 'CANVAS':
@@ -86,8 +83,6 @@ const getEntityIcon = (type: GuestEntityType): ReactElement => {
 
 const getEntityBadgeClass = (type: GuestEntityType): string => {
   switch (type) {
-    case 'PROJECT':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
     case 'CHANNEL':
       return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300';
     case 'CANVAS':

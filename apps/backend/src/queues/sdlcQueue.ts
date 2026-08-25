@@ -4,34 +4,15 @@ import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { sdlcAdmission } from './sdlcAdmission';
 
-export type SdlcJobData = (
-  | {
-      type: 'ACCESS_CHECK';
-      repoId: string;
-      workspaceId: string;
-      userId: string;
-      realFailures?: number;
-    }
-  | { type: 'SETUP' | 'WORK' | 'WIKI'; repoId: string; executionId: string }
-) & { capacityBlockedAt?: number };
-
-export interface SdlcAccessCheckState {
-  status: 'NOT_CHECKED' | 'QUEUED' | 'CHECKING' | 'READY' | 'BLOCKED';
-  errorMessage: string | null;
-  result: unknown;
-}
+export type SdlcJobData = {
+  type: 'SETUP' | 'WORK' | 'WIKI';
+  repoId: string;
+  executionId: string;
+  capacityBlockedAt?: number;
+};
 
 const jobIdFor = (data: SdlcJobData): string =>
-  data.type === 'ACCESS_CHECK'
-    ? `access-check:${data.repoId}`
-    : `${data.type.toLowerCase()}:${data.executionId}`;
-
-function accessCheckStatus(state: Bull.JobStatus | 'stuck'): SdlcAccessCheckState['status'] {
-  if (state === 'active') return 'CHECKING';
-  if (state === 'completed') return 'READY';
-  if (state === 'failed') return 'BLOCKED';
-  return 'QUEUED';
-}
+  `${data.type.toLowerCase()}:${data.executionId}`;
 
 class SdlcQueue {
   private queue: Bull.Queue<SdlcJobData> | null = null;
@@ -63,15 +44,13 @@ class SdlcQueue {
     logger.info('[SDLC-QUEUE] Initialized');
   }
 
-  private async enqueue(data: SdlcJobData): Promise<{ queued: boolean; status: string }> {
+  private async enqueue(data: SdlcJobData): Promise<void> {
     if (!this.queue) await this.initialize();
     const jobId = jobIdFor(data);
     const existing = await this.queue!.getJob(jobId);
     if (existing) {
       const state = await existing.getState();
-      if (['active', 'waiting', 'delayed'].includes(state)) {
-        return { queued: false, status: accessCheckStatus(state) };
-      }
+      if (['active', 'waiting', 'delayed'].includes(state)) return;
       await existing.remove();
     }
     await sdlcAdmission.registerPending(data.repoId, jobId);
@@ -81,11 +60,6 @@ class SdlcQueue {
       await sdlcAdmission.unregisterPending(data.repoId, jobId);
       throw error;
     }
-    return { queued: true, status: 'QUEUED' };
-  }
-
-  enqueueAccessCheck(data: Omit<Extract<SdlcJobData, { type: 'ACCESS_CHECK' }>, 'type'>) {
-    return this.enqueue({ type: 'ACCESS_CHECK', ...data });
   }
 
   async enqueueSetup(executionId: string, repoId: string): Promise<void> {
@@ -98,19 +72,6 @@ class SdlcQueue {
 
   async enqueueWiki(executionId: string, repoId: string): Promise<void> {
     await this.enqueue({ type: 'WIKI', executionId, repoId });
-  }
-
-  async accessCheckState(repoId: string): Promise<SdlcAccessCheckState> {
-    if (!this.queue) await this.initialize();
-    const job = await this.queue!.getJob(`access-check:${repoId}`);
-    if (!job) return { status: 'NOT_CHECKED', errorMessage: null, result: null };
-    const state = await job.getState();
-    return {
-      status: accessCheckStatus(state),
-      errorMessage:
-        state === 'failed' ? job.failedReason || 'Repository access check failed' : null,
-      result: state === 'completed' ? job.returnvalue : null,
-    };
   }
 
   getQueue(): Bull.Queue<SdlcJobData> | null {

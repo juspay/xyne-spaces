@@ -3,7 +3,7 @@ import path from 'path';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
-import { isRecordingInProgress } from './recording-controller';
+import { isMicOwnedByXyne } from './recording-controller';
 
 let popupWindow: BrowserWindow | null = null;
 let autoDismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -26,7 +26,7 @@ export async function showMeetingPopup(meetingData: { app: string; startedAt: st
     return;
   }
 
-  if (isRecordingInProgress()) {
+  if (isMicOwnedByXyne()) {
     log.info('[MeetingPopup] Recording already in progress, skipping popup');
     Logger.info(
       ElectronEvent.MEETING_POPUP_SKIPPED_RECORDING,

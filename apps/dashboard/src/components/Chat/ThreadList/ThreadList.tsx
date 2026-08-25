@@ -40,6 +40,8 @@ type ThreadListProps = {
   conversationParticipant?: { lastReadAt?: number | null };
   /** Scroll to and highlight this specific message on mount. Overrides URL-hash-based scroll. */
   matchedMessageId?: string | null;
+  /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
+  onUserClick?: ((userId: string) => void) | undefined;
 };
 
 /** Space reserved below the last message for the typing / agent-activity bar, which
@@ -66,6 +68,7 @@ const ThreadList = ({
   isMessagesLoaded = true,
   conversationParticipant,
   matchedMessageId,
+  onUserClick,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
@@ -497,6 +500,7 @@ const ThreadList = ({
                       channelId={channelId}
                       showAvatar={showAvatar}
                       context='thread'
+                      {...(onUserClick && { onUserClick })}
                       isFirstInThread={messageIndex === 0}
                       isTicketThread={isTicketThread}
                       isFlowStep={isFlowStep}
@@ -596,6 +600,7 @@ const ThreadList = ({
                     channelId={channelId}
                     showAvatar={showAvatar}
                     context='thread'
+                    {...(onUserClick && { onUserClick })}
                     isFirstInThread={index === 0}
                     isTicketThread={isTicketThread}
                     isFlowStep={isFlowStep}

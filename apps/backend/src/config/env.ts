@@ -3,6 +3,8 @@ import Joi from 'joi';
 
 dotenv.config();
 
+import { parseInternalAppHostMap } from '@/utils/internalHostMap';
+
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
@@ -16,6 +18,9 @@ const envSchema = Joi.object({
   USE_MOCK_ANALYSIS: Joi.boolean().default(false),
   USE_MOCK_BUILD: Joi.boolean().default(false),
   PORT: Joi.number().default(3001),
+
+  // This is for making the backend API available under a prefix path (e.g. /api/v1) for reverse proxy setups. Empty string means no prefix.
+  API_PATH_PREFIX: Joi.string().allow('').default(''),
   HOST: Joi.string().default('localhost'),
   CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
   ALLOWED_MEDIA_ORIGINS: Joi.string().default(
@@ -386,6 +391,15 @@ const envSchema = Joi.object({
   CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS: Joi.number().integer().min(0).default(5000),
   // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
+  // When true, Drive imports are handed to the dedicated background worker (run in
+  // worker.ts). When false, the API process runs the import itself (fallback).
+  ENABLE_DRIVE_IMPORT_WORKER: Joi.boolean().default(false),
+  // Drive import caps (set on whichever process downloads: the drive-import worker,
+  // or the API when ENABLE_DRIVE_IMPORT_WORKER is false). Bytes are absolute values.
+  DRIVE_IMPORT_MAX_FILE_BYTES: Joi.number().integer().min(1).default(100 * 1024 * 1024), // 100 MB / file
+  DRIVE_IMPORT_MAX_FILES: Joi.number().integer().min(1).default(7000), // files per folder import
+  DRIVE_IMPORT_MAX_TOTAL_BYTES: Joi.number().integer().min(1).default(1024 * 1024 * 1024), // 1 GB / folder
+  DRIVE_IMPORT_MAX_DEPTH: Joi.number().integer().min(1).default(40), // folder nesting depth
   VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion'),
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8080'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
@@ -405,6 +419,9 @@ const envSchema = Joi.object({
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
   // Internal S2S key for service-to-service communication
   INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
+  // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
+  // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
+  INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -535,6 +552,10 @@ export const config = {
   // Email of the Digital Twin app's bot user (empty = twin delivery disabled).
   digitalTwinAppEmail: envVars.DIGITAL_TWIN_APP_EMAIL as string,
   port: envVars.PORT,
+  // Normalized to '/sdlc-api' form, or ''.
+  apiPathPrefix: (envVars.API_PATH_PREFIX as string)
+    ? `/${(envVars.API_PATH_PREFIX as string).trim().replace(/^\/+|\/+$/g, '')}`
+    : '',
   host: envVars.HOST,
   cors: {
     origin: envVars.CORS_ORIGIN.split(',')
@@ -943,6 +964,13 @@ export const config = {
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
+  enableDriveImportWorker: envVars.ENABLE_DRIVE_IMPORT_WORKER as boolean,
+  driveImport: {
+    maxFileBytes: envVars.DRIVE_IMPORT_MAX_FILE_BYTES as number,
+    maxFiles: envVars.DRIVE_IMPORT_MAX_FILES as number,
+    maxTotalBytes: envVars.DRIVE_IMPORT_MAX_TOTAL_BYTES as number,
+    maxDepth: envVars.DRIVE_IMPORT_MAX_DEPTH as number,
+  },
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET as string,
@@ -966,6 +994,9 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  apps: {
+    internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
+  },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },

@@ -22,7 +22,7 @@
     "@aws-sdk/lib-storage": "3.1017.0",
     "@aws-sdk/s3-request-presigner": "^3.1017.0",
     "@google-cloud/storage": "^7.7.0",
-    "uuid": "^9.0.0"
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

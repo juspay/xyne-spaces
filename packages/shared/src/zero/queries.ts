@@ -2656,6 +2656,19 @@ export const queries = defineQueries({
     },
   ),
 
+  // Boards mapped to a channel via ChannelBoardMapping.
+  // This is the preferred path for resolving channel → boards.
+  // Falls back to boardsListByProject on the consumer side if empty.
+  boardsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.channel_board_mappings
+        .where('channelId', channelId)
+        .related('board')
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
   boardsListByProject: defineQuery(
     z.object({ projectId: z.string() }),
     ({ args: { projectId } }) => {
@@ -3621,6 +3634,13 @@ export const queries = defineQueries({
       .related('sdlcEntityLinks')
       .orderBy('name', 'asc'),
   ),
+  getSdlcTracks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
+    zql.sdlc_tracks.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  ),
+  getSdlcRepoByChannelId: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => zql.repos.where('channelId', channelId).one(),
+  ),
   getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
     zql.repos
       .where('id', repoId)
@@ -3632,7 +3652,9 @@ export const queries = defineQueries({
           .related('participants')
           .related('channelStats')
           .related('canvasFolders', folder =>
-            folder.where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs']).related('canvases'),
+            folder
+              .where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs'])
+              .related('canvases', canvas => canvas.related('sdlcArtifact')),
           ),
       )
       .related('setupExecution')
@@ -4420,6 +4442,29 @@ export const queries = defineQueries({
     },
   ),
 
+  // Every latest, non-deleted file across a whole collection (matched on
+  // rootCollectionId, so it spans subfolders). Powers the root "collection
+  // status" drawer, which lists each file's ingestion status + size.
+  collectionFilesByRoot: defineQuery(
+    z.object({ rootCollectionId: z.string() }),
+    ({ args: { rootCollectionId } }) => {
+      return zql.collection_items
+        .where('rootCollectionId', rootCollectionId)
+        .where('isLatest', true)
+        .where('deletedAt', 'IS', null)
+        .orderBy('createdAt', 'asc')
+        // The attachment joins on entityId only; a collection_item's id (a globally
+        // unique cuid) never keys a non-COLLECTION attachment, so an entityType
+        // filter would be redundant. Only isDeleted matters — skip soft-deleted rows.
+        .related('attachment', a => a.where('isDeleted', false));
+    },
+  ),
+
+  // Single collection by id (e.g. to resolve its name for an Activity row).
+  collectionById: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
+    return zql.collections.where('id', id).where('deletedAt', 'IS', null);
+  }),
+
   // Collections filtered by generic scope (scopeType + scopeId).
   // For channel-scoped collections pass { scopeType: 'CHANNEL', scopeId: channelId }.
   // Future scopes (THREAD, TICKET, …) just use a different scopeType — no schema change needed.
@@ -4438,6 +4483,24 @@ export const queries = defineQueries({
         scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
       return scoped
         .related('permissions', p => p.where('userId', ctx.userID))
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
+  // Like `scopedCollections`, but also relates every latest, non-deleted file
+  // in each collection (via rootCollectionId) so the KB root view can show a
+  // per-collection "X / Y ingested" rollup. Kept separate from
+  // `scopedCollections` so the Ask-AI collection pickers don't pay to sync all
+  // item rows.
+  scopedCollectionsWithItems: defineQuery(
+    z.object({ scopeType: z.string().optional(), scopeId: z.string().optional() }),
+    ({ ctx, args: { scopeType, scopeId } }) => {
+      const base = zql.collections.where('parentId', 'IS', null).where('deletedAt', 'IS', null);
+      const scoped =
+        scopeType && scopeId ? base.where('scopeType', scopeType).where('scopeId', scopeId) : base;
+      return scoped
+        .related('permissions', p => p.where('userId', ctx.userID))
+        .related('allItems', i => i.where('isLatest', true).where('deletedAt', 'IS', null))
         .orderBy('createdAt', 'asc');
     },
   ),

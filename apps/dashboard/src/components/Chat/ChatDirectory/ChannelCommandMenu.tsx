@@ -36,7 +36,7 @@ import {
   isOneToOneDMChannel,
   getDMParticipantIdsToFetch,
   parseDMParticipantIds,
-  getDMSearchableNames,
+  getDMNames,
   formatChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -45,6 +45,7 @@ import Badge from '../../ui/Badge';
 import { DisplaySearchResult } from '../../../types/search';
 import {
   TabType,
+  TAB_TO_DOC_TYPE,
   MentionType,
   type MentionData,
   ChannelCommandMenuProps,
@@ -92,12 +93,8 @@ import {
 } from '../../../services/Analytics/mixpanelService';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-import {
-  useSearchMetrics,
-  filterChannelsBySearchableNames,
-  rankUsersWithMfu,
-  CMDK_USER_LIMIT,
-} from '../../../hooks/useSearchMetrics';
+import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
+import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
@@ -441,14 +438,17 @@ const ChannelCommandMenu = ({
       channel: Channel;
       category: ChannelCategory;
       searchableNames?: string[];
+      searchNames?: string[];
     }> = [];
 
     // Add starred channels
     starred.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
@@ -463,10 +463,12 @@ const ChannelCommandMenu = ({
 
     // Add direct messages
     directMessages.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
@@ -1098,8 +1100,12 @@ const ChannelCommandMenu = ({
     }
 
     onOpenChange(false);
+    // Land on the tab the user was already filtering by — Messages stays on Messages,
+    // Files on Files, and so on. Tabs with no results-page docType (and plain All) fall
+    // through to undefined, which leaves the page on its own default.
+    const docType = TAB_TO_DOC_TYPE[activeTab as keyof typeof TAB_TO_DOC_TYPE];
     void navigate(
-      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels).toString()}`,
+      `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, docType).toString()}`,
     );
   };
 
@@ -2154,6 +2160,22 @@ const ChannelCommandMenu = ({
     cleanedSearchText,
   ]);
 
+  // Slack-style strong starred match: the Starred section only LEADS (hoists above People/Channels)
+  // when a starred item's displayed name prefix-matches the query. Without this, ANY query hoisted
+  // Starred, so a weak fuzzy hit on a starred DM (e.g. "venkatesan" matching a starred
+  // "…Venkattaramanujam" DM shown as "Mamtha") jumped above the exact "Venkatesan S" user. Checks
+  // every matched starred item (not just the top, which affinity may hold), mirroring the prefix
+  // rule hasStrongUserMatch/hasStrongChannelMatch use.
+  const hasStrongStarredMatch = useMemo(() => {
+    if (hasFromOrInFilter) return false;
+    const q = cleanedSearchText.toLowerCase().trim();
+    if (!q) return false;
+    const starredMatches = groupedChannels[ChannelCategory.STARRED] ?? [];
+    return starredMatches.some(item =>
+      (item.searchableNames ?? []).some(name => name.toLowerCase().startsWith(q)),
+    );
+  }, [hasFromOrInFilter, groupedChannels, cleanedSearchText]);
+
   const iconSize = 14;
 
   const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
@@ -2839,7 +2861,7 @@ const ChannelCommandMenu = ({
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
   const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
-  const hoistStarred = canHoist && !hasFromOrInFilter && searchText.trim().length > 0;
+  const hoistStarred = canHoist && hasStrongStarredMatch;
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
 
