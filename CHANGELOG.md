@@ -1,3 +1,10 @@
+## [1.218.2](https://github.com/juspay/xyne-spaces/compare/v1.218.1...v1.218.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* linearize channel derivation freezing the main thread on every click ([#699](https://github.com/juspay/xyne-spaces/issues/699)) ([ed29301](https://github.com/juspay/xyne-spaces/commit/ed293016762ba792753ae7b7aadd0d741c561e9f))
+
 ## [1.218.1](https://github.com/juspay/xyne-spaces/compare/v1.218.0...v1.218.1) (2026-08-25)
 
 
