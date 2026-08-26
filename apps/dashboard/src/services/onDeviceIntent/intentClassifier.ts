@@ -1,8 +1,15 @@
 /**
  * Main-thread owner of the on-device intent classifier.
  *
- * Responsibilities: worker lifecycle, the public-channel eligibility gate, the
- * drop-oldest scheduler, telemetry emission, and the self-disabling perf budget.
+ * Responsibilities: worker lifecycle, the user-preference and public-channel
+ * gates, the drop-oldest scheduler, and the self-disabling perf budget.
+ *
+ * NOTHING LEAVES THE DEVICE. There is no telemetry here — no OTel metrics, no log
+ * records, no server call. The only observability is `trace()`, which writes to
+ * the local console behind the `xyne:intent-debug` localStorage key. Metrics were
+ * built (five instruments, tight attribute sets) and removed in the same PR: the
+ * local collector was never actually reachable, so they measured nothing, and an
+ * exporter that fails silently is worse than no exporter. See docs §6.
  *
  * This module is the ONLY thing allowed to talk to intent.worker.ts — the
  * eligibility gate is a single chokepoint by design. Adding a second entry point
@@ -17,22 +24,12 @@ import { wasInterrupted } from '@xyne/shared/hooks';
 import { isIntentSuggestionsEnabled } from '../../hooks/useIntentSuggestionsEnabled';
 
 import {
-  intentClassificationTotal,
-  intentDroppedTotal,
-  intentEmbedDuration,
-  intentScore,
-  intentWorkerInitDuration,
-  safeRecordMetric,
-} from '../otel';
-import { Event, logger } from '../../utils/logger';
-import {
   BUDGET_SAMPLE_SIZE,
   CANDIDATE_THRESHOLD,
   EMBED_BUDGET_MS,
   INTENT_TRIGGER_ENABLED,
-  MODEL_VERSION,
 } from './config';
-import { PROTOTYPES_VERSION, getIntent } from './intents';
+import { getIntent } from './intents';
 import { MIN_INTENT_SCORE, UNCLASSIFIED, UNRESOLVED_TOPIC } from './scoring';
 import { isDebugEnabled, resolveDebugEnabled, setDebugEnabled, trace } from './debug';
 import type {
@@ -63,6 +60,20 @@ export interface IntentDetection {
 
 type DetectionListener = (detection: IntentDetection) => void;
 
+/**
+ * Lifecycle of the ~23MB model download, for the Settings UI.
+ *
+ * `idle` means nothing has been requested yet — the model is fetched lazily, so a
+ * user who never enables the feature never pays for it.
+ */
+export type ModelStatus =
+  | { state: 'idle' }
+  | { state: 'downloading'; percent: number | null }
+  | { state: 'ready' }
+  | { state: 'failed'; error: string };
+
+type ModelStatusListener = (status: ModelStatus) => void;
+
 interface PendingJob {
   requestId: string;
   text: string;
@@ -91,6 +102,8 @@ class IntentClassifier {
   private debugResolved = false;
   private embedSamples: number[] = [];
   private listeners = new Set<DetectionListener>();
+  private modelStatus: ModelStatus = { state: 'idle' };
+  private statusListeners = new Set<ModelStatusListener>();
 
   /**
    * Subscribe to detections that cleared their threshold.
@@ -104,6 +117,51 @@ class IntentClassifier {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  /** Current model-download state. Safe to call before anything has started. */
+  getModelStatus(): ModelStatus {
+    return this.modelStatus;
+  }
+
+  /**
+   * Subscribe to model-download state. Returns an unsubscribe function.
+   *
+   * Separate from `subscribe()` because these have different lifetimes: detections
+   * are consumed by the composer, status by Settings, and neither should have to
+   * mount for the other to work.
+   */
+  subscribeModelStatus(listener: ModelStatusListener): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  private setModelStatus(status: ModelStatus): void {
+    this.modelStatus = status;
+    for (const listener of this.statusListeners) {
+      try {
+        listener(status);
+      } catch {
+        // A broken subscriber must not take down the classifier or its siblings.
+      }
+    }
+  }
+
+  /**
+   * Discard a failed worker and download again.
+   *
+   * `disabled` is cleared too: a load failure disables the classifier, and without
+   * clearing it `ensureWorker()` returns null and the retry silently does nothing.
+   */
+  retryModelLoad(): void {
+    this.ensureDebug();
+    trace('main', 'model retry requested');
+    this.teardown();
+    this.disabled = false;
+    this.setModelStatus({ state: 'idle' });
+    this.warmup();
   }
 
   private emit(detection: IntentDetection): void {
@@ -151,11 +209,11 @@ class IntentClassifier {
         this.handleMessage(event.data);
       };
       this.worker.onerror = error => {
-        logger.warn(Event.INTENT_WORKER_FAILED, { error: String(error.message ?? error) });
+        trace('main', `worker error — ${String(error.message ?? error)}`);
         this.teardown();
       };
     } catch (error) {
-      logger.warn(Event.INTENT_WORKER_FAILED, { error: String(error) });
+      trace('main', `worker failed to spawn — ${String(error)}`);
       this.disabled = true;
       return null;
     }
@@ -232,7 +290,14 @@ class IntentClassifier {
   warmup(): void {
     this.ensureDebug();
     const worker = this.ensureWorker();
-    worker?.postMessage({ type: 'WARMUP' } satisfies WorkerIncomingMessage);
+    if (!worker) {
+      this.setModelStatus({ state: 'failed', error: 'classifier unavailable' });
+      return;
+    }
+    if (this.modelStatus.state === 'idle' || this.modelStatus.state === 'failed') {
+      this.setModelStatus({ state: 'downloading', percent: null });
+    }
+    worker.postMessage({ type: 'WARMUP' } satisfies WorkerIncomingMessage);
   }
 
   private enqueue(job: PendingJob): void {
@@ -242,14 +307,17 @@ class IntentClassifier {
       return;
     }
 
+    // The first message a user sends is what triggers the download in practice —
+    // Settings is not the only entry point, so status has to start here too.
+    if (this.modelStatus.state === 'idle') {
+      this.setModelStatus({ state: 'downloading', percent: null });
+    }
+
     if (this.inFlight) {
       // Drop-oldest: a queued job that never ran is stale by the time a slot frees.
       if (this.queued) {
         trace('main', `scheduler — DROPPED ${this.queued.requestId} (newest wins)`);
         this.queued.reject?.(new Error('superseded'));
-        safeRecordMetric(() => {
-          intentDroppedTotal.add(1, { platform: logger.platformName });
-        });
       }
       trace('main', `scheduler — busy, queued ${job.requestId}`);
       this.queued = job;
@@ -275,24 +343,31 @@ class IntentClassifier {
   }
 
   private handleMessage(message: WorkerOutgoingMessage): void {
+    if (message.type === 'PROGRESS') {
+      this.setModelStatus({ state: 'downloading', percent: message.payload.percent });
+      return;
+    }
+
+    if (message.type === 'LOAD_FAILED') {
+      trace('main', `model load failed — ${message.payload.error}`);
+      this.setModelStatus({ state: 'failed', error: message.payload.error });
+      return;
+    }
+
     if (message.type === 'READY') {
-      safeRecordMetric(() => {
-        intentWorkerInitDuration.record(message.payload.loadMs, {
-          platform: logger.platformName,
-          outcome: 'success',
-        });
-      });
-      logger.info(Event.INTENT_WORKER_READY, {
-        loadMs: message.payload.loadMs,
-        modelVersion: message.payload.modelVersion,
-        prototypesVersion: message.payload.prototypesVersion,
-      });
+      trace(
+        'main',
+        `worker READY — model ${message.payload.modelVersion}, ` +
+          `prototypes v${message.payload.prototypesVersion}, ` +
+          `loaded in ${message.payload.loadMs.toFixed(0)}ms`,
+      );
+      this.setModelStatus({ state: 'ready' });
       return;
     }
 
     if (message.type === 'ERROR') {
       const job = this.inFlight;
-      logger.warn(Event.INTENT_WORKER_FAILED, { error: message.payload.error });
+      trace('main', `worker reported an error — ${message.payload.error}`);
       job?.reject?.(new Error(message.payload.error));
       this.pump();
       return;
@@ -312,16 +387,8 @@ class IntentClassifier {
   }
 
   private record(result: ClassificationResult, messageId: string | null): void {
-    const base = { platform: logger.platformName };
-
     if (result.prefiltered) {
-      safeRecordMetric(() => {
-        intentClassificationTotal.add(1, { ...base, prefiltered: 'true' });
-      });
-      trace(
-        'main',
-        '6. telemetry — intent_classification_total{prefiltered=true}; no score recorded',
-      );
+      trace('main', '6. prefiltered — nothing scored');
       return;
     }
 
@@ -353,34 +420,17 @@ class IntentClassifier {
       });
     }
 
-    safeRecordMetric(() => {
-      intentScore.record(result.topScore, { ...base, intent: result.topIntent });
-      intentClassificationTotal.add(1, {
-        ...base,
-        intent: result.topIntent,
-        // Low cardinality by construction: the registry's topics plus
-        // 'unresolved', or 'none' for intents that do not route.
-        topic: topicId ?? 'none',
-        prefiltered: 'false',
-        triggered: String(triggered),
-        shadow: 'false',
-      });
-    });
-
-    // A backgrounded tab or a Zero reconnect makes the timing meaningless; recording
-    // it anyway poisons p95. Mirrors hooks/useLoadingAnimationLog.ts.
+    // A backgrounded tab or a Zero reconnect makes the timing meaningless; feeding
+    // it to the perf budget would self-disable the feature on a bogus sample.
     const skewed = wasInterrupted(performance.now() - result.embedMs);
-    if (!skewed) {
-      safeRecordMetric(() => {
-        intentEmbedDuration.record(result.embedMs, base);
-      });
-      this.checkBudget(result.embedMs);
-    }
+    if (!skewed) this.checkBudget(result.embedMs);
 
-    trace('main', '6. telemetry recorded', {
-      intent_score: Number(result.topScore.toFixed(4)),
-      intent_embed_duration: skewed ? 'skipped (skewed)' : Number(result.embedMs.toFixed(1)),
-      intent_classification_total: { intent: result.topIntent, triggered: String(triggered) },
+    trace('main', '6. scored', {
+      score: Number(result.topScore.toFixed(4)),
+      embedMs: skewed ? 'skipped (skewed)' : Number(result.embedMs.toFixed(1)),
+      intent: result.topIntent,
+      topic: topicId ?? 'none',
+      triggered: String(triggered),
     });
 
     // Always say what happened AND why — a strong score followed by silence reads
@@ -409,25 +459,6 @@ class IntentClassifier {
                   `is correct for a how-to with no destination in the product.`
                 : `7. below threshold — ${result.topScore.toFixed(4)} < ${intent?.threshold ?? '?'}; no action`,
     );
-
-    // Per-event record for the eval flywheel. Joins to the (future) server verdict on
-    // messageId. No message text — see docs/ON_DEVICE_INTENT.md §6.2.
-    logger.info(Event.INTENT_CLASSIFIED, {
-      messageId,
-      topIntent: result.topIntent,
-      topScore: result.topScore,
-      topicId: topicId ?? null,
-      topicScore: result.topic?.score ?? null,
-      topicMargin: result.topic?.margin ?? null,
-      runnerUpIntent: result.runnerUpIntent,
-      runnerUpScore: result.runnerUpScore,
-      embedMs: result.embedMs,
-      skewed,
-      triggered,
-      shadow: false,
-      modelVersion: MODEL_VERSION,
-      prototypesVersion: PROTOTYPES_VERSION,
-    });
   }
 
   /** A slow device drops the feature rather than degrading the app. */
@@ -443,7 +474,6 @@ class IntentClassifier {
     if (p95 > EMBED_BUDGET_MS) {
       this.disabled = true;
       trace('main', 'perf budget EXCEEDED — self-disabling, worker terminated');
-      logger.warn(Event.INTENT_SELF_DISABLED, { p95, budgetMs: EMBED_BUDGET_MS });
       this.teardown();
     }
   }

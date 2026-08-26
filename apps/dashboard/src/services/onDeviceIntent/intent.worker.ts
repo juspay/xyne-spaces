@@ -100,6 +100,28 @@ export interface WorkerReadyMessage {
   payload: { loadMs: number; modelVersion: string; prototypesVersion: string };
 }
 
+/**
+ * Download progress for the ~23MB model.
+ *
+ * Surfaced because the first thing enabling this feature does is pull 23MB, and
+ * a silent 23MB is indistinguishable from a broken feature — which is exactly how
+ * a missing model went unnoticed twice during development.
+ */
+export interface WorkerProgressMessage {
+  type: 'PROGRESS';
+  payload: {
+    /** 0-100 across all files, or null before any total is known. */
+    percent: number | null;
+    file: string;
+  };
+}
+
+/** The model failed to load. Distinct from ERROR, which is per-classification. */
+export interface WorkerLoadFailedMessage {
+  type: 'LOAD_FAILED';
+  payload: { error: string };
+}
+
 export interface WorkerResultMessage {
   type: 'RESULT';
   payload: ClassificationResult;
@@ -110,7 +132,12 @@ export interface WorkerErrorMessage {
   payload: { requestId: string | null; error: string };
 }
 
-export type WorkerOutgoingMessage = WorkerReadyMessage | WorkerResultMessage | WorkerErrorMessage;
+export type WorkerOutgoingMessage =
+  | WorkerReadyMessage
+  | WorkerProgressMessage
+  | WorkerLoadFailedMessage
+  | WorkerResultMessage
+  | WorkerErrorMessage;
 
 let extractor: FeatureExtractionPipeline | null = null;
 let loading: Promise<FeatureExtractionPipeline> | null = null;
@@ -125,7 +152,33 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
 
   const startedAt = performance.now();
   trace('worker', `2. loading model ${MODEL_ID} (${MODEL_DTYPE}) from ${env.localModelPath}`);
-  loading = pipeline('feature-extraction', MODEL_ID, { dtype: MODEL_DTYPE })
+
+  // Transformers.js reports per-file byte progress. Only the ~23MB weights matter
+  // for a progress bar — the tokenizer and configs are together under 1MB, and
+  // letting them drive the number makes it jump to 100% and back.
+  const onProgress = (report: {
+    status?: string;
+    file?: string;
+    progress?: number;
+    loaded?: number;
+    total?: number;
+  }): void => {
+    if (report.status !== 'progress') return;
+    // Weights only. The tokenizer and configs are under 1MB combined but each
+    // reports its own 0-100, so including them makes the bar hit 100% and drop
+    // back to 9% before the 23MB file has really started. Measured, not guessed.
+    if (!report.file?.endsWith('.onnx')) return;
+    const percent =
+      typeof report.progress === 'number' && Number.isFinite(report.progress)
+        ? Math.max(0, Math.min(100, Math.round(report.progress)))
+        : null;
+    post({ type: 'PROGRESS', payload: { percent, file: report.file ?? '' } });
+  };
+
+  loading = pipeline('feature-extraction', MODEL_ID, {
+    dtype: MODEL_DTYPE,
+    progress_callback: onProgress,
+  })
     .then(loaded => {
       extractor = loaded;
       trace('worker', `2. model ready in ${(performance.now() - startedAt).toFixed(0)}ms`);
@@ -140,7 +193,11 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
       return extractor;
     })
     .catch(err => {
+      // Reset so a retry can actually re-run; without this the rejected promise is
+      // cached and every retry fails instantly with the original error.
       loading = null;
+      trace('worker', `2. model load FAILED — ${String(err)}`);
+      post({ type: 'LOAD_FAILED', payload: { error: String(err) } });
       throw err;
     });
 

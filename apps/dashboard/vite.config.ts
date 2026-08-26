@@ -8,11 +8,6 @@ import { createRequire } from 'module';
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 
-// onnxruntime-web is a transitive dep of @huggingface/transformers, so under pnpm it is
-// NOT symlinked into apps/dashboard/node_modules — a literal 'node_modules/onnxruntime-web'
-// path would silently copy nothing. Resolve it from the transformers entry instead, which
-// makes Node walk the right node_modules chain. Neither package exports './package.json',
-// so we resolve the entry module and take its directory.
 const require = createRequire(import.meta.url);
 const ortDistDir = path.dirname(
   require.resolve('onnxruntime-web', {
@@ -95,15 +90,13 @@ export default defineConfig(({ mode }) => {
             src: 'node_modules/pdfjs-dist/wasm/*',
             dest: 'pdfjs/wasm',
           },
-          // ONNX Runtime WASM for the on-device intent classifier. Served from our own
-        // origin — the worker sets `allowRemoteModels = false` so it can never reach a CDN.
-        // See docs/ON_DEVICE_INTENT.md §5.1.
-        {
-          src: `${ortDistDir}/*.wasm`,
-          dest: 'onnx',
-        },
-        {
-          src: `${ortDistDir}/*.mjs`,
+          {
+          src: [
+            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.wasm`,
+            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.mjs`,
+            `${ortDistDir}/ort-wasm-simd-threaded.wasm`,
+            `${ortDistDir}/ort-wasm-simd-threaded.mjs`,
+          ],
           dest: 'onnx',
         },
       ],

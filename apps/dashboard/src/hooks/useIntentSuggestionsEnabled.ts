@@ -6,9 +6,10 @@ import { useSyncExternalStore } from 'react';
  * Mirrors useClawDashboardVisibility: localStorage + a listener set via
  * useSyncExternalStore, so every consumer re-renders on change.
  *
- * Defaults ON. The feature is local-only — classification runs in a Web Worker
- * and surfaces as a toast, with no server call and no cost — so the failure mode
- * of it being on is a suggestion you ignore, not a bill.
+ * Defaults OFF. Not because it is risky — it is local-only, no server call and no
+ * cost — but because the first thing it does when enabled is pull a ~23MB model
+ * over the network. Nobody should pay that for a feature they did not ask for.
+ * Opting in is what triggers the download.
  *
  * `isIntentSuggestionsEnabled()` exists because the classifier is a plain module
  * singleton, not a component, and must read the same value the toggle writes.
@@ -30,9 +31,9 @@ const subscribe = (listener: () => void): (() => void) => {
 /** Plain reader for non-React callers. Storage can throw in locked-down contexts. */
 export const isIntentSuggestionsEnabled = (): boolean => {
   try {
-    return localStorage.getItem(INTENT_SUGGESTIONS_KEY) !== 'false';
+    return localStorage.getItem(INTENT_SUGGESTIONS_KEY) === 'true';
   } catch {
-    return true;
+    return false;
   }
 };
 

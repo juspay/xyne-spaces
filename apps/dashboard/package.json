@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {
+    "predev": "node scripts/fetch-model.mjs",
     "dev": "vite",
     "dev:sdlc": "vite --mode sdlc",
     "dev:test": "vite --mode test",
