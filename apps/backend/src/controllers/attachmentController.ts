@@ -17,6 +17,7 @@ import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { DatabaseClient } from '../database/client';
+import { runAsSystem } from '../database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 
@@ -106,15 +107,12 @@ export class AttachmentController {
     userId: string,
     workspaceId?: string,
   ): Promise<{ ok: true } | { ok: false; status: number; body: Record<string, string> }> {
-    // 1) Workspace isolation — never serve another workspace's file.
-    //    Require a workspace context; an absent one is rejected rather than
-    //    allowed through.
-    if (!workspaceId || attachment.workspaceId !== workspaceId) {
-      logger.warn(
-        `Cross-workspace attachment access blocked: user ${userId} (ws ${workspaceId ?? 'none'}) -> attachment ${attachment.id} (ws ${attachment.workspaceId})`,
-      );
-      return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-    }
+    // Workspace context.  A connect channel's attachments are stamped the HOST workspace, so a
+    // guest member carries a DIFFERENT workspaceId — the per-type gates below (canvas view access
+    // §2, channel participation §3) authorize connect members on their own, so we must NOT blanket
+    // 404 on a workspace mismatch here. Only the workspace-bounded fall-through (§4) still requires
+    // the same workspace. An absent workspace context is treated as cross-workspace.
+    const sameWorkspace = !!workspaceId && attachment.workspaceId === workspaceId;
 
     // 2) Draft / scheduled message attachments — creator only.
     if (
@@ -168,7 +166,20 @@ export class AttachmentController {
         conversation.channelId,
         userId,
       );
-      if (!isParticipant) {
+      // A cross-org connect guest is a hidden HOST participant, so isParticipant already covers
+      // them — but as the canonical membership truth (and robust against tenant-scoping on the
+      // participant read), also accept an active connect_channel_member of the owning channel.
+      const isConnectMember =
+        isParticipant
+          ? false
+          : await runAsSystem(async () => {
+              const member = await db.connectChannelMember.findFirst({
+                where: { channelId: conversation.channelId, userId, leftAt: null },
+                select: { id: true },
+              });
+              return member !== null;
+            });
+      if (!isParticipant && !isConnectMember) {
         logger.warn(
           `Unauthorized attachment access: user ${userId} -> ${attachment.id} in channel ${conversation.channelId}`,
         );
@@ -178,9 +189,21 @@ export class AttachmentController {
           body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
         };
       }
+      // Authorized: participant of the owning channel OR an active connect member. Done.
+      return { ok: true };
     }
 
-    // 4) Impact / stage-form DOC attachments (conversationId is null) — resolve the
+    // 4) Workspace-bounded fall-through — the remaining entity types (TICKET/EMAIL/FORM_ENTITY_VALUE/
+    //    IMPACT with no conversation) have no channel to gate on, so they stay bounded by the caller's
+    //    own workspace. Reject a cross-workspace read here.
+    if (!sameWorkspace) {
+      logger.warn(
+        `Cross-workspace attachment access blocked: user ${userId} (ws ${workspaceId ?? 'none'}) -> attachment ${attachment.id} (ws ${attachment.workspaceId})`,
+      );
+      return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+    }
+
+    // 4a) Impact / stage-form DOC attachments (conversationId is null) — resolve the
     //    owning ticket's channel and require the same access the ticket needs: a PUBLIC
     //    channel is readable by any workspace member, a PRIVATE channel only by its
     //    participants. Without this, any workspace member could download a private

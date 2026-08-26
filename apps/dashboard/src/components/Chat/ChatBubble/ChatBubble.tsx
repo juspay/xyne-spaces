@@ -113,6 +113,8 @@ export interface ThreadData {
 interface ChatBubbleProps {
   message: MessageWithOptionalNudgeCounts;
   channelId: string;
+  // Slack-Connect: pointer id for navigation/URLs (host `channelId` is for content only).
+  navChannelId?: string | undefined;
   projectId?: string | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   replies?: ThreadData;
@@ -143,6 +145,7 @@ interface ChatBubbleProps {
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
   message,
   channelId,
+  navChannelId,
   projectId,
   channelScopeType,
   replies,
@@ -1279,6 +1282,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             variant={variant}
             isHighlighted={isHighlighted}
             channelId={channelId}
+            navChannelId={navChannelId ?? channelId}
             context={context}
             channelScopeType={channelScopeType}
             isFirstInThread={isFirstInThread}

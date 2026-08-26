@@ -83,6 +83,26 @@ export async function getGuestAccessibleChannelIds(
 }
 
 /**
+ * Slack-Connect (REST twin of the Zero `connectChannelAccessWhere` predicate).
+ *
+ * The set of connect-channel (host) ids the user is an ACTIVE member of, ACROSS orgs —
+ * `connect_channel_member WHERE userId = :userId AND leftAt IS NULL`. Intentionally NOT
+ * workspace-filtered: connect membership is the whole point of spanning workspaces.
+ * REST content ACLs OR this in as `{ channelId: { in: <these> } }` (or `{ id: ... }` on
+ * the channels table) alongside the normal `{ workspaceId: ctx }` clause.
+ */
+export async function getConnectAccessibleChannelIds(
+  prisma: PrismaClient,
+  userId: string
+): Promise<string[]> {
+  const rows = await prisma.connectChannelMember.findMany({
+    where: { userId, leftAt: null },
+    select: { channelId: true },
+  })
+  return unique(rows.map((r) => r.channelId))
+}
+
+/**
  * Whether a guest reaches `channelId` through any of their grants.
  *
  * Guest reach is not expressible as a participant lookup, so write clauses that

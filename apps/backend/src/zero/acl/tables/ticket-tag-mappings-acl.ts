@@ -6,13 +6,15 @@ import {
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasGuestTicketAccess } from '../core/guest-access';
+import { hasGuestTicketAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class TicketTagMappingsACL extends BaseACL<'ticket_tag_mappings'> {
 
   private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
     const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
     if (!ticket) throw new MutationACLError('Ticket tag mapping not found: ticket does not exist', 'ticket_tag_mappings');
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
     if (ticket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Ticket tag mapping not found in this workspace', 'ticket_tag_mappings');
     }
@@ -23,6 +25,8 @@ export class TicketTagMappingsACL extends BaseACL<'ticket_tag_mappings'> {
     if (!ticket) {
       throw new MutationACLError('Ticket tag mapping failed: ticket does not exist', 'ticket_tag_mappings');
     }
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
     if (ticket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Ticket tag mapping failed: not in this workspace', 'ticket_tag_mappings');
     }

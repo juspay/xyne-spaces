@@ -209,6 +209,7 @@ import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
+import { ConnectInviteScreen } from './ConnectInviteScreen/ConnectInviteScreen';
 import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
 import SystemPalette from './SystemPalette/SystemPalette';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
@@ -1819,6 +1820,10 @@ export const router = createBrowserRouter(
         {
           path: '/invite',
           element: <AcceptInvitation />,
+        },
+        {
+          path: '/connect-invite',
+          element: <ConnectInviteScreen />,
         },
         {
           path: '/community',

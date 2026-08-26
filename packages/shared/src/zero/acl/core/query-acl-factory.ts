@@ -184,6 +184,12 @@ export class QueryACLFactory {
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_board_mappings':
         return new ChannelBoardMappingsACL(ctx) as BaseQueryACL<TTable>;
+      // Slack-Connect: per-table read ACL is allow-all here; the workspace backstop
+      // still applies. Cross-org read relaxation is Phase 4 (slack-connect-solution.md §4).
+      case 'connect_channel':
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
+      case 'connect_channel_member':
+        return new BaseQueryACL(ctx, table) as BaseQueryACL<TTable>;
       case 'channel_stats':
         return new ChannelStatsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':

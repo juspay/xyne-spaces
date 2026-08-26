@@ -58,6 +58,9 @@ import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
+import { connectChannelService } from '@/services/connectChannelService';
+import { connectDmService } from '@/services/connectDmService';
+import { runAsSystem } from '@/database/tenant/context';
 
 export class ChannelController {
   private channelRepository: ChannelRepository;
@@ -229,6 +232,17 @@ export class ChannelController {
       };
 
       const conversation = await this.conversationRepository.create(conversationData);
+
+      // Slack-Connect: a cross-org DM/GroupDM's guest pointers are materialised on its FIRST
+      // conversation. This SERVER-side path (cuid conversation) does NOT go through the Zero
+      // side-effect that the client (uuid) path uses, so trigger the (idempotent, no-op for
+      // non-connect channels) materialise here too — otherwise a DM whose first message is sent
+      // server-side never materialises on the guest side.
+      await connectDmService
+        .materializeForHostDmChannel(channelId)
+        .catch(err =>
+          logger.error(`[sendInitialMessage] connect DM materialise failed for ${channelId}: ${err}`),
+        );
 
       // Create initial message
       const messageData: CreateMessageInput = {
@@ -680,6 +694,14 @@ export class ChannelController {
         };
       });
       await messageMetadataService.syncInitialMessageMd(result.conversation.conversationId);
+
+      // Slack-Connect: server-side (cuid) conversation → the Zero materialise side-effect won't fire,
+      // so trigger the idempotent guest-side materialise here (no-op for non-connect channels).
+      await connectDmService
+        .materializeForHostDmChannel(channelId)
+        .catch(err =>
+          logger.error(`[sendForwardedMessage] connect DM materialise failed for ${channelId}: ${err}`),
+        );
 
       // Get channel participants for notifications and unread count
       const channelParticipants = await this.channelParticipantRepository.getChannelParticipants(channelId);
@@ -1619,12 +1641,55 @@ export class ChannelController {
         return;
       }
 
+      const ids = channelIds as string[];
       const stats = await db.channelStats.findMany({
-        where: { channelId: { in: channelIds as string[] } },
+        where: { channelId: { in: ids } },
         select: { channelId: true, participantCount: true },
       });
 
       for (const stat of stats) counts[stat.channelId] = stat.participantCount;
+
+      // Slack-Connect: for a channel that's actually shared cross-org, channel_stats is
+      // misleading — a guest's POINTER channel only counts its own workspace's participants.
+      // The real roster is connect_channel_member (host + every guest), keyed by the HOST
+      // channel. Override counts for any requested id that appears in an ACTIVE connect_channel
+      // link — host side (id === hostChannelId) or guest side (id === guestChannelId). A channel
+      // with isConnectEnabled but no link yet has no member rows, so it's intentionally NOT
+      // overridden and keeps its normal count. Run under runAsSystem so the cross-org
+      // connect_channel_member rows aren't hidden by the caller's tenant fence.
+      await runAsSystem(async () => {
+        const idSet = new Set(ids);
+        const links = await db.connectChannel.findMany({
+          where: {
+            status: 'ACTIVE',
+            OR: [{ hostChannelId: { in: ids } }, { guestChannelId: { in: ids } }],
+          },
+          select: { hostChannelId: true, guestChannelId: true },
+        });
+        // requested channel id -> its HOST channel id
+        const hostByRequested = new Map<string, string>();
+        for (const l of links) {
+          if (idSet.has(l.hostChannelId)) hostByRequested.set(l.hostChannelId, l.hostChannelId);
+          if (l.guestChannelId && idSet.has(l.guestChannelId)) {
+            hostByRequested.set(l.guestChannelId, l.hostChannelId);
+          }
+        }
+        if (hostByRequested.size === 0) return;
+
+        const hostIds = [...new Set(hostByRequested.values())];
+        const grouped = await db.connectChannelMember.groupBy({
+          by: ['channelId'],
+          where: { channelId: { in: hostIds }, leftAt: null },
+          _count: { channelId: true },
+        });
+        const activeByHost = new Map<string, number>();
+        for (const g of grouped) activeByHost.set(g.channelId, g._count.channelId);
+
+        for (const [requestedId, hostId] of hostByRequested) {
+          const active = activeByHost.get(hostId);
+          if (active !== undefined) counts[requestedId] = active;
+        }
+      });
 
       res.status(200).json({ success: true, data: { counts } });
     } catch (error) {
@@ -2046,11 +2111,13 @@ export class ChannelController {
         return;
       }
 
-      // Validate all participants exist and are active (skip for self-DM)
+      // Validate all participants exist and are active (skip for self-DM). Resolve cross-workspace
+      // (runAsSystem) so a foreign participant of a Slack-Connect DM isn't hidden by the tenant users
+      // ACL; foreign users are then authorised by the reachability gate below.
       const participantUsers = [];
       if (!isSelfDm) {
         for (const participantId of otherParticipantIds) {
-          const user = await this.userRepository.findById(participantId);
+          const user = await runAsSystem(() => this.userRepository.findById(participantId));
           if (!user || user.status !== 'ACTIVE') {
             res.status(404).json({
               error: 'Participant not found or inactive',
@@ -2060,6 +2127,110 @@ export class ChannelController {
           }
           participantUsers.push(user);
         }
+      }
+
+      // Slack-Connect: if any participant is in another workspace this is a CROSS-ORG DM/GroupDM —
+      // itself a connect channel hosted in the initiator's workspace, with a guest pointer per other org.
+      const foreignParticipants = participantUsers.filter(u => u.workspaceId !== workspaceId);
+      if (foreignParticipants.length > 0) {
+        if (isSelfDm) {
+          res.status(400).json({ error: 'Cannot create a cross-org self-DM' });
+          return;
+        }
+
+        // Eligibility (§3C): the initiator must share a connect channel with each FOREIGN participant.
+        for (const fp of foreignParticipants) {
+          const reachable = await connectChannelService.areReachable(currentUserId, fp.id);
+          if (!reachable) {
+            res.status(403).json({
+              error: 'Not allowed',
+              details: `You can only DM someone you share a connect channel with`,
+              userId: fp.id,
+            });
+            return;
+          }
+        }
+
+        const isOneToOneCross = otherParticipantIds.length === 1;
+        const others = participantUsers.map(u => ({ userId: u.id, workspaceId: u.workspaceId! }));
+
+        const { channel, isExisting } = isOneToOneCross
+          ? await connectDmService.createCrossOrgOneToOneDm({
+              initiatorUserId: currentUserId,
+              initiatorWorkspaceId: workspaceId,
+              targetUserId: others[0].userId,
+              targetWorkspaceId: others[0].workspaceId,
+              hideCreator: shouldHideCreator,
+            })
+          : await connectDmService.createCrossOrgGroupDm({
+              initiatorUserId: currentUserId,
+              initiatorWorkspaceId: workspaceId,
+              others,
+              hideCreator: shouldHideCreator,
+            });
+
+        // Optional initial message goes to the HOST channel (content lives there).
+        let initialConversation = null;
+        if (forwardedMessage) {
+          initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
+        } else if (message && message.trim()) {
+          initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message);
+        }
+
+        if (isOneToOneCross) {
+          const target = participantUsers[0];
+          res.status(isExisting ? 200 : 201).json({
+            message: isExisting ? 'DM channel already exists' : 'DM channel created successfully',
+            id: channel.id,
+            name: channel.name,
+            scopeType: channel.scopeType,
+            description: channel.description,
+            visibility: channel.visibility,
+            projectId: channel.projectId,
+            participantCount: 2,
+            unreadCount: 0,
+            lastActivityAt: channel.createdAt,
+            createdAt: channel.createdAt,
+            isExisting,
+            targetUser: {
+              id: target.id,
+              name: target.displayName || target.name,
+              email: target.email,
+              picture: target.picture,
+            },
+            initialConversation,
+          });
+        } else {
+          const allParticipantDetails = [
+            { userId: currentUserId, user: await this.getUserInfo(currentUserId), role: 'ADMIN' },
+            ...participantUsers.map(u => ({ userId: u.id, user: u, role: 'MEMBER' })),
+          ];
+          res.status(isExisting ? 200 : 201).json({
+            message: isExisting ? 'Group DM already exists' : 'Group DM created successfully',
+            id: channel.id,
+            name: channel.name,
+            scopeType: channel.scopeType,
+            description: channel.description,
+            visibility: channel.visibility,
+            projectId: channel.projectId,
+            participantCount: otherParticipantIds.length + 1,
+            unreadCount: 0,
+            lastActivityAt: channel.createdAt,
+            createdAt: channel.createdAt,
+            participants: allParticipantDetails,
+            isExisting,
+            initialConversation,
+          });
+        }
+
+        vespaQueue.addJob({
+          schema: channelSchema,
+          jobType: 'feed',
+          docId: channel.id,
+          userId: currentUserId,
+          workspaceId,
+        }).catch(error => logger.error('Error queuing Vespa job for cross-org DM:', error));
+        return;
       }
 
       // Handle self-DM case
@@ -2502,6 +2673,70 @@ export class ChannelController {
       if (!isParticipant) {
         res.status(403).json({
           error: 'You must be a participant to add others to this GROUP_DM'
+        });
+        return;
+      }
+
+      // Slack-Connect: a cross-org GROUP_DM is a connect channel. The requester (often a guest) acts on
+      // their POINTER channel, whose participant list is only their own org's slice — so the legacy
+      // new-group/dedup path below would build the wrong member set and fail. Instead resolve the HOST
+      // and add the new members there under runAsSystem; the participant mirror propagates them to
+      // connect_channel_member + the correct (hidden host + visible pointer) shape for every org.
+      const connectHostId = await runAsSystem(async () => {
+        const ch = await db.channel.findUnique({
+          where: { id: channelId },
+          select: { isConnectEnabled: true },
+        });
+        if (ch?.isConnectEnabled) return channelId; // channelId already IS the host
+        const link = await db.connectChannel.findFirst({
+          where: { guestChannelId: channelId, status: 'ACTIVE' },
+          select: { hostChannelId: true },
+        });
+        return link?.hostChannelId ?? null;
+      });
+      if (connectHostId) {
+        // R5.9 reachability gate: the requester may add their OWN-org members freely, but may only pull in
+        // a CROSS-org user they can actually reach (share ≥1 ACTIVE connect channel). Without this, any
+        // member of a connect group DM could inject an arbitrary foreign user they have no relationship with.
+        // Validate the whole batch first (all-or-nothing) so we never partially add before rejecting.
+        const unreachable: string[] = [];
+        await runAsSystem(async () => {
+          for (const userId of uniqueUserIds) {
+            const user = await this.userRepository.findById(userId);
+            if (!user || user.status !== 'ACTIVE') continue; // silently skipped below too
+            if (user.workspaceId === workspaceId) continue; // own org — always allowed
+            const reachable = await connectChannelService.areReachable(currentUserId, userId);
+            if (!reachable) unreachable.push(userId);
+          }
+        });
+        if (unreachable.length > 0) {
+          res.status(403).json({
+            error: 'You can only add people you already share a connect channel with',
+            unreachableUserIds: unreachable,
+          });
+          return;
+        }
+
+        const added: string[] = [];
+        await runAsSystem(async () => {
+          const existing = await this.channelParticipantRepository.getChannelParticipants(connectHostId);
+          const existingIds = new Set(existing.map(p => p.userId));
+          for (const userId of uniqueUserIds) {
+            if (existingIds.has(userId)) continue; // already in the group
+            const user = await this.userRepository.findById(userId);
+            if (!user || user.status !== 'ACTIVE') continue;
+            await this.channelParticipantRepository.addParticipant(connectHostId, userId, ChannelRole.MEMBER);
+            added.push(userId);
+          }
+        });
+        res.status(200).json({
+          // Return the requester's OWN channel (their pointer for a guest, the host for the host) so
+          // the client stays on the channel it's already viewing — never the raw host id for a guest.
+          channelId,
+          isExisting: false,
+          participantsAdded: added.length,
+          conversationsMigrated: 0,
+          message: `Added ${added.length} member(s) to the connect group DM`,
         });
         return;
       }

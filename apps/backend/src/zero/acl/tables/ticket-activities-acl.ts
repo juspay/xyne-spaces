@@ -6,13 +6,15 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasGuestTicketAccess } from '../core/guest-access';
+import { hasGuestTicketAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class TicketActivitiesACL extends BaseACL<'ticket_activities'> {
 
   private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
     const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
     if (!ticket) throw new MutationACLError('Ticket activity not found: ticket does not exist', 'ticket_activities');
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
     if (ticket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Ticket activity not found in this workspace', 'ticket_activities');
     }
@@ -34,6 +36,10 @@ export class TicketActivitiesACL extends BaseACL<'ticket_activities'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'ticket_activities'>>, tx: Transaction<Schema>): Promise<void> {
+    // Slack-Connect: an active connect member may record activity on the (host) channel cross-org.
+    if (args.channelId && (await isActiveConnectMember(this.ctx, tx, args.channelId as string))) {
+      return;
+    }
     if (this.ctx.role === 'GUEST') {
       await this.verifyGuestScope(args.ticketId, tx);
       return;

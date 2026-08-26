@@ -40,6 +40,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { useHostToPointerChannelId } from '../../../hooks/useHostChannelId';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -174,6 +175,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   // route desk/support tickets to the Support desk instead of the chat panel.
   const allChannels = useAllChannels();
   const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
+  // Slack-Connect: route chat ticket opens on the guest's pointer channel (not the ticket's host
+  // channelId) so the conversation header doesn't blank for guests. No-op for host/non-connect.
+  const resolveHostToPointer = useHostToPointerChannelId();
 
   // NON_LINEAR boards reject direct ticket.update — use the transition mutator instead.
   const routeStageChange = useCallback(
@@ -343,14 +347,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
             // On mobile: navigate directly to ThreadMessages route with details tab
             // On desktop: use tab-based route for expanded view in ConversationPannel
+            const navChannelId = resolveHostToPointer(params.data.channelId);
             if (isMobile) {
               void navigate(
-                `${baseRoute}/${params.data.channelId}/${params.data.conversationId}/${params.data.id}?selectedTab=details`,
+                `${baseRoute}/${navChannelId}/${params.data.conversationId}/${params.data.id}?selectedTab=details`,
                 navState,
               );
             } else {
               void navigate(
-                buildChannelRoute(params.data.channelId, {
+                buildChannelRoute(navChannelId, {
                   tab: 'tickets',
                   ticketId: params.data.id,
                   conversationId: params.data.conversationId,

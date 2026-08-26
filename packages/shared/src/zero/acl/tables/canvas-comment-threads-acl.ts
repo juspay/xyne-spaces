@@ -2,12 +2,16 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { CanvasVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { connectChannelAccessWhere } from '../core/guest-acl-utils';
 
 export class CanvasCommentThreadsACL extends BaseQueryACL<'canvas_comment_threads'> {
   constructor(ctx: Context) {
     super(ctx, 'canvas_comment_threads');
   }
 
+  // Slack-Connect: a thread is also visible when its canvas's channel is a connect channel I
+  // actively belong to (canvas -> channel). canvas_comment_threads has no workspaceId column, so no
+  // define-query backstop applies here.
   canSelect<TReturn>(
     query: Query<'canvas_comment_threads', Schema, TReturn>,
   ): Query<'canvas_comment_threads', Schema, TReturn> {
@@ -32,6 +36,9 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<'canvas_comment_thread
                 ),
               ),
             ),
+          ),
+          exists('channel', (channel: any) =>
+            channel.where(connectChannelAccessWhere(this.ctx)),
           ),
         ),
       ),

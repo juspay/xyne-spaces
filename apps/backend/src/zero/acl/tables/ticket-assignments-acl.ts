@@ -6,13 +6,15 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasGuestTicketAccess } from '../core/guest-access';
+import { hasGuestTicketAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class TicketAssignmentsACL extends BaseACL<'ticket_assignments'> {
 
   private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
     const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
     if (!ticket) throw new MutationACLError('Ticket assignment not found: ticket does not exist', 'ticket_assignments');
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
     if (ticket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Ticket assignment not found in this workspace', 'ticket_assignments');
     }
@@ -21,6 +23,12 @@ export class TicketAssignmentsACL extends BaseACL<'ticket_assignments'> {
   // Gate on the ticket's own channel (PUBLIC or participant), matching
   // TicketsACL's read predicate. Guests are gated on guest ticket access instead.
   private async verifyTicketAccess(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+    // Slack-Connect: an active connect member of the ticket's (host) channel bypasses the
+    // same-workspace channel-audience gate.
+    const connectTicket = await tx.run(zql.tickets.where('id', ticketId).one());
+    if (connectTicket && (await isActiveConnectMember(this.ctx, tx, connectTicket.channelId))) {
+      return;
+    }
     if (this.ctx.role === 'GUEST') {
       const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
       if (!ticket || !(await hasGuestTicketAccess(this.ctx, tx, ticket))) {

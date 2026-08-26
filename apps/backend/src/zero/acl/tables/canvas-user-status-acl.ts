@@ -2,6 +2,7 @@ import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/
 import { CanvasVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { isActiveConnectMember } from '../core/guest-access';
 import { zql } from '../../queries';
 
 export class CanvasUserStatusACL extends BaseACL<'canvas_user_status'> {
@@ -12,6 +13,12 @@ export class CanvasUserStatusACL extends BaseACL<'canvas_user_status'> {
         'Canvas user status failed: canvas does not exist',
         'canvas_user_status',
       );
+    }
+
+    // Slack-Connect: an active connect member of the canvas's (host) channel has access. The
+    // caller still may only write their OWN status row (enforced by the per-method userId checks).
+    if (canvas.channelId && (await isActiveConnectMember(this.ctx, tx, canvas.channelId))) {
+      return;
     }
 
     const isCreator = canvas.createdBy === this.ctx.userID;

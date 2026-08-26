@@ -4,13 +4,17 @@ import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { assertWorkspaceMatch } from '../core/workspace-match';
 import { zql } from '../../queries';
-import { hasChannelMutationAccess } from '../core/guest-access';
+import { hasChannelMutationAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class DraftMessagesACL extends BaseACL<'draft_messages'> {
   private async verifyChannelInWorkspace(
     channelId: string,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    // Slack-Connect: an active connect member may draft in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, channelId)) {
+      return;
+    }
     const channel = await tx.run(zql.channels.where('id', channelId).one());
     if (!channel) {
       throw new MutationACLError('Draft message: channel does not exist', 'draft_messages');
@@ -28,6 +32,12 @@ export class DraftMessagesACL extends BaseACL<'draft_messages'> {
     if (!channel) {
       throw new MutationACLError('Draft message: channel does not exist', 'draft_messages');
     }
+
+    // Slack-Connect: an active connect member may draft in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, channelId)) {
+      return;
+    }
+
     await this.verifyChannelInWorkspace(channelId, tx);
     if (channel.isArchived) {
       throw new MutationACLError('Draft message: channel is archived', 'draft_messages');

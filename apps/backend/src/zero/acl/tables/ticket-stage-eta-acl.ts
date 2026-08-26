@@ -6,13 +6,15 @@ import {
 import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasGuestTicketAccess } from '../core/guest-access';
+import { hasGuestTicketAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class TicketStageEtaACL extends BaseACL<'ticket_stage_eta'> {
 
   private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
     const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
     if (!ticket) throw new MutationACLError('Ticket stage ETA not found: ticket does not exist', 'ticket_stage_eta');
+    // Slack-Connect: an active connect member of the ticket's (host) channel may mutate cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, ticket.channelId)) return;
     if (ticket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Ticket stage ETA not found in this workspace', 'ticket_stage_eta');
     }

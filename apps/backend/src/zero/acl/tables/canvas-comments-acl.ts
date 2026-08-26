@@ -2,6 +2,7 @@ import type { InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
 import { CanvasRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { isActiveConnectMember } from '../core/guest-access';
 import { zql } from '../../queries';
 
 export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
@@ -9,6 +10,11 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
     const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
     if (!canvas) {
       throw new MutationACLError('Canvas comment failed: canvas not found', 'canvas_comments');
+    }
+
+    // Slack-Connect: an active connect member of the canvas's (host) channel may write comments.
+    if (canvas.channelId && (await isActiveConnectMember(this.ctx, tx, canvas.channelId))) {
+      return true;
     }
 
     if (canvas.createdBy === this.ctx.userID) return true;

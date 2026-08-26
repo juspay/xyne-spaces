@@ -72,6 +72,7 @@ import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
 import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
 import { useChannel } from '../../../hooks/useChannels';
+import { useHostToPointerChannelId } from '../../../hooks/useHostChannelId';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
@@ -572,6 +573,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const location = useLocation();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+  // Slack-Connect: back/minimize navigations must land on the guest's pointer channel, not the
+  // ticket's host channelId, or the conversation header blanks. No-op for host / non-connect.
+  const resolveHostToPointer = useHostToPointerChannelId();
 
   // State declarations
   const [editingTitle, setEditingTitle] = useState(false);
@@ -2658,9 +2662,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const isFromMyTickets = !!state?.fromMyTickets;
 
     // On mobile: always navigate to ThreadMessages with details tab
+    const navChannelId = resolveHostToPointer(ticket.channelId);
     if (isMobile) {
       void navigate(
-        buildChannelRoute(`${ticket.channelId}/${ticket.conversationId}/${ticket.id}`, {
+        buildChannelRoute(`${navChannelId}/${ticket.conversationId}/${ticket.id}`, {
           selectedTab: 'details',
         }),
       );
@@ -2674,7 +2679,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         ? `?selectedTab=${encodeURIComponent(state.activeTab)}`
         : '';
       void navigate(
-        `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}${activeTabParam}`,
+        `${baseRoute}/${navChannelId}/${ticket.conversationId}/${ticket.id}${activeTabParam}`,
       );
     }
   };
@@ -3073,7 +3078,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 className='p-2 border border-border rounded-lg h-8 w-8'
                 onClick={() => {
                   void navigate(
-                    `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
+                    `${baseRoute}/${resolveHostToPointer(ticket.channelId)}/${ticket.conversationId}#thread-summary`,
                   );
                 }}
                 title='Summarize thread'
