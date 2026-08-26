@@ -160,6 +160,23 @@ router.get("/audit-logs", requireClawAdmin, asyncHandler(async (req: Request, re
   }), { total, limit, offset });
 }));
 
+// Everything below this line is admin-only.
+//
+// Guarding each route individually meant a route added without the guard was
+// served to any authenticated caller, and several were: the dashboard reads,
+// the error-pipeline reads, and a fork-conversation write. Default-deny here
+// makes the guard the property of the router rather than something each new
+// route has to remember.
+//
+// This sits AFTER `/roles/check/:userId` deliberately. That route answers "is
+// the caller an admin" for the frontend and must stay reachable by non-admins;
+// it already resolves the requester itself and ignores the path parameter.
+// Routes registered above keep their explicit `requireClawAdmin` — redundant
+// now, but harmless, and removing them would make this ordering load-bearing
+// in a way that is easy to break later.
+router.use(requireClawAdmin);
+
+
 // ── Ratings aggregation ──────────────────────────────────────────────
 
 function cutoffFromDays(daysParam: unknown): Date | null {
