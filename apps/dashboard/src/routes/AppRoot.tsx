@@ -208,6 +208,7 @@ import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScree
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
+import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
@@ -1057,6 +1058,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'ai',
+                  element: (
+                    <ToolbarProtectedRoute path='/ai'>
+                      <Outlet />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     { index: true, element: <Navigate to='chat/new' replace /> },
                     { path: 'chat/new', element: <AIScreen /> },
@@ -1144,6 +1150,11 @@ export const router = createBrowserRouter(
                     // Directory routes (nested under dir)
                     {
                       path: 'dir',
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/dir'>
+                          <Outlet />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         {
                           index: true,
@@ -1252,7 +1263,11 @@ export const router = createBrowserRouter(
                     // DM routes (full screen with DM list sidebar)
                     {
                       path: 'dm',
-                      element: <DmsPage />,
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/dm'>
+                          <DmsPage />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         { index: true, element: null },
                         { path: 'compose', element: <KeyedComposeDmPanel /> },
@@ -1292,7 +1307,11 @@ export const router = createBrowserRouter(
                     // Canvas (full screen with 2-panel layout on desktop)
                     {
                       path: 'canvas',
-                      element: <CanvasPanel />,
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/canvas'>
+                          <CanvasPanel />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         {
                           index: true,
@@ -1307,7 +1326,11 @@ export const router = createBrowserRouter(
                     // Activity (full screen with activity list sidebar)
                     {
                       path: 'activity',
-                      element: <ActivityListView />,
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/activity'>
+                          <ActivityListView />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         { index: true, element: null },
                         // Desk/Support tickets opened from the Activity list render
@@ -1362,9 +1385,11 @@ export const router = createBrowserRouter(
                 {
                   path: 'claw-agents',
                   element: (
-                    <GuestBlockedRoute>
-                      <ClawAgentsScreen />
-                    </GuestBlockedRoute>
+                    <ToolbarProtectedRoute path='/claw-agents'>
+                      <GuestBlockedRoute>
+                        <ClawAgentsScreen />
+                      </GuestBlockedRoute>
+                    </ToolbarProtectedRoute>
                   ),
                   children: [
                     { index: true, element: <AgentsTab /> },
@@ -1398,7 +1423,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'knowledge-base',
-                  element: <KnowledgeBaseV2Layout />,
+                  element: (
+                    <ToolbarProtectedRoute path='/knowledge-base'>
+                      <KnowledgeBaseV2Layout />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     {
                       index: true,
@@ -1427,7 +1456,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'memory',
-                  element: <MemoryScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/memory'>
+                      <MemoryScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'analytics',
@@ -1543,7 +1576,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'releaseManager',
-                  element: <ReleaseManagerView />,
+                  element: (
+                    <ToolbarProtectedRoute path='/releaseManager'>
+                      <ReleaseManagerView />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'listProjects/:projectId',
@@ -1555,7 +1592,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'calls',
-                  element: <CallHistoryScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/calls'>
+                      <CallHistoryScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     {
                       path: ':callId/detail',
@@ -1573,7 +1614,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'recordings',
-                  element: <RecordingsRoute />,
+                  element: (
+                    <ToolbarProtectedRoute path='/recordings'>
+                      <RecordingsRoute />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'recordings/:recordingId',
@@ -1659,7 +1704,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'browser',
-                  element: <BrowserTabsScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/browser'>
+                      <BrowserTabsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'workspace-management',
@@ -1687,11 +1736,19 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'scheduled-messages',
-                  element: <ScheduledMessageScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/scheduled-messages'>
+                      <ScheduledMessageScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'automations',
-                  element: <AutomationsScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/automations'>
+                      <AutomationsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     { index: true, element: <AutomationsListScreen /> },
                     { path: 'approvals', element: <AutomationApprovalsScreen /> },
@@ -1703,7 +1760,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'apps',
-                  element: <AppsScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/apps'>
+                      <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'resource-access',
@@ -1747,7 +1808,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'guide',
-                  element: <UserGuideScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/guide'>
+                      <UserGuideScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
               ],
             },
