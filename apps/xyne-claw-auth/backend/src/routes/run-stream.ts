@@ -3,7 +3,7 @@ import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
-import { getRequesterId } from "../middleware/agent-acl.js";
+import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
@@ -60,6 +60,12 @@ interface PendingStream {
   reject: (error: Error) => void;
   setClosed: () => void;
   cookieHeader: string | undefined;
+  /** Whether this subscriber may receive `debug` frames. Debug frames carry the
+   *  full system prompt / instructions / tool policy (WAPT PY-JP-012), so they
+   *  must only reach the agent's owner/editors or a Claw admin. Resolved once
+   *  when the SSE opens — the internal /progress POST that forwards frames has
+   *  no end-user identity of its own. */
+  allowDebug: boolean;
 }
 
 interface StreamMeta {
@@ -175,7 +181,10 @@ function ensureStreamEventsSubscriber(): void {
     const stream = pendingStreams.get(msg.streamId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
-      for (const e of msg.events) stream.sendEvent(e.event, e.data);
+      for (const e of msg.events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
       return;
     }
     // result
@@ -412,6 +421,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
     const orgId = agentRow.orgId;
+
+    // Gate for `debug` SSE frames (system prompt / instructions / tool policy).
+    // Same predicate the /agent-chat stream uses: only the agent's editors or a
+    // Claw admin may watch a live debug trace. Resolved here (not in the
+    // /progress forwarder) because that forwarder is an internal S2S POST with
+    // no user identity.
+    const allowDebug = (await isClawAdmin(userId))
+      || (await getAgentEditAccess(userId, slug, orgId)).canEdit;
 
     const sdlcResolution = slug === "sdlc-agent"
       ? await resolveSdlcRepositoryForUser(
@@ -833,6 +850,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           closed = true;
         },
         cookieHeader: req.headers["cookie"] as string | undefined,
+        allowDebug,
       });
 
       setTimeout(() => {
@@ -1259,7 +1277,10 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
     if (events.length > 0) {
       const localStream = pendingStreams.get(streamId);
       if (localStream) {
-        for (const e of events) localStream.sendEvent(e.event, e.data);
+        for (const e of events) {
+          if (e.event === "debug" && !localStream.allowDebug) continue;
+          localStream.sendEvent(e.event, e.data);
+        }
       } else {
         publishStreamEvent({ kind: "progress", streamId, events });
       }
@@ -1690,6 +1711,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         if (CONFIG.liveToolCallsEnabled && toolLabel) publishLiveEvent(convId, { type: "label", conversationId: convId, agentSlug: slug, userId, toolLabel, ts: Date.now() });
       },
       onDebug: (_sid, debugEvent) => {
+        if (!stream.allowDebug) return;
         stream.sendEvent("debug", { debugEvent });
       },
       onCancelled: (_sid, reason) => {

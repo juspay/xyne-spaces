@@ -3181,7 +3181,13 @@ async function runAgentChatViaSse(
               }
             },
             onDebug: (_sid, debugEvent) => {
-              pendingStreams.get(callbackId)?.sendEvent("debug", { debugEvent });
+              // Same gate as the legacy /progress path (line ~325/1901): debug
+              // frames carry the full system prompt / tool policy, so only the
+              // agent's editors or a Claw admin may receive them. Without this
+              // check the SSE transport (CLAW_SSE_TRANSPORT=on) re-opens PY-JP-012.
+              const debugStream = pendingStreams.get(callbackId);
+              if (!debugStream?.allowDebug) return;
+              debugStream.sendEvent("debug", { debugEvent });
             },
             onCancelled: (_sid, reason) => {
               // Distinct cancel signal so the v3 chat UI can drop its typing
