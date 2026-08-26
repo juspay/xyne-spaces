@@ -222,7 +222,12 @@ export function AutomationsList({
               Create and manage workflows that react to events across your workspace.
             </p>
           </div>
-          <Button onClick={onCreate} className='shrink-0 font-semibold'>
+          <Button
+            onClick={onCreate}
+            data-track-category='automations-list'
+            data-track-name='CREATE_AUTOMATION'
+            className='shrink-0 font-semibold'
+          >
             <PlusDefault className='size-4' />
             New automation
           </Button>
@@ -562,7 +567,12 @@ function EmptyState({
         Build a no-code workflow that runs on a trigger — a schedule, a manual click, or an event
         from your workspace.
       </p>
-      <Button size='sm' onClick={onCreate}>
+      <Button
+        size='sm'
+        onClick={onCreate}
+        data-track-category='automations-list'
+        data-track-name='CREATE_AUTOMATION'
+      >
         <PlusDefault className='size-4' />
         Create your first automation
       </Button>

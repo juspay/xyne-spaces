@@ -1363,6 +1363,8 @@ const ChatDirectory = ({
           <div className='flex items-center justify-between gap-2'>
             <button
               onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT'
               className='h-8 px-4 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30 '
             >
               Chat
@@ -1370,6 +1372,8 @@ const ChatDirectory = ({
             <div className='z-30'>
               <button
                 onClick={() => setIsCommandMenuOpen(true)}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_COMMAND_MENU'
                 className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
               >
                 <SearchDefault size={16} />
@@ -1381,11 +1385,15 @@ const ChatDirectory = ({
         {/* Desktop */}
         {/* <div className=' sticky top-0 z-50 hidden min-[500px]:block pt-4 bg-sidebar-background'>
           <div className='pb-6 flex items-center justify-between'>
-            <button onClick={() => void navigate('/chat')} className='cursor-pointer'>
+            <button onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT' className='cursor-pointer'>
               <h2 className='text-black font-inter text-base font-semibold leading-normal'>Chat</h2>
             </button>
             <button
               onClick={() => setIsCommandMenuOpen(true)}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_COMMAND_MENU'
               className='size-8 items-center justify-center hidden min-[500px]:flex cursor-pointer'
             >
               <SearchDefault size={16} />
@@ -1419,6 +1427,9 @@ const ChatDirectory = ({
             onClick={() => {
               void navigate('/chat/bookmarks');
             }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_BOOKMARKS'
+            data-track-metadata={JSON.stringify({ overdueRemindersCount })}
           />
           <hr className='border-border mt-4' />
         </div> */}

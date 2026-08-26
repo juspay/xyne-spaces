@@ -150,7 +150,13 @@ const DigitalTwinSettingsTab = (): ReactElement => {
       </section>
 
       <div className='mt-8 flex items-center gap-3 border-t border-border pt-6'>
-        <Button onClick={save} loading={updateMutation.isPending} disabled={!dirty}>
+        <Button
+          onClick={save}
+          data-track-category='Claw Agents'
+          data-track-name='SAVE_DIGITAL_TWIN_SETTINGS'
+          loading={updateMutation.isPending}
+          disabled={!dirty}
+        >
           Save changes
         </Button>
         {!dirty && <span className='text-xs text-muted-foreground'>No unsaved changes</span>}

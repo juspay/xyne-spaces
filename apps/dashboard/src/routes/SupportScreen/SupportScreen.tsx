@@ -2628,7 +2628,11 @@ const SupportScreen = (): ReactElement => {
                               </span>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
-                              <DropdownMenuItem onClick={() => setShowRefetchDialog(true)}>
+                              <DropdownMenuItem
+                                onClick={() => setShowRefetchDialog(true)}
+                                data-track-category='Support'
+                                data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
+                              >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
                                   <span className='truncate'>Fetch latest emails</span>
@@ -2649,6 +2653,8 @@ const SupportScreen = (): ReactElement => {
                                 onClick={() => {
                                   if (!isDlMemberSyncing) setShowDlMemberSyncDialog(true);
                                 }}
+                                data-track-category='Support'
+                                data-track-name='OPEN_DL_MEMBER_SYNC_DIALOG'
                                 disabled={isDlMemberSyncing}
                               >
                                 <UserPlus size={14} className='mr-2 shrink-0' />
@@ -3089,6 +3095,8 @@ const SupportScreen = (): ReactElement => {
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
                               onClick={() => setFilters({})}
+                              data-track-category='Support'
+                              data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
@@ -5183,11 +5191,15 @@ export const SupportTicketDetail = ({
                         <Button
                           variant='secondary'
                           onClick={() => setShowArchiveConfirmDialog(false)}
+                          data-track-category='Support'
+                          data-track-name='CANCEL_ARCHIVE_TICKET'
                         >
                           Cancel
                         </Button>
                         <Button
                           onClick={() => handleArchiveTicket()}
+                          data-track-category='Support'
+                          data-track-name='CONFIRM_ARCHIVE_TICKET'
                           disabled={!ticket || !!ticket.isArchived || isArchivingTicket}
                           loading={isArchivingTicket}
                           className='bg-destructive text-destructive-foreground hover:bg-destructive/90'

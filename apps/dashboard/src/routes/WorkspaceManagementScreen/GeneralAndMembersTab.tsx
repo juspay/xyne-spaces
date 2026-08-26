@@ -289,6 +289,8 @@ export const GeneralAndMembersTab = ({
             <div className='flex items-center gap-4 pt-2'>
               <Button
                 onClick={() => void handleSaveGeneral()}
+                data-track-category='workspace-management'
+                data-track-name='SAVE_WORKSPACE_GENERAL'
                 disabled={!hasChanges || !name.trim()}
                 className='gap-2'
               >
@@ -411,6 +413,8 @@ export const GeneralAndMembersTab = ({
                           {user.role !== WorkspaceRole.ADMIN && (
                             <DropdownMenuItem
                               onClick={() => handleUpdateRole(user.id, WorkspaceRole.ADMIN)}
+                              data-track-category='workspace-management'
+                              data-track-name='SET_MEMBER_ROLE_ADMIN'
                             >
                               <Shield className='w-4 h-4 mr-2' />
                               Admin
@@ -419,6 +423,8 @@ export const GeneralAndMembersTab = ({
                           {user.role !== WorkspaceRole.MEMBER && (
                             <DropdownMenuItem
                               onClick={() => handleUpdateRole(user.id, WorkspaceRole.MEMBER)}
+                              data-track-category='workspace-management'
+                              data-track-name='SET_MEMBER_ROLE_MEMBER'
                               disabled={!canRemoveAdmin(user)}
                             >
                               <User className='w-4 h-4 mr-2' />
@@ -438,6 +444,8 @@ export const GeneralAndMembersTab = ({
                         variant='ghost'
                         size='sm'
                         onClick={() => handleRemoveMember(user.id, user.name)}
+                        data-track-category='workspace-management'
+                        data-track-name='OPEN_REMOVE_MEMBER_CONFIRM'
                         disabled={processingUserId === user.id || !canRemoveAdmin(user)}
                         className='text-destructive hover:text-destructive hover:bg-destructive/10'
                       >
@@ -519,6 +527,8 @@ export const GeneralAndMembersTab = ({
                 setShowRemoveDialog(false);
                 setUserToRemove(null);
               }}
+              data-track-category='workspace-management'
+              data-track-name='CANCEL_REMOVE_MEMBER'
               disabled={processingUserId === userToRemove?.id}
             >
               Cancel
@@ -526,6 +536,8 @@ export const GeneralAndMembersTab = ({
             <Button
               variant='destructive'
               onClick={confirmRemoveMember}
+              data-track-category='workspace-management'
+              data-track-name='CONFIRM_REMOVE_MEMBER'
               disabled={processingUserId === userToRemove?.id}
               className='gap-2'
             >

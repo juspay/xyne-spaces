@@ -174,6 +174,8 @@ export function ConditionalCard({
                 variant='outline'
                 size='sm'
                 onClick={() => setEditorOpen(true)}
+                data-track-category='automation-builder'
+                data-track-name='conditional-open-editor'
                 className='gap-1.5'
               >
                 <Pencil className='size-3.5' />

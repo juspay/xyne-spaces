@@ -34,6 +34,8 @@ export function CompareSelectRow({
       aria-pressed={selected}
       aria-disabled={!hasDebug}
       onClick={hasDebug ? onToggle : undefined}
+      data-track-category='SEARCH_COMPARE'
+      data-track-name='TOGGLE_COMPARE_ROW'
       onKeyDown={e => {
         if (hasDebug && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault();
