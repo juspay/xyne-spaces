@@ -440,6 +440,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
         ...prev,
         title: recordingRow.title || prev.title,
         labels: recordingRow.labels ?? prev.labels,
+        recordingParticipants: recordingRow.recordingParticipants ?? prev.recordingParticipants,
+        shares: recordingRow.shares ?? prev.shares,
         linkedTicketId,
         linkedTicketMessageId:
           typeof rawLinkedTicketMessageId === 'string' ? rawLinkedTicketMessageId : null,
@@ -470,7 +472,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       }
       return isSameRecordingSnapshot(prev, next) ? prev : next;
     });
-  }, [recordingRow]);
+  }, [recordingRow, recording?.externalId]);
 
   useEffect(() => {
     const request = getSummaryRequest(recordingId);

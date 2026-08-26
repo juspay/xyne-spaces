@@ -42,13 +42,14 @@ import {
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
   findNearestVisibleRecording,
+  formatRecordingParticipants,
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
   LIST_TAB_CLASS_NAME,
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
-import { normalizeRecordingTags } from '../../utils/recordingUtils';
+import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { SummaryTemplatesModal } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
@@ -84,7 +85,7 @@ const RecordingsV2Screen = (): ReactElement => {
     isLoading,
     error,
     refreshRecordings,
-  } = usePaginatedOatsRecordings(activeListTab);
+  } = usePaginatedOatsRecordings(activeListTab, selectedCreatorId);
   const currentUser = useSelf();
   const users = useUsers();
   const usersById = useMemo(() => new Map(users.map(user => [user.id, user])), [users]);
@@ -158,15 +159,14 @@ const RecordingsV2Screen = (): ReactElement => {
     [availableLabels, isManualLabel],
   );
 
-  /** An explicit pick in the People filter wins over the tab's shared-by picker. */
-  const selectedCreatorIds = useMemo(
-    () => (selectedCreatorId ? [selectedCreatorId] : selectedSharerIds),
-    [selectedCreatorId, selectedSharerIds],
-  );
-
+  /**
+   * The People filter is applied server-side by the recordings query, so only the
+   * tab's shared-by picker still narrows the loaded page — and an explicit pick in
+   * the People filter wins over it.
+   */
   const ownershipFilteredRecordings = useMemo(
-    () => filterRecordingsByOwnership(recordings, selectedCreatorIds),
-    [recordings, selectedCreatorIds],
+    () => filterRecordingsByOwnership(recordings, selectedCreatorId ? [] : selectedSharerIds),
+    [recordings, selectedCreatorId, selectedSharerIds],
   );
 
   const liveRecording = useMemo(() => {
@@ -244,15 +244,9 @@ const RecordingsV2Screen = (): ReactElement => {
     [activeListTab, setActiveListTab],
   );
 
-  const handleCreatorChange = useCallback(
-    (creatorId: string | null): void => {
-      setSelectedCreatorId(creatorId);
-      if (creatorId) {
-        setActiveListTab(creatorId === currentUser?.id ? 'created' : 'shared');
-      }
-    },
-    [currentUser?.id, setActiveListTab],
-  );
+  const handleCreatorChange = useCallback((creatorId: string | null): void => {
+    setSelectedCreatorId(creatorId);
+  }, []);
 
   const handleOpenRecording = useCallback(
     (recordingId: string): void => {
@@ -433,7 +427,7 @@ const RecordingsV2Screen = (): ReactElement => {
                 <RecordingDateFilter value={selectedDatePreset} onChange={setSelectedDatePreset} />
 
                 <RecordingPeopleFilter
-                  creators={availableCreators}
+                  creators={users}
                   currentUserId={currentUser?.id}
                   selectedUserId={selectedCreatorId}
                   onUserChange={handleCreatorChange}
@@ -549,7 +543,8 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'>
                 <RecordingsEmptyStateIllustration />
                 <h2 className='text-base font-semibold text-foreground'>
-                  {selectedCreatorIds.length > 0 ||
+                  {selectedCreatorId !== null ||
+                  selectedSharerIds.length > 0 ||
                   selectedLabels.length > 0 ||
                   ownershipFilteredRecordings.length > 0
                     ? 'No matching recordings'
@@ -603,6 +598,14 @@ const RecordingsV2Screen = (): ReactElement => {
                       <RecordingsV2Pill
                         recording={row.recording}
                         creator={usersById.get(row.recording.createdByUserId) ?? null}
+                        participantsLabel={formatRecordingParticipants(
+                          getRecordingParticipantIds(
+                            row.recording.createdByUserId,
+                            row.recording.recordingParticipants,
+                          ),
+                          usersById,
+                          currentUser?.id,
+                        )}
                         tags={row.recording.labels.filter(isManualLabel)}
                         resolveLabel={resolveLabel}
                         currentUserId={currentUser?.id}

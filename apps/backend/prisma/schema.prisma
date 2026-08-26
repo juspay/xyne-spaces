@@ -2731,6 +2731,7 @@ model Call {
   callUpdatesChannel String?   // Non-null = post call updates to this channel (Case 3); null = no broadcast
   participantCount Int?        // Denormalized total CallParticipant rows; nullable until backfilled
   participantPreviewUserIds String? // Stringified JSON: list of { userId: string , hasJoined: boolean }
+  recordingParticipants String @default("[]") // Stringified JSON: string[] of user ids this recording is about
   summaryTemplateId String?
   labels            String[]    @default([]) // Tag ids (see Tag model); no FK constraint
   markedItems       Json[]      @default([]) // Marked moments/decisions/actions surfaced during the call
