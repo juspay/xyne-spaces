@@ -96,6 +96,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: ChatChatting,
     iconSize: 18,
   },
+  { path: '/slack-migration', label: 'Slack Migration', icon: SwapArrowHorizontal, iconSize: 18 },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom },
   { path: '/claw-agents', label: 'Claw Agents', icon: Bot },
 ];
