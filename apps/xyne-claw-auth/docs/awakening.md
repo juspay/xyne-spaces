@@ -204,8 +204,8 @@ All of it lives under `agent.config.awakening`. Two layers validate it:
 | `periodMs` | int | `1_800_000` (30m) | Heartbeat period. Range 5m – 24h |
 | `writePolicy` | `observe` \| `reply` \| `act` | `reply` | Enforced as tool denials, §7.1 |
 | `shadow` | boolean | `true` | Overrides `writePolicy` down to `observe` |
-| `instructions` | string | `""` | Owner-written guidance, ≤ 4000 chars. §7.3 |
-| `workspaceId` | string? | — | Explicit Spaces workspace, when the org maps to more than one |
+| `instructions` | string | `""` | Owner-written guidance, ≤ 10000 chars. §7.3 |
+| `workspaceId` | string? | — | Rarely needed. The workspace is resolved from the agent's own bot user; this only pins it when that user cannot be read, and it must match the bot's workspace |
 
 ### 4.2 Channels
 
@@ -721,7 +721,7 @@ but cannot make a run mute or make it answer itself.
 
 ### 7.3 Operator instructions
 
-`awakening.instructions`, up to 4000 chars, edited in the Awakening tab. Meant
+`awakening.instructions`, up to 10000 chars, edited in the Awakening tab. Meant
 for tone and triage — *"Keep it short and warm. Jump in when someone is blocked
 or waiting on an answer. Stay out of social chatter."* It is advisory by
 construction: it cannot override the write policy or the bounds.
@@ -902,6 +902,22 @@ plus the last 20 runs.
 > at all. A reflex blocked by `maxRunsPerHour` leaves no trace whatsoever. See
 > §14 open defect 12.
 
+**Metrics page.** The workspace view has an **Awakened agents** section
+(`GET /metrics/awakening`, rendered by `AwakeningActivityCard`): wakes vs acted
+vs stayed-quiet vs failed for the window, a per-agent breakdown by wake kind, the
+distribution of gate skip reasons, and a banner listing agents the workers have
+stopped along with their `lastError`. It fetches separately from the rest of the
+page because awakened runs have no `userId` — the user-scoped filters every
+other metrics endpoint applies would drop them. The section hides itself
+entirely for a workspace where nothing has ever woken.
+
+Clicking an agent expands its full wake history, paginated
+(`GET /metrics/awakening/:agentId/runs`, 20 per page). Every wake ATTEMPT is a
+row — a skipped wake carries the gate rule that fired, which is usually what you
+opened it to find out — and a wake that dispatched links straight to its
+transcript. Org scoping is applied to the RUN rows, not just the agent, so an
+admin scoped to one org cannot page through another org's history by id.
+
 **Logs.** Dispatch, gate decisions, channel truncation, watermark rewinds, and
 injection batches all log at `info`. A reflex `wait` **while a run is in flight**
 also logs, because that is the state operators most often need when asking "why
@@ -972,7 +988,7 @@ must be set on **every** API pod to have any effect.
 | `rate-limit.ts` | `peekRunRate` / `consumeRunRate` |
 | `inbox.ts` | Injection batch queue |
 | `reflex.ts` | `countEventsSince`, `decideReflex`, `renderInjection` |
-| `workspace.ts` | org → Spaces workspace resolution |
+| `workspace.ts` | Spaces workspace resolution — bot user first, org link as fallback |
 
 **claw-auth — elsewhere**
 
@@ -1003,6 +1019,9 @@ carried.
 | 1 | **`kind: "reflex"` agents were permanently killed.** The heartbeat tick cleared `state.enabled` for any agent that did not participate in *heartbeat*, and the reflex claim scan requires `enabled = TRUE`. The first heartbeat tick that claimed a reflex-only agent disabled it forever. | `enabled` and "participates in this kind" are now two different questions. A non-participating cadence is **parked** (`nextDueAt`/`reflexNextCheckAt` pushed out by `IDLE_REPARK_MS`), never disabled. Regression test in `awakening-tick-kind.test.ts`. |
 | 2 | **The config editor deleted settings it does not model.** `AwakeningSettings` has no control for `workspaceId`, `limits.maxActiveThreads`, `cursor.overlapMs` or `cursor.maxCatchupWindows`, and the tab persisted `{...agent.config, awakening: draft}` — replacing the block wholesale. Opening the tab and pressing Save reset four settings the admin never touched. | The save path now merges over the stored block, section by section, so unmodeled keys survive. |
 
+| 3 | **Workspace resolution read the wrong source.** `resolveWorkspaceId` consulted only `SurfaceTenantLink` (org → workspace). Nothing in the product ever writes that table for Spaces — the sole writer is `prisma/seed.ts` — so it is empty in production, and a `WorkspaceResolutionError` then **permanently disabled** the agent. Two live prod agents were switched off this way on 2026-08-26, while the UI still showed them enabled. | Resolve from the agent's **own bot user** (`users.workspaceId` in Spaces, via `getWorkspaceIdForUser`), exactly as `credentials-loader.ts` already did for app-tools; fall back to the link table only when that user cannot be read. Needs no configuration, and a multi-workspace org is no longer ambiguous — the bot is in exactly one. 12 tests. |
+| 4 | **A recoverable gap was treated as fatal, invisibly.** `WorkspaceResolutionError` was grouped with `AwakeningIdentityError` and cleared `state.enabled`; the tab reads `config.awakening.enabled`, so the agent kept rendering as on. | Only identity failures disable now (an agent with no bot identity must never fall back to a user token). A workspace error records `lastError`, stays enabled and retries on the normal cadence — and clears itself on the next success, on both the heartbeat and reflex paths. The tab shows a banner when the state row disagrees with the config. |
+
 ### Open
 
 | # | Defect | Impact |
@@ -1020,7 +1039,7 @@ carried.
 | 12 | **The reflex path records almost nothing.** A run row is created only on `fire`; `wait`, every `hold`, `inject`, rate-limited, lock-busy, no-channels and empty-collect all return silently. | A reflex blocked by `maxRunsPerHour` produces no row *and* no log, where the heartbeat records `skipReason: "rate_limited"`. §11's "answers why it did/didn't wake" holds for heartbeat only. |
 | 13 | **A retried window keeps the wrong outcome.** Dispatch failure records `outcome="failed"` *and* throws, triggering the BullMQ retry (`attempts: 3`). The retry recomputes an identical `idempotencyKey`, so the success-path insert hits `P2002` and is swallowed. | The row stays `failed` with `sessionId` NULL for a wake that actually ran — so `/status` lies, and the injection bookkeeping keyed on `sessionId` can never match it. `markFailure` also fires up to 3× for one beat, driving the backoff to 2³ = 8 (4 h at the default period, not the "within one hour" the code comment promises). |
 | 14 | **A dead claw pod loses injected events permanently.** The §8.2 rewind runs only in the result callback. If the owning pod dies, no callback fires: the batch expires with its 1 h TTL, the reflex watermark stays advanced past those events, and the lock is held until its own TTL. Nothing reaps `agent_awakening_runs` rows with `completedAt IS NULL`. | Blast radius is one inbox (≤ 20 batches) per dead run. Recovery is manual. |
-| 15 | **No product path re-enables a self-disabled agent.** Both workers set `enabled: false` on `AwakeningIdentityError` / `WorkspaceResolutionError`. `/status` is read-only, and `syncAwakeningState` re-enables only via a PUT. | The runbook is "fix the identity, then press Save" — which is not discoverable and is nowhere in the UI. |
+| 15 | **Re-enabling a self-disabled agent is still a PUT.** `AwakeningIdentityError` (only) sets `enabled: false`, and `syncAwakeningState` re-enables solely via a PUT. | Now at least visible — the tab shows a "switched off" banner with `lastError` and tells the admin to press Save (see Fixed #4). A dedicated re-enable action would be better than overloading Save. |
 
 | 16 | **`reflex.checkIntervalMs` below `AWAKENING_TICK_MS` is a silent no-op.** Reflex rows are claimed by the fleet tick, so the effective cadence is `max(checkIntervalMs, tickIntervalMs)` — 60s by default. The UI's `REFLEX_CHECK_OPTIONS` offers 15s and 30s, and `AWAKENING_BOUNDS.reflexCheckIntervalMs.MIN` is 15s, so the editor lets an admin pick values that can never be honoured. | Directly defeats live injection on short runs: a run must survive a full tick to be injectable, so anything finishing in under ~60s never receives an update no matter how the reflex knobs are set. Either raise the UI's floor to the tick interval, or drive the tick from the smallest configured reflex interval. |
 
@@ -1044,8 +1063,9 @@ Two related notes that are working as intended but read as surprises:
 - **Steering only lands at a turn boundary.** An agent that stops calling tools
   cannot be reached again; queued batches are returned to the next wake.
 - **Heartbeat windows are sealed.** Injection is reflex-only by design.
-- **One workspace per agent.** `workspaceId` picks it when the org maps to more
-  than one; there is no multi-workspace fan-out.
+- **One workspace per agent.** The agent's bot user belongs to exactly one
+  Spaces workspace and that is the one it acts in; there is no multi-workspace
+  fan-out. An org with several workspaces needs one agent per workspace.
 - **`maxChannels` truncation is silent to the channel, visible to the agent** —
   it is recorded in the artifact header, not surfaced as an admin alert.
 - **An awakened run has an effective 20-minute ceiling** while defect 10 stands.
