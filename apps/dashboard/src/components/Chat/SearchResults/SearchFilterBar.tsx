@@ -95,16 +95,10 @@ const SORT_OPTIONS = [
   { value: 'oldest' as const, label: 'Oldest' },
 ];
 
-// Hardcoded Vespa rank profiles, scoped to the schema(s) each docType resolves to.
-// Only profiles that exist in every schema the type queries are listed, because Vespa
-// rejects a rank profile that is missing from any queried schema. Selecting a single
-// type prunes the query's sources to that one schema (see searchService.ts), which is
-// what makes the chat-only and mail-only profiles below valid.
-//
-// These are the EXPLICIT picks. getRankProfileOptions() prepends a `value: ''` row
-// meaning "no explicit pick": the request layer resolves '' to the per-tab default from
-// the cmdk_search_config CAC key (see useCmdkDefaultRankProfiles), so that row is
-// labeled with the resolved default at render time — never hardcoded here.
+// Explicit rank-profile picks per docType, scoped to the schema(s) each type queries —
+// Vespa rejects a profile missing from any queried schema. getRankProfileOptions()
+// prepends a `value: ''` row ("no explicit pick"), labeled with the per-tab CAC default
+// (useCmdkDefaultRankProfiles) at render time — the default is never hardcoded here.
 type RankProfileOption = { value: string; label: string };
 const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   Record<SearchResultsFilters['docType'], RankProfileOption[]>
@@ -151,7 +145,7 @@ function getRankProfileOptions(
   if (!explicit) return [];
   return [
     { value: '', label: resolvedDefault },
-    // The default row already covers this profile; a second row would send the same one.
+    // drop the explicit row the default row already covers
     ...explicit.filter(o => o.value !== resolvedDefault),
   ];
 }
@@ -269,8 +263,7 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const rankProfileOptions = getRankProfileOptions(filters.docType, resolvedDefaultRankProfile);
   const showRankProfile = rankProfileOptions.length > 0;
   const isRankActive = filters.rankProfile !== '';
-  // '' always matches the prepended default row; the fallback only covers a profile
-  // set via URL that is not in the hardcoded list — show it verbatim.
+  // fallback: a profile not in the list — show it verbatim
   const rankProfileLabel =
     rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ?? filters.rankProfile;
 
@@ -796,9 +789,8 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                   <Check
                     className={cn(
                       'size-3.5 shrink-0',
-                      // The default row also owns an explicit pick equal to the resolved
-                      // default (possible when the CAC config arrives after the pick) —
-                      // that explicit row is deduped away, and both send the same profile.
+                      // the default row also owns an explicit pick equal to the default
+                      // (its own row is deduped away; both send the same profile)
                       filters.rankProfile === opt.value ||
                         (opt.value === '' && filters.rankProfile === resolvedDefaultRankProfile)
                         ? 'opacity-100'
