@@ -1,3 +1,17 @@
+## [1.228.0](https://github.com/juspay/xyne-spaces/compare/v1.227.0...v1.228.0) (2026-08-26)
+
+
+### Features
+
+* : Backend changes for spaces-desk-metrics ([#829](https://github.com/juspay/xyne-spaces/issues/829)) ([19d204d](https://github.com/juspay/xyne-spaces/commit/19d204d3fec5659b38f2a223911586d6478787cf))
+
+
+### Bug Fixes
+
+* allow recording sharing without canvases ([#1063](https://github.com/juspay/xyne-spaces/issues/1063)) ([1ea9cca](https://github.com/juspay/xyne-spaces/commit/1ea9cca33e281adbd07f73254a0da2502c916f8e))
+* call details page UI change ([#1028](https://github.com/juspay/xyne-spaces/issues/1028)) ([0dbbeda](https://github.com/juspay/xyne-spaces/commit/0dbbeda040402ca2f8ae23f36c8bf31b29bc062c))
+* channel forward now gates success on server ack (stops silent first-attempt failure) ([#1046](https://github.com/juspay/xyne-spaces/issues/1046)) ([e0be083](https://github.com/juspay/xyne-spaces/commit/e0be083fbe2f6e8139441dddd94249f00d84f3f8))
+
 ## [1.227.0](https://github.com/juspay/xyne-spaces/compare/v1.226.0...v1.227.0) (2026-08-26)
 
 
