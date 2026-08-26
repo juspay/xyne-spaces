@@ -121,7 +121,6 @@ export class DeskMetricsRepository {
       priorities,
       userGroupIds,
       tagValues,
-      aiCategories,
       customFieldFilter,
     } = params;
     const aiCategories = params.aiCategories ?? [];
