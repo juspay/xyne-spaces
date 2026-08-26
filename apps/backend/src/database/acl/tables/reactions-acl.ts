@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import {
   getAccessibleChannelIds,
+  getConnectAccessibleChannelIds,
   hasGuestChannelAccess,
   isGuestContext,
 } from './channel-access-helper'
@@ -15,37 +16,53 @@ export class ReactionsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.ReactionWhereInput> {
+    // Slack-Connect: reactions on connect channels the caller is an active member of, across orgs.
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+    const connectBranch: Prisma.ReactionWhereInput = {
+      message: { conversation: { channelId: { in: connectChannelIds } } },
+    }
+
     if (isGuestContext(this.ctx)) {
       const channelIds = await getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx)
 
       return {
-        message: {
-          conversation: {
-            channel: {
-              workspaceId: this.ctx.workspaceId ?? '',
-              id: { in: channelIds },
+        OR: [
+          {
+            message: {
+              conversation: {
+                channel: {
+                  workspaceId: this.ctx.workspaceId ?? '',
+                  id: { in: channelIds },
+                },
+              },
             },
           },
-        },
+          connectBranch,
+        ],
       }
     }
 
     return {
-      message: {
-        conversation: {
-          channel: {
-            AND: [
-              { workspaceId: this.ctx.workspaceId },
-              {
-                OR: [
-                  { visibility: 'PUBLIC' },
-                  { participants: { some: { userId: this.ctx.userId } } },
+      OR: [
+        {
+          message: {
+            conversation: {
+              channel: {
+                AND: [
+                  { workspaceId: this.ctx.workspaceId },
+                  {
+                    OR: [
+                      { visibility: 'PUBLIC' },
+                      { participants: { some: { userId: this.ctx.userId } } },
+                    ],
+                  },
                 ],
               },
-            ],
+            },
           },
         },
-      },
+        connectBranch,
+      ],
     }
   }
 

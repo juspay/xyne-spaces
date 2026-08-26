@@ -784,6 +784,7 @@ export const channelTable = table('channels')
     isMigrated: boolean().optional(),
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
     isArchived: boolean(),
+    isConnectEnabled: boolean(), // Slack-Connect: channel is connect-capable (enables invite UI)
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
   })
@@ -799,6 +800,33 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+// Slack-Connect (cross-workspace shared channels). connect_request is NOT here —
+// it lives in the non_zero Postgres schema and is accessed via REST only.
+export const connectChannelTable = table('connect_channel' /* ConnectChannel */)
+  .columns({
+    id: string(),
+    hostChannelId: string(),
+    hostWorkspaceId: string(),
+    guestWorkspaceId: string(),
+    guestChannelId: string().optional(),
+    status: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const connectChannelMemberTable = table('connect_channel_member' /* ConnectChannelMember */)
+  .columns({
+    id: string(),
+    channelId: string(),
+    userId: string(),
+    userWorkspaceId: string(),
+    leftAt: number().optional(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -3021,6 +3049,12 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ['userId'],
     destSchema: userPresenceTable,
   }),
+  // Slack-Connect: this user's connect-channel memberships (for cross-org user resolution).
+  connectMemberships: many({
+    sourceField: ['id'],
+    destField: ['userId'],
+    destSchema: connectChannelMemberTable,
+  }),
   resourceAccess: many({
     sourceField: ['id'],
     destField: ['userId'],
@@ -3156,11 +3190,17 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
   }),
 }));
 
-export const userPresenceTableRelationships = relationships(userPresenceTable, ({ one }) => ({
+export const userPresenceTableRelationships = relationships(userPresenceTable, ({ one, many }) => ({
   user: one({
     sourceField: ['userId'],
     destField: ['id'],
     destSchema: userTable,
+  }),
+  // Slack-Connect: presence row → that user's connect memberships (cross-org resolution).
+  connectMemberships: many({
+    sourceField: ['userId'],
+    destField: ['userId'],
+    destSchema: connectChannelMemberTable,
   }),
 }));
 
@@ -3358,6 +3398,13 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
+  // Slack-Connect: the flat cross-org member index for this channel (host channel id).
+  // Used by connectChannelAccessWhere to gate connect-channel content on active membership.
+  connectMembers: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: connectChannelMemberTable,
+  }),
 }));
 
 export const channelBoardMappingTableRelationships = relationships(
@@ -3406,6 +3453,17 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     destSchema: repoTable,
   }),
 }));
+// Slack-Connect: a member row → its host channel (for the cross-org user-resolution self-join).
+export const connectChannelMemberTableRelationships = relationships(
+  connectChannelMemberTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+  }),
+);
 
 export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
   repo: one({
@@ -4769,6 +4827,8 @@ export const schema = createSchema({
     guestAccessTable,
     channelTable,
     channelBoardMappingTable,
+    connectChannelTable,
+    connectChannelMemberTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -4902,6 +4962,7 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     channelBoardMappingTableRelationships,
+    connectChannelMemberTableRelationships,
     channelStatsTableRelationships,
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
@@ -5041,6 +5102,8 @@ export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
+export type ConnectChannel = Row<typeof schema.tables.connect_channel>;
+export type ConnectChannelMember = Row<typeof schema.tables.connect_channel_member>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;

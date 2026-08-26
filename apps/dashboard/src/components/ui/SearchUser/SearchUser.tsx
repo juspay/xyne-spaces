@@ -29,6 +29,12 @@ interface SearchUserProps {
   autoFocus?: boolean;
   /** When set, only users whose id is in this set are shown (e.g. project members for share collection) */
   allowedUserIds?: Set<string> | null;
+  /**
+   * Slack-Connect: when true, hide EXTERNAL (cross-workspace) users. `useActiveUserSearch` now surfaces
+   * connect co-members from other orgs (needed for DMs/group-DMs), but a plain DEFAULT channel must only
+   * ever add same-org people — externals join a channel exclusively via the connect invite flow.
+   */
+  restrictToSameWorkspace?: boolean;
 }
 
 export const SearchUser: React.FC<SearchUserProps> = ({
@@ -43,6 +49,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   channelId,
   autoFocus = false,
   allowedUserIds,
+  restrictToSameWorkspace = false,
 }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -72,6 +79,16 @@ export const SearchUser: React.FC<SearchUserProps> = ({
     if (!searchResults) return [];
 
     return searchResults.filter(user => {
+      // Slack-Connect: on a plain channel, hide anyone outside the current user's workspace.
+      if (
+        restrictToSameWorkspace &&
+        selfUser?.workspaceId &&
+        user.workspaceId &&
+        user.workspaceId !== selfUser.workspaceId
+      ) {
+        return false;
+      }
+
       // If channelId is provided, only show users who are channel participants
       if (channelUserIds && !channelUserIds.has(user.id)) {
         return false;
@@ -89,7 +106,15 @@ export const SearchUser: React.FC<SearchUserProps> = ({
 
       return !isExcluded;
     });
-  }, [searchResults, excludeUserIds, selectedUsers, channelUserIds, allowedUserIds]);
+  }, [
+    searchResults,
+    excludeUserIds,
+    selectedUsers,
+    channelUserIds,
+    allowedUserIds,
+    restrictToSameWorkspace,
+    selfUser?.workspaceId,
+  ]);
 
   // Get filtered users (limit to 10)
   const filteredUsers = availableUsers.slice(0, 10);
@@ -309,6 +334,14 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                               <span className='inline-flex'>{renderEmoji(user.statusEmoji)}</span>
                             )}
                         </span>
+                        {/* Slack-Connect: user from another workspace (reachable via a shared connect channel). */}
+                        {!!selfUser?.workspaceId &&
+                          !!user.workspaceId &&
+                          user.workspaceId !== selfUser.workspaceId && (
+                            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 shrink-0'>
+                              External
+                            </span>
+                          )}
                         {isUserDeactivated(user) && (
                           <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
                             Deactivated

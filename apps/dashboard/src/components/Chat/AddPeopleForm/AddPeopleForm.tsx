@@ -13,7 +13,7 @@ import { channelService } from '../../../services/Chat/channelService';
 import { useMutation } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { isOneToOneDMChannel, parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 
 interface AddPeopleFormProps {
@@ -41,10 +41,16 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   const [participantsData] = useCachedQuery(queries.channelParticipants({ channelId }));
   const isDM = channel ? isOneToOneDMChannel(channel.scopeType) : false;
 
-  const existingUserIds = useMemo(
-    () => propExistingUserIds || (participantsData || []).map(p => p.userId),
-    [propExistingUserIds, participantsData],
-  );
+  const existingUserIds = useMemo(() => {
+    if (propExistingUserIds) return propExistingUserIds;
+    if (
+      channel &&
+      (channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM)
+    ) {
+      return parseDMParticipantIds(channel);
+    }
+    return (participantsData || []).map(p => p.userId);
+  }, [propExistingUserIds, participantsData, channel]);
 
   const createGroupDmFromDmMutation = useMutation({
     mutationFn: (participantIds: string[]) => channelService.createDm({ participantIds }),
@@ -202,6 +208,9 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           label='Search Users'
           hintText='Search by name or email to find users to add'
           autoFocus={!isMobile}
+          // Slack-Connect: a plain DEFAULT channel only ever adds same-org people; externals join via the
+          // connect invite flow. DMs/group-DMs keep cross-org candidates (reachability-gated on submit).
+          restrictToSameWorkspace={channel?.scopeType === ChannelScopeType.DEFAULT}
         />
       </div>
 

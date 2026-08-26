@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { useConnectAwareParticipantCount } from '../../../hooks/useHostChannelId';
 import Drawer from '../../ui/Drawer';
 import AddPeopleForm from '../AddPeopleForm/AddPeopleForm';
 import { getTargetUserIdForCall } from '../ConversationHeader/ConversationHeader.utils';
@@ -57,6 +58,8 @@ const ConversationHeaderMobile = ({
   const context = useAuthContextValues();
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const dmUser = useUser(avatarUserId || '');
+  // Slack-Connect: full cross-org roster count for connect channels (not the pointer's local stat).
+  const memberCount = useConnectAwareParticipantCount(channel);
 
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -169,9 +172,7 @@ const ConversationHeaderMobile = ({
                   {dmUser.statusContent}
                 </small>
               ) : (
-                <small className='text-muted-foreground text-xs'>
-                  {channel.channelStats?.participantCount} members
-                </small>
+                <small className='text-muted-foreground text-xs'>{memberCount} members</small>
               )}
             </div>
           </motion.div>
@@ -260,9 +261,7 @@ const ConversationHeaderMobile = ({
                 <span className='text-sm font-medium text-foreground'>
                   {channelScopeType === ChannelScopeType.DM ? 'Profile' : 'Members'}
                 </span>
-                <span className='text-sm font-medium text-foreground ml-auto'>
-                  {channel.channelStats?.participantCount}
-                </span>
+                <span className='text-sm font-medium text-foreground ml-auto'>{memberCount}</span>
                 <span>
                   <ChevronRight size={16} />
                 </span>
@@ -295,9 +294,7 @@ const ConversationHeaderMobile = ({
               {...(targetUserId && { targetUserIds: [targetUserId] })}
               {...(channel.scopeType && { scopeType: channel.scopeType })}
               {...(displayName && { channelName: displayName })}
-              {...(channel.channelStats?.participantCount !== undefined && {
-                participantCount: channel.channelStats?.participantCount,
-              })}
+              participantCount={memberCount}
               callDisplayName={displayName}
               isMember={!!channelUserStatus}
               className={cn('rounded-full', floatingButtonClass)}

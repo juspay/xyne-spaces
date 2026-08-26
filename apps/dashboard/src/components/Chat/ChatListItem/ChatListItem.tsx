@@ -22,6 +22,8 @@ type ChatListItemProps = {
   index: number;
   chatListItems: ChatListItemWithSeparator[];
   channelId: string;
+  // Slack-Connect: pointer id for navigation/URLs (host `channelId` is for content only).
+  navChannelId?: string | undefined;
   projectId?: string | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   handleOpenThread: (conversationId: string, e?: React.MouseEvent) => void;
@@ -36,6 +38,7 @@ const ChatListItemComponent = ({
   index,
   chatListItems,
   channelId,
+  navChannelId,
   projectId,
   channelScopeType,
   handleOpenThread,
@@ -107,6 +110,7 @@ const ChatListItemComponent = ({
       <ChatBubble
         message={message}
         channelId={channelId}
+        navChannelId={navChannelId ?? channelId}
         projectId={projectId}
         channelScopeType={channelScopeType}
         showAvatar={showAvatar}

@@ -3,6 +3,8 @@ import { ChannelParticipant } from '@prisma/client';
 import { ChannelRole, UserStatus, UserType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
+import { connectMemberSyncService } from '@/services/connectMemberSyncService';
+import { logger } from '@/utils/logger';
 
 export interface CreateChannelParticipantInput {
   channelId: string;
@@ -51,7 +53,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       await this.validateEnum(data.role, 'role', ['ADMIN', 'MEMBER']);
     }
 
-    return await this.db.$transaction(async (tx) => {
+    const participant = await this.db.$transaction(async (tx) => {
       const now = new Date();
       const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(
         tx,
@@ -98,6 +100,14 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
       return participant;
     });
+
+    // Slack-Connect: mirror into connect_channel_member (idempotent, no-op for
+    // non-connect channels). Runs post-commit, outside the transaction.
+    await connectMemberSyncService
+      .mirrorParticipantAdded(data.channelId, data.userId)
+      .catch((err) => logger.error(`[ChannelParticipantRepository] connect member sync (create) failed: ${err}`));
+
+    return participant;
   }
 
   async findById(id: string): Promise<ChannelParticipant | null> {
@@ -144,14 +154,21 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
   }
 
   async delete(id: string): Promise<ChannelParticipant> {
-    return await this.db.channelParticipant.delete({
+    const deleted = await this.db.channelParticipant.delete({
       where: { id }
     });
+
+    // Slack-Connect: mirror the removal into connect_channel_member (tombstone).
+    await connectMemberSyncService
+      .mirrorParticipantRemoved(deleted.channelId, deleted.userId)
+      .catch((err) => logger.error(`[ChannelParticipantRepository] connect member sync (delete) failed: ${err}`));
+
+    return deleted;
   }
 
   // Channel Participant specific methods
   async addParticipant(channelId: string, userId: string, role: ChannelRole = ChannelRole.MEMBER, isClosed: boolean = false): Promise<ChannelParticipant> {
-    return await this.db.$transaction(async (tx) => {
+    const participant = await this.db.$transaction(async (tx) => {
       const now = new Date();
       const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(tx, channelId, now);
       // Check if participant already exists
@@ -207,6 +224,14 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
       return participant;
     });
+
+    // Slack-Connect: mirror into connect_channel_member (idempotent, no-op for
+    // non-connect channels).
+    await connectMemberSyncService
+      .mirrorParticipantAdded(channelId, userId)
+      .catch((err) => logger.error(`[ChannelParticipantRepository] connect member sync (add) failed: ${err}`));
+
+    return participant;
   }
 
   async removeParticipant(channelId: string, userId: string): Promise<void> {
@@ -232,6 +257,11 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         data: { participantCount: { decrement: 1 } },
       });
     });
+
+    // Slack-Connect: mirror the removal into connect_channel_member (tombstone).
+    await connectMemberSyncService
+      .mirrorParticipantRemoved(channelId, userId)
+      .catch((err) => logger.error(`[ChannelParticipantRepository] connect member sync (remove) failed: ${err}`));
   }
 
   async findParticipant(channelId: string, userId: string): Promise<ChannelParticipant | null> {
@@ -348,7 +378,10 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       return { addedCount: 0, existingCount: 0 };
     }
 
-    return await this.db.$transaction(async (tx) => {
+    // Hoisted so the post-commit connect-member mirror can see which users were added.
+    let addedUserIds: string[] = [];
+
+    const result = await this.db.$transaction(async (tx) => {
       const now = new Date();
       const conversationSeenCutoffAt = overrideCutoffAt !== undefined
         ? overrideCutoffAt
@@ -371,6 +404,8 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       if (newUserIds.length === 0) {
         return { addedCount: 0, existingCount: existingUserIds.size };
       }
+
+      addedUserIds = newUserIds;
 
       const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: channelId });
 
@@ -405,6 +440,16 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
       return { addedCount: newUserIds.length, existingCount: existingUserIds.size };
     });
+
+    // Slack-Connect: mirror each newly-added participant into connect_channel_member
+    // (idempotent, no-op for non-connect channels). Post-commit, outside the transaction.
+    for (const userId of addedUserIds) {
+      await connectMemberSyncService
+        .mirrorParticipantAdded(channelId, userId)
+        .catch((err) => logger.error(`[ChannelParticipantRepository] connect member sync (batch add) failed for ${userId}: ${err}`));
+    }
+
+    return result;
   }
 
   async getParticipantRole(channelId: string, userId: string): Promise<string | null> {

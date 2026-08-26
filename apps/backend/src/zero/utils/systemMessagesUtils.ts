@@ -57,7 +57,20 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
     operationType: ParticipantOperationType;
   }
 ): Promise<void> {
-  const channelId = channel.id;
+  // Slack-Connect: if `channel` is a guest POINTER channel, the participant add/remove system
+  // message must land on the HOST channel so everyone in the connect channel (host + every guest
+  // org) sees it — otherwise it's siloed in one guest workspace's pointer and invisible to the host.
+  let effectiveChannel = channel;
+  if (channel.isConnectEnabled !== true) {
+    const link = await tx.run(
+      zql.connect_channel.where('guestChannelId', channel.id).where('status', 'ACTIVE').one(),
+    );
+    if (link) {
+      const hostChannel = await tx.run(zql.channels.where('id', link.hostChannelId).one());
+      if (hostChannel) effectiveChannel = hostChannel;
+    }
+  }
+  const channelId = effectiveChannel.id;
   if (newParticipants.length > 0) {
     // Check if the last message is a bot message about participant addition/removal by the same admin
     const lastConversation = await tx.run(zql.conversations
@@ -132,7 +145,7 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
       await tx.mutate.conversations.insert({
         conversationId,
         channelId,
-        workspaceId: channel.workspaceId,
+        workspaceId: effectiveChannel.workspaceId,
         createdBy: 'system',
         initialMessageId: messageId,
         lastActivityAt: now,
@@ -146,7 +159,7 @@ export async function sendAddAndRemoveParticipantsSystemMessage(
       await tx.mutate.messages.insert({
         messageId,
         conversationId,
-        workspaceId: channel.workspaceId,
+        workspaceId: effectiveChannel.workspaceId,
         senderId: newParticipants[0].userId,
         content: systemContent,
         msgType: MessageType.SYSTEM,

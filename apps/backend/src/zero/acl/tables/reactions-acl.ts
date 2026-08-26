@@ -3,13 +3,17 @@ import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasChannelMutationAccess } from '../core/guest-access';
+import { hasChannelMutationAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class ReactionsACL extends BaseACL<'reactions'> {
 
   private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>): Promise<void> {
     const conversation = await tx.run(zql.conversations.where('conversationId', conversationId).one());
     if (!conversation) throw new MutationACLError('Reaction not found: conversation does not exist', 'reactions');
+    // Slack-Connect: an active connect member may react in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, conversation.channelId)) {
+      return;
+    }
     const channel = await tx.run(zql.channels.where('id', conversation.channelId).one());
     if (channel?.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Reaction not found in this workspace', 'reactions');
@@ -26,6 +30,12 @@ export class ReactionsACL extends BaseACL<'reactions'> {
     if (!channel) {
       throw new MutationACLError('Reaction insert failed: the channel does not exist', 'reactions');
     }
+
+    // Slack-Connect: an active connect member may react in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, channel.id)) {
+      return;
+    }
+
     await this.verifyConversationInWorkspace(message.conversation.conversationId, tx);
 
     if (this.ctx.role === 'GUEST') {

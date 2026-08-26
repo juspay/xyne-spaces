@@ -2,6 +2,7 @@ import type { InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
 import { CanvasRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { isActiveConnectMember } from '../core/guest-access';
 import { zql } from '../../queries';
 
 export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
@@ -9,6 +10,11 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
     const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
     if (!canvas) {
       throw new MutationACLError('Canvas comment thread failed: canvas not found', 'canvas_comment_threads');
+    }
+
+    // Slack-Connect: an active connect member of the canvas's (host) channel may write threads.
+    if (canvas.channelId && (await isActiveConnectMember(this.ctx, tx, canvas.channelId))) {
+      return true;
     }
 
     if (canvas.createdBy === this.ctx.userID) return true;

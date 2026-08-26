@@ -1064,8 +1064,34 @@ export const channelTable = table("channels")
     isMigrated: boolean().optional(),
     addUserPolicy: string().optional(),
     isArchived: boolean(),
+    isConnectEnabled: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(),
+  })
+  .primaryKey("id");
+
+export const connectChannelTable = table("connect_channel")
+  .columns({
+    id: string(),
+    hostChannelId: string(),
+    hostWorkspaceId: string(),
+    guestWorkspaceId: string(),
+    guestChannelId: string().optional(),
+    status: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const connectChannelMemberTable = table("connect_channel_member")
+  .columns({
+    id: string(),
+    channelId: string(),
+    userId: string(),
+    userWorkspaceId: string(),
+    leftAt: number().optional(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -4974,6 +5000,8 @@ export const schema = createSchema(
       stagePrStatusMappingTable,
       stageTransitionTable,
       channelTable,
+      connectChannelTable,
+      connectChannelMemberTable,
       channelBoardMappingTable,
       channelStatsTable,
       channelParticipantTable,
@@ -5271,6 +5299,8 @@ export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ConnectChannel = Row<typeof schema.tables.connect_channel>;
+export type ConnectChannelMember = Row<typeof schema.tables.connect_channel_member>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;

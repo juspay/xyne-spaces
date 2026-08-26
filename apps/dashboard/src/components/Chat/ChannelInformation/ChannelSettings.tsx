@@ -13,7 +13,9 @@ import {
   useChannelEmailAlias,
 } from '../../../hooks/useChannelEmailAlias';
 import { useUsers } from '../../../hooks/useUsers';
+import { useHostChannelId } from '../../../hooks/useHostChannelId';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { connectRequestService } from '../../../services/Chat/connectRequestService';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
@@ -95,6 +97,9 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   const [searchParams] = useSearchParams();
   const { copy } = useClipboard();
   const { emailAlias, configured, isActive, mailboxEmail } = useChannelEmailAlias(channel.id);
+  // Slack-Connect: read the roster from the HOST channel for a guest pointer channel.
+  // Only the participant read uses this; channel.id stays the pointer for settings/identity.
+  const contentChannelId = useHostChannelId(channel.id) ?? channel.id;
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
@@ -145,7 +150,62 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   const isArchived = channel.isArchived;
   const canManageChannelEmail = context.role === 'OWNER' || context.role === 'ADMIN';
 
-  const fetchParticipants = () => zero.run(queries.channelParticipants({ channelId: channel.id }));
+  // Slack-Connect: a "Connect channel" toggle lets the creator/admin open a DEFAULT channel to external
+  // orgs. Toggle-off is only allowed while no org is connected (server enforces via canDisableConnect).
+  // A guest POINTER channel (its host id differs from its own id) must NEVER show the Connect toggle —
+  // only the HOST org federates (no nested connect; rulebook R4.3). Backend enableConnect guards this too.
+  const isGuestPointer = contentChannelId !== channel.id;
+  const canManageConnect =
+    isDefaultChannel &&
+    !isGuestPointer &&
+    (context.role === 'OWNER' || context.role === 'ADMIN' || context.userID === channel.createdBy);
+  const [connectEnabled, setConnectEnabled] = useState<boolean>(channel.isConnectEnabled === true);
+  const [canDisableConnect, setCanDisableConnect] = useState<boolean>(true);
+  const [connectToggleBusy, setConnectToggleBusy] = useState<boolean>(false);
+
+  useEffect(() => {
+    setConnectEnabled(channel.isConnectEnabled === true);
+  }, [channel.isConnectEnabled]);
+
+  useEffect(() => {
+    if (!canManageConnect || !connectEnabled) return;
+    let cancelled = false;
+    void connectRequestService
+      .canDisableConnect(channel.id)
+      .then(v => {
+        if (!cancelled) setCanDisableConnect(v);
+      })
+      .catch(() => {
+        if (!cancelled) setCanDisableConnect(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageConnect, connectEnabled, channel.id]);
+
+  const handleToggleConnect = async (next: boolean): Promise<void> => {
+    if (connectToggleBusy) return;
+    setConnectToggleBusy(true);
+    try {
+      if (next) {
+        await connectRequestService.enableConnect(channel.id);
+        setConnectEnabled(true);
+        toast.success('Connect channel enabled — you can now invite external people');
+      } else {
+        await connectRequestService.disableConnect(channel.id);
+        setConnectEnabled(false);
+        toast.success('Connect channel disabled');
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Could not update connect setting';
+      toast.error(msg);
+    } finally {
+      setConnectToggleBusy(false);
+    }
+  };
+
+  const fetchParticipants = () =>
+    zero.run(queries.channelParticipants({ channelId: contentChannelId }));
 
   const handleCopyNames = async (): Promise<void> => {
     const participants = await fetchParticipants();
@@ -308,6 +368,31 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                 checked={showTicketsInChat}
                 onCheckedChange={handleToggleTicketsInChat}
                 aria-label='Show tickets created from the Tickets tab in chat'
+              />
+            </div>
+          </div>
+        )}
+
+        {canManageConnect && (
+          <div className='bg-card p-[12px] rounded-[12px] border border-border'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='flex flex-col gap-y-1'>
+                <p className='text-sm font-medium text-foreground'>Connect channel</p>
+                <p className='text-sm text-muted-foreground'>
+                  Share this channel with people in other organizations. Turn this on to invite
+                  external people. It can only be turned off while no external org has joined.
+                </p>
+                {connectEnabled && !canDisableConnect && (
+                  <p className='text-xs text-muted-foreground'>
+                    An external org has joined, so this can’t be turned off.
+                  </p>
+                )}
+              </div>
+              <Switch
+                checked={connectEnabled}
+                disabled={connectToggleBusy || (connectEnabled && !canDisableConnect)}
+                onCheckedChange={next => void handleToggleConnect(next)}
+                aria-label='Enable connect channel (share with external organizations)'
               />
             </div>
           </div>

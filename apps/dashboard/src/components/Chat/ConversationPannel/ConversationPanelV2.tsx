@@ -9,6 +9,7 @@ import {
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
+import { useHostChannelId, useIsConnectMember } from '../../../hooks/useHostChannelId';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
 import { standaloneNavigate } from '../../../utils/electronApp';
@@ -105,6 +106,11 @@ const ConversationPanelV2 = ({
   const channelParticipation = useGetChannelUserStatus(channelId);
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(channelId);
 
+  // Slack-Connect: the id whose CONTENT (transcript/messages) we read. For a guest pointer
+  // channel this resolves to the host channel; for normal channels it's the same id.
+  // Only content reads/writes use this — header/nav/status stay on `channelId` (the pointer).
+  const contentChannelId = useHostChannelId(channelId) ?? channelId;
+
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const routerLocation = useLocation();
@@ -173,8 +179,8 @@ const ConversationPanelV2 = ({
   // anchor is available at hydration time. Older/newer pages load through
   // the normal pagination path.
   const cachedConversations = useMemo(
-    () => getChannelConversationsSnapshot(channelId, urlCreatedAt ?? undefined),
-    [channelId, urlCreatedAt],
+    () => getChannelConversationsSnapshot(contentChannelId, urlCreatedAt ?? undefined),
+    [contentChannelId, urlCreatedAt],
   );
 
   // Skip mark as read functionality
@@ -183,7 +189,7 @@ const ConversationPanelV2 = ({
     skipMarkAsReadRef.current = skip;
   }, []);
 
-  useChannelSubscription(channelId, NO_CONVERSATION_IDS);
+  useChannelSubscription(contentChannelId, NO_CONVERSATION_IDS);
   useScope('channel', !!channelId);
   useShortcutById('global.openCanvasTab', () => {
     handleTabChange('canvas');
@@ -191,8 +197,14 @@ const ConversationPanelV2 = ({
 
   // Check if channel is public and user is not a member
   const isUserMember = !!channelParticipation;
+  // Slack-Connect: a connect member of the CONTENT (host) channel is already a member — never show
+  // the "Join channel" prompt. Works whether the URL is the guest pointer id OR the host id directly.
+  const isConnectMember = useIsConnectMember(contentChannelId);
   const shouldShowJoinChannel =
-    channel?.visibility === ChannelVisibility.PUBLIC && !isUserMember && !channel?.isArchived;
+    channel?.visibility === ChannelVisibility.PUBLIC &&
+    !isUserMember &&
+    !channel?.isArchived &&
+    !isConnectMember;
 
   const { userID: currentUserId } = useAuthContextValues();
   const dmPartnerId =
@@ -256,7 +268,10 @@ const ConversationPanelV2 = ({
                     linkedCutoffCreatedAt: { createdAt: stateLinkedCutoffCreatedAt },
                   })}
                   cachedConversations={cachedConversations}
-                  channelId={channelId}
+                  channelId={contentChannelId}
+                  // Slack-Connect: content reads use the host id, but thread navigation must
+                  // stay on the guest's pointer id so the channel header/URL don't break.
+                  navChannelId={channelId}
                   projectId={channel?.projectId}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
@@ -272,27 +287,30 @@ const ConversationPanelV2 = ({
                     // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus={skipInputAutoFocus ? null : 'end'}
                     ref={inputRef}
-                    channelId={channelId || ''}
+                    // Slack-Connect: compose/send targets the HOST channel (content), not the pointer.
+                    channelId={contentChannelId || ''}
                   />
                 </div>
               )}
             </div>
           )}
 
-          {tab === 'files' && <FileListV2 channelId={channelId} />}
-          {tab === 'pins' && <PinListV2 channelId={channelId} />}
+          {/* Slack-Connect: files + pins live on the host channel (their ACLs are relaxed). */}
+          {tab === 'files' && <FileListV2 channelId={contentChannelId} />}
+          {tab === 'pins' && <PinListV2 channelId={contentChannelId} navChannelId={channelId} />}
+          {/* Slack-Connect: tickets/canvas/links content lives on the host channel too. */}
           {tab === 'tickets' &&
             (!!ticketId && !!conversationId ? (
               <ExpandedTicketView
                 ticketId={ticketId}
-                channelId={channelId}
+                channelId={contentChannelId}
                 conversationId={conversationId}
               />
             ) : (
-              <KanbanBoardScreen channelId={channelId} />
+              <KanbanBoardScreen channelId={contentChannelId} />
             ))}
-          {tab === 'canvas' && <CanvasTab channelId={channelId} />}
-          {tab === 'links' && <LinksTab channelId={channelId} />}
+          {tab === 'canvas' && <CanvasTab channelId={contentChannelId} />}
+          {tab === 'links' && <LinksTab channelId={contentChannelId} navChannelId={channelId} />}
         </div>
       </div>
     </ConversationTabContext.Provider>

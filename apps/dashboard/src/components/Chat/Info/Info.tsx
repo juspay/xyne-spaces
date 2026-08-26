@@ -58,6 +58,12 @@ import Tooltip from '../../ui/Tooltip';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
+import {
+  useHostChannelId,
+  useIsConnectMember,
+  useConnectAwareParticipantCount,
+} from '../../../hooks/useHostChannelId';
+import { InviteExternalForm } from '../InviteExternalForm/InviteExternalForm';
 import { mutators } from '../../../zero/mutators';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -65,7 +71,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
-export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
+export type ChannelTab =
+  | 'about'
+  | 'members'
+  | 'notifications'
+  | 'settings'
+  | 'ai-features'
+  | 'invite-external';
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -93,16 +105,31 @@ const Info = ({
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
 
-  const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
+  // Slack-Connect: roster comes from the HOST channel for a guest pointer channel.
+  const rosterChannelId = useHostChannelId(channel.id) ?? channel.id;
+  // Slack-Connect: connect channels count their full cross-org roster, not the pointer's local stat.
+  const memberCount = useConnectAwareParticipantCount(channel);
+  const [participants] = useCachedQuery(
+    queries.channelParticipants({ channelId: rosterChannelId }),
+  );
 
   const currentUserParticipant = useMemo(
     () => participants.find(p => p.userId === context.userID),
     [participants, context.userID],
   );
 
-  const isParticipant = participants.some(p => p.userId === context.userID);
+  // Slack-Connect: an active connect member (e.g. a guest who owns the pointer channel but
+  // holds no channel_participants row on the host channel) counts as a member for UI gating.
+  const isConnectMember = useIsConnectMember(rosterChannelId);
+  const isParticipant = participants.some(p => p.userId === context.userID) || isConnectMember;
   const isSelfDM = isDM && participants.length === 1 && participants[0]?.userId === context.userID;
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
+  // Slack-Connect: the "Invite External" tab appears once the channel is a connect channel, only for
+  // the channel creator or a workspace admin (host side).
+  const showInviteExternal =
+    isDefaultChannel &&
+    channel.isConnectEnabled === true &&
+    (channel.createdBy === context.userID || context.role === 'OWNER' || context.role === 'ADMIN');
   const canManageAiPreferences =
     currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
 
@@ -111,6 +138,7 @@ const Info = ({
     isParticipant &&
     !isDM &&
     (channel.scopeType === ChannelScopeType.GROUP_DM ||
+      isConnectMember ||
       currentUserParticipant?.role === ChannelRole.ADMIN ||
       addUserPolicy === ChannelAddUserPolicy.EVERYONE);
 
@@ -232,7 +260,7 @@ const Info = ({
     setShowPromoteDialog(false);
   };
 
-  const showPromoteButton = isGroupDM && isParticipant;
+  const showPromoteButton = isGroupDM && isParticipant && !isConnectMember;
 
   const handleLeaveChannel = (): void => {
     onClose?.();
@@ -444,7 +472,7 @@ const Info = ({
           </Tabs.Trigger>
           {!isDM && (
             <Tabs.Trigger value='members' className={tabTriggerClass('members')}>
-              Members {channel.channelStats?.participantCount || 0}
+              Members {memberCount || 0}
             </Tabs.Trigger>
           )}
           {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
@@ -460,6 +488,11 @@ const Info = ({
           {isDefaultChannel && (
             <Tabs.Trigger value='ai-features' className={tabTriggerClass('ai-features')}>
               AI Preference
+            </Tabs.Trigger>
+          )}
+          {showInviteExternal && (
+            <Tabs.Trigger value='invite-external' className={tabTriggerClass('invite-external')}>
+              Invite External
             </Tabs.Trigger>
           )}
         </Tabs.List>
@@ -530,9 +563,21 @@ const Info = ({
             <NotificationsTab channel={channel} isParticipant={isParticipant} />
           </Tabs.Content>
         )}
+        {showInviteExternal && (
+          <Tabs.Content
+            value='invite-external'
+            className='outline-none flex-1 min-h-0 overflow-y-auto'
+          >
+            <InviteExternalForm channelId={channel.id} />
+          </Tabs.Content>
+        )}
       </Tabs.Root>
 
       <Dialog open={showAddPeopleDialog} onOpenChange={setShowAddPeopleDialog} title='Add Members'>
+        {/* Slack-Connect: add against the LOCAL channel (pointer for a guest, host for the
+            host). The guest owner is a participant of their own pointer channel, so this is
+            a same-org write with no cross-org friction; the pointer-aware member mirror
+            reflects the add into the host's connect_channel_member. */}
         <AddPeopleForm
           channelId={channel.id}
           onSuccess={handleAddPeopleSuccess}
@@ -565,8 +610,12 @@ const Info = ({
   );
 };
 
+// Minimal structural shape so both channel_participants rows and synthetic connect-only
+// roster entries (cross-org members with no local participant row) can render in one list.
+type RosterMember = { id: string; userId: string; role: ChannelRole };
+
 interface ParticipantListItemProps {
-  participant: NonNullable<QueryResultType<typeof queries.channelParticipants>>[number];
+  participant: RosterMember;
   channelCreatedBy: string;
   currentUserId: string;
   currentUserIsAdmin: boolean;
@@ -576,6 +625,10 @@ interface ParticipantListItemProps {
   onMakeAdmin: (userId: string) => void;
   onRemoveAdmin: (userId: string) => void;
   popoverContainer?: HTMLElement | null | undefined;
+  // Slack-Connect: the viewer's own workspace and this member's home workspace, used to
+  // render an "External" badge for cross-workspace members of a connect channel.
+  viewerWorkspaceId?: string | undefined;
+  memberWorkspaceId?: string | null | undefined;
 }
 
 const ParticipantListItem = ({
@@ -589,11 +642,20 @@ const ParticipantListItem = ({
   onMakeAdmin,
   onRemoveAdmin,
   popoverContainer,
+  viewerWorkspaceId,
+  memberWorkspaceId,
 }: ParticipantListItemProps): ReactElement => {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const user = useUser(participant.userId);
   const isAdmin = participant.role === ChannelRole.ADMIN;
   const isCreator = channelCreatedBy === participant.userId;
+  // Slack-Connect: prefer the authoritative home workspace from the connect roster; fall
+  // back to the resolved user row. External = member's workspace differs from the viewer's.
+  const effectiveMemberWorkspaceId = memberWorkspaceId ?? user?.workspaceId;
+  const isExternal =
+    !!viewerWorkspaceId &&
+    !!effectiveMemberWorkspaceId &&
+    effectiveMemberWorkspaceId !== viewerWorkspaceId;
   const canManageThisUser =
     currentUserIsAdmin && currentUserId !== participant.userId && !(isCreator && !isChannelCreator);
 
@@ -628,6 +690,11 @@ const ParticipantListItem = ({
             {(isCreator || isAdmin) && (
               <span className='px-2 py-[0.8px] text-[13px] bg-muted text-muted-foreground rounded-full whitespace-nowrap'>
                 Admin
+              </span>
+            )}
+            {isExternal && (
+              <span className='px-2 py-[0.8px] text-[13px] bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 rounded-full whitespace-nowrap'>
+                External
               </span>
             )}
           </div>
@@ -750,21 +817,37 @@ const ChannelMembers = ({
   );
   const [hasMore, setHasMore] = useState(true);
 
+  // Slack-Connect: for a guest pointer channel the roster lives on the HOST channel.
+  const hostChannelId = useHostChannelId(channel.id) ?? channel.id;
+
   // Query for paginated participants using useQuery hook
   const [participants] = useQuery(
     queries.channelParticipantsPaginated({
-      channelId: channel.id,
+      channelId: hostChannelId,
       limit: PAGE_SIZE,
       start: currentCursor,
     }),
   );
 
   const [searchResults] = useCachedQuery(
-    queries.searchChannelParticipants({ channelId: channel.id, searchQuery }),
+    queries.searchChannelParticipants({ channelId: hostChannelId, searchQuery }),
     {
       enabled: !!searchQuery.trim(),
     },
   );
+
+  // Slack-Connect: the full cross-org roster (host-side + guest-side members). Empty for
+  // normal channels. Gives us every member's home workspace so we can mark "external".
+  const [connectMembers] = useCachedQuery(
+    queries.connectMembersForChannel({ channelId: hostChannelId }),
+  );
+  const connectMemberWorkspaceByUser = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const cm of connectMembers ?? []) {
+      map.set(cm.userId, cm.userWorkspaceId);
+    }
+    return map;
+  }, [connectMembers]);
 
   const currentUserParticipant = useMemo(
     () =>
@@ -924,6 +1007,30 @@ const ChannelMembers = ({
     return accumulatedParticipants;
   }, [accumulatedParticipants, searchQuery, searchResults, usersById]);
 
+  // Slack-Connect: append cross-org members that have no local channel_participants row
+  // (they exist only in connect_channel_member) so the roster is complete cross-workspace.
+  const rosterMembers = useMemo<RosterMember[]>(() => {
+    const base: RosterMember[] = filteredParticipants.map(p => ({
+      id: p.id,
+      userId: p.userId,
+      role: p.role,
+    }));
+    if (!connectMembers || connectMembers.length === 0) return base;
+
+    const presentUserIds = new Set(base.map(m => m.userId));
+    const query = searchQuery.trim().toLowerCase();
+    const connectOnly: RosterMember[] = connectMembers
+      .filter(cm => !presentUserIds.has(cm.userId))
+      .filter(cm => {
+        if (!query) return true;
+        const u = usersById.get(cm.userId);
+        return u ? getUserDisplayName(u).toLowerCase().includes(query) : false;
+      })
+      .map(cm => ({ id: `connect-${cm.userId}`, userId: cm.userId, role: ChannelRole.MEMBER }));
+
+    return [...base, ...connectOnly];
+  }, [filteredParticipants, connectMembers, searchQuery, usersById]);
+
   return (
     <div className='relative h-full min-h-0 flex flex-col'>
       <div className='shrink-0 z-10 p-4'>
@@ -943,7 +1050,7 @@ const ChannelMembers = ({
       <Virtuoso
         className='flex-1 min-h-0 thin-scrollbar'
         style={{ height: '100%' }}
-        data={filteredParticipants}
+        data={rosterMembers}
         {...(!searchQuery &&
           hasMore && {
             endReached: loadMore,
@@ -962,6 +1069,8 @@ const ChannelMembers = ({
             onMakeAdmin={handleMakeAdmin}
             onRemoveAdmin={handleRemoveAdmin}
             popoverContainer={popoverContainer || document.body}
+            viewerWorkspaceId={context.workspaceId}
+            memberWorkspaceId={connectMemberWorkspaceByUser.get(participant.userId) ?? null}
           />
         )}
       />

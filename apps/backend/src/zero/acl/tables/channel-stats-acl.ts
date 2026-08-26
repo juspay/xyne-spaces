@@ -3,10 +3,14 @@ import { ChannelRole, ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasGuestChannelAccess } from '../core/guest-access';
+import { hasGuestChannelAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class ChannelStatsACL extends BaseACL<'channel_stats'> {
   async canInsert(args: InsertValue<TableSchema<'channel_stats'>>, tx: Transaction<Schema>): Promise<void> {
+      // Slack-Connect: an active connect member may update the (host) channel's stats cross-org.
+      if (await isActiveConnectMember(this.ctx, tx, args.channelId)) {
+        return;
+      }
       if (this.ctx.role === 'GUEST') {
         const hasGuestAccess = await hasGuestChannelAccess(this.ctx, tx, args.channelId);
         if (!hasGuestAccess) {
@@ -16,6 +20,10 @@ export class ChannelStatsACL extends BaseACL<'channel_stats'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'channel_stats'>>, tx: Transaction<Schema>): Promise<void> {
+    // Slack-Connect: an active connect member may update the (host) channel's stats cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, args.channelId)) {
+      return;
+    }
     if (this.ctx.role === 'GUEST') {
       const hasGuestAccess = await hasGuestChannelAccess(this.ctx, tx, args.channelId);
       if (hasGuestAccess) {

@@ -163,11 +163,24 @@ export const useChannelSearch = (query: string, limit: number): Channel[] => {
 
 export const useBrowsableChannels = (): Channel[] => {
   const channels = useAllChannels();
+  // Slack-Connect: a guest is an active connect member of the HOST channel, so it's ACL-visible and would
+  // otherwise show up here NEXT TO their local pointer (both are DEFAULT) — the guest would see the channel
+  // twice. A guest navigates the pointer only, never the host. Detect "I'm the guest of this link" by whether
+  // I hold its pointer (guestChannelId ∈ my visible channels); if so, hide its host id. The HOST keeps its
+  // channel because it never holds the pointer (the pointer lives in the guest workspace).
+  const [activeLinks] = useQuery(queries.activeConnectChannels());
   return useMemo(() => {
+    const myChannelIds = new Set(channels.map(c => c.id));
+    const hostIdsToHide = new Set(
+      (activeLinks ?? [])
+        .filter(l => l.guestChannelId && myChannelIds.has(l.guestChannelId))
+        .map(l => l.hostChannelId),
+    );
     return channels
       .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
+      .filter(channel => !hostIdsToHide.has(channel.id))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [channels]);
+  }, [channels, activeLinks]);
 };
 
 export const useMigratedChannels = (): Channel[] => {

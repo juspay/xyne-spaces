@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getGuestAccessibleChannelIds, isGuestContext } from './channel-access-helper'
+import {
+  getConnectAccessibleChannelIds,
+  getGuestAccessibleChannelIds,
+  isGuestContext,
+} from './channel-access-helper'
 
 export class BoardsACL extends BaseQueryACL<
   Prisma.BoardWhereInput,
@@ -12,6 +16,12 @@ export class BoardsACL extends BaseQueryACL<
 
   async getWhereClause(): Promise<Prisma.BoardWhereInput> {
     const ctx = this.ctx
+    // Slack-Connect: boards mapped to a connect channel the caller is an active member of.
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+    const connectClause: Prisma.BoardWhereInput[] = connectChannelIds.length
+      ? [{ channelMappings: { some: { channelId: { in: connectChannelIds } } } }]
+      : []
+
     if (isGuestContext(ctx)) {
       const channelIds = await getGuestAccessibleChannelIds(
         this.prisma,
@@ -20,23 +30,37 @@ export class BoardsACL extends BaseQueryACL<
       )
 
       return {
-        workspaceId: this.ctx.workspaceId ?? '',
-        channelMappings: {
-          some: {
-            channelId: { in: channelIds },
+        OR: [
+          {
+            workspaceId: this.ctx.workspaceId ?? '',
+            channelMappings: {
+              some: {
+                channelId: { in: channelIds },
+              },
+            },
           },
-        },
+          ...connectClause,
+        ],
       }
     }
 
     // Direct workspaceId check - no need to traverse through project
     return {
-      workspaceId: this.ctx.workspaceId,
+      OR: [{ workspaceId: this.ctx.workspaceId }, ...connectClause],
     }
   }
 
   async getMutateWhere(): Promise<Prisma.BoardWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+    if (connectChannelIds.length === 0) {
+      return { workspaceId: this.ctx.workspaceId }
+    }
+    return {
+      OR: [
+        { workspaceId: this.ctx.workspaceId },
+        { channelMappings: { some: { channelId: { in: connectChannelIds } } } },
+      ],
+    }
   }
 
   async canCreate(data: Prisma.BoardUncheckedCreateInput): Promise<boolean> {

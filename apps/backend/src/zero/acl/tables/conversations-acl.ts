@@ -3,12 +3,17 @@ import { Schema, ChannelVisibility } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
-import { hasChannelMutationAccess } from '../core/guest-access';
+import { hasChannelMutationAccess, isActiveConnectMember } from '../core/guest-access';
 
 export class ConversationsACL extends BaseACL<'conversations'> {
 
   private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
-    const conversationWorkspaceId = workspaceId ?? await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one()).then(c => c?.channel?.workspaceId);
+    const conv = await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one());
+    // Slack-Connect: an active connect member may mutate the (host) channel's threads cross-org.
+    if (conv?.channel?.id && (await isActiveConnectMember(this.ctx, tx, conv.channel.id))) {
+      return;
+    }
+    const conversationWorkspaceId = workspaceId ?? conv?.channel?.workspaceId;
     if (!conversationWorkspaceId) throw new MutationACLError('Conversation not found', 'conversations');
     if (conversationWorkspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Conversation not found in this workspace', 'conversations');
@@ -18,13 +23,18 @@ export class ConversationsACL extends BaseACL<'conversations'> {
   async canInsert(args: InsertValue<TableSchema<'conversations'>>, tx: Transaction<Schema>): Promise<void> {
     const channel = await tx.run(zql.channels.where('id', args.channelId).one());
     if (!channel) throw new MutationACLError('Conversation not found: channel does not exist', 'conversations');
-    if (channel.workspaceId !== this.ctx.workspaceId) {
-      throw new MutationACLError('Conversation not found in this workspace', 'conversations');
-    }
-
 
     if (channel?.isArchived) {
       throw new MutationACLError('Conversation insert failed: cannot create conversations in archived channel', 'conversations');
+    }
+
+    // Slack-Connect: an active connect member may create threads in the (host) channel cross-org.
+    if (await isActiveConnectMember(this.ctx, tx, args.channelId)) {
+      return;
+    }
+
+    if (channel.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Conversation not found in this workspace', 'conversations');
     }
 
     if (this.ctx.role === 'GUEST') {
@@ -59,6 +69,12 @@ export class ConversationsACL extends BaseACL<'conversations'> {
     const conversation = await tx.run(zql.conversations.where('conversationId', args.conversationId).related('channel').one());
     if (!conversation || !conversation.channel) {
       throw new MutationACLError('Conversation update failed: conversation does not exist', 'conversations');
+    }
+
+    // Slack-Connect: an active connect member may update the (host) channel's threads cross-org
+    // (e.g. replyCount/lastActivity bumps on reply) even without a host channel_participant row.
+    if (await isActiveConnectMember(this.ctx, tx, conversation.channel.id)) {
+      return;
     }
 
     const channelParticipant = await tx.run(zql.channel_participants

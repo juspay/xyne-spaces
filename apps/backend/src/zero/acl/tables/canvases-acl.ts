@@ -12,6 +12,7 @@ import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
 import {
   hasGuestChannelAccess,
+  isActiveConnectMember,
 } from '../core/guest-access';
 
 export class CanvasesACL extends BaseACL<'canvases'> {
@@ -36,6 +37,8 @@ export class CanvasesACL extends BaseACL<'canvases'> {
 
   private async verifyWorkspace(channelId: string | null | undefined, tx: Transaction<Schema>): Promise<void> {
     if (!channelId) return;
+    // Slack-Connect: an active connect member of the host channel bypasses the workspace fence.
+    if (await isActiveConnectMember(this.ctx, tx, channelId)) return;
     const channel = await tx.run(zql.channels.where('id', channelId).one());
     if (!channel) throw new MutationACLError('Canvas not found: channel does not exist', 'canvases');
     if (channel.workspaceId !== this.ctx.workspaceId) {
@@ -92,6 +95,12 @@ export class CanvasesACL extends BaseACL<'canvases'> {
         throw new MutationACLError(this.mapInsertHierarchyError(error.code), 'canvases');
       }
       throw error;
+    }
+
+    // Slack-Connect: an active connect member of the (cross-org) host channel may create canvases
+    // there, bypassing the workspace fence and the channel-membership requirement below.
+    if (resolvedChannelId && (await isActiveConnectMember(this.ctx, tx, resolvedChannelId))) {
+      return;
     }
 
     await this.verifyWorkspace(resolvedChannelId, tx);
@@ -161,6 +170,11 @@ export class CanvasesACL extends BaseACL<'canvases'> {
       throw new MutationACLError('Canvas update failed: canvas not found', 'canvases');
     }
 
+    // Slack-Connect: an active connect member of the host channel may update the canvas cross-org.
+    if (canvas.channelId && (await isActiveConnectMember(this.ctx, tx, canvas.channelId))) {
+      return;
+    }
+
     await this.verifyCanvasInWorkspace(canvas, tx);
 
     if (this.ctx.role === 'GUEST') {
@@ -210,6 +224,13 @@ export class CanvasesACL extends BaseACL<'canvases'> {
     if (!canvas) {
       throw new MutationACLError('Canvas delete failed: canvas not found', 'canvases');
     }
+
+    // Slack-Connect: an active connect member of the host channel may delete the canvas cross-org,
+    // bypassing the workspace fence and the owner/creator requirement below.
+    if (canvas.channelId && (await isActiveConnectMember(this.ctx, tx, canvas.channelId))) {
+      return;
+    }
+
     await this.verifyWorkspace(canvas.channelId, tx);
 
     if (canvas.channel?.isArchived) {

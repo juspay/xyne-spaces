@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
+import {
+  getAccessibleChannelIds,
+  getConnectAccessibleChannelIds,
+  isGuestContext,
+} from './channel-access-helper'
 
 export class ConversationsACL extends BaseQueryACL<
   Prisma.ConversationWhereInput,
@@ -12,29 +16,37 @@ export class ConversationsACL extends BaseQueryACL<
 
   async getWhereClause(): Promise<Prisma.ConversationWhereInput> {
     const ctx = this.ctx
+    // Slack-Connect: connect channels the caller is an active member of, across orgs.
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+
     if (isGuestContext(ctx)) {
       const channelIds = await getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx)
 
       return {
-        channel: {
-          workspaceId: this.ctx.workspaceId ?? '',
-          id: { in: channelIds },
-        },
+        OR: [
+          { channel: { workspaceId: this.ctx.workspaceId ?? '', id: { in: channelIds } } },
+          { channelId: { in: connectChannelIds } },
+        ],
       }
     }
 
     return {
-      channel: {
-        AND: [
-          { workspaceId: this.ctx.workspaceId },
-          {
-            OR: [
-              { visibility: 'PUBLIC' },
-              { participants: { some: { userId: this.ctx.userId } } },
+      OR: [
+        {
+          channel: {
+            AND: [
+              { workspaceId: this.ctx.workspaceId },
+              {
+                OR: [
+                  { visibility: 'PUBLIC' },
+                  { participants: { some: { userId: this.ctx.userId } } },
+                ],
+              },
             ],
           },
-        ],
-      },
+        },
+        { channelId: { in: connectChannelIds } },
+      ],
     }
   }
 

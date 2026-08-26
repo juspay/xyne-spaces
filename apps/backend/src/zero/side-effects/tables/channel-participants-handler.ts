@@ -5,6 +5,7 @@ import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
 import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
+import { connectMemberSyncService } from '@/services/connectMemberSyncService';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
@@ -23,6 +24,14 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
     await refreshCanvasPermissionsForChannel(previousValue.channelId).catch(err =>
       logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${previousValue.channelId}: ${err}`),
     );
+
+    // Slack-Connect: mirror the removal into connect_channel_member (tombstone). No-op
+    // for non-connect channels.
+    await connectMemberSyncService
+      .mirrorParticipantRemoved(previousValue.channelId, previousValue.userId)
+      .catch(err =>
+        logger.error(`[ChannelParticipantsHandler] connect member sync (remove) failed for channel ${previousValue.channelId}: ${err}`),
+      );
   }
 
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -49,6 +58,13 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       await refreshCanvasPermissionsForChannel(channelId).catch(err =>
         logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`));
 
+      // Slack-Connect: mirror the add into connect_channel_member. MUST run before the
+      // self-join early-return below so a user joining themselves is still mirrored.
+      // No-op for non-connect channels.
+      await connectMemberSyncService
+        .mirrorParticipantAdded(channelId, userId)
+        .catch(err =>
+          logger.error(`[ChannelParticipantsHandler] connect member sync (add) failed for channel ${channelId}: ${err}`));
 
       if (this.ctx.userID === userId) {
         logger.info(`[ChannelParticipantsHandler] User ${userId} joined channel ${channelId} themselves - skipping notification`);

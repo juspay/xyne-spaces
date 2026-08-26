@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import {
   getAccessibleChannelIds,
+  getConnectAccessibleChannelIds,
   hasGuestChannelAccess,
   isGuestContext,
 } from './channel-access-helper'
@@ -16,38 +17,52 @@ export class ChannelParticipantsACL extends BaseQueryACL<
 
   async getWhereClause(): Promise<Prisma.ChannelParticipantWhereInput> {
     const ctx = this.ctx
+    // Slack-Connect: roster of connect channels the caller is an active member of (cross-org).
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+    const connectBranch: Prisma.ChannelParticipantWhereInput = { channelId: { in: connectChannelIds } }
+
     if (isGuestContext(ctx)) {
       const channelIds = await getAccessibleChannelIds(this.prisma, this.ctx.userId, this.ctx)
 
       return {
-        AND: [
+        OR: [
           {
-            OR: [
-              { userId: this.ctx.userId },
-              { channelId: { in: channelIds } },
+            AND: [
+              {
+                OR: [
+                  { userId: this.ctx.userId },
+                  { channelId: { in: channelIds } },
+                ],
+              },
+              { channel: { workspaceId: this.ctx.workspaceId ?? '' } },
             ],
           },
-          { channel: { workspaceId: this.ctx.workspaceId ?? '' } },
+          connectBranch,
         ],
       }
     }
 
     return {
-      AND: [
+      OR: [
         {
-          OR: [
-            { userId: this.ctx.userId },
+          AND: [
             {
-              channel: {
-                OR: [
-                  { visibility: 'PUBLIC' },
-                  { participants: { some: { userId: this.ctx.userId } } },
-                ],
-              },
+              OR: [
+                { userId: this.ctx.userId },
+                {
+                  channel: {
+                    OR: [
+                      { visibility: 'PUBLIC' },
+                      { participants: { some: { userId: this.ctx.userId } } },
+                    ],
+                  },
+                },
+              ],
             },
+            { channel: { workspaceId: this.ctx.workspaceId } },
           ],
         },
-        { channel: { workspaceId: this.ctx.workspaceId } },
+        connectBranch,
       ],
     }
   }

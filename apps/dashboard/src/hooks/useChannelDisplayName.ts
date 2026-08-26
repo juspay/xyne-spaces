@@ -39,6 +39,7 @@ export const useChannelDisplayName = (
     participantCount: 0,
     addUserPolicy: null,
     isArchived: false,
+    isConnectEnabled: false,
     showTicketsTabTicketsInChat: true,
     callSummaryPrompt: null,
     workspaceId: workspaceId,
