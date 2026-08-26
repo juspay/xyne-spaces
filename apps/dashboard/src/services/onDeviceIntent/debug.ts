@@ -42,15 +42,18 @@ export function isDebugEnabled(): boolean {
  */
 export function trace(scope: 'main' | 'worker', step: string, data?: unknown): void {
   if (!enabled) return;
+  // `step` is passed as an argument, not interpolated: it carries message text
+  // (intent.worker.ts embeds the winning segment), so a message containing %c or
+  // %s would consume the style arguments and shift the whole line.
   if (data === undefined) {
-    console.log(`%c[intent:${scope}]%c ${step}`, STYLE_SCOPE, STYLE_STEP);
+    console.log(`%c[intent:${scope}]%c %s`, STYLE_SCOPE, STYLE_STEP, step);
   } else {
-    console.log(`%c[intent:${scope}]%c ${step}`, STYLE_SCOPE, STYLE_STEP, data);
+    console.log(`%c[intent:${scope}]%c %s`, STYLE_SCOPE, STYLE_STEP, step, data);
   }
 }
 
 export function traceTable(scope: 'main' | 'worker', step: string, rows: unknown[]): void {
   if (!enabled) return;
-  console.log(`%c[intent:${scope}]%c ${step}`, STYLE_SCOPE, STYLE_STEP);
+  console.log(`%c[intent:${scope}]%c %s`, STYLE_SCOPE, STYLE_STEP, step);
   console.table(rows);
 }
