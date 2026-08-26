@@ -1,3 +1,15 @@
+## [1.226.0](https://github.com/juspay/xyne-spaces/compare/v1.225.0...v1.226.0) (2026-08-26)
+
+
+### Features
+
+* control call setup from channel URL params ([#86](https://github.com/juspay/xyne-spaces/issues/86)) ([01650c4](https://github.com/juspay/xyne-spaces/commit/01650c4ed055e9cd771c19f1d593c0a71981346e))
+
+
+### Bug Fixes
+
+* auth middleware set user role ([#1039](https://github.com/juspay/xyne-spaces/issues/1039)) ([b197bb7](https://github.com/juspay/xyne-spaces/commit/b197bb717d0a4358008ad123b9ba8136044b7d7f))
+
 ## [1.225.0](https://github.com/juspay/xyne-spaces/compare/v1.224.1...v1.225.0) (2026-08-26)
 
 
