@@ -428,7 +428,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // /progress forwarder) because that forwarder is an internal S2S POST with
     // no user identity.
     const allowDebug = (await isClawAdmin(userId))
-      || (await getAgentEditAccess(userId, slug, orgId)).canEdit;
+      || Boolean((await getAgentEditAccess(userId, slug, orgId))?.canEdit);
 
     const sdlcResolution = slug === "sdlc-agent"
       ? await resolveSdlcRepositoryForUser(
