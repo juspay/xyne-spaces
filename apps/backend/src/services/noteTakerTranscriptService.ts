@@ -8,6 +8,7 @@ import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
+import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
@@ -470,6 +471,16 @@ class NoteTakerTranscriptService {
       try {
         await repositories.calls.update(call.id, { title });
         logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
+        try {
+          await canvasAuthService.syncNotesCanvasTitle(call.id, title);
+        } catch (syncError) {
+          logger.error(`[${callId}] notes_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
+        }
+        try {
+          await canvasAuthService.syncDetailedSummaryCanvasTitle(call.id, title);
+        } catch (syncError) {
+          logger.error(`[${callId}] detailed_summary_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
+        }
         // Thread-linked recording: patch the anchor message's content with
         // this title too (mirrors how a regular call's ended message shows its
         // AI text as message.content) so RecordingBubble never needs its own
@@ -569,6 +580,12 @@ class NoteTakerTranscriptService {
           return null;
         }
 
+        // Re-read the title here rather than reuse resolvedCallTitle: the AI title
+        // generation runs concurrently with generateRecordingSummary above and may
+        // have finished (and already synced the canvas title) while that LLM call
+        // was in flight. Using the stale value would clobber that sync right back.
+        const freshCallTitle = (await repositories.calls.findByExternalId(callId))?.title ?? resolvedCallTitle;
+
         const { canvasId } = await callDocumentService.createOrUpdateDetailedSummaryCanvas(
           callId,
           generated.summary,
@@ -577,7 +594,7 @@ class NoteTakerTranscriptService {
           null,
           call.startedAt,
           call.createdByUserId,
-          resolvedCallTitle,
+          freshCallTitle,
           citationCtx,
           workspaceId,
         );
@@ -751,6 +768,12 @@ class NoteTakerTranscriptService {
         return null;
       }
 
+      // Re-read the title here rather than reuse resolvedCallTitle: the AI title
+      // generation runs concurrently with the summary streaming above and may have
+      // finished (and already synced the canvas title) while that was in flight.
+      // Using the stale value would clobber that sync right back on finalize.
+      const freshCallTitle = (await repositories.calls.findByExternalId(callId))?.title ?? resolvedCallTitle;
+
       const finalized = await callDocumentService.finalizeDetailedSummaryCanvas(
         newCanvasId,
         generated.summary,
@@ -758,7 +781,7 @@ class NoteTakerTranscriptService {
         null,
         callId,
         call.startedAt,
-        resolvedCallTitle,
+        freshCallTitle,
         citationCtx,
       );
       if (!finalized) {
@@ -820,6 +843,7 @@ class NoteTakerTranscriptService {
         logger.error(`[${callId}] label_tag_failed`, { label: slug, path: 'note_taker', error });
       }
     }
+
     return tagIds;
   }
 
