@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.5](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.4...v1.219.0-release-20260825.5) (2026-08-26)
+
+
+### Features
+
+* self-serve Slack DM, group DM & channel migration with streamed-encrypted collection and controlled ingest ([#1053](https://github.com/juspay/xyne-spaces/issues/1053)) ([5318a95](https://github.com/juspay/xyne-spaces/commit/5318a9539552d1d25250a0e2b473428817f6fa36))
+
 ## [1.219.0-release-20260825.4](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.3...v1.219.0-release-20260825.4) (2026-08-26)
 
 
