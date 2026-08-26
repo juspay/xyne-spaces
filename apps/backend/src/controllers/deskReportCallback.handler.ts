@@ -108,26 +108,6 @@ export async function handleDeskReportCallback(
     }
     const metadata = (pending.metadata as Record<string, unknown> | null) ?? {};
 
-    // Reject a definite sessionId mismatch — a stray result must not bind to
-    // a different dispatched run. A callback that omits sessionId entirely
-    // still goes through, just logged, since some shapes may not echo it.
-    const pendingSessionId = typeof metadata['sessionId'] === 'string' ? metadata['sessionId'] : undefined;
-    if (sessionId && pendingSessionId && sessionId !== pendingSessionId) {
-      logger.warn('[DeskReport] callback: sessionId mismatch — dropping', {
-        channelId,
-        receivedSessionId: sessionId,
-        pendingSessionId,
-      });
-      res.json({ success: true, persisted: false });
-      return;
-    }
-    if (!sessionId) {
-      logger.warn('[DeskReport] callback: no sessionId in payload — accepting without cross-check', {
-        channelId,
-        pendingSessionId,
-      });
-    }
-
     const errorMessage = typeof payload['error'] === 'string' ? payload['error'] : undefined;
     const attachment = status === 'error' || errorMessage ? null : extractHtmlAttachment(payload);
 

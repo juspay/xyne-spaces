@@ -9,7 +9,7 @@ import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
 // A run with no callback (crash, dropped webhook) is reaped as failed past this age.
-export const STUCK_PENDING_HOURS = 2;
+export const STUCK_PENDING_HOURS = 3;
 
 const messageAttachmentRepo = new MessageAttachmentRepository();
 
