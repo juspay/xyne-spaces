@@ -41,6 +41,7 @@ import {
   DelayedMessageStatus,
   RecapEntityType,
   UserResponsibility,
+  UserType,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -2329,8 +2330,9 @@ export const queries = defineQueries({
       types: z.array(z.string()),
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
       isRead: z.boolean().optional(),
+      actorTypes: z.array(z.nativeEnum(UserType)).optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead } }) => {
+    ({ args: { limit, start, types, classification, isRead, actorTypes } }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -2347,6 +2349,16 @@ export const queries = defineQueries({
 
       if (isRead !== undefined) {
         query = query.where('isRead', isRead);
+      }
+
+      // Actor kind lives on users.userType, not on the activity row, so this has to
+      // reach through the `actor` relationship. Filtering here rather than on the
+      // client keeps `limit` meaningful — a client-side filter would page over all
+      // activities and hand back short or empty pages.
+      if (actorTypes && actorTypes.length > 0) {
+        query = query.whereExists('actor', (actor: any) =>
+          actor.where('userType', 'IN', actorTypes),
+        );
       }
 
       query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
