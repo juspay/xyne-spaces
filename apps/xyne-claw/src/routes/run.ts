@@ -119,6 +119,7 @@ import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } fro
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
+import { buildSuggestConnectorsTool, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -1707,6 +1708,7 @@ async function processTask(
   // alongside the others so the catch handler can still ship a queued card when
   // the turn ends some other way.
   const describeAgentRef: DescribeAgentRef = {};
+  const suggestConnectorsRef: SuggestConnectorsRef = {};
   // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
   // fires abortRun, so the brief is recovered from ref.value in the catch block
   // and shipped as `dailyBrief` on the callback.
@@ -3038,6 +3040,9 @@ async function processTask(
       !isDailyBrief;
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));
+      // Same gate as describe-agent: a connector card is only worth posting
+      // where a human is watching and can press Connect.
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef));
     }
 
 
@@ -4577,6 +4582,9 @@ async function processTask(
       // A draft (terminal, normally recovered in the catch) wins over a profile
       // card if a turn somehow produced both — the decision surface matters more
       // than the description.
+      ...(suggestConnectorsRef.value
+        ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
+        : {}),
       ...(proposeAgentRef.value || describeAgentRef.value
         ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
         : {}),
@@ -4761,6 +4769,9 @@ async function processTask(
         // A queued capability card must survive the copilot terminal path too,
         // or "what can you do?" silently loses its card on those agents.
         ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
+        ...(suggestConnectorsRef.value
+          ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
+          : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),

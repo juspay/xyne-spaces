@@ -30,6 +30,8 @@ type FlowComponentType =
   | 'link'
   | 'plan'
   | 'agent'
+  | 'agent_summary'
+  | 'mcp_suggest'
   | 'mcpConfigure'
   | 'pr'
   | 'user_question'
@@ -1226,6 +1228,59 @@ export function buildChartFlow(chart: ChartArtifact): FlowDefinition {
       fallbackText: chart.caption?.trim()
         ? chart.caption.trim()
         : `${chart.type} chart · ${pointCount} point${pointCount === 1 ? '' : 's'}`,
+    })
+    .build();
+}
+
+export interface McpSuggestConnector {
+  serverType: string;
+  name: string;
+  description?: string;
+  connected?: boolean;
+}
+
+/**
+ * Connector suggestions posted into a conversation.
+ *
+ * Rows carry display data only. The dashboard node resolves the live server id
+ * from the catalog when Connect is pressed, so a card that has been sitting in
+ * a thread cannot act on a connector that has since changed.
+ */
+export function buildMcpSuggestFlow(context: {
+  connectors: McpSuggestConnector[];
+  title?: string;
+  reason?: string;
+  browseAll?: boolean;
+  totalCount?: number;
+  screenKey: string;
+  agentSlug?: string;
+  userId: string;
+  conversationId?: string;
+  channelId?: string;
+}): FlowDefinition {
+  return new FlowBuilder(`mcp-suggest-${context.screenKey}`)
+    .addComponent({
+      id: 'mcp-suggest',
+      type: 'mcp_suggest',
+      props: {
+        ...(context.title ? { title: context.title } : {}),
+        ...(context.reason ? { reason: context.reason } : {}),
+        ...(context.browseAll ? { browseAll: true } : {}),
+        ...(context.totalCount !== undefined ? { totalCount: context.totalCount } : {}),
+        connectors: context.connectors.map((c) => ({
+          serverType: c.serverType,
+          name: c.name,
+          ...(c.description ? { description: c.description } : {}),
+          ...(c.connected !== undefined ? { connected: c.connected } : {}),
+        })),
+      },
+    })
+    .setData({
+      actionType: 'mcp-suggest',
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      userId: context.userId,
+      ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+      ...(context.channelId ? { channelId: context.channelId } : {}),
     })
     .build();
 }

@@ -64,7 +64,9 @@ export interface ProposedAgentSpec {
  */
 export type PendingAgentCard =
   | { variant: "draft"; agent: ProposedAgentSpec }
-  | { variant: "profile"; slug?: string };
+  | { variant: "profile"; slug?: string }
+  | { variant: "profile-list"; slugs: string[] }
+  | { variant: "summary" };
 
 /** Shared ref the tool writes the accepted draft into (mirrors ProposePlanRef). */
 export interface ProposeAgentRef {

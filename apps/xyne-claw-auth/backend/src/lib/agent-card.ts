@@ -268,6 +268,7 @@ export interface AgentRowLike {
   systemPrompt: string;
   modelId?: string | null;
   color?: string | null;
+  scope?: string | null;
 }
 
 /**
@@ -282,11 +283,15 @@ export function identityFromAgentRow(
   row: AgentRowLike,
   resolved: ResolvedCapabilities,
   builtBy?: string,
+  owner?: { name?: string | null; id?: string | null },
 ): AgentIdentity {
   return agentIdentity({
     name: row.name,
     slug: row.slug,
     ...(builtBy ? { builtBy } : {}),
+    ...(owner?.name ? { ownedBy: owner.name } : {}),
+    ...(owner?.id ? { ownedById: owner.id } : {}),
+    ...(row.scope ? { scope: row.scope } : {}),
     description: row.description ?? "",
     systemPrompt: row.systemPrompt,
     ...(row.modelId ? { modelId: row.modelId } : {}),

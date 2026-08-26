@@ -11,6 +11,7 @@ import { getRequesterId, isClawAdmin , requireRequester} from "../middleware/age
 import { prisma } from "../db.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decrypt } from "../crypto.js";
+import { extractClaudeBearer } from "../lib/claude-creds.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
@@ -467,7 +468,8 @@ router.get("/claude/models", asyncHandler(async (req: Request, res: Response) =>
     throw badRequest("Claude is not configured. Save an API key first.");
   }
   try {
-    const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+    const decrypted = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+    const apiKey = extractClaudeBearer(decrypted);
     const models = await fetchAnthropicModels(apiKey, cred.baseUrl ?? undefined, cred.authType ?? undefined);
     ok(res, models);
   } catch (err) {
@@ -569,5 +571,157 @@ function decodeJwtChatgptAccountId(jwt: string): string | undefined {
     return undefined;
   }
 }
+
+// ── Claude browser sign-in (user-scoped) ──────────────────────────────────────
+// Mirrors the agent-scoped flow in agents.ts, but writes the user's own
+// credential. Anthropic's Claude Code flow is PKCE with the verifier doubling
+// as `state`, and its redirect lands on localhost:53692 — a port only the
+// Claude Code CLI listens on — so the browser cannot post back to us. The user
+// copies the code (or the whole redirect URL) and pastes it into /exchange.
+//
+// Captures a REFRESHABLE token, unlike a pasted `claude setup-token` value.
+const USER_CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const USER_CLAUDE_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
+const USER_CLAUDE_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+const USER_CLAUDE_REDIRECT_URI = "http://localhost:53692/callback";
+const USER_CLAUDE_SCOPES =
+  "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+const USER_CLAUDE_PKCE_PREFIX = "claude-pkce-user:";
+const USER_CLAUDE_PKCE_TTL = 600;
+
+function generateUserClaudePkce(): { verifier: string; challenge: string } {
+  const verifier = crypto.randomBytes(32).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  return { verifier, challenge };
+}
+
+router.post("/provider-credentials/claude/oauth/start", async (req: Request, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "x-user-id header required" });
+      return;
+    }
+
+    const { verifier, challenge } = generateUserClaudePkce();
+    const state = verifier;
+    await redisService
+      .getConnection()
+      .set(`${USER_CLAUDE_PKCE_PREFIX}${userId}:${state}`, verifier, "EX", USER_CLAUDE_PKCE_TTL);
+
+    const url = new URL(USER_CLAUDE_AUTHORIZE_URL);
+    url.searchParams.set("code", "true");
+    url.searchParams.set("client_id", USER_CLAUDE_CLIENT_ID);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("redirect_uri", USER_CLAUDE_REDIRECT_URI);
+    url.searchParams.set("scope", USER_CLAUDE_SCOPES);
+    url.searchParams.set("code_challenge", challenge);
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("state", state);
+
+    res.json({
+      success: true,
+      data: { url: url.toString(), state, expiresIn: USER_CLAUDE_PKCE_TTL },
+    });
+  } catch (err) {
+    log.error("[settings] claude/oauth/start error:", err);
+    res.status(500).json({ success: false, error: "Failed to start Claude login" });
+  }
+});
+
+router.post("/provider-credentials/claude/oauth/exchange", async (req: Request, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "x-user-id header required" });
+      return;
+    }
+
+    let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
+
+    // Tolerate a full redirect URL, "code#state", or a bare code — users paste
+    // whichever of the three the browser happened to show them.
+    let raw = (code ?? "").trim();
+    if (raw.startsWith("http") || raw.includes("code=")) {
+      try {
+        const u = raw.startsWith("http") ? new URL(raw) : new URL(`http://x?${raw}`);
+        code = u.searchParams.get("code") ?? code;
+        state = u.searchParams.get("state") ?? state;
+        raw = (code ?? "").trim();
+      } catch {
+        /* keep original */
+      }
+    }
+    if (raw.includes("#")) {
+      const [c, s] = raw.split("#", 2);
+      code = c;
+      if (!state && s) state = s;
+    }
+
+    if (!code || !state) {
+      res.status(400).json({ success: false, error: "code and state are required" });
+      return;
+    }
+
+    const redis = redisService.getConnection();
+    const key = `${USER_CLAUDE_PKCE_PREFIX}${userId}:${state}`;
+    const verifier = await redis.get(key);
+    if (!verifier) {
+      res.status(400).json({ success: false, error: "Sign-in expired — start again" });
+      return;
+    }
+    await redis.del(key);
+
+    const tokRes = await fetch(USER_CLAUDE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        grant_type: "authorization_code",
+        client_id: USER_CLAUDE_CLIENT_ID,
+        code,
+        state,
+        redirect_uri: USER_CLAUDE_REDIRECT_URI,
+        code_verifier: verifier,
+      }),
+    });
+    if (!tokRes.ok) {
+      const text = await tokRes.text().catch(() => "");
+      res.status(502).json({
+        success: false,
+        error: `Anthropic token exchange failed: ${tokRes.status} ${text.slice(0, 200)}`,
+      });
+      return;
+    }
+
+    const tokens = (await tokRes.json()) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+    if (!tokens.access_token || !tokens.refresh_token) {
+      res.status(502).json({ success: false, error: "Anthropic did not return tokens" });
+      return;
+    }
+
+    const bundle = JSON.stringify({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expires_at: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+    });
+    const enc = encrypt(bundle, CONFIG.encryptionKey);
+    await userProviderCredentialsRepository.upsert(userId, "claude", {
+      encryptedKey: enc.ciphertext,
+      iv: enc.iv,
+      authTag: enc.authTag,
+      authType: "oauth_token",
+      baseUrl: "https://api.anthropic.com",
+    });
+
+    res.json({ success: true, data: { connected: true } });
+  } catch (err) {
+    log.error("[settings] claude/oauth/exchange error:", err);
+    res.status(500).json({ success: false, error: "Claude login exchange failed" });
+  }
+});
 
 export const settingsRouter = router;
