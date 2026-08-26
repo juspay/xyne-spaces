@@ -59,6 +59,7 @@ import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { decryptStoredField } from "../surfaces/spaces/client.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
 import { getRequesterId, getOrgId } from "../middleware/agent-acl.js";
@@ -120,6 +121,7 @@ async function resolveSpacesAuthFromRequest(
     }
 
     // Workspace id: x-workspace-id header → xyne_last_workspace cookie
+    const verifiedWorkspaceHeader = req.headers["x-spaces-workspace-id"];
     const workspaceHeader = req.headers["x-workspace-id"];
     const workspaceId =
       typeof workspaceHeader === "string" && workspaceHeader.trim()
@@ -158,9 +160,16 @@ async function resolveSpacesAuthFromRequest(
 
     if (!token && !sessionId) return undefined;
 
+    const spacesUserIdHeader = req.headers["x-spaces-user-id"];
+    const spacesUserId = typeof spacesUserIdHeader === "string" && spacesUserIdHeader.trim()
+      ? spacesUserIdHeader.trim()
+      : userId;
     const effectiveWorkspaceId =
       workspaceId ??
-      (userId ? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) : null) ??
+      (typeof verifiedWorkspaceHeader === "string" && verifiedWorkspaceHeader.trim()
+        ? verifiedWorkspaceHeader.trim()
+        : null) ??
+      (spacesUserId ? await getWorkspaceIdForUser(spacesUserId, "require-auth").catch(() => null) : null) ??
       undefined;
     if (!workspaceId && effectiveWorkspaceId) {
       log.info(

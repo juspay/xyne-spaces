@@ -27,7 +27,7 @@ import {
   isClawAdmin,
   requireRequester,
 } from "../middleware/agent-acl.js";
-import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -355,9 +355,22 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   // the AUTHENTICATED user — requireAuth has already verified their cookie
   // and pinned the verified userId at req.headers["x-user-id"]. We never
   // trust the query string for that decision.
-  const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+  const scopeUserId = (req.query["userId"] as string | undefined)?.trim() || undefined;
   const authedUserId = String(req.headers["x-user-id"] ?? "");
   const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+
+  // Dashboard auth exposes the workspace-scoped Spaces user ID, while
+  // Agent.ownerUserId stores the canonical Claw User ID. Resolve an explicit
+  // scope through UserSurfaceIdentity before applying the visibility filter.
+  // Non-admin callers may only request their own two equivalent identities.
+  if (scopeUserId && !admin && !matchesAuthenticatedUserId(req, scopeUserId)) {
+    throw forbidden("userId does not match authenticated session");
+  }
+  const scopedUser = scopeUserId ? await userRepository.findById(scopeUserId) : null;
+  if (scopeUserId && !scopedUser) {
+    throw notFound("User not found");
+  }
+  const canonicalScopeUserId = (scopedUser?.id ?? authedUserId) || undefined;
 
   // The admin "see ALL agents" bypass is OPT-IN via ?scope=all. The default
   // list (e.g. the main "My Agents" view) stays filtered to
@@ -369,7 +382,7 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const adminScope = getAdminOrgScope(req, "/agents", admin && wantAllAgents);
   const listOrgId = adminScope.orgId ?? getOrgId(req);
   const agents = await agentRepository.listVisible({
-    ...(scopeUserId ? { userId: scopeUserId } : {}),
+    ...(canonicalScopeUserId ? { userId: canonicalScopeUserId } : {}),
     ...(listOrgId ? { orgId: listOrgId } : {}),
     isAdmin: admin && wantAllAgents,
   });
@@ -391,7 +404,7 @@ router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.query["userId"] as string | undefined)?.trim();
   if (!userId) throw badRequest("userId is required");
   const requesterId = requireRequester(req, "authenticated user required");
-  if (requesterId !== userId) throw forbidden("userId does not match authenticated session");
+  if (!matchesAuthenticatedUserId(req, userId)) throw forbidden("userId does not match authenticated session");
   const orgId = getOrgId(req);
   if (!orgId) throw badRequest("Organization context is required");
   const configs = await userAgentConfigRepository.listByUser(userId, orgId);
@@ -476,7 +489,9 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   const admin = requesterId ? await isClawAdmin(requesterId) : false;
   const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
-  if (ownerUserId && ownerUserId !== requesterId && !admin) {
+  // The auth boundary retains both representations of the caller, so accept
+  // either the canonical Claw id or the verified Spaces id from the session.
+  if (ownerUserId && !matchesAuthenticatedUserId(req, ownerUserId) && !admin) {
     throw forbidden("Only an admin can create an agent owned by another user");
   }
   // For personal agents, owner is required

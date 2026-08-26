@@ -1,17 +1,54 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { asyncHandler, ok, badRequest, forbidden, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
-import { getDefaultOrgId, ensureOrgMembership, ensureUserExists } from "../lib/users-jit.js";
+import {
+  getDefaultOrgId,
+  ensureOrgMembership,
+  ensureUserExists,
+  resolveClawUserIdForSpacesIdentity,
+} from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getCanonicalRequesterId, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("users");
 const router = Router();
+
+/**
+ * GET /users/me
+ *
+ * The Spaces cookie identifies a workspace-scoped Spaces user, whereas Claw
+ * owns the canonical person id. `requireAuth` resolves that identity before
+ * this handler runs and stamps both values onto the request. The SPA must use
+ * `userId` for every Claw URL; retaining the raw Spaces id here is useful only
+ * to callers that also need to call Spaces directly.
+ */
+router.get("/me", (req: Request, res: Response) => {
+  const userId = req.headers["x-user-id"];
+  if (typeof userId !== "string" || !userId) {
+    res.status(401).json({ success: false, error: "authenticated user required" });
+    return;
+  }
+
+  const spacesUserId = req.headers["x-spaces-user-id"];
+  const spacesWorkspaceId = req.headers["x-spaces-workspace-id"];
+  const spacesOrgMemberId = req.headers["x-spaces-org-member-id"];
+  res.json({
+    success: true,
+    data: {
+      userId,
+      ...(typeof spacesUserId === "string" && spacesUserId ? { spacesUserId } : {}),
+      ...(typeof spacesWorkspaceId === "string" && spacesWorkspaceId ? { spacesWorkspaceId } : {}),
+      ...(typeof spacesOrgMemberId === "string" && spacesOrgMemberId ? { spacesOrgMemberId } : {}),
+    },
+  });
+});
 
 /**
  * GET /users[?q=<substr>]
@@ -79,8 +116,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("name is required");
   }
 
-  const sessionUserId = req.headers["x-user-id"];
-  if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== id.trim()) {
+  if (getCanonicalRequesterId(req) && !matchesAuthenticatedUserId(req, id.trim())) {
     throw forbidden("Body id does not match authenticated session");
   }
 
@@ -93,8 +129,13 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   let user;
   const jitOk = await ensureUserExists(id.trim(), "require-auth");
   if (jitOk) {
+    const clawUserId = await resolveClawUserIdForSpacesIdentity(id.trim());
+    if (!clawUserId) {
+      log.error(`[users] JIT resolved Spaces user ${id.trim()} but no Claw identity exists`);
+      throw new HttpError(503, "User identity is still being synchronized");
+    }
     user = await prisma.user.update({
-      where: { id: id.trim() },
+      where: { id: clawUserId },
       data: { email: email.trim(), name: name.trim() },
     });
     // Gap 8: re-assert OrgMembership for a pre-existing user (ensureUserExists
@@ -107,17 +148,20 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
       throw new HttpError(503, "Default organization not provisioned");
     }
-    user = await prisma.user.upsert({
-      where: { id: id.trim() },
-      create: { id: id.trim(), email: email.trim(), name: name.trim(), orgId },
-      update: { email: email.trim(), name: name.trim() },
+    user = await prisma.user.create({
+      data: {
+        id: `claw-user-${randomUUID()}`,
+        email: email.trim(),
+        name: name.trim(),
+        orgId,
+      },
     });
     await ensureOrgMembership(user.id, orgId);
   }
 
   // Auto-configure xyne-spaces MCP connection if token provided
   if (spacesToken && typeof spacesToken === "string") {
-    autoConfigureSpaces(user.id, spacesToken).catch((err) => {
+    autoConfigureSpaces(user.id, id.trim(), spacesToken).catch((err) => {
       log.error("[users] auto-configure xyne-spaces failed:", err);
     });
   }
@@ -125,7 +169,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   ok(res, user);
 }));
 
-async function autoConfigureSpaces(userId: string, token: string): Promise<void> {
+async function autoConfigureSpaces(clawUserId: string, spacesUserId: string, token: string): Promise<void> {
   const serverType = "xyne-spaces";
 
   // Find or create the xyne-spaces MCP server
@@ -142,21 +186,21 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   }
 
   const spacesUrl = CONFIG.spacesInternalUrl;
-  const workspaceId = await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+  const workspaceId = await getWorkspaceIdForUser(spacesUserId, "require-auth").catch(() => null);
   const credentials = {
     url: spacesUrl,
     token,
     ...(workspaceId ? { workspaceId } : {}),
   };
   if (workspaceId) {
-    log.info(`[users] Auto-configured xyne-spaces workspaceId=${workspaceId} for user ${userId}`);
+    log.info(`[users] Auto-configured xyne-spaces workspaceId=${workspaceId} for user ${clawUserId}`);
   }
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
   await prisma.userMcpConnection.upsert({
-    where: { userId_mcpServerId: { userId, mcpServerId: server.id } },
+    where: { userId_mcpServerId: { userId: clawUserId, mcpServerId: server.id } },
     create: {
-      userId,
+      userId: clawUserId,
       mcpServerId: server.id,
       encryptedCreds: encrypted.ciphertext,
       iv: encrypted.iv,
@@ -171,12 +215,12 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
 
   // Sync tools
   if (await hasConnectorDefinition(serverType)) {
-    syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
+    syncToolsForServer(clawUserId, serverType, server.name, credentials).catch((err) => {
       log.error(`[users] tool sync failed for ${serverType}:`, err);
     });
   }
 
-  log.info(`[users] Auto-configured xyne-spaces for user ${userId}`);
+  log.info(`[users] Auto-configured xyne-spaces for user ${clawUserId}`);
 
   // Also auto-connect xyne-spaces-app-tools for this user.
   // Stores the default agent's spacesAppToken so the MCP server can post autonomously
@@ -194,9 +238,9 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
       });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    const user = await prisma.user.findUnique({ where: { id: clawUserId }, select: { orgId: true } });
     if (!user?.orgId) {
-      log.error(`[users] orgId is required; refusing global default-agent lookup for xyne-spaces-app-tools userId=${userId}`);
+      log.error(`[users] orgId is required; refusing global default-agent lookup for xyne-spaces-app-tools userId=${clawUserId}`);
       return;
     }
 
@@ -219,9 +263,9 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
     const appToolsCredentials = { url: spacesUrl, app_token: decryptedAppToken };
     const encryptedAppTools = encrypt(JSON.stringify(appToolsCredentials), CONFIG.encryptionKey);
     await prisma.userMcpConnection.upsert({
-      where: { userId_mcpServerId: { userId, mcpServerId: appToolsServer.id } },
+      where: { userId_mcpServerId: { userId: clawUserId, mcpServerId: appToolsServer.id } },
       create: {
-        userId,
+        userId: clawUserId,
         mcpServerId: appToolsServer.id,
         encryptedCreds: encryptedAppTools.ciphertext,
         iv: encryptedAppTools.iv,
@@ -236,14 +280,14 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
 
     const appToolsType = "xyne-spaces-app-tools";
     if (await hasConnectorDefinition(appToolsType)) {
-      syncToolsForServer(userId, appToolsType, appToolsServer.name, appToolsCredentials).catch((err) => {
+      syncToolsForServer(clawUserId, appToolsType, appToolsServer.name, appToolsCredentials).catch((err) => {
         log.error(`[users] tool sync failed for ${appToolsType}:`, err);
       });
     }
 
-    log.info(`[users] Auto-configured xyne-spaces-app-tools for user ${userId}`);
+    log.info(`[users] Auto-configured xyne-spaces-app-tools for user ${clawUserId}`);
   } catch (err) {
-    log.error(`[users] auto-configure xyne-spaces-app-tools failed for user ${userId}:`, err);
+    log.error(`[users] auto-configure xyne-spaces-app-tools failed for user ${clawUserId}:`, err);
     // Non-fatal — don't block the spaces configuration
   }
 }
