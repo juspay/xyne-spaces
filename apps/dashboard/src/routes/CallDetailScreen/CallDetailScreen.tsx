@@ -247,7 +247,10 @@ export default function CallDetailScreen(): ReactElement {
     );
 
   return (
-    <div className='flex h-full overflow-hidden bg-background rounded-2xl'>
+    // `relative` scopes the canvas table-of-contents rail, which positions itself
+    // `absolute left-0`, to this screen instead of letting it escape onto the app
+    // sidebar. Mirrors the recording detail screen's root.
+    <div className='relative flex h-full overflow-hidden bg-background rounded-2xl'>
       <div className='flex-1 flex flex-col overflow-hidden min-w-0'>
         <div className='flex-1 overflow-y-auto'>
           <div className='mx-auto w-full max-w-[820px] px-6 pt-6 pb-24 sm:px-8'>
