@@ -18,7 +18,9 @@ import { CanvasSharedActivity } from './CanvasSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
 import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
 import { StageApprovalActivity } from './StageApprovalActivity';
+import { KbIngestionActivity } from './KbIngestionActivity';
 import { SlashCommandArtifactActivity } from './SlashCommandArtifactActivity';
+import { MaxWorkloadActivity } from './MaxWorkloadActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -133,6 +135,12 @@ export const ActivityItem = memo(function ActivityItem({
     case 'stage_approval_approved':
     case 'stage_approval_rejected':
       return <StageApprovalActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'kb_ingestion_completed':
+      return <KbIngestionActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'max_workload_reached':
+      return <MaxWorkloadActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

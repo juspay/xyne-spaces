@@ -13,12 +13,14 @@ const REQUEST_TTL_MS = 60 * 60 * 1000;
 export interface SummaryRequestState {
   requestedAt: number;
   progress: number;
+  stageIndex: number;
   templateId?: string;
 }
 
 type RequestMap = Record<string, SummaryRequestState>;
 
 const normalizeProgress = (progress: number): number => Math.min(96, Math.max(0, progress));
+const normalizeStageIndex = (stageIndex: number): number => Math.max(0, Math.trunc(stageIndex));
 
 // Reads all pending summary-generation states from the session-storage key.
 const read = (): RequestMap => {
@@ -41,6 +43,9 @@ const read = (): RequestMap => {
         requests[recordingId] = {
           requestedAt: request.requestedAt,
           progress: normalizeProgress(request.progress),
+          stageIndex: normalizeStageIndex(
+            typeof request.stageIndex === 'number' ? request.stageIndex : 0,
+          ),
           ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {}),
         };
       }
@@ -72,6 +77,9 @@ export const getSummaryRequest = (
 export const getSummaryProgress = (recordingId: string | null | undefined): number =>
   getSummaryRequest(recordingId)?.progress ?? 0;
 
+export const getSummaryStage = (recordingId: string | null | undefined): number =>
+  getSummaryRequest(recordingId)?.stageIndex ?? 0;
+
 export const markSummaryRequested = (
   recordingId: string | null | undefined,
   templateId?: string,
@@ -82,6 +90,7 @@ export const markSummaryRequested = (
     [recordingId]: {
       requestedAt: Date.now(),
       progress: 0,
+      stageIndex: 0,
       ...(templateId ? { templateId } : {}),
     },
   });
@@ -90,13 +99,21 @@ export const markSummaryRequested = (
 export const saveSummaryProgress = (
   recordingId: string | null | undefined,
   progress: number,
+  stageIndex: number,
 ): void => {
   if (!recordingId || !Number.isFinite(progress)) return;
   const map = read();
   const request = map[recordingId];
   // Success/failure may clear the request before the panel cleanup runs.
   if (!request) return;
-  write({ ...map, [recordingId]: { ...request, progress: normalizeProgress(progress) } });
+  write({
+    ...map,
+    [recordingId]: {
+      ...request,
+      progress: normalizeProgress(progress),
+      stageIndex: normalizeStageIndex(stageIndex),
+    },
+  });
 };
 
 export const clearSummaryRequested = (recordingId: string | null | undefined): void => {

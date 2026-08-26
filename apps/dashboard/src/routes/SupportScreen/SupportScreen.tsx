@@ -49,6 +49,7 @@ import {
   Info as InfoIcon,
   Ticket as TicketIcon,
   Tag as TagIcon,
+  CalendarRange,
 } from 'lucide-react';
 import {
   ChannelVisibility,
@@ -138,11 +139,20 @@ import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
-import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
+import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../../hooks/useUsers';
+import { BulkActionToolbar } from '../../components/Tickets/TicketTable/BulkActionToolbar';
+import { assigneeOptionToTicketUpdate } from '../../components/Tickets/TicketTable/TicketTableHelper';
+import {
+  dueDateToEta,
+  sharedChannelId,
+  useBulkAssignableUsers,
+  useBulkTicketActions,
+  type BulkTicketUpdates,
+} from '../../components/Tickets/TicketTable/useBulkTicketActions';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { AssigneePicker } from '../../components/Tickets/TicketListView/AssigneePicker';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
@@ -160,6 +170,7 @@ import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyCo
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
+import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
 import { useEmailDrafts } from '../../hooks/useEmailDraft';
@@ -536,7 +547,7 @@ interface DemergeEmailResponse {
   };
 }
 
-type ViewMode = 'kanban' | 'list' | 'table';
+type ViewMode = 'kanban' | 'list' | 'table' | 'calendar';
 
 const SupportScreen = (): ReactElement => {
   const {
@@ -756,6 +767,12 @@ const SupportScreen = (): ReactElement => {
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Radix replays outside-dismissal on `click` with the original pointerdown target, which is
+  // already detached when a submenu button unmounts itself (AI Tags category drill-down), so the
+  // `closest('[data-filter-submenu]')` guard below misses it. Remember the exact node the
+  // pointerdown started on — matching on identity means a pointerdown that never leads to a
+  // dismissal (touch scroll, Escape) can't latch and swallow a later, genuine outside click.
+  const submenuPointerDownTargetRef = useRef<EventTarget | null>(null);
 
   useEffect(() => {
     if (!moreFiltersOpen) {
@@ -1419,8 +1436,9 @@ const SupportScreen = (): ReactElement => {
     localStorage.setItem('support-sidebar-open', isSidebarOpen.toString());
   }, [isSidebarOpen]);
 
-  // Fetch EMAIL channels using hook (from state machine, already loaded)
-  const emailChannels = useEmailChannels(!ticketId);
+  // Derive EMAIL channels from already-loaded state (no extra Zero query).
+  // channelStats are fetched inside the hook and merged onto each channel.
+  const emailChannels = useEmailChannels();
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
@@ -1540,6 +1558,10 @@ const SupportScreen = (): ReactElement => {
     priority?: string | null | undefined;
     assignedTo?: string | null | undefined;
     userGroupId?: string | null | undefined;
+    // The bulk bar routes stage changes by board type and creates labels under the
+    // ticket's project, so both ids are captured with the selection.
+    boardId?: string | null | undefined;
+    projectId?: string | null | undefined;
   };
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
@@ -1565,6 +1587,8 @@ const SupportScreen = (): ReactElement => {
       priority?: string | null | undefined;
       assignedTo?: string | null | undefined;
       userGroupId?: string | null | undefined;
+      boardId?: string | null | undefined;
+      projectId?: string | null | undefined;
     }): void => {
       setSelectedTickets(prev => {
         const next = new Map(prev);
@@ -1584,6 +1608,8 @@ const SupportScreen = (): ReactElement => {
             priority: row.priority,
             assignedTo: row.assignedTo,
             userGroupId: row.userGroupId,
+            boardId: row.boardId,
+            projectId: row.projectId,
           });
         }
         return next;
@@ -1623,6 +1649,8 @@ const SupportScreen = (): ReactElement => {
         priority?: string | null | undefined;
         assignedTo?: string | null | undefined;
         userGroupId?: string | null | undefined;
+        boardId?: string | null | undefined;
+        projectId?: string | null | undefined;
       }>,
       select: boolean,
     ): void => {
@@ -1643,6 +1671,8 @@ const SupportScreen = (): ReactElement => {
               priority: row.priority,
               assignedTo: row.assignedTo,
               userGroupId: row.userGroupId,
+              boardId: row.boardId,
+              projectId: row.projectId,
             });
           } else {
             next.delete(row.id);
@@ -1677,11 +1707,88 @@ const SupportScreen = (): ReactElement => {
             priority: ticket.priority,
             assignedTo: ticket.assignedTo,
             userGroupId: ticket.userGroupId,
+            boardId: ticket.boardId,
+            projectId: ticket.projectId,
           },
         ]),
       ),
     );
   }, []);
+
+  // --- Bulk field edits over the current selection ---------------------------
+  // The list view has no grid of its own, so the shared bulk bar is driven from
+  // here; the table view renders the same bar from inside TicketTable.
+  const { applyUpdates: applyBulkUpdates, applyTags: applyBulkTags } = useBulkTicketActions();
+
+  const selectedTicketList = useMemo(() => Array.from(selectedTickets.values()), [selectedTickets]);
+
+  // Active users in the selection's channel — see useBulkAssignableUsers.
+  const bulkChannelId = useMemo(() => sharedChannelId(selectedTicketList), [selectedTicketList]);
+  const deskUsers = useBulkAssignableUsers(bulkChannelId);
+
+  // Every desk ticket lives on the channel's board, so the label catalog can be
+  // read off whichever page of tickets is currently loaded.
+  const deskProjectId = kanbanTickets[0]?.projectId;
+  const [deskProjectTags] = useCachedQuery(
+    queries.projectTagsByProjectId({ projectId: deskProjectId ?? '' }),
+    { enabled: !!deskProjectId },
+  );
+  const deskAvailableTags = useMemo(
+    () => Array.from(new Set((deskProjectTags ?? []).map(tag => tag.name))).sort(),
+    [deskProjectTags],
+  );
+  // No Stage control on boards that gate moves client-side (evaluateLinearStageGate) —
+  // a bulk bar can't run per-ticket forms/approvals. NON_LINEAR is server-enforced.
+  const deskBoardGatesStageMoves = useMemo(() => {
+    if (channelBoardDetail?.boardType === BoardType.NON_LINEAR) return false;
+    return (channelBoardDetail?.stages ?? []).some(
+      stage =>
+        (stage.approvers?.length ?? 0) > 0 ||
+        (stage.formContextMappings ?? []).some(
+          mapping => mapping.contextType === FormContextType.STAGE,
+        ),
+    );
+  }, [channelBoardDetail?.boardType, channelBoardDetail?.stages]);
+
+  const deskBulkStages = useMemo(
+    () =>
+      deskBoardGatesStageMoves
+        ? []
+        : availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+    [availableStages, deskBoardGatesStageMoves],
+  );
+
+  // A stage's default status must ride along in the same write — see BulkTicketUpdates.stage.
+  const deskStageStatusByName = useMemo(
+    () => new Map(availableStages.map(stage => [stage.name, stage.status])),
+    [availableStages],
+  );
+
+  const handleBulkFieldUpdate = useCallback(
+    (updates: BulkTicketUpdates): void => {
+      if (selectedTicketList.length === 0) return;
+      applyBulkUpdates(selectedTicketList, updates);
+      clearTicketSelection();
+    },
+    [applyBulkUpdates, selectedTicketList, clearTicketSelection],
+  );
+
+  const handleBulkStageChange = useCallback(
+    (name: string): void => {
+      const statusV2 = deskStageStatusByName.get(name);
+      handleBulkFieldUpdate({ stage: { name, ...(statusV2 ? { statusV2 } : {}) } });
+    },
+    [deskStageStatusByName, handleBulkFieldUpdate],
+  );
+
+  const handleBulkTagsChange = useCallback(
+    (tags: string[]): void => {
+      if (selectedTicketList.length === 0 || tags.length === 0) return;
+      applyBulkTags(selectedTicketList, tags);
+      clearTicketSelection();
+    },
+    [applyBulkTags, selectedTicketList, clearTicketSelection],
+  );
 
   const handleMergeSelectedTickets = useCallback(
     async (parentTicketId: string, ticketIds: string[]): Promise<void> => {
@@ -2242,6 +2349,7 @@ const SupportScreen = (): ReactElement => {
             />
             <DeskLabelsSidebar
               channelId={c.id}
+              isMember={isJoined}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
               onDeletedLabel={handleDeletedLabel}
@@ -2829,6 +2937,11 @@ const SupportScreen = (): ReactElement => {
                               sideOffset={6}
                               className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
                               onInteractOutside={e => {
+                                if (e.target === submenuPointerDownTargetRef.current) {
+                                  submenuPointerDownTargetRef.current = null;
+                                  e.preventDefault();
+                                  return;
+                                }
                                 const target = e.target;
                                 if (
                                   target instanceof Element &&
@@ -2952,6 +3065,9 @@ const SupportScreen = (): ReactElement => {
                               <div
                                 ref={submenuRef}
                                 data-filter-submenu='true'
+                                onPointerDownCapture={e => {
+                                  submenuPointerDownTargetRef.current = e.target;
+                                }}
                                 className='fixed z-[60]'
                                 style={{
                                   left:
@@ -3120,6 +3236,20 @@ const SupportScreen = (): ReactElement => {
                           data-track-name='SetTableView'
                         >
                           <Table2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => setViewMode('calendar')}
+                          className={cn(
+                            'p-1.5 transition-colors',
+                            viewMode === 'calendar'
+                              ? 'bg-muted text-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                          )}
+                          title='Calendar View'
+                          data-track-category='Support'
+                          data-track-name='SetCalendarView'
+                        >
+                          <CalendarRange size={16} />
                         </button>
                       </div>
                       {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
@@ -3345,6 +3475,21 @@ const SupportScreen = (): ReactElement => {
                         onTicketsLoaded={setKanbanTickets}
                         {...(ticketId !== undefined && { activeTicketId: ticketId })}
                       />
+                    ) : viewMode === 'calendar' && selectedChannelId ? (
+                      <DeskCalendarView
+                        channelId={selectedChannelId}
+                        isMember={isSelectedChannelJoined}
+                        ticketFilter={ticketFilter}
+                        onTicketClick={ticket => {
+                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                            state: {
+                              conversationId: ticket.conversationId,
+                              ticketId: ticket.id,
+                            },
+                          });
+                        }}
+                        onTicketsLoaded={setKanbanTickets}
+                      />
                     ) : viewMode === 'table' ? (
                       <SupportTicketTable
                         channelId={selectedChannelId}
@@ -3395,6 +3540,29 @@ const SupportScreen = (): ReactElement => {
                   </>
                 )}
               </div>
+              {/* Bulk field actions for the list view — the table view already gets
+                  the same bar from TicketTable, driven by its own grid selection. */}
+              {viewMode === 'list' && selectedTicketIds.size > 0 && (
+                <BulkActionToolbar
+                  selectedCount={selectedTicketIds.size}
+                  users={deskUsers}
+                  stages={deskBulkStages}
+                  onAssigneeChange={value =>
+                    handleBulkFieldUpdate(assigneeOptionToTicketUpdate(value))
+                  }
+                  onStatusChange={value => handleBulkFieldUpdate({ statusV2: value })}
+                  onPriorityChange={value => {
+                    if (value) handleBulkFieldUpdate({ priority: value });
+                  }}
+                  onStageChange={handleBulkStageChange}
+                  onDueDateChange={date => {
+                    if (date) handleBulkFieldUpdate({ eta: dueDateToEta(date) });
+                  }}
+                  onClearSelection={clearTicketSelection}
+                  availableTags={deskAvailableTags}
+                  onTagsChange={handleBulkTagsChange}
+                />
+              )}
             </div>
           </Panel>
         )}
@@ -3531,6 +3699,7 @@ const SupportScreen = (): ReactElement => {
           open={autoLabelWizardOpen}
           onOpenChange={setAutoLabelWizardOpen}
           channelId={selectedChannelId}
+          isMember={isSelectedChannelJoined}
         />
       )}
 
@@ -3924,7 +4093,6 @@ export const SupportTicketDetail = ({
 
   const channelIntegrationInfo = useChannelIntegrationInfo(channelId || null);
   const deskEmail = channelIntegrationInfo.email ?? '';
-  const { outboundConfigured } = channelIntegrationInfo;
 
   useAskAiTicketContext({
     channelId: channelId || null,
@@ -4246,12 +4414,20 @@ export const SupportTicketDetail = ({
   // Get channel info and user status
   const channel = useChannel(channelId);
   const [mailboxRows] = useCachedQuery(
-    queries.myTicketMailbox({ ticketId: mailboxTicketId ?? '' }),
+    queries.myTicketMailboxV2({
+      ticketId: mailboxTicketId ?? '',
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: channel?.type === ChannelType.EMAIL && !!mailboxTicketId },
   );
   const mailboxOverlay = mailboxRows?.[0];
   const [conversationLabelMappings] = useCachedQuery(
-    queries.conversationLabelMappingsByConversationId({ conversationId: conversationId || '' }),
+    queries.conversationLabelMappingsByConversationIdV2({
+      conversationId: conversationId || '',
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: !!conversationId },
   );
   // Subscribe to channel for real-time updates
@@ -4334,6 +4510,7 @@ export const SupportTicketDetail = ({
                       <ConversationLabels
                         conversationId={conversationId}
                         channelId={channelId}
+                        isMember={isMember}
                         slot='picker'
                         appliedMappings={conversationLabelMappings ?? []}
                       />
@@ -4588,6 +4765,7 @@ export const SupportTicketDetail = ({
                         <ConversationLabels
                           conversationId={conversationId}
                           channelId={channelId}
+                          isMember={isMember}
                           slot='chips'
                           appliedMappings={conversationLabelMappings ?? []}
                         />
@@ -4844,7 +5022,10 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
-                    recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
+                    recordOnly={
+                      channel.type === ChannelType.APP &&
+                      channelPreference?.appWebhookDeliveryEnabled === false
+                    }
                   />
                 ) : null
               ) : channel?.type === ChannelType.EMAIL ? (

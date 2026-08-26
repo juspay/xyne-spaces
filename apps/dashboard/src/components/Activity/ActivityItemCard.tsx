@@ -7,11 +7,14 @@ import {
 } from './activitySkipMarkAsRead';
 import { Activity, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
+import { resolveSdlcActivityTarget } from './sdlcActivityNavigation';
 
 /** Ref-based context: when current=true, ActivityItemCard appends ?nofocus=1 to navigation. */
 const NofocusRefContext = createContext<React.RefObject<boolean>>({ current: false });
 export const NofocusRefProvider = NofocusRefContext.Provider;
 import { useChannel } from '../../hooks/useChannels';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { useRouteContext } from '../../hooks/useRouteContext';
@@ -33,7 +36,7 @@ interface ActivityItemCardProps {
   actorName: string;
   isExpanded?: boolean;
   channelId: string | undefined;
-  badgeIcon: ReactNode;
+  badgeIcon?: ReactNode;
   badgeColorClass?: string;
   titlePrefix?: ReactNode;
   description: ReactNode;
@@ -78,6 +81,11 @@ export const ActivityItemCard = ({
   const nofocusRef = useContext(NofocusRefContext);
 
   const channel = useChannel(channelId || '');
+  const isSdlcChannel = channel?.type === ChannelType.SDLC;
+  const [sdlcRepo] = useCachedQuery(
+    queries.getSdlcRepoByChannelId({ channelId: channelId || '' }),
+    { enabled: isSdlcChannel && !!channelId },
+  );
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
   const displayedChannelName = channel ? channelDisplayName : unresolvedChannelLabel;
 
@@ -121,13 +129,19 @@ export const ActivityItemCard = ({
       baseRoute === '/chat/activity' && supportTargetPath
         ? supportTargetPath.replace(/^\/support\//, `${baseRoute}/ticket/`)
         : undefined;
-    const path = isDeskChannel
+    const defaultPath = isDeskChannel
       ? (embeddedTicketPath ?? supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
+    const path = resolveSdlcActivityTarget({
+      activity,
+      channelType: channel?.type,
+      repoId: sdlcRepo && !(sdlcRepo instanceof Error) ? sdlcRepo.id : null,
+      fallbackPath: defaultPath,
+    });
 
     if (path) {
       const pathWithActivityId =
-        focusThread && !isDeskChannel
+        focusThread && !isDeskChannel && !path.startsWith('/sdlc/')
           ? appendFocusThread(appendSelectedActivity(path))
           : appendSelectedActivity(path);
       const state = {
@@ -257,14 +271,16 @@ export const ActivityItemCard = ({
             data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
           >
             <UserAvatar userId={actorId} size={AvatarSize.REGULAR} showActiveStatus={false} />
-            <div
-              className={cn(
-                'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
-                badgeColorClass,
-              )}
-            >
-              {badgeIcon}
-            </div>
+            {badgeIcon ? (
+              <div
+                className={cn(
+                  'absolute -bottom-1 -right-1 flex size-5 [&_svg]:size-3.5 [&_span]:text-xs leading-none items-center justify-center rounded-full bg-muted border-[0.5px]',
+                  badgeColorClass,
+                )}
+              >
+                {badgeIcon}
+              </div>
+            ) : null}
           </button>
         </UserHoverWrapper>
       </div>

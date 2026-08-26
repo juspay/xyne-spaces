@@ -24,6 +24,7 @@ import {
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@xyne/storage';
+import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
@@ -48,6 +49,7 @@ import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptServic
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 
 const UpdateHeadlessRecordingSchema = z
   .object({
@@ -397,6 +399,7 @@ export class CallController {
         sttModel,
         conversationId,
         artifactMessageId,
+        sdlcLink,
       } = req.body;
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
@@ -557,8 +560,10 @@ export class CallController {
       // No pre-flight validation of artifactMessageId: every artifact write is
       // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
       // an id that does not belong to this channel matches zero rows.
+      // Not gated on conversationId — an artifact's call is channel-scoped even
+      // though the artifact message itself may live inside a thread.
       const linkedArtifactMessageId =
-        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
+        typeof artifactMessageId === 'string' ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -620,6 +625,20 @@ export class CallController {
               data: { metadata: restMeta as Prisma.InputJsonValue },
             });
             queueCallVespaFeed(existingCall.id, { source: CallVespaFeedSource.CallControllerInitiateCallClearRemovedByHostExistingRoom });
+          }
+
+          // A channel already running a call is the call this incident should
+          // use — adopt it rather than leaving the artifact card stuck pending.
+          if (linkedArtifactMessageId && existingCall.channelId) {
+            stage = 'existing_call_artifact_link';
+            const linked = await repositories.calls.linkArtifactToActiveCall({
+              callId: existingCall.id,
+              callExternalId: existingCall.externalId,
+              channelId: existingCall.channelId,
+              artifactMessageId: linkedArtifactMessageId,
+              metadata: existingCall.metadata,
+            });
+            logger.info(`[${existingCall.externalId}] artifact_link_on_existing_call | linked=${linked}, correlation_id=${correlationId}`);
           }
 
           // Room exists, generate token to join the existing call
@@ -689,11 +708,47 @@ export class CallController {
       // Generate room link
       const roomLink = buildCallInviteUrl(callExternalId);
 
+      // SDLC linking context: validated here, applied by the LiveKit webhook when
+      // the call record (and its conversation) are created. Invalid input is
+      // dropped with a warning rather than failing the call.
+      let validatedSdlcLink: SdlcCallLink | null = null;
+      if (sdlcLink) {
+        const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
+        if (parsedSdlcLink.success) {
+          const link = parsedSdlcLink.data;
+          const sdlcRepo = await db.repo.findFirst({
+            where: { id: link.repoId, channelId: channel.id },
+            select: { id: true },
+          });
+          const linkTargetValid = sdlcRepo
+            ? link.ownerType === 'CANVAS'
+              ? Boolean(
+                  await db.canvas.findFirst({
+                    where: { id: link.ownerId, channelId: channel.id },
+                    select: { id: true },
+                  }),
+                )
+              : Boolean(
+                  await db.sdlcTrack.findFirst({
+                    where: { id: link.ownerId, repoId: link.repoId },
+                    select: { id: true },
+                  }),
+                )
+            : false;
+          if (linkTargetValid) {
+            validatedSdlcLink = link;
+          } else {
+            logger.warn(`[${correlationId}] sdlc_link_dropped | reason=entity_not_in_channel`);
+          }
+        } else {
+          logger.warn(`[${correlationId}] sdlc_link_dropped | reason=invalid_shape`);
+        }
+      }
+
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
-        projectId: channel.projectId,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
         sttModel: sttModel || 'azure',
@@ -701,6 +756,7 @@ export class CallController {
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
+        ...(validatedSdlcLink && { sdlcLink: validatedSdlcLink }),
       });
 
       stage = 'livekit_room_creation';
@@ -900,7 +956,6 @@ export class CallController {
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
-          projectId: channel.projectId,
           createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
@@ -1200,7 +1255,7 @@ export class CallController {
         return {
           id: call.id,
           externalId: call.externalId,
-          title: call.title || 'Impromptu Recording',
+          title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,
@@ -1362,7 +1417,7 @@ export class CallController {
         recording: {
           id: call.id,
           externalId: call.externalId,
-          title: call.title || 'Impromptu Recording',
+          title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
           startedAt: call.startedAt,
@@ -1407,6 +1462,8 @@ export class CallController {
             typeof callMetadata?.linkedTicketMessageId === 'string'
               ? callMetadata.linkedTicketMessageId
               : null,
+          // Google Docs exported from this recording's summary, newest first.
+          googleDocs: readRecordingGoogleDocLinks(call.metadata),
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
@@ -1461,9 +1518,16 @@ export class CallController {
         }
       }
 
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const resolvedLabels = input.labels
+        ? await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels)
+        : undefined;
+
       await repositories.calls.update(call.id, {
         ...(input.title ? { title: input.title } : {}),
-        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(resolvedLabels ? { labels: resolvedLabels } : {}),
         ...(input.markedItems !== undefined
           ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
           : {}),

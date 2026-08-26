@@ -3,9 +3,16 @@ import { ActivityClassification } from '@xyne/shared';
 import type { SideEffectJobConfig, TicketStageEtaPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
+import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { logger } from '@/utils/logger';
 
 export class TicketStageEtaSideEffectHandler extends BaseSideEffectHandler {
+  async onInsert(job: SideEffectJobConfig): Promise<void> {
+    const ticketId = this.getTicketId(job);
+    if (!ticketId) return;
+    await syncStageOverdueFlag(db, ticketId);
+  }
+
   async onUpdate(job: SideEffectJobConfig): Promise<void> {
     const { entityId: ticketStageEtaId, args, previousValue } = job;
 
@@ -17,6 +24,8 @@ export class TicketStageEtaSideEffectHandler extends BaseSideEffectHandler {
     const prev = previousValue as TicketStageEtaPreviousValue;
     const actorId = this.ctx.userID;
 
+    await syncStageOverdueFlag(db, prev.ticketId);
+
     // Only track stageEta changes
     const stageEtaChanged = args.stageEta !== undefined && args.stageEta !== prev.stageEta;
 
@@ -25,7 +34,6 @@ export class TicketStageEtaSideEffectHandler extends BaseSideEffectHandler {
     }
 
     try {
-      
       // Fetch ticket details for activity creation
       const ticket = await db.ticket.findUnique({
         where: { id: prev.ticketId },
@@ -67,5 +75,22 @@ export class TicketStageEtaSideEffectHandler extends BaseSideEffectHandler {
     } catch (error) {
       logger.error(`[TicketStageEtaSideEffectHandler] Failed to create activities:`, error);
     }
+  }
+
+  async onDelete(job: SideEffectJobConfig): Promise<void> {
+    const ticketId = this.getTicketId(job);
+    if (!ticketId) return;
+    await syncStageOverdueFlag(db, ticketId);
+  }
+
+  async onUpsert(job: SideEffectJobConfig): Promise<void> {
+    const ticketId = this.getTicketId(job);
+    if (!ticketId) return;
+    await syncStageOverdueFlag(db, ticketId);
+  }
+
+  private getTicketId(job: SideEffectJobConfig): string | null {
+    const previousValue = job.previousValue as TicketStageEtaPreviousValue | undefined;
+    return job.args?.ticketId ?? previousValue?.ticketId ?? null;
   }
 }

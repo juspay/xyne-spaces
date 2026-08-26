@@ -4,7 +4,7 @@ import { SearchableMultiSelect } from '../../../components/ui/SearchableMultiSel
 import type { SearchableMultiSelectOption } from '../../../components/ui/SearchableMultiSelect/SearchableMultiSelect.types';
 import { Button } from '../../../components/ui/Button/Button';
 import { cn } from '../../../utils/classNames';
-import { getRecordingTagDotColor } from '../../../utils/recordingUtils';
+import { getTagDotColor } from '../../../utils/tagTheme';
 
 interface RecordingLabelFilterProps {
   labels: string[];
@@ -15,6 +15,8 @@ interface RecordingLabelFilterProps {
 }
 
 const TRIGGER_CLASS_NAME = 'h-9 gap-1.5 rounded-xl border-border px-3 font-medium shadow-none';
+const LIST_INHERITS_POPOVER_CLASS_NAME =
+  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
 
 export function RecordingLabelFilter({
   labels,
@@ -35,7 +37,7 @@ export function RecordingLabelFilter({
           label: displayLabel,
           icon: (
             <span
-              className={cn('size-2 shrink-0 rounded-full', getRecordingTagDotColor(displayLabel))}
+              className={cn('size-2 shrink-0 rounded-full', getTagDotColor(displayLabel))}
               aria-hidden='true'
             />
           ),
@@ -71,6 +73,7 @@ export function RecordingLabelFilter({
       emptyMessage='No labels found'
       trackCategory='RecordingsV2'
       trackName='toggle_label_filter'
+      className={LIST_INHERITS_POPOVER_CLASS_NAME}
       trigger={
         <Button
           type='button'

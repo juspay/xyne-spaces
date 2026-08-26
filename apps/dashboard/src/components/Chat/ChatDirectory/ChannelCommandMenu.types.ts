@@ -96,6 +96,25 @@ export const DOC_TYPE_TO_TAB = Object.fromEntries(
 ) as Record<SearchResultsDocType, TabType>;
 
 /**
+ * Palette TabType -> results-page docType, so "Show detailed results for" lands on the
+ * tab the user was already looking at.
+ *
+ * Deliberately NOT an inversion of DOC_TYPE_TO_TAB: 'all' and 'channels' both map to
+ * TabType.ALL, so inverting is lossy — it would drop 'channels' and make TabType.ALL
+ * ambiguous. Only the palette's own tabs appear here; TabType also carries CANVAS/CALL/
+ * RECORDING, which are not tabs in the palette, hence Partial.
+ */
+export const TAB_TO_DOC_TYPE = {
+  [TabType.ALL]: 'all',
+  [TabType.MESSAGES]: 'messages',
+  [TabType.USERS]: 'people',
+  [TabType.CHANNELS]: 'channels',
+  [TabType.ATTACHMENTS]: 'files',
+  [TabType.TICKETS]: 'tickets',
+  [TabType.DESK]: 'desk',
+} as const satisfies Partial<Record<TabType, SearchResultsDocType>>;
+
+/**
  * Backend-result group key -> results-page docType — derived by inverting each
  * registry entry's `groupKeys`.
  */

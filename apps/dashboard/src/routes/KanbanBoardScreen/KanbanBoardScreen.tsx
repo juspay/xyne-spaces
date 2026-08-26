@@ -71,6 +71,7 @@ import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
+import { withTicketChannelScope } from './ticketChannelScope';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
@@ -173,7 +174,7 @@ import { flowGroupCoverId } from '../../components/Board/FlowRun/useFlowRunGraph
 import Avatar from '../../components/ui/Avatar/Avatar';
 import {
   getPriorityIcon,
-  isStageEtaOverdue,
+  isStageOverdue,
 } from '../../components/Tickets/TicketCard/TicketCard.utils';
 import {
   TicketPriority,
@@ -1512,14 +1513,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const ticketsQueryParams = useMemo(() => {
     const params: FlowStepVisibilityOptions & {
       viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+      channelId?: string;
       projectId?: string;
       boardId?: string;
       userId?: string;
       groupId?: string;
       formEntityValueFieldIds?: string[];
-    } = {
-      viewMode: queryViewMode,
-    };
+    } = withTicketChannelScope({ viewMode: queryViewMode }, channelId);
 
     // Always pass boardId if it exists (from URL param)
     // Board ID implicitly scopes to project, so no need for projectId in this case
@@ -1569,6 +1569,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
+    channelId,
   ]);
 
   const [allProjectTickets, ticketsDetails] = useCachedQuery(
@@ -1856,7 +1857,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Filter tickets based on view mode and filters.
   // NOTE: ALL filters including dynamic field filters are applied CLIENT-SIDE.
-  const deferredFilters = useDeferredValue(filters);
+  //
+  // In a channel Kanban view a board can be shared across multiple channels, so
+  // the board's tickets are not all "this channel's" tickets. Scope every ticket
+  // path (page fetch, counts, board-nav args, legacy client filter) to tickets
+  // created in this channel by forcing `sourceChannels` to the current channel.
+  // This applies both when a specific board is selected and in the "All Boards"
+  // view. The filter dropdown UI still reads the raw `filters`, so this scoping
+  // stays invisible there.
+  const scopedFilters = useMemo(() => {
+    if (channelId && viewMode === 'project') {
+      return { ...filters, sourceChannels: [channelId] };
+    }
+    return filters;
+  }, [filters, channelId, viewMode]);
+
+  const deferredFilters = useDeferredValue(scopedFilters);
 
   const filteredTickets = useMemo(() => {
     if (!shouldUseLegacyTicketsQuery || !allProjectTickets) {
@@ -1893,7 +1909,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     // Filter for stage overdue tickets
     if (showOverdueOnly) {
-      tickets = tickets.filter(ticket => isStageEtaOverdue(ticket));
+      tickets = tickets.filter(ticket => isStageOverdue(ticket));
     }
 
     return tickets;

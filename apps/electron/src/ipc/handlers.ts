@@ -26,8 +26,10 @@ import {
   focusMainWindow,
   markRendererReady,
   resumeRecordingFromOutside,
+  setCallActive,
   setOverlayMinimized,
   setRecordingPillEnabled,
+  setRecordingStarting,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
@@ -454,7 +456,7 @@ export function setupIpcHandlers(): void {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
-      if (process.platform === 'darwin') app.dock.bounce('critical');
+      if (process.platform === 'darwin') app.dock?.bounce('critical');
     }
   });
 
@@ -620,6 +622,7 @@ export function setupIpcHandlers(): void {
       event,
       state: {
         active: boolean;
+        starting?: boolean;
         startTime?: number;
         paused?: boolean;
         pauseStartedAt?: number | null;
@@ -628,6 +631,7 @@ export function setupIpcHandlers(): void {
     ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
+      setRecordingStarting(!!state?.starting);
       syncRecordingState(!!state?.active, state?.startTime, {
         paused: !!state?.paused,
         pauseStartedAt: state?.pauseStartedAt ?? null,
@@ -640,6 +644,11 @@ export function setupIpcHandlers(): void {
     if (!isMainWindowSender(event)) return;
     if (theme !== 'light' && theme !== 'dark') return;
     setRecordingPillTheme(theme);
+  });
+
+  ipcMain.on('call:state-changed', (event, inCall: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    setCallActive(!!inCall);
   });
 
   ipcMain.on('recording:renderer-ready', (event) => {

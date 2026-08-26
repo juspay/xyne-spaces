@@ -184,6 +184,7 @@ export const ticketTable = table('tickets')
     userGroupId: string(),
     boardId: string(),
     stageName: string(),
+    isStageOverdue: boolean().optional(),
     ticketType: string().optional(),
     isArchived: boolean(),
     kanbanPosition: string().optional(),
@@ -404,6 +405,8 @@ export const userGroupMappingTable = table('user_group_mappings')
     roleId: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
+    startOffset: number().optional(),
+    isNotified: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -525,6 +528,7 @@ export const userGroupTable = table('user_groups')
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
     reassignOnUnavailable: boolean().optional(),
+    maxWorkload: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -982,6 +986,7 @@ export const messageAttachmentTable = table('message_attachments')
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
+    position: number().optional(),
   })
   .primaryKey('id');
 
@@ -1130,7 +1135,7 @@ export const surfaceNudgeTable = table('surface_nudges')
     state: enumeration<NudgeState>(),
     visibleTo: string().optional(),
     surfaceNudgeCountId: string().optional(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1207,6 +1212,7 @@ export const entityAccessTable = table('entity_access' /* EntityAccess */)
     userGroupId: string().optional(),
     channelId: string().optional(),
     entityUserAccess: string(),
+    metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1447,11 +1453,62 @@ export const repoTable = table('repos')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
-    name: string(),                     // e.g., "xyne-spaces"
-    url: string(),                      // SSH or HTTPS URL
-    baseBranch: json<string[]>(),       // Base branches to checkout from: ["main", "develop"]
-    prefix: string(),                   // Branch prefix: "feature"
+    name: string(), // e.g., "xyne-spaces"
+    url: string(), // SSH or HTTPS URL
+    canonicalUrl: string().optional(),
+    baseBranch: json<string[]>(), // Base branches to checkout from: ["main", "develop"]
+    prefix: string(), // Branch prefix: "feature"
     createdBy: string(),
+    projectId: string().optional(),
+    channelId: string().optional(),
+    sdlcSetupExecutionId: string().optional(),
+    accessCapabilities: json().optional(),
+  })
+  .primaryKey('id');
+
+export const sdlcEntityLinkTable = table('sdlc_entity_links')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    repoId: string(),
+    sourceType: string(),
+    sourceId: string(),
+    targetType: string(),
+    targetId: string(),
+    relationType: string(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const sdlcArtifactTable = table('sdlc_artifacts')
+  .columns({
+    workspaceId: string(),
+    artifactId: string(),
+    repoId: string(),
+    artifactType: string(),
+    artifactStatus: string(),
+    workflowExecutionId: string().optional(),
+    generationCommit: string().optional(),
+    sourceReferences: string().optional(),
+    sourcePaths: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('artifactId');
+
+export const sdlcTrackTable = table('sdlc_tracks')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    repoId: string(),
+    name: string(),
+    description: string().optional(),
+    status: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -1509,7 +1566,7 @@ export const conversationLabelTable = table('conversation_labels')
     name: string(),
     color: string().optional(),
     channelId: string(),
-    projectId: string(),
+    projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1594,6 +1651,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    appWebhookDeliveryEnabled: boolean().optional(),
   })
   .primaryKey('channelId');
 
@@ -2019,7 +2077,7 @@ export const surfaceLinkTable = table('surface_links')
     targetId: string(),
     linkKind: enumeration<SurfaceLinkKind>(),
     createdBy: string(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
   })
   .primaryKey('id');
@@ -2070,7 +2128,8 @@ export const appsTable = table('apps')
     scope: string(),
     version: number(),
     webhookUrl: string().optional(),
-    signingSecret: string(),
+    // signingSecret intentionally NOT synced to clients (XYNE-56394): the app HMAC secret
+    // is read server-side via Prisma; the client never needs it. Kept in Postgres/Prisma only.
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2167,6 +2226,9 @@ export const collectionPermissionTable = table('collection_permissions')
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
+    // Grants every current+future member of this channel access — always
+    // VIEWER, only offered for workspace-scoped collections in the UI.
+    channelId: string().optional(),
     role: enumeration<CollectionRole>(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -2612,6 +2674,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ['projectId'],
     destSchema: canvasTable,
   }),
+  repos: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: repoTable,
+  }),
   projectTags: many({
     sourceField: ['id'],
     destField: ['projectId'],
@@ -3039,6 +3106,13 @@ export const collectionTableRelationships = relationships(collectionTable, ({ ma
     destField: ['collectionId'],
     destSchema: collectionItemTable,
   }),
+  // Every file anywhere under this root collection (keyed on rootCollectionId, so it
+  // spans subfolders) — powers the KB root per-collection ingestion rollup.
+  allItems: many({
+    sourceField: ['id'],
+    destField: ['rootCollectionId'],
+    destSchema: collectionItemTable,
+  }),
   permissions: many({
     sourceField: ['rootCollectionId'],
     destField: ['collectionId'],
@@ -3074,6 +3148,11 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ['userGroupId'],
     destField: ['id'],
     destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 
@@ -3264,6 +3343,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: canvasFolderTable,
   }),
+  sdlcRepos: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: repoTable,
+  }),
   guestAccess: many({
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
@@ -3291,6 +3375,58 @@ export const channelBoardMappingTableRelationships = relationships(
     }),
   }),
 );
+
+export const repoTableRelationships = relationships(repoTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+  setupExecution: one({
+    sourceField: ['sdlcSetupExecutionId'],
+    destField: ['id'],
+    destSchema: workflowExecutionTable,
+  }),
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['repoId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+}));
+
+export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+  canvas: one({
+    sourceField: ['artifactId'],
+    destField: ['id'],
+    destSchema: canvasTable,
+  }),
+}));
+
+export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+}));
 
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
   channel: one({
@@ -3764,6 +3900,11 @@ export const canvasFolderTableRelationships = relationships(canvasFolderTable, (
 }));
 
 export const canvasTableRelationships = relationships(canvasTable, ({ one, many }) => ({
+  sdlcArtifact: one({
+    sourceField: ['id'],
+    destField: ['artifactId'],
+    destSchema: sdlcArtifactTable,
+  }),
   participants: many({
     sourceField: ['id'],
     destField: ['canvasId'],
@@ -4664,6 +4805,9 @@ export const schema = createSchema({
     linkTable,
     linkAccessTable,
     repoTable,
+    sdlcEntityLinkTable,
+    sdlcArtifactTable,
+    sdlcTrackTable,
     emailTable,
     emailDraftTable,
     conversationLabelTable,
@@ -4759,6 +4903,10 @@ export const schema = createSchema({
     channelTableRelationships,
     channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
+    repoTableRelationships,
+    sdlcEntityLinkTableRelationships,
+    sdlcArtifactTableRelationships,
+    sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
     draftMessageTableRelationships,
@@ -4927,6 +5075,9 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
+export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
+export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;

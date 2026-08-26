@@ -201,7 +201,10 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   }
 
   const orderedAttachments = [...attachments].sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+    (a, b) =>
+      (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) ||
+      a.createdAt - b.createdAt ||
+      a.id.localeCompare(b.id),
   );
 
   // Separate attachments by deleted status first
@@ -603,6 +606,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // picks up call-only behavior (transcript dimming, forwarding-as-call, PRD
   // buttons, etc).
   const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+  // Only live recording anchors use the system-style sender.
+  const isHeadlessRecordingAnchor =
+    isRecordingMessage && metadata?.['isHeadlessRecording'] === true;
   // Synchronous end-signal from the message's own metadata (stamped by
   // noteTakerCallRepository.updateThreadMessageOnEnd) — mirrors isActiveCall's
   // active/ended split for the avatar box below, without needing a live query
@@ -854,7 +860,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* ================== LEFT AVATAR ================== */}
         {!contentOnly && (
           <div
-            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage && !isRecordingMessage ? 'pt-[4px]' : ''}`}
+            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage && !isHeadlessRecordingAnchor ? 'pt-[4px]' : ''}`}
           >
             {message.isDeleted ? (
               <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted'>
@@ -875,7 +881,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--foreground) / 0.8)'}
                 />
               </div>
-            ) : showAvatar && isRecordingMessage && !isForwardedMessage ? (
+            ) : showAvatar && isHeadlessRecordingAnchor && !isForwardedMessage ? (
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center self-center shrink-0 border ${isRecordingEnded ? 'bg-muted-foreground/10 border-border/25' : 'bg-status-failure/15 border-status-failure/30'}`}
               >
@@ -1057,7 +1063,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       message.content ||
                       'A call happened'}
                 </h3>
-              ) : isRecordingMessage && !isForwardedMessage ? (
+              ) : isHeadlessRecordingAnchor && !isForwardedMessage ? (
                 <h3 className='text-sm font-medium text-foreground'>Recording</h3>
               ) : isXyneBot ? (
                 <h3 className='text-sm font-medium text-foreground'>
@@ -1190,7 +1196,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isRecordingMessage && metadata?.callId && !isForwardedMessage ? (
+          {isRecordingMessage && metadata?.callId && !isForwardedMessage && !message.isDeleted ? (
             <RecordingBubble
               message={{
                 messageId: message.messageId,
@@ -1632,6 +1638,28 @@ export interface GroupedReaction {
   orderIndex: number;
 }
 
+const MAX_TOOLTIP_REACTOR_NAMES = 50;
+
+const formatReactorNames = (
+  users: GroupedReaction['users'],
+  currentUserId: string | undefined,
+): string => {
+  const names = users.map(u => (u.userId === currentUserId ? 'You' : u.name));
+  const selfIndex = currentUserId ? users.findIndex(u => u.userId === currentUserId) : -1;
+  if (selfIndex > 0) {
+    names.unshift(...names.splice(selfIndex, 1));
+  }
+
+  const overflow = names.length - MAX_TOOLTIP_REACTOR_NAMES;
+  if (overflow > 0) {
+    const shown = names.slice(0, MAX_TOOLTIP_REACTOR_NAMES).join(', ');
+    return `${shown} and ${overflow} ${overflow === 1 ? 'other' : 'others'}`;
+  }
+
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+};
+
 /**
  * Displays reaction emojis for a message with user tooltips.
  * Each reaction is clickable to toggle the reaction.
@@ -1748,13 +1776,8 @@ export const ReactionView = ({
     <>
       <div className='flex items-center gap-1 flex-wrap'>
         {groupedReactionsArray.map(reaction => {
-          const visibleUserNames = reaction.users.slice(0, 2).map(u => u.name);
-          const remainingUserCount = reaction.users.length - visibleUserNames.length;
-          const userNames =
-            remainingUserCount > 0
-              ? `${visibleUserNames.join(', ')} and ${remainingUserCount} ${remainingUserCount === 1 ? 'other' : 'others'}`
-              : visibleUserNames.join(', ');
-          const verb = reaction.users.length === 1 ? 'has' : 'have';
+          const userNames = formatReactorNames(reaction.users, user?.id);
+          const verb = reaction.users.length === 1 && !reaction.userHasReacted ? 'has' : 'have';
           // For custom emojis, show the emoji name instead of the full ID
           const displayEmojiName = getEmojiDisplayName(reaction.emojiName);
           const tooltipContent = (

@@ -1,12 +1,22 @@
 import type { Session } from "@xyne/kata-sdk";
 
-export interface SdlcRuntimeCredentialBinding {
+interface SdlcRuntimeCredentialBindingBase {
   agentSlug: "sdlc-agent";
-  operation: "CLONE" | "PUSH";
-  executionId: string;
-  sessionId: string;
   repoId: string;
 }
+
+export type SdlcRuntimeCredentialBinding = SdlcRuntimeCredentialBindingBase & (
+  | {
+      operation: "CLONE" | "PUSH";
+      executionId: string;
+      sessionId: string;
+    }
+  | {
+      operation: "INTERACTIVE";
+      interactiveGrant: string;
+      conversationId: string;
+    }
+);
 
 export interface SdlcCredentialEnvelope {
   version: 1;
@@ -57,7 +67,7 @@ async function requestEnvelope(
   binding: SdlcRuntimeCredentialBinding,
   sandboxId: string,
   sandboxPublicKey: string,
-): Promise<SdlcCredentialEnvelope> {
+): Promise<SdlcCredentialEnvelope | null> {
   const baseUrl = (process.env["SPACES_BACKEND_URL"] ?? process.env["XYNE_SPACES_URL"] ?? "").replace(/\/+$/, "");
   const s2sKey = process.env["XYNE_CLAW_S2S_KEY"] ?? "";
   if (!baseUrl || !s2sKey) throw new Error("Spaces URL or S2S key is unavailable for private repository setup");
@@ -68,7 +78,11 @@ async function requestEnvelope(
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`Runtime credential bootstrap rejected (HTTP ${response.status})`);
-  const payload = await response.json() as { envelope?: SdlcCredentialEnvelope };
+  const payload = await response.json() as {
+    anonymous?: boolean;
+    envelope?: SdlcCredentialEnvelope;
+  };
+  if (payload.anonymous === true) return null;
   if (payload.envelope?.version !== 1 || payload.envelope.algorithm !== "X25519-HKDF-SHA256-AES-256-GCM") {
     throw new Error("Runtime credential bootstrap returned invalid envelope");
   }
@@ -78,7 +92,7 @@ async function requestEnvelope(
 export async function installSdlcGitCredentialBootstrap(
   session: Session,
   binding: SdlcRuntimeCredentialBinding,
-): Promise<void> {
+): Promise<"credential" | "anonymous"> {
   const preflight = await session.commands.run(
     `node -e "const m=Number(process.versions.node.split('.')[0]);if(m<20)process.exit(1)"`,
     10_000,
@@ -92,6 +106,10 @@ export async function installSdlcGitCredentialBootstrap(
   if (generated.exitCode !== 0 || !sandboxPublicKey) throw new Error("Sandbox ephemeral key generation failed");
 
   const envelope = await requestEnvelope(binding, session.id, sandboxPublicKey);
+  if (!envelope) {
+    await cleanupSdlcGitCredentialMaterial(session);
+    return "anonymous";
+  }
   await session.files.write(ENVELOPE, Buffer.from(JSON.stringify(envelope), "utf8"));
   const hookBase64 = Buffer.from(postCommitHook, "utf8").toString("base64");
   const bootstrap = [
@@ -137,6 +155,7 @@ export async function installSdlcGitCredentialBootstrap(
   await session.files.write(BOOTSTRAP_SCRIPT, Buffer.from(bootstrap, "utf8"));
   const installed = await session.commands.run(`node ${BOOTSTRAP_SCRIPT}`, 10_000);
   if (installed.exitCode !== 0) throw new Error("Sandbox credential bootstrap failed");
+  return "credential";
 }
 
 export async function cleanupSdlcGitCredentialMaterial(session: Session): Promise<void> {

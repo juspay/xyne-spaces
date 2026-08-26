@@ -273,10 +273,10 @@ export class BoardRepository {
     return !!(existing && existing.id !== excludeId);
   }
 
-  async findBoardById(id: string): Promise<{ name: string; boardType: BoardType } | null> {
+  async findBoardById(id: string): Promise<{ name: string; boardType: BoardType; projectId: string } | null> {
     const board = await this.db.board.findUnique({
       where: { id },
-      select: { name: true, boardType: true },
+      select: { name: true, boardType: true, projectId: true },
     });
     return board ? { ...board, boardType: board.boardType as BoardType } : null;
   }

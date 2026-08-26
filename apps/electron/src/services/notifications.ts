@@ -63,7 +63,7 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
 
     // Bounce the dock if on macOS and not focused
     if (process.platform === 'darwin' && !mainWindow?.isFocused()) {
-      app.dock.bounce();
+      app.dock?.bounce();
     }
   } catch (error) {
     Logger.logError('notification.show.failed', error);
@@ -86,10 +86,10 @@ export function showCallNotification(
   }
 
   try {
-    const callTypeLabel = data.callType === 'VIDEO' ? 'Video' : 'Audio';
-    
+    // There is one kind of call, so the OS notification says so too. `callType`
+    // stays on the payload — LiveKit room setup and CallKit still key off it.
     const notification = new Notification({
-      title: `Incoming ${callTypeLabel} Call`,
+      title: 'Incoming call',
       body: `${data.callerName} is calling you`,
       silent: false,
       urgency: 'critical',
@@ -139,7 +139,7 @@ export function showCallNotification(
     notification.show();
 
     if (process.platform === 'darwin' && !mainWindow?.isFocused()) {
-      app.dock.bounce('critical');
+      app.dock?.bounce('critical');
     }
   } catch (error) {
     Logger.logError('call-notification.show.failed', error, { call_id: data.callId });

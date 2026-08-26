@@ -78,6 +78,11 @@ export interface StreamRequest {
   channelIds: string[];
   collectionIds?: string[];
   fileIds?: string[];
+  /** Folder scopes from the composer picker. Sent to claw-auth as a single
+   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
+   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
+   *  at Vespa-query time. */
+  folderIds?: string[];
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
   callIds?: string[] | undefined;
@@ -93,6 +98,8 @@ export interface StreamRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** Per-run thinking level (composer dropdown). Absent = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -114,6 +121,10 @@ export interface StreamRequest {
    *  agent's own default. Only meaningful on v2 (v1 resolves its model from
    *  env and ignores the field). */
   model?: string | undefined;
+  /** Which provider the model pin rides ("litellm" = the agent's own
+   *  credential, "spaces" = the platform allowed list). Only meaningful
+   *  alongside `model`. */
+  modelProvider?: 'litellm' | 'spaces';
   showInSidebar?: boolean | undefined;
 }
 
@@ -1039,6 +1050,8 @@ class XyneAIStreamManager {
           ...(request.collectionIds &&
             request.collectionIds.length > 0 && { collectionIds: request.collectionIds }),
           ...(request.fileIds && request.fileIds.length > 0 && { fileIds: request.fileIds }),
+          ...(request.folderIds &&
+            request.folderIds.length > 0 && { folderIds: request.folderIds }),
           ...(request.canvasIds &&
             request.canvasIds.length > 0 && { canvasIds: request.canvasIds }),
           ...(request.ticketIds &&
@@ -1052,6 +1065,7 @@ class XyneAIStreamManager {
           deepResearchEnabled: request.deepResearchEnabled ?? false,
           createCanvasEnabled: request.createCanvasEnabled ?? false,
           instant: request.instant ?? false,
+          ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
           researchContext: request.researchContext
             ? request.researchContext.id
               ? {
@@ -1088,6 +1102,7 @@ class XyneAIStreamManager {
           ...(request.disableTools && { disableTools: true }),
           ...(request.agentSlug && { agentSlug: request.agentSlug }),
           ...(request.model && { model: request.model }),
+          ...(request.model && request.modelProvider && { modelProvider: request.modelProvider }),
         },
       },
     };
