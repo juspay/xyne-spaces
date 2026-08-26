@@ -160,14 +160,6 @@ export interface RoomContext {
   viewMode: 'mini' | 'full';
   callId: string | null;
   channelId: string | null;
-  // The call a confirmed switch is headed for, held across the teardown of the
-  // call being left. Deliberately outside `clearContext`, which runs on the way
-  // through `disconnecting`.
-  pendingJoin: {
-    callId: string;
-    viewMode: 'mini' | 'full';
-    callUrlOverrides: CallUrlOverrides | null;
-  } | null;
   scopeType: string | null; // Channel scope type (DM, GROUP_DM, DEFAULT, etc.)
   invitedUserId: string | null;
   conversationId: string | null;
@@ -258,10 +250,6 @@ export type RoomMachineEvent =
       callId: string;
       zero: Zero | null;
       viewMode?: 'mini' | 'full';
-      // The user has asked to leave whatever call they are in for this one —
-      // the switch-call flows set it. Without it a JOIN_CALL that lands while
-      // another call is live is dropped rather than silently switching calls.
-      allowSwitch?: boolean;
       // Omit for a join a person drove themselves (see RoomContext).
       callUrlOverrides?: CallUrlOverrides;
     }
@@ -1360,17 +1348,6 @@ export const roomMachine = setup({
       callUrlOverrides: () => null,
     }),
 
-    // Runs right after `clearContext` on the way out of `disconnecting`, which
-    // is why it reads `pendingJoin`: that field is the one thing the teardown
-    // leaves standing, and `joining` picks the call up from `callId`.
-    startPendingJoin: assign({
-      callId: ({ context }) => context.pendingJoin?.callId ?? null,
-      viewMode: ({ context }) => context.pendingJoin?.viewMode ?? ('mini' as const),
-      callUrlOverrides: ({ context }) => context.pendingJoin?.callUrlOverrides ?? null,
-      isInitiator: () => false,
-      pendingJoin: () => null,
-    }),
-
     enableLocalTracks: ({ context }) => {
       if (context.room) {
         const enableTracksAndSelectDevices = async (): Promise<void> => {
@@ -1508,7 +1485,6 @@ export const roomMachine = setup({
     viewMode: 'mini',
     callId: null,
     channelId: null,
-    pendingJoin: null,
     sdlcLink: null,
     scopeType: null,
     invitedUserId: null,
@@ -1914,71 +1890,6 @@ export const roomMachine = setup({
         },
       ],
       on: {
-        // A join asked for while a call is already up. Every entry point ends
-        // here — link clicks, deep links, the join buttons — so the decision
-        // lives with the machine rather than with each caller.
-        JOIN_CALL: [
-          {
-            // Already in the call being asked for: joining again would tear the
-            // room down and rebuild it, dropping the user out of the call they
-            // are sitting in. `callId` is what JOIN_CALL was given, `externalId`
-            // what the join response came back with; for an invite link they are
-            // the same value.
-            guard: ({ context, event }): boolean =>
-              event.type === 'JOIN_CALL' &&
-              (context.externalId === event.callId || context.callId === event.callId),
-            actions: [
-              ({ context }): void => {
-                logRoomMachineEvent(
-                  context.externalId ?? context.callId,
-                  'join_call_ignored_already_in_call',
-                );
-              },
-            ],
-          },
-          {
-            // A different call, and the caller carries the user's intent to
-            // leave this one. Hold the target across the teardown and pick the
-            // join back up when `disconnecting` finishes.
-            guard: ({ event }): boolean => event.type === 'JOIN_CALL' && event.allowSwitch === true,
-            target: 'disconnecting',
-            actions: [
-              ({ context, event }): void => {
-                logRoomMachineEvent(context.externalId ?? context.callId, 'call_switch_requested', {
-                  targetCallId: event.type === 'JOIN_CALL' ? event.callId : null,
-                });
-              },
-              assign({
-                pendingJoin: ({ event }) =>
-                  event.type === 'JOIN_CALL'
-                    ? {
-                        callId: event.callId,
-                        viewMode: event.viewMode ?? ('mini' as const),
-                        callUrlOverrides: event.callUrlOverrides ?? null,
-                      }
-                    : null,
-                zero: ({ context, event }) =>
-                  event.type === 'JOIN_CALL' ? (event.zero ?? context.zero) : context.zero,
-              }),
-            ],
-          },
-          {
-            // A different call with no switch intent behind it — an auto-join,
-            // a deep link that fired while the user was busy. Leave the live
-            // call alone.
-            actions: [
-              ({ context, event }): void => {
-                logRoomMachineEvent(
-                  context.externalId ?? context.callId,
-                  'join_call_ignored_busy',
-                  {
-                    targetCallId: event.type === 'JOIN_CALL' ? event.callId : null,
-                  },
-                );
-              },
-            ],
-          },
-        ],
         DISCONNECT: {
           target: 'disconnecting',
           actions: ({ context, event }): void => {
@@ -2581,71 +2492,34 @@ export const roomMachine = setup({
           isNativeMode: isNativeCallSupported(), // Check dynamically - context.isNativeMode is stale from module init
           endForAll: event.type === 'DISCONNECT' ? (event.endForAll ?? false) : false,
         }),
-        onDone: [
-          {
-            // A confirmed switch was waiting on this teardown: go straight into
-            // the new call instead of settling in `idle`.
-            guard: ({ context }): boolean => context.pendingJoin !== null,
-            target: 'joining',
-            actions: [
-              ({ context }): void => {
-                logRoomMachineEvent(
-                  context.pendingJoin?.callId ?? null,
-                  'disconnect_cleanup_done_transition_to_pending_join',
-                );
-              },
-              'clearContext',
-              'startPendingJoin',
-            ],
-          },
-          {
-            target: 'idle',
-            actions: [
-              ({ context }): void => {
-                logRoomMachineEvent(
-                  context.externalId ?? context.callId,
-                  'disconnect_cleanup_done_transition_to_idle',
-                );
-              },
-              'clearContext',
-            ],
-          },
-        ],
-        onError: [
-          {
-            // Cleanup failed, but the user still asked to be in the other call —
-            // the same thing the pre-machine switch flow did from `idle`.
-            guard: ({ context }): boolean => context.pendingJoin !== null,
-            target: 'joining',
-            actions: [
-              ({ context, event }): void => {
-                logger.error(Event.LIVEKIT_ROOM_EVENT, {
-                  callId: context.externalId ?? context.callId,
-                  eventName: 'disconnect_cleanup_actor_failed_with_pending_join',
-                  error: event.error instanceof Error ? event.error.message : String(event.error),
-                });
-              },
-              'clearContext',
-              'startPendingJoin',
-            ],
-          },
-          {
-            target: 'idle',
-            actions: [
-              ({ context, event }): void => {
-                logger.error(Event.LIVEKIT_ROOM_EVENT, {
-                  callId: context.externalId ?? context.callId,
-                  eventName: 'disconnect_cleanup_actor_failed',
-                  error: event.error instanceof Error ? event.error.message : String(event.error),
-                });
-              },
-              'clearContext',
-              assign({
-                error: () => 'Failed to disconnect from room',
-              }),
-            ],
-          },
-        ],
+        onDone: {
+          target: 'idle',
+          actions: [
+            ({ context }): void => {
+              logRoomMachineEvent(
+                context.externalId ?? context.callId,
+                'disconnect_cleanup_done_transition_to_idle',
+              );
+            },
+            'clearContext',
+          ],
+        },
+        onError: {
+          target: 'idle',
+          actions: [
+            ({ context, event }): void => {
+              logger.error(Event.LIVEKIT_ROOM_EVENT, {
+                callId: context.externalId ?? context.callId,
+                eventName: 'disconnect_cleanup_actor_failed',
+                error: event.error instanceof Error ? event.error.message : String(event.error),
+              });
+            },
+            'clearContext',
+            assign({
+              error: () => 'Failed to disconnect from room',
+            }),
+          ],
+        },
       },
     },
     failed: {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
-import { useIsInCallInThisSession } from '../../../hooks/useCalls';
+import { useIsActiveCallParticipant } from '../../../hooks/useCalls';
 import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 import { resolveCallLinkTarget } from '../../../utils/callLinkRouting';
 
@@ -25,16 +25,14 @@ import { resolveCallLinkTarget } from '../../../utils/callLinkRouting';
 export function CallLinkInterceptor(): null {
   const { user, isAuthenticated } = useAuth();
   const { joinCall } = useCallJoinOrInitiate();
-  const isInCallInThisSession = useIsInCallInThisSession(user?.id);
+  const isActiveCallParticipant = useIsActiveCallParticipant(user?.id);
 
   const openCallLink = useCallback(
     (callId: string, href: string): void => {
-      // Nothing for the link to do — this session is already in that call — and
-      // skipping it spares the round trip below. `roomMachine` guards the join
-      // itself; this only spares the click. A user in the call on another
-      // device falls through on purpose: joining here is how the call switches
-      // over to this one.
-      if (isInCallInThisSession(callId)) {
+      // The call already counts this user as in it, so there is nothing for the
+      // link to do: joining again would tear the room down and rebuild it,
+      // dropping them out of the call they are sitting in.
+      if (isActiveCallParticipant(callId)) {
         return;
       }
       void resolveCallLinkTarget(callId, href, user?.workspaceId).then(target => {
@@ -45,7 +43,7 @@ export function CallLinkInterceptor(): null {
         window.location.assign(target.url);
       });
     },
-    [user?.workspaceId, joinCall, isInCallInThisSession],
+    [user?.workspaceId, joinCall, isActiveCallParticipant],
   );
 
   // `joinCall` is rebuilt on every roomActor update, so the listeners below read
