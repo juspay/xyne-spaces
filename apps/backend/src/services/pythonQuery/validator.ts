@@ -22,6 +22,7 @@ export const ALLOWED_MODELS = new Set([
   'notification',
   'call',
   'canvas',
+  'collectionItem',
   'organization',
   'form',
   'formEntityValues',

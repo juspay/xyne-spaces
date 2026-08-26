@@ -28,6 +28,13 @@ export interface ComposerContext {
   recordings: SelectedRecording[];
   collections: { id: string; name: string }[];
   fileScopes: { id: string; name: string }[];
+  /** A specific folder scoped in (not the whole collection, not one file).
+   *  Sent to claw-auth as a single 'folder' attached_context pointer — NOT
+   *  expanded to a recursive file list here (xyneAIControllerV2.ts doesn't
+   *  do that); claw-auth resolves it itself, at Vespa-query time, since
+   *  Vespa's collectionId filter only ever matches a doc's ROOT collection
+   *  and can't filter on a folder id directly. */
+  folderScopes: { id: string; name: string }[];
   research: ResearchContext | null;
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
@@ -56,6 +63,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   recordings: [],
   collections: [],
   fileScopes: [],
+  folderScopes: [],
   research: null,
   webSearchEnabled: false,
   deepResearchEnabled: false,
@@ -76,6 +84,7 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.recordings.length > 0 ||
     ctx.collections.length > 0 ||
     ctx.fileScopes.length > 0 ||
+    ctx.folderScopes.length > 0 ||
     ctx.research !== null ||
     ctx.webSearchEnabled ||
     ctx.deepResearchEnabled ||
@@ -97,6 +106,7 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
     channelIds: ctx.channels.map(c => c.id),
     collectionIds: ctx.collections.map(c => c.id),
     fileIds: ctx.fileScopes.map(f => f.id),
+    folderIds: ctx.folderScopes.map(f => f.id),
     ticketIds: ctx.tickets.map(t => t.id),
     canvasIds: ctx.canvases.map(c => c.id),
     callIds: [...ctx.transcripts.map(t => t.id), ...ctx.recordings.map(r => r.id)],

@@ -158,7 +158,9 @@ export interface CanvasListProps {
   paginated?: boolean;
   channelId?: string;
   excludeCallGeneratedCanvases?: boolean;
+  excludeRecordingGeneratedCanvases?: boolean;
   onlyCallGeneratedCanvases?: boolean;
+  onlyRecordingGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
   includeArchived?: boolean;
   onlyArchived?: boolean;

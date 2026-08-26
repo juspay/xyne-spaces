@@ -12,6 +12,7 @@ export interface CanvasListGroupedProps {
   isPersonalSectionCollapsed: boolean;
   onSetPersonalSectionCollapsed: (collapsed: boolean) => void;
   excludeCallGeneratedCanvases?: boolean;
+  excludeRecordingGeneratedCanvases?: boolean;
   showStarredOnly?: boolean;
   includeArchived?: boolean;
   onlyArchived?: boolean;

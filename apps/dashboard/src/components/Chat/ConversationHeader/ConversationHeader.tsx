@@ -47,6 +47,7 @@ import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import {
   DropdownMenu,
@@ -80,6 +81,7 @@ const ConversationHeader = ({
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
   const channelUserStatus = useGetChannelUserStatus(channelId);
+  useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');

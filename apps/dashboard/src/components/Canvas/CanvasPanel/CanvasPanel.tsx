@@ -79,6 +79,7 @@ const CanvasPanel = (): ReactElement => {
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases] = useState(true);
   const [onlyCallGeneratedCanvases, setOnlyCallGeneratedCanvases] = useState(false);
+  const [onlyRecordingGeneratedCanvases, setOnlyRecordingGeneratedCanvases] = useState(false);
   const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [groupedSearchQuery, setGroupedSearchQuery] = useState('');
   const [listOptionsOpen, setListOptionsOpen] = useState(false);
@@ -408,6 +409,30 @@ const CanvasPanel = (): ReactElement => {
                     className='items-start gap-2 rounded-lg px-2 py-2 text-[13px]'
                     onSelect={event => event.preventDefault()}
                     data-track-category='CANVAS'
+                    data-track-name='TOGGLE_ONLY_RECORDING_GENERATED_CANVASES'
+                  >
+                    <Bot size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <span className='min-w-0 flex-1'>
+                      <span className='block leading-5'>Only recording-generated</span>
+                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                        Notes and summaries from your recordings
+                      </span>
+                    </span>
+                    <Switch
+                      id='only-recording-generated-canvases'
+                      checked={onlyRecordingGeneratedCanvases}
+                      onCheckedChange={checked => {
+                        setOnlyRecordingGeneratedCanvases(checked);
+                        if (checked) {
+                          setViewMode('list');
+                        }
+                      }}
+                    />
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className='items-start gap-2 rounded-lg px-2 py-2 text-[13px]'
+                    onSelect={event => event.preventDefault()}
+                    data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_ARCHIVED_CANVASES'
                   >
                     <Archive size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
@@ -481,6 +506,7 @@ const CanvasPanel = (): ReactElement => {
                 onlyCallGeneratedCanvases ? false : excludeCallGeneratedCanvases
               }
               onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
+              onlyRecordingGeneratedCanvases={onlyRecordingGeneratedCanvases}
               showStarredOnly={false}
               onlyArchived={onlyArchivedCanvases}
               onToggleStar={handleToggleStar}

@@ -1429,17 +1429,20 @@ export class CallDocumentService {
     currentVersion: number,
     callId: string,
     callTitle?: string | null,
-    citationCtx?: CitationContext
+    citationCtx?: CitationContext,
+    callStartedAt?: Date
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
       const now = new Date();
 
-      // Prepare canvas content (title, content, mentions, citations)
+      // Prepare canvas content (title, content, mentions, citations). Falls back to
+      // a timestamp-based title (instead of the bare "(Updated)" placeholder) when
+      // callTitle isn't ready yet — e.g. AI title generation is still racing this update.
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
-        undefined,
+        callStartedAt,
         callTitle,
         citationCtx
       );
@@ -1635,7 +1638,8 @@ export class CallDocumentService {
         existingCanvas.version,
         callId,
         callTitle,
-        citationCtx
+        citationCtx,
+        callStartedAt
       );
 
       return {

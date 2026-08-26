@@ -62,7 +62,7 @@ type KanbanCursor = {
 };
 
 type KanbanTicketsPageQueryArgs = Omit<
-  Parameters<typeof queries.kanbanTicketsPageV2>[0],
+  Parameters<typeof queries.kanbanTicketsPageV3>[0],
   'start'
 > & {
   start: KanbanCursor | null;
@@ -468,21 +468,23 @@ export const useKanbanTicketsPage = (
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
   const pageArgs = buildKanbanTicketsPageArgs(pageOptions, fetchCursor);
-  const [page, pageDetails] = useCachedQuery(
-    queries.kanbanTicketsPageV2(pageArgs as Parameters<typeof queries.kanbanTicketsPageV2>[0]),
-    {
-      enabled:
-        (options.enabled ?? true) &&
-        !shouldUseDirectVespaRows &&
-        (!requiresVespaTicketIds || vespaTicketSearch.searchResults !== null),
-    },
+  const pageQuery = queries.kanbanTicketsPageV3(
+    pageArgs as Parameters<typeof queries.kanbanTicketsPageV3>[0],
   );
+  const [page, pageDetails] = useCachedQuery(pageQuery, {
+    enabled:
+      (options.enabled ?? true) &&
+      !shouldUseDirectVespaRows &&
+      (!requiresVespaTicketIds || vespaTicketSearch.searchResults !== null),
+  });
   const effectivePage = shouldUseDirectVespaRows ? directVespaPage : page;
   const effectivePageDetailsType = shouldUseDirectVespaRows
     ? directVespaPage === null
       ? 'unknown'
       : 'complete'
     : pageDetails.type;
+
+  const preserveRelevanceOrder = shouldUseDirectVespaRows && hasSearchTerm;
 
   useEffect(() => {
     setTicketsState(prev =>
@@ -502,7 +504,9 @@ export const useKanbanTicketsPage = (
     const visiblePageRows = options.excludeFlowSteps
       ? rawPageRows.filter(ticket => !isMaterializedFlowStep(ticket))
       : rawPageRows;
-    const pageRows = sortByKanbanPosition(visiblePageRows);
+    const pageRows = preserveRelevanceOrder
+      ? visiblePageRows
+      : sortByKanbanPosition(visiblePageRows);
     if (typeof window !== 'undefined') {
       const debugDynamicFieldIds = new Set<string>();
       if (options.filters?.dynamicFields) {
@@ -563,6 +567,7 @@ export const useKanbanTicketsPage = (
     effectivePage,
     effectivePageDetailsType,
     shouldUseDirectVespaRows,
+    preserveRelevanceOrder,
   ]);
 
   const loadMore = useCallback(() => {

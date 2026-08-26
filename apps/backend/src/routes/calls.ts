@@ -32,7 +32,6 @@ router.post('/recordings/:callId/export-google-doc', recordingGoogleDocControlle
 router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
-router.post('/recordings/:callId/participants', callController.manageRecordingParticipants);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
