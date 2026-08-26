@@ -1,3 +1,11 @@
+## [1.228.2](https://github.com/juspay/xyne-spaces/compare/v1.228.1...v1.228.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* log fetched new email for channel in Google and Microsoft refetch ([#74](https://github.com/juspay/xyne-spaces/issues/74)) ([7e19f92](https://github.com/juspay/xyne-spaces/commit/7e19f92126a07e513e24ac3e751c7d3a4aff48c9))
+* stop nested if/else branches from overflowing the card ([#1000](https://github.com/juspay/xyne-spaces/issues/1000)) ([2e1676b](https://github.com/juspay/xyne-spaces/commit/2e1676b40f9224daff8d7eac14c53ba00c10e5d8))
+
 ## [1.228.1](https://github.com/juspay/xyne-spaces/compare/v1.228.0...v1.228.1) (2026-08-26)
 
 
