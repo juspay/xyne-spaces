@@ -548,6 +548,26 @@ const ReleaseDetailScreen = (): ReactElement => {
     ? `${releaseTicket.xyneId} · ${releaseTicket.title || 'Release ticket'}`
     : releaseTicket?.title || 'Release';
 
+  const returnToUrl = (location.state as { returnToUrl?: string } | null)?.returnToUrl;
+  const releaseTicketChannelId = (releaseTicket as { channelId?: string | null } | undefined)
+    ?.channelId;
+  const releaseTicketConversationId = (
+    releaseTicket as { conversationId?: string | null } | undefined
+  )?.conversationId;
+  const canGoToTicket =
+    !!returnToUrl || !!(releaseTicketChannelId && releaseTicketConversationId);
+  const goToReleaseTicket = (): void => {
+    if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
+      void navigate(returnToUrl);
+      return;
+    }
+    if (releaseTicketChannelId && releaseTicketConversationId && releaseTicketId) {
+      void navigate(
+        `${baseRoute}/${releaseTicketChannelId}/${releaseTicketConversationId}/${releaseTicketId}?selectedTab=details`,
+      );
+    }
+  };
+
   const exportDevTickets = async (): Promise<void> => {
     if (isExportingArt) return;
 
@@ -760,18 +780,35 @@ const ReleaseDetailScreen = (): ReactElement => {
             {/* Header */}
             <div className='flex items-start justify-between gap-4'>
               <h1 className='text-2xl font-bold text-foreground'>{releaseLabel}</h1>
-              <button
-                type='button'
-                onClick={() => {
-                  const w = window.open(window.location.href, '_blank');
-                  w?.focus();
-                }}
-                className='shrink-0 p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                title='Open in new window'
-                aria-label='Open in new window'
-              >
-                <SquareArrowOutUpRight size={16} />
-              </button>
+              <div className='flex items-center gap-2 shrink-0'>
+                {canGoToTicket && (
+                  <button
+                    type='button'
+                    onClick={goToReleaseTicket}
+                    data-track-event='BUTTON_CLICK'
+                    data-track-category='Release'
+                    data-track-name='GoToReleaseTicket'
+                    data-testid='go-to-release-ticket'
+                    className='inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted transition-colors'
+                    title='Open the release ticket in its channel'
+                  >
+                    <TicketIcon size={15} />
+                    Go to ticket
+                  </button>
+                )}
+                <button
+                  type='button'
+                  onClick={() => {
+                    const w = window.open(window.location.href, '_blank');
+                    w?.focus();
+                  }}
+                  className='p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                  title='Open in new window'
+                  aria-label='Open in new window'
+                >
+                  <SquareArrowOutUpRight size={16} />
+                </button>
+              </div>
             </div>
 
             {releaseTicket && (
