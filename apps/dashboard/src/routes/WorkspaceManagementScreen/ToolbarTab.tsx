@@ -70,8 +70,8 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
             to hide enabled items for themselves under Preferences → Toolbar, but items disabled
             here are unavailable to everyone. Managed centrally via Superposition — contact your ops
             team to change the list for {workspace?.name ?? 'this workspace'}, under the key{' '}
-            <code className='rounded bg-muted px-1 py-0.5 text-xs'>disabled_toolbar_paths</code>
-            , entry{' '}
+            <code className='rounded bg-muted px-1 py-0.5 text-xs'>disabled_toolbar_paths</code>,
+            entry{' '}
             <code className='rounded bg-muted px-1 py-0.5 text-xs'>
               {self?.workspaceId ?? '<workspaceId>'}
             </code>
