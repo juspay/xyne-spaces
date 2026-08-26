@@ -3,6 +3,7 @@ import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
+import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
@@ -1011,6 +1012,10 @@ export const router = createBrowserRouter(
                 {
                   index: true,
                   element: <HomeScreen />,
+                },
+                {
+                  path: 'slack-migration',
+                  element: <SlackMigration />,
                 },
                 {
                   path: 'ai',

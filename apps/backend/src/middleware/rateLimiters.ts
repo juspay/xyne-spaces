@@ -30,6 +30,20 @@ export const aiTitleLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+/** Per-user limiter for the self-serve Slack migration API (~2 req/s/user): above polling, blocks refresh/script spam. */
+export const slackMigrationLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'Too many migration requests. Please slow down and try again shortly.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /**
  * Rate limiter for webhook endpoints
  * Applied to: /api/webhooks/* and external source sync routes
