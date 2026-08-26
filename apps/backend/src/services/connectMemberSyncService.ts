@@ -80,7 +80,14 @@ export class ConnectMemberSyncService {
       );
       return;
     }
-    await this.members.upsertActive(hostChannelId, userId, userWorkspaceId);
+    // runAsSystem: this fires from the participant side-effect, which runs under WHOEVER triggered the
+    // add (often the GUEST). The connect_channel_member write must not be scoped to that caller's
+    // workspace — a foreign-org member's row would otherwise be silently dropped by the tenant ACL,
+    // leaving a host participant with NO member row (the "count not increasing" bug). The `await` is
+    // inside the callback so it executes in system scope (not a lazy scoped promise, §16).
+    await runAsSystem(async () => {
+      await this.members.upsertActive(hostChannelId, userId, userWorkspaceId);
+    });
     // Enforce the canonical member SHAPE at this single choke point, so EVERY add path (tag/assign,
     // add-people dialog, host-side, invite/DM flows) produces the correct rows — no matter which
     // channelId or context it used (rulebook R1.2/R1.3):
@@ -191,7 +198,11 @@ export class ConnectMemberSyncService {
   async mirrorParticipantRemoved(channelId: string, userId: string): Promise<void> {
     const hostChannelId = await this.resolveHostChannelId(channelId);
     if (!hostChannelId) return;
-    await this.members.markLeft(hostChannelId, userId);
+    // runAsSystem: same reason as mirrorParticipantAdded — the tombstone write must not be scoped to
+    // whoever triggered the leave, or a foreign-org member's row won't be marked left.
+    await runAsSystem(async () => {
+      await this.members.markLeft(hostChannelId, userId);
+    });
     // Symmetric to ensureMemberShape: whichever side triggered this leave (pointer OR host), tear
     // down the OTHER half of a guest member's shape — the HIDDEN host shadow AND the VISIBLE pointer
     // participant. Idempotent: the row the trigger already deleted is skipped. Never touches a real
