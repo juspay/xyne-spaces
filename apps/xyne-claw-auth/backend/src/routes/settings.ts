@@ -16,7 +16,9 @@ import { extractCodexBearer } from "../lib/codex-creds.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
 import { fetchAnthropicModels } from "./agents.js";
+import { createLogger } from "../logger.js";
 
+const log = createLogger("settings");
 
 const router = Router();
 
