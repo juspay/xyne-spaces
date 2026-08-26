@@ -234,6 +234,16 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
+  // Set lastActivityAt explicitly so a migrated DM lands at its real position, not the `now` placeholder.
+  async setLastActivity(channelId: string, at: Date): Promise<void> {
+    const workspaceId = await this.getWorkspaceId(channelId);
+    await this.db.channelStats.upsert({
+      where: { channelId },
+      update: { lastActivityAt: at },
+      create: { channelId, workspaceId, lastActivityAt: at },
+    });
+  }
+
   async incrementUnreadForAllMembers(channelId: string, increment: number): Promise<void> {
     if (increment <= 0) return;
     await this.db.channelUserStatus.updateMany({

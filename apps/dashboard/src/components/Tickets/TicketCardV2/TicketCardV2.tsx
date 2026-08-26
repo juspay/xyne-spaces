@@ -59,6 +59,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     userGroupId: '',
     boardId: '',
     stageName: summary.stageName ?? '',
+    isStageOverdue: false,
     ticketType: summary.ticketType ?? null,
     isArchived: false,
     kanbanPosition: null,

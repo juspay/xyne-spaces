@@ -97,6 +97,11 @@ import {
   sdlcDiscussionSchema,
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import {
+  MessageArtifactStatus,
+  parseSlashCommandArtifactMessage,
+  withSlashCommandArtifactClosed,
+} from '@xyne/shared';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
 import {
   FLOW_STAGE_NAMES,
@@ -128,6 +133,7 @@ import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
+import { releaseDevTicketNotifyService } from '@/services/release/releaseDevTicketNotifyService';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -426,6 +432,50 @@ async function reopenClosedDmParticipants(
       updatedAt: timestamp,
     });
   }
+}
+
+const COLLECTION_ROLE_RANK: Record<CollectionRole, number> = {
+  [CollectionRole.VIEWER]: 1,
+  [CollectionRole.EDITOR]: 2,
+  [CollectionRole.OWNER]: 3,
+};
+
+/**
+ * Resolve a user's CollectionRole on a collection from its collection_permissions
+ * rows, considering a direct grant (userId), a grant made to a group they
+ * belong to (userGroupId), or a grant made to a channel they participate in
+ * (channelId — always VIEWER, enforced at grant time, but still needs to be
+ * visible here so a channel-only Viewer can exercise "any role can share").
+ * Mirrors collectionAccess.ts's resolveCollectionAccess read-side resolution,
+ * via Zero's tx instead of Prisma so mutators see the transaction's own
+ * consistent view. Membership is resolved at check-time, not fanned out into
+ * per-member rows — one group/channel-scoped row keeps covering every
+ * current+future member.
+ */
+async function resolveCollectionPermissionRole(
+  tx: Transaction<Schema>,
+  collectionId: string,
+  userId: string,
+): Promise<CollectionRole | null> {
+  const permissions = await tx.run(zql.collection_permissions.where('collectionId', collectionId));
+  const groupIds = new Set(
+    (await tx.run(zql.user_group_mappings.where('userId', userId))).map(m => m.userGroupId),
+  );
+  const channelIds = new Set(
+    (await tx.run(zql.channel_participants.where('userId', userId))).map(cp => cp.channelId),
+  );
+
+  let role: CollectionRole | null = null;
+  for (const p of permissions) {
+    const matches =
+      p.userId === userId ||
+      (p.userGroupId !== null && groupIds.has(p.userGroupId)) ||
+      (p.channelId !== null && channelIds.has(p.channelId));
+    if (!matches) continue;
+    const candidate = p.role as CollectionRole;
+    if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
+  }
+  return role;
 }
 
 async function resolveMentionParticipantUserIds(
@@ -2916,9 +2966,20 @@ export function createMutators(
             metadata: undefined,
           });
 
-          // Copy attachments from the original message
-          for (const attachment of attachmentsArray) {
-            if (!attachment) continue;
+          // Copy attachments from the original message, preserving their display order.
+          // Sort the source rows by the same comparator the UI uses, then stamp a
+          // strictly increasing explicit position (and createdAt offset) on each clone
+          // so the forwarded copy renders in the same order the sender saw.
+          const orderedSourceAttachments = [...attachmentsArray]
+            .filter((a): a is MessageAttachment => !!a)
+            .sort(
+              (a, b) =>
+                ((a.position ?? Number.MAX_SAFE_INTEGER) -
+                  (b.position ?? Number.MAX_SAFE_INTEGER)) ||
+                (a.createdAt as number) - (b.createdAt as number) ||
+                a.id.localeCompare(b.id),
+            );
+          for (const [index, attachment] of orderedSourceAttachments.entries()) {
             await tx.mutate.message_attachments.insert({
               id: uuidv4(),
               entityId: messageId,
@@ -2934,7 +2995,8 @@ export function createMutators(
               conversationId: conversationId,
               workspaceId: authData.workspaceId,
               metadata: attachment.metadata,
-              createdAt: now,
+              createdAt: now + index,
+              position: index,
               isDeleted: false,
             });
           }
@@ -3022,7 +3084,8 @@ export function createMutators(
                       conversationId: conversationId,
                       workspaceId: authData.workspaceId,
                       metadata: attInfo.metadata as any,
-                      createdAt: now,
+                      createdAt: now + j,
+                      position: j,
                       isDeleted: false,
                     });
                   }
@@ -3215,6 +3278,24 @@ export function createMutators(
 
           if (participant === undefined && channel.visibility == ChannelVisibility.PRIVATE) {
             throw new Error('You need to be a participant for adding a conversations');
+          }
+
+          // One open artifact per thread. A thread is a single incident's workspace,
+          // so a second /sev2 inside it would fork the responders across two cards
+          // and two calls. The channel is unrestricted — that is where a genuinely
+          // separate incident belongs.
+          const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+          if (outgoingArtifact) {
+            const openArtifact = await tx.run(zql.message_artifacts
+              // channelId first: it is the only selective index on this table.
+              .where('channelId', conversation.channelId)
+              .where('conversationId', conversationId)
+              .where('command', outgoingArtifact.definition.command)
+              .where('status', MessageArtifactStatus.ACTIVE)
+              .one());
+            if (openArtifact) {
+              throw new Error(`A ${outgoingArtifact.definition.badge} is already open in this thread`);
+            }
           }
 
           const message = {
@@ -3866,6 +3947,51 @@ export function createMutators(
           }
         },
       ),
+      /**
+       * Close a slash-command artifact (e.g. decline a SEV2) without ever running
+       * a call. Only the message's author may do it.
+       *
+       * Two writes, both required: the artifact row moves to a terminal status so
+       * the banner and channel indicator clear for everyone, and the closed marker
+       * is baked into the message's FlowJSON so the card still renders as finished
+       * once the row has left the ACTIVE-only artifact subscription.
+       */
+      closeSlashCommandArtifact: defineMutator(
+        z.object({ messageId: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { messageId, timestamp } }) => {
+          const message = await tx.run(zql.messages.where('messageId', messageId).one());
+          if (!message) {
+            throw new Error('Message not available');
+          }
+          if (message.senderId !== authData.sub) {
+            throw new Error('Only the author can close this incident');
+          }
+
+          const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
+          if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
+            throw new Error('This incident is already closed');
+          }
+
+          const content = withSlashCommandArtifactClosed(message.content, {
+            closedAt: timestamp,
+            closedBy: authData.sub,
+          });
+          if (!content) {
+            throw new Error('Message is not a slash command artifact');
+          }
+
+          if (artifact) {
+            await tx.mutate.message_artifacts.update({
+              id: artifact.id,
+              status: MessageArtifactStatus.CANCELLED,
+              updatedAt: timestamp,
+            });
+          }
+          // Deliberately not `edited: true` — closing is a lifecycle transition,
+          // not an edit, and must not raise a "message edited" notification.
+          await tx.mutate.messages.update({ messageId, content });
+        },
+      ),
       updateShowInChannel: defineMutator(
         z.object({
           messageId: z.string(),
@@ -4442,7 +4568,6 @@ export function createMutators(
             updatedAt: now,
             labels: [],
             markedItems: [],
-            recordingParticipants: [],
             xyneManaged: false,
             metadata: {
               systemMessageId,
@@ -6227,6 +6352,32 @@ export function createMutators(
             });
           }
 
+          // Mirror every release-ticket status change into the bundled dev
+          // tickets' threads. Keyed on the canonical statusV2 (never on board
+          // stage names — those are team-specific); the != guard means one
+          // message per genuine transition.
+          if (
+            params.statusV2 !== undefined
+            && params.statusV2 !== ticket.statusV2
+            && isReleaseTicket(ticket.ticketType as BaseTicketType | null)
+          ) {
+            const newStatus = params.statusV2 as TicketStatusV2;
+            asyncTasks.push(async () => {
+              try {
+                await releaseDevTicketNotifyService.notifyDevTicketsOnReleaseStatusChange({
+                  releaseTicketId: params.id,
+                  status: newStatus,
+                  workspaceId: authData.workspaceId,
+                });
+              } catch (error) {
+                logger.error(
+                  `[ReleaseDevNotify] failed to notify dev tickets for release ${params.id}:`,
+                  error,
+                );
+              }
+            });
+          }
+
           // Sync workload for assignedTo changes (async, non-blocking)
           if (params.assignedTo !== undefined && params.assignedTo !== oldAssignedTo && ticket.userGroupId && ticket.boardId) {
             const usersToSync = [oldAssignedTo, params.assignedTo].filter(Boolean) as string[];
@@ -7352,6 +7503,7 @@ export function createMutators(
           alias: z.string().optional(),
           description: z.string().optional(),
           reassignOnUnavailable: z.boolean().optional(),
+          maxWorkload: z.number().int().positive().nullable().optional(),
           userResponsibilityUpdates: z
             .record(z.string(), z.nativeEnum(UserResponsibility))
             .optional(),
@@ -7366,6 +7518,7 @@ export function createMutators(
             alias,
             description,
             reassignOnUnavailable,
+            maxWorkload,
             userResponsibilityUpdates,
             userRoleUpdates,
             timestamp,
@@ -7406,6 +7559,7 @@ export function createMutators(
             ...(alias !== undefined && { alias }),
             ...(description !== undefined && { description }),
             ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
+            ...(maxWorkload !== undefined && { maxWorkload }),
             updatedAt: timestamp,
           });
 
@@ -7584,6 +7738,7 @@ export function createMutators(
                 ? { roleId, ...(responsibility ? { responsibility } : {}) }
                 : { responsibility: UserResponsibility.MEMBER }),
               onCallSetNumbers: [],
+              isNotified: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -10388,6 +10543,7 @@ export function createMutators(
             z.object({
               userId: z.string(),
               onCallSetNumbers: z.array(z.number()),
+              isNotified: z.boolean().optional(),
             })
           ).optional(),
           boardWeight: z.object({
@@ -10463,6 +10619,7 @@ export function createMutators(
                 await tx.mutate.user_group_mappings.update({
                   id: existingMapping.id,
                   onCallSetNumbers: mapping.onCallSetNumbers,
+                  ...(mapping.isNotified !== undefined && { isNotified: mapping.isNotified }),
                   updatedAt: now,
                 });
               }
@@ -12408,6 +12565,7 @@ export function createMutators(
                   height,
                   uploadedByUserId: authData.sub,
                   createdAt: timestamp + index,
+                  position: index,
                   createdBy: authData.sub,
                   url: '', // Will be populated after upload completes
                   metadata: null,
@@ -15347,33 +15505,32 @@ export function createMutators(
             throw new Error('Collection not found');
           }
 
-          const isOwner = collection.ownerId === authData.sub;
+          // OWNER is a real, multi-holder role — the creator (ownerId) is a
+          // separate, permanent label, not the sole authority. Either grants
+          // full owner privilege here.
+          const isCreator = collection.ownerId === authData.sub;
+          const permissionRole = isCreator
+            ? null
+            : await resolveCollectionPermissionRole(tx, id, authData.sub);
+          const canActAsOwner = isCreator || permissionRole === CollectionRole.OWNER;
 
           // Visibility is owner-only: flipping isPrivate changes who can see
           // the collection at all, so EDITOR permissions are not enough.
-          if (isPrivate !== undefined && !isOwner) {
-            throw new Error('Collection update failed: only the owner can change visibility');
+          if (isPrivate !== undefined && !canActAsOwner) {
+            throw new Error('Collection update failed: only an owner can change visibility');
           }
 
           // Rename is owner-only too: collection names are surfaced wherever
           // the collection is referenced (sidebar, breadcrumbs, share UI),
           // so we treat the title the same as visibility — a property only
-          // the owner is allowed to change.
-          if (name !== undefined && !isOwner) {
-            throw new Error('Collection update failed: only the owner can rename the collection');
+          // owners are allowed to change.
+          if (name !== undefined && !canActAsOwner) {
+            throw new Error('Collection update failed: only an owner can rename the collection');
           }
 
           // Verify OWNER or EDITOR permission for name/description edits
-          if (!isOwner && collection.isPrivate) {
-            const permission = await tx.run(
-              zql.collection_permissions
-                .where('collectionId', id)
-                .where('userId', authData.sub)
-                .one(),
-            );
-            if (!permission || permission.role === CollectionRole.VIEWER) {
-              throw new Error('Collection update failed: requires EDITOR or OWNER permission');
-            }
+          if (!canActAsOwner && (!permissionRole || permissionRole === CollectionRole.VIEWER)) {
+            throw new Error('Collection update failed: requires EDITOR or OWNER permission');
           }
 
           await tx.mutate.collections.update({
@@ -15397,7 +15554,10 @@ export function createMutators(
             throw new Error('Collection not found');
           }
           if (collection.ownerId !== authData.sub) {
-            throw new Error('Collection deletion failed: only the owner can delete a collection');
+            const permissionRole = await resolveCollectionPermissionRole(tx, id, authData.sub);
+            if (permissionRole !== CollectionRole.OWNER) {
+              throw new Error('Collection deletion failed: only an owner can delete a collection');
+            }
           }
 
           await tx.mutate.collections.update({
@@ -15452,14 +15612,9 @@ export function createMutators(
           // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
           const rootCollectionId = parentCollection.rootCollectionId ?? parentId;
           const isOwner = parentCollection.ownerId === authData.sub;
-          if (!isOwner && parentCollection.isPrivate) {
-            const permission = await tx.run(
-              zql.collection_permissions
-                .where('collectionId', rootCollectionId)
-                .where('userId', authData.sub)
-                .one(),
-            );
-            if (!permission || permission.role === CollectionRole.VIEWER) {
+          if (!isOwner) {
+            const permissionRole = await resolveCollectionPermissionRole(tx, rootCollectionId, authData.sub);
+            if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
               throw new Error('Folder creation failed: requires EDITOR or OWNER permission');
             }
           }
@@ -15495,14 +15650,9 @@ export function createMutators(
           // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
           const rootCollectionId = collection.rootCollectionId ?? collectionId;
           const isOwner = collection.ownerId === authData.sub;
-          if (!isOwner && collection.isPrivate) {
-            const permission = await tx.run(
-              zql.collection_permissions
-                .where('collectionId', rootCollectionId)
-                .where('userId', authData.sub)
-                .one(),
-            );
-            if (!permission || permission.role === CollectionRole.VIEWER) {
+          if (!isOwner) {
+            const permissionRole = await resolveCollectionPermissionRole(tx, rootCollectionId, authData.sub);
+            if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
               throw new Error('Item deletion failed: requires EDITOR or OWNER permission');
             }
           }
@@ -15566,14 +15716,9 @@ export function createMutators(
           // Verify EDITOR+ permission against the root collection (permissions only exist on root collections)
           const rootCollectionId = collection.rootCollectionId ?? collectionId;
           const isOwner = collection.ownerId === authData.sub;
-          if (!isOwner && collection.isPrivate) {
-            const permission = await tx.run(
-              zql.collection_permissions
-                .where('collectionId', rootCollectionId)
-                .where('userId', authData.sub)
-                .one(),
-            );
-            if (!permission || permission.role === CollectionRole.VIEWER) {
+          if (!isOwner) {
+            const permissionRole = await resolveCollectionPermissionRole(tx, rootCollectionId, authData.sub);
+            if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
               throw new Error('Item rename failed: requires EDITOR or OWNER permission');
             }
           }
@@ -15594,44 +15739,52 @@ export function createMutators(
           collectionId: z.string(),
           userId: z.string().optional(),
           userGroupId: z.string().optional(),
+          channelId: z.string().optional(),
           role: z.nativeEnum(CollectionRole),
-          canShare: z.boolean(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, collectionId, userId, userGroupId, role, canShare, timestamp } }) => {
+        async ({ tx, args: { id, collectionId, userId, userGroupId, channelId, role, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', collectionId).one());
           if (!collection) {
             throw new Error('Collection not found');
           }
-    if (collection.ownerId !== authData.sub) {
-      const rootCollectionId = collection.rootCollectionId ?? collectionId;
-      const granterPermission = await tx.run(
-        zql.collection_permissions
-          .where('collectionId', rootCollectionId)
-          .where('userId', authData.sub)
-          .one(),
-      );
-      if (!granterPermission || !granterPermission.canShare) {
-        throw new Error('Permission grant failed: only owners or users with canShare can grant permissions');
-      }
+    // OWNER is a real, multi-holder role (like EDITOR/VIEWER) — the creator
+    // (collection.ownerId) is a separate, permanent, never-reassigned label,
+    // not the sole authority. Anyone holding an OWNER permission row gets the
+    // same full privilege as the creator here.
+    const isCreator = collection.ownerId === authData.sub;
+    const rootCollectionId = collection.rootCollectionId ?? collectionId;
+    const granterRole = isCreator
+      ? null
+      : await resolveCollectionPermissionRole(tx, rootCollectionId, authData.sub);
+    const granterIsOwner = isCreator || granterRole === CollectionRole.OWNER;
 
-      // Prevent role escalation: non-owners cannot grant a role higher than their own
-      const granterRole = granterPermission.role;
+    // Anyone with an explicit role (Viewer/Editor/Owner) can share — there's
+    // no separate delegated "canShare" permission. The only real limit is
+    // role escalation: you can't grant a role higher than your own.
+    if (!granterIsOwner) {
+      if (!granterRole) {
+        throw new Error('Permission grant failed: you do not have access to this collection');
+      }
       if (role === CollectionRole.OWNER) {
-        throw new Error('Permission grant failed: only the owner can grant OWNER role');
+        throw new Error('Permission grant failed: only an owner can grant OWNER role');
       }
       if (granterRole === CollectionRole.VIEWER && role !== CollectionRole.VIEWER) {
         throw new Error('Permission grant failed: VIEWERs can only grant VIEWER role');
-      }
-      // Prevent granting canShare if the granter doesn't have it (already checked above, but also block passing it through)
-      if (canShare && !granterPermission.canShare) {
-        throw new Error('Permission grant failed: you do not have permission to grant share access');
       }
     }
 
     // Prevent sharing with the collection owner
     if (userId && userId === collection.ownerId) {
       throw new Error('Cannot share collection with its owner');
+    }
+
+    // A channel grant is always read-only — a channel can have many members,
+    // so defaulting all of them to write access is a bigger blast radius
+    // than a person or a curated group. Enforced server-side regardless of
+    // what the UI sends.
+    if (channelId && role !== CollectionRole.VIEWER) {
+      throw new Error('Permission grant failed: channel grants are read-only (Viewer)');
     }
 
     const existing = userId
@@ -15641,13 +15794,31 @@ export function createMutators(
                   .where('userId', userId)
                   .one(),
               )
-            : null;
+            : userGroupId
+              ? await tx.run(
+                  zql.collection_permissions
+                    .where('collectionId', collectionId)
+                    .where('userGroupId', userGroupId)
+                    .one(),
+                )
+              : channelId
+                ? await tx.run(
+                    zql.collection_permissions
+                      .where('collectionId', collectionId)
+                      .where('channelId', channelId)
+                      .one(),
+                  )
+                : null;
 
           if (existing) {
             await tx.mutate.collection_permissions.update({
               id: existing.id,
               role,
-              canShare,
+              // Dead field — nothing reads canShare anymore (sharing is
+              // purely role-based, see the escalation check above). Kept at
+              // the Prisma column default since it's still NOT NULL; not
+              // threaded through as a caller-supplied argument.
+              canShare: false,
               updatedAt: timestamp,
             });
           } else {
@@ -15657,8 +15828,9 @@ export function createMutators(
               collectionId,
               userId,
               userGroupId,
+              channelId,
               role,
-              canShare,
+              canShare: false,
               grantedBy: authData.sub,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -15744,7 +15916,10 @@ export function createMutators(
             throw new Error('Collection not found');
           }
           if (collection.ownerId !== authData.sub) {
-            throw new Error('Permission revoke failed: only the owner can revoke permissions');
+            const granterRole = await resolveCollectionPermissionRole(tx, collectionId, authData.sub);
+            if (granterRole !== CollectionRole.OWNER) {
+              throw new Error('Permission revoke failed: only an owner can revoke permissions');
+            }
           }
 
           await tx.mutate.collection_permissions.delete({ id });

@@ -201,7 +201,10 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   }
 
   const orderedAttachments = [...attachments].sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+    (a, b) =>
+      (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) ||
+      a.createdAt - b.createdAt ||
+      a.id.localeCompare(b.id),
   );
 
   // Separate attachments by deleted status first

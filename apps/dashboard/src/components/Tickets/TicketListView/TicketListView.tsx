@@ -146,6 +146,9 @@ export interface SelectableRow {
   priority?: TicketListItem['priority'];
   assignedTo?: string | null;
   userGroupId?: string | null;
+  // Carried for the bulk bar — see SelectedTicket in SupportScreen.
+  boardId?: string | null;
+  projectId?: string | null;
 }
 
 export const TicketListView = function TicketListView({
@@ -781,6 +784,8 @@ export const TicketListView = function TicketListView({
                       priority: row.priority,
                       assignedTo: row.assignedTo,
                       userGroupId: row.userGroupId,
+                      boardId: row.boardId,
+                      projectId: row.projectId,
                       ...(emailReads ? { emailReads } : {}),
                     });
                   },
@@ -811,6 +816,8 @@ export const TicketListView = function TicketListView({
       priority: t.priority,
       assignedTo: t.assignedTo,
       userGroupId: t.userGroupId,
+      boardId: t.boardId,
+      projectId: t.projectId,
     };
     const emailReads = t.emailReads as
       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>

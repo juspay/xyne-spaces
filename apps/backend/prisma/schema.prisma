@@ -141,6 +141,7 @@ model Ticket {
   userGroupId      String?            // User group to which the ticket belongs
   boardId          String            // Board to which the ticket belongs
   stageName        String            // Current stage of the ticket
+  isStageOverdue   Boolean?          // Derived from the active ticket_stage_eta row for the current stage
   ticketType       String?
   isArchived       Boolean           @default(false)
   kanbanPosition   String?
@@ -703,6 +704,7 @@ model UserGroup {
   rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
   reassignOnUnavailable Boolean?         // When true, a member going unavailable triggers reassignment of their open tickets in this group
+  maxWorkload          Int?              // Max weighted workload Σ(tickets × board weight) per member; null = unlimited. At or above it, a member is skipped for assignment
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdBy   String?  // User ID of the group creator (no FK constraint; relationMode="prisma"). Nullable: pre-existing groups have no known creator.
@@ -980,6 +982,8 @@ model UserGroupMapping {
   responsibility String?             // Legacy column; new writes set roleId instead
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
+  startOffset    Int?                // Cold-start fairness offset, added once for brand-new members with zero prior workload history
+  isNotified     Boolean  @default(false) // Subscriber flag: when true, this member is notified whenever the group's maxWorkload cap blocks an assignment
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -1788,6 +1792,7 @@ model Channel {
   emails             Email[]
   boardMappings      ChannelBoardMapping[]
   sdlcRepos          Repo[] @relation("RepoSdlcChannel")
+  collectionPermissions CollectionPermission[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -2346,6 +2351,7 @@ model MessageAttachment {
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
   uploadStatus       String?                 // Tracks upload state
+  position           Int?                  // Display order within a message (lower = earlier); null for legacy rows
 
   // Relations
   conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
@@ -2354,6 +2360,7 @@ model MessageAttachment {
   @@index([conversationId])
   @@index([entityId])
   @@index([entityId, id])
+  @@index([entityId, position])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2713,7 +2720,6 @@ model Call {
   instanceDate     DateTime?   // For recurring instances
   recordingEnabled Boolean     @default(false)
   recordingUrl     String?     // GCS path: recordings/{callId}.mp4
-  recordingParticipants String[] @default([])
   transcript       String?     // Call transcript
   aiSummary        String?     // AI-generated summary
   startedAt        DateTime    @default(now())
@@ -3634,6 +3640,10 @@ model CollectionPermission {
   collectionId String
   userId       String?
   userGroupId  String?
+  // Grants every current+future member of this channel access — always
+  // VIEWER (enforced in the grantPermission mutator), and only offered for
+  // workspace-scoped collections (no home channel of their own) in the UI.
+  channelId    String?
   role         String
   canShare     Boolean        @default(false)
   grantedBy    String?
@@ -3643,10 +3653,13 @@ model CollectionPermission {
   collection Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   user       User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
   userGroup  UserGroup?  @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+  channel    Channel?    @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   @@unique([collectionId, userId])
   @@unique([collectionId, userGroupId])
+  @@unique([collectionId, channelId])
   @@index([userGroupId])
+  @@index([channelId])
   @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
   @@map("collection_permissions")
   @@schema("public")

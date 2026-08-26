@@ -52,7 +52,6 @@ export class NoteTakerCallRepository {
         workspaceId,
         createdByUserId: createdBy,
         callType: CallType.HEADLESS,
-        recordingParticipants: [createdBy],
         status: CallStatus.ACTIVE,
         roomLink,
         metadata: metadata as Prisma.InputJsonValue,

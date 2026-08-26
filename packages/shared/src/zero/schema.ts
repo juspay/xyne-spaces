@@ -184,6 +184,7 @@ export const ticketTable = table('tickets')
     userGroupId: string(),
     boardId: string(),
     stageName: string(),
+    isStageOverdue: boolean().optional(),
     ticketType: string().optional(),
     isArchived: boolean(),
     kanbanPosition: string().optional(),
@@ -404,6 +405,8 @@ export const userGroupMappingTable = table('user_group_mappings')
     roleId: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
+    startOffset: number().optional(),
+    isNotified: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -525,6 +528,7 @@ export const userGroupTable = table('user_groups')
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
     reassignOnUnavailable: boolean().optional(),
+    maxWorkload: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -982,6 +986,7 @@ export const messageAttachmentTable = table('message_attachments')
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
+    position: number().optional(),
   })
   .primaryKey('id');
 
@@ -1179,7 +1184,6 @@ export const callTable = table('calls')
     instanceDate: number().optional(),
     recordingEnabled: boolean(),
     recordingUrl: string().optional(),
-    recordingParticipants: json<string[]>(),
     transcript: string().optional(),
     aiSummary: string().optional(),
     startedAt: number(),
@@ -2222,6 +2226,9 @@ export const collectionPermissionTable = table('collection_permissions')
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
+    // Grants every current+future member of this channel access — always
+    // VIEWER, only offered for workspace-scoped collections in the UI.
+    channelId: string().optional(),
     role: enumeration<CollectionRole>(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -3141,6 +3148,11 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ['userGroupId'],
     destField: ['id'],
     destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 

@@ -30,7 +30,7 @@ import {
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
-import { useCmdkAllDefaultRankProfile } from './useCmdkSearchConfig';
+import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -115,7 +115,7 @@ export const CMDK_USER_LIMIT = 25;
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
-  const allDefaultRankProfile = useCmdkAllDefaultRankProfile();
+  const defaultRankProfileFor = useCmdkDefaultRankProfiles();
 
   useEffect(() => {
     void affinityService.prefetch();
@@ -146,6 +146,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
+  // Per-tab CAC default; an explicit user pick (rankProfile) wins.
+  const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
     Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
   >([]);
@@ -835,8 +837,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           {
             const limit = BACKEND_RESULTS_LIMIT;
             const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
-            const effectiveRankProfile =
-              activeTab === TabType.ALL ? rankProfile || allDefaultRankProfile : rankProfile;
+            const effectiveRankProfile = rankProfile || allDefaultRankProfile;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -1299,8 +1300,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       {
         const currentOffset = currentPagination.offset;
         const pageSize = BACKEND_RESULTS_LIMIT;
-        const effectiveRankProfile =
-          activeTab === TabType.ALL ? rankProfile || allDefaultRankProfile : rankProfile;
+        const effectiveRankProfile = rankProfile || allDefaultRankProfile;
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
