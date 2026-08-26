@@ -3675,6 +3675,17 @@ export async function shareMyProviderCredential(
   return data.data;
 }
 
+export async function listLitellmModelsForUser(
+  userId: string,
+  payload?: { apiKey?: string; baseUrl?: string },
+): Promise<Array<{ id: string; name: string }>> {
+  const data = await request<{ success: boolean; data: Array<{ id: string; name: string }> }>(
+    `${AUTH_API_URL}/api/v1/settings/provider-credentials/litellm/models`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload ?? {}) },
+  );
+  return data.data;
+}
+
 export async function deleteProviderCredential(userId: string, provider: string): Promise<void> {
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/settings/provider-credentials/${encodeURIComponent(provider)}`,

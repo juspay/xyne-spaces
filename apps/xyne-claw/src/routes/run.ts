@@ -3953,7 +3953,8 @@ async function processTask(
     //   - First entry = the current parent (runtimeProvider).
     //   - Subsequent entries = remaining providers from `providerOrder`
     //     for which we actually have credentials in `providerConfigs`.
-    //   - Final entry = "spaces" (Kimi) unless the parent already was it.
+    //   - Final entry = "spaces" (Kimi) unless the parent already was it and
+    //     agentConfig.providerFallbackToSpaces has not been explicitly disabled.
     type Attempt = {
       provider: string | undefined;
       config: typeof providerConfig | undefined;
@@ -3970,8 +3971,11 @@ async function processTask(
         attempts.push({ provider: p, config: cfg });
       }
     }
-    if (runtimeProvider && runtimeProvider !== "spaces") {
+    const providerFallbackToSpaces = agentConfig?.["providerFallbackToSpaces"] !== false;
+    if (runtimeProvider && runtimeProvider !== "spaces" && providerFallbackToSpaces) {
       attempts.push({ provider: "spaces", config: undefined });
+    } else if (runtimeProvider && runtimeProvider !== "spaces" && !providerFallbackToSpaces) {
+      clog.info(`[agent] provider fallback to spaces disabled session=${sessionId} provider=${runtimeProvider}`);
     }
     const attemptByProvider = new Map(
       attempts
@@ -4136,7 +4140,7 @@ async function processTask(
             }
           }
           log(
-            `Quota fallback: ${from} → ${to}. Underlying: ${lastFallbackUnderlying}`,
+            `Provider fallback: ${from} → ${to}. Underlying: ${lastFallbackUnderlying}`,
           );
         },
         onEmpty: (provider, terminal) => {

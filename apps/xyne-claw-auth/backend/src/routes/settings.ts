@@ -22,7 +22,7 @@ const log = createLogger("settings");
 
 const router = Router();
 
-const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex"]);
+const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex", "litellm"]);
 
 const GITHUB_CLIENT_ID = "Ov23li8tweQw6odWQebz";
 const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
@@ -557,6 +557,47 @@ router.get("/codex/models", asyncHandler(async (req: Request, res: Response) => 
     .filter((m): m is { id: string } => Boolean(m.id))
     .filter((m) => /^(gpt-|o\d|chatgpt-)/i.test(m.id))
     .map((m) => ({ id: m.id, name: m.id }));
+  ok(res, models);
+}));
+
+
+// POST /settings/provider-credentials/litellm/models — list models for a just-typed
+// or saved personal LiteLLM/Grid key. Mirrors the agent-scoped endpoint so the
+// user settings screen can show exactly the models this key is allowed to call
+// before the credential is saved. Never returns or logs the raw key.
+router.post("/provider-credentials/litellm/models", asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+  const body = (req.body ?? {}) as { apiKey?: string; baseUrl?: string };
+  const typedKey = (body.apiKey ?? "").trim();
+
+  let apiKey = typedKey;
+  let baseUrl = (body.baseUrl ?? "").trim();
+  if (!apiKey) {
+    const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, "litellm");
+    if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
+      throw badRequest("LiteLLM is not configured. Enter an API key first.");
+    }
+    apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+    if (!baseUrl) baseUrl = cred.baseUrl ?? "";
+  }
+
+  const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
+  log.info(`[settings] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
+  const upstream = await fetch(`${root}/v1/models`, {
+    headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => "");
+    log.warn(`[settings] litellm/models upstream ${upstream.status} at ${root}/v1/models: ${text.slice(0, 200)}`);
+    throw new HttpError(502, `Models endpoint ${upstream.status}: ${text.slice(0, 200)}`);
+  }
+
+  const payload = (await upstream.json()) as { data?: Array<{ id?: string }> };
+  const models = (payload.data ?? [])
+    .filter((m): m is { id: string } => Boolean(m.id))
+    .map((m) => ({ id: m.id, name: m.id }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   ok(res, models);
 }));
 
