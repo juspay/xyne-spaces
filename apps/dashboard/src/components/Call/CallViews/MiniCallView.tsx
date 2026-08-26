@@ -77,8 +77,8 @@ interface MiniCallViewProps {
     | undefined;
   isHost?: boolean | undefined;
   currentUserId?: string | null | undefined;
-  onApproveLobbyRequest?: ((participantId: string) => void) | undefined;
-  onRejectLobbyRequest?: ((participantId: string) => void) | undefined;
+  onApproveLobbyRequest?: ((participantId: string) => void | Promise<void>) | undefined;
+  onRejectLobbyRequest?: ((participantId: string) => void | Promise<void>) | undefined;
   /** Called when a new remote call chat message arrives (for unread tracking) */
   onCallChatNewMessage?: (() => void) | undefined;
   /** Identities of participants with hand raised (synced via data channel) */
