@@ -40,11 +40,27 @@ export class BundleOverrideService {
       });
 
       if (override && override.enabled) {
-        logger.info(`[BundleOverride] Serving override bundle for user ${userId}: ${override.bundleName}`);
+        logger.info('[BundleOverride] Override hit — serving custom bundle', {
+          userId,
+          bundleName: override.bundleName,
+        });
         return override.bundleName;
       }
+
+      if (override && !override.enabled) {
+        logger.info('[BundleOverride] Override row disabled — serving default', {
+          userId,
+          disabledBundle: override.bundleName,
+        });
+      } else {
+        logger.info('[BundleOverride] No override for user — serving default', { userId });
+      }
     } catch (error) {
-      logger.error(`[BundleOverride] Failed to resolve bundle for user ${userId}, using default:`, error);
+      // DB-layer fallback: never let an override lookup failure break serving.
+      logger.error('[BundleOverride] Lookup failed — falling back to default bundle', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     return fallback;
@@ -63,14 +79,15 @@ export class BundleOverrideService {
   /** Create or update the override for a user (idempotent on userId). */
   static async upsert(params: {
     userId: string;
+    workspaceId: string;
     bundleName: string;
     enabled?: boolean;
     note?: string | null;
   }) {
-    const { userId, bundleName, enabled = true, note = null } = params;
+    const { userId, workspaceId, bundleName, enabled = true, note = null } = params;
     return this.db().userBundleOverride.upsert({
       where: { userId },
-      create: { userId, bundleName, enabled, note },
+      create: { userId, workspaceId, bundleName, enabled, note },
       update: { bundleName, enabled, note },
     });
   }

@@ -3,7 +3,10 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getStorageService } from '@/services/storage';
 import { BundleOverrideService } from '@/services/bundleOverrideService';
+import { UserService } from '@/services/userService';
 import path from 'path';
+
+const userService = new UserService();
 
 // Default bundle folder in the GCS bundle bucket. Unmapped users (and any
 // request whose resolved folder is missing a file) fall back to this.
@@ -90,9 +93,11 @@ export class BundleController {
     const userId = req.user?.id;
     const branchName = await BundleOverrideService.resolveBundleName(userId);
 
-    logger.info(`Resolved user bundle folder`, {
+    logger.info('[BundleServe] Resolved user bundle folder', {
       userId: userId ?? 'anonymous',
-      branchName,
+      authenticated: !!userId,
+      resolvedFolder: branchName,
+      isDefault: branchName === DEFAULT_BUNDLE_FOLDER,
       filePath,
     });
 
@@ -131,47 +136,69 @@ export class BundleController {
         return;
       }
 
-      logger.info(`Serving bundle file from GCS: ${branchName}/${filePath}`, {
-        branchName,
+      logger.info('[BundleServe] Serving bundle file from GCS', {
+        folder: branchName,
         filePath,
         userAgent: req.get('user-agent'),
       });
 
       // 1. Requested folder, exact file.
-      if (await this.tryStream(res, branchName, filePath)) return;
+      if (await this.tryStream(res, branchName, filePath)) {
+        logger.info('[BundleServe] Served from requested folder', { folder: branchName, filePath });
+        return;
+      }
 
       // 2. Extensionless route -> requested folder's index.html (SPA routing).
       if (!path.extname(filePath) && (await this.tryStream(res, branchName, 'index.html'))) {
-        logger.info(`Serving index.html for SPA route: ${branchName}/${filePath}`);
+        logger.info('[BundleServe] Served SPA index.html from requested folder', {
+          folder: branchName,
+          filePath,
+        });
         return;
       }
 
       // 3. Default-folder fallback (skip if we're already on the default folder).
       if (branchName !== DEFAULT_BUNDLE_FOLDER) {
-        logger.warn(
-          `Bundle file not found in "${branchName}", falling back to default: ${filePath}`,
-        );
-        if (await this.tryStream(res, DEFAULT_BUNDLE_FOLDER, filePath)) return;
+        logger.warn('[BundleServe] File missing in requested folder, falling back to default', {
+          requestedFolder: branchName,
+          defaultFolder: DEFAULT_BUNDLE_FOLDER,
+          filePath,
+        });
+        if (await this.tryStream(res, DEFAULT_BUNDLE_FOLDER, filePath)) {
+          logger.info('[BundleServe] Served from default folder (fallback)', { filePath });
+          return;
+        }
         if (
           !path.extname(filePath) &&
           (await this.tryStream(res, DEFAULT_BUNDLE_FOLDER, 'index.html'))
         ) {
+          logger.info('[BundleServe] Served default SPA index.html (fallback)', { filePath });
           return;
         }
       }
 
-      logger.warn(`Bundle file not found in GCS (incl. default): ${branchName}/${filePath}`);
+      logger.warn('[BundleServe] Bundle file not found in GCS (incl. default)', {
+        folder: branchName,
+        filePath,
+      });
       res.status(404).json({
         success: false,
         error: 'Bundle file not found',
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      logger.error('Bundle controller error:', error);
+      // A hard failure here (e.g. GCS unreachable) is logged as an error and
+      // returned as a 5xx BEFORE any bytes are streamed, so the nginx layer can
+      // intercept it and fall back to the image-baked local bundle (prev flow).
+      logger.error('[BundleServe] Bundle serve failed — returning 5xx for nginx fallback', {
+        folder: branchName,
+        filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
       if (!res.headersSent) {
-        res.status(500).json({
+        res.status(502).json({
           success: false,
-          error: 'Internal server error',
+          error: 'Bundle backend unavailable',
           timestamp: new Date().toISOString(),
         });
       }
@@ -268,8 +295,22 @@ export class BundleController {
         return;
       }
 
+      // Workspace isolation: the target user must belong to the caller's
+      // workspace. (The ACL layer scopes list/delete automatically, but an
+      // insert names an arbitrary userId, so we check it explicitly here.)
+      const targetUser = await userService.getUserById(userId);
+      if (!targetUser || targetUser.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({
+          success: false,
+          error: 'User not found in your workspace',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
       const override = await BundleOverrideService.upsert({
         userId,
+        workspaceId: targetUser.workspaceId,
         bundleName,
         enabled: typeof enabled === 'boolean' ? enabled : undefined,
         note: typeof note === 'string' ? note : null,

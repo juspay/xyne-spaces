@@ -5,6 +5,7 @@ CREATE SCHEMA IF NOT EXISTS "non_zero";
 CREATE TABLE "non_zero"."user_bundle_overrides" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
     "bundleName" TEXT NOT NULL,
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "note" TEXT,
@@ -19,3 +20,6 @@ CREATE UNIQUE INDEX "user_bundle_overrides_userId_key" ON "non_zero"."user_bundl
 
 -- CreateIndex
 CREATE INDEX "user_bundle_overrides_userId_idx" ON "non_zero"."user_bundle_overrides"("userId");
+
+-- CreateIndex
+CREATE INDEX "user_bundle_overrides_workspaceId_idx" ON "non_zero"."user_bundle_overrides"("workspaceId");

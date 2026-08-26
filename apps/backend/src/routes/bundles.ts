@@ -8,24 +8,27 @@ const router = Router();
  * Admin CRUD for per-user bundle overrides.
  * Registered BEFORE the /:branchName/* catch-all so "admin" isn't treated as a
  * branch name.
- * @access Admin only
+ * @access Workspace/org ADMIN or OWNER. Scoped to the caller's workspace: the
+ *         tenant ACL layer auto-filters list/update/delete to req.user's
+ *         workspace, and upsert additionally rejects a target user in another
+ *         workspace.
  */
 router.get(
   '/admin/overrides',
   authMiddleware.authenticate,
-  authMiddleware.requireAdmin,
+  authMiddleware.requireAdminOrOwner,
   (req, res) => BundleController.listOverrides(req, res),
 );
 router.post(
   '/admin/overrides',
   authMiddleware.authenticate,
-  authMiddleware.requireAdmin,
+  authMiddleware.requireAdminOrOwner,
   (req, res) => BundleController.upsertOverride(req, res),
 );
 router.delete(
   '/admin/overrides/:userId',
   authMiddleware.authenticate,
-  authMiddleware.requireAdmin,
+  authMiddleware.requireAdminOrOwner,
   (req, res) => BundleController.deleteOverride(req, res),
 );
 

@@ -879,16 +879,23 @@ model User {
 // Routes a specific user to a non-default bundle folder in the GCS bundle
 // bucket. The backend resolves this from the VERIFIED JWT (userId = sub) when
 // serving /api/bundles/me/*; absence of a row (or enabled=false) => "default".
+//
+// workspaceId scopes the row to a workspace: the tenant ACL/stamp layer
+// auto-stamps it on insert and auto-filters reads/writes to the caller's
+// workspace, so a workspace admin can only manage overrides for their own
+// workspace.
 model UserBundleOverride {
-  id         String   @id @default(cuid())
-  userId     String   @unique                 // users.id (relationMode=prisma, no hard FK)
-  bundleName String                           // GCS folder to serve, e.g. "beta-v2"
-  enabled    Boolean  @default(true)
-  note       String?                          // optional human note about why this override exists
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String   @id @default(cuid())
+  userId      String   @unique                 // users.id (relationMode=prisma, no hard FK)
+  workspaceId String                           // tenant scope (stamped from context)
+  bundleName  String                           // GCS folder to serve, e.g. "beta-v2"
+  enabled     Boolean  @default(true)
+  note        String?                          // optional human note about why this override exists
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([userId])
+  @@index([workspaceId])
   @@map("user_bundle_overrides")
   @@schema("non_zero")
 }
