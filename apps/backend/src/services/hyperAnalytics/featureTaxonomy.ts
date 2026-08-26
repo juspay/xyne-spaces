@@ -4,80 +4,89 @@
  * The app already emits a large, inconsistently-named stream of engagement
  * signals: frontend `data-track-category` / `data-track-name` clicks and
  * backend useractivity `eventCategory` / `eventName` records. This module
- * normalizes those source labels into a small, stable set of product
- * "features" so SudoQuery / ClickHouse can answer questions like
- * "how many unique users clicked on <feature>" with a single swappable key.
+ * maps those source labels onto the product's own SECTION names (the same
+ * names the UI/nav uses) so SudoQuery / ClickHouse can answer questions like
+ * "how many unique users clicked on <threads>" with a single swappable key.
  *
- * Known sources map to a canonical feature; unknown categories fall back to a
- * slug of the category so no engagement is silently dropped ("Everything").
+ * Naming rule: a feature IS the route's own section name (1:1) — we do NOT
+ * collapse distinct sections into broader buckets. So `unreads`, `recap` and
+ * `threads` stay separate; `analytics` and `product-insights` are NOT folded
+ * into a generic "dashboard". Unknown click categories fall back to a slug of
+ * the category so no engagement is silently dropped ("Everything").
  */
 
 // Canonical feature keyed by a resolved module path (see moduleRoutes.ts).
-// Used for the time-spent signal, which is keyed off page/module dwell.
+// Value = that section's own name. Used for the time-spent (dwell) signal.
 const FEATURE_BY_MODULE: Record<string, string> = {
-  '/chat/dir/threads': 'thread',
-  '/chat/dir/unreads': 'thread',
-  '/chat/dir/recap': 'thread',
+  // Chat directory tabs — each tab is its own section.
+  '/chat/dir/threads': 'threads',
+  '/chat/dir/unreads': 'unreads',
+  '/chat/dir/recap': 'recap',
+  '/chat/dir/canvas': 'canvas',
+  '/chat/dir/my-tickets': 'my-tickets',
+  // Chat surfaces.
   '/chat/dm': 'dm',
   '/chat/activity': 'activity',
   '/chat/canvas': 'canvas',
-  '/chat/dir/canvas': 'canvas',
-  '/chat/dir/my-tickets': 'ticket',
-  '/chat/bookmarks': 'bookmark',
-  '/chat/drafts-sent': 'message',
+  '/chat/bookmarks': 'bookmarks',
+  '/chat/drafts-sent': 'drafts-sent',
   '/chat/search': 'search',
-  '/search-results': 'search',
-  '/recordings': 'recording',
-  '/calls': 'call',
-  '/knowledge-base': 'knowledge_base',
-  '/ai/knowledge': 'knowledge_base',
+  // Global search results page (the full-screen results view).
+  '/search-results': 'search-results',
+  // Calls & recordings.
+  '/recordings': 'recordings',
+  '/calls': 'calls',
+  // Knowledge / memory.
+  '/knowledge-base': 'knowledge-base',
+  '/ai/knowledge': 'knowledge',
   '/memory': 'memory',
-  '/agents': 'agent',
-  '/claw-agents': 'agent',
-  '/ai/chat/new': 'agent',
-  '/ai/library': 'agent',
-  '/projects': 'project',
-  '/listProjects': 'project',
-  '/forms': 'form',
-  '/automations': 'automation',
-  '/analytics': 'dashboard',
-  '/analytics-dashboard': 'dashboard',
-  '/dashboards': 'dashboard',
-  '/product-insights': 'dashboard',
+  // Agents / AI.
+  '/agents': 'agents',
+  '/claw-agents': 'claw-agents',
+  '/ai/chat/new': 'agent-chat',
+  '/ai/library': 'agent-hub',
+  // Projects / forms / automations.
+  '/projects': 'projects',
+  '/listProjects': 'projects',
+  '/forms': 'forms',
+  '/automations': 'automations',
+  // Analytics family — kept distinct, NOT bucketed into "dashboard".
+  '/analytics': 'analytics',
+  '/analytics-dashboard': 'analytics-dashboard',
+  '/dashboards': 'dashboards',
+  '/product-insights': 'product-insights',
+  // Misc.
   '/rca': 'rca',
   '/support/all': 'support',
-  '/daily-brief': 'daily_brief',
+  '/daily-brief': 'daily-brief',
 };
 
-// Canonical feature keyed by a normalized source category (data-track-category
+// Canonical feature keyed by a normalized click category (data-track-category
 // or useractivity eventCategory). Matched case/separator-insensitively via
-// normalizeKey, so 'CALLS', 'Calls' and 'calls' all collapse to the same key.
+// normalizeKey, so 'Search Results', 'search-results' and 'searchResults' all
+// collapse to the same section name.
 const FEATURE_BY_CATEGORY: Record<string, string> = {
-  calls: 'call',
-  call: 'call',
-  chat: 'message',
-  chatsidebar: 'message',
-  message: 'message',
-  messagesent: 'message',
-  tickets: 'ticket',
-  ticket: 'ticket',
-  ticketfilters: 'ticket',
+  calls: 'calls',
+  call: 'calls',
+  tickets: 'my-tickets',
+  ticket: 'my-tickets',
+  ticketfilters: 'my-tickets',
   canvas: 'canvas',
-  channel: 'channel',
+  channel: 'threads',
   activity: 'activity',
-  recordingdetailv2: 'recording',
-  recordingsscreen: 'recording',
-  recordings: 'recording',
-  knowledgebase: 'knowledge_base',
-  xyneai: 'agent',
-  askai: 'agent',
-  clawchat: 'agent',
-  clawagents: 'agent',
-  searchresults: 'search',
-  querybuilder: 'search',
-  automationbuilder: 'automation',
-  automationruns: 'automation',
-  usergroups: 'user_group',
+  recordingdetailv2: 'recordings',
+  recordingsscreen: 'recordings',
+  recordings: 'recordings',
+  knowledgebase: 'knowledge-base',
+  xyneai: 'agent-chat',
+  askai: 'agent-chat',
+  clawchat: 'agent-chat',
+  clawagents: 'claw-agents',
+  searchresults: 'search-results',
+  querybuilder: 'search-results',
+  automationbuilder: 'automations',
+  automationruns: 'automations',
+  usergroups: 'user-groups',
   preferences: 'settings',
 };
 
@@ -89,19 +98,19 @@ function slugify(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
-/** Resolve a whitelisted module path to a canonical feature, or null. */
+/** Resolve a whitelisted module path to its section name, or null. */
 export function resolveFeatureFromModule(module: string): string | null {
   return FEATURE_BY_MODULE[module] ?? null;
 }
 
 /**
- * Resolve a click/engagement event to a canonical feature. Falls back to a
- * slug of the source category so unmapped surfaces are still counted rather
- * than dropped. Returns null only when there is no usable category at all.
+ * Resolve a click/engagement event to a section name. Falls back to a slug of
+ * the source category so unmapped surfaces are still counted rather than
+ * dropped. Returns null only when there is no usable category at all.
  */
 export function resolveFeature(input: { category?: string; eventName?: string }): string | null {
   const category = input.category?.trim();
