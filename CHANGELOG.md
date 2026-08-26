@@ -1,3 +1,10 @@
+## [1.230.0](https://github.com/juspay/xyne-spaces/compare/v1.229.1...v1.230.0) (2026-08-26)
+
+
+### Features
+
+* new dm person selector ([#1091](https://github.com/juspay/xyne-spaces/issues/1091)) ([cbc8674](https://github.com/juspay/xyne-spaces/commit/cbc8674b03c41ed8142563d9ede6bcf8d8421145))
+
 ## [1.229.1](https://github.com/juspay/xyne-spaces/compare/v1.229.0...v1.229.1) (2026-08-26)
 
 
