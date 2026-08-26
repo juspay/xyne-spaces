@@ -1,3 +1,10 @@
+## [1.206.0-release-20260821.10](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.9...v1.206.0-release-20260821.10) (2026-08-26)
+
+
+### Bug Fixes
+
+* allow recording sharing without canvases ([#1067](https://github.com/juspay/xyne-spaces/issues/1067)) ([1d2d28c](https://github.com/juspay/xyne-spaces/commit/1d2d28c44a9e8e98794db4c1f9b922618cc161af))
+
 ## [1.206.0-release-20260821.9](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.8...v1.206.0-release-20260821.9) (2026-08-26)
 
 
