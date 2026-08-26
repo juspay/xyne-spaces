@@ -7,6 +7,7 @@ import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
 import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
 import { CallType, CallVisibility } from '@xyne/shared';
+import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
 export interface RecordingSession {
   /** Public Call ID used by the recording routes (same value as externalId). */
@@ -286,6 +287,10 @@ class RecordingService {
         isHeadless: true,
         callType: CallType.AUDIO,
         sttModel: params?.sttModel || 'google',
+        // Ferry the browser-local summary tier onto the recording so the
+        // headless call-end auto-generation can honour a 'thinking' default;
+        // the server can't read localStorage itself.
+        summaryModelPreference: getSummaryModelPreference(),
         ...(params?.conversationId && { conversationId: params.conversationId }),
         ...(params?.channelId && { channelId: params.channelId }),
       },

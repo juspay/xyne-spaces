@@ -13,7 +13,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Search,
   AudioLines,
   Monitor,
   Smartphone,

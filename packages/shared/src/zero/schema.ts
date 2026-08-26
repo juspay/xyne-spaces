@@ -632,7 +632,6 @@ export const userPreferenceTable = table('user_preferences')
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
     showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
-    summaryModelPreference: string().optional(), // Recording summary LLM model: "fast" (default) or "thinking"
     createdAt: number(),
     updatedAt: number(),
   })

@@ -408,7 +408,13 @@ export class CallController {
         conversationId,
         artifactMessageId,
         sdlcLink,
+        summaryModelPreference,
       } = req.body;
+      // Recording summary LLM tier the client carried from its localStorage;
+      // stamped onto the notes canvas so headless call-end auto-generation can
+      // honour a 'thinking' default. Anything but explicit 'thinking' is 'fast'.
+      const summaryModelPref: 'fast' | 'thinking' =
+        summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -440,6 +446,7 @@ export class CallController {
           metadata: {
             source: 'call_notes',
             callId: callExternalId,
+            summaryModelPreference: summaryModelPref,
           },
         });
 

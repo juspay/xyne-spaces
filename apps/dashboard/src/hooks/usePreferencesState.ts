@@ -49,7 +49,7 @@ export function usePreferencesState(enabled: boolean) {
     useDefaultFormattingToolbarOpen();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
-  const { searchMode, setSearchMode } = useSearchMode();
+  const { searchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();

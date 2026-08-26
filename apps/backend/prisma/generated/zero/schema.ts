@@ -537,7 +537,6 @@ export const userPreferenceTable = table("user_preferences")
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
     showThreadTags: boolean(),
-    summaryModelPreference: string().optional(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
@@ -777,6 +776,7 @@ export const prThreadLinkTable = table("pr_thread_links")
 export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_ingestion_batches_v2")
   .columns({
     id: string(),
+    orgId: string().optional(),
     reportDate: number(),
     source: string(),
     idempotencyKey: string(),
@@ -800,7 +800,7 @@ export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_in
 
 export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_user_ingestions_v2")
   .columns({
-    workspaceId: string().optional(),
+    orgId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -827,7 +827,7 @@ export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_use
 
 export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_summaries_v2")
   .columns({
-    workspaceId: string().optional(),
+    orgId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -855,7 +855,7 @@ export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_
 
 export const teamIntelligenceOrgSummaryV2Table = table("team_intelligence_org_summaries_v2")
   .columns({
-    workspaceId: string().optional(),
+    orgId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),

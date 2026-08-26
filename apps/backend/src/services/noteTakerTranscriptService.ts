@@ -131,7 +131,7 @@ class NoteTakerTranscriptService {
 
       // The recording creator's model preference (fast/thinking) drives which
       // LLM tier generates the summary, title, and detailed-summary canvas.
-      const summaryModelType = await this.getSummaryModelPreference(call.createdByUserId);
+      const summaryModelType = await this.getSummaryModelPreference(call);
 
       // These workloads are independent once the transcript is available, so
       // start them together. The detailed-summary result is also the sole source
@@ -199,7 +199,7 @@ class NoteTakerTranscriptService {
 
     // An explicit modelType (e.g. the "Try the thinking model" button) wins;
     // otherwise fall back to the creator's saved preference.
-    const resolvedModelType = modelType ?? (await this.getSummaryModelPreference(call.createdByUserId));
+    const resolvedModelType = modelType ?? (await this.getSummaryModelPreference(call));
 
     const detailedSummary = await this.generateDetailedSummaryCanvas(
       call,
@@ -257,19 +257,32 @@ class NoteTakerTranscriptService {
   /**
    * Resolve the recording creator's summary model preference (fast/thinking),
    * defaulting to 'fast' when there's no preference row or the lookup fails.
+   * Resolve the recording's summary model tier (fast/thinking), read from the
+   * notes canvas metadata where the client stamped it at recording start (see
+   * callController.initiateCall) — the browser's localStorage is unreachable
+   * from this headless call-end path. Defaults to 'fast' when the canvas is
+   * missing, predates this feature, or the lookup fails.
    */
-  private async getSummaryModelPreference(
-    userId: string | null | undefined,
-  ): Promise<SummaryModelType> {
-    if (!userId) return 'fast';
+  private async getSummaryModelPreference(call: Call): Promise<SummaryModelType> {
+    const metadata =
+      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+        ? (call.metadata as Record<string, unknown>)
+        : {};
+    const notesCanvasId =
+      typeof metadata.notesCanvasId === 'string' ? metadata.notesCanvasId : null;
+    if (!notesCanvasId) return 'fast';
     try {
-      const pref = await db.userPreference.findUnique({
-        where: { userId },
-        select: { summaryModelPreference: true },
+      const canvas = await db.canvas.findUnique({
+        where: { id: notesCanvasId },
+        select: { metadata: true },
       });
-      return pref?.summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
+      const canvasMeta =
+        canvas?.metadata && typeof canvas.metadata === 'object' && !Array.isArray(canvas.metadata)
+          ? (canvas.metadata as Record<string, unknown>)
+          : {};
+      return canvasMeta.summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
     } catch (error) {
-      logger.warn('summary_model_preference_lookup_failed', { userId, error });
+      logger.warn('summary_model_preference_lookup_failed', { callId: call.id, error });
       return 'fast';
     }
   }
