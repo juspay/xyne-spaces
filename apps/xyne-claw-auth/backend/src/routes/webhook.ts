@@ -607,6 +607,18 @@ const AGENT_SUMMARY_SAMPLE = 5;
 /** Cap on connectors the server offers unprompted, so a card never becomes a list. */
 const MCP_SUGGEST_INFERRED_MAX = 3;
 
+/**
+ * Connector cards to post alongside a reply. The model requests these
+ * explicitly (`title`/`listAll`); the server fills the same shape when it
+ * infers a suggestion from the message text (`inferred`).
+ */
+type PendingConnectorSuggestions = {
+  serverTypes: string[];
+  title?: string;
+  listAll?: boolean;
+  inferred?: boolean;
+};
+
 async function agentOwnerCredit(
   ownerUserId: string | null | undefined,
 ): Promise<{ name?: string | null; id?: string | null } | undefined> {
@@ -4710,7 +4722,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       | { variant: "summary" };
     // Connector cards to post alongside the reply, so the user can connect
     // without leaving the conversation.
-    pendingConnectorSuggestions?: { serverTypes: string[]; title?: string; listAll?: boolean };
+    pendingConnectorSuggestions?: PendingConnectorSuggestions;
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -6062,7 +6074,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
-  const pendingConnectorSuggestions =
+  const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
     payload.pendingConnectorSuggestions ??
     (inferredTypes.length > 0 ? { serverTypes: inferredTypes, inferred: true } : undefined);
   if (pendingConnectorSuggestions && agentCardDeliverable) {
@@ -6104,7 +6116,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             .map((type) => byType.get(type))
             .filter((row): row is NonNullable<typeof row> => !!row);
 
-      const inferred = (pendingConnectorSuggestions as { inferred?: boolean }).inferred === true;
+      const inferred = pendingConnectorSuggestions.inferred === true;
 
       const connectors = ordered
         // An inferred card is unsolicited, so it only earns its place when it
