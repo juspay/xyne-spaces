@@ -1235,6 +1235,7 @@ model PullRequests {
 
   @@index([workflowExecutionId])
   @@index([date])
+  @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
   @@map("pull_requests")
   @@schema("public")
 }

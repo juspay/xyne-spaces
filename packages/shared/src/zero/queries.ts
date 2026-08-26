@@ -3949,7 +3949,9 @@ export const queries = defineQueries({
         .related('devTicket', q => {
           let devTicket = q
             .one()
-            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc'));
+            // Only the latest PR is rendered (pullRequests[0]); limit keeps the
+            // relation from hydrating a ticket's full PR history.
+            .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc').limit(1));
           if (includeColumnData) {
             devTicket = devTicket.related('workflows').related('tags').related('formEntityValues');
           }
