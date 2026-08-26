@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.18](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.17...v1.188.0-release-20260817.18) (2026-08-26)
+
+
+### Reverts
+
+* Revert "feat: SDLC resource access backfill endpoint (#1100)" (#1113) ([4155397](https://github.com/juspay/xyne-spaces/commit/41553973b70e9fe73f46e586d86d85ea70c676a4)), closes [#1100](https://github.com/juspay/xyne-spaces/issues/1100) [#1113](https://github.com/juspay/xyne-spaces/issues/1113)
+
 ## [1.188.0-release-20260817.17](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.16...v1.188.0-release-20260817.17) (2026-08-26)
 
 
