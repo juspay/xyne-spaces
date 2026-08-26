@@ -1,0 +1,377 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { computeProjectSectionSuggestions } from '../dist/channelSectionSuggestions.js';
+
+const project = (id, name, type = 'DEFAULT') => ({ id, name, type });
+
+const channel = (id, projectId, overrides = {}) => ({
+  id,
+  projectId,
+  scopeType: 'DEFAULT',
+  type: 'DEFAULT',
+  ...overrides,
+});
+
+const status = (channelId, overrides = {}) => ({
+  channelId,
+  sectionId: null,
+  isStarred: false,
+  isDeleted: false,
+  ...overrides,
+});
+
+const compute = ({ channels, statuses, projects, existingSectionNames = [], ...rest }) =>
+  computeProjectSectionSuggestions({
+    channels,
+    statuses,
+    projects,
+    existingSectionNames,
+    ...rest,
+  });
+
+test('groups unsectioned channels by project', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p2'),
+      channel('c4', 'p2'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+  });
+
+  assert.equal(result.length, 2);
+  assert.deepEqual(
+    result.map(s => s.name).sort(),
+    ['Infra', 'Platform'],
+  );
+});
+
+test('excludes starred channels', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p1'),
+      channel('c4', 'p2'),
+      channel('c5', 'p2'),
+    ],
+    statuses: [
+      status('c1'),
+      status('c2'),
+      status('c3', { isStarred: true }),
+      status('c4'),
+      status('c5'),
+    ],
+  });
+
+  const platform = result.find(s => s.name === 'Platform');
+  assert.deepEqual(platform.channelIds, ['c1', 'c2']);
+});
+
+test('a project drops out when the starred filter takes it below the threshold', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p2'),
+      channel('c4', 'p2'),
+      channel('c5', 'p2'),
+    ],
+    statuses: [
+      status('c1'),
+      status('c2', { isStarred: true }),
+      status('c3'),
+      status('c4'),
+      status('c5'),
+    ],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Infra'],
+  );
+});
+
+test('excludes channels already in a section', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p1'),
+      channel('c4', 'p2'),
+      channel('c5', 'p2'),
+    ],
+    statuses: [
+      status('c1'),
+      status('c2'),
+      status('c3', { sectionId: 'existing-section' }),
+      status('c4'),
+      status('c5'),
+    ],
+  });
+
+  const platform = result.find(s => s.name === 'Platform');
+  assert.deepEqual(platform.channelIds, ['c1', 'c2']);
+});
+
+test('excludes deleted statuses and channels with no status row', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p1'),
+      channel('c4', 'p1'),
+      channel('c5', 'p2'),
+      channel('c6', 'p2'),
+    ],
+    statuses: [
+      status('c1'),
+      status('c2'),
+      status('c3', { isDeleted: true }),
+      status('c5'),
+      status('c6'),
+    ],
+  });
+
+  const platform = result.find(s => s.name === 'Platform');
+  assert.deepEqual(platform.channelIds, ['c1', 'c2']);
+});
+
+test('excludes non-default scope channels', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p1', { scopeType: 'GROUP_DM' }),
+      channel('c4', 'p2'),
+      channel('c5', 'p2'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4'), status('c5')],
+  });
+
+  const platform = result.find(s => s.name === 'Platform');
+  assert.deepEqual(platform.channelIds, ['c1', 'c2']);
+});
+
+test('excludes desk channel types', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p1', { type: 'EMAIL' }),
+      channel('c4', 'p1', { type: 'SLACK' }),
+      channel('c5', 'p2'),
+      channel('c6', 'p2'),
+    ],
+    statuses: [
+      status('c1'),
+      status('c2'),
+      status('c3'),
+      status('c4'),
+      status('c5'),
+      status('c6'),
+    ],
+  });
+
+  const platform = result.find(s => s.name === 'Platform');
+  assert.deepEqual(platform.channelIds, ['c1', 'c2']);
+});
+
+test('excludes the DM project', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('dm', 'Direct Messages', 'DM')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'dm'),
+      channel('c4', 'dm'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Platform'],
+  );
+});
+
+test('drops groups below the minimum channel threshold', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [channel('c1', 'p1'), channel('c2', 'p1'), channel('c3', 'p2')],
+    statuses: [status('c1'), status('c2'), status('c3')],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Platform'],
+  );
+});
+
+test('honours a custom minimum channel threshold', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p1'),
+      channel('c4', 'p2'),
+      channel('c5', 'p2'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4'), status('c5')],
+    minChannels: 3,
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Platform'],
+  );
+});
+
+test('skips a project whose name collides with an existing section', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p2'),
+      channel('c4', 'p2'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+    existingSectionNames: ['  platform '],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Infra'],
+  );
+});
+
+test('suggests only the first of two projects sharing a name', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'platform')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p1'),
+      channel('c4', 'p2'),
+      channel('c5', 'p2'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4'), status('c5')],
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].projectId, 'p1');
+});
+
+test('truncates long project names to the dialog limit', () => {
+  const longName = 'x'.repeat(80);
+  const result = compute({
+    projects: [project('p1', longName), project('p2', 'Infra')],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p2'),
+      channel('c4', 'p2'),
+    ],
+    statuses: [status('c1'), status('c2'), status('c3'), status('c4')],
+  });
+
+  const truncated = result.find(s => s.projectId === 'p1');
+  assert.equal(truncated.name.length, 50);
+});
+
+test('returns nothing when a single project holds every candidate channel', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform')],
+    channels: Array.from({ length: 14 }, (_, i) => channel(`c${i}`, 'p1')),
+    statuses: Array.from({ length: 14 }, (_, i) => status(`c${i}`)),
+  });
+
+  assert.deepEqual(result, []);
+});
+
+test('suggests a dominant project when other candidates remain outside it', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      ...Array.from({ length: 10 }, (_, i) => channel(`a${i}`, 'p1')),
+      channel('b1', 'p2'),
+    ],
+    statuses: [...Array.from({ length: 10 }, (_, i) => status(`a${i}`)), status('b1')],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Platform'],
+  );
+});
+
+test('still suggests a dominant project when a second viable project exists', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform'), project('p2', 'Infra')],
+    channels: [
+      ...Array.from({ length: 9 }, (_, i) => channel(`a${i}`, 'p1')),
+      channel('b1', 'p2'),
+      channel('b2', 'p2'),
+    ],
+    statuses: [
+      ...Array.from({ length: 9 }, (_, i) => status(`a${i}`)),
+      status('b1'),
+      status('b2'),
+    ],
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Platform', 'Infra'],
+  );
+});
+
+test('returns nothing when there are no candidate channels', () => {
+  const result = compute({
+    projects: [project('p1', 'Platform')],
+    channels: [channel('c1', 'p1'), channel('c2', 'p1')],
+    statuses: [status('c1', { isStarred: true }), status('c2', { sectionId: 's1' })],
+  });
+
+  assert.deepEqual(result, []);
+});
+
+test('orders suggestions by channel count then name', () => {
+  const result = compute({
+    projects: [
+      project('p1', 'Beta'),
+      project('p2', 'Alpha'),
+      project('p3', 'Gamma'),
+      project('p4', 'Delta'),
+    ],
+    channels: [
+      channel('c1', 'p1'),
+      channel('c2', 'p1'),
+      channel('c3', 'p2'),
+      channel('c4', 'p2'),
+      channel('c5', 'p3'),
+      channel('c6', 'p3'),
+      channel('c7', 'p3'),
+      channel('c8', 'p4'),
+      channel('c9', 'p4'),
+      channel('c10', 'p4'),
+    ],
+    statuses: Array.from({ length: 10 }, (_, i) => status(`c${i + 1}`)),
+  });
+
+  assert.deepEqual(
+    result.map(s => s.name),
+    ['Delta', 'Gamma', 'Alpha', 'Beta'],
+  );
+});
