@@ -18,6 +18,7 @@ import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
+import { ShortcutHint } from '../ui/ShortcutHint';
 import { isStatusExpired } from '../../utils/statusUtils';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useSelf } from '../../hooks/useUsers';
@@ -284,6 +285,7 @@ const Settings = ({
             <div className='flex items-center p-1 gap-2 text-muted-foreground'>
               <SmilePlus className='size-4 flex-shrink-0' />
               <span className='text-xs truncate'>Set a status</span>
+              <ShortcutHint shortcut='global.setStatus' className='ml-auto text-xs' />
             </div>
           )}
         </div>
@@ -410,6 +412,7 @@ const Settings = ({
         >
           <Settings2 className='size-4' />
           Preferences
+          <ShortcutHint shortcut='global.openPreferences' className='ml-auto' />
         </Button>
       </div>
 

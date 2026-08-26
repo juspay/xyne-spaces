@@ -44,6 +44,8 @@ export const shortcuts = {
   },
   'global.openCanvasTab': {
     keys: ['mod+shift+n'],
+    // Browsers reserve this for a new incognito/private window.
+    electronOnly: true,
     scope: 'channel',
     description: 'Open canvas tab',
     category: 'Navigation',
@@ -89,6 +91,8 @@ export const shortcuts = {
   },
   'global.openThreads': {
     keys: 'mod+shift+t',
+    // Browsers reserve this for "reopen closed tab".
+    electronOnly: true,
     scope: 'global',
     description: 'Open the Threads view',
     category: 'Navigation',
@@ -115,6 +119,8 @@ export const shortcuts = {
   },
   'global.composeMessage': {
     keys: 'mod+n',
+    // Browsers reserve this for a new window.
+    electronOnly: true,
     scope: 'global',
     description: 'Compose a new message',
     category: 'Navigation',
@@ -125,6 +131,9 @@ export const shortcuts = {
   },
   'recording.start': {
     keys: 'mod+alt+x',
+    // Bound by the Electron main process (RECORDING_SHORTCUT), never by the
+    // renderer — so the combo does not exist in a browser tab.
+    electronOnly: true,
     scope: 'global',
     description: 'Start or stop recording',
     category: 'Recording',

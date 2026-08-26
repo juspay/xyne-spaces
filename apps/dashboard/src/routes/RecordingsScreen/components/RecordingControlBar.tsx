@@ -7,6 +7,7 @@ import { ReactElement, useEffect, useState, useRef } from 'react';
 import { Loader2, Pause, Play } from 'lucide-react';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import { Waveform } from '../../../utils/recordingWaveform';
+import { ShortcutTooltip } from '../../../components/ui/ShortcutTooltip';
 
 /**
  * Returns true when the dashboard is running inside a mobile browser or
@@ -126,21 +127,23 @@ export function RecordingControlBar({
             </button>
           </>
         ) : (
-          <button
-            onClick={onStart}
-            disabled={isStarting}
-            className='flex items-center justify-center w-14 h-14 rounded-full bg-destructive hover:bg-destructive/85 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg'
-            title='Start recording'
-            data-track-category='RecordingControlBar'
-            data-track-name='start_recording'
-          >
-            {isStarting ? (
-              <Loader2 className='w-6 h-6 text-white animate-spin' />
-            ) : (
-              /* Circle record icon */
-              <div className='w-6 h-6 rounded-full bg-background' />
-            )}
-          </button>
+          <ShortcutTooltip label='Start recording' shortcut='recording.start' side='top'>
+            <button
+              onClick={onStart}
+              disabled={isStarting}
+              className='flex items-center justify-center w-14 h-14 rounded-full bg-destructive hover:bg-destructive/85 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg'
+              aria-label='Start recording'
+              data-track-category='RecordingControlBar'
+              data-track-name='start_recording'
+            >
+              {isStarting ? (
+                <Loader2 className='w-6 h-6 text-white animate-spin' />
+              ) : (
+                /* Circle record icon */
+                <div className='w-6 h-6 rounded-full bg-background' />
+              )}
+            </button>
+          </ShortcutTooltip>
         )}
 
         {/* Waveform bars (right side, visible when actively recording) */}

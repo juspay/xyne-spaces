@@ -3,6 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, SearchBig } from '@xyne/icons';
 import { invokeShortcut } from '../../shortcuts';
+import { ShortcutTooltip } from '../ui/ShortcutTooltip';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 import { roomActor } from '../../machines/roomMachine';
@@ -69,40 +70,46 @@ const AppNavigator = (): ReactElement => {
       style={APP_DRAG_STYLE}
     >
       <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
-        <button
-          type='button'
-          aria-label='Back'
-          onClick={handleGoBack}
-          disabled={!canGoBack}
-          className={canGoBack ? buttonClass : disabledButtonClass}
-          data-track-category='APP_NAVIGATOR'
-          data-track-name='GO_BACK'
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <button
-          type='button'
-          aria-label='Forward'
-          onClick={handleGoForward}
-          disabled={!canGoForward}
-          className={canGoForward ? buttonClass : disabledButtonClass}
-          data-track-category='APP_NAVIGATOR'
-          data-track-name='GO_FORWARD'
-        >
-          <ArrowRight size={16} />
-        </button>
+        <ShortcutTooltip label='Back' shortcut='global.goBack' side='bottom'>
+          <button
+            type='button'
+            aria-label='Back'
+            onClick={handleGoBack}
+            disabled={!canGoBack}
+            className={canGoBack ? buttonClass : disabledButtonClass}
+            data-track-category='APP_NAVIGATOR'
+            data-track-name='GO_BACK'
+          >
+            <ArrowLeft size={16} />
+          </button>
+        </ShortcutTooltip>
+        <ShortcutTooltip label='Forward' shortcut='global.goForward' side='bottom'>
+          <button
+            type='button'
+            aria-label='Forward'
+            onClick={handleGoForward}
+            disabled={!canGoForward}
+            className={canGoForward ? buttonClass : disabledButtonClass}
+            data-track-category='APP_NAVIGATOR'
+            data-track-name='GO_FORWARD'
+          >
+            <ArrowRight size={16} />
+          </button>
+        </ShortcutTooltip>
       </div>
       <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
-        <button
-          type='button'
-          aria-label='Search'
-          onClick={() => invokeShortcut('mod+k')}
-          className={buttonClass}
-          data-track-category='APP_NAVIGATOR'
-          data-track-name='OPEN_SEARCH'
-        >
-          <SearchBig size={16} />
-        </button>
+        <ShortcutTooltip label='Search' shortcut='global.search' side='bottom'>
+          <button
+            type='button'
+            aria-label='Search'
+            onClick={() => invokeShortcut('mod+k')}
+            className={buttonClass}
+            data-track-category='APP_NAVIGATOR'
+            data-track-name='OPEN_SEARCH'
+          >
+            <SearchBig size={16} />
+          </button>
+        </ShortcutTooltip>
       </div>
     </div>
   );
