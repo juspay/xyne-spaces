@@ -1,3 +1,10 @@
+## [1.188.0-release-20260817.17](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.16...v1.188.0-release-20260817.17) (2026-08-26)
+
+
+### Features
+
+* SDLC resource access backfill endpoint ([#1100](https://github.com/juspay/xyne-spaces/issues/1100)) ([03b1b4b](https://github.com/juspay/xyne-spaces/commit/03b1b4b6a2863c3240e2a38852f83ce23f1341ef))
+
 ## [1.188.0-release-20260817.16](https://github.com/juspay/xyne-spaces/compare/v1.188.0-release-20260817.15...v1.188.0-release-20260817.16) (2026-08-25)
 
 
