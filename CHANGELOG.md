@@ -1,3 +1,10 @@
+## [1.206.0-release-20260821.8](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.7...v1.206.0-release-20260821.8) (2026-08-26)
+
+
+### Bug Fixes
+
+* auth middleware set user role ([#1037](https://github.com/juspay/xyne-spaces/issues/1037)) ([3cd2679](https://github.com/juspay/xyne-spaces/commit/3cd2679d16d6bad657a87b247996a15dfdb0c153))
+
 ## [1.206.0-release-20260821.7](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.6...v1.206.0-release-20260821.7) (2026-08-25)
 
 
