@@ -3,6 +3,8 @@ import { Search, Shield } from 'lucide-react';
 import Input from '../../components/ui/Input/Input';
 import { useSelf } from '../../hooks/useUsers';
 import { useDisabledToolbarPaths } from '../../hooks/useDisabledToolbarPaths';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import { cn } from '../../utils/classNames';
 import { WorkspaceRole } from '@xyne/shared';
 import {
@@ -31,6 +33,10 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
   const self = useSelf();
   const isAdmin = self?.role === WorkspaceRole.ADMIN || self?.role === WorkspaceRole.OWNER;
   const disabledPaths = useDisabledToolbarPaths();
+  const [workspace] = useCachedQuery(
+    queries.getWorkspaceById({ workspaceId: self?.workspaceId ?? '' }),
+    { enabled: !!self?.workspaceId },
+  );
 
   // Permission-gated items (e.g. Roles, Workspace Management) are already restricted by the
   // user/role permission system — a regular member can never see them regardless of this
@@ -62,9 +68,14 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
           <p className='text-sm text-muted-foreground'>
             Which sidebar items are available to members of this workspace. Members can still choose
             to hide enabled items for themselves under Preferences → Toolbar, but items disabled
-            here are unavailable to everyone. Managed centrally via Superposition
-            (disabled_toolbar_paths, targeted per workspace) — contact your ops team to change the
-            list for this workspace.
+            here are unavailable to everyone. Managed centrally via Superposition — contact your ops
+            team to change the list for {workspace?.name ?? 'this workspace'}, under the key{' '}
+            <code className='rounded bg-muted px-1 py-0.5 text-xs'>disabled_toolbar_paths</code>
+            , entry{' '}
+            <code className='rounded bg-muted px-1 py-0.5 text-xs'>
+              {self?.workspaceId ?? '<workspaceId>'}
+            </code>
+            .
           </p>
         </div>
         <Card className='p-4'>
