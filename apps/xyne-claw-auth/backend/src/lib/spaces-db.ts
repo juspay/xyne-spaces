@@ -180,9 +180,50 @@ export type SpacesAuthCaller =
   | "artifact-app-storage"
   | "unknown";
 
+/**
+ * Translate a canonical Claw user id to its raw, workspace-scoped Spaces id.
+ *
+ * The Spaces database only knows `public.users.id`, while all Claw-owned
+ * records use `User.id`. Legacy rows happen to use the same value for both,
+ * but newly provisioned users do not. Do not guess when a canonical user has
+ * identities in multiple workspaces: callers must provide the workspace that
+ * selected the request.
+ */
+async function resolveSpacesUserId(
+  clawUserId: string,
+  workspaceId?: string | null,
+): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: clawUserId },
+    select: { id: true },
+  });
+  if (!user) return null;
+
+  const identities = await prisma.userSurfaceIdentity.findMany({
+    where: {
+      surfaceId: "spaces",
+      userId: clawUserId,
+      status: "ACTIVE",
+      ...(workspaceId ? { surfaceWorkspaceId: workspaceId } : {}),
+    },
+    select: { surfaceUserId: true },
+    orderBy: { updatedAt: "desc" },
+    take: 2,
+  });
+  if (identities.length === 1) return identities[0]!.surfaceUserId;
+  if (identities.length > 1) {
+    log.warn(
+      `[spaces-db] identity resolution clawUserId=${clawUserId} result=ambiguous ` +
+        `workspaceId=${workspaceId ?? "none"}`,
+    );
+  }
+  return null;
+}
+
 export async function getSpacesAuthForUser(
   userId: string,
   caller: SpacesAuthCaller = "unknown",
+  workspaceId?: string | null,
 ): Promise<SpacesUserAuth | null> {
   const client = getClient();
   if (!client) return null;
@@ -190,11 +231,14 @@ export async function getSpacesAuthForUser(
 
   const started = Date.now();
   try {
+    // First preserve legacy/raw callers. If that raw id has no Spaces session,
+    // resolve it as a canonical Claw id through UserSurfaceIdentity.
+    let spacesUserId = userId;
     // Most recently active non-expired session for this user.
     // `workspaceId` lives on `public.users.workspaceId`, NOT on the session
     // row — sessions inherit the user's workspace. We join on `userId` to
     // pull both in one query.
-    const rows = await client.$queryRaw<Array<UserSessionRow>>`
+    let rows = await client.$queryRaw<Array<UserSessionRow>>`
       SELECT
         s.id,
         s."accessToken",
@@ -205,22 +249,46 @@ export async function getSpacesAuthForUser(
         u."workspaceId"
       FROM workflow.user_sessions s
       JOIN public.users u ON u.id = s."userId"
-      WHERE s."userId" = ${userId}
+      WHERE s."userId" = ${spacesUserId}
         AND s.status = 'ACTIVE'
         AND s."refreshTokenExpiry" > NOW()
       ORDER BY s."lastActivity" DESC
       LIMIT 1
     `;
 
+    if (!rows[0]) {
+      const resolved = await resolveSpacesUserId(userId, workspaceId);
+      if (resolved && resolved !== spacesUserId) {
+        spacesUserId = resolved;
+        rows = await client.$queryRaw<Array<UserSessionRow>>`
+          SELECT
+            s.id,
+            s."accessToken",
+            s."accessTokenExpiry",
+            s."refreshTokenExpiry",
+            s.status::text AS status,
+            s."lastActivity",
+            u."workspaceId"
+          FROM workflow.user_sessions s
+          JOIN public.users u ON u.id = s."userId"
+          WHERE s."userId" = ${spacesUserId}
+            AND s.status = 'ACTIVE'
+            AND s."refreshTokenExpiry" > NOW()
+          ORDER BY s."lastActivity" DESC
+          LIMIT 1
+        `;
+      }
+    }
+
     const row = rows[0];
     const elapsed = Date.now() - started;
 
     if (!row) {
-      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=miss-no-session ms=${elapsed}`);
+      log.info(`[spaces-db] read userId=${userId} spacesUserId=${spacesUserId} caller=${caller} result=miss-no-session ms=${elapsed}`);
       return null;
     }
     if (!row.workspaceId) {
-      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=miss-no-workspace ms=${elapsed}`);
+      log.info(`[spaces-db] read userId=${userId} spacesUserId=${spacesUserId} caller=${caller} result=miss-no-workspace ms=${elapsed}`);
       return null;
     }
 
@@ -228,7 +296,7 @@ export async function getSpacesAuthForUser(
     const tokenValid = row.accessToken && row.accessTokenExpiry && row.accessTokenExpiry.getTime() > now;
 
     if (tokenValid) {
-      log.info(`[spaces-db] read userId=${userId} caller=${caller} result=hit workspaceId=${row.workspaceId} ms=${elapsed}`);
+      log.info(`[spaces-db] read userId=${userId} spacesUserId=${spacesUserId} caller=${caller} result=hit workspaceId=${row.workspaceId} ms=${elapsed}`);
       return {
         token: row.accessToken!,
         sessionId: row.id,
@@ -275,9 +343,14 @@ export interface SpacesUserProfile {
   id: string;
   email: string;
   name: string;
+  /** Stable person-in-org id (`public.org_members.memberId`). */
+  spacesOrgMemberId: string | null;
   /// The user's current Spaces workspace (public.users.workspaceId). Used by
-  /// JIT to map the user to a claw org via SurfaceTenantLink. May be null.
+  /// JIT to map the user to a claw org via ConnectedSurface. May be null.
   workspaceId: string | null;
+  /// The upstream Spaces org for workspaceId (public.workspaces.orgId). Used
+  /// to validate connected_surfaces.surfaceOrgId before assigning a claw org.
+  spacesOrgId: string | null;
 }
 
 /**
@@ -300,9 +373,16 @@ export async function getSpacesUserById(
   const started = Date.now();
   try {
     const rows = await client.$queryRaw<Array<SpacesUserProfile>>`
-      SELECT id, email, name, "workspaceId"
-      FROM public.users
-      WHERE id = ${userId}
+      SELECT
+        u.id,
+        u.email,
+        u.name,
+        u."orgMemberId" AS "spacesOrgMemberId",
+        u."workspaceId",
+        w."orgId" AS "spacesOrgId"
+      FROM public.users u
+      LEFT JOIN public.workspaces w ON w.id = u."workspaceId"
+      WHERE u.id = ${userId}
       LIMIT 1
     `;
     const row = rows[0];
@@ -328,7 +408,9 @@ export async function getSpacesUserById(
  * 10 PM" typed hours earlier, or any S2S/automation trigger) fell through to a
  * NULL workspaceId and Spaces then rejected result delivery. The workspaceId
  * lives on the user row itself, so this session-independent lookup is the
- * reliable fallback. Single-workspace deployment → one workspaceId per user.
+ * reliable fallback. A canonical Claw user with several Spaces memberships
+ * must supply its selected workspace; this helper deliberately refuses to
+ * choose an arbitrary workspace.
  *
  * Returns null when SPACES_DB_URL is unset, the user is missing, the column is
  * NULL, or on any DB error — callers treat null as "couldn't resolve".
@@ -336,22 +418,36 @@ export async function getSpacesUserById(
 export async function getWorkspaceIdForUser(
   userId: string,
   caller: SpacesAuthCaller = "unknown",
+  requestedWorkspaceId?: string | null,
 ): Promise<string | null> {
   if (!userId) return null;
 
   const started = Date.now();
   const client = getClient();
   if (client) try {
-    const rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
+    let spacesUserId = userId;
+    let rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
       SELECT "workspaceId"
       FROM public.users
-      WHERE id = ${userId}
+      WHERE id = ${spacesUserId}
       LIMIT 1
     `;
+    if (!rows[0]) {
+      const resolved = await resolveSpacesUserId(userId, requestedWorkspaceId);
+      if (resolved && resolved !== spacesUserId) {
+        spacesUserId = resolved;
+        rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
+          SELECT "workspaceId"
+          FROM public.users
+          WHERE id = ${spacesUserId}
+          LIMIT 1
+        `;
+      }
+    }
     const workspaceId = rows[0]?.workspaceId ?? null;
     const elapsed = Date.now() - started;
     log.info(
-      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=${workspaceId ? "hit" : "miss"}${workspaceId ? ` workspaceId=${workspaceId}` : ""} ms=${elapsed}`,
+      `[spaces-db] workspace-lookup userId=${userId} spacesUserId=${spacesUserId} caller=${caller} result=${workspaceId ? "hit" : "miss"}${workspaceId ? ` workspaceId=${workspaceId}` : ""} ms=${elapsed}`,
     );
     if (workspaceId) return workspaceId;
   } catch (err) {
@@ -362,11 +458,46 @@ export async function getWorkspaceIdForUser(
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { orgId: true },
-    });
+    const workspaceId = await resolveSpacesUserId(userId, requestedWorkspaceId)
+      .then(async (spacesUserId) => {
+        if (!spacesUserId) return null;
+        const identity = await prisma.userSurfaceIdentity.findFirst({
+          where: {
+            surfaceId: "spaces",
+            userId,
+            surfaceUserId: spacesUserId,
+            status: "ACTIVE",
+            ...(requestedWorkspaceId ? { surfaceWorkspaceId: requestedWorkspaceId } : {}),
+          },
+          select: { surfaceWorkspaceId: true },
+        });
+        return identity?.surfaceWorkspaceId ?? null;
+      });
+    if (workspaceId) return workspaceId;
+
+    // Backward compatibility for legacy Claw users that predate
+    // UserSurfaceIdentity. This is deliberately allowed only when the org has
+    // exactly one Spaces workspace; choosing from two or more would attach a
+    // request to the wrong membership.
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
     if (!user?.orgId) return null;
+    const connected = await prisma.connectedSurface.findMany({
+      where: { surfaceId: "spaces", orgId: user.orgId, surfaceTenantId: { not: "" } },
+      select: { surfaceTenantId: true },
+      take: 2,
+    });
+    if (connected.length === 1) {
+      log.warn(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} used legacy single-workspace connected-surface fallback`,
+      );
+      return connected[0]!.surfaceTenantId;
+    }
+    if (connected.length > 1) {
+      log.warn(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=ambiguous-connected-surfaces orgId=${user.orgId}`,
+      );
+      return null;
+    }
 
     const links = await prisma.surfaceTenantLink.findMany({
       where: { surfaceType: "spaces", orgId: user.orgId },
@@ -374,16 +505,14 @@ export async function getWorkspaceIdForUser(
       take: 2,
     });
     if (links.length === 1) {
-      const workspaceId = links[0]!.surfaceTenantId;
-      const elapsed = Date.now() - started;
-      log.info(
-        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=hit-claw-link workspaceId=${workspaceId} orgId=${user.orgId} ms=${elapsed}`,
+      log.warn(
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} used deprecated single-workspace surface-tenant-link fallback`,
       );
-      return workspaceId;
+      return links[0]!.surfaceTenantId;
     }
     if (links.length > 1) {
       log.warn(
-        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=ambiguous-claw-link orgId=${user.orgId}`,
+        `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=ambiguous-legacy-surface-tenant-links orgId=${user.orgId}`,
       );
     }
     return null;
@@ -413,6 +542,7 @@ export async function getDmChannelForUserAndApp(
 
   const workspaceId = await getWorkspaceIdForUser(trimmedUserId, "mcp-runner");
   if (!workspaceId) return null;
+  const spacesUserId = await resolveSpacesUserId(trimmedUserId, workspaceId) ?? trimmedUserId;
 
   const appProviderUserId = `xyne-app-${trimmedAppId}`;
   const started = Date.now();
@@ -434,7 +564,7 @@ export async function getDmChannelForUserAndApp(
       SELECT c.id
       FROM public.channels c
       JOIN public.channel_participants human_cp
-        ON human_cp."channelId" = c.id AND human_cp."userId" = ${trimmedUserId}
+        ON human_cp."channelId" = c.id AND human_cp."userId" = ${spacesUserId}
       JOIN public.channel_participants app_cp
         ON app_cp."channelId" = c.id AND app_cp."userId" IN (SELECT id FROM app_users)
       WHERE c."scopeType" = 'DM'
@@ -448,10 +578,10 @@ export async function getDmChannelForUserAndApp(
     `;
     const elapsed = Date.now() - started;
     if (rows.length === 1) {
-      log.info(`[spaces-db] dm-channel userId=${trimmedUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=hit channelId=${rows[0]!.id} ms=${elapsed}`);
+      log.info(`[spaces-db] dm-channel userId=${trimmedUserId} spacesUserId=${spacesUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=hit channelId=${rows[0]!.id} ms=${elapsed}`);
       return rows[0]!.id;
     }
-    log.info(`[spaces-db] dm-channel userId=${trimmedUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=${rows.length === 0 ? "miss" : "ambiguous"} ms=${elapsed}`);
+    log.info(`[spaces-db] dm-channel userId=${trimmedUserId} spacesUserId=${spacesUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=${rows.length === 0 ? "miss" : "ambiguous"} ms=${elapsed}`);
     return null;
   } catch (err) {
     const elapsed = Date.now() - started;
@@ -593,20 +723,10 @@ export async function getSpacesUsersByName(name: string, workspaceId?: string): 
 /** The workspace a user belongs to (`public.users.workspaceId`). Used to scope
  *  name resolution to the agent's own workspace. Returns null if unknown. */
 export async function getSpacesUserWorkspaceId(userId: string): Promise<string | null> {
-  const client = getClient();
-  if (!client) return null;
-  const trimmed = userId.trim();
-  if (!trimmed) return null;
-  try {
-    const rows = await client.$queryRawUnsafe<Array<{ workspaceId: string | null }>>(
-      `SELECT "workspaceId" FROM public.users WHERE id = $1 LIMIT 1`,
-      trimmed,
-    );
-    return rows[0]?.workspaceId ?? null;
-  } catch (err) {
-    log.warn(`[spaces-db] user-workspace userId=${trimmed} err=${errMsg(err)}`);
-    return null;
-  }
+  // Keep this legacy helper canonical-aware. It is used by request handlers
+  // that receive `x-user-id` after requireAuth has normalized it to Claw's
+  // internal id.
+  return getWorkspaceIdForUser(userId, "unknown");
 }
 
 /** Resolve `@email@domain` → the active user with that email (email is @unique). */
