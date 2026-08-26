@@ -13,7 +13,7 @@ import { cn } from '../../../utils/classNames';
 interface RecordingParticipantsProps {
   recordingExternalId: string;
   createdByUserId: string | undefined;
-  recordingParticipants: readonly string[] | null | undefined;
+  recordingParticipants: string | null | undefined;
   shares: readonly RecordingParticipantShare[] | null | undefined;
 }
 
@@ -131,6 +131,7 @@ export function RecordingParticipants({
             onKeyDown={onSearchKeyDown}
             role='combobox'
             aria-expanded={results.length > 0}
+            aria-autocomplete='list'
             aria-controls='recording-participant-results'
             aria-activedescendant={results[activeIndex]?.id}
             placeholder='Add someone by name or email'
@@ -141,19 +142,19 @@ export function RecordingParticipants({
         </div>
       )}
 
-      {trimmedQuery ? (
-        <div
-          id='recording-participant-results'
-          role='listbox'
-          aria-label='Matching people'
-          className='max-h-60 overflow-y-auto py-1'
-        >
-          {results.length === 0 && (
-            <p className='px-3 py-5 text-center text-[13px] text-muted-foreground'>
-              No one matches “{trimmedQuery}”
-            </p>
-          )}
-          {results.map((user, index) => (
+      <div
+        id='recording-participant-results'
+        role='listbox'
+        aria-label='Matching people'
+        className={cn('max-h-60 overflow-y-auto py-1', !trimmedQuery && 'hidden')}
+      >
+        {trimmedQuery && results.length === 0 && (
+          <p className='px-3 py-5 text-center text-[13px] text-muted-foreground'>
+            No one matches “{trimmedQuery}”
+          </p>
+        )}
+        {trimmedQuery &&
+          results.map((user, index) => (
             <button
               key={user.id}
               id={user.id}
@@ -179,8 +180,9 @@ export function RecordingParticipants({
               </span>
             </button>
           ))}
-        </div>
-      ) : (
+      </div>
+
+      {!trimmedQuery && (
         <div className='max-h-60 overflow-y-auto py-1'>
           {participants.length === 0 && emptyState}
           <AnimatePresence initial={false}>

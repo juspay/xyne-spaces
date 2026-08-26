@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ZoomIn, ZoomOut, RotateCw, Maximize2, ExternalLink } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, Maximize2, Minimize2, ExternalLink } from 'lucide-react';
 import {
   TransformWrapper,
   TransformComponent,
@@ -21,7 +21,9 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
+  const viewerContainerRef = useRef<HTMLDivElement>(null);
   const disableGesturesContainerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<ReactZoomPanPinchContentRef>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -76,6 +78,26 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
     if (transformRef.current) {
       transformRef.current.resetTransform();
     }
+  }, []);
+
+  const handleFullscreenToggle = useCallback(() => {
+    if (document.fullscreenElement === viewerContainerRef.current) {
+      document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+
+    void viewerContainerRef.current?.requestFullscreen().catch(() => {
+      // Fullscreen not supported or denied — keep the viewer as-is.
+    });
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = (): void => {
+      setIsFullscreen(document.fullscreenElement === viewerContainerRef.current);
+    };
+
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return (): void => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
 
   const handleRotate = useCallback(() => {
@@ -234,7 +256,8 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
 
   return (
     <div
-      className='h-full w-full relative'
+      ref={viewerContainerRef}
+      className='h-full w-full relative bg-black'
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -349,14 +372,14 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
             }`}
           >
             <button
-              onClick={handleReset}
+              onClick={handleFullscreenToggle}
               className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
-              title='Fit to Screen (Ctrl 0)'
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
               data-track-category='FileViewer'
-              data-track-name='FIT_IMAGE_TO_SCREEN'
+              data-track-name={isFullscreen ? 'EXIT_IMAGE_FULLSCREEN' : 'ENTER_IMAGE_FULLSCREEN'}
               data-track-metadata={JSON.stringify({ source, fileName })}
             >
-              <Maximize2 className='h-5 w-5' />
+              {isFullscreen ? <Minimize2 className='h-5 w-5' /> : <Maximize2 className='h-5 w-5' />}
             </button>
 
             <button

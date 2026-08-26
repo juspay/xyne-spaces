@@ -100,6 +100,7 @@ export const ticketTable = table("tickets")
     userGroupId: string().optional(),
     boardId: string(),
     stageName: string(),
+    isStageOverdue: boolean().optional(),
     ticketType: string().optional(),
     isArchived: boolean(),
     kanbanPosition: string().optional(),
@@ -1255,7 +1256,7 @@ export const conversationLabelTable = table("conversation_labels")
     name: string(),
     color: string().optional(),
     channelId: string(),
-    projectId: string(),
+    projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1436,6 +1437,7 @@ export const messageAttachmentTable = table("message_attachments")
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: string().optional(),
+    position: number().optional(),
   })
   .primaryKey("id");
 
@@ -1562,7 +1564,7 @@ export const surfaceNudgeTable = table("surface_nudges")
     state: string(),
     visibleTo: string().optional(),
     surfaceNudgeCountId: string().optional(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1663,7 +1665,6 @@ export const callTable = table("calls")
     instanceDate: number().optional(),
     recordingEnabled: boolean(),
     recordingUrl: string().optional(),
-    recordingParticipants: json<string[]>(),
     transcript: string().optional(),
     aiSummary: string().optional(),
     startedAt: number(),
@@ -1675,6 +1676,7 @@ export const callTable = table("calls")
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
+    recordingParticipants: string(),
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
@@ -1692,6 +1694,7 @@ export const entityAccessTable = table("entity_access")
     userGroupId: string().optional(),
     channelId: string().optional(),
     entityUserAccess: string(),
+    metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2252,6 +2255,7 @@ export const collectionPermissionTable = table("collection_permissions")
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
+    channelId: string().optional(),
     role: string(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -2491,7 +2495,7 @@ export const surfaceLinkTable = table("surface_links")
     targetId: string(),
     linkKind: string(),
     createdBy: string(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
   })
   .primaryKey("id");
@@ -4050,6 +4054,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: repoTable,
+  }),
+  collectionPermissions: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: collectionPermissionTable,
   })
 }));
 
@@ -4581,6 +4590,11 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ["userGroupId"],
     destField: ["id"],
     destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 

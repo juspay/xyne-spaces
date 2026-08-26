@@ -14,10 +14,7 @@ import {
 import { CallStatus } from '@xyne/shared';
 import type { User } from '@xyne/shared/machines';
 import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
-import {
-  getRecordingParticipantIds,
-  type RecordingTitleInput,
-} from '../../../utils/recordingUtils';
+import type { RecordingTitleInput } from '../../../utils/recordingUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export type RecordingDatePreset =
@@ -225,13 +222,13 @@ export function filterRecordingsByOwnership(
   if (selectedCreatorIds.length === 0) return recordings;
 
   const wanted = new Set(selectedCreatorIds);
-  return recordings.filter(recording =>
-    getRecordingParticipantIds(recording.createdByUserId, recording.recordingParticipants).some(
-      id => wanted.has(id),
-    ),
-  );
+  return recordings.filter(recording => wanted.has(recording.createdByUserId));
 }
 
+/**
+ * Renders the people a recording is about: "Just you", "Alice", "Alice & you",
+ * "Alice, Bob & 2 others".
+ */
 export function formatRecordingParticipants(
   participantIds: string[],
   usersById: Map<string, User>,

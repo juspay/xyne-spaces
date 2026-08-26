@@ -1,11 +1,12 @@
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
 import { BitbucketManager } from '@/bitbucket/apis';
+import { githubManager } from '@/git-providers/github/apis';
 import { logger } from '@/utils/logger';
-import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
+import { sanitizeProjectCode, isValidProjectCode, VCSProviderType } from '@xyne/shared';
 
-// Bitbucket PR validation configuration constants
-const BITBUCKET_PR_CONFIG = {
+// PR validation constants (shared by the Bitbucket and GitHub webhook paths)
+const PR_VALIDATION_CONFIG = {
   PR_TITLE_PATTERN: /^(?:(?:feat|fix):\s+)?([^\s-]+)-\s*(\d+)\s*[:\s]/i,
   ERROR_MESSAGES: {
     INVALID_FORMAT: 'PR title must format: PROJECT-####: description OR feat/fix: PROJECT-####:subject OR feat/fix: PROJECT-#### subject',
@@ -17,10 +18,10 @@ const BITBUCKET_PR_CONFIG = {
     INTERNAL_ERROR: 'Internal error during PR validation',
   },
   BUILD_STATUS: {
+    // Bitbucket build-status key (dedupes statuses per commit).
     KEY: 'xyne-ticket-check',
+    // Display name: Bitbucket build-status `name`, GitHub commit-status `context`.
     NAME: 'Ticket Validation',
-    SUCCESS_URL: 'https://xyne.juspay.net',
-    FAILED_URL: 'https://spaces.xyne.juspay.net',
   },
 } as const;
 
@@ -29,6 +30,16 @@ interface ValidationResult {
   errorMessage?: string;
   ticketId?: string;
 }
+
+/**
+ * Where the "Ticket Validation" result is reported. Bitbucket's build-status API is
+ * keyed by commit alone (server-wide); GitHub's commit-status API needs the repo too.
+ */
+export type BuildStatusTarget =
+  | { provider: VCSProviderType.BITBUCKET_SERVER }
+  | { provider: VCSProviderType.GITHUB; owner: string; repo: string };
+
+const DEFAULT_BUILD_STATUS_TARGET: BuildStatusTarget = { provider: VCSProviderType.BITBUCKET_SERVER };
 
 export class PullRequestValidationService {
   private ticketRepository: TicketRepository;
@@ -52,11 +63,12 @@ export class PullRequestValidationService {
     repoUrl?: string,
     prUrl?: string,
     numberOfComments?: number,
+    target: BuildStatusTarget = DEFAULT_BUILD_STATUS_TARGET,
   ): Promise<ValidationResult> {
     try {
       logger.debug(`[PR-Validation] Validating PR ${prId}: ${prTitle}`);
       const normalizedTitle = prTitle.trim();
-      const ticketIdMatch = normalizedTitle.match(BITBUCKET_PR_CONFIG.PR_TITLE_PATTERN);
+      const ticketIdMatch = normalizedTitle.match(PR_VALIDATION_CONFIG.PR_TITLE_PATTERN);
       const rawProjectCode = ticketIdMatch?.[1];
 
       // Validate project code using the same rules as project creation
@@ -66,8 +78,8 @@ export class PullRequestValidationService {
         isValidProjectCode(rawProjectCode);
 
       if (!ticketIdMatch || !hasValidProjectCode) {
-        const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.INVALID_FORMAT;
-        await this.postFailedBuildStatus(commitHash, errorMessage);
+        const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.INVALID_FORMAT;
+        await this.postFailedBuildStatus(target, commitHash, errorMessage);
         return { isValid: false, errorMessage };
       }
 
@@ -78,14 +90,14 @@ export class PullRequestValidationService {
 
 
       if (!ticket) {
-        const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.TICKET_NOT_FOUND(ticketId);
-        await this.postFailedBuildStatus(commitHash, errorMessage);
+        const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.TICKET_NOT_FOUND(ticketId);
+        await this.postFailedBuildStatus(target, commitHash, errorMessage);
         return { isValid: false, errorMessage, ticketId };
       }
 
       if (ticket.status === 'RESOLVED') {
-        const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.TICKET_ALREADY_RESOLVED(ticketId);
-        await this.postFailedBuildStatus(commitHash, errorMessage);
+        const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.TICKET_ALREADY_RESOLVED(ticketId);
+        await this.postFailedBuildStatus(target, commitHash, errorMessage);
         return { isValid: false, errorMessage, ticketId };
       }
 
@@ -124,8 +136,8 @@ export class PullRequestValidationService {
               `[PR-Validation] Workflow chain lookup failed for PR ${duplicatePR.prId}, ` +
                 `rejecting duplicate`
             );
-            const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
-            await this.postFailedBuildStatus( commitHash, errorMessage);
+            const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
+            await this.postFailedBuildStatus(target, commitHash, errorMessage);
             return { isValid: false, errorMessage, ticketId };
           }
 
@@ -149,65 +161,83 @@ export class PullRequestValidationService {
           }
 
           // Post success and return valid
-          const successMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
-          await this.postSuccessfulBuildStatus( commitHash, successMessage);
+          const successMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
+          await this.postSuccessfulBuildStatus(target, commitHash, successMessage);
           return { isValid: true, ticketId: resolvedTicketId };
         }
 
         // Duplicate PR is manual (no workflowExecutionId), reject it
         logger.debug(`[PR-Validation] Duplicate PR ${duplicatePR.prId} is manual, rejecting`);
-        const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
-        await this.postFailedBuildStatus( commitHash, errorMessage);
+        const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
+        await this.postFailedBuildStatus(target, commitHash, errorMessage);
         return { isValid: false, errorMessage, ticketId };
       }
 
-      const successMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
-      await this.postSuccessfulBuildStatus( commitHash, successMessage);
+      const successMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
+      await this.postSuccessfulBuildStatus(target, commitHash, successMessage);
       logger.info(`[PR-Validation] PR ${prId} passed validation for ticket ${ticketId}`);
 
       // Validation service only validates - storage is handled by webhook handlers
       return { isValid: true, ticketId: ticket.id };
     } catch (error) {
       logger.error('[PR-Validation] Unexpected error during validation:', error);
-      const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR;
-      await this.postFailedBuildStatus(commitHash, errorMessage);
+      const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR;
+      await this.postFailedBuildStatus(target, commitHash, errorMessage);
       return { isValid: false, errorMessage };
     }
   }
   
   private async postSuccessfulBuildStatus(
+    target: BuildStatusTarget,
     commitHash: string,
     description: string
   ): Promise<void> {
-    try {
-      await this.bitbucketManager.postBuildStatus(
-        commitHash,
-        'SUCCESSFUL',
-        BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
-        BITBUCKET_PR_CONFIG.BUILD_STATUS.NAME,
-        process.env.FRONTEND_URL || '' ,
-        description,
-      );
-    } catch (error) {
-      logger.error('[PR-Validation] Failed to post successful build status:', error);
-    }
+    await this.postBuildStatus(target, commitHash, true, description);
   }
 
   private async postFailedBuildStatus(
+    target: BuildStatusTarget,
     commitHash: string,
     description: string
   ): Promise<void> {
+    await this.postBuildStatus(target, commitHash, false, description);
+  }
+
+  /**
+   * Report the validation outcome on the commit so it shows as a check on the PR.
+   * Never throws: a status-API failure must not change the validation verdict.
+   */
+  private async postBuildStatus(
+    target: BuildStatusTarget,
+    commitHash: string,
+    success: boolean,
+    description: string
+  ): Promise<void> {
     try {
+      if (target.provider === VCSProviderType.GITHUB) {
+        await githubManager.postCommitStatus(
+          target.owner,
+          target.repo,
+          commitHash,
+          success ? 'success' : 'failure',
+          PR_VALIDATION_CONFIG.BUILD_STATUS.NAME,
+          description,
+        );
+        return;
+      }
       await this.bitbucketManager.postBuildStatus(
         commitHash,
-        'FAILED',
-        BITBUCKET_PR_CONFIG.BUILD_STATUS.KEY,
-        BITBUCKET_PR_CONFIG.BUILD_STATUS.NAME,
-        process.env.FRONTEND_URL || '' ,
-        description
+        success ? 'SUCCESSFUL' : 'FAILED',
+        PR_VALIDATION_CONFIG.BUILD_STATUS.KEY,
+        PR_VALIDATION_CONFIG.BUILD_STATUS.NAME,
+        process.env.FRONTEND_URL || '',
+        description,
       );
     } catch (error) {
-      logger.error('[PR-Validation] Failed to post failed build status:', error);
+      logger.error(
+        `[PR-Validation] Failed to post ${success ? 'successful' : 'failed'} build status (${target.provider}):`,
+        error
+      );
     }
   }
 }

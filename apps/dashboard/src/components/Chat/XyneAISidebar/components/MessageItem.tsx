@@ -50,6 +50,7 @@ import {
 } from '../utils/clawCitationUrl';
 import { CitationLink } from './CitationLink';
 import { genericInstance } from '../../../../services/clients/genericClient';
+import { showDownloadCompleteToast } from '../../../../utils/downloadToast';
 import type { Components } from 'react-markdown';
 import {
   SingleStat,
@@ -832,6 +833,7 @@ export const AttachmentPreview = ({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(blobUrl);
+        showDownloadCompleteToast(displayName);
         return;
       }
 
@@ -863,6 +865,7 @@ export const AttachmentPreview = ({
       document.body.removeChild(link);
 
       URL.revokeObjectURL(blobUrl);
+      showDownloadCompleteToast(displayName);
     } catch (error) {
       logger.error(LogEvent.FRONTEND_ERROR, {
         type: 'migrated_console_error',

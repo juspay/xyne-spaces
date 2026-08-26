@@ -6,7 +6,7 @@ import { Button } from '../../../components/ui/Button/Button';
 import { EntitySelector } from '../../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../../components/ui/EntitySelector/EntitySelector.types';
 import { cn } from '../../../utils/classNames';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, matchesUserQuery } from '../../../utils/userDisplayName';
 
 interface RecordingPeopleFilterProps {
   creators: User[];
@@ -26,11 +26,7 @@ export function RecordingPeopleFilter({
   const options = useMemo<SelectorOption[]>(() => {
     const query = searchValue.trim().toLowerCase();
     const matchedCreators = query
-      ? creators.filter(
-          creator =>
-            getUserDisplayName(creator).toLowerCase().includes(query) ||
-            (creator.email ?? '').toLowerCase().includes(query),
-        )
+      ? creators.filter(creator => matchesUserQuery(creator, searchValue))
       : creators;
 
     const creatorOptions = matchedCreators.map(creator => ({

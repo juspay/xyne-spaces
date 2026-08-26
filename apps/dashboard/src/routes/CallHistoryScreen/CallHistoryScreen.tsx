@@ -160,7 +160,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
     instanceDate: null,
     recordingEnabled: false,
     recordingUrl: null,
-    recordingParticipants: [],
+    recordingParticipants: '[]',
     transcript: context?.hasTranscript ? 'available' : undefined,
     aiSummary: null,
     startedAt,

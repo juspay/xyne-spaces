@@ -129,6 +129,10 @@ export interface ClawCitation {
   /** For kind="recording": the call's externalId — the `/recordings/:id` segment.
    *  Note-taker recordings have no channel or thread, so this is their only link. */
   recordingId?: string;
+  /** Canvas citations key on `viewAccessId` (the id in `/chat/canvas/<id>`),
+   *  which is what claw's `pushCanvasCitation` emits — `canvasId` is never set
+   *  for kind="canvas". The URL builder / panel doc read this first. */
+  viewAccessId?: string;
   ticketId?: string;
   xyneId?: string;
   mailId?: string;

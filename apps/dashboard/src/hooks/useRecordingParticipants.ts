@@ -10,7 +10,7 @@ import { getApiErrorMessage } from '../utils/apiError';
 interface UseRecordingParticipantsArgs {
   recordingExternalId: string;
   createdByUserId: string | undefined;
-  recordingParticipants: readonly string[] | null | undefined;
+  recordingParticipants: string | null | undefined;
   shares: readonly RecordingParticipantShare[] | null | undefined;
 }
 

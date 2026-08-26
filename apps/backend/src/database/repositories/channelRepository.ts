@@ -27,7 +27,6 @@ export interface UpdateChannelInput {
 
 export interface ChannelFilters {
   scopeType?: ChannelScopeType;
-  projectId?: string;
   visibility?: ChannelVisibility;
 }
 
@@ -73,6 +72,28 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       }
     });
 
+    // Dual-write: mirror the channel→project board set into ChannelBoardMapping
+    // so downstream consumers never need to read channel.projectId.
+    const boards = await this.db.board.findMany({
+      where: { projectId: data.projectId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (boards.length > 0) {
+      const now = new Date();
+      await this.db.channelBoardMapping.createMany({
+        data: boards.map((board, index) => ({
+          channelId: result.id,
+          boardId: board.id,
+          workspaceId: data.workspaceId,
+          isDefault: index === 0,
+          createdBy: data.createdBy,
+          createdAt: now,
+          updatedAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     return result;
   }
@@ -109,10 +130,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
     if (filters?.scopeType) {
       where.scopeType = filters.scopeType;
-    }
-
-    if (filters?.projectId) {
-      where.projectId = filters.projectId;
     }
 
 
@@ -217,6 +234,16 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
+  // Set lastActivityAt explicitly so a migrated DM lands at its real position, not the `now` placeholder.
+  async setLastActivity(channelId: string, at: Date): Promise<void> {
+    const workspaceId = await this.getWorkspaceId(channelId);
+    await this.db.channelStats.upsert({
+      where: { channelId },
+      update: { lastActivityAt: at },
+      create: { channelId, workspaceId, lastActivityAt: at },
+    });
+  }
+
   async incrementUnreadForAllMembers(channelId: string, increment: number): Promise<void> {
     if (increment <= 0) return;
     await this.db.channelUserStatus.updateMany({
@@ -227,10 +254,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
   async getChannelsByScope(scopeType: ChannelScopeType): Promise<Channel[]> {
     return await this.findMany({ scopeType });
-  }
-
-  async getChannelsByProject(projectId: string): Promise<Channel[]> {
-    return await this.findMany({ projectId });
   }
 
   async getDMChannel(userId1: string, userId2: string): Promise<Channel | null> {
@@ -269,10 +292,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Apply additional filters if provided
     if (filters?.scopeType) {
       where.scopeType = filters.scopeType;
-    }
-
-    if (filters?.projectId) {
-      where.projectId = filters.projectId;
     }
 
     if (filters?.visibility) {

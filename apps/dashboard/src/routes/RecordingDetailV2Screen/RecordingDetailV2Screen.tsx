@@ -106,6 +106,11 @@ const AUDIO_POLL_MAX_ATTEMPTS = 30;
 // recording simply has no playable audio, so we skip polling and mark it unavailable.
 const AUDIO_STITCH_GRACE_MS = AUDIO_POLL_INTERVAL_MS * AUDIO_POLL_MAX_ATTEMPTS;
 
+// A summary normally lands within minutes of the call ending. If the recording
+// ended over an hour ago and detailedSummaryReady never flipped, the in-call
+// attempt failed — stop implying progress and offer "Generate summary" instead.
+const SUMMARY_PENDING_GRACE_MS = 60 * 60 * 1000;
+
 const DEFAULT_SUMMARY_TEMPLATE_OPTION: RecordingSummaryTemplate = {
   id: 'default',
   name: 'Default summary',
@@ -135,6 +140,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const requestedTab = useMemo(
+    () => new URLSearchParams(location.search).get('tab'),
+    [location.search],
+  );
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const currentUser = useSelf();
 
@@ -144,7 +153,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [failure, setFailure] = useState<RecordingLoadFailure | null>(null);
   // Which of the two panes to show. The concrete second tab (transcript while live,
   // summary once ended) is derived below, so only the notes/not-notes choice is held.
-  const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(getRecordingV2Tab);
+  const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(() =>
+    requestedTab === 'notes' ? 'notes' : getRecordingV2Tab(),
+  );
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
@@ -177,6 +188,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Which line the transcript panel opens on: set by a timeline marker, null when the
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
+
+  useEffect(() => {
+    if (requestedTab === 'notes') {
+      setTabPreference('notes');
+    }
+  }, [recordingId, requestedTab]);
 
   const exportGoogleDoc = async (documentTitle?: string): Promise<void> => {
     if (!recording || isExportingGoogleDoc) return;
@@ -315,7 +332,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const liveTabRecordingIdRef = useRef<string | null>(null);
   if (isLive && recordingId && liveTabRecordingIdRef.current !== recordingId) {
     liveTabRecordingIdRef.current = recordingId;
-    setTabPreference(getLiveRecordingV2Tab(recordingId));
+    setTabPreference(requestedTab === 'notes' ? 'notes' : getLiveRecordingV2Tab(recordingId));
   }
 
   // j/k keyboard navigation between recordings
@@ -455,7 +472,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       }
       return isSameRecordingSnapshot(prev, next) ? prev : next;
     });
-  }, [recordingRow]);
+  }, [recordingRow, recording?.externalId]);
 
   useEffect(() => {
     const request = getSummaryRequest(recordingId);
@@ -770,6 +787,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
     const hasTranscriptNow =
       !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording?.hasTranscript;
     if (hasDetailedSummaryNow || !hasTranscriptNow) return;
+    // An hour past the end with the summary still pending, generation is not
+    // coming on its own — leave the request unset so the offer shows instead.
+    const endedAtMs = recording?.endedAt ? Date.parse(recording.endedAt) : null;
+    if (endedAtMs !== null && Date.now() - endedAtMs > SUMMARY_PENDING_GRACE_MS) return;
     if (getSummaryRequest(recordingId)) return;
     markSummaryRequested(recordingId);
   }, [recordingId, recording, recordingRow, transcriptText, awaitingSummary, summaryFailed]);
@@ -831,8 +852,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const hasTranscript =
     !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording.hasTranscript;
 
+  // Past the grace window the auto-pending shimmer would be a lie — the in-call
+  // generation isn't coming. An explicit regenerate still shimmers via
+  // `awaitingSummary`.
+  const endedAtMs = recording.endedAt ? Date.parse(recording.endedAt) : null;
+  const summaryPendingExpired =
+    !hasDetailedSummary && endedAtMs !== null && Date.now() - endedAtMs > SUMMARY_PENDING_GRACE_MS;
+
   const showSummaryShimmer =
-    awaitingSummary || (!hasDetailedSummary && hasTranscript && !summaryFailed);
+    awaitingSummary ||
+    (!hasDetailedSummary && hasTranscript && !summaryFailed && !summaryPendingExpired);
 
   const handleMarkerSelect = (item: MarkedItem): void => {
     // A moment already announces itself in the transcript with a divider, so only
@@ -859,13 +888,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
       return;
     }
     openTranscriptPanel();
-  };
-
-  const handleShowSummaryShimmer = (): void => {
-    markSummaryRequested(recordingId);
-    setSummaryRunNonce(value => value + 1);
-    setSummaryFailed(false);
-    setAwaitingSummary(true);
   };
 
   const handleOpenSummaryTemplates = (): void => {
@@ -1118,7 +1140,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 <SummaryGenerationPanel
                   isAwaiting={showSummaryShimmer}
                   canGenerate={hasTranscript}
-                  onGenerate={handleShowSummaryShimmer}
+                  onGenerate={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
                   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
                   hasFailed={summaryFailed}
                   generationRunId={summaryRunNonce}

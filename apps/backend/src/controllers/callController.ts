@@ -434,6 +434,10 @@ export class CallController {
         stage = 'notes_canvas_creation';
         await canvasAuthService.createCanvasForUser(notesCanvasId, userId, {
           title: 'Untitled Notes',
+          metadata: {
+            source: 'call_notes',
+            callId: callExternalId,
+          },
         });
 
         stage = 'detailed_summary_canvas_creation';
@@ -565,8 +569,10 @@ export class CallController {
       // No pre-flight validation of artifactMessageId: every artifact write is
       // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
       // an id that does not belong to this channel matches zero rows.
+      // Not gated on conversationId — an artifact's call is channel-scoped even
+      // though the artifact message itself may live inside a thread.
       const linkedArtifactMessageId =
-        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
+        typeof artifactMessageId === 'string' ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -628,6 +634,20 @@ export class CallController {
               data: { metadata: restMeta as Prisma.InputJsonValue },
             });
             queueCallVespaFeed(existingCall.id, { source: CallVespaFeedSource.CallControllerInitiateCallClearRemovedByHostExistingRoom });
+          }
+
+          // A channel already running a call is the call this incident should
+          // use — adopt it rather than leaving the artifact card stuck pending.
+          if (linkedArtifactMessageId && existingCall.channelId) {
+            stage = 'existing_call_artifact_link';
+            const linked = await repositories.calls.linkArtifactToActiveCall({
+              callId: existingCall.id,
+              callExternalId: existingCall.externalId,
+              channelId: existingCall.channelId,
+              artifactMessageId: linkedArtifactMessageId,
+              metadata: existingCall.metadata,
+            });
+            logger.info(`[${existingCall.externalId}] artifact_link_on_existing_call | linked=${linked}, correlation_id=${correlationId}`);
           }
 
           // Room exists, generate token to join the existing call
@@ -738,7 +758,6 @@ export class CallController {
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
-        projectId: channel.projectId,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
         sttModel: sttModel || 'azure',
@@ -946,7 +965,6 @@ export class CallController {
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
-          projectId: channel.projectId,
           createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
@@ -1502,10 +1520,9 @@ export class CallController {
           res.status(400).json({ success: false, error: 'User not found in this workspace' });
           return;
         }
-        await repositories.calls.addRecordingParticipant(callId, input.userId);
-      } else {
-        await repositories.calls.removeRecordingParticipant(callId, input.userId);
       }
+
+      await repositories.calls.updateRecordingParticipants(callId, input.action, input.userId);
 
       res.json({ success: true });
     } catch (error) {

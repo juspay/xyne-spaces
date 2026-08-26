@@ -93,6 +93,10 @@ export const generateRecordingTitle = (startTime: number | null): string => {
 export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 export const NO_TRANSCRIPT_RECORDING_TITLE = 'Recording (no transcript)';
 
+/** Trims a recording's title, falling back to `DEFAULT_RECORDING_TITLE` when blank. */
+export const resolveRecordingTitle = (title: string | null | undefined): string =>
+  title?.trim() || DEFAULT_RECORDING_TITLE;
+
 /** How long a recording gets to produce a transcript before we say it has none. */
 export const NO_TRANSCRIPT_AFTER_MS = 5 * 60 * 1000;
 
@@ -174,13 +178,25 @@ export const normalizeRecordingTags = (tags: string[]): string[] => {
   return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
 };
 
+/**
+ * Reads `calls.recordingParticipants` (stringified JSON string[]) into user ids,
+ * prepending the creator so older rows still resolve to at least one person.
+ */
 export const getRecordingParticipantIds = (
   createdByUserId: string | undefined,
-  stored: readonly string[] | null | undefined,
+  stored: string | null | undefined,
 ): string[] => {
-  const ids = stored ?? [];
+  let ids: string[] = [];
+  if (stored) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed)) ids = parsed.filter((id): id is string => typeof id === 'string');
+    } catch {
+      ids = [];
+    }
+  }
   if (createdByUserId && !ids.includes(createdByUserId)) return [createdByUserId, ...ids];
-  return [...ids];
+  return ids;
 };
 
 /** Canonical tag name, or null when the text can't make one — tags must start with a letter. */
@@ -216,6 +232,29 @@ export const logRecordingError = (context: string, error: unknown): void => {
     context,
     error: errorMessage,
   });
+};
+
+/** Recording share post details. */
+export interface RecordingSharePost {
+  channelId: string;
+  conversationId: string;
+  messageId: string;
+}
+
+export const isRecordingTicketLinkShare = (metadata: unknown): boolean => {
+  if (!metadata || typeof metadata !== 'object') return false;
+  return (metadata as Record<string, unknown>)['intent'] === 'ticket_link';
+};
+
+/** Reads post details from share metadata. */
+export const getRecordingSharePost = (metadata: unknown): RecordingSharePost | null => {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const { channelId, conversationId, messageId } = metadata as Record<string, unknown>;
+  return typeof channelId === 'string' &&
+    typeof conversationId === 'string' &&
+    typeof messageId === 'string'
+    ? { channelId, conversationId, messageId }
+    : null;
 };
 
 /**

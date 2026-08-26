@@ -34,6 +34,7 @@ import { CallType } from '@xyne/shared';
 import { mixpanelService } from '../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
+import { isCallUrlApiAllowed, type CallUrlOverrides } from '../utils/callUrlOverrides';
 import { toast } from 'sonner';
 import { MACOS_PRIVACY_URLS } from '../constants/permissions';
 import {
@@ -162,7 +163,11 @@ export interface RoomContext {
   // The call a confirmed switch is headed for, held across the teardown of the
   // call being left. Deliberately outside `clearContext`, which runs on the way
   // through `disconnecting`.
-  pendingJoin: { callId: string; viewMode: 'mini' | 'full' } | null;
+  pendingJoin: {
+    callId: string;
+    viewMode: 'mini' | 'full';
+    callUrlOverrides: CallUrlOverrides | null;
+  } | null;
   scopeType: string | null; // Channel scope type (DM, GROUP_DM, DEFAULT, etc.)
   invitedUserId: string | null;
   conversationId: string | null;
@@ -208,6 +213,19 @@ export interface RoomContext {
   hostControls: HostControls;
   // Background blur on the local camera feed (web only). Off by default.
   isBackgroundBlurEnabled: boolean;
+  // What a call URL asked for, when the join was driven by one rather than by a
+  // person clicking Join (see utils/callUrlOverrides). `null` is the normal case
+  // and means "no request": enableLocalTracks falls back to the user's saved join
+  // preferences, and failures surface as a toast.
+  //
+  // Non-null also marks the join as URL-driven, which is what makes it retry on
+  // its own and stay silent while doing so — on an unattended display there is
+  // nobody to read or dismiss a toast mid-recovery.
+  //
+  // Carried here rather than read from the URL at the point of use so it stays
+  // scoped to one call and clears with the rest of the context on disconnect.
+  // Every consumer re-checks the CAC flag before acting on it.
+  callUrlOverrides: CallUrlOverrides | null;
 }
 
 // Events for Room operations
@@ -232,6 +250,8 @@ export type RoomMachineEvent =
       conversationId?: string; // Optional: for thread-initiated calls
       artifactMessageId?: string; // Exact slash-command artifact that owns the call
       sdlcLink?: SdlcCallLink; // Optional: SDLC entity to link the call to
+      // Omit for a join a person drove themselves (see RoomContext).
+      callUrlOverrides?: CallUrlOverrides;
     }
   | {
       type: 'JOIN_CALL';
@@ -242,6 +262,8 @@ export type RoomMachineEvent =
       // the switch-call flows set it. Without it a JOIN_CALL that lands while
       // another call is live is dropped rather than silently switching calls.
       allowSwitch?: boolean;
+      // Omit for a join a person drove themselves (see RoomContext).
+      callUrlOverrides?: CallUrlOverrides;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -1335,6 +1357,7 @@ export const roomMachine = setup({
       unreadCallChatCount: () => 0,
       isBackgroundBlurEnabled: () => false,
       hostControls: () => DEFAULT_HOST_CONTROLS,
+      callUrlOverrides: () => null,
     }),
 
     // Runs right after `clearContext` on the way out of `disconnecting`, which
@@ -1343,6 +1366,7 @@ export const roomMachine = setup({
     startPendingJoin: assign({
       callId: ({ context }) => context.pendingJoin?.callId ?? null,
       viewMode: ({ context }) => context.pendingJoin?.viewMode ?? ('mini' as const),
+      callUrlOverrides: ({ context }) => context.pendingJoin?.callUrlOverrides ?? null,
       isInitiator: () => false,
       pendingJoin: () => null,
     }),
@@ -1373,13 +1397,29 @@ export const roomMachine = setup({
               'turnOffCamera',
             );
 
-            // Respect user preference: if joinMuted is true, always mute
-            // If joinMuted is false, use the existing threshold logic
-            const enableMic = !audioTurnedOffByHost && !joinMuted && !shouldMuteByDefault;
-            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            // The CAC flag is re-checked here, at the point the override is acted
+            // on, rather than being trusted from whoever sent the event: the hook
+            // that reads the URL gates entry, and this gates effect. A caller that
+            // sets callUrlOverrides without the flag gets the saved preferences,
+            // exactly as if it had asked for nothing.
+            const urlOverrides = isCallUrlApiAllowed() ? context.callUrlOverrides : null;
 
-            // For video: respect user preference
-            const enableCamera = !cameraTurnedOffByHost && !joinWithoutVideo;
+            // Precedence, strongest first:
+            //   1. host controls — never overridable by anyone but the host
+            //   2. an explicit request from the call URL (e.g. ?mic=on), once the
+            //      flag above allows it
+            //   3. the user's saved join preferences + the crowded-room mute threshold
+            // Applying (2) here rather than toggling after 'connected' is deliberate:
+            // this action is the single writer of the initial track state, so there is
+            // no window where a post-connect compare-and-toggle could read a value
+            // these very awaits are about to overwrite and end up inverted.
+            const enableMic =
+              !audioTurnedOffByHost && (urlOverrides?.mic ?? (!joinMuted && !shouldMuteByDefault));
+
+            const enableCamera =
+              !cameraTurnedOffByHost && (urlOverrides?.camera ?? !joinWithoutVideo);
+
+            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
 
             await context.room!.localParticipant.setCameraEnabled(enableCamera);
 
@@ -1396,7 +1436,8 @@ export const roomMachine = setup({
       }
     },
 
-    showJoinCallErrorToast: () => {
+    showJoinCallErrorToast: ({ context }) => {
+      if (context.callUrlOverrides) return;
       toast.error('Failed to join call', {
         description: 'Unable to connect to the room. Please try again.',
         duration: 4000,
@@ -1512,6 +1553,7 @@ export const roomMachine = setup({
     unreadCallChatCount: 0,
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
+    callUrlOverrides: null,
   },
   id: 'roomMachine',
   on: {
@@ -1568,6 +1610,8 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' ? (event.artifactMessageId ?? null) : null,
             sdlcLink: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.sdlcLink ?? null) : null,
+            callUrlOverrides: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.callUrlOverrides ?? null) : null,
             isInitiator: () => true,
           }),
         },
@@ -1583,6 +1627,8 @@ export const roomMachine = setup({
               zero: ({ event }) => (event.type === 'JOIN_CALL' ? (event.zero ?? null) : null),
               viewMode: ({ event }) =>
                 event.type === 'JOIN_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
+              callUrlOverrides: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.callUrlOverrides ?? null) : null,
               isInitiator: () => false,
             }),
           ],
@@ -1905,7 +1951,11 @@ export const roomMachine = setup({
               assign({
                 pendingJoin: ({ event }) =>
                   event.type === 'JOIN_CALL'
-                    ? { callId: event.callId, viewMode: event.viewMode ?? ('mini' as const) }
+                    ? {
+                        callId: event.callId,
+                        viewMode: event.viewMode ?? ('mini' as const),
+                        callUrlOverrides: event.callUrlOverrides ?? null,
+                      }
                     : null,
                 zero: ({ context, event }) =>
                   event.type === 'JOIN_CALL' ? (event.zero ?? context.zero) : context.zero,

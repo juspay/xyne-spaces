@@ -174,7 +174,7 @@ import { flowGroupCoverId } from '../../components/Board/FlowRun/useFlowRunGraph
 import Avatar from '../../components/ui/Avatar/Avatar';
 import {
   getPriorityIcon,
-  isStageEtaOverdue,
+  isStageOverdue,
 } from '../../components/Tickets/TicketCard/TicketCard.utils';
 import {
   TicketPriority,
@@ -1857,7 +1857,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Filter tickets based on view mode and filters.
   // NOTE: ALL filters including dynamic field filters are applied CLIENT-SIDE.
-  const deferredFilters = useDeferredValue(filters);
+  //
+  // In a channel Kanban view a board can be shared across multiple channels, so
+  // the board's tickets are not all "this channel's" tickets. Scope every ticket
+  // path (page fetch, counts, board-nav args, legacy client filter) to tickets
+  // created in this channel by forcing `sourceChannels` to the current channel.
+  // This applies both when a specific board is selected and in the "All Boards"
+  // view. The filter dropdown UI still reads the raw `filters`, so this scoping
+  // stays invisible there.
+  const scopedFilters = useMemo(() => {
+    if (channelId && viewMode === 'project') {
+      return { ...filters, sourceChannels: [channelId] };
+    }
+    return filters;
+  }, [filters, channelId, viewMode]);
+
+  const deferredFilters = useDeferredValue(scopedFilters);
 
   const filteredTickets = useMemo(() => {
     if (!shouldUseLegacyTicketsQuery || !allProjectTickets) {
@@ -1894,7 +1909,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     // Filter for stage overdue tickets
     if (showOverdueOnly) {
-      tickets = tickets.filter(ticket => isStageEtaOverdue(ticket));
+      tickets = tickets.filter(ticket => isStageOverdue(ticket));
     }
 
     return tickets;
@@ -2910,11 +2925,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (lastKanbanColumnQueryKeyRef.current === kanbanColumnQueryKey) return;
 
     lastKanbanColumnQueryKeyRef.current = kanbanColumnQueryKey;
-    if (searchTerm.trim().length === 0) {
-      setLocalTickets(null);
-      setKanbanTicketsByColumn({});
-    }
-  }, [isKanbanLayout, kanbanColumnQueryKey, searchTerm]);
+    setLocalTickets(null);
+    setKanbanTicketsByColumn({});
+  }, [isKanbanLayout, kanbanColumnQueryKey]);
 
   useEffect(() => {
     if (isKanbanLayout) {
@@ -3220,8 +3233,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   } | null>(null);
   const lastKnownKanbanGroupsQueryKeyRef = useRef<string | null>(null);
   const lastKnownKanbanTicketsRef = useRef<{
+    queryKey: string;
     tickets: Ticket[];
   } | null>(null);
+  const lastKnownKanbanTicketsQueryKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isKanbanLayout) return;
@@ -3241,12 +3256,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   useEffect(() => {
     if (!isKanbanLayout) return;
+
+    // On the pass where the query key changes, `localTickets` here still holds the previous
+    // query's rows: the reset above only queues setLocalTickets(null), which lands next render.
+    // Stamping the new key onto those rows would make the queryKey check below always pass, so
+    // drop the remembered rows instead and let a later pass re-record the new query's results.
+    if (lastKnownKanbanTicketsQueryKeyRef.current !== kanbanColumnQueryKey) {
+      lastKnownKanbanTicketsQueryKeyRef.current = kanbanColumnQueryKey;
+      lastKnownKanbanTicketsRef.current = null;
+      return;
+    }
+
     if (!localTickets || localTickets.length === 0) return;
 
     lastKnownKanbanTicketsRef.current = {
+      queryKey: kanbanColumnQueryKey,
       tickets: localTickets,
     };
-  }, [isKanbanLayout, localTickets]);
+  }, [isKanbanLayout, kanbanColumnQueryKey, localTickets]);
 
   const hasMatchingLastKnownKanbanGroups =
     lastKnownKanbanGroupsQueryKeyRef.current === kanbanColumnQueryKey &&
@@ -3262,12 +3289,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (
       hasSearchTerm &&
       lastKnownKanbanTickets !== null &&
+      lastKnownKanbanTickets.queryKey === kanbanColumnQueryKey &&
       lastKnownKanbanTickets.tickets.length > 0
     ) {
       return lastKnownKanbanTickets.tickets;
     }
     return localTickets ?? [];
-  }, [hasSearchTerm, localTickets]);
+  }, [hasSearchTerm, kanbanColumnQueryKey, localTickets]);
 
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
@@ -3308,7 +3336,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         : (serverCountGroup?.stages ?? {});
       const ticketsByColumn = shouldUseStatusColumns
         ? groupTicketsByStatus(groupTickets, stages)
-        : groupTicketsByStage(groupTickets, stages, canReorder);
+        : groupTicketsByStage(groupTickets, stages, canReorder && !hasSearchTerm);
 
       let displayName = serverCountGroup?.displayName ?? groupName;
       let entityType: 'user' | 'group' | null = null;

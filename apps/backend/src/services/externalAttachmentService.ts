@@ -1,4 +1,5 @@
-import { storageService } from './storage/index';
+import { storageService, getStorageService } from './storage/index';
+import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { decrypt } from './encryptionService';
@@ -17,6 +18,13 @@ export interface ExternalAttachment {
   fileUrl?: string;
   /** Pre-fetched bytes — when provided, the URL fetch is skipped. */
   buffer?: Buffer;
+  /**
+   * Path to bytes already in OUR storage (self-serve migration collection). Streamed straight
+   * to the final location — no fetch/token, bounded memory. Takes precedence over `fileUrl`/`buffer`.
+   */
+  storageSourcePath?: string;
+  /** True when `storageSourcePath` bytes are envelope-encrypted (migration bucket) — decrypt while streaming. */
+  storageSourceEncrypted?: boolean;
   mimeType?: string;
   size?: number;
   /** MIME Content-ID (no angle brackets) for inline images referenced from the HTML body. */
@@ -113,6 +121,12 @@ class DefaultAuthHandler implements AuthHandler {
       'User-Agent': 'Xyne-Spaces-Backend/1.0'
     };
   }
+}
+
+/** Split a `gs://`/`s3://` URI into bucket+key; a bare key (no scheme) returns `{ key }` (default bucket). */
+function parseStorageUri(uri: string): { bucket?: string; key: string } {
+  const m = /^[a-z0-9]+:\/\/([^/]+)\/(.+)$/i.exec(uri);
+  return m ? { bucket: m[1], key: m[2] } : { key: uri };
 }
 
 export class ExternalAttachmentService {
@@ -230,6 +244,39 @@ export class ExternalAttachmentService {
     } = options;
 
     const { fileName, fileUrl, mimeType: expectedMimeType, size: expectedSize } = attachment;
+
+    // Bytes already in our storage (self-serve migration): stream straight to the final
+    // location — no fetch/token, never lands whole in the pod's heap.
+    if (attachment.storageSourcePath) {
+      const finalMimeType = expectedMimeType || 'application/octet-stream';
+      const fileExtension = path.extname(fileName) || this.getExtensionFromMimeType(finalMimeType);
+      const baseName = path.basename(fileName, path.extname(fileName));
+      const uniqueFileName = `${baseName}-${uuidv4().substring(0, 8)}${fileExtension}`;
+      // Read from the source bucket (gs://bucket/key from the collector); write final to default bucket.
+      const { bucket, key } = parseStorageUri(attachment.storageSourcePath);
+      const sourceStore = bucket ? getStorageService(bucket) : storageService;
+      const raw = await sourceStore.createReadStream(key);
+      const source = attachment.storageSourceEncrypted ? decryptStream(raw) : raw;
+      const gcsResult = await storageService.uploadStream(source, {
+        filename: uniqueFileName,
+        contentType: finalMimeType,
+        metadata: {
+          originalName: fileName,
+          migratedFrom: attachment.storageSourcePath,
+          downloadedAt: new Date().toISOString(),
+        },
+        scopeType,
+        scopeId,
+      });
+      return {
+        originalName: fileName,
+        fileName: gcsResult.filename,
+        fileSize: gcsResult.size,
+        mimeType: finalMimeType,
+        fileUrl: gcsResult.path,
+        metadata: { gcsPath: gcsResult.path, storageSourcePath: attachment.storageSourcePath },
+      };
+    }
 
     let buffer: Buffer;
     let responseMimeType: string | undefined;

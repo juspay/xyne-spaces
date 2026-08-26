@@ -185,7 +185,8 @@ export interface RecordingParticipantShare {
 }
 
 export interface RecordingDetail extends Recording {
-  recordingParticipants?: readonly string[] | null;
+  /** Stringified JSON string[] — read it through getRecordingParticipantIds. */
+  recordingParticipants?: string | null;
   shares?: readonly RecordingParticipantShare[] | null;
   transcript: string | null;
   identifiedTranscript: string | null;
@@ -382,12 +383,14 @@ class RecordingService {
     callId: string,
     targets: RecordingShareTarget[],
     access?: GrantableEntityUserAccess,
+    messageContent?: string,
   ): Promise<RecordingSharingResult> {
     const response: AxiosResponse<{ success: true } & RecordingSharingResult> =
       await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
         action: 'grant',
         targets,
         ...(access ? { access } : {}),
+        ...(messageContent?.trim() ? { messageContent: messageContent.trim() } : {}),
       });
     return response.data;
   }

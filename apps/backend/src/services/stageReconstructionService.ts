@@ -6,6 +6,7 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { logger } from '@/utils/logger';
+import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 
 type PrismaTransaction = Omit<
   PrismaClient,
@@ -478,6 +479,8 @@ export class StageReconstructionService {
             });
           }
         }
+
+        await syncStageOverdueFlag(tx, ticket.id, now);
 
         await tx.ticketActivity.create({
           data: {

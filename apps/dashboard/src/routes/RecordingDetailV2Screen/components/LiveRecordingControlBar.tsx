@@ -196,6 +196,7 @@ export const LiveRecordingControlBar = ({
 
       <RecordingVisualizer
         isAnimated={!isPaused}
+        className='h-7 w-14 justify-center rounded-lg border border-border px-2'
         {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
       />
     </div>
@@ -548,6 +549,7 @@ const RecordedTimelineBar = ({
 
         <RecordingVisualizer
           isAnimated={false}
+          className='h-7 w-14 justify-center rounded-lg border border-border px-2'
           {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
         />
       </div>
@@ -586,26 +588,36 @@ const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactE
 /* Audio visualizer                                                           */
 /* -------------------------------------------------------------------------- */
 
-interface RecordingVisualizerProps {
-  /** Bars only wave while the recording itself is live and unpaused — never during playback. */
+export interface RecordingVisualizerProps {
   isAnimated: boolean;
-  /** Supplied once there is a transcript to open — makes the pill a button that opens it. */
   onClick?: () => void;
+  size?: 'sm' | 'md';
+  colorClassName?: string;
+  className?: string;
 }
 
 const RECORDING_VISUALIZER_REST_HEIGHT = '40%';
 
-const RecordingVisualizer = ({ isAnimated, onClick }: RecordingVisualizerProps): ReactElement => {
+const RECORDING_VISUALIZER_SIZE_CLASSES = {
+  md: { wrapperHeight: 'h-4', barWidth: 'w-1.5' },
+  sm: { wrapperHeight: 'h-3', barWidth: 'w-0.5' },
+} as const;
+
+export const RecordingVisualizer = ({
+  isAnimated,
+  onClick,
+  size = 'md',
+  colorClassName = 'bg-primary',
+  className,
+}: RecordingVisualizerProps): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
   const isWaving = isAnimated && !shouldReduceMotion;
+  const { wrapperHeight, barWidth } = RECORDING_VISUALIZER_SIZE_CLASSES[size];
 
-  // A single motion value per bar lets it wave on a loop and then settle to a fixed
-  // resting height with one smooth interpolation, instead of snapping between a tall
-  // animated bar and an unrelated static dot.
   const bars = Array.from({ length: 4 }, (_, i) => (
-    <div key={i} className='flex h-4 items-center'>
+    <div key={i} className={cn('flex items-center', wrapperHeight)}>
       <motion.div
-        className='w-1.5 rounded-full bg-primary'
+        className={cn('rounded-full', barWidth, colorClassName)}
         initial={{ height: isWaving ? '25%' : RECORDING_VISUALIZER_REST_HEIGHT }}
         animate={
           isWaving ? { height: ['25%', '100%'] } : { height: RECORDING_VISUALIZER_REST_HEIGHT }
@@ -625,18 +637,17 @@ const RecordingVisualizer = ({ isAnimated, onClick }: RecordingVisualizerProps):
     </div>
   ));
 
-  const className =
-    'inline-flex h-7 w-14 items-center justify-center gap-0.5 rounded-lg border border-border px-2';
+  const wrapperClassName = cn('inline-flex items-center gap-0.5', className);
 
   if (!onClick) {
-    return <div className={className}>{bars}</div>;
+    return <div className={wrapperClassName}>{bars}</div>;
   }
 
   return (
     <button
       type='button'
       onClick={onClick}
-      className={cn(className, 'transition-colors hover:border-primary/50')}
+      className={cn(wrapperClassName, 'transition-colors hover:border-primary/50')}
       aria-label='Open transcript'
       title='Open transcript'
       data-track-category='RecordingDetailV2'
