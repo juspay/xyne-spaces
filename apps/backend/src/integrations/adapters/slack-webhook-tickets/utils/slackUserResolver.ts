@@ -7,6 +7,7 @@ import { config } from '../../../../config/env';
 
 import { logger } from '../../../../utils/logger';
 import { getAllBotTokens } from '../../../../migration/slack/slackMigrationBotConfig';
+import { slackOfflineReference } from './slackOfflineReference';
 import { WebClient } from '@slack/web-api';
 
 /**
@@ -161,6 +162,8 @@ export async function fetchSlackUserInfo(
   slackUserId: string,
   botOauthToken: string
 ): Promise<SlackUserInfo | null> {
+  const offline = slackOfflineReference();
+  if (offline) return (offline.users.get(slackUserId) as SlackUserInfo) ?? null;
   const tokens = buildTokenFallbackList(botOauthToken);
   let bestResult: SlackUserInfo | null = null;
 
@@ -222,6 +225,8 @@ async function fetchSlackChannelInfo(
   channelId: string,
   botOauthToken: string
 ): Promise<{ id: string; name: string; isPrivate: boolean } | null> {
+  const offline = slackOfflineReference();
+  if (offline) return offline.channels.get(channelId) ?? null;
   const tokens = buildTokenFallbackList(botOauthToken);
 
   for (let i = 0; i < tokens.length; i++) {
@@ -273,6 +278,8 @@ async function requestSlackGroupInfo(slackGroupId: string, botOauthToken: string
  * first token that resolves the group with members; otherwise the best result.
  */
 async function fetchSlackGroupInfo(slackGroupId: string, botOauthToken: string): Promise<SlackGroupInfo | null> {
+  const offline = slackOfflineReference();
+  if (offline) return (offline.groups.get(slackGroupId) as SlackGroupInfo) ?? null;
   const tokens = buildTokenFallbackList(botOauthToken);
   let bestResult: SlackGroupInfo | null = null;
 
@@ -309,11 +316,26 @@ async function resolveApiUser(
     undefined;
 
   if (!slackUser?.profile?.email) {
+    // Offline migration: an author with no email (deactivated / external / missing scope) still has
+    // a name in the dump — create a best-effort placeholder so the message keeps its sender instead
+    // of being silently dropped. The live path (no offline ref) is unchanged.
+    const offline = slackOfflineReference();
+    if (offline?.createUser) {
+      const name = displayName || `Slack user ${slackUserId}`;
+      const dbUserId = await offline.createUser(`slack-${slackUserId}@migrated.invalid`, name, !!slackUser?.deleted);
+      if (dbUserId) return { dbUserId, displayName: name };
+    }
     return { displayName };
   }
   const userRepo = new UserRepository();
   const user = await userRepo.findByEmail(slackUser.profile.email, workspaceId);
-  return { dbUserId: user?.id, displayName };
+  if (user) return { dbUserId: user.id, displayName };
+  const offline = slackOfflineReference();
+  if (offline?.createUser) {
+    const dbUserId = await offline.createUser(slackUser.profile.email, displayName || slackUser.profile.email, !!slackUser.deleted);
+    return { dbUserId, displayName };
+  }
+  return { displayName };
 }
 
 /**
