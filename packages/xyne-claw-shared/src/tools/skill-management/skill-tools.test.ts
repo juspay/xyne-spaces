@@ -4,7 +4,7 @@ import { createSkillTool, updateSkillTool } from "./tools.js";
 describe("createSkillTool definition", () => {
   it("is an approval-gated write tool", () => {
     expect(createSkillTool.slug).toBe("create-skill");
-    expect(createSkillTool.source).toBe("custom:skill");
+    expect(createSkillTool.source).toBe("custom:agent-tools");
     expect(createSkillTool.isWriteTool).toBe(true);
   });
   it("requires name, description and content", () => {
@@ -21,7 +21,7 @@ describe("createSkillTool definition", () => {
 describe("updateSkillTool definition", () => {
   it("is a proposal (non-write) tool", () => {
     expect(updateSkillTool.slug).toBe("update-skill");
-    expect(updateSkillTool.source).toBe("custom:skill-update");
+    expect(updateSkillTool.source).toBe("custom:agent-tools");
     expect(updateSkillTool.isWriteTool).toBeFalsy();
   });
   it("requires slug while accepting edits or content", () => {
