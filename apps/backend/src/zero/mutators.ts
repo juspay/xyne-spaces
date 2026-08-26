@@ -117,6 +117,8 @@ import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
+import { userAssignmentStateService } from '@/services/userAssignmentStateService';
 import { notificationService } from '@/services/notificationService';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
@@ -7590,8 +7592,12 @@ export function createMutators(
         },
       ),
       removeUsers: defineMutator(
-        z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
-        async ({ tx, args: { userGroupId, userIds } }) => {
+        z.object({
+          userGroupId: z.string(),
+          userIds: z.array(z.string()),
+          reassignTickets: z.boolean().optional(),
+        }),
+        async ({ tx, args: { userGroupId, userIds, reassignTickets } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -7609,12 +7615,37 @@ export function createMutators(
           );
 
           // Delete the found mappings
+          const removedUserIds: string[] = [];
           for (const mapping of mappingsToRemove) {
             if (mapping) {
               await tx.mutate.user_group_mappings.delete({
                 id: mapping.id,
               });
+              removedUserIds.push(mapping.userId);
             }
+          }
+
+          // Hand the removed members' open tickets off only once the delete has committed:
+          // a queued reassignment cannot be cancelled, so it must never run for a removal
+          // that rolled back. Same policy as the member pause flow - the group must allow it.
+          if (
+            reassignTickets &&
+            userGroup.reassignOnUnavailable === true &&
+            removedUserIds.length > 0
+          ) {
+            awaitedPostCommitTasks.push(async () => {
+              // Per-user guard: one failed enqueue must not skip the rest.
+              for (const removedUserId of removedUserIds) {
+                try {
+                  await ticketReassignmentQueue.scheduleReassignment(removedUserId, userGroupId);
+                } catch (error) {
+                  logger.error(
+                    `❌ [TICKET-REASSIGNMENT] Failed to schedule handoff for removed user ${removedUserId} in group ${userGroupId}:`,
+                    error
+                  );
+                }
+              }
+            });
           }
         },
       ),
@@ -10405,8 +10436,9 @@ export function createMutators(
           stateIds: z.record(z.string(), z.string()).optional(),
           complexityScoreId: z.string().optional(),
           mappingIds: z.record(z.string(), z.string()).optional(),
+          reassignUserIds: z.array(z.string()).optional(),
         }),
-        async ({ tx, args: { userGroupId, userStates, userMappings, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {} } }) => {
+        async ({ tx, args: { userGroupId, userStates, userMappings, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {}, reassignUserIds = [] } }) => {
           const now = timestamp;
 
           // Validate user group exists
@@ -10414,6 +10446,12 @@ export function createMutators(
           if (!userGroup) {
             throw new Error('User group not found');
           }
+
+          // Members opted in to a ticket handoff whose deactivation this save actually
+          // performs. Detected from the pre-write row rather than trusted from the client,
+          // so a stale opt-in for someone already inactive queues nothing.
+          const reassignOptIns = new Set(reassignUserIds);
+          const handoffTargets: string[] = [];
 
           // Update user assignment states
           for (const state of userStates) {
@@ -10429,6 +10467,14 @@ export function createMutators(
               throw new Error(`stateId is required for user ${state.userId}`);
             }
             const isActiveForAssignment = state.isActive;
+
+            if (
+              reassignOptIns.has(state.userId) &&
+              existingState?.isActiveForAssignment === true &&
+              !isActiveForAssignment
+            ) {
+              handoffTargets.push(state.userId);
+            }
 
             const stateData = {
               id: stateId,
@@ -10545,6 +10591,34 @@ export function createMutators(
                 });
               }
             }
+          }
+
+          // Hand off after the states commit, so members deactivated in this same save
+          // can't inherit each other's tickets and a rolled-back save queues nothing.
+          // The service re-checks workspace, the group's reassignOnUnavailable setting
+          // and membership against committed rows.
+          if (handoffTargets.length > 0) {
+            awaitedPostCommitTasks.push(async () => {
+              for (const targetUserId of handoffTargets) {
+                try {
+                  const result = await userAssignmentStateService.reassignMemberTicketsInGroup(
+                    targetUserId,
+                    userGroupId,
+                    authData.workspaceId,
+                  );
+                  if (!result.scheduled) {
+                    logger.warn(
+                      `⚠️ [TICKET-REASSIGNMENT] Handoff for deactivated user ${targetUserId} in group ${userGroupId} not scheduled: ${result.reason}`
+                    );
+                  }
+                } catch (error) {
+                  logger.error(
+                    `❌ [TICKET-REASSIGNMENT] Failed to schedule handoff for deactivated user ${targetUserId} in group ${userGroupId}:`,
+                    error
+                  );
+                }
+              }
+            });
           }
         },
       ),
