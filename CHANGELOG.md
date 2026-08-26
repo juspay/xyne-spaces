@@ -1,3 +1,10 @@
+## [1.206.0-release-20260821.11](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.10...v1.206.0-release-20260821.11) (2026-08-26)
+
+
+### Bug Fixes
+
+* stop Participants sidebar buttons from dropping clicks in active calls ([#1109](https://github.com/juspay/xyne-spaces/issues/1109)) ([f55356d](https://github.com/juspay/xyne-spaces/commit/f55356d8942f90c89bb9fb1c51f6296cc315844f))
+
 ## [1.206.0-release-20260821.10](https://github.com/juspay/xyne-spaces/compare/v1.206.0-release-20260821.9...v1.206.0-release-20260821.10) (2026-08-26)
 
 
