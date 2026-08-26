@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { timingSafeEqual } from "node:crypto";
 import { CONFIG } from "../config.js";
-import { ensureUserExists } from "../lib/users-jit.js";
+import { ensureUserExists, resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { checkResultCallbackToken } from "../lib/session-tokens.js";
 import { verify as verifyCliToken } from "../lib/cli-tokens.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
@@ -51,7 +51,13 @@ async function attachOrgContext(req: Request, userId: string): Promise<void> {
 
 interface SpacesMeResponse {
   success?: boolean;
-  user?: { id?: string };
+  user?: { id?: string; workspaceId?: string; memberId?: string };
+}
+
+interface VerifiedSpacesIdentity {
+  userId: string;
+  workspaceId?: string;
+  orgMemberId?: string;
 }
 
 /**
@@ -86,21 +92,16 @@ export function s2sKeyMatches(provided: string | string[] | undefined): boolean 
 // Memoize the Spaces /api/auth/me lookup per request. Routes now stack
 // mount-level auth (main.ts) with per-route auth (defense-in-depth), and
 // without this each layer would re-fetch /me for the same request.
-const SPACES_USER_ID = Symbol("spacesUserId");
+const SPACES_IDENTITY = Symbol("spacesIdentity");
 
-async function resolveUserIdFromSpaces(req: Request): Promise<string | undefined> {
-  const cached = (req as unknown as Record<symbol, string | undefined>)[SPACES_USER_ID];
-  if (cached !== undefined) return cached || undefined;
-
-  const userId = await resolveUserIdFromSpacesUncached(req);
-  // Store "" for a failed resolution so repeat lookups are also skipped.
-  (req as unknown as Record<symbol, string | undefined>)[SPACES_USER_ID] = userId ?? "";
-  return userId;
-}
-
-async function resolveUserIdFromSpacesUncached(req: Request): Promise<string | undefined> {
+async function resolveSpacesIdentityFromSpaces(req: Request): Promise<VerifiedSpacesIdentity | undefined> {
+  const cached = (req as unknown as Record<symbol, VerifiedSpacesIdentity | null | undefined>)[SPACES_IDENTITY];
+  if (cached !== undefined) return cached ?? undefined;
   const cookieHeader = req.headers.cookie;
-  if (!cookieHeader) return undefined;
+  if (!cookieHeader) {
+    (req as unknown as Record<symbol, VerifiedSpacesIdentity | null>)[SPACES_IDENTITY] = null;
+    return undefined;
+  }
 
   const headers: Record<string, string> = {
     cookie: cookieHeader,
@@ -117,11 +118,26 @@ async function resolveUserIdFromSpacesUncached(req: Request): Promise<string | u
     signal: AbortSignal.timeout(5000),
   });
 
-  if (!res.ok) return undefined;
+  if (!res.ok) {
+    (req as unknown as Record<symbol, VerifiedSpacesIdentity | null>)[SPACES_IDENTITY] = null;
+    return undefined;
+  }
 
   const body = (await res.json().catch(() => null)) as SpacesMeResponse | null;
   const userId = body?.user?.id;
-  return typeof userId === "string" && userId.trim() ? userId.trim() : undefined;
+  const identity = typeof userId === "string" && userId.trim()
+    ? {
+        userId: userId.trim(),
+        ...(typeof body?.user?.workspaceId === "string" && body.user.workspaceId.trim()
+          ? { workspaceId: body.user.workspaceId.trim() }
+          : {}),
+        ...(typeof body?.user?.memberId === "string" && body.user.memberId.trim()
+          ? { orgMemberId: body.user.memberId.trim() }
+          : {}),
+      }
+    : undefined;
+  (req as unknown as Record<symbol, VerifiedSpacesIdentity | null>)[SPACES_IDENTITY] = identity ?? null;
+  return identity;
 }
 
 function bearerToken(req: Request): string | undefined {
@@ -129,6 +145,42 @@ function bearerToken(req: Request): string | undefined {
   if (typeof header !== "string") return undefined;
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   return match?.[1]?.trim();
+}
+
+function headerValue(req: Request, name: string): string | undefined {
+  const value = req.headers[name];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Normalize the backwards-compatible Spaces S2S contract at the boundary.
+ * Older callers put the raw workspace user id in `x-user-id`; newer callers
+ * may additionally send `x-spaces-user-id` and workspace context. Downstream
+ * Claw code must always see the canonical id in `x-user-id`.
+ */
+async function canonicalizeS2SIdentity(req: Request): Promise<string | undefined> {
+  const explicitSpacesUserId = headerValue(req, "x-spaces-user-id");
+  const suppliedUserId = explicitSpacesUserId ?? headerValue(req, "x-user-id");
+  if (!suppliedUserId) return undefined;
+
+  const workspaceId = headerValue(req, "x-spaces-workspace-id") ?? headerValue(req, "x-workspace-id");
+  await ensureUserExists(suppliedUserId, "require-auth").catch((err) => {
+    log.warn(`[require-auth] ensureUserExists(${suppliedUserId}) for S2S failed:`, err instanceof Error ? err.message : err);
+  });
+  const clawUserId = await resolveClawUserIdForSpacesIdentity(suppliedUserId, workspaceId).catch((err) => {
+    log.warn(`[require-auth] resolveClawUserIdForSpacesIdentity(${suppliedUserId}) for S2S failed:`, err instanceof Error ? err.message : err);
+    return undefined;
+  });
+  if (!clawUserId) return undefined;
+
+  req.headers["x-user-id"] = clawUserId;
+  // Do not manufacture a raw Spaces id when a Claw-internal caller supplied
+  // an already-canonical id. Keep it only when the source identity is known.
+  if (explicitSpacesUserId || clawUserId !== suppliedUserId) {
+    req.headers["x-spaces-user-id"] = suppliedUserId;
+  }
+  if (workspaceId) req.headers["x-spaces-workspace-id"] = workspaceId;
+  return clawUserId;
 }
 
 /**
@@ -149,7 +201,8 @@ export async function requireAuth(
 ): Promise<void> {
   stripClientOrgHeaders(req);
   // 1. Verify browser cookies through Spaces backend auth middleware.
-  const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
+  const spacesIdentity = await resolveSpacesIdentityFromSpaces(req).catch(() => undefined);
+  const userId = spacesIdentity?.userId;
   if (userId) {
     // JIT-mirror the user row from Spaces if we've never seen them. Lets a
     // brand-new Spaces user hit any claw-auth route without first POSTing
@@ -158,9 +211,19 @@ export async function requireAuth(
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
-    req.headers["x-user-id"] = userId;
+    // /auth/me has already authenticated the cookie and selected its active
+    // workspace. Use that verified value—not the inbound header—to resolve the
+    // workspace-scoped source identity to the canonical Claw user.
+    const clawUserId = await resolveClawUserIdForSpacesIdentity(userId, spacesIdentity.workspaceId).catch((err) => {
+      log.warn(`[require-auth] resolveClawUserIdForSpacesIdentity(${userId}) failed:`, err instanceof Error ? err.message : err);
+      return undefined;
+    });
+    req.headers["x-spaces-user-id"] = userId;
+    if (spacesIdentity.workspaceId) req.headers["x-spaces-workspace-id"] = spacesIdentity.workspaceId;
+    if (spacesIdentity.orgMemberId) req.headers["x-spaces-org-member-id"] = spacesIdentity.orgMemberId;
+    req.headers["x-user-id"] = clawUserId ?? userId;
     // Phase-1 org context (additive; requireAuth only).
-    await attachOrgContext(req, userId);
+    await attachOrgContext(req, clawUserId ?? userId);
     next();
     return;
   }
@@ -189,7 +252,7 @@ export async function requireAuth(
   // 3. Service-to-service: x-s2s-key header
   const s2sKey = req.headers["x-s2s-key"] as string | undefined;
   if (s2sKeyMatches(s2sKey)) {
-    const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
+    const pinnedUserId = await canonicalizeS2SIdentity(req);
     if (pinnedUserId) {
       await attachOrgContext(req, pinnedUserId);
     }
@@ -237,7 +300,7 @@ export async function requireS2S(
   stripClientOrgHeaders(req);
   const s2sKey = req.headers["x-s2s-key"] as string | undefined;
   if (s2sKeyMatches(s2sKey)) {
-    const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
+    const pinnedUserId = await canonicalizeS2SIdentity(req);
     if (pinnedUserId) {
       await attachOrgContext(req, pinnedUserId);
     }
@@ -245,13 +308,21 @@ export async function requireS2S(
     return;
   }
 
-  const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
+  const spacesIdentity = await resolveSpacesIdentityFromSpaces(req).catch(() => undefined);
+  const userId = spacesIdentity?.userId;
   if (userId) {
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth/s2s] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
-    req.headers["x-user-id"] = userId;
-    await attachOrgContext(req, userId);
+    const clawUserId = await resolveClawUserIdForSpacesIdentity(userId, spacesIdentity.workspaceId).catch((err) => {
+      log.warn(`[require-auth/s2s] resolveClawUserIdForSpacesIdentity(${userId}) failed:`, err instanceof Error ? err.message : err);
+      return undefined;
+    });
+    req.headers["x-spaces-user-id"] = userId;
+    if (spacesIdentity.workspaceId) req.headers["x-spaces-workspace-id"] = spacesIdentity.workspaceId;
+    if (spacesIdentity.orgMemberId) req.headers["x-spaces-org-member-id"] = spacesIdentity.orgMemberId;
+    req.headers["x-user-id"] = clawUserId ?? userId;
+    await attachOrgContext(req, clawUserId ?? userId);
     next();
     return;
   }
@@ -351,7 +422,8 @@ export async function requireUserAuth(
   next: NextFunction,
 ): Promise<void> {
   stripClientOrgHeaders(req);
-  const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
+  const spacesIdentity = await resolveSpacesIdentityFromSpaces(req).catch(() => undefined);
+  const userId = spacesIdentity?.userId;
   if (!userId) {
     res.status(401).json({ success: false, error: "User session required" });
     return;
@@ -361,8 +433,15 @@ export async function requireUserAuth(
   await ensureUserExists(userId, "require-auth").catch((err) => {
     log.warn(`[require-user-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
   });
-  req.headers["x-user-id"] = userId;
-  await attachOrgContext(req, userId);
+  const clawUserId = await resolveClawUserIdForSpacesIdentity(userId, spacesIdentity?.workspaceId).catch((err) => {
+    log.warn(`[require-user-auth] resolveClawUserIdForSpacesIdentity(${userId}) failed:`, err instanceof Error ? err.message : err);
+    return undefined;
+  });
+  req.headers["x-spaces-user-id"] = userId;
+  if (spacesIdentity?.workspaceId) req.headers["x-spaces-workspace-id"] = spacesIdentity.workspaceId;
+  if (spacesIdentity?.orgMemberId) req.headers["x-spaces-org-member-id"] = spacesIdentity.orgMemberId;
+  req.headers["x-user-id"] = clawUserId ?? userId;
+  await attachOrgContext(req, clawUserId ?? userId);
   next();
 }
 

@@ -3,6 +3,7 @@ import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
+import { findUserByAnyId } from "../lib/users-jit.js";
 import { createLogger } from "../logger.js";
 import {
   AdminDigitalTwinControlError,
@@ -147,14 +148,17 @@ router.get("/users", async (req: Request, res: Response) => {
 
 router.post("/users/:userId/enable", async (req: Request<{ userId: string }>, res: Response) => {
   try {
+    // The URL parameter may be a canonical Claw id OR a Spaces alias —
+    // normalize when resolvable; the service layer rejects unknown ids.
+    const userId = (await findUserByAnyId(req.params.userId))?.id ?? req.params.userId;
     const backfill = parseBackfill((req.body as { backfill?: unknown } | undefined)?.backfill, false);
     const result = await adminEnableDigitalTwin({
-      userId: req.params.userId,
+      userId,
       ...(backfill !== undefined ? { backfill } : {}),
     });
     log.info("CLAW_ADMIN enabled Digital Twin for user", {
       actorUserId: getRequesterId(req),
-      targetUserId: req.params.userId,
+      targetUserId: userId,
       backfillStarted: result.backfillJobIds.length > 0,
     });
     res.json({ success: true, data: { enabled: true, ...result } });
@@ -165,10 +169,11 @@ router.post("/users/:userId/enable", async (req: Request<{ userId: string }>, re
 
 router.post("/users/:userId/disable", async (req: Request<{ userId: string }>, res: Response) => {
   try {
-    const result = await adminDisableDigitalTwin(req.params.userId);
+    const userId = (await findUserByAnyId(req.params.userId))?.id ?? req.params.userId;
+    const result = await adminDisableDigitalTwin(userId);
     log.info("CLAW_ADMIN disabled Digital Twin for user", {
       actorUserId: getRequesterId(req),
-      targetUserId: req.params.userId,
+      targetUserId: userId,
       cancelledJobs: result.cancelledJobs,
     });
     res.json({ success: true, data: { disabled: true, ...result } });
@@ -179,11 +184,12 @@ router.post("/users/:userId/disable", async (req: Request<{ userId: string }>, r
 
 router.post("/users/:userId/backfill", async (req: Request<{ userId: string }>, res: Response) => {
   try {
+    const userId = (await findUserByAnyId(req.params.userId))?.id ?? req.params.userId;
     const backfill = parseBackfill((req.body as { backfill?: unknown } | undefined)?.backfill, true)!;
-    const result = await adminStartDigitalTwinBackfill({ userId: req.params.userId, backfill });
+    const result = await adminStartDigitalTwinBackfill({ userId, backfill });
     log.info("CLAW_ADMIN started Digital Twin backfill for user", {
       actorUserId: getRequesterId(req),
-      targetUserId: req.params.userId,
+      targetUserId: userId,
       from: backfill.from,
       to: backfill.to,
     });
