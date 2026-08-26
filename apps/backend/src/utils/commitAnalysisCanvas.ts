@@ -629,6 +629,14 @@ async function findExistingAnalysisCanvas(
   });
 }
 
+export async function findAnalysisCanvasIdForConversation(
+  conversationId: string | undefined,
+  channelId: string | undefined,
+): Promise<string | null> {
+  const canvas = await findExistingAnalysisCanvas(conversationId, channelId);
+  return canvas?.id ?? null;
+}
+
 type CanvasSection = 'main' | 'hotfix';
 
 export interface UpsertCommitAnalysisCanvasArgs {

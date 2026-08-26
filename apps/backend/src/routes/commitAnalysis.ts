@@ -5,6 +5,7 @@ import { testRepoConnection } from '@/services/release/repoInspector';
 import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
 import { FormsRepository } from '@/database/repositories/formsRepository';
 import { unifiedBotUserService } from '@/bots/unified/index.js';
 
@@ -115,7 +116,17 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
       where: { releaseId, workspaceId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
-    res.json({ repos });
+
+    const ticket = await db.ticket.findFirst({
+      where: { id: releaseId, workspaceId },
+      select: { conversationId: true, channelId: true },
+    });
+    const analysisCanvasId = await findAnalysisCanvasIdForConversation(
+      ticket?.conversationId ?? undefined,
+      ticket?.channelId ?? undefined,
+    );
+
+    res.json({ repos, analysisCanvasId });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const safeReleaseId = String(releaseId).replace(/[\r\n]/g, '');

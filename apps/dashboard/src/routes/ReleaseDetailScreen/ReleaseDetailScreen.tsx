@@ -57,8 +57,9 @@ import {
   type ReleaseDetailDevTicketRow,
 } from './releaseReport.utils';
 import { apiInstance } from '../../services/clients/apiClient';
+import { CanvasPreview } from '../../components/Canvas/CanvasPreview/CanvasPreview';
 
-type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline';
+type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline' | 'releasenotes';
 
 // Shape returned by GET /commits/analyze/repos/:releaseId. Mirrors the
 // non_zero release_ticket_repos row; structurally compatible with the
@@ -250,7 +251,11 @@ const TabTrigger = ({
 );
 
 const isTabValue = (value: unknown): value is TabValue =>
-  value === 'testing' || value === 'envs' || value === 'migrations' || value === 'timeline';
+  value === 'testing' ||
+  value === 'envs' ||
+  value === 'migrations' ||
+  value === 'timeline' ||
+  value === 'releasenotes';
 
 // ─── ReleaseDetailScreen ──────────────────────────────────────────────────────
 const ReleaseDetailScreen = (): ReactElement => {
@@ -353,18 +358,23 @@ const ReleaseDetailScreen = (): ReactElement => {
   // Zero-replicated), so it's fetched over HTTP instead of synced via Zero.
   // Refetched after a re-run — the only in-screen action that changes these rows.
   const [releaseTicketRepos, setReleaseTicketRepos] = useState<ReleaseTicketRepoRow[]>([]);
+  const [analysisCanvasId, setAnalysisCanvasId] = useState<string | null>(null);
   const fetchReleaseTicketRepos = useCallback(async (): Promise<void> => {
     if (!releaseTicketId) {
       setReleaseTicketRepos([]);
+      setAnalysisCanvasId(null);
       return;
     }
     try {
-      const response = await apiInstance.get<{ repos: ReleaseTicketRepoRow[] }>(
-        `/commits/analyze/repos/${releaseTicketId}`,
-      );
+      const response = await apiInstance.get<{
+        repos: ReleaseTicketRepoRow[];
+        analysisCanvasId?: string | null;
+      }>(`/commits/analyze/repos/${releaseTicketId}`);
       setReleaseTicketRepos(response.data?.repos ?? []);
+      setAnalysisCanvasId(response.data?.analysisCanvasId ?? null);
     } catch {
       setReleaseTicketRepos([]);
+      setAnalysisCanvasId(null);
     }
   }, [releaseTicketId]);
   useEffect(() => {
@@ -810,6 +820,9 @@ const ReleaseDetailScreen = (): ReactElement => {
                 <TabTrigger value='timeline' activeTab={activeTab}>
                   Timeline
                 </TabTrigger>
+                <TabTrigger value='releasenotes' activeTab={activeTab}>
+                  Release notes
+                </TabTrigger>
               </Tabs.List>
 
               {/* Dev Tickets tab */}
@@ -1107,6 +1120,19 @@ const ReleaseDetailScreen = (): ReactElement => {
                       );
                     })}
                   </ol>
+                )}
+              </Tabs.Content>
+
+              <Tabs.Content value='releasenotes' className='mt-6 outline-none'>
+                {analysisCanvasId ? (
+                  <CanvasPreview canvasId={analysisCanvasId} expanded />
+                ) : (
+                  <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
+                    <p className='text-sm text-muted-foreground'>
+                      No release notes yet. They appear here once commit analysis has run for
+                      this release — use “Re-run Analysis” on the Dev Tickets tab to generate them.
+                    </p>
+                  </div>
                 )}
               </Tabs.Content>
             </Tabs.Root>
