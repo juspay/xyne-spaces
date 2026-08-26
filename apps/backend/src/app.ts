@@ -92,7 +92,6 @@ import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
-import { sdlcAccessBackfillRouter } from '@/controllers/sdlcAccessBackfillController';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -608,7 +607,6 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
-    this.app.use('/api/sdlc-backfill', sdlcAccessBackfillRouter);
     this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
     this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
