@@ -333,7 +333,12 @@ export class BundleController {
       const { userId } = req.params;
       const existing = await BundleOverrideService.getByUserId(userId);
 
-      if (!existing) {
+      // Workspace isolation: 404 both when the row is absent AND when it belongs
+      // to another workspace. The tenant ACL layer already scopes the read, but
+      // we assert workspaceId explicitly here too (defense-in-depth, and mirrors
+      // the explicit check in upsertOverride) so this security boundary does not
+      // silently depend on the ACL extension's behaviour.
+      if (!existing || existing.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({
           success: false,
           error: 'Override not found',
