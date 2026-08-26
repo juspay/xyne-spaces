@@ -96,22 +96,27 @@ const SORT_OPTIONS = [
 ];
 
 // Hardcoded Vespa rank profiles, scoped to the schema(s) each docType resolves to.
-// '' means "send nothing" => backend default (default_native). Only profiles that exist
-// in every schema the type queries are listed, because Vespa rejects a rank profile that
-// is missing from any queried schema. Selecting a single type prunes the query's sources
-// to that one schema (see searchService.ts), which is what makes the chat-only and
-// mail-only profiles below valid.
+// Only profiles that exist in every schema the type queries are listed, because Vespa
+// rejects a rank profile that is missing from any queried schema. Selecting a single
+// type prunes the query's sources to that one schema (see searchService.ts), which is
+// what makes the chat-only and mail-only profiles below valid.
+//
+// These are the EXPLICIT picks. getRankProfileOptions() prepends a `value: ''` row
+// meaning "no explicit pick": the request layer resolves '' to the per-tab default from
+// the cmdk_search_config CAC key (see useCmdkDefaultRankProfiles), so that row is
+// labeled with the resolved default at render time — never hardcoded here.
 type RankProfileOption = { value: string; label: string };
 const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   Record<SearchResultsFilters['docType'], RankProfileOption[]>
 > = {
   all: [
     { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'unified', label: 'unified' },
   ],
   messages: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
     { value: 'personalized', label: 'personalized' },
     { value: 'default_random', label: 'default_random' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
@@ -121,16 +126,16 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
     })),
   ],
   files: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
   ],
   tickets: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'semantic_ranking', label: 'semantic_ranking' },
   ],
   desk: [
-    { value: '', label: 'default_native' },
+    { value: 'default_native', label: 'default_native' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'global_sorted', label: 'global_sorted' },
     { value: 'default_bm25', label: 'default_bm25' },
@@ -138,8 +143,17 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   ],
 };
 
-function getRankProfileOptions(docType: SearchResultsFilters['docType']): RankProfileOption[] {
-  return RANK_PROFILE_OPTIONS_BY_TYPE[docType] ?? [];
+function getRankProfileOptions(
+  docType: SearchResultsFilters['docType'],
+  resolvedDefault: string,
+): RankProfileOption[] {
+  const explicit = RANK_PROFILE_OPTIONS_BY_TYPE[docType];
+  if (!explicit) return [];
+  return [
+    { value: '', label: resolvedDefault },
+    // The default row already covers this profile; a second row would send the same one.
+    ...explicit.filter(o => o.value !== resolvedDefault),
+  ];
 }
 
 function useListKeyNav(
@@ -251,12 +265,14 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
   const isAssigneeActive = filters.assigneeIds.length > 0;
   const isSortActive = filters.sortBy !== 'relevance';
 
-  const rankProfileOptions = getRankProfileOptions(filters.docType);
+  const resolvedDefaultRankProfile = defaultRankProfileFor(cmdkTabKeyForDocType(filters.docType));
+  const rankProfileOptions = getRankProfileOptions(filters.docType, resolvedDefaultRankProfile);
   const showRankProfile = rankProfileOptions.length > 0;
   const isRankActive = filters.rankProfile !== '';
+  // '' always matches the prepended default row; the fallback only covers a profile
+  // set via URL that is not in the hardcoded list — show it verbatim.
   const rankProfileLabel =
-    rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ??
-    defaultRankProfileFor(cmdkTabKeyForDocType(filters.docType));
+    rankProfileOptions.find(o => o.value === filters.rankProfile)?.label ?? filters.rankProfile;
 
   const showFromIn = filters.docType !== 'channels' && filters.docType !== 'people';
   const showAssignee = filters.docType === 'tickets' || filters.docType === 'all';
