@@ -1,4 +1,4 @@
-import { useCacConfig } from '@xyne/shared/hooks';
+import { useOptionalCacConfig } from '@xyne/shared/hooks';
 import {
   TELEPRESENCE_CAC_KEY,
   DEFAULT_TELEPRESENCE_CAC_CONFIG,
@@ -14,7 +14,9 @@ import {
  *   2. the user's email is in config.allowedEmails
  */
 export function useTelepresenceEnabled(userEmail: string | null | undefined): boolean {
-  const { config } = useCacConfig<TelepresenceCacConfig>({
+  // Optional variant: FullCallView is reused by dashboard-external, which mounts
+  // no HttpClientProvider, and the throwing `useCacConfig` crashed that render.
+  const { config } = useOptionalCacConfig<TelepresenceCacConfig>({
     key: TELEPRESENCE_CAC_KEY,
     fallbackConfig: DEFAULT_TELEPRESENCE_CAC_CONFIG,
   });
