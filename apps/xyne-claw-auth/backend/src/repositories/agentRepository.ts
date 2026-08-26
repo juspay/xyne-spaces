@@ -47,7 +47,49 @@ const INCLUDE_TOOLS_SKILLS = {
   collections: true,
 } as const;
 
+/**
+ * The one definition of "this user may use this agent": org-global, owned, or
+ * explicitly shared. Kept beside `listVisible`, which applies the same rule to
+ * the agent list, so a change to what "visible" means cannot drift between the
+ * list a user is shown and the agents they can actually address.
+ *
+ * Org scoping is applied separately by the caller — it is a different question
+ * (which tenant) from this one (which agent within it).
+ */
+export function agentVisibleToUser(userId: string): Prisma.AgentWhereInput {
+  return {
+    OR: [{ scope: "global" }, { ownerUserId: userId }, { shares: { some: { userId } } }],
+  };
+}
+
 export const agentRepository = {
+  /**
+   * Resolve a slug to an agent the caller is actually allowed to use.
+   *
+   * `findBySlug` scopes by org only, which makes every agent in an org
+   * addressable by slug regardless of whether it is private to another user.
+   * Execution paths — chatting, regenerating, forking — must use this instead:
+   * the slug is caller-supplied, so org scoping alone is tenant isolation, not
+   * authorization.
+   *
+   * Returns null both when the agent does not exist and when it exists but is
+   * not visible, so callers 404 either way. That is deliberate: a distinct 403
+   * would confirm the slug to someone probing for other users' private agents.
+   */
+  findBySlugVisibleTo: (slug: string, orgId: string | null | undefined, userId: string | null | undefined) => {
+    if (!orgId) {
+      log.error("[agentRepository.findBySlugVisibleTo] missing orgId; refusing global slug lookup", { slug });
+      return Promise.resolve(null);
+    }
+    if (!userId) {
+      log.error("[agentRepository.findBySlugVisibleTo] missing userId; refusing unscoped slug lookup", { slug });
+      return Promise.resolve(null);
+    }
+    return prisma.agent.findFirst({
+      where: { AND: [{ orgId, slug }, agentVisibleToUser(userId)] },
+    });
+  },
+
   findBySlug: (slug: string, orgId?: string | null) => {
     if (!orgId) {
       log.error("[agentRepository.findBySlug] missing orgId; refusing global slug lookup", { slug });
