@@ -4944,13 +4944,34 @@ async function processTask(
         requiresStructuredDelivery,
         stallProgress,
       );
+      // Route EVERY terminal transient failure into claw-auth's capacity-retry
+      // flow (scheduleProviderRetry — health-gated, auto-retries when the
+      // provider recovers) instead of dead-ending on a "work stopped" notice.
+      // We only reach here when isTransientProviderError(err) AND the whole
+      // provider fallback chain is exhausted — a platform availability problem
+      // (stall / 5xx / network), never a deterministic agent error or a user
+      // cancel (both handled by earlier branches). Previously only the
+      // EMPTY-completion capacity case was tagged, so stalls/timeouts — the
+      // dominant failure under load — got the terminal notice and no retry.
+      // Tagging emptyReason makes claw-auth's isCapacityFailure recognise it:
+      // interactive runs send an EMPTY result so it lands in the empty-result
+      // retry hook and the retry CARD replaces the notice; structured jobs keep
+      // their failed terminal (deliverable fails closed) and the tag routes them
+      // to the silent automation retry.
+      const transientDetail = err instanceof ProviderStallError
+        ? `model stopped responding for ${Math.round(err.idleMs / 1000)}s`
+        : (err instanceof Error ? err.message : String(err)).split(/\r?\n/, 1)[0]!.slice(0, 200);
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
-        ...terminal,
+        ...(requiresStructuredDelivery
+          ? terminal
+          : { status: "completed" as const, result: "" }),
+        emptyReason: "provider_capacity" as const,
+        ...(transientDetail ? { emptyReasonDetail: transientDetail } : {}),
         ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
           ? { toolsUsed: err.toolsUsed }
           : {}),
