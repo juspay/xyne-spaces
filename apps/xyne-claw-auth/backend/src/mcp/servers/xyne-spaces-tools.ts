@@ -7506,10 +7506,7 @@ const onyxBenchSearch: ToolDef = {
           `  docId: ${r.id}`,
           `  sourceType: ${st}`,
         ];
-        if (r.context) {
-          const snippet = r.context.length > 500 ? r.context.slice(0, 500) + "…" : r.context;
-          lines.push(`  content: ${snippet}`);
-        }
+        if (r.context && typeof r.context === "string") lines.push(`  content: ${r.context}`);
         return lines.join("\n");
       }).join("\n\n");
 
