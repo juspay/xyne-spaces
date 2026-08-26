@@ -68,7 +68,7 @@ interface CanvasSideEffectContext {
   workspaceId: string;
 }
 
-import { executeStreamingLlmRequest } from './callLlmRetry';
+import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -1013,6 +1013,7 @@ export class CallDocumentService {
     templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     citationSegments?: CitationContext['segments'],
+    modelType?: SummaryModelType,
   ): Promise<{
     summary: string;
     template: SummaryTemplate;
@@ -1066,6 +1067,7 @@ export class CallDocumentService {
             ),
           )
         : undefined,
+      modelType,
     );
 
     if (!rawSummary) return null;
@@ -1091,6 +1093,7 @@ export class CallDocumentService {
     promptTemplate = DETAILED_SUMMARY_PROMPT,
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
     // Use people who actually spoke in the transcript. A channel roster can contain
     // members who never joined or contributed to this particular call.
@@ -1150,6 +1153,7 @@ MANDATORY OUTPUT CONTRACT:
       operation: 'detailed_summary_generation',
       callId,
       ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
+      ...(modelType ? { modelType } : {}),
       onDelta,
     });
 

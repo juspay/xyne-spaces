@@ -135,6 +135,7 @@ export interface RegenerateRecordingSummaryResult {
   summaryTemplateId: string;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean;
+  summaryModelUsed?: 'fast' | 'thinking';
 }
 
 /** A Google Doc created from this recording's summary, as stored on call metadata. */
@@ -200,6 +201,7 @@ export interface RecordingDetail extends Recording {
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
+  summaryModelUsed: 'fast' | 'thinking' | null;
   citationSegments: CitationSegment[];
   visibility?: CallVisibility;
   /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
@@ -346,10 +348,12 @@ class RecordingService {
   async regenerateSummary(
     callId: string,
     summaryTemplateId: string,
+    modelType?: 'fast' | 'thinking',
   ): Promise<RegenerateRecordingSummaryResult> {
     const response: AxiosResponse<{ success: true } & RegenerateRecordingSummaryResult> =
       await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
         summaryTemplateId,
+        ...(modelType ? { modelType } : {}),
       });
     return response.data;
   }

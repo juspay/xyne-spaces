@@ -537,6 +537,7 @@ export const userPreferenceTable = table("user_preferences")
     enterSendsMessage: boolean(),
     allowThreadBroadcastMentions: boolean(),
     showThreadTags: boolean(),
+    summaryModelPreference: string().optional(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),
