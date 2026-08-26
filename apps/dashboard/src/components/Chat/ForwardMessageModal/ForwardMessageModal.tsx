@@ -40,6 +40,7 @@ import { InputBox } from '../../ui/InputBox';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { ForwardMessageFormProps, ForwardTarget, SelectionMode } from './ForwardMessageModal.types';
 import { toast } from 'sonner';
+import { subscribeSendLifecycle } from '@xyne/shared/messages';
 import {
   getDMParticipantIdsToFetch,
   getDMNames,
@@ -121,7 +122,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         const timestamp = Date.now();
 
         try {
-          zero.mutate(
+          // Fire without awaiting (like sendMessage) and observe the outcome below.
+          const mutation = zero.mutate(
             mutators.conversations.forwardMessage({
               targetChannelId: firstTarget.id,
               originalMessageId: message.messageId,
@@ -154,6 +156,20 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
           // Navigate to the channel
           void navigate(`/chat/dir/${firstTarget.id}`);
+
+          // Surface a real mutator rejection; transient zero errors are ignored
+          // since Zero still persists those on reconnect.
+          subscribeSendLifecycle(mutation, () => {
+            logger.error(Event.MESSAGE_FORWARD_FAILED, {
+              originalMessageId: message.messageId,
+              targetType: 'channel',
+              targetChannelId: firstTarget.id,
+            });
+            toast.error('Failed to forward message', {
+              description: `Please try again.`,
+              duration: 3000,
+            });
+          });
         } catch (error) {
           logger.error(Event.FRONTEND_ERROR, {
             type: 'migrated_console_error',
