@@ -1175,6 +1175,15 @@ function ChatMessageBubble({
             </div>
           )}
 
+          {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool) */}
+          {!isUser && message.attachments && message.attachments.length > 0 && (
+            <div className='mt-2 space-y-2'>
+              {message.attachments.map((attachment, index) => (
+                <AttachmentPreview key={index} attachment={attachment} />
+              ))}
+            </div>
+          )}
+
           {inlineCitations.length > 0 && <InlineCitations citations={inlineCitations} />}
 
           {!isUser &&
