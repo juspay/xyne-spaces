@@ -221,9 +221,14 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     }
   };
 
-  const handleCopyLink = (): void => {
-    void navigator.clipboard.writeText(`${shareableOrigin}/recordings/${recording.externalId}`);
-    toast.success('Link copied');
+  const handleCopyLink = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(`${shareableOrigin}/recordings/${recording.externalId}`);
+      toast.success('Link copied');
+    } catch (error) {
+      logRecordingError('RecordingShareModal.handleCopyLink', error);
+      toast.error('Failed to copy link');
+    }
   };
 
   const handleAccessChange = async (
@@ -423,7 +428,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
           <div className='flex justify-end'>
             <button
               type='button'
-              onClick={handleCopyLink}
+              onClick={() => void handleCopyLink()}
               className='inline-flex items-center gap-2 text-sm font-medium text-foreground rounded-md px-2.5 py-1.5 -mr-2.5 transition-colors hover:bg-accent hover:text-primary'
               data-testid='recording-copy-link-button'
               data-track-category='RecordingDetailV2'

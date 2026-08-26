@@ -8,6 +8,7 @@ import { CallVisibility, ShareableEntityType } from '@xyne/shared';
  */
 export class CallShareService {
   async canView(call: Call, userId: string, workspaceId: string): Promise<boolean> {
+    if (call.workspaceId !== workspaceId) return false;
     if (call.createdByUserId === userId) return true;
     if (call.visibility === CallVisibility.PUBLIC) return true;
     return entityAccessService.hasActiveShare({
