@@ -231,6 +231,15 @@ interface PendingStream {
   /** Parent ref the assistant placeholder was created under. Echoed in `done`
    *  so the frontend can stitch the optimistic message into the tree. */
   assistantParentId?: string;
+  /** Whether this subscriber may receive `debug` frames.
+   *
+   *  The debug frame carries the agent's full system prompt, instructions and
+   *  tool-use policy. The stored-history endpoint already withholds it from
+   *  callers without elevated access; the live stream did not, so the same
+   *  content was readable by any user who could start a run. Resolved once when
+   *  the stream is opened — the callback handler that forwards frames runs on
+   *  an S2S request from xyne-claw and has no end-user identity of its own. */
+  allowDebug?: boolean;
 }
 const pendingStreams = new Map<string, PendingStream>();
 
@@ -310,7 +319,12 @@ function ensureChatEventsSubscriber(): void {
     const stream = pendingStreams.get(msg.callbackId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
-      for (const e of msg.events) stream.sendEvent(e.event, e.data);
+      // Same withholding as the same-pod path above: the pod that owns the
+      // subscriber is the only one that knows whether it may see `debug`.
+      for (const e of msg.events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
       return;
     }
     stream.sendEvent("debug_artifacts_ready", {
@@ -780,7 +794,7 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       return;
     }
 
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, getOrgId(req), getRequesterId(req));
     if (!agent) {
       log.warn(`[agent-chat/context-search] agent org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
@@ -863,7 +877,7 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       res.status(401).json({ success: false, error: "x-user-id header is required" });
       return;
     }
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, getOrgId(req), getRequesterId(req));
     if (!agent) {
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
@@ -1070,7 +1084,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         ].join("\n")
       : "";
 
-    const agent = await agentRepository.findBySlug(slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(slug, getOrgId(req), userId);
     if (!agent) {
       log.warn(`[agent-chat/chat] agent org-scoped miss slug=${slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
@@ -1317,6 +1331,15 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
     });
 
+    // Whether this subscriber may receive `debug` frames. Same predicate the
+    // stored-history endpoint uses for `debugEvents`, so a caller sees the same
+    // debug content live as it would on replay. Resolved here, before the SSE
+    // promise, because the callback that forwards frames arrives on a separate
+    // S2S request with no end-user identity of its own.
+    const debugIsAdmin = await isClawAdmin(userId);
+    const debugEditAccess = debugIsAdmin ? null : await getAgentEditAccess(userId, slug, getOrgId(req));
+    const allowDebug = debugIsAdmin || Boolean(debugEditAccess?.canEdit);
+
     // Send conversationId immediately
     res.write(`event: meta\ndata: ${JSON.stringify({ conversationId })}\n\n`);
 
@@ -1358,6 +1381,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         resolve,
         setClosed: () => { closed = true; },
         assistantMessageId: assistantMsg.id,
+        allowDebug,
         ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
         ...(assistantParentId ? { assistantParentId } : {}),
       });
@@ -1869,7 +1893,14 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
 
   if (events.length > 0 && callbackId) {
     if (stream) {
-      for (const e of events) stream.sendEvent(e.event, e.data);
+      // `debug` is withheld unless the subscriber was resolved as elevated when
+      // the stream opened. Filtered at delivery rather than at construction
+      // because the same `events` array is also published cross-pod, where the
+      // receiving pod owns the subscriber and applies this same check.
+      for (const e of events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
     } else {
       publishChatEvent({ kind: "progress", callbackId, events });
     }
@@ -1977,7 +2008,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   let includeCitations = false;
   try {
     const agentRow = callbackOrgId
-      ? await agentRepository.findBySlug(req.params.slug, callbackOrgId)
+      ? await agentRepository.findBySlugVisibleTo(req.params.slug, callbackOrgId, userId)
       : null;
     const replyOpts = (agentRow?.config as { replyOptions?: { includeCitations?: boolean } } | undefined)?.replyOptions;
     if (replyOpts && replyOpts.includeCitations === true) includeCitations = true;
@@ -2055,7 +2086,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   let persisted: { messageId: string; persistedAttachments: PersistedAttachment[] } | null = null;
   if (userId && callbackOrgId) {
     try {
-      const agent = await agentRepository.findBySlug(req.params.slug, callbackOrgId);
+      const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, callbackOrgId, userId);
       if (!agent) {
         log.warn(`[agent-chat/result] agent org-scoped miss slug=${req.params.slug} orgId=${callbackOrgId ?? "none"} userId=${userId ?? "none"} sessionId=${req.params.convId}`);
         res.status(404).json({ success: false, error: "Agent not found" });
@@ -3150,7 +3181,13 @@ async function runAgentChatViaSse(
               }
             },
             onDebug: (_sid, debugEvent) => {
-              pendingStreams.get(callbackId)?.sendEvent("debug", { debugEvent });
+              // Same gate as the legacy /progress path (line ~325/1901): debug
+              // frames carry the full system prompt / tool policy, so only the
+              // agent's editors or a Claw admin may receive them. Without this
+              // check the SSE transport (CLAW_SSE_TRANSPORT=on) re-opens PY-JP-012.
+              const debugStream = pendingStreams.get(callbackId);
+              if (!debugStream?.allowDebug) return;
+              debugStream.sendEvent("debug", { debugEvent });
             },
             onCancelled: (_sid, reason) => {
               // Distinct cancel signal so the v3 chat UI can drop its typing
