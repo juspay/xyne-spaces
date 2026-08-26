@@ -1,3 +1,31 @@
+## [1.226.0](https://github.com/juspay/xyne-spaces/compare/v1.225.0...v1.226.0) (2026-08-26)
+
+
+### Features
+
+* control call setup from channel URL params ([#86](https://github.com/juspay/xyne-spaces/issues/86)) ([01650c4](https://github.com/juspay/xyne-spaces/commit/01650c4ed055e9cd771c19f1d593c0a71981346e))
+
+
+### Bug Fixes
+
+* auth middleware set user role ([#1039](https://github.com/juspay/xyne-spaces/issues/1039)) ([b197bb7](https://github.com/juspay/xyne-spaces/commit/b197bb717d0a4358008ad123b9ba8136044b7d7f))
+
+## [1.225.0](https://github.com/juspay/xyne-spaces/compare/v1.224.1...v1.225.0) (2026-08-26)
+
+
+### Features
+
+* self-serve Slack DM, group DM & channel migration wi… ([#896](https://github.com/juspay/xyne-spaces/issues/896)) ([61858b6](https://github.com/juspay/xyne-spaces/commit/61858b6167b8471ce892c82e325a3a26170d1b95))
+
+## [1.224.1](https://github.com/juspay/xyne-spaces/compare/v1.224.0...v1.224.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* fixes html preview character encoding issue ([#1016](https://github.com/juspay/xyne-spaces/issues/1016)) ([10a2f6a](https://github.com/juspay/xyne-spaces/commit/10a2f6af478b9ea77e4e71bce7da1a44dba73191))
+* fixes ticket search and board reset issue ([#528](https://github.com/juspay/xyne-spaces/issues/528)) ([27d816e](https://github.com/juspay/xyne-spaces/commit/27d816e9bbce14c3b05e109e030a7fcf32b0041f))
+* sync recording canvas titles ([#952](https://github.com/juspay/xyne-spaces/issues/952)) ([6779a8f](https://github.com/juspay/xyne-spaces/commit/6779a8f419958bdfc68fe961c6d037b06ace5ad4))
+
 ## [1.224.0](https://github.com/juspay/xyne-spaces/compare/v1.223.0...v1.224.0) (2026-08-25)
 
 

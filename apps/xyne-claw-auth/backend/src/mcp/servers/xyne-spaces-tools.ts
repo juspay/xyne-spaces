@@ -3622,9 +3622,13 @@ const spacesCanvases: ToolDef = {
         if (c.lastEditedAt) parts.push(`  Last edited: ${toIST(c.lastEditedAt)}`);
         else if (c.updatedAt) parts.push(`  Updated: ${toIST(c.updatedAt)}`);
         parts.push(`  ID: ${c.id}`);
-        if (c.viewAccessId) {
-          pushCanvasCitation(citations, c.viewAccessId, idx + 1, c.title);
-        }
+        // Prefer viewAccessId, but fall back to the canonical canvas id: the
+        // Spaces `getCanvas` query resolves a canvas by id OR viewAccessId OR
+        // editAccessId (see backend zero/queries.ts), so `/chat/canvas/<id>` is
+        // a valid link too. Without this fallback, canvases that never got a
+        // viewAccessId (older/locally-seeded rows) emit no citation at all and
+        // render as an empty token in the answer.
+        pushCanvasCitation(citations, c.viewAccessId || c.id, idx + 1, c.title);
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
 

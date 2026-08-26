@@ -140,6 +140,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const requestedTab = useMemo(
+    () => new URLSearchParams(location.search).get('tab'),
+    [location.search],
+  );
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const currentUser = useSelf();
 
@@ -149,7 +153,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [failure, setFailure] = useState<RecordingLoadFailure | null>(null);
   // Which of the two panes to show. The concrete second tab (transcript while live,
   // summary once ended) is derived below, so only the notes/not-notes choice is held.
-  const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(getRecordingV2Tab);
+  const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(() =>
+    requestedTab === 'notes' ? 'notes' : getRecordingV2Tab(),
+  );
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
@@ -182,6 +188,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Which line the transcript panel opens on: set by a timeline marker, null when the
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
+
+  useEffect(() => {
+    if (requestedTab === 'notes') {
+      setTabPreference('notes');
+    }
+  }, [recordingId, requestedTab]);
 
   const exportGoogleDoc = async (documentTitle?: string): Promise<void> => {
     if (!recording || isExportingGoogleDoc) return;
@@ -320,7 +332,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const liveTabRecordingIdRef = useRef<string | null>(null);
   if (isLive && recordingId && liveTabRecordingIdRef.current !== recordingId) {
     liveTabRecordingIdRef.current = recordingId;
-    setTabPreference(getLiveRecordingV2Tab(recordingId));
+    setTabPreference(requestedTab === 'notes' ? 'notes' : getLiveRecordingV2Tab(recordingId));
   }
 
   // j/k keyboard navigation between recordings
