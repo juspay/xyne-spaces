@@ -33,21 +33,25 @@ export function closeOrphanFinalizerWorker(): void {
   }
 }
 
-async function runtimeHasAnyActiveRuns(): Promise<boolean> {
+async function getRuntimeActiveSessionIds(): Promise<Set<string> | null> {
   try {
     const res = await fetch(`${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/healthz/ready`, {
       method: "GET",
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) {
-      log.warn(`[orphan-finalizer] runtime readiness check returned HTTP ${res.status}; skipping`);
-      return true;
+      log.warn(`[orphan-finalizer] runtime readiness check returned HTTP ${res.status}; skipping tick`);
+      return null;
     }
-    const body = (await res.json().catch(() => ({}))) as { activeRuns?: unknown };
-    return typeof body.activeRuns === "number" ? body.activeRuns > 0 : true;
+    const body = (await res.json().catch(() => ({}))) as { activeSessionIds?: unknown };
+    if (!Array.isArray(body.activeSessionIds)) {
+      log.warn("[orphan-finalizer] runtime did not report activeSessionIds; skipping tick");
+      return null;
+    }
+    return new Set(body.activeSessionIds.filter((s): s is string => typeof s === "string"));
   } catch (err) {
-    log.warn(`[orphan-finalizer] runtime readiness check failed; skipping: ${errMsg(err)}`);
-    return true;
+    log.warn(`[orphan-finalizer] runtime readiness check failed; skipping tick: ${errMsg(err)}`);
+    return null;
   }
 }
 
@@ -67,17 +71,17 @@ async function tickOnce(): Promise<void> {
     });
     if (candidates.length === 0) return;
 
-    // xyne-claw currently exposes active-run count but not a non-mutating
-    // per-session liveness route. Be conservative: if any runtime run is live,
-    // skip this silent cleanup tick rather than risk aborting a long run.
-    if (await runtimeHasAnyActiveRuns()) {
-      log.info(`[orphan-finalizer] ${candidates.length} old running row(s) found, but runtime has active runs; skipping`);
+    const activeSessionIds = await getRuntimeActiveSessionIds();
+    if (activeSessionIds === null) return;
+    const orphans = candidates.filter((run) => !activeSessionIds.has(run.sessionId));
+    if (orphans.length === 0) {
+      log.info(`[orphan-finalizer] ${candidates.length} old running row(s), all still active on runtime; nothing to reap`);
       return;
     }
 
     let finalized = 0;
     const now = Date.now();
-    for (const run of candidates) {
+    for (const run of orphans) {
       const ok = await finalizeOrphanedRun(run, ERROR, "orphan-finalizer");
       if (!ok) continue;
       finalized++;
