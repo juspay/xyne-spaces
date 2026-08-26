@@ -779,15 +779,6 @@ async function createNonParticipantSystemMessages(
     // Combine individual user IDs with group member user IDs and deduplicate
     const allMentionedUserIds = [...new Set([...mentionedUserIds, ...groupMemberIds])];
 
-    const npLinkedAsHost = await tx.run(
-      zql.connect_channel.where('hostChannelId', channelId).where('status', 'ACTIVE').one(),
-    );
-    const npLinkedAsPointer = npLinkedAsHost
-      ? null
-      : await tx.run(zql.connect_channel.where('guestChannelId', channelId).where('status', 'ACTIVE').one());
-    const npIsConnectChannel =
-      channel?.isConnectEnabled === true || Boolean(npLinkedAsHost) || Boolean(npLinkedAsPointer);
-
     // Check which mentioned users are NOT channel participants
     const nonParticipants: Array<{ userId: string; userName: string }> = [];
 
@@ -801,9 +792,11 @@ async function createNonParticipantSystemMessages(
         // User is not a participant - get their name
         const user = await tx.run(zql.users.where('id', userId).one());
         if (user) {
-          // External user on a plain channel → not addable; skip so no "Add them" banner is shown for them.
-          if (!npIsConnectChannel && user.workspaceId !== workspaceId) {
-            logger.info(`⛔ [NON-PARTICIPANT] Skipping external user ${userId} on non-connect channel ${channelId}`);
+          // The "Add them" banner is offered ONLY for the tagger's OWN-workspace members (`workspaceId`
+          // is the sender's workspace, authData.workspaceId). Anyone external (host, guest, or unrelated
+          // org) is a plain mention with no banner — external people join only via the invite handshake
+          // or the +Add-people picker, never this @tag path. Uniform across normal/connect/GroupDM.
+          if (user.workspaceId !== workspaceId) {
             continue;
           }
           nonParticipants.push({
@@ -4172,31 +4165,13 @@ export function createMutators(
 
           // 3️⃣ Perform the action
           if (action === 'add' || action === 'add_all') {
-            // Enforce addUserPolicy before adding anyone
-            const channel = await tx.run(zql.channels.where('id', channelId).one());
-            if (!channel) throw new Error('Channel not found');
+            const passedChannel = await tx.run(zql.channels.where('id', channelId).one());
+            if (!passedChannel) throw new Error('Channel not found');
 
-            if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
-              const actionChannelStats = await tx.run(zql.channel_stats.where('channelId', channelId).one());
-              const addUserPolicy = actionChannelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
-              if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY) {
-                const senderParticipation = await tx.run(
-                  zql.channel_participants
-                    .where('channelId', channelId)
-                    .where('userId', authData.sub)
-                    .one()
-                );
-                if (senderParticipation?.role === ChannelRole.MEMBER) {
-                  throw new Error('Only admins can add users to this channel');
-                }
-              }
-            }
-
-            // Slack-Connect fence (§15): EXTERNAL (cross-workspace) people may ONLY enter a channel through
-            // the connect invite flow — never this @tag "Add them" path. The `channel.addParticipants` mutator
-            // and the SearchUser picker already enforce this; this is the sibling add path (§2/§14) that must
-            // match, else it's a loophole to inject a foreign user into a plain channel. Connect channels are
-            // exempt (they legitimately hold cross-org members, gated by their own flow).
+            // Slack-Connect: a GUEST triggers "Add them" from their POINTER channel, but a connect channel's
+            // participants + membership live on the HOST. Resolve pointer→host so the add lands on the host and
+            // the member-sync mirror produces the canonical shape (hidden host participant + pointer participant
+            // + connect_channel_member). Host-side callers already pass the host id, so this is a no-op for them.
             const linkedAsHost = await tx.run(
               zql.connect_channel.where('hostChannelId', channelId).where('status', 'ACTIVE').one(),
             );
@@ -4206,19 +4181,43 @@ export function createMutators(
                   zql.connect_channel.where('guestChannelId', channelId).where('status', 'ACTIVE').one(),
                 );
             const isConnectChannel =
-              channel.isConnectEnabled === true || Boolean(linkedAsHost) || Boolean(linkedAsPointer);
+              passedChannel.isConnectEnabled === true || Boolean(linkedAsHost) || Boolean(linkedAsPointer);
+            const hostChannelId = linkedAsPointer?.hostChannelId ?? channelId;
+            const channel = linkedAsPointer
+              ? await tx.run(zql.channels.where('id', hostChannelId).one())
+              : passedChannel;
+            if (!channel) throw new Error('Host channel not found');
 
-            // R4.2 parity for the @tag "Add them" path: on a DEFAULT connect channel, only the requester's
-            // OWN-workspace users (or members of an ALREADY-connected org, host-org side) may be added — a
-            // brand-new org must go through the invite handshake. Resolve the requester + host once here.
-            const isDefaultConnect = isConnectChannel && channel.scopeType === ChannelScopeType.DEFAULT;
-            const requestingUserRow = isDefaultConnect
-              ? await tx.run(zql.users.where('id', authData.sub).one())
-              : null;
-            const npConnectLink = linkedAsHost ?? linkedAsPointer;
-            const npHostChannelId = npConnectLink?.hostChannelId ?? channelId;
-            const npHostWorkspaceId = npConnectLink?.hostWorkspaceId ?? channel.workspaceId;
-            const npRequesterIsHostOrg = requestingUserRow?.workspaceId === npHostWorkspaceId;
+            // A connect member may add (needs no host participant row) and bypasses addUserPolicy — mirrors
+            // channel.addParticipants so the @tag path and the +Add-people path behave identically.
+            const isConnectMember =
+              isConnectChannel &&
+              Boolean(
+                await tx.run(
+                  zql.connect_channel_member
+                    .where('channelId', hostChannelId)
+                    .where('userId', authData.sub)
+                    .where('leftAt', 'IS', null)
+                    .one(),
+                ),
+              );
+
+            // Enforce addUserPolicy before adding anyone (skipped for connect members and group DMs).
+            if (channel.scopeType !== ChannelScopeType.GROUP_DM && !isConnectMember) {
+              const actionChannelStats = await tx.run(zql.channel_stats.where('channelId', hostChannelId).one());
+              const addUserPolicy = actionChannelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+              if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY) {
+                const senderParticipation = await tx.run(
+                  zql.channel_participants
+                    .where('channelId', hostChannelId)
+                    .where('userId', authData.sub)
+                    .one()
+                );
+                if (senderParticipation?.role === ChannelRole.MEMBER) {
+                  throw new Error('Only admins can add users to this channel');
+                }
+              }
+            }
 
             // Add users to channel (with validation)
             const validUsers = [];
@@ -4228,49 +4227,33 @@ export function createMutators(
               const user = await tx.run(zql.users.where('id', userId).one());
               if (!user) continue;
 
-              // Non-connect channel: refuse a foreign-workspace user (the loophole this closes).
-              if (!isConnectChannel && user.workspaceId !== channel.workspaceId) {
+              // @tag "Add them" adds ONLY the requester's OWN-workspace members (authData.workspaceId) — the
+              // exact mirror of the banner rule (createNonParticipantSystemMessages), so banner and action can
+              // never diverge. External people (host, guest, or an unrelated org) are never added here; they
+              // join via the invite handshake or the +Add-people picker. Uniform across normal/connect/GroupDM.
+              if (user.workspaceId !== authData.workspaceId) {
                 continue;
-              }
-
-              // DEFAULT connect channel: enforce the own-org / already-connected-org rule (skip violators).
-              if (
-                isDefaultConnect &&
-                requestingUserRow &&
-                user.workspaceId !== requestingUserRow.workspaceId
-              ) {
-                if (!npRequesterIsHostOrg) continue; // a guest may only add own-workspace users
-                const orgAlreadyLinked = await tx.run(
-                  zql.connect_channel
-                    .where('hostChannelId', npHostChannelId)
-                    .where('guestWorkspaceId', user.workspaceId)
-                    .where('status', 'ACTIVE')
-                    .one(),
-                );
-                if (!orgAlreadyLinked) continue; // new org must be invited, not @tag-added
               }
 
               const participantId = uuidv4();
               const channelUserStatusId = uuidv4();
 
-              // Use utility function to properly add participant and update count
-              const { added } = await addChannelParticipant(tx, channelId, userId, ChannelRole.MEMBER, participantId, channelUserStatusId, Date.now());
+              // Add to the HOST channel → triggers the member-sync mirror to build the canonical member shape.
+              const { added } = await addChannelParticipant(tx, hostChannelId, userId, ChannelRole.MEMBER, participantId, channelUserStatusId, Date.now());
 
               if (added) {
                 validUsers.push({ userId, userName: user.displayName || user.name });
               }
             }
 
-            // Send system message for added participants
+            // Send system message for added participants (posts on the HOST channel, visible to all orgs).
             if (validUsers.length > 0) {
-              if (channel) {
-                await sendAddAndRemoveParticipantsSystemMessage(tx, {
-                  channel,
-                  newParticipants: validUsers,
-                  authData,
-                  operationType: 'participants_added',
-                });
-              }
+              await sendAddAndRemoveParticipantsSystemMessage(tx, {
+                channel,
+                newParticipants: validUsers,
+                authData,
+                operationType: 'participants_added',
+              });
             }
           }
 

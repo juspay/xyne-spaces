@@ -1,6 +1,7 @@
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, ChannelParticipantPreviousValue } from '../types';
 import { db } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
@@ -38,13 +39,18 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
     logger.info(`[ChannelParticipantsHandler] onInsert called for entity: ${job.entityId}`);
 
     try {
-      // Query DB for participant record
-      const participant = await db.channelParticipant.findUnique({
-        where: { id: job.entityId },
-        select: {
-          channelId: true,
-          userId: true,
-        }
+      // Query DB for participant record. runAsSystem: this side-effect runs under WHOEVER triggered the
+      // write (often a GUEST). A cross-org add lands the participant on the HOST channel (host workspace),
+      // so a caller-scoped read here returns null → the connect member-sync mirror below never fires and the
+      // member row / hidden-status is never written (the "guest add shows added but no member" bug).
+      const participant = await runAsSystem(async () => {
+        return await db.channelParticipant.findUnique({
+          where: { id: job.entityId },
+          select: {
+            channelId: true,
+            userId: true,
+          },
+        });
       });
 
       if (!participant) {
