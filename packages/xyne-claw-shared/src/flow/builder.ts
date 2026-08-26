@@ -700,6 +700,99 @@ export function buildGoalSuggestionFlow(
     .build();
 }
 
+/**
+ * Feedback options for buildFeedbackFlow. `value` is the machine value
+ * captured on click; `sentiment` optionally maps the choice onto the run's
+ * up/down rating signal (AgentRun.rating).
+ */
+export interface FeedbackOptionDef {
+  label: string;
+  value: string;
+  sentiment?: 'up' | 'down';
+}
+
+/**
+ * Collect-feedback — a configurable button row an agent posts after a run
+ * (e.g. an RCA agent asking "Was this RCA correct?"). Each button captures a
+ * `value`; tapping fires flow-action.ts's `collect-feedback` branch, which
+ * verifies the caller and records the choice on the run's rating signal
+ * (AgentRun.rating / ratingComment). When the agent supplies no options the
+ * caller passes the built-in 👍 / 👎 default.
+ *
+ * Mirrors buildUserQuestionFlow's shape — agent-supplied options, HMAC-bound
+ * routing carried in flowJSON.data, and an answered-phase collapse so the card
+ * can't be tapped twice. Primitive components only (text + buttons), so it
+ * renders on the deployed dashboard with no Spaces flow-schema change.
+ *
+ * Each button carries its choice in the actionId (`collect-feedback:<value>`)
+ * because FlowAction submits are distinguished by actionId, not a value field.
+ *
+ * The `fallbackText` in setData is the stored-message preview — the "fallback
+ * node" every rich card flow carries (see buildCodeFlow/buildDiffFlow/
+ * buildChartFlow). Without it the persisted chat preview degrades to the
+ * literal "Flow JSON".
+ */
+export function buildFeedbackFlow(
+  prompt: string,
+  options: FeedbackOptionDef[],
+  context: {
+    feedbackId: string;
+    sessionId: string;
+    agentSlug: string;
+    channelId: string;
+    conversationId: string;
+    userId: string;
+    signature?: string;
+  },
+  opts?: {
+    phase?: 'pending' | 'answered';
+    chosenLabel?: string;
+    decidedAt?: string;
+  },
+): FlowDefinition {
+  const phase = opts?.phase ?? 'pending';
+  const b = new FlowBuilder(`collect-feedback-${context.feedbackId}`).setTitle('Feedback');
+
+  if (phase === 'answered') {
+    b.addText('prompt', prompt, { variant: 'muted' });
+    b.addText('chosen', `✅ Thanks — you chose **${opts?.chosenLabel ?? ''}**`, { variant: 'success' });
+  } else {
+    b.addText('prompt', prompt);
+    b.addRow(
+      'actions',
+      options.map((option, index) =>
+        FlowBuilder.button(
+          `fb-${index}`,
+          option.label,
+          {
+            type: 'submit',
+            actionId: `collect-feedback:${option.value}`,
+            successMessage: 'Thanks for the feedback!',
+          },
+          { variant: index === 0 ? 'primary' : 'secondary' },
+        ),
+      ),
+    );
+  }
+
+  return b
+    .setData({
+      actionType: 'collect-feedback',
+      kind: 'feedback',
+      fallbackText: `Feedback: ${prompt}`,
+      feedbackId: context.feedbackId,
+      sessionId: context.sessionId,
+      agentSlug: context.agentSlug,
+      channelId: context.channelId,
+      conversationId: context.conversationId,
+      userId: context.userId,
+      options,
+      ...(opts?.decidedAt ? { decidedAt: opts.decidedAt } : {}),
+      ...(context.signature ? { signature: context.signature } : {}),
+    })
+    .build();
+}
+
 export function buildAgentCallProposalFlow(
   context: {
     proposerAgentSlug: string;

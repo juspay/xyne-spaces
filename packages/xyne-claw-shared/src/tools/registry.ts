@@ -8,6 +8,7 @@ import * as google from "./google/index.js";
 import * as microsoft from "./microsoft/index.js";
 import * as schedule from "./schedule/index.js";
 import * as askQuestion from "./ask-question/index.js";
+import * as collectFeedback from "./collect-feedback/index.js";
 import * as codeArtifacts from "./code-artifacts/index.js";
 import * as addCitations from "./add-citations/index.js";
 import * as attachment from "./attachment/index.js";
@@ -46,6 +47,7 @@ function register(tool: ToolDefinition): void {
 register(schedule.scheduleTask);
 register(schedule.scheduledJobControl);
 register(askQuestion.askUserQuestion);
+register(collectFeedback.collectFeedback);
 register(codeArtifacts.postCodeBlock);
 register(codeArtifacts.postDiff);
 register(codeArtifacts.postChart);

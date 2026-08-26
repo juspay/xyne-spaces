@@ -23,7 +23,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, buildFeedbackFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -1145,6 +1145,110 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     }
 
     // ── 3. User question answer ───────────────────────────────────────────────
+    if (actionType === "collect-feedback") {
+      const feedbackId = data["feedbackId"] as string;
+      const fbSessionId = data["sessionId"] as string;
+      const fbAgentSlug = data["agentSlug"] as string;
+      const fbSpacesAppId = data["spacesAppId"] as string | undefined;
+      const fbChannelId = data["channelId"] as string;
+      const fbConversationId = data["conversationId"] as string;
+      const fbUserId = data["userId"] as string;
+      const signature = data["signature"] as string | undefined;
+
+      if (!feedbackId || !fbSessionId || !fbUserId || !signature) {
+        res.status(400).json({ type: "error", message: "Missing collect-feedback fields" } satisfies AppActionResponse);
+        return;
+      }
+
+      // Verify caller is the intended user. Fail closed on missing callerUserId.
+      if (!callerUserId || callerUserId !== fbUserId) {
+        log.error(`[flow-action] Unauthorized feedback: caller ${callerUserId ?? "(none)"} != expected ${fbUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+
+      // The card's identity + routing fields are HMAC-bound at creation (the
+      // buildFeedbackFlow sign site in webhook.ts). Verify here so a tampered
+      // flowJSON.data (session, channel, conversation, or user swap) cannot
+      // write a rating onto someone else's run.
+      const { verifyActionSignature } = await import("./mcp.js");
+      const feedbackActionPayload = {
+        actionType: "collect-feedback",
+        feedbackId,
+        sessionId: fbSessionId,
+        userId: fbUserId,
+        agentSlug: fbAgentSlug,
+        spacesAppId: fbSpacesAppId ?? "",
+        channelId: fbChannelId,
+        conversationId: fbConversationId,
+      };
+      if (!verifyActionSignature(feedbackActionPayload, signature)) {
+        log.error("[flow-action] collect-feedback HMAC verification failed");
+        res.status(422).json({ type: "error", message: "Feedback card verification failed" } satisfies AppActionResponse);
+        return;
+      }
+
+      // Each button ships its choice in the actionId (`collect-feedback:<value>`)
+      // because FlowAction submits are distinguished by actionId, not a value.
+      const chosenValue = typeof actionId === "string" && actionId.startsWith("collect-feedback:")
+        ? actionId.slice("collect-feedback:".length)
+        : "";
+      if (!chosenValue) {
+        res.status(400).json({ type: "error", message: "No feedback option selected" } satisfies AppActionResponse);
+        return;
+      }
+
+      try {
+        const { consumeFeedback } = await import("./pending-feedback.js");
+        // GETDEL keeps a double-click idempotent — the card can only be answered once.
+        const stored = await consumeFeedback(feedbackId);
+        if (!stored) {
+          res.json({ type: "close_screen", finalMessage: "This feedback prompt was already answered or has expired." } satisfies AppActionResponse);
+          return;
+        }
+        if (stored.userId && stored.userId !== fbUserId) {
+          log.error(`[flow-action] collect-feedback ownership mismatch: stored ${stored.userId} != caller ${fbUserId}`);
+          res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+          return;
+        }
+        const chosen = stored.options.find((option) => option.value === chosenValue);
+        if (!chosen) {
+          res.status(400).json({ type: "error", message: "Unknown feedback option" } satisfies AppActionResponse);
+          return;
+        }
+
+        // Persist on the run's rating signal (existing columns, no migration).
+        try {
+          const { agentRunRepository } = await import("../repositories/agentRunRepository.js");
+          await agentRunRepository.recordFeedback(
+            fbSessionId,
+            fbUserId,
+            `${chosen.label} (${chosen.value})`,
+            chosen.sentiment,
+          );
+        } catch (persistErr) {
+          log.error(`[flow-action] failed to persist feedback ${feedbackId}: ${persistErr instanceof Error ? persistErr.message : String(persistErr)}`);
+        }
+
+        resp = { type: "close_screen", finalMessage: "✅ Thanks for the feedback!" };
+        res.json(resp);
+        // Collapse the card to its answered phase so it can't be tapped again.
+        void replaceFlowCardWithFlow(messageId, fbAgentSlug, buildFeedbackFlow(stored.prompt, stored.options, {
+          feedbackId,
+          sessionId: fbSessionId,
+          agentSlug: fbAgentSlug,
+          channelId: fbChannelId,
+          conversationId: fbConversationId,
+          userId: fbUserId,
+        }, { phase: "answered", chosenLabel: chosen.label, decidedAt: new Date().toISOString() }), fbConversationId, fbChannelId, fbSpacesAppId);
+        return;
+      } catch (err) {
+        log.error(`[flow-action] collect-feedback error: ${err instanceof Error ? err.message : String(err)}`);
+        res.status(500).json({ type: "error", message: "Failed to record feedback" } satisfies AppActionResponse);
+        return;
+      }
+    }
+
     if (actionType === "user-answer") {
       const isQuestionDismissal = actionId === "dismiss-user-question";
       const questionId = data["questionId"] as string;

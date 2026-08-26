@@ -338,6 +338,19 @@ export const agentRunRepository = {
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
+  /**
+   * Record a collect-feedback choice on the run. Reuses the existing rating
+   * columns (no migration): `comment` always keeps the human label + value so
+   * a custom option ("RCA is correct") is preserved, and `rating` is set only
+   * when the chosen option carries an up/down sentiment. Scoped by userId so a
+   * caller can only annotate their own run.
+   */
+  recordFeedback: (sessionId: string, userId: string, comment: string, rating?: "up" | "down") =>
+    prisma.agentRun.updateMany({
+      where: { sessionId, userId },
+      data: { ratingComment: comment, ratedAt: new Date(), ...(rating ? { rating } : {}) },
+    }),
+
   // Rate by the assistant ChatMessage the run produced. Preferred by the Spaces
   // ask-ai v2 surfaces: the assistant message id is known the instant a turn
   // completes (synced on the `done` frame), whereas the run's sessionId only
