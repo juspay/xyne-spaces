@@ -76,7 +76,7 @@ export function AgentProgressIndicator({
   if (agents.length === 0) return null;
 
   return (
-    <div className='mb-2 flex items-center gap-2 h-5 bg-background'>
+    <div className='flex w-full items-center gap-2 h-5 bg-background'>
       <div className='flex flex-wrap gap-3 text-[11px] text-muted-foreground flex-1 min-w-0'>
         {agents.map(a => (
           <span key={a.agentUserId ?? a.agentSlug ?? 'agent'} style={rowStyle}>
