@@ -1278,7 +1278,11 @@ export const mutators = defineMutators({
       z.object({ channelId: z.string(), updatedAt: z.number() }),
       async ({ tx, ctx, args: { channelId, updatedAt } }) => {
         const participation = await tx.run(
-          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!participation) {
