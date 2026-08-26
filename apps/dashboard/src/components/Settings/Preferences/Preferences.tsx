@@ -14,7 +14,7 @@ import {
   ChevronRight,
   Calendar,
   Search,
-  Video,
+  AudioLines,
   Monitor,
   Smartphone,
   LayoutGrid,
@@ -87,7 +87,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
   { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
-  { id: 'recordings', label: 'Recordings', icon: <Video className='size-4' /> },
+  { id: 'recordings', label: 'Recordings', icon: <AudioLines className='size-4' /> },
   {
     id: 'messaging',
     label: 'Messaging',
