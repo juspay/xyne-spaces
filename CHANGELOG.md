@@ -1,3 +1,10 @@
+## [1.229.1](https://github.com/juspay/xyne-spaces/compare/v1.229.0...v1.229.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* reopenDm resets isClosed on the correct table (channel_user_status) ([#1035](https://github.com/juspay/xyne-spaces/issues/1035)) ([8c6e1fd](https://github.com/juspay/xyne-spaces/commit/8c6e1fd7455396335e351ebc88f655fdd48f4c00))
+
 ## [1.229.0](https://github.com/juspay/xyne-spaces/compare/v1.228.3...v1.229.0) (2026-08-26)
 
 
