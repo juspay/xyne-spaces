@@ -2199,6 +2199,7 @@ const SupportScreen = (): ReactElement => {
         state: {
           conversationId: ticketData.conversationId,
           ticketId: ticketData.id,
+          fromDeskList: true,
         },
       });
     },
@@ -3457,7 +3458,7 @@ const SupportScreen = (): ReactElement => {
                               const back = selectedChannelId
                                 ? `${supportBase}/${selectedChannelId}`
                                 : supportBase;
-                              void navigate(back);
+                              void navigate(back, { replace: true });
                             }}
                             data-track-category='Support'
                             data-track-name='CloseTicketPanel'
@@ -3679,6 +3680,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -3700,6 +3702,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -3726,6 +3729,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -4090,6 +4094,7 @@ export const SupportTicketDetail = ({
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
+    fromDeskList?: boolean;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -4386,15 +4391,27 @@ export const SupportTicketDetail = ({
     // inbox they never visited. Only same-origin paths are honoured — reject
     // absolute URLs and the "//host" / "/\host" protocol-relative forms so
     // router state can't drive an off-site redirect.
+    if (routerState?.fromDeskList) {
+      void navigate(-1);
+      return;
+    }
     const returnToUrl = routerState?.returnToUrl;
     if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
-      void navigate(returnToUrl);
+      void navigate(returnToUrl, { replace: true });
       return;
     }
     const base = navBasePath ?? supportBase;
     const back = channelIdParam ? `${base}/${channelIdParam}` : base;
-    void navigate(back);
-  }, [channelIdParam, navBasePath, navigate, onBack, routerState?.returnToUrl, supportBase]);
+    void navigate(back, { replace: true });
+  }, [
+    channelIdParam,
+    navBasePath,
+    navigate,
+    onBack,
+    routerState?.fromDeskList,
+    routerState?.returnToUrl,
+    supportBase,
+  ]);
 
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
     const windowTarget = dir === 'forward' ? windowNext : windowPrev;
