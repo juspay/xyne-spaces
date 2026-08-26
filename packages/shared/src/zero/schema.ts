@@ -1201,7 +1201,7 @@ export const callTable = table('calls')
     labels: json<string[]>(),
     markedItems: json<any[]>(),
     xyneManaged: boolean(),
-    visibility: enumeration<CallVisibility>(),
+    visibility: enumeration<CallVisibility>().optional(),
   })
   .primaryKey('id');
 
