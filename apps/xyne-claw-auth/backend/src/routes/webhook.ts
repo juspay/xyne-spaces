@@ -1081,6 +1081,7 @@ async function postGoalPhase(
         conversationId: fields.conversationId,
         ...(fields.channelId ? { channelId: fields.channelId } : {}),
         ...(fields.agentSlug ? { agentSlug: fields.agentSlug } : {}),
+        ...(fields.agentName ? { agentName: fields.agentName } : {}),
         userId: fields.spacesAppUserId,
         toolLabel: label,
         status: "working",
@@ -2180,7 +2181,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // tool calls), not as a permanent chat message — the goal loop's meta lines
     // shouldn't clutter the thread. The terminal outcome stays a real message.
     await postGoalPhase(
-      { conversationId: payload.conversationId, channelId: payload.channelId, agentSlug: agent.slug, spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+      { conversationId: payload.conversationId, channelId: payload.channelId, agentSlug: agent.slug, agentName: agent.name, spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
       intercept.replyToUser,
     );
   } else {
@@ -2609,6 +2610,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             agentId: agent.id,
             agentOrgId: agent.orgId,
             agentSlug: agent.slug,
+            agentName: agent.name,
           responseMode: "conversation",
           appToken: agent.appToken,
           spacesAppId: agent.spacesAppId,
@@ -2987,6 +2989,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: eventType === "USER_MENTIONED" ? "approval" as const : "conversation" as const,
       appToken: agent.appToken,
       spacesAppId: agent.spacesAppId,
@@ -3148,6 +3151,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               conversationId: payload.conversationId,
               channelId: payload.channelId,
               agentSlug: agent.slug,
+              agentName: agent.name,
               userId: agent.spacesAppUserId,
               toolLabel: "Working on it...",
               status: "working",
@@ -3892,6 +3896,7 @@ export async function handleAutomationWebhook(
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: "conversation",
       appToken,
       spacesAppId: agent.spacesAppId!,
@@ -4223,6 +4228,7 @@ export async function handleAutomationWebhook(
       conversationId: payload.conversationId ?? "",
       task: task!,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: "conversation",
       appToken: decryptStoredField(agent.spacesAppToken!),
       spacesAppId: agent.spacesAppId!,
@@ -5265,6 +5271,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
       agentSlug: ctx.agentSlug,
+      agentName: ctx.agentName,
       userId: ctx.spacesAppUserId,
       status: "done",
     }, ctx.appToken).catch((err) =>
@@ -5534,6 +5541,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             conversationId: ctx.conversationId,
             channelId: ctx.channelId,
             agentSlug: ctx.agentSlug,
+            agentName: ctx.agentName,
             spacesAppUserId: ctx.spacesAppUserId,
             appToken: ctx.appToken,
             toolLabel: "Starting the plan…",
@@ -7413,6 +7421,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         conversationId: ctx.conversationId,
         channelId: ctx.channelId,
         agentSlug: ctx.agentSlug,
+        agentName: ctx.agentName,
         userId: ctx.spacesAppUserId,
         toolLabel,
         status: "working",
