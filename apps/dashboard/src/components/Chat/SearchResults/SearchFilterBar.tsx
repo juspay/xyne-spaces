@@ -127,15 +127,18 @@ const RANK_PROFILE_OPTIONS_BY_TYPE: Partial<
   ],
   files: [
     { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
   ],
   tickets: [
     { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'semantic_ranking', label: 'semantic_ranking' },
   ],
   desk: [
     { value: 'default_native', label: 'default_native' },
+    { value: 'personalized', label: 'personalized' },
     { value: 'default_fuzzy', label: 'default_fuzzy' },
     { value: 'global_sorted', label: 'global_sorted' },
     { value: 'default_bm25', label: 'default_bm25' },
