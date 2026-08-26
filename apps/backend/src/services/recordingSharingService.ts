@@ -1034,13 +1034,16 @@ export class RecordingSharingService {
     const metadata = asMetadata(recording.metadata);
     const detailedSummaryCanvasId = metadata['detailedSummaryCanvasId'];
     const notesCanvasId = metadata['notesCanvasId'];
-    if (typeof detailedSummaryCanvasId !== 'string' || detailedSummaryCanvasId.length === 0) {
-      throw new RecordingSharingError('Detailed summary canvas is not ready yet', 409);
+    const canvasIds: string[] = [];
+
+    if (typeof detailedSummaryCanvasId === 'string' && detailedSummaryCanvasId.length > 0) {
+      canvasIds.push(detailedSummaryCanvasId);
     }
-    if (typeof notesCanvasId !== 'string' || notesCanvasId.length === 0) {
-      throw new RecordingSharingError('Recording notes canvas is not ready yet', 409);
+    if (typeof notesCanvasId === 'string' && notesCanvasId.length > 0) {
+      canvasIds.push(notesCanvasId);
     }
-    return [...new Set([detailedSummaryCanvasId, notesCanvasId])];
+
+    return [...new Set(canvasIds)];
   }
 
 }
