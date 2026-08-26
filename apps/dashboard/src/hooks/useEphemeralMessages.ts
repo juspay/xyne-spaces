@@ -1,5 +1,7 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
+import { useSelector } from '@xstate/react';
 import { websocketService } from '../services/clients/socketClient';
+import { authActor } from '../machines/authMachine';
 
 export type EphemeralMessage = {
   messageId: string;
@@ -27,16 +29,29 @@ type EphemeralMessageEvent = {
 const store = new Map<string, EphemeralMessage[]>();
 const listeners = new Set<() => void>();
 const EMPTY: EphemeralMessage[] = [];
-let initialized = false;
+
+/** Who the messages currently held in `store` were delivered to. */
+let currentUserId: string | null = null;
 
 function notify(): void {
   for (const listener of listeners) listener();
+}
+
+function clearStore(): void {
+  if (store.size === 0) return;
+  store.clear();
+  notify();
 }
 
 function handleEphemeralMessage(event: EphemeralMessageEvent): void {
   const message = event.message;
   const channelId = event.channelId;
   if (!message || !channelId) return;
+
+  // The server routes these to the recipient's user room, so this is a second guard:
+  // it keeps another account's message out of the store after a user switch in the
+  // same tab, before `clearStore` has run.
+  if (message.visibleTo && currentUserId && message.visibleTo !== currentUserId) return;
 
   const existing = store.get(channelId) ?? EMPTY;
   if (existing.some(m => m.messageId === message.messageId)) return;
@@ -48,21 +63,6 @@ function handleEphemeralMessage(event: EphemeralMessageEvent): void {
   notify();
 }
 
-// Register the websocket listener exactly once for the lifetime of the page.
-function ensureInitialized(): void {
-  if (initialized) return;
-  initialized = true;
-
-  const start = async (): Promise<void> => {
-    if (!websocketService.isConnectedToServer()) {
-      await websocketService.connect();
-    }
-    websocketService.on('ephemeral_message', handleEphemeralMessage);
-  };
-
-  void start();
-}
-
 function subscribe(callback: () => void): () => void {
   listeners.add(callback);
   return (): void => {
@@ -71,7 +71,42 @@ function subscribe(callback: () => void): () => void {
 }
 
 export function useEphemeralMessages(channelId: string | undefined): EphemeralMessage[] {
-  ensureInitialized();
+  // Selected narrowly rather than via useAuth(), which subscribes to the whole auth
+  // state — this hook runs inside ConversationPanelV2 and ThreadPannel.
+  const userId = useSelector(authActor, state => state.context.user?.id ?? null);
+
+  // A different account in the same tab must not inherit the previous one's messages.
+  useEffect(() => {
+    if (currentUserId === userId) return;
+    currentUserId = userId;
+    clearStore();
+  }, [userId]);
+
+  // Registered per mount, not once per page: `connect()` calls removeAllListeners() and
+  // builds a new Socket (socketClient.ts), so a listener attached once is silently lost
+  // the first time anything reconnects. Same shape as DynamicDashboardPanel.
+  useEffect(() => {
+    let active = true;
+
+    // A fresh socket means a fresh session — anything held is unreplayable, and may
+    // belong to a login that has since been replaced.
+    const handleConnect = (): void => clearStore();
+
+    void websocketService
+      .connect()
+      .then(() => {
+        if (!active) return;
+        websocketService.on('ephemeral_message', handleEphemeralMessage);
+        websocketService.on('connect', handleConnect);
+      })
+      .catch(() => {});
+
+    return (): void => {
+      active = false;
+      websocketService.removeListener('ephemeral_message', handleEphemeralMessage);
+      websocketService.removeListener('connect', handleConnect);
+    };
+  }, []);
 
   return useSyncExternalStore(subscribe, () =>
     channelId ? (store.get(channelId) ?? EMPTY) : EMPTY,

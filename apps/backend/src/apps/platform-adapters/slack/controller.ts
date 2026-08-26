@@ -442,9 +442,26 @@ export class SlackController {
 		const targetUserId = parsed.data.user;
 		const targetUser =
 			(await repositories.users.findById(targetUserId)) ??
-			(await repositories.users.findByMetadataField("slackId", targetUserId));
+			(await repositories.users.findByMetadataField(
+				"slackId",
+				targetUserId,
+				context.workspaceId,
+			));
 		if (!targetUser) {
-			res.status(200).json({ ok: false, error: "user_not_found" });
+			res.status(200).json({ ok: false, error: "user_not_in_channel" });
+			return;
+		}
+
+		// slackChannelValidation only covers the bot's own access to the channel. The
+		// recipient needs checking too, the way the native route does at
+		// chatController.postEphemeral — otherwise an app can address a message at
+		// someone with no part in the channel it claims to come from.
+		const isParticipant = await repositories.channelParticipants.isParticipant(
+			channelId,
+			targetUser.id,
+		);
+		if (!isParticipant) {
+			res.status(200).json({ ok: false, error: "user_not_in_channel" });
 			return;
 		}
 
@@ -482,7 +499,7 @@ export class SlackController {
 			timestamp: new Date(),
 		});
 
-		const slackResponse = transformPostEphemeralResponse(messageId, channelId);
+		const slackResponse = transformPostEphemeralResponse(messageId);
 		res.status(200).json(slackResponse);
 	});
 

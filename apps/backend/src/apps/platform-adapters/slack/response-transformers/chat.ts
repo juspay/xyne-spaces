@@ -29,11 +29,9 @@ export function transformPostMessageResponse(
 
 export function transformPostEphemeralResponse(
 	messageId: string,
-	channelId: string,
 ): SlackChatPostEphemeralResponse {
 	return {
 		ok: true,
-		channel: channelId,
 		message_ts: messageId,
 	};
 }

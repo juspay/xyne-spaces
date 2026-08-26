@@ -124,7 +124,6 @@ export interface SlackChatPostMessageResponse {
 }
 export interface SlackChatPostEphemeralResponse {
 	ok: true;
-	channel: string;
 	message_ts: string;
 }
 

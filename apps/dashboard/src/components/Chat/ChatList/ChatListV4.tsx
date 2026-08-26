@@ -416,6 +416,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
     const byAnchor = new Map<number, EphemeralMessage[]>();
     const leading: EphemeralMessage[] = [];
     for (const em of ephemeralMessages ?? []) {
+      // Channel-level ephemerals only. The backend falls back to the channel id when no
+      // thread was targeted, so anything else is addressed to a thread and belongs in
+      // ThreadPannel, not in the main feed.
+      if (em.conversationId !== channelId) continue;
       const t = new Date(em.createdAt).getTime();
       let anchor = -1;
       for (let i = 0; i < combinedMessages.length; i++) {
@@ -431,7 +435,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       }
     }
     return { ephemeralsByAnchorIndex: byAnchor, leadingEphemerals: leading };
-  }, [ephemeralMessages, combinedMessages]);
+  }, [ephemeralMessages, combinedMessages, channelId]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const isConversationFullyVisible = useCallback(

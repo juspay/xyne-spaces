@@ -231,6 +231,24 @@ export class ChatController {
   }
 
   /**
+   * Content for a non-flow message: markdown is stored as-is after sanitizing, plain
+   * text goes through attachment and mention processing. Shared by postMessage and
+   * postEphemeral so the two routes can't drift apart.
+   */
+  private async buildTextContent(
+    fields: Pick<
+      z.infer<typeof PostMessageFieldsSchema>,
+      'text' | 'markdownText' | 'contentFormat' | 'attachments'
+    >,
+    workspaceId: string | undefined,
+  ): Promise<string> {
+    const { text, markdownText, contentFormat, attachments } = fields;
+    if (markdownText) return sanitizeMessageContent(markdownText);
+    if (contentFormat === ContentFormat.MARKDOWN) return sanitizeMessageContent(text || '');
+    return await this.processMessageContent(text, attachments, workspaceId);
+  }
+
+  /**
    * Post a message to a channel or conversation
    * POST /api/external-event/chat/postMessage
    *
@@ -301,12 +319,11 @@ export class ChatController {
         }
         content = built.content;
         isMarkdown = false;
-      } else if (markdownText) {
-        content = sanitizeMessageContent(markdownText);
-      } else if (contentFormat === ContentFormat.MARKDOWN) {
-        content = sanitizeMessageContent(text || '');
       } else {
-          content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
+        content = await this.buildTextContent(
+          { text, markdownText, contentFormat, attachments },
+          req.user?.workspaceId,
+        );
       }
 
       // Messages posted via the internal /api/internal/postAsUser route are authored
@@ -365,6 +382,10 @@ export class ChatController {
    *
    * The message vanishes on reload. A `flow` stays interactive for 30 minutes via
    * ephemeralFlowStore, which is what lets executeAction resolve the owning app.
+   *
+   * Delivery is best-effort and is NOT guaranteed by the 201. Nothing is persisted, so
+   * a recipient with no live socket never receives it and there is nothing to catch up
+   * on when they reconnect. The response reports `delivery: 'best-effort'` to say so.
    */
   postEphemeral = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -373,7 +394,7 @@ export class ChatController {
       if (!bodyResult.success) {
         res.status(400).json({
           error: `Validation error`,
-          code: 'VALIDATION__ERROR',
+          code: 'VALIDATION_ERROR',
           details: bodyResult.error.errors,
         });
         return;
@@ -417,7 +438,9 @@ export class ChatController {
       let isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
 
       if (flow) {
-        const built = this.buildFlowContent(flow, (req as any).auth?.appId);
+        // Verified token appId for app callers; the S2S postAsUser route may pass it in the body.
+        const appId = (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId;
+        const built = this.buildFlowContent(flow, appId);
         if (!built.ok) {
           res.status(400).json({
             error: built.error,
@@ -428,12 +451,11 @@ export class ChatController {
         }
         content = built.content;
         isMarkdown = false;
-      } else if (markdownText) {
-        content = sanitizeMessageContent(markdownText);
-      } else if (contentFormat === ContentFormat.MARKDOWN) {
-        content = sanitizeMessageContent(text || '');
       } else {
-        content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
+        content = await this.buildTextContent(
+          { text, markdownText, contentFormat, attachments },
+          req.user?.workspaceId,
+        );
       }
 
       const messageId = crypto.randomUUID();
@@ -471,6 +493,8 @@ export class ChatController {
         conversationId: conversationId ?? null,
         visibleTo: targetUser.id,
         ephemeral: true,
+        // Broadcast, not delivered: an offline recipient silently misses it.
+        delivery: 'best-effort',
       });
     } catch (error) {
       logger.error('Error posting ephemeral message:', error);

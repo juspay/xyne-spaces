@@ -1346,9 +1346,8 @@ class WebSocketService {
 
         // Send to each subscribed socket
         for (const socketId of subscribedSockets) {
-           if (message.visibleTo) {
+          if (message.visibleTo) {
             const socket = this.io?.sockets.sockets.get(socketId) as AuthenticatedSocket | undefined;
-            logger.info(`[EPHEMERAL-FILTER] socketId=${socketId}, socket.userId=${socket?.userId}, visibleTo=${message.visibleTo}, match=${socket?.userId === message.visibleTo}`);
             if (socket?.userId !== message.visibleTo) continue;
           }
           this.io?.to(socketId).emit('session_activity', {

@@ -287,10 +287,20 @@ export const ThreadMessages = ({
   const queryDetails = conversationDetails;
 
   // Use pre-fetched messages if provided, otherwise use queried
-  const dbMessages = propThreadMessages ?? queriedMessages ?? [];
+  const dbMessages = useMemo(
+    () => propThreadMessages ?? queriedMessages ?? [],
+    [propThreadMessages, queriedMessages],
+  );
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
-  // Ephemeral messages: WebSocket-only, not persisted, visible only to current user
-  const ephemeralMessages = useEphemeralMessages(derivedChannelId);
+  // Ephemeral messages: WebSocket-only, not persisted, visible only to current user.
+  // The hook is channel-scoped, so narrow to this thread: the backend falls back to the
+  // channel id when an ephemeral targets no particular thread, and those belong in the
+  // channel feed rather than in every thread that happens to be open.
+  const channelEphemerals = useEphemeralMessages(derivedChannelId);
+  const ephemeralMessages = useMemo(
+    () => channelEphemerals.filter(em => em.conversationId === derivedConversationId),
+    [channelEphemerals, derivedConversationId],
+  );
   const messages = useMemo(() => {
     if (ephemeralMessages.length === 0) return dbMessages;
     const converted = ephemeralMessages.map(
