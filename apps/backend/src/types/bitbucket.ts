@@ -162,21 +162,6 @@ export interface PullRequestData {
   };
 }
 
-export interface PullRequestDataWithRepo {
-  pr_id: number;
-  branchName: string;
-  sourceBranchName: string;
-  destinationBranchName: string;
-  date: string;
-  numberOfComments: number;
-  repositoryURL: string;
-  prUrl: string;
-  status: string;
-  projectKey: string;
-  repositorySlug: string;
-  ticketId?: string;
-}
-
 export interface PullRequestDataPartial {
   pr_id: number;
   branchName: string;
@@ -245,21 +230,6 @@ export interface BitbucketConfig {
   token?: string;
   projectKey?: string;
   repositorySlug?: string;
-}
-
-export interface RepositoryConfig {
-  projectKey: string;
-  repositorySlug: string;
-  name?: string;
-  displayName?: string;
-}
-
-export interface MultiBitbucketConfig {
-  repositories: RepositoryConfig[];
-  username: string;
-  password: string;
-  baseUrl: string;
-  token?: string;
 }
 
 // Error Types

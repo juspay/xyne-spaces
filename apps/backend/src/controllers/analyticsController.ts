@@ -22,304 +22,71 @@ export class AnalyticsController {
     return req.user!.workspaceId!;
   }
 
-  /**
-   * Get overview statistics
-   * GET /api/analytics/overview?timeRange=7d&workflowType=all
-   */
-  getOverview = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const filters = this.buildWorkspaceFilters(req, {
-        workflowType: req.query.workflowType as string
-      });
-
-      const overview = await this.analyticsRepository.getOverviewStats(filters);
-
-      res.json({
-        success: true,
-        data: overview,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching analytics overview:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch analytics overview',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
+  private groupByParam(req: Request): 'day' | 'hour' | undefined {
+    return req.query.groupBy as 'day' | 'hour' | undefined;
+  }
 
   /**
-   * Get workflow type statistics
-   * GET /api/analytics/workflow-types?timeRange=7d&workflowType=all
+   * Run `produce`, wrap its result in the standard success envelope, and send it.
+   * On failure, log with `logLabel` and reply with the standard 500 envelope
+   * carrying `errorMessage`. `extra` merges extra top-level keys (e.g. `filters`)
+   * between `data` and `timestamp`, preserving the previous response shape.
    */
-  getWorkflowTypes = async (req: Request, res: Response): Promise<void> => {
+  private async respond(
+    res: Response,
+    logLabel: string,
+    errorMessage: string,
+    produce: () => Promise<unknown>,
+    extra?: Record<string, unknown>,
+  ): Promise<void> {
     try {
-      const filters = this.buildWorkspaceFilters(req, {
-        workflowType: req.query.workflowType as string
-      });
-
-      const workflowTypes = await this.analyticsRepository.getWorkflowTypeStats(filters);
-
+      const data = await produce();
       res.json({
         success: true,
-        data: workflowTypes,
-        timestamp: new Date().toISOString()
+        data,
+        ...(extra ?? {}),
+        timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      logger.error('Error fetching workflow types analytics:', error);
+      logger.error(`${logLabel}:`, error);
       res.status(500).json({
         success: false,
-        error: 'Failed to fetch workflow types analytics',
-        timestamp: new Date().toISOString()
+        error: errorMessage,
+        timestamp: new Date().toISOString(),
       });
     }
-  };
+  }
 
   /**
-   * Get execution status distribution
-   * GET /api/analytics/execution-status?timeRange=7d&workflowType=all
+   * Endpoints that return per-bucket time-series when `groupBy` is day/hour and
+   * an aggregate value otherwise. Preserves the exact branch: time-series only
+   * for an explicit day|hour groupBy, aggregate for everything else.
    */
-  getExecutionStatus = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const filters = this.buildWorkspaceFilters(req, {
-        workflowType: req.query.workflowType as string
-      });
-
-      const executionStatus = await this.analyticsRepository.getExecutionStatusStats(filters);
-
-      res.json({
-        success: true,
-        data: executionStatus,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching execution status analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch execution status analytics',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-
-  /**
-   * Get step failure statistics
-   * GET /api/analytics/step-failures?timeRange=7d&workflowType=all
-   */
-  getStepFailures = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const filters = this.buildWorkspaceFilters(req, {
-        workflowType: req.query.workflowType as string
-      });
-
-      const stepFailures = await this.analyticsRepository.getStepFailureStats(filters);
-
-      res.json({
-        success: true,
-        data: stepFailures,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching step failures analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch step failures analytics',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-
-  /**
-   * Get recent activity
-   * GET /api/analytics/recent-activity?timeRange=7d&workflowType=all
-   */
-  getRecentActivity = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const filters = this.buildWorkspaceFilters(req, {
-        workflowType: req.query.workflowType as string
-      });
-
-      const recentActivity = await this.analyticsRepository.getRecentActivity(filters);
-
-      res.json({
-        success: true,
-        data: recentActivity,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching recent activity analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch recent activity analytics',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-
-  /**
-   * Get step funnel statistics
-   * GET /api/analytics/step-funnel?timeRange=7d&workflowType=all
-   */
-  getStepFunnel = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const filters = this.buildWorkspaceFilters(req, {
-        workflowType: req.query.workflowType as string
-      });
-
-      const stepFunnel = await this.analyticsRepository.getStepFunnelStats(filters);
-
-      res.json({
-        success: true,
-        data: stepFunnel,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching step funnel analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch step funnel analytics',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-
-  /**
-   * Get all analytics data in one call (optional endpoint for efficiency)
-   * GET /api/analytics/dashboard?timeRange=7d&workflowType=all
-   */
-  getDashboard = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const filters = this.buildWorkspaceFilters(req, {
-        workflowType: req.query.workflowType as string,
-        repoName: req.query.repoName as string,
-        userId: req.query.userId as string
-      });
-
-      // Fetch optimized analytics data in parallel
-      const [
-        executionStats,
-        prMetrics
-      ] = await Promise.all([
-        this.analyticsRepository.getExecutionStats(filters),
-        this.analyticsRepository.getPRMetrics(filters)
-      ]);
-
-      res.json({
-        success: true,
-        data: {
-          executionStats,
-          prStats: prMetrics
-        },
-        filters,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching analytics dashboard:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch analytics dashboard',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
+  private async respondCountOrTimeSeries(
+    res: Response,
+    groupBy: 'day' | 'hour' | undefined,
+    logLabel: string,
+    errorMessage: string,
+    timeSeries: (groupBy: 'day' | 'hour') => Promise<unknown>,
+    aggregate: () => Promise<unknown>,
+  ): Promise<void> {
+    return this.respond(res, logLabel, errorMessage, () =>
+      groupBy === 'day' || groupBy === 'hour' ? timeSeries(groupBy) : aggregate()
+    );
+  }
 
   /**
    * Get workflow metrics (grouped raw execution statuses)
    * GET /api/analytics/workflow-metrics?timeRange=7d
    */
   getWorkflowMetrics = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const filters = this.buildWorkspaceFilters(req);
-
-      const workflowMetrics = await this.analyticsRepository.getWorkflowMetrics(filters);
-
-      res.json({
-        success: true,
-        data: workflowMetrics,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching workflow metrics analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch workflow metrics analytics',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-
-  /**
-   * Get available workflow types for filter dropdown
-   * GET /api/analytics/workflow-types-options
-   */
-  getWorkflowTypeOptions = async (_req: Request, res: Response): Promise<void> => {
-    try {
-      const workflowTypes = await this.analyticsRepository.getAvailableWorkflowTypes();
-
-      res.json({
-        success: true,
-        data: workflowTypes,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching workflow type options:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch workflow type options',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-
-  /**
-   * Get available repositories for filter dropdown
-   * GET /api/analytics/repository-options
-   */
-  getRepositoryOptions = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const workspaceId = this.getWorkspaceId(req);
-
-      const repositories = await this.analyticsRepository.getAvailableRepositories(workspaceId);
-
-      res.json({
-        success: true,
-        data: repositories,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching repository options:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch repository options',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-
-  /**
-   * Get available users for filter dropdown
-   * GET /api/analytics/user-options
-   */
-  getUserOptions = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const workspaceId = this.getWorkspaceId(req);
-
-      const users = await this.analyticsRepository.getAvailableUsers(workspaceId);
-
-      res.json({
-        success: true,
-        data: users,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      logger.error('Error fetching user options:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch user options',
-        timestamp: new Date().toISOString()
-      });
-    }
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respond(
+      res,
+      'Error fetching workflow metrics analytics',
+      'Failed to fetch workflow metrics analytics',
+      () => this.analyticsRepository.getWorkflowMetrics(filters),
+    );
   };
 
   /**
@@ -327,81 +94,46 @@ export class AnalyticsController {
    * GET /api/analytics/messages-exchanged?timeRange=7d
    */
   getMessagesExchanged = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = (req.query.groupBy as 'day' | 'hour' | undefined) ?? 'day';
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // Always return time-series data for consistency
-      const messagesExchanged = await this.analyticsRepository.getMessagesExchanged(filters, groupBy);
-      
-      res.json({
-        success: true,
-        data: messagesExchanged,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      logger.error('Error fetching messages exchanged analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch messages exchanged analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req) ?? 'day';
+    const filters = this.buildWorkspaceFilters(req);
+    // Always return time-series data for consistency
+    return this.respond(
+      res,
+      'Error fetching messages exchanged analytics',
+      'Failed to fetch messages exchanged analytics',
+      () => this.analyticsRepository.getMessagesExchanged(filters, groupBy),
+    );
   };
 
   /**
-   * Get active users statistics  
+   * Get active users statistics
    * GET /api/analytics/active-users?timeRange=7d (always returns both unique count and time-series in single response)
    */
   getActiveUsers = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = (req.query.groupBy as 'day' | 'hour' | undefined) ?? 'day';
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // Always return both unique count and time-series data in a single response
-      const result = await this.analyticsRepository.getActiveUsersWithChart(filters, groupBy);
-      
-      res.json({
-        success: true,
-        data: result, // Returns { uniqueUsers: number, timeSeries: TimeSeriesDataPoint[] }
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      logger.error('Error fetching active users analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch active users analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req) ?? 'day';
+    const filters = this.buildWorkspaceFilters(req);
+    // Always return both unique count and time-series data in a single response
+    // Returns { uniqueUsers: number, timeSeries: { date: string; value: number }[] }
+    return this.respond(
+      res,
+      'Error fetching active users analytics',
+      'Failed to fetch active users analytics',
+      () => this.analyticsRepository.getActiveUsersWithChart(filters, groupBy),
+    );
   };
-
 
   /**
    * Get current active users grouped by presence status
    * GET /api/analytics/current-active-users
    */
   getCurrentActiveUsers = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const workspaceId = this.getWorkspaceId(req);
-
-      const currentActiveUsers = await this.analyticsRepository.getCurrentActiveUsers(workspaceId);
-
-      res.json({
-        success: true,
-        data: currentActiveUsers,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      logger.error('Error fetching current active users analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch current active users analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const workspaceId = this.getWorkspaceId(req);
+    return this.respond(
+      res,
+      'Error fetching current active users analytics',
+      'Failed to fetch current active users analytics',
+      () => this.analyticsRepository.getCurrentActiveUsers(workspaceId),
+    );
   };
 
   /**
@@ -409,38 +141,18 @@ export class AnalyticsController {
    * GET /api/analytics/active-channels?timeRange=7d&groupBy=day (uses correct methods for stat vs chart)
    */
   getActiveChannels = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
+    const groupBy = this.groupByParam(req);
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respondCountOrTimeSeries(
+      res,
+      groupBy,
+      'Error fetching active channels analytics',
+      'Failed to fetch active channels analytics',
       // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day' || groupBy === 'hour') {
-        const activeChannelsTimeSeries = await this.analyticsRepository.getActiveChannelsTimeSeries(filters, groupBy);
-        
-        res.json({
-          success: true,
-          data: activeChannelsTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // For stat card: return unique channels count using efficient database aggregation
-        const uniqueActiveChannels = await this.analyticsRepository.getActiveChannels(filters);
-        
-        res.json({
-          success: true,
-          data: uniqueActiveChannels,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching active channels analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch active channels analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+      (gb) => this.analyticsRepository.getActiveChannelsTimeSeries(filters, gb),
+      // For stat card: return unique channels count using efficient database aggregation
+      () => this.analyticsRepository.getActiveChannels(filters),
+    );
   };
 
   /**
@@ -448,38 +160,16 @@ export class AnalyticsController {
    * GET /api/analytics/files-shared?timeRange=7d&groupBy=day (supports time-series for charts)
    */
   getFilesShared = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day' || groupBy === 'hour') {
-        const filesSharedTimeSeries = await this.analyticsRepository.getFilesSharedTimeSeries(filters, groupBy);
-        
-        res.json({
-          success: true,
-          data: filesSharedTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // Otherwise, return aggregate count
-        const filesShared = await this.analyticsRepository.getFilesShared(filters);
-        
-        res.json({
-          success: true,
-          data: filesShared,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching files shared analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch files shared analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req);
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respondCountOrTimeSeries(
+      res,
+      groupBy,
+      'Error fetching files shared analytics',
+      'Failed to fetch files shared analytics',
+      (gb) => this.analyticsRepository.getFilesSharedTimeSeries(filters, gb),
+      () => this.analyticsRepository.getFilesShared(filters),
+    );
   };
 
   /**
@@ -487,37 +177,18 @@ export class AnalyticsController {
    * GET /api/analytics/messages-today?groupBy=day (supports time-series for hourly chart)
    */
   getMessagesToday = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
-      const workspaceId = this.getWorkspaceId(req);
-
-      // If groupBy is specified, return time-series data (hourly breakdown)
-      if (groupBy === 'day' || groupBy === 'hour') {
-        const messagesTodayTimeSeries = await this.analyticsRepository.getMessagesTodayTimeSeries(workspaceId);
-        
-        res.json({
-          success: true,
-          data: messagesTodayTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // Otherwise, return aggregate count scoped to the caller's current workspace.
-        const messagesToday = await this.analyticsRepository.getMessagesToday(workspaceId);
-        
-        res.json({
-          success: true,
-          data: messagesToday,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching messages today analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch messages today analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req);
+    const workspaceId = this.getWorkspaceId(req);
+    return this.respondCountOrTimeSeries(
+      res,
+      groupBy,
+      'Error fetching messages today analytics',
+      'Failed to fetch messages today analytics',
+      // Time-series is an hourly breakdown for today; groupBy only gates the branch
+      () => this.analyticsRepository.getMessagesTodayTimeSeries(workspaceId),
+      // Aggregate count scoped to the caller's current workspace
+      () => this.analyticsRepository.getMessagesToday(workspaceId),
+    );
   };
 
   /**
@@ -525,38 +196,16 @@ export class AnalyticsController {
    * GET /api/analytics/number-of-tickets?timeRange=7d&groupBy=day (supports time-series for charts)
    */
   getNumberOfTickets = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day' || groupBy === 'hour') {
-        const ticketsTimeSeries = await this.analyticsRepository.getNumberOfTicketsTimeSeries(filters, groupBy);
-        
-        res.json({
-          success: true,
-          data: ticketsTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // Otherwise, return aggregate count
-        const ticketsCount = await this.analyticsRepository.getNumberOfTickets(filters);
-        
-        res.json({
-          success: true,
-          data: ticketsCount,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching number of tickets analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch number of tickets analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req);
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respondCountOrTimeSeries(
+      res,
+      groupBy,
+      'Error fetching number of tickets analytics',
+      'Failed to fetch number of tickets analytics',
+      (gb) => this.analyticsRepository.getNumberOfTicketsTimeSeries(filters, gb),
+      () => this.analyticsRepository.getNumberOfTickets(filters),
+    );
   };
 
   /**
@@ -564,38 +213,16 @@ export class AnalyticsController {
    * GET /api/analytics/number-of-canvases?timeRange=7d&groupBy=day (supports time-series for charts)
    */
   getNumberOfCanvases = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day' || groupBy === 'hour') {
-        const canvasesTimeSeries = await this.analyticsRepository.getNumberOfCanvasesTimeSeries(filters, groupBy);
-        
-        res.json({
-          success: true,
-          data: canvasesTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // Otherwise, return aggregate count
-        const canvasesCount = await this.analyticsRepository.getNumberOfCanvases(filters);
-        
-        res.json({
-          success: true,
-          data: canvasesCount,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching number of canvases analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch number of canvases analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req);
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respondCountOrTimeSeries(
+      res,
+      groupBy,
+      'Error fetching number of canvases analytics',
+      'Failed to fetch number of canvases analytics',
+      (gb) => this.analyticsRepository.getNumberOfCanvasesTimeSeries(filters, gb),
+      () => this.analyticsRepository.getNumberOfCanvases(filters),
+    );
   };
 
   /**
@@ -603,38 +230,16 @@ export class AnalyticsController {
    * GET /api/analytics/number-of-calls?timeRange=7d&groupBy=day (supports time-series for charts)
    */
   getNumberOfCalls = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day' || groupBy === 'hour') {
-        const callsTimeSeries = await this.analyticsRepository.getNumberOfCallsTimeSeries(filters, groupBy);
-        
-        res.json({
-          success: true,
-          data: callsTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // Otherwise, return aggregate count
-        const callsCount = await this.analyticsRepository.getNumberOfCalls(filters);
-        
-        res.json({
-          success: true,
-          data: callsCount,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching number of calls analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch number of calls analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req);
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respondCountOrTimeSeries(
+      res,
+      groupBy,
+      'Error fetching number of calls analytics',
+      'Failed to fetch number of calls analytics',
+      (gb) => this.analyticsRepository.getNumberOfCallsTimeSeries(filters, gb),
+      () => this.analyticsRepository.getNumberOfCalls(filters),
+    );
   };
 
   /**
@@ -642,38 +247,16 @@ export class AnalyticsController {
    * GET /api/analytics/total-calls-duration?timeRange=7d&groupBy=day (supports time-series for charts)
    */
   getTotalCallsDuration = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | 'hour' | undefined;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day' || groupBy === 'hour') {
-        const durationTimeSeries = await this.analyticsRepository.getTotalCallsDurationTimeSeries(filters, groupBy);
-        
-        res.json({
-          success: true,
-          data: durationTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // Otherwise, return aggregate total duration
-        const totalDuration = await this.analyticsRepository.getTotalCallsDuration(filters);
-        
-        res.json({
-          success: true,
-          data: totalDuration,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching total calls duration analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch total calls duration analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = this.groupByParam(req);
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respondCountOrTimeSeries(
+      res,
+      groupBy,
+      'Error fetching total calls duration analytics',
+      'Failed to fetch total calls duration analytics',
+      (gb) => this.analyticsRepository.getTotalCallsDurationTimeSeries(filters, gb),
+      () => this.analyticsRepository.getTotalCallsDuration(filters),
+    );
   };
 
   /**
@@ -681,26 +264,14 @@ export class AnalyticsController {
    * GET /api/analytics/top-users-by-messages?timeRange=7d&limit=10
    */
   getTopUsersByMessages = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      const topUsers = await this.analyticsRepository.getTopUsersByMessages(filters, limit);
-      
-      res.json({
-        success: true,
-        data: topUsers,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      logger.error('Error fetching top users by messages:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch top users by messages',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+    const filters = this.buildWorkspaceFilters(req);
+    return this.respond(
+      res,
+      'Error fetching top users by messages',
+      'Failed to fetch top users by messages',
+      () => this.analyticsRepository.getTopUsersByMessages(filters, limit),
+    );
   };
 
   /**
@@ -708,38 +279,18 @@ export class AnalyticsController {
    * GET /api/analytics/users-onboarded?timeRange=7d&groupBy=day (supports time-series for charts)
    */
   getUsersOnboarded = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const groupBy = req.query.groupBy as 'day' | undefined;
-      
-      const filters = this.buildWorkspaceFilters(req);
-
-      // If groupBy is specified, return time-series data for charts
-      if (groupBy === 'day') {
-        const usersOnboardedTimeSeries = await this.analyticsRepository.getUsersOnboardedTimeSeries(filters);
-        
-        res.json({
-          success: true,
-          data: usersOnboardedTimeSeries,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        // Otherwise, return aggregate count
-        const usersOnboarded = await this.analyticsRepository.getUsersOnboarded(filters);
-        
-        res.json({
-          success: true,
-          data: usersOnboarded,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.error('Error fetching users onboarded analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch users onboarded analytics',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const groupBy = req.query.groupBy as 'day' | undefined;
+    const filters = this.buildWorkspaceFilters(req);
+    // Users-onboarded only supports a daily series, so gate strictly on 'day'
+    // (an explicit 'hour' still falls through to the aggregate, as before).
+    return this.respond(
+      res,
+      'Error fetching users onboarded analytics',
+      'Failed to fetch users onboarded analytics',
+      () => groupBy === 'day'
+        ? this.analyticsRepository.getUsersOnboardedTimeSeries(filters)
+        : this.analyticsRepository.getUsersOnboarded(filters),
+    );
   };
 
 }
