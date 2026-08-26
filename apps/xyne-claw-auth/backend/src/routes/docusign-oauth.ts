@@ -76,7 +76,7 @@ export async function ensureDocuSignServer() {
   const healthcheckSpec = { name: "getUserInfo", params: {} };
   return prisma.mcpServer.upsert({
     where: { type: "docusign" },
-    update: { writeToolPolicy, healthcheckSpec, transport: "http" },
+    update: { writeToolPolicy, healthcheckSpec, transport: "http", isOauth: true },
     create: {
       type: "docusign",
       name: "DocuSign",
@@ -86,6 +86,7 @@ export async function ensureDocuSignServer() {
       writeToolPolicy,
       healthcheckSpec,
       connectorMeta: { scope: "global", mode: "self-serve" },
+      isOauth: true,
     },
   });
 }

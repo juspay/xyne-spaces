@@ -155,8 +155,11 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const visible = servers.filter((s: any) => isVisibleToUser(parseConnectorMeta(s.connectorMeta), requesterId));
   // Decorate with `oauth` so the UI can tell OAuth connectors apart (they
   // need the browser flow, can't be pinned credential-less) without
-  // hardcoding a google/microsoft list in the frontend.
-  const decorated = visible.map((s: any) => ({ ...s, oauth: isOAuthConnector(s.type, s.connectorMeta) }));
+  // hardcoding a google/microsoft list in the frontend. isOAuthConnector is
+  // registry-derived (true for any connector with a registered
+  // OAuthTokenProvider) OR'd with the DB-declared isOauth flag, so a future
+  // admin-defined connector with no code can also opt in.
+  const decorated = visible.map((s: any) => ({ ...s, oauth: isOAuthConnector(s.type, s.connectorMeta, Boolean(s.isOauth)) }));
   ok(res, decorated);
 }));
 

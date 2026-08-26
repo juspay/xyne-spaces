@@ -115,6 +115,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
         writeToolPolicy: config.server.writeToolPolicy as never,
         healthcheckSpec: config.server.healthcheckSpec as never,
         connectorMeta: (config.server.connectorMeta ?? { scope: "global", mode: "self-serve" }) as never,
+        isOauth: true,
       },
     });
   }
