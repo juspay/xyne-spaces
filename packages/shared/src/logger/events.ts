@@ -188,6 +188,7 @@ export const Event = {
   LOTUS_TELEMETRY_SHUTDOWN: "lotus_telemetry_shutdown",
   LOTUS_STARTUP_DIAGNOSTIC: "lotus_startup_diagnostic",
   LOTUS_CHAT_OPEN_TIMING: "lotus_chat_open_timing",
+  CHAT_NOTIFICATION_CACHE_READ: "chat_notification_cache_read",
   LOTUS_METRIC_ERROR: "lotus_metric_error",
 } as const;
 

@@ -1,3 +1,12 @@
+export type ChatCacheEntityKind = 'channel' | 'thread';
+
+export type ChatCacheEntity = {
+  kind: ChatCacheEntityKind;
+  id: string;
+  value: unknown;
+  fingerprint: string;
+};
+
 /**
  * Platform-agnostic storage adapter interface.
  * Abstracts IndexedDB (web) vs AsyncStorage/SQLite (native).
@@ -20,4 +29,18 @@ export interface StorageAdapter {
   readShadowValue?(key: string): Promise<unknown>;
   writeShadowValue?(key: string, value: unknown): Promise<void>;
   removeShadowValue?(key: string): Promise<void>;
+
+  // Mobile-only optional sync accessors for cache-first chat opens.
+  readChannelConversationsSync?(channelId: string): unknown[] | null;
+  readChatEntitySync?(kind: ChatCacheEntityKind, id: string): unknown | null;
+  primeChannelTail?(channelId: string, conversations: unknown[]): void;
+  loadChatEntities?(): Promise<ChatCacheEntity[]>;
+  writeChatEntity?(
+    kind: ChatCacheEntityKind,
+    id: string,
+    value: unknown,
+    fingerprint: string,
+  ): Promise<void> | void;
+  removeChatEntity?(kind: ChatCacheEntityKind, id: string): Promise<void> | void;
+  loadContextPropertySync?(key: string): unknown;
 }

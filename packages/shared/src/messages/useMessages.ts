@@ -7,7 +7,8 @@ import {
   useState,
 } from 'react';
 import { useQuery } from '../hooks/useQuery.js';
-import { useZero } from '../hooks/useZero.js';
+import { useInstrumentation, useZero } from '../hooks/useZero.js';
+import { Event } from '../logger/events.js';
 import { queries } from '../zero/queries.js';
 import type {
   Conversation,
@@ -21,7 +22,9 @@ import type {
 import { refKey } from './conversationRef.js';
 import {
   getChannelSnapshot,
+  getChannelSnapshotWithSource,
   getThreadSnapshot,
+  getThreadSnapshotWithSource,
   primeChannelCache,
   primeThreadCache,
   subscribeMessages,
@@ -30,6 +33,8 @@ import {
   dedupeAndSortConversations,
   mergeCachedConversations,
   mergeConversationsWithLatest,
+  mergeServerAndPendingConversations,
+  mergeServerAndPendingThreadMessages,
   reconcileConversationWindow,
 } from './channelMessageMerge.js';
 import {
@@ -41,7 +46,11 @@ import { usePendingForChannel, usePendingForThread } from './usePending.js';
 export type UseMessagesOptions = {
   channelPageSize?: number;
   channelLatestLimit?: number;
+  // Opt-in: mobile uses the latest tail as a provisional first window.
+  promoteLatestTailOnColdOpen?: boolean;
   enabled?: boolean;
+  // Opt-in diagnostic only; does not change cache selection or query behavior.
+  notificationTargetMessageId?: string | null | undefined;
   linkedConversationId?: string | null | undefined;
   linkedItemCreatedAt?: { createdAt: number } | null | undefined;
   linkedCutoffCreatedAt?: { createdAt: number } | null | undefined;
@@ -51,6 +60,21 @@ export type UseMessagesOptions = {
 };
 
 const DEFAULT_CHANNEL_PAGE_SIZE = 50;
+
+const summarizeCachedMessages = (
+  rows: readonly { createdAt: number }[],
+): { messageCount: number; latestMessageCreatedAt: number | null } => {
+  let latestMessageCreatedAt: number | null = null;
+  for (const row of rows) {
+    if (
+      latestMessageCreatedAt === null ||
+      row.createdAt > latestMessageCreatedAt
+    ) {
+      latestMessageCreatedAt = row.createdAt;
+    }
+  }
+  return { messageCount: rows.length, latestMessageCreatedAt };
+};
 
 type Anchor = { createdAt: number };
 
@@ -63,6 +87,8 @@ export type InViewAnchor = {
 export type UseChannelMessagesResult = {
   messages: Conversation[];
   latestConversationsList: Conversation[];
+  initialLoadError: string | null;
+  retryInitialLoad: () => void;
   loadOlder: () => void;
   loadNewer: () => void;
   setInViewAnchor: (anchor: InViewAnchor | null) => void;
@@ -121,8 +147,10 @@ function useChannelMessagesImpl(
   const isMember = ref.isMember ?? true;
   const pageSize = opts.channelPageSize ?? DEFAULT_CHANNEL_PAGE_SIZE;
   const latestLimit = opts.channelLatestLimit ?? Math.max(1, Math.floor(pageSize / 2));
+  const promoteLatestTailOnColdOpen = opts.promoteLatestTailOnColdOpen ?? false;
   const { channelId } = ref;
   const key = refKey(ref);
+  const notificationTargetMessageId = opts.notificationTargetMessageId ?? null;
   const linkedConversationId = opts.linkedConversationId ?? null;
   const linkedItemCreatedAt = opts.linkedItemCreatedAt ?? null;
   const linkedCutoffCreatedAt = opts.linkedCutoffCreatedAt ?? null;
@@ -131,10 +159,41 @@ function useChannelMessagesImpl(
   const conversationSeenCutoffAt = opts.conversationSeenCutoffAt ?? null;
 
   const zero = useZero();
+  const { logger } = useInstrumentation();
 
-  const cachedConversations = useMemo(() => getChannelSnapshot(ref), [key]);
+  const cachedSnapshot = useMemo(
+    () => getChannelSnapshotWithSource(ref),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, notificationTargetMessageId],
+  );
+  const cachedConversations = cachedSnapshot.value;
   const [conversations, setConversations] = useState<Conversation[]>(cachedConversations);
   const conversationsRef = useRef<Conversation[]>(cachedConversations);
+  const loggedNotificationCacheKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!enabled || notificationTargetMessageId === null) return;
+    const diagnosticKey = `${key}:${notificationTargetMessageId}`;
+    if (loggedNotificationCacheKeyRef.current === diagnosticKey) return;
+    loggedNotificationCacheKeyRef.current = diagnosticKey;
+
+    const targetPresent = cachedSnapshot.value.some(
+      conversation => conversation.initialMessageId === notificationTargetMessageId,
+    );
+    logger.info(Event.CHAT_NOTIFICATION_CACHE_READ, {
+      cacheKind: 'channel',
+      cacheId: channelId,
+      cacheSource: cachedSnapshot.source,
+      cacheStatus: targetPresent ? 'hit' : 'target_missing',
+      ...summarizeCachedMessages(cachedSnapshot.value),
+    });
+  }, [
+    cachedSnapshot,
+    channelId,
+    enabled,
+    key,
+    logger,
+    notificationTargetMessageId,
+  ]);
   const setConversationsState = useCallback(
     (next: Conversation[] | ((prev: Conversation[]) => Conversation[])): void => {
       if (typeof next !== 'function') {
@@ -181,8 +240,11 @@ function useChannelMessagesImpl(
 
   const [latestConversationsList, setLatestConversationsList] = useState<Conversation[]>([]);
   const latestConversationsListRef = useRef<Conversation[]>([]);
+  const hasProvisionalWindowRef = useRef(false);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
+  const [initialLoadAttempt, setInitialLoadAttempt] = useState(0);
   const isFetchingRef = useRef(false);
   const isFetchingOlderRef = useRef(false);
   const hasReachedChannelStartRef = useRef(false);
@@ -190,6 +252,8 @@ function useChannelMessagesImpl(
 
   const shouldUseCutoffQuery =
     conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+  const hasLinkedAnchor = linkedConversationId !== null || linkedItemCreatedAt !== null;
+  const allowProvisionalPromotion = promoteLatestTailOnColdOpen && !hasLinkedAnchor;
 
   const activityCutoffCreatedAt = linkedCutoffCreatedAt?.createdAt ?? null;
   const channelSeenCutoffCreatedAt = !linkedConversationId
@@ -199,6 +263,11 @@ function useChannelMessagesImpl(
   const [cutoffAnchor, setCutoffAnchor] = useState<Anchor | null>(
     initialCutoffCreatedAt !== null ? { createdAt: initialCutoffCreatedAt } : null,
   );
+  const retryInitialLoad = useCallback((): void => {
+    if (!enabled || !channelId || shouldUseCutoffQuery) return;
+    setInitialLoadError(null);
+    setInitialLoadAttempt(attempt => attempt + 1);
+  }, [channelId, enabled, shouldUseCutoffQuery]);
 
   const [updatedConversations, updatedConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
@@ -238,6 +307,8 @@ function useChannelMessagesImpl(
   useEffect(() => {
     if (!enabled || !channelId) return;
     if (shouldUseCutoffQuery) return;
+    let cancelled = false;
+    setInitialLoadError(null);
 
     Promise.all([
       zero.run(
@@ -264,9 +335,13 @@ function useChannelMessagesImpl(
         : Promise.resolve<Conversation[] | null>(null),
     ])
       .then(([older, newerNullable]) => {
+        if (cancelled) return;
         const newer = newerNullable ?? [];
         const fetched = dedupeAndSortConversations(older, newer);
-        const mergedWithCached = mergeCachedConversations(conversationsRef.current, fetched);
+        const cachedWindow = conversationsRef.current;
+        const mergedWithCached = hasProvisionalWindowRef.current
+          ? dedupeAndSortConversations(cachedWindow, fetched)
+          : mergeCachedConversations(cachedWindow, fetched);
         const { merged, latestClear } = mergeConversationsWithLatest(
           mergedWithCached,
           latestConversationsListRef.current,
@@ -286,11 +361,21 @@ function useChannelMessagesImpl(
         }
 
         setConversationsState(merged);
+        hasProvisionalWindowRef.current = false;
+        setInitialLoadError(null);
         setIsInitialLoadComplete(true);
       })
-      .catch(() => {});
+      .catch(err => {
+        if (cancelled) return;
+        const serializedError = serializeInitialLoadError(err);
+        setInitialLoadError(serializedError);
+        console.error('[useMessages] initial channel load failed', serializedError);
+      });
+    return (): void => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, initialLoadAttempt]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -519,32 +604,32 @@ function useChannelMessagesImpl(
     if (!enabled) return;
     if (latestConversationsDetails.type !== 'complete') return;
     if (latestConversations.length === 0) {
-      if (isInitialLoadComplete) {
+      if (!promoteLatestTailOnColdOpen && isInitialLoadComplete) {
         setConversationsState(prev => (prev.length > 0 ? [] : prev));
       }
       return;
     }
     const sortedLatest = [...latestConversations].sort((a, b) => a.createdAt - b.createdAt);
 
-    setConversationsState(prev => {
-      const { merged, latestClear } = mergeConversationsWithLatest(
-        prev,
-        sortedLatest,
-        isInitialLoadComplete,
-      );
-      if (latestClear) {
-        return isSameConversationList(prev, merged) ? prev : merged;
-      }
-      return prev;
-    });
-
-    const { latestClear: latestClearForSideEffects } = mergeConversationsWithLatest(
-      conversationsRef.current,
+    const currentWindow = conversationsRef.current;
+    const { merged, latestClear } = mergeConversationsWithLatest(
+      currentWindow,
       sortedLatest,
       isInitialLoadComplete,
+      allowProvisionalPromotion,
     );
 
-    if (latestClearForSideEffects) {
+    if (latestClear) {
+      if (
+        allowProvisionalPromotion &&
+        !isInitialLoadComplete &&
+        currentWindow.length === 0
+      ) {
+        hasProvisionalWindowRef.current = true;
+      }
+      if (!isSameConversationList(currentWindow, merged)) {
+        setConversationsState(merged);
+      }
       setLatestConversationsList([]);
       latestConversationsListRef.current = [];
       setNewConversationsAnchor(null);
@@ -558,26 +643,24 @@ function useChannelMessagesImpl(
     latestConversations,
     latestConversationsDetails.type,
     isInitialLoadComplete,
+    allowProvisionalPromotion,
+    promoteLatestTailOnColdOpen,
   ]);
 
   const pendingForChannel = usePendingForChannel(channelId);
   const messagesWithPending = useMemo(() => {
     if (pendingForChannel.length === 0) return conversations;
-    const pendingByMessageId = new Map(
-      pendingForChannel.map(p => [p.messageId, p]),
-    );
-    const filtered = conversations.filter(
-      c => !pendingByMessageId.has(c.initialMessageId ?? ''),
-    );
     const pendingRows = [...pendingForChannel]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingChannelConversation);
-    return [...filtered, ...pendingRows];
+    return mergeServerAndPendingConversations(conversations, pendingRows);
   }, [conversations, pendingForChannel]);
 
   return {
     messages: messagesWithPending,
     latestConversationsList,
+    initialLoadError,
+    retryInitialLoad,
     loadOlder,
     loadNewer,
     setInViewAnchor,
@@ -594,10 +677,41 @@ function useThreadMessagesImpl(
 ): ThreadConversation | null {
   const enabled = (opts.enabled ?? true) && Boolean(ref.conversationId);
   const key = refKey(ref);
+  const notificationTargetMessageId = opts.notificationTargetMessageId ?? null;
+  const { logger } = useInstrumentation();
 
-  const [snapshot, setSnapshot] = useState<ThreadConversation | null>(() =>
-    getThreadSnapshot(ref),
+  const cachedSnapshot = useMemo(
+    () => getThreadSnapshotWithSource(ref),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, notificationTargetMessageId],
   );
+  const [snapshot, setSnapshot] = useState<ThreadConversation | null>(cachedSnapshot.value);
+  const loggedNotificationCacheKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!enabled || notificationTargetMessageId === null) return;
+    const diagnosticKey = `${key}:${notificationTargetMessageId}`;
+    if (loggedNotificationCacheKeyRef.current === diagnosticKey) return;
+    loggedNotificationCacheKeyRef.current = diagnosticKey;
+
+    const targetPresent =
+      cachedSnapshot.value?.messages.some(
+        message => message.messageId === notificationTargetMessageId,
+      ) ?? false;
+    logger.info(Event.CHAT_NOTIFICATION_CACHE_READ, {
+      cacheKind: 'thread',
+      cacheId: ref.conversationId,
+      cacheSource: cachedSnapshot.source,
+      cacheStatus: targetPresent ? 'hit' : 'target_missing',
+      ...summarizeCachedMessages(cachedSnapshot.value?.messages ?? []),
+    });
+  }, [
+    cachedSnapshot,
+    enabled,
+    key,
+    logger,
+    notificationTargetMessageId,
+    ref.conversationId,
+  ]);
 
   useEffect(() => {
     setSnapshot(getThreadSnapshot(ref));
@@ -624,18 +738,12 @@ function useThreadMessagesImpl(
   return useMemo(() => {
     if (!base) return null;
     if (pendingForThread.length === 0) return base;
-    const pendingByMessageId = new Map(
-      pendingForThread.map(p => [p.messageId, p]),
-    );
-    const filtered = base.messages.filter(
-      m => !pendingByMessageId.has(m.messageId),
-    );
     const pendingRows = [...pendingForThread]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingThreadMessage);
     return {
       ...base,
-      messages: [...filtered, ...pendingRows],
+      messages: mergeServerAndPendingThreadMessages(base.messages, pendingRows),
     } as ThreadConversation;
   }, [base, pendingForThread]);
 }

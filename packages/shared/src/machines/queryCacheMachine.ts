@@ -506,6 +506,36 @@ const PERSIST_DEBOUNCE_MS = 2000;
 // into IndexedDB on EVERY flush — profiled at ~660ms of main-thread time for
 // four channel opens.
 const lastPersistedRefs = new Map<string, unknown>();
+const lastPersistedChannelRefs = new Map<string, Conversation[]>();
+const lastPersistedThreadRefs = new Map<string, ThreadConversation>();
+
+function persistChatEntities<T>(
+  storage: StorageAdapter,
+  kind: 'channel' | 'thread',
+  entries: Record<string, T>,
+  fingerprint: string,
+  persistedRefs: Map<string, T>,
+): boolean {
+  if (!storage.loadChatEntities || !storage.writeChatEntity || !storage.removeChatEntity) {
+    return false;
+  }
+
+  for (const [id, value] of Object.entries(entries)) {
+    if (persistedRefs.get(id) === value) continue;
+    persistedRefs.set(id, value);
+    void Promise.resolve(storage.writeChatEntity(kind, id, value, fingerprint)).catch(error => {
+      console.error(`Failed to persist ${kind} chat entity:`, error);
+    });
+  }
+  for (const id of persistedRefs.keys()) {
+    if (id in entries) continue;
+    persistedRefs.delete(id);
+    void Promise.resolve(storage.removeChatEntity?.(kind, id)).catch(error => {
+      console.error(`Failed to remove ${kind} chat entity:`, error);
+    });
+  }
+  return true;
+}
 
 // Schedule work off the critical path when the platform supports it
 // (requestIdleCallback exists in browsers; guarded for React Native).
@@ -615,6 +645,9 @@ export const setupQueryCachePersistence = (
   schemaVersion: string,
 ): void => {
   setStorageAdapter(storage);
+  lastPersistedRefs.clear();
+  lastPersistedChannelRefs.clear();
+  lastPersistedThreadRefs.clear();
 
   const doPersist = (): void => {
     // Read the LATEST snapshot at flush time (not the one that scheduled
@@ -656,13 +689,22 @@ export const setupQueryCachePersistence = (
     if (lastPersistedRefs.get('channelConversations') !== channelConversations) {
       lastPersistedRefs.set('channelConversations', channelConversations);
       const conversationHash = getChannelConversationsQueryHash({ userID: userId });
+      if (
+        !persistChatEntities(
+          storage,
+          'channel',
+          channelConversations,
+          conversationHash,
+          lastPersistedChannelRefs,
+        )
+      ) {
+        const payload: Record<string, unknown> = {
+          ...channelConversations,
+          [FINGERPRINT_FIELD]: conversationHash,
+        };
 
-      const payload: Record<string, unknown> = {
-        ...channelConversations,
-        [FINGERPRINT_FIELD]: conversationHash,
-      };
-
-      storage.saveContextProperty('channelConversations', payload).catch(() => {});
+        storage.saveContextProperty('channelConversations', payload).catch(() => {});
+      }
     }
 
     if (
@@ -670,15 +712,24 @@ export const setupQueryCachePersistence = (
     ) {
       lastPersistedRefs.set(THREAD_CONVERSATIONS_KEY, threadConversations);
       const threadHash = getThreadConversationQueryHash({ userID: userId });
+      if (
+        !persistChatEntities(
+          storage,
+          'thread',
+          threadConversations,
+          threadHash,
+          lastPersistedThreadRefs,
+        )
+      ) {
+        const threadPayload: Record<string, unknown> = {
+          ...threadConversations,
+          [THREAD_FINGERPRINT_FIELD]: threadHash,
+        };
 
-      const threadPayload: Record<string, unknown> = {
-        ...threadConversations,
-        [THREAD_FINGERPRINT_FIELD]: threadHash,
-      };
-
-      storage
-        .saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload)
-        .catch(() => {});
+        storage
+          .saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload)
+          .catch(() => {});
+      }
     }
 
     if (lastPersistedRefs.get(CALL_HISTORY_KEY) !== callHistory) {
@@ -747,9 +798,10 @@ export const hydrateQueryCacheFromStorage = async (
   try {
     await storage.init(userId, schemaVersion);
 
+    const chatEntities = (await storage.loadChatEntities?.()) ?? [];
     const context = await storage.loadContext();
 
-    if (!context) {
+    if (!context && chatEntities.length === 0) {
       return false;
     }
 
@@ -763,7 +815,21 @@ export const hydrateQueryCacheFromStorage = async (
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
     const currentThreadHash = getThreadConversationQueryHash({ userID: userId });
 
-    for (const [key, value] of Object.entries(context)) {
+    for (const entity of chatEntities) {
+      if (entity.kind === 'channel') {
+        if (entity.fingerprint && entity.fingerprint !== currentConversationHash) continue;
+        if (Array.isArray(entity.value) && entity.value.length > 0) {
+          conversationsData[entity.id] = entity.value as Conversation[];
+        }
+      } else if (entity.kind === 'thread') {
+        if (entity.fingerprint && entity.fingerprint !== currentThreadHash) continue;
+        if (entity.value && typeof entity.value === 'object') {
+          threadConversationsData[entity.id] = entity.value as ThreadConversation;
+        }
+      }
+    }
+
+    for (const [key, value] of Object.entries(context ?? {})) {
       if (key === 'channelConversations') {
         const raw = value as Record<string, unknown>;
 
