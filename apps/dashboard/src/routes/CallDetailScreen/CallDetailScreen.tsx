@@ -39,7 +39,9 @@ export default function CallDetailScreen(): ReactElement {
   const callConversationId =
     (call?.metadata as { conversationId?: string } | null)?.conversationId ?? null;
 
-  const [activeTab, setActiveTab] = useState<string>('detailed-summary');
+  // `null` until the user picks a tab. The active tab is derived below, because
+  // Zero has not resolved on first paint and the tab list is not known yet.
+  const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -49,8 +51,20 @@ export default function CallDetailScreen(): ReactElement {
   const isAIOpen = useSelector(xyneAIActor, state => !state.matches('closed'));
   const allChannels = useAllChannels();
   const visibleChannels = useAllVisibleChannels();
-  const isChannelMember = visibleChannels.some(c => c.id === call?.channelId);
-  const channel = allChannels.find(c => c.id === call?.channelId);
+  // Both lists run to hundreds of channels, and this screen re-renders on every
+  // Zero update, so keep the scans off the render path.
+  // The call's conversation is created in `callUpdatesChannel` when that override
+  // is set, falling back to the call's own channel (callRepository.ts:1209). Label,
+  // membership check and navigation all key off this one id so they cannot diverge.
+  const callMessageChannelId = call?.callUpdatesChannel ?? call?.channelId ?? null;
+  const isChannelMember = useMemo(
+    () => visibleChannels.some(c => c.id === callMessageChannelId),
+    [visibleChannels, callMessageChannelId],
+  );
+  const channel = useMemo(
+    () => allChannels.find(c => c.id === callMessageChannelId),
+    [allChannels, callMessageChannelId],
+  );
   const { displayName: channelDisplayName, isLoading: isChannelNameLoading } =
     useChannelDisplayName(channel, user?.id ?? '');
 
@@ -61,7 +75,7 @@ export default function CallDetailScreen(): ReactElement {
     previewText: call?.title ?? 'Call',
   });
 
-  const [conversationMessages] = useCachedQuery(
+  const [conversationMessages, conversationMessagesDetails] = useCachedQuery(
     queries.conversationMessages({ conversationId: callConversationId ?? '' }),
     { enabled: !!callConversationId },
   );
@@ -115,8 +129,31 @@ export default function CallDetailScreen(): ReactElement {
     externalId: call?.externalId ?? '',
     messageId: callMessageId,
     persistedPrdCanvasIds,
-    onTabCreate: setActiveTab,
+    onTabCreate: setSelectedTab,
   });
+
+  const availableTabIds = useMemo<string[]>(
+    () => [
+      ...(hasDetailedSummaryTab ? ['detailed-summary'] : []),
+      ...prdEntries.map(prd => prd.id),
+    ],
+    [hasDetailedSummaryTab, prdEntries],
+  );
+
+  // Honour the user's pick while that tab still exists, otherwise fall back to the
+  // first tab there is. On first paint that list is empty, so nothing is active
+  // until Zero resolves and the real tabs appear.
+  const activeTab =
+    selectedTab && availableTabIds.includes(selectedTab)
+      ? selectedTab
+      : (availableTabIds[0] ?? null);
+
+  // Tabs come out of the call's conversation messages, so an unresolved query means
+  // "not known yet" rather than "this call has nothing".
+  const isTabContentLoading =
+    availableTabIds.length === 0 &&
+    Boolean(callConversationId) &&
+    conversationMessagesDetails.type !== 'complete';
 
   const updateScrollButtons = (): void => {
     const el = tabScrollRef.current;
@@ -183,8 +220,7 @@ export default function CallDetailScreen(): ReactElement {
       </div>
     );
   }
-  const callUpdatesChannelId = call.callUpdatesChannel ?? call.channelId;
-  const hasCallMessageLink = Boolean(call.channelId && callConversationId);
+  const hasCallMessageLink = Boolean(callMessageChannelId && callConversationId);
   // While a DM's participants are still loading the hook reports "Unknown User",
   // so fall back to the neutral label rather than flashing a wrong name.
   const postedInLabel =
@@ -193,9 +229,9 @@ export default function CallDetailScreen(): ReactElement {
       : 'Go to message';
 
   const handleGotoCallMessage = (): void => {
-    if (!callUpdatesChannelId || !callConversationId) return;
+    if (!callMessageChannelId || !callConversationId) return;
     void navigate(
-      `/chat/dir/${callUpdatesChannelId}/${callConversationId}#origin=${callConversationId}`,
+      `/chat/dir/${callMessageChannelId}/${callConversationId}#origin=${callConversationId}`,
     );
   };
 
@@ -327,14 +363,14 @@ export default function CallDetailScreen(): ReactElement {
                   <CallSummaryTemplatePicker
                     selectedTemplateId={call.summaryTemplateId}
                     isActive={activeTab === 'detailed-summary'}
-                    onSelect={() => setActiveTab('detailed-summary')}
+                    onSelect={() => setSelectedTab('detailed-summary')}
                     className={pillClassName(activeTab === 'detailed-summary')}
                   />
                 )}
                 {prdEntries.map(prd => (
                   <button
                     key={prd.id}
-                    onClick={() => setActiveTab(prd.id)}
+                    onClick={() => setSelectedTab(prd.id)}
                     data-track-category='CallDetail'
                     data-track-name='tab-prd'
                     className={cn(pillClassName(activeTab === prd.id), 'max-w-[160px]')}
@@ -365,7 +401,12 @@ export default function CallDetailScreen(): ReactElement {
 
             {/* Tab content */}
             <div className='w-full pt-6'>
-              {activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
+              {isTabContentLoading ? (
+                <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+                  <Loader2 className='size-4 animate-spin' />
+                  Loading...
+                </div>
+              ) : activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
                 <DetailedSummaryCanvasTab canvasId={detailedSummaryCanvasId} />
               ) : (
                 (() => {

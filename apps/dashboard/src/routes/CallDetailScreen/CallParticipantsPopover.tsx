@@ -3,10 +3,10 @@ import { Loader2 } from 'lucide-react';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import AvatarGroup from '../../components/ui/Avatar/AvatarGroup';
 import { Popover } from '../../components/ui/Popover';
+import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
 import { usePlatform } from '../../hooks/usePlatform';
 import { cn } from '../../utils/classNames';
 import { getCallParticipantCount, type Call } from '../CallHistoryScreen/callHistoryItem.utils';
-import { useCallParticipantRoster } from '../CallHistoryScreen/useCallParticipantRoster';
 
 /** Faces shown on the pill before it falls back to the bare count. */
 const MAX_PARTICIPANT_FACES = 4;
@@ -102,7 +102,7 @@ export function CallParticipantsPopover({
                       <span className='font-normal text-muted-foreground'> (you)</span>
                     )}
                   </span>
-                  {participant.isExternal && <StatusPill tone='amber' label='External' />}
+                  {participant.isExternal && <StatusPill tone='pending' label='External' />}
                 </div>
                 {participant.email && (
                   <span className='block truncate text-[11.5px] text-muted-foreground'>
@@ -111,7 +111,7 @@ export function CallParticipantsPopover({
                 )}
               </div>
               <StatusPill
-                tone={participant.hasJoined ? 'green' : 'muted'}
+                tone={participant.hasJoined ? 'success' : 'muted'}
                 label={participant.hasJoined ? 'Joined' : 'Not joined'}
               />
             </div>
@@ -129,16 +129,19 @@ export function CallParticipantsPopover({
   );
 }
 
-type PillTone = 'amber' | 'green' | 'muted';
+type PillTone = 'pending' | 'success' | 'muted';
 
+// Semantic status tokens, not raw palette colours: `--status-*` is redefined per
+// `[data-theme]`, so these follow the active theme. Tailwind's `dark:` variant
+// cannot do that here — `darkMode` is `class`, and no `.dark` class is ever set.
 const pillToneClasses: Record<PillTone, { pill: string; dot: string }> = {
-  amber: {
-    pill: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    dot: 'bg-amber-500',
+  pending: {
+    pill: 'border-status-pending/30 bg-status-pending/10 text-status-pending',
+    dot: 'bg-status-pending',
   },
-  green: {
-    pill: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
-    dot: 'bg-emerald-500',
+  success: {
+    pill: 'border-status-success/30 bg-status-success/10 text-status-success',
+    dot: 'bg-status-success',
   },
   muted: {
     pill: 'border-border bg-muted text-muted-foreground',

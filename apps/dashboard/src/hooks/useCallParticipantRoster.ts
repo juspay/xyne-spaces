@@ -1,9 +1,12 @@
 import { useMemo } from 'react';
 import { CallStatus } from '@xyne/shared';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { useUsers } from '../../hooks/useUsers';
-import { queries } from '../../zero/queries';
-import { getPreviewParticipantEntries, type Call } from './callHistoryItem.utils';
+import { useCachedQuery } from './useCachedQuery';
+import { useUsers } from './useUsers';
+import { queries } from '../zero/queries';
+import {
+  getPreviewParticipantEntries,
+  type Call,
+} from '../routes/CallHistoryScreen/callHistoryItem.utils';
 
 type CallParticipant = NonNullable<Call['participants']>[number];
 type MergedParticipant = Partial<CallParticipant> & {

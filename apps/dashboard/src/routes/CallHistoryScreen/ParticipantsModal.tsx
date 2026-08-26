@@ -3,8 +3,8 @@ import { Loader2 } from 'lucide-react';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
 import { type Call } from './callHistoryItem.utils';
-import { useCallParticipantRoster } from './useCallParticipantRoster';
 
 interface CallParticipantsContentProps {
   call: Call;
