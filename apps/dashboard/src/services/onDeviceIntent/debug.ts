@@ -10,6 +10,9 @@
  *   localStorage.setItem('xyne:intent-debug', '1'); location.reload();
  */
 
+/* eslint-disable no-console -- this module IS the console tracer; every statement
+   below is gated behind `enabled`, which is false in production builds. */
+
 const STORAGE_KEY = 'xyne:intent-debug';
 
 const STYLE_SCOPE = 'color:#8b5cf6;font-weight:600';

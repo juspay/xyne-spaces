@@ -772,9 +772,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         };
 
         // On-device intent classification. Fire-and-forget and never awaited — it must
-        // not add a single millisecond to the send path. Gated to public channels inside
-        // the service (fail closed). Phase 1 is measure-only: this emits telemetry and
-        // renders nothing. See docs/ON_DEVICE_INTENT.md
+        // not add a single millisecond to the send path. Gated inside the service on the
+        // user preference and public-channel visibility, both fail closed. A detection
+        // raises a local toast; nothing leaves the device. See docs/ON_DEVICE_INTENT.md
         const classifyIntent = (sentMessageId: string): void => {
           intentClassifier.submitForMessage({
             text: _plainText,
@@ -931,16 +931,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
             dispatchChatMessageSentEvent(channelId);
-            handleMutationResult(
-              result,
-              restoreDraft,
-              () => dispatchChatMessageSentEvent(channelId),
-              () => classifyIntent(newMessageId),
-              {
-                channelId,
-                isNewConversation: true,
-              },
-            );
+            // Called directly, unlike the two zero.mutate paths which classify from
+            // `onServerSuccess`. sendMessage() returns `{ messageId, conversationId }`
+            // synchronously — there is no server ack to wait on. Worst case is a
+            // suggestion for a message that later fails to send, which costs nothing:
+            // the toast is local and the user simply ignores it.
+            classifyIntent(newMessageId);
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,

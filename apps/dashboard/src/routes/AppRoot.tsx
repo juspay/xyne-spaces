@@ -1155,13 +1155,13 @@ export const router = createBrowserRouter(
                   element: <QuestionnaireScreen />,
                 },
                 {
-                // Dev-only surface for the on-device intent classifier. Bypasses the
-                // public-channel eligibility gate, so it is intentionally not linked
-                // from product UI. See docs/ON_DEVICE_INTENT.md
-                path: 'intent-playground',
-                element: <IntentPlaygroundScreen />,
-              },
-              {
+                  // Dev-only surface for the on-device intent classifier. Bypasses the
+                  // public-channel eligibility gate, so it is intentionally not linked
+                  // from product UI. See docs/ON_DEVICE_INTENT.md
+                  path: 'intent-playground',
+                  element: <IntentPlaygroundScreen />,
+                },
+                {
                   path: 'rca',
                   element: <RCAListScreen />,
                 },
