@@ -1,3 +1,10 @@
+## [1.230.1](https://github.com/juspay/xyne-spaces/compare/v1.230.0...v1.230.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* workpsace management page fix ([#1080](https://github.com/juspay/xyne-spaces/issues/1080)) ([524a1fe](https://github.com/juspay/xyne-spaces/commit/524a1fefff7e8b2a4984240665d8a8eafe8d588a))
+
 ## [1.230.0](https://github.com/juspay/xyne-spaces/compare/v1.229.1...v1.230.0) (2026-08-26)
 
 
