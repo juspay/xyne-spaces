@@ -8,7 +8,7 @@ import { authorize } from '@/middleware/authorize';
 const TAG = '[SdlcAccessBackfill]';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-const BATCH_DELAY_MS = 60_000;
+const BATCH_DELAY_MS = 10_000;
 
 const DEFAULT_RESOURCE_NAME = 'SDLC';
 const DEFAULT_ACCESS_TYPE = 'WRITE';
