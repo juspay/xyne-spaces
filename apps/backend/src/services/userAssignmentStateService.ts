@@ -142,7 +142,9 @@ export class UserAssignmentStateService {
 
   /**
    * Hand off a member's open tickets in one group after an admin deactivates them.
-   * Same policy as the member pause flow: the group must allow reassignment.
+   * Called from assignmentConfig.batchUpdate's post-commit hook, so every lookup here
+   * reads committed rows. Same policy as the member pause flow: the group must allow it,
+   * and the member must already be inactive for assignment.
    * @param userId - Member being deactivated
    * @param userGroupId - Group whose open tickets should be handed off
    * @param workspaceId - Caller's workspace, used to scope the group lookup
@@ -173,6 +175,18 @@ export class UserAssignmentStateService {
 
       if (!membership) {
         return { scheduled: false, reason: 'NOT_A_GROUP_MEMBER' };
+      }
+
+      // Only hand off for a member who has actually stopped taking new work, so the
+      // method cannot redistribute an active member's tickets. A missing row counts as
+      // inactive - the assignment engine treats it that way.
+      const state = await this.prisma.userAssignmentState.findFirst({
+        where: { userId, userGroupId },
+        select: { isActiveForAssignment: true },
+      });
+
+      if (state?.isActiveForAssignment === true) {
+        return { scheduled: false, reason: 'MEMBER_STILL_ACTIVE' };
       }
 
       await ticketReassignmentQueue.scheduleReassignment(userId, userGroupId);
