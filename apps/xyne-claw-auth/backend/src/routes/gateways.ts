@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import type { Prisma } from "@prisma/client";
 import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
 import { prisma } from "../db.js";
+import { findUserByAnyId } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("gateways");
@@ -91,8 +92,9 @@ router.post("/:id/identities", asyncHandler(async (req, res) => {
     throw notFound("Gateway not found");
   }
 
-  // Verify user exists
-  const user = await prisma.user.findUnique({ where: { id: userId.trim() } });
+  // The body userId may be a canonical Claw id OR a Spaces alias —
+  // normalize before linking the gateway identity row.
+  const user = await findUserByAnyId(userId.trim());
   if (!user) {
     throw notFound("User not found");
   }
@@ -102,7 +104,7 @@ router.post("/:id/identities", asyncHandler(async (req, res) => {
     create: {
       gatewayId,
       externalUserId: externalUserId.trim(),
-      userId: userId.trim(),
+      userId: user.id,
     },
     update: {
       userId: userId.trim(),

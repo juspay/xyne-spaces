@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
@@ -630,7 +631,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       : applyAiScreenCommand(task).task;
 
     const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
+    // Spaces sends its workspace membership ID in the body while requireAuth
+    // resolves the verified session to Claw's canonical user ID. They are two
+    // representations of the same caller, not an attempted cross-user run.
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
