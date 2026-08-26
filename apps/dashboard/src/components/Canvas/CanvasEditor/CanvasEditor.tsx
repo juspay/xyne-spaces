@@ -77,6 +77,7 @@ import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel'
 import { AnimatePresence } from 'framer-motion';
 
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
+import { CanvasInlineAIEdit } from '../CanvasInlineAIEdit/CanvasInlineAIEdit';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
@@ -387,14 +388,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       isCommentsOpen,
       setIsCommentsOpen,
       inlineCommentThread,
+      inlineAIEdit,
       activeCommentBlockId,
       activeCommentThreadId,
       activeCommentAnchor,
       refreshCommentHighlights,
       openCommentsForCurrentBlock,
+      openAskAIForCurrentSelection,
       focusCommentBlock,
       clearActiveCommentAnchor,
       closeInlineCommentThread,
+      closeInlineAIEdit,
       applyCommentAnchorStyle,
       removeCommentAnchorStyle,
     } = useCanvasCommentEditorBridge({
@@ -536,8 +540,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           ...(canvasId && { canvasId }),
           ...(_canvasTitle && { canvasTitle: _canvasTitle }),
           canComment: editable,
+          onAskAI: openAskAIForCurrentSelection,
         }),
-      [_canvasTitle, canvasId, editable, openCommentsForCurrentBlock],
+      [_canvasTitle, canvasId, editable, openAskAIForCurrentSelection, openCommentsForCurrentBlock],
     );
 
     const handleSave = useCallback((): void => {
@@ -628,6 +633,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
               onBeforeCreateThread={applyCommentAnchorStyle}
               onCreateThreadCreated={clearActiveCommentAnchor}
               onCreateThreadFailed={removeCommentAnchorStyle}
+            />
+          )}
+
+          {canvasId && inlineAIEdit && (
+            <CanvasInlineAIEdit
+              canvasId={canvasId}
+              canvasTitle={_canvasTitle}
+              channelId={channelId}
+              selectedText={inlineAIEdit.selectedText}
+              anchorRect={inlineAIEdit.rect}
+              onClose={closeInlineAIEdit}
             />
           )}
         </div>

@@ -9,63 +9,26 @@ import {
 } from '@blocknote/react';
 import { MessageSquarePlus } from 'lucide-react';
 import type { FC, ReactElement } from 'react';
-import { useCallback, useEffect, useRef } from 'react';
-import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine';
+import { useCallback } from 'react';
 
 type CanvasFormattingToolbarOptions = {
   canvasId?: string;
   canvasTitle?: string;
   canComment?: boolean;
+  onAskAI?: () => void;
 };
 
 function CanvasToolbarAttachedActions({
   onAddComment,
   canvasId,
-  canvasTitle,
   canComment = true,
+  onAskAI,
 }: {
   onAddComment: () => void;
 } & CanvasFormattingToolbarOptions): ReactElement {
-  const selectedTextRef = useRef('');
-
-  useEffect(() => {
-    const updateSelectedText = (): void => {
-      const selectedText = window.getSelection()?.toString().trim() ?? '';
-      if (selectedText) {
-        selectedTextRef.current = selectedText;
-      }
-    };
-
-    updateSelectedText();
-    document.addEventListener('selectionchange', updateSelectedText);
-    return (): void => document.removeEventListener('selectionchange', updateSelectedText);
-  }, []);
-
   const handleAskAI = useCallback((): void => {
-    if (!canvasId) return;
-
-    const selectedText = window.getSelection()?.toString().trim() || selectedTextRef.current;
-    if (!selectedText) return;
-
-    const preview = selectedText.length > 50 ? `${selectedText.substring(0, 50)}...` : selectedText;
-    const selectionInfo: SelectionInfo = {
-      text: selectedText,
-      preview,
-      canvasId,
-      ...(canvasTitle && { canvasTitle }),
-    };
-
-    xyneAIActor.send({
-      type: 'OPEN',
-      canvasInfo: {
-        canvasId,
-        ...(canvasTitle && { title: canvasTitle }),
-      },
-      selectionInfo,
-    });
-
-    window.getSelection()?.removeAllRanges();
-  }, [canvasId, canvasTitle]);
+    onAskAI?.();
+  }, [onAskAI]);
 
   return (
     <div className='canvas-formatting-menu__attached-actions'>

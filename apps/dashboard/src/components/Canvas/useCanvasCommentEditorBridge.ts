@@ -40,6 +40,11 @@ export type CanvasInlineCommentThreadState =
     }
   | null;
 
+export type CanvasInlineAIEditState = {
+  selectedText: string;
+  rect: DOMRect;
+} | null;
+
 interface TiptapEditorLike {
   state: {
     selection: { from: number; to: number; empty?: boolean };
@@ -110,6 +115,7 @@ const getCommentThreadRect = (
 
 const INLINE_COMMENT_INTERACTIVE_SELECTOR = [
   '[data-canvas-inline-comment-thread="true"]',
+  '[data-canvas-inline-ai-edit="true"]',
   '[data-overlay-portal]',
   '[data-radix-popper-content-wrapper]',
   '[data-testid="user-search-results"]',
@@ -132,6 +138,7 @@ export function useCanvasCommentEditorBridge({
   const [activeCommentAnchor, setActiveCommentAnchor] = useState<CanvasCommentAnchor | null>(null);
   const [inlineCommentThread, setInlineCommentThread] =
     useState<CanvasInlineCommentThreadState>(null);
+  const [inlineAIEdit, setInlineAIEdit] = useState<CanvasInlineAIEditState>(null);
   const [commentThreads, setCommentThreads] = useState<CanvasCommentHighlightThread[]>([]);
   const [commentHighlightVersion, setCommentHighlightVersion] = useState(0);
   const openedInitialThreadKeyRef = useRef<string | null>(null);
@@ -146,6 +153,7 @@ export function useCanvasCommentEditorBridge({
       setActiveCommentBlockId(thread.blockId);
       setActiveCommentThreadId(thread.id);
       setActiveCommentAnchor(null);
+      setInlineAIEdit(null);
       if (rect) {
         setInlineCommentThread({
           mode: 'thread',
@@ -181,7 +189,7 @@ export function useCanvasCommentEditorBridge({
   }, [commentThreads]);
 
   useEffect(() => {
-    if (!inlineCommentThread) return;
+    if (!inlineCommentThread && !inlineAIEdit) return;
 
     const handlePointerDown = (event: PointerEvent): void => {
       const target = event.target;
@@ -202,7 +210,7 @@ export function useCanvasCommentEditorBridge({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [inlineCommentThread]);
+  }, [inlineCommentThread, inlineAIEdit]);
 
   useEffect(() => {
     const editor = getEditor();
@@ -372,6 +380,28 @@ export function useCanvasCommentEditorBridge({
     toast.error('Select text to add a comment');
   }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor, getEditor]);
 
+  const openAskAIForCurrentSelection = useCallback((): void => {
+    const blockId = getCurrentBlockId();
+    const anchor = getCurrentCommentAnchor();
+    if (!blockId || !anchor?.anchorText) {
+      toast.error('Select text to ask AI');
+      return;
+    }
+
+    const rect = getSelectionRect(containerRef.current, blockId);
+    if (!rect) {
+      toast.error('Unable to locate selected text');
+      return;
+    }
+
+    setIsCommentsOpen(false);
+    setInlineCommentThread(null);
+    setInlineAIEdit({
+      selectedText: anchor.anchorText,
+      rect,
+    });
+  }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor]);
+
   const focusCommentBlock = useCallback(
     (blockId: string): void => {
       setActiveCommentBlockId(blockId);
@@ -400,18 +430,25 @@ export function useCanvasCommentEditorBridge({
     setActiveCommentThreadId(null);
   }, []);
 
+  const closeInlineAIEdit = useCallback((): void => {
+    setInlineAIEdit(null);
+  }, []);
+
   return {
     isCommentsOpen,
     setIsCommentsOpen,
     inlineCommentThread,
+    inlineAIEdit,
     activeCommentBlockId,
     activeCommentThreadId,
     activeCommentAnchor,
     refreshCommentHighlights,
     openCommentsForCurrentBlock,
+    openAskAIForCurrentSelection,
     focusCommentBlock,
     clearActiveCommentAnchor,
     closeInlineCommentThread,
+    closeInlineAIEdit,
     applyCommentAnchorStyle,
     removeCommentAnchorStyle,
   };
