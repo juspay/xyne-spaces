@@ -553,11 +553,12 @@ const AppSidebar = (): ReactElement => {
               hasValidStatus ? (
                 <div
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
-                  style={{ backgroundColor: 'var(--sidebar-border)' }}
                   data-testid='profile-icon'
                 >
+                  <div className='absolute inset-x-0 top-0 bottom-2 rounded-lg bg-sidebar-border' />
+
                   {/* Status Emoji at Top Center */}
-                  <div className='absolute top-0 left-1/2 -translate-x-1/2'>
+                  <div className='absolute top-0 left-1/2 -translate-x-1/2 z-10'>
                     <StatusIndicator
                       statusEmoji={currentUser?.statusEmoji}
                       statusContent={currentUser?.statusContent}
@@ -568,7 +569,7 @@ const AppSidebar = (): ReactElement => {
                   </div>
 
                   {/* Avatar at Bottom - overlaps container slightly */}
-                  <div className='relative flex'>
+                  <div className='relative z-10 flex'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-lg' />
                     ) : (
