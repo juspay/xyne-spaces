@@ -106,8 +106,6 @@ const kanbanTicketsPageArgsSchema = z.object({
     .optional(),
   filters: kanbanTicketPageFiltersSchema.optional(),
   formEntityValueFieldIds: z.array(z.string()).optional(),
-  showOverdueOnly: z.boolean().optional(),
-  overdueReferenceTime: z.number().optional(),
 });
 
 type KanbanTicketsPageArgs = z.infer<typeof kanbanTicketsPageArgsSchema>;
@@ -118,12 +116,14 @@ const kanbanTicketPageV2FiltersSchema = kanbanTicketPageFiltersSchema.extend({
     .optional(),
 });
 
-const kanbanTicketsPageV2ArgsSchema = kanbanTicketsPageArgsSchema.extend({
+const kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageArgsSchema.extend({
   filters: kanbanTicketPageV2FiltersSchema.optional(),
   dir: z.literal('forward').or(z.literal('backward')).optional(),
+  showOverdueOnly: z.boolean().optional(),
+  overdueReferenceTime: z.number().optional(),
 });
 
-type KanbanTicketsPageV2Args = z.infer<typeof kanbanTicketsPageV2ArgsSchema>;
+type KanbanTicketsPageV3Args = z.infer<typeof kanbanTicketsPageV3ArgsSchema>;
 
 const prefixedKanbanIdentityValues = (id: string): string[] => [
   id,
@@ -232,8 +232,6 @@ const applyKanbanTicketPageConditions = (
     vespaTicketIds,
     dynamicFieldScalarFilters,
     filters,
-    showOverdueOnly,
-    overdueReferenceTime,
   } = args;
 
   if (stageName) {
@@ -435,19 +433,6 @@ const applyKanbanTicketPageConditions = (
     });
   }
 
-  if (showOverdueOnly) {
-    const overdueBefore = overdueReferenceTime ?? Date.now();
-    query = query.where((helpers: any) =>
-      helpers.and(
-        helpers.cmp('statusV2', '!=', TicketStatusV2.COMPLETED),
-        helpers.cmp('statusV2', '!=', TicketStatusV2.CANCELLED),
-        helpers.exists('stageEtaEntries', (stageEtaEntry: any) =>
-          stageEtaEntry.where('stageLeftAt', 'IS', null).where('stageEta', '<', overdueBefore),
-        ),
-      ),
-    );
-  }
-
   if (vespaTicketIds) {
     if (vespaTicketIds.length === 0) {
       return query.where('id', '__kanban_vespa_no_match__');
@@ -495,10 +480,10 @@ const applyKanbanTicketPageConditions = (
   return query;
 };
 
-const applyKanbanTicketPageV2Conditions = (
+const applyKanbanTicketPageV3Conditions = (
   query: any,
   ctx: { userID: string },
-  args: KanbanTicketsPageV2Args,
+  args: KanbanTicketsPageV3Args,
 ) => {
   query = applyKanbanTicketPageConditions(query, ctx, args);
 
@@ -509,6 +494,16 @@ const applyKanbanTicketPageV2Conditions = (
         assignment.where('roleId', roleAssignment.roleId).where('userId', 'IN', roleAssignment.userIds),
       );
     }
+  }
+
+  if (args.showOverdueOnly) {
+    query = query.where((helpers: any) =>
+      helpers.and(
+        helpers.cmp('statusV2', '!=', TicketStatusV2.COMPLETED),
+        helpers.cmp('statusV2', '!=', TicketStatusV2.CANCELLED),
+        helpers.cmp('isStageOverdue', true),
+      ),
+    );
   }
 
   return query;
@@ -1059,11 +1054,11 @@ export const queries = defineQueries({
     },
   ),
 
-  kanbanTicketsPageV2: defineQuery(
-    kanbanTicketsPageV2ArgsSchema,
+  kanbanTicketsPageV3: defineQuery(
+    kanbanTicketsPageV3ArgsSchema,
     ({ ctx, args }) => {
       const dir = args.dir ?? 'forward';
-      let query = applyKanbanTicketPageV2Conditions(zql.tickets, ctx, args)
+      let query = applyKanbanTicketPageV3Conditions(zql.tickets, ctx, args)
         .orderBy('createdAt', dir === 'forward' ? 'desc' : 'asc')
         .orderBy('id', dir === 'forward' ? 'asc' : 'desc');
 
@@ -1074,7 +1069,6 @@ export const queries = defineQueries({
       let finalQuery = query
         .limit(args.limit)
         .related('assignments', (a: any) => a.related('role'))
-        .related('stageEtaEntries')
         .related('tagMappings');
 
       if (args.formEntityValueFieldIds?.length) {
