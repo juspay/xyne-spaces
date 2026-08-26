@@ -15,6 +15,7 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
 import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
+import { getPendingSdkSso, clearPendingSdkSso } from '../SdkSsoAuthorizeScreen';
 
 interface CommunityWorkspaceListItem {
   id: string;
@@ -544,6 +545,18 @@ const AuthScreen = (): ReactElement | null => {
     setRegPasswordError('');
     setRegConfirmPasswordError('');
   };
+
+  // Handle SDK SSO flow - redirect to authorize page after login (must be checked before workspace redirect)
+  const pendingSdkSsoUserCode = getPendingSdkSso();
+  if (isAuthenticated && pendingSdkSsoUserCode) {
+    clearPendingSdkSso();
+    return (
+      <Navigate
+        to={`/sdk-sso/authorize?user_code=${encodeURIComponent(pendingSdkSsoUserCode)}`}
+        replace={true}
+      />
+    );
+  }
 
   if (isAuthenticated) {
     const dest = user?.workspaceId ? `/${user.workspaceId}` : '/';

@@ -231,6 +231,7 @@ import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
+import SdkSsoAuthorizeScreen from './SdkSsoAuthorizeScreen';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
 import AIScreen from './AIScreen/AIScreen';
@@ -1988,6 +1989,10 @@ export const router = createBrowserRouter(
         {
           path: '/auth',
           element: <AuthScreen />,
+        },
+        {
+          path: '/sdk-sso/authorize',
+          element: <SdkSsoAuthorizeScreen />,
         },
         {
           path: '/workspaces',

@@ -25,6 +25,20 @@
 export { createClient, SpacesClient } from './client.js';
 export type { SpacesClientOptions } from './client.js';
 
+// ----- SSO Authentication -----
+export {
+  xyneSsoLogin,
+  xyneSsoPoll,
+  xyneSsoLoginAndWait,
+  SsoAuthError,
+} from './auth/sso.js';
+export type {
+  SsoInitResult,
+  SsoPollResult,
+  SsoLoginOptions,
+  SsoLoginAndWaitOptions,
+} from './auth/sso.js';
+
 // ----- Claw (remote agents, relayed through Spaces) -----
 export { ClawResource } from './resources/claw.js';
 export type { ClawRunAndWaitInput } from './resources/claw.js';

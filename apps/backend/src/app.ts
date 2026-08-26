@@ -205,6 +205,7 @@ import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { sdkConfig } from '@/api/sdk/config';
 import { apiKeyAuth } from '@/middleware/sdkApiKeyAuth';
 import sdkKeyRoutes from '@/routes/sdk-keys';
+import sdkSsoRoutes from '@/routes/sdk-sso';
 
 
 export class App {
@@ -370,6 +371,11 @@ export class App {
     // own error envelope: that failure happens before the protected router is
     // ever entered, so an error handler defined inside it would never see it.
     if (sdkConfig.enabled) {
+      // SDK SSO device flow routes MUST be mounted first (before apiKeyAuth).
+      // These have mixed auth: init/poll are public, status/approve need session.
+      this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
+      logger.info('SDK SSO routes mounted at /api/sdk/auth/sso');
+
       this.app.use('/api/sdk', createSdkPublicRouter());
       this.app.use('/api/sdk', apiKeyAuth, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
