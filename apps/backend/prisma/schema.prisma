@@ -2736,6 +2736,7 @@ model Call {
   labels            String[]    @default([]) // Tag ids (see Tag model); no FK constraint
   markedItems       Json[]      @default([]) // Marked moments/decisions/actions surfaced during the call
   xyneManaged       Boolean     @default(false) // True when Xyne owns this Call's conference link on the source Calendar event (Xyne Call Link Auto-Injection)
+  visibility        String      @default("PRIVATE") // PRIVATE | PUBLIC (see CallVisibility in @xyne/shared; app-validated, no DB enum)
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])

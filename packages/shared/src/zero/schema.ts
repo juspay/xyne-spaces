@@ -33,6 +33,7 @@ import {
   CallOrigin,
   CallStatus,
   CallType,
+  CallVisibility,
   CanvasCommentThreadStatus,
   CanvasRole,
   CanvasVisibility,
@@ -1200,6 +1201,7 @@ export const callTable = table('calls')
     labels: json<string[]>(),
     markedItems: json<any[]>(),
     xyneManaged: boolean(),
+    visibility: enumeration<CallVisibility>(),
   })
   .primaryKey('id');
 

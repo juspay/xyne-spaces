@@ -441,6 +441,7 @@ export const userGroupTable = table("user_groups")
     rotationInterval: string().optional(),
     rotationStartDate: number().optional(),
     reassignOnUnavailable: boolean().optional(),
+    maxWorkload: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -594,6 +595,8 @@ export const userGroupMappingTable = table("user_group_mappings")
     responsibility: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
+    startOffset: number().optional(),
+    isNotified: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1681,6 +1684,7 @@ export const callTable = table("calls")
     labels: json<string[]>(),
     markedItems: json<any[]>(),
     xyneManaged: boolean(),
+    visibility: string(),
   })
   .primaryKey("id");
 

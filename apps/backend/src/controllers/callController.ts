@@ -1429,6 +1429,7 @@ export class CallController {
           title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
+          visibility: call.visibility,
           startedAt: call.startedAt,
           endedAt: call.endedAt,
           durationMs: call.endedAt
