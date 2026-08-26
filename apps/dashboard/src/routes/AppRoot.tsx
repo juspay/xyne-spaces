@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
@@ -241,6 +242,7 @@ import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapPro
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
 import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
+const WorkflowSdkScreen = lazy(() => import('./WorkflowSdkScreen/WorkflowSdkScreen'));
 import AutomationsScreen from './AutomationsScreen/AutomationsScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
@@ -1632,6 +1634,16 @@ export const router = createBrowserRouter(
                 {
                   path: 'scheduled-messages',
                   element: <ScheduledMessageScreen />,
+                },
+                {
+                  path: 'workflow-studio/*',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKFLOW-STUDIO' minAccess='READ'>
+                      <Suspense fallback={null}>
+                        <WorkflowSdkScreen />
+                      </Suspense>
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'automations',

@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "SdkFolder", "SdkStepEvent", "SdkStaticData", "SdkCredential", "SdkWebhook", "SdkResumePayload", "SdkWorkflowCallback", "SdkResourcePermission"]
 }
 
 datasource db {
@@ -432,6 +432,16 @@ model Workflow {
   eventType        String            @default("NO_OP")
   automationSeriesId String?
   scheduledAt      DateTime? // Do the deployment only after 12 AM
+  // v2 workflow-sdk columns — set only on rows with workflowType='SDK'
+  // (the @xyne/workflow-sdk engine, src/workflowSdk). Null on legacy rows.
+  folderId         String? // soft ref to workflow.folders.id
+  isPublic         Boolean? // workspace-wide visibility (null = false)
+  summary          String? // human-facing readme/summary
+  /// The SDK's trigger type (MANUAL / CRON / WEBHOOK / ...). Kept out of
+  /// `eventType` because that column is a closed, validated enum driving the
+  /// automations event router; SDK rows leave it at NO_OP so that router skips
+  /// them, exactly as the enum intends.
+  sdkEventType     String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -439,6 +449,9 @@ model Workflow {
   workflowExecutions WorkflowExecution[]
   ticket             Ticket?             @relation(fields: [ticketId], references: [id])
   deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
+  sdkStaticData               SdkStaticData[]
+  sdkWebhook                  SdkWebhook?
+  sdkWorkflowCallback         SdkWorkflowCallback?
 
   @@index([ticketId])
   @@index([ticketId, createdAt, id])
@@ -448,6 +461,7 @@ model Workflow {
   @@index([automationSeriesId])
   @@index([workspaceId, eventType, status])
   @@index([workspaceId, workflowType, createdAt(sort: Desc)])
+  @@index([workspaceId, sdkEventType, status])
   @@map("workflows")
   @@schema("public")
 }
@@ -469,6 +483,10 @@ model WorkflowExecution {
   ignoreDuration            Int      @default(0) // ~22 days max (PAUSED or Waiting for external input)
   mode                      String                @default("AUTOMATIC") // for agent step continuation control
   createdBy                 String?  // User ID of who created/triggered this execution
+  // v2 workflow-sdk: the execution this one was rerun from. Set only on rows
+  // with workflowType='SDK' (excluded from the generic poller via
+  // GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES).
+  sourceExecutionId         String?
 
   // Relations
   workflow                Workflow               @relation(fields: [workflowId], references: [id], onDelete: Cascade)
@@ -480,6 +498,8 @@ model WorkflowExecution {
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
   sdlcRepo                Repo?                  @relation("RepoSetupExecution")
+  sdkStepEvents           SdkStepEvent[]
+  sdkResumePayload        SdkResumePayload?
 
   @@index([workflowId])
   @@index([workflowId, createdAt(sort: Desc), id])
@@ -495,6 +515,9 @@ model WorkflowExecutionState {
   context             String? // For child executions - initial context (JSON)
   output              String? // Execution-specific output (typed result)
   currentStepIndex    Int     @default(0)
+  // v2 workflow-sdk pause bookkeeping — set only for workflowType='SDK' runs.
+  pausePath           String?
+  pauseType           String?
 
   @@index([workflowExecutionId])
   @@map("workflow_execution_states")
@@ -4621,4 +4644,146 @@ model EntityAlias {
   @@index([entityId])
   @@map("entity_aliases")
   @@schema("non_zero")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @xyne/workflow-sdk persistence tables (v2 workflow engine, /api/v2/workflows).
+// The SDK's workflows / executions / execution-states / step-records REUSE the
+// legacy tables above (Workflow / WorkflowExecution / WorkflowExecutionState /
+// WorkflowStep), discriminated by workflowType='SDK' and excluded from the
+// generic poller via GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES. The models
+// below cover only what has no legacy counterpart. Bigint ms timestamps.
+// Managed exclusively by backend/src/workflowSdk/persistence.ts.
+//
+// Table names match the SDK's reference layout (xyne-search): bare inside the
+// dedicated `workflow` Postgres schema — workflow.folders, workflow.credentials,
+// etc. — while the Prisma models keep the Sdk prefix so `db.sdkFolder` stays
+// unambiguous next to CanvasFolder/AppIncomingWebhook in a 190-model schema.
+// The one prefixed table is public.sdk_resource_permissions: it sits in the
+// shared `public` schema, where a bare `resource_permissions` would not be
+// self-describing (xyne-search names it the same way).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model SdkFolder {
+  id          String  @id
+  workspaceId String
+  name        String
+  metadata    String? // JSON: host metadata
+  parentId    String? // null = top-level folder
+  isPublic    Boolean @default(false)
+  createdAt   BigInt
+
+  @@index([workspaceId])
+  @@map("folders")
+  @@schema("workflow")
+}
+
+model SdkStepEvent {
+  id          String @id
+  workspaceId String // denormalized tenant key (stamped on insert, from the execution)
+  executionId String
+  stepName    String
+  type        String
+  data        String
+  createdAt   BigInt
+
+  execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, stepName, createdAt])
+  @@index([workspaceId])
+  @@map("step_events")
+  @@schema("workflow")
+}
+
+model SdkStaticData {
+  workspaceId String // denormalized tenant key (stamped on insert, from the workflow)
+  workflowId  String
+  key         String
+  value       Json?
+  updatedAt   BigInt
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@id([workflowId, key])
+  @@index([workspaceId])
+  @@map("static_data")
+  @@schema("workflow")
+}
+
+/// `data` is AES-encrypted by the persistence adapter (encryptionService) before
+/// write and decrypted on read — never store plaintext credential material.
+model SdkCredential {
+  workspaceId String
+  name        String
+  credType    String
+  data        String
+  status      String @default("ACTIVE")
+  createdAt   BigInt
+  updatedAt   BigInt
+
+  @@id([workspaceId, name])
+  @@map("credentials")
+  @@schema("workflow")
+}
+
+model SdkWebhook {
+  workflowId  String @id
+  workspaceId String // denormalized tenant key (stamped on insert, from the workflow)
+  path        String @unique(map: "webhooks_path_unique")
+  secret      String
+  createdAt   BigInt
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("webhooks")
+  @@schema("workflow")
+}
+
+model SdkResumePayload {
+  executionId String @id
+  workspaceId String // denormalized tenant key (stamped on insert, from the execution)
+  payload     String
+  createdAt   BigInt
+
+  execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("resume_payloads")
+  @@schema("workflow")
+}
+
+model SdkWorkflowCallback {
+  workflowId  String @id
+  workspaceId String // denormalized tenant key (stamped on insert, from the workflow)
+  secret      String @unique(map: "workflow_callbacks_secret_unique")
+  createdAt   BigInt
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("workflow_callbacks")
+  @@schema("workflow")
+}
+
+/// Polymorphic grants for workflow-sdk resources (workflows, folders,
+/// credentials). Ownership is a row with role='owner'. resource_id is the sdk
+/// cuid with no FK (spans tables in the `workflow` schema); userId is the
+/// public.User cuid (no Prisma relation — kept FK-free like workspaceId).
+model SdkResourcePermission {
+  id           Int      @id @default(autoincrement())
+  workspaceId  String // denormalized tenant key (stamped on insert, from the resource)
+  userId       String
+  resourceType String // 'workflow' | 'folder' | 'credential'
+  resourceId   String // sdk cuid; polymorphic, no FK
+  role         String   @default("viewer") // 'owner' | 'editor' | 'viewer'
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, resourceType, resourceId])
+  @@index([resourceType, resourceId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("sdk_resource_permissions")
+  @@schema("public")
 }

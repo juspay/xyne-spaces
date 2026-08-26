@@ -20,6 +20,7 @@ import {
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
+import { dispatchMessageReceived } from '@/workflowSdk/events';
 import { activityTrackingService } from '@/services/activityTrackingService';
 import { Platform,
   serializeMessagePreviewMd,
@@ -402,6 +403,17 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         userId: senderId,
       });
     }
+
+    // Every message reaches the v2 workflow engine (src/workflowSdk) — unlike
+    // the automations fan-out above, which only fires for a conversation's
+    // first message. Trigger filters decide what actually runs.
+    void dispatchMessageReceived({
+      messageId: message.messageId,
+      conversationId,
+      channelId,
+      msgType: message.msgType as string,
+      userId: senderId,
+    });
 
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({

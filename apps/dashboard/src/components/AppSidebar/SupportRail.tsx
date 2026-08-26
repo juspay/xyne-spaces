@@ -9,6 +9,7 @@ import {
   Notebook,
   PhoneDefault,
   LightningThunderElectricOn,
+  GitBranch,
 } from '@xyne/icons';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { ShortcutHint } from '../ui/ShortcutHint';
@@ -85,6 +86,16 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
     path: '/automations',
     gatedPath: '/automations',
     isActive: ctx => ctx.activeRoute === '/automations',
+  },
+  {
+    // v2 workflow engine (@xyne/workflow-sdk). Gated by the WORKFLOW-STUDIO
+    // ACL resource via PATH_TO_RESOURCE — hidden unless the user is granted it.
+    key: 'workflow-studio',
+    label: 'Workflow Studio',
+    icon: GitBranch,
+    path: '/workflow-studio',
+    gatedPath: '/workflow-studio',
+    isActive: ctx => ctx.activeRoute === '/workflow-studio',
   },
   {
     key: 'dashboards',

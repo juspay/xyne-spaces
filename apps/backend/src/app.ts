@@ -44,6 +44,8 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
+import { workflowSdkRouter, workflowSdkPublicRouter } from '@/workflowSdk/router';
+import { requireWorkflowStudioAccess } from '@/workflowSdk/accessControl';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -454,6 +456,20 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
+    // v2 workflow engine (@xyne/workflow-sdk). Public router first: it only
+    // registers the SDK's secret-in-path routes (webhook trigger, wait
+    // callback, public multipart trigger); everything else falls through to
+    // the authenticated router. The SDK's own authorizer is the ACL here —
+    // aclMiddleware serves the legacy resource model and is deliberately absent.
+    if (config.workflowStudioEnabled) {
+      this.app.use('/api/workflow-studio', workflowSdkPublicRouter);
+      this.app.use(
+        '/api/workflow-studio',
+        authMiddleware.authenticate,
+        requireWorkflowStudioAccess,
+        workflowSdkRouter
+      );
+    }
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
       '/api/agent-tools-mappings',

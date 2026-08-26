@@ -1,0 +1,41 @@
+/*
+ * Fallbacks for CSS variables that @xyne/workflow-ui 1.3.30 *uses* but never
+ * *defines*. Its own stylesheet declares 36 `--wui-*` tokens on
+ * `:root,[data-workflow-ui]`, but eight more are referenced by components and
+ * are missing — so those properties resolve to nothing.
+ *
+ * The visible symptom was the Create Workflow modal: its panel is
+ * `bg-[var(--wui-surface)]`, which with no value means no background at all,
+ * leaving the `bg-black/50 backdrop-blur-sm` scrim showing straight through
+ * the dialog (a washed-out, frosted panel).
+ *
+ * Values mirror the package's own light palette (slate + indigo). That is
+ * deliberate, NOT an oversight: the package ships one light-only palette and no
+ * dark variant, so mapping these eight to the host's themed tokens
+ * (`hsl(var(--card))` and friends) would put a dark panel behind the package's
+ * still-dark `--wui-fg` under `[data-theme="midnight"]`. Theming the workflow
+ * UI properly means overriding the package's whole palette, not these eight —
+ * until then, matching its palette is what keeps every theme readable.
+ *
+ * Scoped to the provider's wrapper rather than `:root` so eight `--wui-*`
+ * properties do not leak into the whole dashboard. Dialogs are covered: the
+ * package portals to `document.querySelector('[data-workflow-ui]')`, inside
+ * this element, and only falls back to `document.body` when it is absent.
+ *
+ * Delete this file once the package ships these tokens — it already does the
+ * right thing for `--wui-danger`, whose every usage carries a `var()` fallback.
+ */
+[data-workflow-ui] {
+  /* Elevated surfaces: dialogs, popovers, cards. Matches --wui-bg (#fff). */
+  --wui-surface: #fff;
+
+  /* Form controls — mirror --wui-bg / --wui-border / --wui-fg / --wui-bg-muted. */
+  --wui-control-bg: #fff;
+  --wui-control-bg-hover: #f1f5f9;
+  --wui-control-border: #e2e8f0;
+  --wui-control-fg: #0f172a;
+  --wui-control-radius: var(--wui-radius-sm);
+
+  --wui-pill-radius: 9999px;
+  --wui-shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.05);
+}

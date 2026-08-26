@@ -234,6 +234,7 @@ const envSchema = Joi.object({
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
+  ENABLE_WORKFLOW_STUDIO: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
@@ -860,6 +861,7 @@ export const config = {
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
+  workflowStudioEnabled: envVars.ENABLE_WORKFLOW_STUDIO,
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,

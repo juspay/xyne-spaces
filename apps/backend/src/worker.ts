@@ -220,6 +220,13 @@ class WorkerService {
       const { scheduledMessageQueue } = await import('@/queues/scheduledMessageQueue');
       await scheduledMessageQueue.initialize();
 
+
+      if (appConfig.workflowStudioEnabled) {
+        logger.info('Initializing Workflow Studio workers...');
+        const { initWorkflowSdkWorkers } = await import('@/workflowSdk/worker');
+        await initWorkflowSdkWorkers();
+      }
+
       // Initialize recording cleanup queue (daily cron to delete expired recordings)
       logger.info('Initializing recording cleanup queue...');
       const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');

@@ -150,7 +150,14 @@ export class WorkflowRepository {
   }
 
   // POST: Create new workflow execution
-  async createWorkflowExecution(data: Omit<WorkflowExecution, 'id' | 'createdAt' | 'updatedAt' | 'workspaceId'>) {
+  // sourceExecutionId is omitted: it belongs to the v2 workflow-sdk engine
+  // (src/workflowSdk), which writes workflow_executions directly.
+  async createWorkflowExecution(
+    data: Omit<
+      WorkflowExecution,
+      'id' | 'createdAt' | 'updatedAt' | 'workspaceId' | 'sourceExecutionId'
+    >,
+  ) {
     // Stamp the denormalized tenant key from the owning workflow.
     const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'workflow', { id: data.workflowId });
     return await prisma.workflowExecution.create({

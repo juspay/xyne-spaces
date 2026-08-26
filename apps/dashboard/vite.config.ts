@@ -91,6 +91,7 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       exclude: ['@terrastruct/d2'],
+      include: ['@xyne/workflow-ui', '@xyne/workflow-sdk'],
     },
     server: {
       port: devPort,

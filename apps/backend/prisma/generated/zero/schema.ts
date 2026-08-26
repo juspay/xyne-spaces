@@ -260,6 +260,10 @@ export const workflowTable = table("workflows")
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    isPublic: boolean().optional(),
+    summary: string().optional(),
+    sdkEventType: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -283,6 +287,7 @@ export const workflowExecutionTable = table("workflow_executions")
     ignoreDuration: number(),
     mode: string(),
     createdBy: string().optional(),
+    sourceExecutionId: string().optional(),
   })
   .primaryKey("id");
 
@@ -294,6 +299,8 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     context: string().optional(),
     output: string().optional(),
     currentStepIndex: number(),
+    pausePath: string().optional(),
+    pauseType: string().optional(),
   })
   .primaryKey("id");
 
