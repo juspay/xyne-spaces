@@ -10,7 +10,6 @@ import {
   BaseTicketType,
   BoardType,
   CallType,
-  CallVisibility,
   defineQuery,
   DocType,
   EntityUserAccess,
@@ -2768,33 +2767,6 @@ export const queries: AnyQueryRegistry = defineQueries({
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
         .where('externalId', callId)
-        // Mirrors CallsACL.canSelect's non-guest access conditions inline (in addition to the
-        // ACL wrapper) so a live `visibility` flip to PUBLIC is picked up by this subscription
-        // without requiring the viewer to reload.
-        .where(({ or, cmp, exists }) =>
-          or(
-            cmp('visibility', CallVisibility.PUBLIC),
-            cmp('createdByUserId', ctx.userID),
-            exists('participants', p => p.where('userId', ctx.userID)),
-            exists('channel', ch =>
-              ch
-                .where('workspaceId', '=', ctx.workspaceId)
-                .whereExists('participants', p => p.where('userId', ctx.userID)),
-            ),
-            exists('shares', share =>
-              share
-                .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-                .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-                .where(({ or: shareOr, cmp: shareCmp, exists: shareExists }) =>
-                  shareOr(
-                    shareCmp('userId', ctx.userID),
-                    shareExists('userGroupMemberships', m => m.where('userId', ctx.userID)),
-                    shareExists('channelMembers', m => m.where('userId', ctx.userID)),
-                  ),
-                ),
-            ),
-          ),
-        )
         .related('shares', shares =>
           shares
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
