@@ -796,7 +796,13 @@ export function SearchFilterBar({ filters, onFiltersChange }: SearchFilterBarPro
                   <Check
                     className={cn(
                       'size-3.5 shrink-0',
-                      filters.rankProfile === opt.value ? 'opacity-100' : 'opacity-0',
+                      // The default row also owns an explicit pick equal to the resolved
+                      // default (possible when the CAC config arrives after the pick) —
+                      // that explicit row is deduped away, and both send the same profile.
+                      filters.rankProfile === opt.value ||
+                        (opt.value === '' && filters.rankProfile === resolvedDefaultRankProfile)
+                        ? 'opacity-100'
+                        : 'opacity-0',
                     )}
                   />
                   {opt.label}
