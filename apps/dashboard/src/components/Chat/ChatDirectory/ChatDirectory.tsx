@@ -59,6 +59,8 @@ import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
 import AddChannelForm from '../AddChannelForm/AddChannelForm';
 import AddSectionForm from '../AddSectionForm/AddSectionForm';
 import CreateSectionDialog from '../CreateSectionDialog/CreateSectionDialog';
+import ProjectSectionSuggestionCard from './ProjectSectionSuggestionCard';
+import SectionOrganizerDialog, { type OrganizerGroup } from './SectionOrganizerDialog';
 import ManageSectionChannelsDialog from './ManageSectionChannelsDialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Badge from '../../ui/Badge';
@@ -67,7 +69,10 @@ import Dialog, { cn } from '../../ui/Dialog';
 import { Button } from '../../ui/Button';
 
 import { useZero } from '../../../hooks/useZero';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
+import { toast } from 'sonner';
 import {
   useChannelSort,
   type SidebarGroup,
@@ -85,6 +90,7 @@ import {
   ChannelScopeType,
   isDeskChannelType,
   NotificationLevel,
+  computeProjectSectionSuggestions,
 } from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -103,6 +109,8 @@ import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCoun
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor, type VisibleChannel } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
+
+const SECTION_SUGGESTION_DISMISSED_KEY = 'xyne:section-suggestion-dismissed';
 
 const ContainerDropZone = ({
   id,
@@ -285,6 +293,99 @@ const ChatDirectory = ({
     mentionCounts,
     activeChannelId,
   });
+
+  const [projects] = useCachedQuery(queries.getAllProjectsList());
+  const [suggestionDismissed, setSuggestionDismissed] = useState(
+    () => localStorage.getItem(SECTION_SUGGESTION_DISMISSED_KEY) === 'true',
+  );
+  const [showOrganizer, setShowOrganizer] = useState(false);
+
+  const sectionSuggestions = useMemo(
+    () =>
+      computeProjectSectionSuggestions({
+        channels: channelData ?? [],
+        statuses: allChannelsUserStatus ?? [],
+        projects: projects ?? [],
+        existingSectionNames: (channelSections ?? []).map(section => section.name),
+      }),
+    [channelData, allChannelsUserStatus, projects, channelSections],
+  );
+
+  const showSuggestionCard = !suggestionDismissed && sectionSuggestions.length > 0;
+
+  const channelsById = useMemo(
+    () => new Map((channelData ?? []).map(channel => [channel.id, channel])),
+    [channelData],
+  );
+
+  const handleDismissSuggestion = useCallback(() => {
+    localStorage.setItem(SECTION_SUGGESTION_DISMISSED_KEY, 'true');
+    setSuggestionDismissed(true);
+    toast('You can create sections any time from the channel menu.', { duration: 5000 });
+  }, []);
+
+  const handleCreateSections = useCallback(
+    (groups: OrganizerGroup[]) => {
+      const timestamp = Date.now();
+      const created: { id: string; channelIds: string[] }[] = [];
+      let prevSectionKey = lastSectionPosition;
+
+      for (const group of groups) {
+        const sectionId = crypto.randomUUID();
+        const position = keyBetween(prevSectionKey, null);
+        prevSectionKey = position;
+
+        void zero.mutate(
+          mutators.channelSection.create({
+            id: sectionId,
+            name: group.name.trim(),
+            emoji: null,
+            position,
+            timestamp,
+          }),
+        );
+
+        let prevChannelKey: string | null = null;
+        for (const channelId of group.channelIds) {
+          const channelPosition = keyBetween(prevChannelKey, null);
+          prevChannelKey = channelPosition;
+          void zero.mutate(
+            mutators.channel.moveToSection({
+              channelId,
+              sectionId,
+              position: channelPosition,
+              timestamp,
+            }),
+          );
+        }
+
+        created.push({ id: sectionId, channelIds: group.channelIds });
+      }
+
+      setShowOrganizer(false);
+
+      const sectionCount = created.length;
+      const channelCount = created.reduce((sum, s) => sum + s.channelIds.length, 0);
+      toast(
+        `${sectionCount} section${sectionCount === 1 ? '' : 's'} created with ${channelCount} channels.`,
+        {
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              const undoTimestamp = Date.now();
+              for (const section of created) {
+                void zero.mutate(
+                  mutators.channelSection.remove({ id: section.id, timestamp: undoTimestamp }),
+                );
+              }
+            },
+          },
+        },
+      );
+    },
+    [zero, lastSectionPosition],
+  );
 
   // Flattened, de-duplicated sidebar conversation order — mirrors exactly what
   // ChatDirectory renders (starred → custom sections → channels → DMs) so keyboard
@@ -854,6 +955,13 @@ const ChatDirectory = ({
 
           <div className='py-3 w-full hidden md:block' />
 
+          {showSuggestionCard && (
+            <ProjectSectionSuggestionCard
+              onAccept={() => setShowOrganizer(true)}
+              onDismiss={handleDismissSuggestion}
+            />
+          )}
+
           <Accordion.Root
             type='multiple'
             className='space-y-4'
@@ -1263,6 +1371,23 @@ const ChatDirectory = ({
               lastSectionPosition={lastSectionPosition}
               prioritizeType={addSectionSource === 'dms' ? 'dm' : 'channel'}
               onClose={() => setShowAddSectionForm(false)}
+            />
+          )}
+        </Dialog>
+
+        <Dialog
+          open={showOrganizer}
+          onOpenChange={setShowOrganizer}
+          testId='section-organizer-dialog'
+          className='max-w-lg'
+        >
+          {showOrganizer && (
+            <SectionOrganizerDialog
+              suggestions={sectionSuggestions}
+              channelsById={channelsById}
+              existingNames={(channelSections ?? []).map(s => s.name)}
+              onCancel={() => setShowOrganizer(false)}
+              onConfirm={handleCreateSections}
             />
           )}
         </Dialog>
