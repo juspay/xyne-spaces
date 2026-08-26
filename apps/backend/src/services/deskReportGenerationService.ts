@@ -10,6 +10,7 @@ import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
 // A run with no callback (crash, dropped webhook) is reaped as failed past this age.
 export const STUCK_PENDING_HOURS = 3;
+export const DEFAULT_DESK_REPORT_AGENT_SLUG = 'desk-report-generator';
 
 const messageAttachmentRepo = new MessageAttachmentRepository();
 
@@ -76,7 +77,7 @@ export class DeskReportGenerationService {
     deskReportRangeDays: number | null;
   }): Promise<DeskReportGenerationResult> {
     const { channelId, workspaceId } = pref;
-    const agentSlug = pref.deskReportAgentSlug?.trim() || null;
+    const agentSlug = pref.deskReportAgentSlug?.trim() || DEFAULT_DESK_REPORT_AGENT_SLUG;
     const rangeDays = pref.deskReportRangeDays && pref.deskReportRangeDays > 0 ? pref.deskReportRangeDays : 1;
 
     if (!pref.ownerUserId) {
@@ -109,12 +110,8 @@ export class DeskReportGenerationService {
     const channel = await db.channel.findUnique({ where: { id: channelId }, select: { name: true } });
     const channelName = channel?.name ?? channelId;
 
-    // Two reasons dispatch can be blocked, both surfaced as a 'failed' row:
-    // no agent picked, or a picked agent no longer exists.
     let dispatchBlockedMessage: string | null = null;
-    if (!agentSlug) {
-      dispatchBlockedMessage = 'No agent selected for Desk Report. Pick an agent in Desk Settings → Agent before this desk\'s report can be generated.';
-    } else {
+    {
       let agentExists: boolean;
       try {
         const agents = await listS2SClawAgents();
@@ -124,7 +121,9 @@ export class DeskReportGenerationService {
         agentExists = true; // fail open on a transient lookup error — let the dispatch attempt itself decide
       }
       if (!agentExists) {
-        dispatchBlockedMessage = `Agent "${agentSlug}" isn't configured in this workspace. Pick a different agent for Desk Report in Desk Settings → Agent.`;
+        dispatchBlockedMessage = pref.deskReportAgentSlug?.trim()
+          ? `Agent "${agentSlug}" isn't configured in this workspace. Pick a different agent for Desk Report in Desk Settings → Agent.`
+          : `The default Desk Report agent isn't installed in this workspace yet. Ask an admin to install it, or pick a different agent in Desk Settings → Agent.`;
       }
     }
     if (dispatchBlockedMessage) {

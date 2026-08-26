@@ -333,13 +333,6 @@ export function useDeskSettingsForm(
       toast.error('Incomplete classification config', { description: classificationConfigError });
       return;
     }
-    if (pref.draft.deskReportEnabled && !pref.draft.deskReportAgentSlug) {
-      toast.error('Select an agent for Desk Report', {
-        description:
-          'Pick an agent before saving, e.g. "Desk Report Generator" — or create one if it\'s not available yet.',
-      });
-      return;
-    }
     setSaving(true);
     try {
       const d = pref.draft;

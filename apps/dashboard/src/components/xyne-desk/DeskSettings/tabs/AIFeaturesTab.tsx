@@ -203,8 +203,8 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
                 content={
                   <div className='flex max-w-[260px] flex-col gap-1'>
                     <span>
-                      Add a Claw agent to this channel and pick it as the report agent — the report
-                      won&apos;t generate until one is selected, there&apos;s no built-in default.
+                      Uses the built-in Desk Report Generator agent by default — pick a different
+                      Claw agent here if you want another one to generate the report instead.
                     </span>
                   </div>
                 }
@@ -232,8 +232,8 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
                 onChange={setDeskReportAgentSlug}
                 clawAgents={clawAgents}
                 disabled={!canManage}
-                defaultLabel='None'
-                emptyStateHelperText="Add a Claw agent to this channel and pick it as the report agent. There's no built-in default — the report won't generate until one is selected."
+                defaultLabel='Report Generator'
+                emptyStateHelperText='Uses the built-in Report Generator agent. Add a Claw agent to this channel to use a different one instead.'
               />
             )}
             <Switch
