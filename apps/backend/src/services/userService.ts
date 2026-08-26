@@ -43,7 +43,7 @@ interface GoogleUserData {
 }
 
 export interface UserWithOrgRole extends User {
-  orgRole?: string;
+  orgRole: string;
 }
 
 export class UserService {
@@ -411,7 +411,8 @@ export class UserService {
         }
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -432,7 +433,8 @@ export class UserService {
         });
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -443,7 +445,8 @@ export class UserService {
       isNewUser = true;
 
       // Fetch org role for new user
-      const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+      const orgRole = await this.getOrgRole(user.orgMemberId);
+      if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
       // Note: ensureUserPresence is called in createUser(), so no need to call it here
 
@@ -481,7 +484,7 @@ export class UserService {
   /**
    * Get user by ID with org member data
    */
-  async getUserById(userId: string): Promise<(User & { orgMember?: { memberId: string; role: string } | null }) | null> {
+  async getUserById(userId: string): Promise<(User & { orgMember: { memberId: string; role: string } }) | null> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -492,14 +495,19 @@ export class UserService {
       }
       
       // Fetch org member separately since there's no explicit relation
-      const orgMember = user.orgMemberId ? await this.prisma.orgMember.findUnique({
+      const orgMember = await this.prisma.orgMember.findUnique({
         where: { memberId: user.orgMemberId },
         select: {
           memberId: true,
           role: true,
         },
-      }) : null;
-      
+      });
+
+      if (!orgMember) {
+        logger.warn(`getUserById: orgMember not found for user ${userId}`);
+        return null;
+      }
+
       return {
         ...user,
         orgMember,
