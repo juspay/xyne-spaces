@@ -31,6 +31,10 @@ interface ParticipantTileProps {
   requestedAiController?: boolean;
   isHandRaised?: boolean | undefined;
   onToggleHandRaise?: (() => void) | undefined;
+  /** Hide the participant name overlay (used by presentation mode's full-bleed tile) */
+  hideNameLabel?: boolean | undefined;
+  /** Drop the speaking/raised-hand glow ring (a full-screen coloured frame looks wrong) */
+  hideSpeakingIndicator?: boolean | undefined;
 }
 
 export function ParticipantTile({
@@ -47,6 +51,8 @@ export function ParticipantTile({
   requestedAiController,
   isHandRaised = false,
   onToggleHandRaise,
+  hideNameLabel = false,
+  hideSpeakingIndicator = false,
 }: ParticipantTileProps): React.ReactElement {
   // Get track publications - these are observables that update automatically
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
@@ -150,6 +156,11 @@ export function ParticipantTile({
     if (isScreenShare) {
       return 'border-blue-400 border-2 cursor-pointer hover:border-blue-300';
     }
+    // Presentation mode fills the screen, so any state ring becomes a coloured
+    // frame around the whole viewport — drop the border entirely there.
+    if (hideSpeakingIndicator) {
+      return 'border-0';
+    }
     // Hand raised — amber glow to draw attention (a raised hand usually means
     // the person is waiting to speak, so it takes precedence over the speaking ring).
     if (isHandRaised) {
@@ -241,16 +252,18 @@ export function ParticipantTile({
       {!participant.isLocal && audioTrackRef && <AudioTrack trackRef={audioTrackRef} />}
 
       {/* Participant Info Overlay */}
-      <div
-        className={cn(
-          'absolute text-white font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] visual-regression-hide',
-          compact
-            ? 'bottom-0.5 left-0.5 text-[9px]'
-            : 'bottom-1 left-1 sm:bottom-2 sm:left-2 text-[10px] sm:text-xs max-w-[calc(100%-0.5rem)] truncate',
-        )}
-      >
-        {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
-      </div>
+      {!hideNameLabel && (
+        <div
+          className={cn(
+            'absolute text-white font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] visual-regression-hide',
+            compact
+              ? 'bottom-0.5 left-0.5 text-[9px]'
+              : 'bottom-1 left-1 sm:bottom-2 sm:left-2 text-[10px] sm:text-xs max-w-[calc(100%-0.5rem)] truncate',
+          )}
+        >
+          {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
+        </div>
+      )}
 
       {/* Background Blur Toggle - local tile only, when camera is on */}
       {showBlurToggle && (
