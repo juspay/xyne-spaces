@@ -1,11 +1,9 @@
-import { cloneElement, useRef, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, type ReactElement, type ReactNode } from 'react';
 import { HoverCard } from '../ui/HoverCard';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 
 export const QUICK_NAV_ROW_CLASS =
   'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm leading-5 text-foreground no-underline transition-colors hover:bg-accent hover:text-accent-foreground';
-
-const OPEN_GUARD_MS = 600;
 
 export const QuickNavList = ({
   heading,
@@ -28,15 +26,13 @@ export const RailQuickNavEntry = ({
   open,
   onOpenChange,
 }: {
-  trigger: ReactElement<{ onPointerDown?: (event: React.PointerEvent) => void }>;
+  trigger: ReactElement<{ onFocus?: (event: React.FocusEvent) => void }>;
   menu: ReactNode;
   tooltip: ReactNode;
   showQuickMenu: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): ReactElement => {
-  const ignoreOpenUntil = useRef(0);
-
   if (!showQuickMenu) {
     return (
       <Tooltip content={tooltip} side='right' delayDuration={0}>
@@ -48,23 +44,14 @@ export const RailQuickNavEntry = ({
   return (
     <HoverCard
       open={open}
-      onOpenChange={next => {
-        if (next && performance.now() < ignoreOpenUntil.current) return;
-        onOpenChange(next);
-      }}
+      onOpenChange={onOpenChange}
       side='right'
       align='start'
       sideOffset={8}
       openDelay={200}
       closeDelay={120}
       className='w-56 rounded-xl p-1.5'
-      trigger={cloneElement(trigger, {
-        onPointerDown: event => {
-          ignoreOpenUntil.current = performance.now() + OPEN_GUARD_MS;
-          onOpenChange(false);
-          trigger.props.onPointerDown?.(event);
-        },
-      })}
+      trigger={cloneElement(trigger, { onFocus: event => event.preventDefault() })}
     >
       {menu}
     </HoverCard>
