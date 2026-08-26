@@ -87,6 +87,26 @@ class TicketReassignmentQueue {
     try {
       const jobId = `reassign-${userGroupId}-${userId}`;
 
+      // Bull silently ignores an add whose jobId already exists, and this queue keeps
+      // failed jobs (removeOnFail: false). Without this, one run that exhausted its
+      // retries - or stalled out past maxStalledCount - would block every later
+      // reassignment for the same pair forever, while callers still see success.
+      // Only failed jobs need clearing: removeOnComplete drops successful ones already.
+      // Best effort: waiting/active/delayed jobs are left alone so re-scheduling still
+      // collapses onto them, and losing the race to an active job is harmless.
+      try {
+        const existing = await this.queue.getJob(jobId);
+        if (existing && (await existing.isFailed())) {
+          await existing.remove();
+          logger.warn(`⚠️ [TICKET-REASSIGNMENT] Cleared stale job ${jobId} before re-enqueue`);
+        }
+      } catch (error) {
+        logger.warn(
+          `⚠️ [TICKET-REASSIGNMENT] Could not clear existing job ${jobId}; continuing to enqueue:`,
+          error
+        );
+      }
+
       await this.queue.add(
         'reassign-user-tickets',
         { type: 'reassign-user-tickets', userId, userGroupId },
