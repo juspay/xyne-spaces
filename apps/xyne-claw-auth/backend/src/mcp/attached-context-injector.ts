@@ -15,6 +15,7 @@
  * passes a value, we never overwrite it.
  */
 import { redisService } from "../redis.js";
+import { errMsg } from "../lib/errors.js";
 import type { AttachedContextRef } from "../services/agentChatContextService.js";
 import { createLogger } from "../logger.js";
 
@@ -32,7 +33,7 @@ export async function storeForSession(sessionId: string, items: AttachedContextR
   try {
     await redisService.getConnection().set(key(sessionId), JSON.stringify(items), "EX", TTL_SECONDS);
   } catch (err) {
-    log.warn(`[attached-ctx] store failed for ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[attached-ctx] store failed for ${sessionId}:`, errMsg(err));
   }
 }
 
@@ -44,7 +45,7 @@ export async function loadForSession(sessionId: string): Promise<AttachedContext
     const parsed = JSON.parse(raw) as AttachedContextRef[];
     return Array.isArray(parsed) ? parsed : undefined;
   } catch (err) {
-    log.warn(`[attached-ctx] load failed for ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[attached-ctx] load failed for ${sessionId}:`, errMsg(err));
     return undefined;
   }
 }

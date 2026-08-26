@@ -6,6 +6,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
 import {
@@ -35,7 +36,7 @@ import {
 } from "../lib/agent-card.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
-import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
@@ -57,6 +58,8 @@ import {
   tryAcquireSlot,
   releaseSlot,
   refreshSlot,
+  attachSlotSession,
+  getSlotOwner,
   enqueueMessage,
   dequeueMessage,
   queueDepth,
@@ -91,7 +94,7 @@ import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middlewa
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
-import { sendStoredExternalResultCallback, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
+import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
@@ -104,12 +107,17 @@ import {
   clearPlanExecMeta,
   normalizePlanTitle,
   filterToApprovedTitles,
+  setPlanLastTodos,
+  getPlanLastTodos,
+  clearPlanLastTodos,
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
+
 import {
   buildSdlcAgentToolProfile,
   buildWriteApprovalFlow,
+  buildTicketProposalFlow,
   buildTwinApprovalFlow,
   buildUserQuestionFlow,
   buildPromoteProviderFlow,
@@ -117,16 +125,19 @@ import {
   buildGoalSuggestionFlow,
   buildPlanFlow,
   buildAgentCardFlow,
+  buildCodeFlow,
+  buildDiffFlow,
+  buildChartFlow,
   hashSkillContent,
   buildPrFlow,
   prScreenId,
   isTwinDelivery,
+  isUiWidget,
   SDLC_REQUIRED_TOOLS,
-  type PrProvider,
-  type PrStatus,
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
-import type { TwinDelivery } from "xyne-claw-shared";
+import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
+import { isAgentInvocableBy } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 
@@ -521,6 +532,10 @@ import {
   readPrBindingData,
   normalizePrUrl,
   setWidgetBindingStatus,
+  upsertPlanBinding,
+  findProposedPlanBinding,
+  readPlanBindingData,
+  markPlanBindingStatus,
 } from "../lib/agent-widget-binding.js";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -564,6 +579,8 @@ import {
   spacesAppFetch,
   spacesAppFetchGet,
   spacesAppFetchMultipart,
+  SpacesApiError,
+  isFlowSchemaRejection,
   withSpaces5xxRetry,
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
@@ -710,17 +727,32 @@ async function continueExperimentAfterResult(ctx: SessionContext, sessionId: str
     clog.warn("[experiment] checker dispatch threw", {
       experimentId: active.id,
       epoch: active.epoch,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
   });
 
-  if (now < active.deadlineAt.getTime()) {
+  // repo-history is COMMIT-bound, not time-bound: every commit from the initial
+  // sha to HEAD must be walked, so the deadline is NOT its stop condition — it
+  // keeps chaining epochs until the agent ends the run at HEAD (end-experiment,
+  // which flips the row out of "active" so this function returns early next
+  // time). The only backstop is an epoch-count cap, since a walk that never
+  // advances the cursor would otherwise loop forever — a time deadline would
+  // defeat the whole point. Other kinds keep the deadline as their safety cap.
+  const MAX_REPO_HISTORY_EPOCHS = 1000;
+  const keepGoing =
+    active.kind === "repo-history"
+      ? active.epoch < MAX_REPO_HISTORY_EPOCHS
+      : now < active.deadlineAt.getTime();
+  if (keepGoing) {
     const next = await experimentRepository.update(active.id, {
       epoch: { increment: 1 },
       lastEpochEndedAt: new Date(),
     });
     await dispatchExperimentEpoch(next);
     return true;
+  }
+  if (active.kind === "repo-history") {
+    clog.warn(`[experiment] repo-history ${active.id} hit the ${MAX_REPO_HISTORY_EPOCHS}-epoch backstop without reaching HEAD — finishing; the walk likely stalled (cursor not advancing)`);
   }
 
   const finishing = await experimentRepository.update(active.id, {
@@ -768,12 +800,15 @@ async function pendingActionTargetValidation(
       );
       return { error: null };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/Spaces app API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+      // Branch on the typed HTTP status, not message text. Only a definitive 404
+      // rejects a conversation target; everything else (403 included, preserving
+      // prior behavior) fails open so the Spaces API stays the final judge.
+      const status = err instanceof SpacesApiError ? err.status : undefined;
+      if (status === 404) {
         return { error: `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread` };
       }
       clog.warn(
-        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+        `[webhook/result] approval conversation lookup failed open tool=${String(action["tool"] ?? "")} conversationId=${conversationId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(errMsg(err)).slice(0, 240)}`,
       );
       return { error: null };
     }
@@ -785,24 +820,21 @@ async function pendingActionTargetValidation(
     const channel = (await spacesAppFetch("/channel/info", { channelId }, appToken)) as { name?: string } | undefined;
     return channel?.name ? { error: null, channelName: channel.name } : { error: null };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (
-      /Spaces app API 404/i.test(msg) ||
-      /CHANNEL_NOT_FOUND/i.test(msg) ||
-      (/channel not found/i.test(msg) && /\b404\b/.test(msg))
-    ) {
+    // Same typed-status branch as the queue-time validator (mcp/validators.ts):
+    // 404 → not found, 403 → not accessible, anything else fails open.
+    const status = err instanceof SpacesApiError ? err.status : undefined;
+    if (status === 404) {
       return { error: `channel ${channelId} not found — use a real Spaces channel id` };
     }
-    if (/Spaces app API 403/i.test(msg) || /forbidden/i.test(msg)) {
+    if (status === 403) {
       return { error: `channel ${channelId} is not accessible — add the app to the channel or choose a channel it can access` };
     }
     clog.warn(
-      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} err=${msg.slice(0, 240)}`,
+      `[webhook/result] approval channel lookup failed open tool=${String(action["tool"] ?? "")} channelId=${channelId} userId=${ctx.senderId} spacesAppId=${ctx.spacesAppId} status=${status ?? "n/a"} err=${(errMsg(err)).slice(0, 240)}`,
     );
     return { error: null };
   }
 }
-
 
 /**
  * Digital Twin (approval mode): open a DM with the mentioned user and send the
@@ -958,7 +990,7 @@ async function sendTwinReplyDraft(
         effectiveDelivery = { ...delivery, message: `${delivery.message.trimEnd()}\n\n${suffix}` };
       }
     } catch (err) {
-      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${errMsg(err)}`);
     }
   }
 
@@ -971,7 +1003,7 @@ async function sendTwinReplyDraft(
       const merged = mergeInvocationsForCitations(persisted?.toolInvocations, toolInvocations);
       citationMeta = buildThreadCitationMeta(merged, effectiveDelivery.reasoning);
     } catch (err) {
-      clog.warn(`[webhook/result] Twin citation baking failed: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Twin citation baking failed: ${errMsg(err)}`);
     }
   }
 
@@ -1038,7 +1070,7 @@ async function sendTwinReplyDraft(
       return;
     }
   } catch (err) {
-    clog.error(`[webhook/result] Twin reply-draft create error: ${err instanceof Error ? err.message : String(err)} — staying silent, session ${sessionId}`);
+    clog.error(`[webhook/result] Twin reply-draft create error: ${errMsg(err)} — staying silent, session ${sessionId}`);
     await deleteSession(sessionId);
     return;
   }
@@ -1224,6 +1256,9 @@ export async function fetchConversationHistory(
  *  since the executed payload comes from the HMAC-signed action, not the card. */
 const BULK_TICKETS_CARD_LIMIT = 25;
 
+type TicketCardPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -1273,6 +1308,43 @@ function formatActionDescription(tool: string, params: Record<string, unknown>, 
     });
     if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
       lines.push(`_…and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more — all ${tickets.length} are created on approve._`);
+    }
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-update-bulk-tickets") {
+    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
+    const lines = [`**Update ${tickets.length} Tickets**`, ``];
+
+    const defaults: string[] = [];
+    if (params["defaultStatus"]) defaults.push(`status \u2192 ${String(params["defaultStatus"])}`);
+    if (params["defaultStage"]) defaults.push(`stage \u2192 ${String(params["defaultStage"])}`);
+    if (params["defaultPriority"]) defaults.push(`priority \u2192 ${String(params["defaultPriority"])}`);
+    if (params["defaultAssigneeId"]) defaults.push(`assignee \u2192 ${String(params["defaultAssigneeId"])}`);
+    if (Array.isArray(params["defaultTags"]) && (params["defaultTags"] as unknown[]).length) {
+      defaults.push(`tags [${(params["defaultTags"] as unknown[]).join(", ")}]`);
+    }
+    if (defaults.length) lines.push(`**Defaults:** ${defaults.join(" \u00b7 ")}`, ``);
+
+    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
+      const ticketId = String(ticket["ticketId"] ?? "(no id)");
+      const changes: string[] = [];
+      const status = ticket["status"] ?? params["defaultStatus"];
+      const stage = ticket["stage"] ?? params["defaultStage"];
+      const priority = ticket["priority"] ?? params["defaultPriority"];
+      const assignee = ticket["assigneeId"] ?? params["defaultAssigneeId"];
+      if (status) changes.push(`status \u2192 ${String(status)}`);
+      if (stage) changes.push(`stage \u2192 ${String(stage)}`);
+      if (priority) changes.push(`priority \u2192 ${String(priority)}`);
+      if (assignee) changes.push(`assignee \u2192 ${String(assignee)}`);
+      if (ticket["title"]) changes.push(`title`);
+      if (ticket["description"]) changes.push(`description`);
+      if (ticket["eta"]) changes.push(`eta \u2192 ${String(ticket["eta"])}`);
+      if (Array.isArray(ticket["tags"]) || Array.isArray(params["defaultTags"])) changes.push(`tags`);
+      lines.push(`**${index + 1}. ${ticketId}**${changes.length ? ` \u2014 ${changes.join(" \u00b7 ")}` : ""}`);
+    });
+    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
+      lines.push(``, `_\u2026and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more \u2014 all ${tickets.length} are updated on approve._`);
     }
     return lines.join("\n");
   }
@@ -1347,7 +1419,7 @@ async function postWriteApprovalAction(args: {
   const spacesAppId = ctx.spacesAppId ?? "";
   const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
 
-  const writeFlow = withSpacesAppId(buildWriteApprovalFlow(actionDesc, {
+  const cardAction = {
     serverType: pendingActionPayload.serverType,
     tool: pendingActionPayload.tool,
     params,
@@ -1356,7 +1428,28 @@ async function postWriteApprovalAction(args: {
     agentSlug,
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-  }), spacesAppId);
+  };
+
+  const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
+  // The rich `ticket` FlowUI component is only rendered by newer Spaces
+  // backends; older deployments reject it. Track when we used it so a flow-
+  // schema rejection can fall back to the generic approval card below.
+  const usedRichTicketCard = pendingActionPayload.tool === "spaces-create-ticket" && !!ticketTitle;
+  const writeFlow = withSpacesAppId(
+    usedRichTicketCard
+      ? buildTicketProposalFlow({
+          title: ticketTitle,
+          ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
+            ? { priority: params["priority"] as TicketCardPriority }
+            : {}),
+          ...(typeof params["eta"] === "string" && params["eta"] ? { eta: params["eta"] } : {}),
+          ...(typeof params["assignedTo"] === "string" && params["assignedTo"]
+            ? { assigneeId: params["assignedTo"] }
+            : {}),
+        }, cardAction)
+      : buildWriteApprovalFlow(actionDesc, cardAction),
+    spacesAppId,
+  );
 
   // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
   // (filesController.uploadFiles) has no flow handling at all — a `flow` field
@@ -1384,23 +1477,43 @@ async function postWriteApprovalAction(args: {
       });
     } catch (err) {
       clog.warn("[webhook/result] memory attachment upload failed; posting approval card without attachment", {
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg(err),
       });
     }
   }
 
-  await spacesAppFetch("/chat/postMessage", {
-    channelId: ctx.channelId,
-    // Same empty-conversationId guard as the result post: an API/event-triggered
-    // run has no thread, so posting the approval card with conversationId: ""
-    // 400s in Spaces' channel-validation middleware and the card silently never
-    // appears. Omit when empty → the card posts as a top-level channel message.
-    ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
-    flow: writeFlow,
-    userId: ctx.spacesAppUserId,
-  }, token);
-}
+  const postCard = (flow: unknown): Promise<unknown> =>
+    spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      // Same empty-conversationId guard as the result post: an API/event-triggered
+      // run has no thread, so posting the approval card with conversationId: ""
+      // 400s in Spaces' channel-validation middleware and the card silently never
+      // appears. Omit when empty → the card posts as a top-level channel message.
+      ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, token);
 
+  try {
+    await postCard(writeFlow);
+  } catch (err) {
+    // The rich `ticket` component isn't rendered by every deployed Spaces
+    // backend; when it isn't, /chat/postMessage rejects the ENTIRE card with a
+    // 400 "Invalid flowJSON" (unknown component discriminator) and the approval
+    // never appears (prod 2026-08-24, arya-doctor spaces-create-ticket). Degrade
+    // to the generic approve/decline card, which uses only universally-supported
+    // component types and carries the identical signed action, so the write can
+    // still be approved. ONLY a flow-schema 400 triggers this — any other error
+    // (auth, channel validation, network) re-throws so the caller's skip/target
+    // logic is unaffected. Once Spaces ships `ticket`, the rich card works again
+    // with no code change.
+    if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
+    clog.warn(
+      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${pendingActionPayload.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+    );
+    await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
+  }
+}
 
 // ── POST /webhook and /webhook/:agentSlug — receive events from Xyne Spaces ──
 
@@ -1545,7 +1658,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // First check if the mentioned user is an agent bot
       agent = await resolveAgentByAppUserId(mentionedUserIds[0]!);
 
-
       // If not an agent bot, check if the mentioned user is registered in claw-auth
       // (i.e. they have a Digital Twin set up with MCP connections)
       if (!agent) {
@@ -1595,7 +1707,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         metadata: { contentFormat: "markdown" },
       }, agent.appToken).catch((err) => {
         log.error("Failed to send unregistered-user template", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
       });
     } else {
@@ -1651,7 +1763,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     planModeEnabled = ((cfgRow?.config ?? {}) as Record<string, unknown>)["planMode"] === true;
   } catch (err) {
     log.warn("autoGoal config lookup failed — treating as off", {
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
   }
   // ── /goal slash command interception ─────────────────────────────────────
@@ -1680,7 +1792,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /experiment reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /experiment reply", { error: errMsg(err) });
     });
 
     if (experimentCommand.sub === "unknown") {
@@ -1736,7 +1848,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           log.warn("[experiment] failed to cancel running epoch", {
             experimentId: run.id,
             sessionId: run.currentSessionId,
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -1835,7 +1947,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         }
       } catch (err) {
         log.warn("[experiment] proof bundle failed; falling back to markdown only", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
       }
       if (bundle) {
@@ -1864,7 +1976,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         });
       } catch (err) {
         log.warn("[experiment] findings file upload failed; posting inline fallback", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
         await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${bundle ? bundle.filename : filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
       }
@@ -1926,7 +2038,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     } catch (err) {
       // A silent failure here strands a zombie "active" run that blocks every
       // future /experiment in this thread. Abort it and tell the user why.
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errMsg(err);
       log.warn("[experiment] initial dispatch failed", { error: msg });
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
       await postExperimentReply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`);
@@ -1956,7 +2068,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /queue reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /queue reply", { error: errMsg(err) });
     });
     return;
   }
@@ -1992,7 +2104,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
         "- `/clear` — wipe this thread's context and start fresh",
         "- `/compact [focus]` — summarize & shrink the context, then continue",
-        "- `/queue` — show messages waiting behind the current run · `/queue clear` — drop them",
+        "- `/queue` — show messages waiting behind the current run · `/queue <message>` — run it after the current run without interrupting · `/queue clear` — drop waiting messages",
         "- `/upgrade [task]` — use the premium model for this conversation",
         "- `/fast [task]` / `/fast off` — fast mode: the agent calls tools directly instead of delegating to subagents (quicker for short asks; use normal mode for deep investigations)",
         "- `/help` — show this list",
@@ -2000,7 +2112,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /help reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /help reply", { error: errMsg(err) });
     });
     return;
   }
@@ -2013,7 +2125,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /fast reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /fast reply", { error: errMsg(err) });
     });
     return;
   }
@@ -2031,7 +2143,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       try {
         await setFastModeOverride(payload.conversationId, agent.slug, slash.enabled);
       } catch (err) {
-        log.warn("Failed to set /fast override", { error: err instanceof Error ? err.message : String(err) });
+        log.warn("Failed to set /fast override", { error: errMsg(err) });
         markdownText = "⚠️ couldn't persist fast mode — try again";
       }
     }
@@ -2042,7 +2154,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /fast reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /fast reply", { error: errMsg(err) });
     });
     return;
   }
@@ -2059,7 +2171,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       });
       cleared = (r as unknown as { ok: boolean }).ok;
     } catch (err) {
-      log.warn("Failed to clear claw session", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to clear claw session", { error: errMsg(err) });
     }
     await spacesAppFetch("/chat/postMessage", {
       channelId: payload.channelId,
@@ -2070,7 +2182,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /clear reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /clear reply", { error: errMsg(err) });
     });
     return;
   }
@@ -2092,7 +2204,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /queue clear reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /queue clear reply", { error: errMsg(err) });
     });
     return;
   }
@@ -2133,7 +2245,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /stop reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /stop reply", { error: errMsg(err) });
     });
     return;
   }
@@ -2142,6 +2254,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Not a short-circuit: it dispatches a normal turn with compactBeforeRun set,
   // so the agent compacts the resumed session and replies with a summary.
   const compactBeforeRun = slash?.kind === "compact";
+  const explicitQueueOnly = slash?.kind === "queueAdd";
 
   // Only goal commands reach the goal relooper; stop/clear/compact are handled
   // here (goalClear was short-circuited above into the full /stop path).
@@ -2160,9 +2273,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       userId: agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /goal control reply", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to post /goal control reply", { error: errMsg(err) });
     });
     return;
+  } else if (slash?.kind === "queueAdd") {
+    // `/queue <message>` is an explicit opt-out from same-user interrupt-with-reply.
+    // If a run is active the slot gate below will enqueue it without touching the
+    // active run; if nothing is active we just run the message now.
+    task = slash.message;
   } else if (compactBeforeRun) {
     // The run resumes the session, forces a compaction, and answers this task —
     // a short summary for the user while the context shrinks.
@@ -2230,7 +2348,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         await setFastModeOverride(payload.conversationId, agent.slug, fastEnable);
       } catch (err) {
         // Run the task anyway — resolveFastMode falls back to agent config.
-        log.warn("Failed to set /fast override for /fast <task>", { error: err instanceof Error ? err.message : String(err) });
+        log.warn("Failed to set /fast override for /fast <task>", { error: errMsg(err) });
       }
     }
   }
@@ -2254,9 +2372,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Claim the conversation slot before slow provider/history/attachment setup.
   // Bare `/upgrade` is an ack-only command, so it must not reserve a run slot.
   if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId && task) {
-    const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug);
+    const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug, undefined, targetUserId);
     slotToken = slot;
     if (!slot) {
+      const slotOwner = await getSlotOwner(payload.conversationId, runAgentSlug).catch(() => null);
+      const activeRunToInterrupt =
+        !explicitQueueOnly && slotOwner?.sessionId
+          ? { sessionId: slotOwner.sessionId, ownerUserId: slotOwner.userId }
+          : null;
       const queuedMsg: QueuedMessage = {
         eventId: (payload as { messageId?: string }).messageId ?? traceId,
         conversationId: payload.conversationId,
@@ -2268,16 +2391,45 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         orgId: agent.orgId,
         task,
         eventType,
+        queueReason: activeRunToInterrupt ? "interrupt_followup" : explicitQueueOnly ? "explicit_queue" : "busy",
+        interruptMode: activeRunToInterrupt ? "interrupt_with_reply" : "queue_only",
         ts: Date.now(),
       };
       const enq = await enqueueMessage(queuedMsg);
-      const notice = enq.enqueued
-        ? `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`
-        : enq.deduped
-          ? `🕒 Already queued — I’ll get to it as soon as I’m done with the current one.`
-          : enq.full
-            ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
-            : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
+      let interruptRequested = false;
+      if (enq.enqueued && activeRunToInterrupt) {
+        try {
+          const interruptRes = await fetch(
+            `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(activeRunToInterrupt.sessionId)}/interrupt-with-reply`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                "x-user-id": targetUserId,
+              },
+            },
+          );
+          interruptRequested = interruptRes.ok;
+          if (!interruptRes.ok) {
+            const body = await interruptRes.text().catch(() => "");
+            log.warn(`[msg-queue] interrupt-with-reply rejected session=${activeRunToInterrupt.sessionId} owner=${activeRunToInterrupt.ownerUserId ?? "?"} by=${targetUserId} status=${interruptRes.status} body=${body.slice(0, 200)}`);
+          }
+        } catch (err) {
+          log.warn("Failed to request interrupt-with-reply", { error: errMsg(err) });
+        }
+      }
+      const notice = activeRunToInterrupt && interruptRequested
+        ? `⏸️ I’ll wrap up my current reply first, then continue with your new message.`
+        : enq.enqueued
+          ? explicitQueueOnly
+            ? `🕒 Queued after the current run (position ${enq.position}).`
+            : `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`
+          : enq.deduped
+            ? `🕒 Already queued — I’ll get to it as soon as I’m done with the current one.`
+            : enq.full
+              ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
+              : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
       await spacesAppFetch("/chat/postMessage", {
         channelId: payload.channelId,
         conversationId: payload.conversationId,
@@ -2285,9 +2437,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         userId: agent.spacesAppUserId,
         metadata: { contentFormat: "markdown" },
       }, agent.appToken).catch((err) => {
-        log.warn("Failed to post queue notice", { error: err instanceof Error ? err.message : String(err) });
+        log.warn("Failed to post queue notice", { error: errMsg(err) });
       });
-      log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
+      log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} reason=${queuedMsg.queueReason} interruptRequested=${interruptRequested} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
       return;
     }
   }
@@ -2352,13 +2504,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     //   1. personal provider (user picked in agent settings + has own creds)
     //   2. agent-level provider (agent.config.provider + agentProviderCredentials)
     //   3. "spaces" / LiteLLM platform default
-    const agentLevelProvider = (agentRow?.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
+    // Agent-default fast mode may resolve against its own provider profile
+    // (config.fastModeProfile) — see lib/agent-provider-config.ts.
+    const mentionSpeed = agentDefaultSpeed(agentRow?.config);
+    const mentionSpeedConfig = providerConfigForSpeed(agentRow?.config, mentionSpeed);
+    const agentLevelProvider = mentionSpeedConfig["provider"] as string | undefined;
     // Owners can also pin an ordered preference list under config.providerOrder.
     // We use it (a) to pick which agent-level provider to bind as the parent
     // model, and (b) to thread the full fallback chain into the runtime so
     // claw can walk it on quota exhaustion instead of dropping straight to
     // LiteLLM. Validation: keep only known provider strings.
-    const rawProviderOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const rawProviderOrder = mentionSpeedConfig["providerOrder"];
     const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
       ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
       : [];
@@ -2421,6 +2577,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         providerScope[provider] = "agent";
       }
     }
+    applyFastModeModels(providerConfigs, agentRow?.config, mentionSpeed);
 
     // Refresh the Claude OAuth token before use — it's short-lived. Codex
     // already stores+refreshes a bundle; Claude historically stored a raw token
@@ -2448,7 +2605,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           // it's visible rather than a mystery empty-completion.
           log.warn("Claude OAuth refresh failed — credential likely needs reconnect", {
             scope,
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -2480,7 +2637,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           // it's visible rather than a mystery empty-completion.
           log.warn("Codex OAuth refresh failed — credential likely needs reconnect", {
             scope,
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -2615,6 +2772,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           spacesAppUserId: agent.spacesAppUserId,
           traceId,
           rootAgentSlug: agent.slug,
+          triggerSource: "spaces",
           escalatedProvider,
           // Preserve other prior-session fields where helpful.
           ...(priorSession?.workflowId ? { workflowId: priorSession.workflowId } : {}),
@@ -2627,7 +2785,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           userId: agent.spacesAppUserId,
           metadata: { contentFormat: "markdown" },
         }, agent.appToken).catch((err) => {
-          log.warn("Failed to post /upgrade ack", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("Failed to post /upgrade ack", { error: errMsg(err) });
         });
         log.info(`/upgrade flipped escalation to ${escalatedProvider} for conv ${payload.conversationId}`);
       } else {
@@ -2678,7 +2836,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           if (parsed.workspaceId) userSpacesWorkspaceId = parsed.workspaceId;
         }
       } catch (err) {
-        log.warn(`Failed to load user Spaces token for ${payload.userId}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Failed to load user Spaces token for ${payload.userId}: ${errMsg(err)}`);
       }
     }
     if (userSpacesToken && !userSpacesWorkspaceId) {
@@ -2868,7 +3026,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             const body = await dlRes.text().catch(() => "");
             failures.push(`${src.label}: HTTP ${dlRes.status} ${body.slice(0, 120)}`);
           } catch (err) {
-            failures.push(`${src.label}: ${err instanceof Error ? err.message : String(err)}`);
+            failures.push(`${src.label}: ${errMsg(err)}`);
           }
         }
         if (!downloaded) {
@@ -2993,6 +3151,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       spacesAppUserId: agent.spacesAppUserId,
       traceId,
       rootAgentSlug: agent.slug,
+      triggerSource: "spaces",
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(escalatedProvider ? { escalatedProvider } : {}),
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
@@ -3164,7 +3323,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             log.info(`Posted progress placeholder, messageId=${progressMessageId}`);
           }
         } catch (err) {
-          log.warn("Failed to publish initial agent progress signal", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("Failed to publish initial agent progress signal", { error: errMsg(err) });
         }
       }
 
@@ -3204,7 +3363,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           // brand which doesn't accept Record<string, unknown> directly.
           runPayload: JSON.parse(JSON.stringify(dispatchPayload)),
         }).catch((err) => {
-          log.warn("Failed to persist /goal start — loop will not auto-continue", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("Failed to persist /goal start — loop will not auto-continue", { error: errMsg(err) });
         });
       }
 
@@ -3249,7 +3408,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         userId: agent.spacesAppUserId,
         metadata: { contentFormat: "markdown" },
       }, agent.appToken).catch((err) =>
-        log.warn("Failed to post dispatch-refusal notice", { error: err instanceof Error ? err.message : String(err) }),
+        log.warn("Failed to post dispatch-refusal notice", { error: errMsg(err) }),
       );
       log.warn(`Dispatch refused for agent=${agent.slug} conv=${payload.conversationId}: ${refusal}`);
     }
@@ -3346,7 +3505,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           await dispatchRunForTarget(twin.userId, twin.workspaceId);
         } catch (err) {
           log.error(`Twin dispatch failed for user ${twin.userId} — other mentioned users unaffected`, {
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -3356,9 +3515,36 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // Conversation mode (APP_MENTIONED / DIRECT_MESSAGE): a single run as the
     // sender — one call, sender is the target, no twin workspaceId. Behavior
     // unchanged from before the per-target refactor.
+    //
+    // Invocation whitelist: this is the "someone called the agent" path, so
+    // gate it on agent.config.privacy before dispatch. Denied callers get the
+    // same shape of notice as a disabled agent (per product decision), never a
+    // silent drop. Twin (USER_MENTIONED) runs above are a persona of the
+    // mentioned user, not an agent call, so they are intentionally not gated.
+    {
+      const invocRow = await agentRepository.findBySlug(agent.slug, agent.orgId ?? undefined).catch(() => null);
+      if (invocRow && !isAgentInvocableBy(invocRow.config as Record<string, unknown> | null, payload.userId)) {
+        log.warn(`Invocation denied (not whitelisted) agent=${agent.slug} userId=${payload.userId} conv=${payload.conversationId}`);
+        if (payload.conversationId) {
+          await spacesAppFetch("/chat/postMessage", {
+            channelId: payload.channelId,
+            conversationId: payload.conversationId,
+            markdownText: `🚫 **${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
+            userId: agent.spacesAppUserId,
+            metadata: { contentFormat: "markdown" },
+          }, agent.appToken).catch((err) =>
+            log.warn("Failed to post invocation-denied notice", { error: errMsg(err) }),
+          );
+        }
+        if (QUEUE_ENABLED && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
+        }
+        return;
+      }
+    }
     await dispatchRunForTarget(payload.userId, undefined);
   } catch (err) {
-    log.error("Error forwarding:", { error: err instanceof Error ? err.message : String(err) });
+    log.error("Error forwarding:", { error: errMsg(err) });
     if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId) {
       await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
     }
@@ -3408,7 +3594,7 @@ async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: s
       // actual cancel on this. (finalizeOrphanedRun repeats it idempotently
       // on the orphan path.)
       await cancelRunRecovery(run.sessionId).catch((err) =>
-        clog.warn(`[stop] cancelRunRecovery failed for ${run.sessionId}: ${err instanceof Error ? err.message : String(err)}`),
+        clog.warn(`[stop] cancelRunRecovery failed for ${run.sessionId}: ${errMsg(err)}`),
       );
       const res = await fetch(
         `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(run.sessionId)}/cancel`,
@@ -3442,13 +3628,13 @@ async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: s
         }
       }
     } catch (err) {
-      clog.warn(`[stop] reconcile failed for run ${run.sessionId} conv ${conversationId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[stop] reconcile failed for run ${run.sessionId} conv ${conversationId}: ${errMsg(err)}`);
     }
   }
 
   for (const agentSlug of cleanedAgentSlugs) {
     await drainNextQueued(conversationId, agentSlug).catch((err) =>
-      clog.warn(`[stop] orphan drain failed for conv ${conversationId}: ${err instanceof Error ? err.message : String(err)}`),
+      clog.warn(`[stop] orphan drain failed for conv ${conversationId}: ${errMsg(err)}`),
     );
   }
   return summary;
@@ -3564,6 +3750,16 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     ...(msg.resolveMentions ? { resolveMentions: msg.resolveMentions } : {}),
   };
   await setSession(body.sessionId, queuedContext);
+  if (msg.queueReason === "interrupt_followup") {
+    void emitAgentWorkingSignal({
+      conversationId: msg.conversationId,
+      channelId: msg.channelId,
+      agentSlug: msg.agentSlug,
+      spacesAppUserId: agentRow.spacesAppUserId ?? "",
+      appToken,
+      toolLabel: "Picked up your new message — continuing from the summary above…",
+    });
+  }
   clog.info(`[msg-queue] registered queued session context sessionId=${body.sessionId} conv=${msg.conversationId} agent=${msg.agentSlug} workspaceId=${workspaceId ?? "(none)"}`);
 }
 
@@ -3597,7 +3793,7 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     await refreshSlot(conversationId, agentSlug, undefined, userScopeId);
     clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${userScopeId ? ` owner ${userScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
   } catch (err) {
-    clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${err instanceof Error ? err.message : String(err)}`);
+    clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${errMsg(err)}`);
     await releaseSlot(conversationId, agentSlug, token ?? undefined, userScopeId);
   }
 }
@@ -3743,6 +3939,14 @@ export async function handleAutomationWebhook(
     res.status(403).json({ success: false, error: `agent "${agentSlug}" is disabled` });
     return;
   }
+  // Invocation whitelist — automations run under `userId` (the run owner); gate
+  // them exactly like a human caller so "all surfaces" holds. Refused like
+  // disabled (403), which the automation callback surfaces to the trigger.
+  if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
+    clog.warn(`[webhook/automation-run] invocation denied (not whitelisted) agent=${agentSlug} userId=${userId} sessionId=${sessionId}`);
+    res.status(403).json({ success: false, error: `agent "${agentSlug}" is restricted — you don't have access to it` });
+    return;
+  }
 
   // Flatten the rich-text/HTML the Spaces automation builder sends (authored
   // prompt + resolved message.content, both HTML) to plain text so the agent
@@ -3780,7 +3984,7 @@ export async function handleAutomationWebhook(
       }
     } catch (err) {
       clog.warn(
-        `[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${err instanceof Error ? err.message : String(err)}`,
+        `[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${errMsg(err)}`,
       );
     }
   }
@@ -3806,7 +4010,7 @@ export async function handleAutomationWebhook(
       }
     } catch (err) {
       clog.warn(
-        `[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[webhook/automation-run] automation dedup check failed conversationId=${payload.conversationId} agentSlug=${agentSlug} sessionId=${sessionId}: ${errMsg(err)}`,
       );
     }
   }
@@ -3897,6 +4101,10 @@ export async function handleAutomationWebhook(
       spacesAppId: agent.spacesAppId!,
       spacesAppUserId: agent.spacesAppUserId!,
       rootAgentSlug: agent.slug,
+      // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
+      // MCP swap on this (not on the resolveMentions proxy).
+      isAutomation: true,
+      triggerSource: "automation",
       // Forward the resolved result to the automation's original callback (so
       // step-1.output.result carries clickable mentions) instead of posting a
       // bot message, and turn on mention resolution for that forward.
@@ -4228,6 +4436,11 @@ export async function handleAutomationWebhook(
       spacesAppId: agent.spacesAppId!,
       spacesAppUserId: agent.spacesAppUserId!,
       ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+      // Explicit automation marker — see SessionContext.isAutomation. Set
+      // unconditionally: a plain-callback automation (no externalResultCallback,
+      // no interpose) otherwise carries NEITHER forward flag, and a recovery
+      // replay of it would be indistinguishable from an interactive run.
+      isAutomation: true,
       // Carry the automation's forward target through recovery. claw calls back
       // with its own sessionId (misses the Redis session keyed by the dispatch
       // id), so /webhook/result resolves ctx from THIS recovery context. Mirror
@@ -4248,7 +4461,7 @@ export async function handleAutomationWebhook(
       sessionContext: recoveryCtx,
     }).catch((err) => {
       clog.warn(
-        `[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[webhook] registerRunRecovery non-fatal for ${runSessionId}: ${errMsg(err)}`,
       );
     });
   }
@@ -4284,12 +4497,41 @@ async function forwardResult(
   // escaped JSON.
   const isAutomationCallback = url.includes("/automations/claw-callback/");
   const resultField = isAutomationCallback ? coerceAutomationForwardResult(result) : result;
+  const forwardToInternal = isInternalCallbackOrigin(url);
+  // Origin only — the full URL can carry a secret path segment.
+  const targetOrigin = (() => { try { return new URL(url).origin; } catch { return "(unparseable)"; } })();
+  // A dropped forward means the automation upstream waits forever for a result
+  // that will never arrive, so every non-delivery outcome here must be LOUD:
+  // error-level, event-tagged for the log bridge, and counted as a metric —
+  // not a warn that scrolls past.
+  const forwardFailure = (outcome: string, detail: string): void => {
+    clog.error(`[webhook/result] resultForward ${outcome} session=${payload.sessionId} origin=${targetOrigin} ${detail}`, {
+      event: "result_forward_failed",
+      sessionId: payload.sessionId,
+      outcome,
+      origin: targetOrigin,
+      internal: forwardToInternal,
+      automationCallback: isAutomationCallback,
+    });
+    clog.info([
+      "[metric]",
+      "name=result_forward",
+      "kind=count",
+      `outcome=${outcome}`,
+      `internal=${forwardToInternal}`,
+      `automation=${isAutomationCallback}`,
+    ].join(" "));
+  };
+  if (!forwardToInternal && !isAllowedExternalCallbackUrl(url)) {
+    forwardFailure("refused_origin", "target origin is neither internal nor an allowed external callback — result DROPPED");
+    return;
+  }
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
       body: JSON.stringify({
         sessionId: payload.sessionId,
@@ -4299,9 +4541,17 @@ async function forwardResult(
         ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
       }),
     });
-    if (!res.ok) clog.warn(`[webhook/result] resultForward returned ${res.status}`);
+    if (!res.ok) {
+      // 401/403 on an internal-classified target is the L-18 misconfiguration
+      // signature (callback origin not in selfUrl/internalUrl/xyneClawUrl, or
+      // key mismatch) — the detail names it so the fix is obvious from the log.
+      const authHint = res.status === 401 || res.status === 403
+        ? " (auth rejected — check the callback origin against SELF_URL/INTERNAL_URL/XYNE_CLAW_URL and the S2S key)"
+        : "";
+      forwardFailure(`http_${res.status}`, `delivery rejected by target${authHint}`);
+    }
   } catch (err) {
-    clog.warn(`[webhook/result] resultForward failed: ${err instanceof Error ? err.message : String(err)}`);
+    forwardFailure("network_error", errMsg(err));
   }
 }
 
@@ -4362,7 +4612,7 @@ async function publishThreadArtifactShare(
     }, ctx.appToken);
     clog.info(`[webhook/result] posted design share link shareId=${share.id} conv=${ctx.conversationId}`);
   } catch (err) {
-    clog.warn(`[webhook/result] design share publish failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    clog.warn(`[webhook/result] design share publish failed (non-fatal): ${errMsg(err)}`);
   }
 }
 
@@ -4448,7 +4698,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       : undefined;
     clog.info(`[webhook/result] handoff callback session=${sessionId} conversation=${payload.conversationId ?? ""} agent=${payload.agentSlug ?? ""} lastTurn=${lastTurn ?? "unknown"}`);
     const handoff = await handleRunHandoff(sessionId).catch((err) => {
-      clog.warn(`[webhook/result] handoff re-dispatch failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
+      clog.warn(`[webhook/result] handoff re-dispatch failed session=${sessionId}:`, errMsg(err));
       return null;
     });
     if (handoff) {
@@ -4584,7 +4834,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
         twinAssistantMsgId = outcomeMsg.id;
       } catch (e) {
-        clog.warn(`[webhook/result] Twin: failed to persist outcome chat message for ${sessionId}: ${e instanceof Error ? e.message : String(e)}`);
+        clog.warn(`[webhook/result] Twin: failed to persist outcome chat message for ${sessionId}: ${errMsg(e)}`);
       }
     }
 
@@ -4648,7 +4898,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         payload.result = `${payload.result.trimEnd()}\n\n${suffix}`;
       }
     } catch (err) {
-      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${errMsg(err)}`);
       // Non-fatal — the reply still posts, just without the user's suffix.
     }
   }
@@ -4692,6 +4942,63 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     resultWithCitations = `${resultWithCitations.trimEnd()}\n\n_Searched agent memory ${memorySearchCount} ${label}._`;
   }
 
+  // Pending write-action footer: a DETERMINISTIC, per-action-honest correction.
+  // Write tools now live in child subagent palettes too, so a parent (or child)
+  // can queue a signed write and then narrate as if it already ran. The write is
+  // execution-gated (nothing runs until the approval card is approved), but two
+  // things could still mislead the user: (1) the narration claims success, and
+  // (2) the approval card is SKIPPED when the target channel isn't app-accessible
+  // (see the loop below, which validates and `continue`s). Before that skip was
+  // silent — the user saw "queued, approve it" and no card ever came.
+  //
+  // Fix: validate every queued write HERE, against the same target-validation the
+  // card loop uses, and (a) stash the result so the loop reuses it — the footer
+  // can never claim a card the loop then drops — and (b) split the footer into
+  // "actually queued" vs "could NOT be queued (with reason)". A rejected action
+  // is stated as a failure, so there is no silent "queued" exit. The warning
+  // fires even on an empty result (seeding the message) because a dropped card
+  // must always be surfaced.
+  const pendingActionList = Array.isArray(
+    (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions,
+  )
+    ? (payload as { pendingActions: Array<Record<string, unknown>> }).pendingActions
+    : [];
+  const pendingActionValidation = new Map<
+    Record<string, unknown>,
+    { error: string | null; channelName?: string }
+  >();
+  if (ctx && payload.status === "completed" && pendingActionList.length > 0) {
+    for (const action of pendingActionList) {
+      const v = await pendingActionTargetValidation(action, ctx, ctx.appToken).catch(
+        () => ({ error: null as string | null }),
+      );
+      pendingActionValidation.set(action, v);
+    }
+    const toolOf = (a: Record<string, unknown>): string =>
+      typeof a["tool"] === "string" && a["tool"].trim() ? a["tool"].trim() : "write action";
+    const queued = pendingActionList.filter((a) => !pendingActionValidation.get(a)?.error);
+    const rejected = pendingActionList.filter((a) => pendingActionValidation.get(a)?.error);
+
+    const lines: string[] = [];
+    if (queued.length > 0) {
+      const names = [...new Set(queued.map(toolOf))].slice(0, 6).map((t) => `\`${t}\``);
+      const noun = queued.length === 1 ? "action is" : "actions are";
+      lines.push(
+        `⏳ ${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
+      );
+    }
+    for (const action of rejected) {
+      const reason = pendingActionValidation.get(action)?.error ?? "target not accessible";
+      lines.push(`⚠️ \`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
+    }
+    if (lines.length > 0) {
+      const body = lines.map((l) => `_${l}_`).join("\n\n");
+      resultWithCitations = resultWithCitations.trim()
+        ? `${resultWithCitations.trimEnd()}\n\n${body}`
+        : body;
+    }
+  }
+
   // When an active /goal loop is running, prefix every turn's user-facing reply
   // with a turn counter for clarity. The goal's turnCount is still pre-increment
   // here (recordTurnAndDecide bumps it in the relooper hook below), so the turn
@@ -4733,7 +5040,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     externalCallbackSessionId = recoveryCompletion?.rootSessionId ?? sessionId;
     if (ctx?.conversationId && ctx.agentSlug) {
       experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
-        clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, err instanceof Error ? err.message : String(err));
+        clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, errMsg(err));
         return false;
       });
     }
@@ -4801,8 +5108,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // re-dispatch the message we just enqueued into the still-held session
     // lock, whose new session_locked result re-enters this handler (live
     // ping-pong). The lock holder's own completion drains this queue.
+    // MUST pass resultUserScope: a digital-twin slot is keyed
+    // conv:digital-twin:<userId> (see scoped() in message-queue.ts). Releasing
+    // without it targets the 2-part conv:digital-twin key, misses the real
+    // 3-part marker, and the twin slot leaks for the full 20m TTL — every new
+    // twin tag then queues behind a phantom "active run" (observed 2026-08-19).
     if (QUEUE_ENABLED && resultConversationId && resultAgentSlug) {
-      await releaseSlot(resultConversationId, resultAgentSlug).catch(() => {});
+      await releaseSlot(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
     return;
   }
@@ -4859,7 +5171,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           await postWriteApprovalAction({ action, ctx: cbCtx, token: cbAppToken, targetValidation });
           approvalCardsSent += 1;
         } catch (err) {
-          clog.warn(`[webhook/result] external-callback approval card failed tool=${String(action["tool"] ?? "")} sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+          clog.warn(`[webhook/result] external-callback approval card failed tool=${String(action["tool"] ?? "")} sessionId=${sessionId}: ${errMsg(err)}`);
         }
       }
       clog.info(`[webhook/result] external-callback sent ${approvalCardsSent}/${externalPendingActions.length} write approval card(s) channelId=${cbCtx.channelId} sessionId=${sessionId}`);
@@ -4887,10 +5199,25 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       result: resultWithCitations,
       ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
     }).catch((err) => {
-      clog.warn(`[webhook/result] Slack delivery failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      clog.warn(`[webhook/result] Slack delivery failed for session ${sessionId}: ${errMsg(err)}`);
     });
     return;
   }
+
+  // The run is over and will NOT continue: every path that re-dispatches or
+  // re-queues (handoff, broken-SSE retry, session_locked, recovery retry) has
+  // already returned above. Settle the plan card here, so it covers a failed or
+  // cancelled run too — those are exactly the ones that die mid-step.
+  await reconcileStalePlanTodos(
+    sessionId,
+    ctx?.conversationId ?? payload.conversationId ?? null,
+    ctx?.agentSlug ?? payload.agentSlug ?? null,
+  ).catch((err) =>
+    clog.warn(
+      "[webhook/result] plan todo reconcile failed (non-fatal):",
+      err instanceof Error ? err.message : err,
+    ),
+  );
 
   if (payload.status !== "completed") {
     // Result-forward callers (Spaces auto-draft / automations) get the failure
@@ -5195,7 +5522,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // their reports (e.g. the error-pipeline RCA .html) as attachments.
         .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
         .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
-        .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+        .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
     // clickable/notifying Spaces mentions before forwarding, so the
@@ -5229,7 +5556,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         );
         forwardText = expandSpacesMentions(resolved);
       } catch (err) {
-        log.warn(`mention resolution failed — forwarding raw text: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`mention resolution failed — forwarding raw text: ${errMsg(err)}`);
       }
     }
     // Capacity failure shaped as an EMPTY completed result: schedule the same
@@ -5268,7 +5595,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       userId: ctx.spacesAppUserId,
       status: "done",
     }, ctx.appToken).catch((err) =>
-      log.warn("Failed to clear agent progress signal", { error: err instanceof Error ? err.message : String(err) }),
+      log.warn("Failed to clear agent progress signal", { error: errMsg(err) }),
     );
   }
 
@@ -5293,7 +5620,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // UI reads chat_attachments).
       .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
         .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
-      .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+      .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
   }
 
   // ── Plan mode Turn 1: post the plan card and short-circuit ──
@@ -5354,7 +5681,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           });
         } catch (e) {
           log.warn("Failed to persist plan assistant transcript row (non-fatal)", {
-            error: e instanceof Error ? e.message : String(e),
+            error: errMsg(e),
           });
         }
       }
@@ -5363,7 +5690,23 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // re-planned). Grey it out + disable its Approve button so a superseded
       // plan can't be run. Best-effort; the new card posts regardless.
       if (ctx.conversationId && ctx.agentSlug) {
-        const prevCard = await getActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => null);
+        // Redis is the fast path; the durable binding is what still finds a
+        // proposal older than the 24h TTL — without it an ancient card would
+        // stay tappable (and, now that approval survives, actually runnable)
+        // after the agent has already re-planned.
+        const prevBinding = await findProposedPlanBinding(ctx.conversationId, ctx.agentSlug).catch(() => null);
+        const prevBindingData = prevBinding ? readPlanBindingData(prevBinding) : null;
+        const prevCard =
+          (await getActivePlanCard(ctx.conversationId, ctx.agentSlug).catch(() => null)) ??
+          (prevBinding?.messageId && prevBindingData
+            ? {
+                messageId: prevBinding.messageId,
+                todos: prevBindingData.todos,
+                ...(prevBindingData.title ? { title: prevBindingData.title } : {}),
+                ...(prevBindingData.desc ? { desc: prevBindingData.desc } : {}),
+                ...(prevBindingData.document ? { document: prevBindingData.document } : {}),
+              }
+            : null);
         if (prevCard?.messageId) {
           try {
             const supersededFlow = withSpacesAppId(
@@ -5390,9 +5733,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             );
           } catch (e) {
             log.warn("Failed to supersede prior plan card (non-fatal)", {
-              error: e instanceof Error ? e.message : String(e),
+              error: errMsg(e),
             });
           }
+        }
+        // Terminal in the durable store too, whether or not the card repaint
+        // above succeeded: a superseded plan must fail the approve guard forever,
+        // not just until its Redis pointer is overwritten.
+        if (prevBinding) {
+          await markPlanBindingStatus(prevBinding.id, "superseded").catch((e) => {
+            log.warn("Failed to mark prior plan binding superseded (non-fatal)", {
+              error: errMsg(e),
+            });
+          });
         }
       }
 
@@ -5455,6 +5808,39 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
             ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
           }).catch(() => {});
+          // Durable mirror of the line above. The Redis pointer and the session
+          // both expire in 24h, but the card in the thread does not — this row is
+          // what lets someone approve a plan days later. It carries everything
+          // flow-action.ts needs with NO surviving Redis state: the executable
+          // todos, the card's routing, and the proposer (the only user allowed to
+          // act on it). Best-effort: a failure here costs durability, never the
+          // card, and the Redis fast path still covers the first 24h.
+          if (ctx.agentOrgId && ctx.spacesAppId && ctx.spacesAppUserId) {
+            await upsertPlanBinding({
+              orgId: ctx.agentOrgId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+              messageId: planMessageId,
+              spacesAppId: ctx.spacesAppId,
+              spacesAppUserId: ctx.spacesAppUserId,
+              agentSlug: ctx.agentSlug,
+              data: {
+                todos: planTodos,
+                ownerUserId: ctx.senderId,
+                ...(pendingPlan.title ? { title: pendingPlan.title } : {}),
+                ...(pendingPlan.desc ? { desc: pendingPlan.desc } : {}),
+                ...(pendingPlan.document ? { document: pendingPlan.document } : {}),
+              },
+            }).catch((e) => {
+              log.warn("Failed to persist plan binding — approval will expire with Redis (non-fatal)", {
+                error: errMsg(e),
+              });
+            });
+          } else {
+            log.warn(
+              `Plan card posted without org/app context — no durable binding written, approval expires in 24h (conv=${ctx.conversationId})`,
+            );
+          }
           // Fresh proposal awaiting approval: reset any prior run's exec meta so
           // stale approvedTitles/autoApproved can't leak into this plan. The
           // approve flow-action writes the real meta before it dispatches Turn 2.
@@ -5545,7 +5931,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     } catch (err) {
       log.warn("Failed to post/dispatch plan card (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg(err),
       });
     }
     return;
@@ -5621,7 +6007,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     } catch (err) {
       // Non-fatal: the reply itself still posts below.
       log.warn("Failed to post agent profile card (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg(err),
       });
     }
   }
@@ -5709,7 +6095,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       } catch (e) {
         // Non-fatal: the card is the deliverable and still posts below.
         log.warn("Failed to post agent-draft lead-in (non-fatal)", {
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg(e),
         });
       }
 
@@ -5765,12 +6151,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
       } catch (e) {
         log.warn("Failed to persist agent-draft assistant transcript row (non-fatal)", {
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg(e),
         });
       }
     } catch (err) {
       log.error("Failed to post agent draft card", {
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg(err),
         slug: spec.slug,
       });
       try {
@@ -5857,7 +6243,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         metadata: { contentFormat: "markdown" },
       }, token);
     } catch (err) {
-      log.error("Failed to send empty-result notice", { error: err instanceof Error ? err.message : String(err) });
+      log.error("Failed to send empty-result notice", { error: errMsg(err) });
     }
     return;
   }
@@ -5895,7 +6281,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         );
         return expandSpacesMentions(resolved);
       } catch (err) {
-        log.warn(`pending-response mention resolution failed — posting raw: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`pending-response mention resolution failed — posting raw: ${errMsg(err)}`);
         return text;
       }
     };
@@ -5956,7 +6342,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const merged = mergeInvocationsById(...lists);
       if (merged.length > 0) citationInvocations = merged;
     } catch (e) {
-      log.warn(`Failed to assemble citation invocations for baking: ${e instanceof Error ? e.message : String(e)}`);
+      log.warn(`Failed to assemble citation invocations for baking: ${errMsg(e)}`);
     }
 
     // Build the /chat/postMessage `metadata` for a bot reply, baking in the
@@ -6054,7 +6440,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // only the files couldn't be delivered. Mirrors the normal result path.
           log.warn(
             `Copilot: attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
-            { error: err instanceof Error ? err.message : String(err) },
+            { error: errMsg(err) },
           );
           const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
@@ -6106,7 +6492,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           content: pendingReply,
           status: "completed",
           ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
-        }).catch((e) => log.warn("Failed to save pending-response assistant ChatMessage", { error: e instanceof Error ? e.message : String(e) }));
+        }).catch((e) => log.warn("Failed to save pending-response assistant ChatMessage", { error: errMsg(e) }));
       }
 
       // Post pending write action approvals (e.g. spaces-memory-create) before returning
@@ -6217,7 +6603,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // unavailable, e.g. GCS unauthenticated.)
           log.warn(
             `Attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
-            { error: err instanceof Error ? err.message : String(err) },
+            { error: errMsg(err) },
           );
           const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
@@ -6251,7 +6637,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             log.info(`Updated placeholder ${ctx.progressMessageId} with final result for ${ctx.agentSlug}`);
             posted = true;
           } catch (err) {
-            log.warn("Failed to update placeholder with final result — falling back to fresh post", { error: err instanceof Error ? err.message : String(err) });
+            log.warn("Failed to update placeholder with final result — falling back to fresh post", { error: errMsg(err) });
           }
         }
         if (!posted) {
@@ -6360,14 +6746,14 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               },
               body: JSON.stringify(refire),
             }).catch((err) => {
-              log.warn("[goal] refire failed", { error: err instanceof Error ? err.message : String(err) });
+              log.warn("[goal] refire failed", { error: errMsg(err) });
             });
             goalContinues = true;
             log.info(`[goal] continuing for conv ${ctx.conversationId}`);
           }
         } catch (err) {
           log.warn("[goal] relooper hook errored — leaving goal in current state", {
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         }
       }
@@ -6436,54 +6822,33 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
                 flow,
                 userId: ctx.spacesAppUserId,
               }, token).catch((err) => {
-                log.warn("Failed to post promote-provider prompt (soft refusal)", { error: err instanceof Error ? err.message : String(err) });
+                log.warn("Failed to post promote-provider prompt (soft refusal)", { error: errMsg(err) });
               });
               log.info(`Posted promote-provider prompt for conv ${ctx.conversationId} (soft refusal, provider=${candidate})`);
             }
           }
         } catch (err) {
-          log.warn("promote-provider prompt (soft refusal) error (non-fatal)", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("promote-provider prompt (soft refusal) error (non-fatal)", { error: errMsg(err) });
         }
       }
     }
 
     // ── Post question buttons in thread ──
-    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; question: string; options: string[] }> }).pendingQuestions;
+    const pendingQuestions = (payload as { pendingQuestions?: Array<{ questionId: string; questions?: import("xyne-claw-shared").UserQuestion[]; question?: string; options?: string[] }> }).pendingQuestions;
     if (pendingQuestions?.length) {
-      const { signAction: signUserAnswer } = await import("./mcp.js");
+      let postedQuestionSets = 0;
       for (const q of pendingQuestions) {
-        const questionFlow = withSpacesAppId(buildUserQuestionFlow(q.question, q.options, {
-          questionId: q.questionId,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          userId: ctx.senderId,
-        }), ctx.spacesAppId);
-        // XYNE-55135: bind the card's identity + routing fields with an HMAC at
-        // creation time. The transport signature only proves Spaces forwarded
-        // the body unmodified; it cannot prove these fields equal what the agent
-        // posted, because Spaces forwards client-controlled flowJSON.data.
-        // flow-action re-derives and verifies this exact payload on click.
-        questionFlow.data = {
-          ...(questionFlow.data ?? {}),
-          signature: signUserAnswer({
-            actionType: "user-answer",
-            questionId: q.questionId,
-            userId: ctx.senderId,
-            agentSlug: ctx.agentSlug ?? "",
-            spacesAppId: ctx.spacesAppId ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }),
-        };
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow: questionFlow,
-          userId: ctx.spacesAppUserId,
-        }, token);
+        const questions = q.questions?.length ? q.questions : q.question && q.options?.length ? [{ id: "q1", question: q.question, type: "single_choice" as const, options: q.options }] : undefined;
+        if (!questions) continue;
+        const posted = await renderUiWidget(sessionId, {
+          id: `question:${q.questionId}`,
+          type: "question",
+          operation: "create",
+          payload: { questionId: q.questionId, questions },
+        }, ctx.conversationId, ctx.agentSlug, ctx);
+        if (posted) postedQuestionSets += 1;
       }
-      log.info(`Posted ${pendingQuestions.length} question(s) in thread ${ctx.conversationId}`);
+      log.info(`Delivered ${postedQuestionSets} question set fallback(s) in thread ${ctx.conversationId}`);
     }
 
     // ── Post /goal suggestion FlowUI card in thread ──
@@ -6538,7 +6903,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           userId: ctx.spacesAppUserId,
         }, token).catch((err) => {
           log.warn("Failed to post /goal suggestion FlowUI card", {
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         });
         log.info(`Posted /goal suggestion in thread ${ctx.conversationId}`);
@@ -6550,7 +6915,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (pendingActionsPayload?.length) {
       let approvalCardsSent = 0;
       for (const action of pendingActionsPayload) {
-        const targetValidation = await pendingActionTargetValidation(action, ctx, token);
+        // Reuse the validation computed for the footer above so the message and
+        // the card can never disagree; fall back only if it wasn't classified
+        // (e.g. a non-completed status path that skipped the footer).
+        const targetValidation =
+          pendingActionValidation.get(action) ?? (await pendingActionTargetValidation(action, ctx, token));
         if (targetValidation.error) {
           log.info(`[webhook/result] skipped write approval card tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
           continue;
@@ -6684,6 +7053,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             chainDepth: currentDepth + 1,
             rootAgentSlug,
             workflowId: binding.workflowId,
+            triggerSource: "spaces",
             ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
           };
           await setSession(runBody.sessionId, targetContext);
@@ -6722,7 +7092,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           log.error(`Chain: failed to trigger ${targetAgentSlug}: ${runBody.error ?? "unknown"}`);
         }
       } catch (chainErr) {
-        log.error("Chain trigger failed (non-fatal):", { error: chainErr instanceof Error ? chainErr.message : String(chainErr) });
+        log.error("Chain trigger failed (non-fatal):", { error: errMsg(chainErr) });
       }
     }
   } catch (err) {
@@ -6732,7 +7102,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // updateMessage, or a token issue — and the relevant identifiers (which
     // workspace, which agent, which mode) were left implicit. Add them.
     log.error("Failed to send result", {
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
       stack: err instanceof Error ? err.stack?.split("\n").slice(0, 3).join(" | ") : undefined,
       sessionId,
       agentSlug: ctx?.agentSlug,
@@ -6760,7 +7130,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   }
 });
 
-// ── Plan card render (todo-write → kind:"plan" progress event) ──────────────
+// ── Plan card render (todo-write → ui-widget progress event) ────────────────
 // Post the live todo checklist once, then updateMessage it IN PLACE on every
 // subsequent todo-write. Renders are serialized per session so a burst of
 // todo-writes can't double-post the card before planMessageId is stored.
@@ -6785,7 +7155,7 @@ async function doRenderPlanCard(
   // Per-agent opt-out (agent.config.postTodos === false): suppress the live
   // plan/todo card in the Spaces thread for agents whose owner turned this off.
   // Absent/true preserves the default (post), so existing agents are unchanged.
-  // This is the ONE choke point every kind:"plan" emitter funnels through
+  // This is the ONE choke point every plan ui-widget funnels through
   // (the runtime todo-write tool, run.ts onPlan, consume-claw-stream), so a
   // single guard here covers every emitter and every dispatch surface. Read
   // fresh from the agent row (a PK lookup) — mirrors how memoryEnabled is
@@ -6817,6 +7187,15 @@ async function doRenderPlanCard(
     clog.info(
       `[plan] reject-filter: ${todos.length} → ${renderTodos.length} todos (dropped non-approved) conv=${ctx.conversationId}`,
     );
+  }
+
+  // Snapshot exactly what this card is about to show. Nothing else records the
+  // todo list, so this is what reconcileStalePlanTodos reads at run end to find
+  // a step the agent left `in_progress` and never closed.
+  const snapConversationId = ctx.conversationId ?? conversationId ?? "";
+  const snapAgentSlug = ctx.agentSlug ?? agentSlug ?? "";
+  if (snapConversationId && snapAgentSlug) {
+    await setPlanLastTodos(snapConversationId, snapAgentSlug, renderTodos).catch(() => {});
   }
 
   // Live todo cards are always in execution (auto mode). Pick the phase so the
@@ -6880,6 +7259,58 @@ function renderPlanCard(
     if (planRenderQueue.get(sessionId) === next) planRenderQueue.delete(sessionId);
   });
   return next;
+}
+
+/**
+ * Run-end reconciliation for the live plan card.
+ *
+ * A todo only leaves `in_progress` when the NEXT todo-write arrives. If the run
+ * ends without one — the model forgot to close the last step, or the run died
+ * mid-step — the card keeps rendering that row as `running`, so the user watches
+ * a spinner that can never resolve on a run that is definitively over.
+ *
+ * Those rows are reset to `pending`, NOT `completed`. The run ended without ever
+ * telling us the step succeeded, so marking it done would be inventing a result,
+ * and a false ✓ is the one outcome the user can't tell apart from a real one.
+ * `pending` also deliberately keeps the card out of the terminal 'done' phase
+ * (which needs every todo completed/failed), so the header stays "Approved"
+ * rather than claiming "Completed" over work that never finished.
+ *
+ * `failed` was the other candidate and is worse: it asserts the step broke,
+ * which is equally unverified, and it reads as an error the user should act on.
+ * Not-confirmed is the honest state, and `pending` is the only status that says
+ * that without also making a claim.
+ */
+async function reconcileStalePlanTodos(
+  sessionId: string,
+  conversationId: string | null,
+  agentSlug: string | null,
+): Promise<void> {
+  if (!conversationId || !agentSlug) return;
+  // Drain any todo-write render still queued for this session BEFORE reading the
+  // snapshot. Reading first would capture the previous render's list and then
+  // re-render it on top of the newer one, reverting a status the agent did
+  // legitimately write in its final tick.
+  await (planRenderQueue.get(sessionId) ?? Promise.resolve()).catch(() => {});
+  const last = await getPlanLastTodos(conversationId, agentSlug).catch(() => null);
+  if (!last?.length) return;
+  const stalled = last.filter((t) => t.status === "in_progress").length;
+  if (stalled === 0) {
+    // Card already settled itself — drop the snapshot so it can't be re-applied
+    // to a later run in this thread.
+    await clearPlanLastTodos(conversationId, agentSlug).catch(() => {});
+    return;
+  }
+  const reconciled: Todo[] = last.map((t) =>
+    t.status === "in_progress" ? { ...t, status: "pending" as const } : t,
+  );
+  clog.info(
+    `[plan] run ended with ${stalled} step(s) still in_progress — resetting to pending conv=${conversationId} agent=${agentSlug}`,
+  );
+  // Goes through the SAME serialized queue as every todo-write render, so it
+  // lands after any render still in flight instead of racing it.
+  await renderPlanCard(sessionId, reconciled, conversationId, agentSlug);
+  await clearPlanLastTodos(conversationId, agentSlug).catch(() => {});
 }
 
 // ── PR card render (create/merge PR subagent tool → kind:"pr" progress) ─────
@@ -7231,6 +7662,124 @@ router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) =
   });
 });
 
+// ── Unified tool-authored UI widgets ───────────────────────────────────────
+//
+// The claw runtime transports typed domain payloads only. This is the single
+// choke point that resolves Spaces routing, signs interactive actions, builds
+// Flow JSON, and chooses create vs update behavior. A future widget adds one
+// shared union variant and one branch here; HTTP/SSE plumbing stays unchanged.
+const UI_WIDGET_DELIVERY_TTL_SECONDS = 24 * 60 * 60;
+const UI_WIDGET_CLAIM_TTL_SECONDS = 30;
+
+function uiWidgetDeliveryKey(sessionId: string, widgetId: string): string {
+  return `ui-widget-delivery:${sessionId}:${widgetId}`;
+}
+
+async function acquireCreateWidget(sessionId: string, widgetId: string): Promise<string | null> {
+  const redis = redisService.getConnection();
+  const key = uiWidgetDeliveryKey(sessionId, widgetId);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const token = crypto.randomUUID();
+    const acquired = await redis.set(key, `posting:${token}`, "EX", UI_WIDGET_CLAIM_TTL_SECONDS, "NX");
+    if (acquired === "OK") return token;
+    const state = await redis.get(key);
+    if (state === "delivered") return null;
+    // A final-callback fallback can race the live event. Wait for the first
+    // renderer to commit instead of posting a duplicate card.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for widget delivery claim (${widgetId})`);
+}
+
+async function finishCreateWidget(sessionId: string, widgetId: string, token: string, delivered: boolean): Promise<void> {
+  const redis = redisService.getConnection();
+  const key = uiWidgetDeliveryKey(sessionId, widgetId);
+  const current = await redis.get(key);
+  if (current !== `posting:${token}`) return;
+  if (delivered) {
+    await redis.set(key, "delivered", "EX", UI_WIDGET_DELIVERY_TTL_SECONDS);
+  } else {
+    await redis.del(key);
+  }
+}
+
+async function renderUiWidget(
+  sessionId: string,
+  widget: UiWidget,
+  conversationId?: string | null,
+  agentSlug?: string | null,
+  knownContext?: SessionContext,
+): Promise<boolean> {
+  if (widget.type === "plan") {
+    await renderPlanCard(sessionId, widget.payload.todos, conversationId, agentSlug);
+    return true;
+  }
+
+  const claim = await acquireCreateWidget(sessionId, widget.id);
+  if (!claim) return false;
+  let delivered = false;
+  try {
+    const ctx = knownContext ?? await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
+    if (!ctx || !ctx.channelId || !ctx.appToken) return false;
+    // Static/live artifacts historically render only for conversation replies;
+    // clarification questions also support approval-mode agent runs.
+    if (widget.type !== "question" && ctx.responseMode !== "conversation") return false;
+    const log = createLogger("webhook/ui-widget", ctx.traceId ?? sessionId.slice(0, 8));
+    let flow;
+
+    switch (widget.type) {
+      case "question": {
+        const { questionId, questions } = widget.payload;
+        if (!questionId || questions.length === 0) return false;
+        const { signAction } = await import("./mcp.js");
+        flow = withSpacesAppId(buildUserQuestionFlow(questions, {
+          questionId,
+          agentSlug: ctx.agentSlug ?? "",
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          userId: ctx.senderId,
+        }), ctx.spacesAppId);
+        flow.data = {
+          ...(flow.data ?? {}),
+          signature: signAction({
+            actionType: "user-answer",
+            questionId,
+            userId: ctx.senderId,
+            agentSlug: ctx.agentSlug ?? "",
+            spacesAppId: ctx.spacesAppId ?? "",
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+          }),
+        };
+        break;
+      }
+      case "code":
+        if (!widget.payload.code.trim()) return false;
+        flow = withSpacesAppId(buildCodeFlow(widget.payload.code, widget.payload.language), ctx.spacesAppId);
+        break;
+      case "diff":
+        if (!widget.payload.path.trim() || !widget.payload.patch.trim()) return false;
+        flow = withSpacesAppId(buildDiffFlow(widget.payload.path.trim(), widget.payload.patch), ctx.spacesAppId);
+        break;
+      case "chart":
+        flow = withSpacesAppId(buildChartFlow(widget.payload), ctx.spacesAppId);
+        break;
+    }
+
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      flow,
+      userId: ctx.spacesAppUserId,
+    }, ctx.appToken);
+    delivered = true;
+    log.info(`Posted ${widget.type} UI widget ${widget.id} in thread ${ctx.conversationId}`);
+    return true;
+  } finally {
+    await finishCreateWidget(sessionId, widget.id, claim, delivered).catch(() => {});
+  }
+}
+
 // ── POST /webhook/progress — live tool-call update from xyne-claw ───────────
 //
 // xyne-claw POSTs here on every tool_execution_start (throttled to 10s).
@@ -7270,24 +7819,64 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       const ctx = sessionId ? await getSession(sessionId).catch(() => null) : null;
       if (ctx?.mentionedUserId) {
         await refreshSlot(conversationId, agentSlug, undefined, ctx.mentionedUserId).catch(() => {});
+        if (sessionId) await attachSlotSession(conversationId, agentSlug, sessionId, ctx.mentionedUserId).catch(() => {});
       }
     } else {
       await refreshSlot(conversationId, agentSlug).catch(() => {});
+      if (sessionId) await attachSlotSession(conversationId, agentSlug, sessionId).catch(() => {});
     }
   }
 
   if (!sessionId) return;
 
-  // Plan/todo card: claw's todo-write tool fires kind:"plan" with the full
-  // todo list. Render (first time) or update-in-place the live checklist in
-  // the thread. Serialized per session; best-effort — never blocks the ack.
-  if ((req.body as { kind?: string }).kind === "plan") {
-    // A todo-write proves the run is still active — keep the recovery TTL alive
-    // too (normal tool-progress events do this below; plan events return early).
+  const body = req.body as Record<string, unknown>;
+  let widget: UiWidget | null = isUiWidget(body["widget"]) ? body["widget"] : null;
+
+  // Rolling-deploy compatibility: accept the widget-specific progress shapes
+  // emitted by older claw pods and normalize them into the unified contract.
+  // New widget types never add another transport branch here.
+  if (!widget && body["kind"] === "plan" && Array.isArray(body["todos"])) {
+    widget = { id: "plan", type: "plan", operation: "upsert", payload: { todos: body["todos"] as Todo[] } };
+  } else if (!widget && body["kind"] === "code" && typeof body["code"] === "string") {
+    widget = {
+      id: `legacy-code:${crypto.randomUUID()}`,
+      type: "code",
+      operation: "create",
+      payload: { code: body["code"], ...(typeof body["language"] === "string" ? { language: body["language"] } : {}) },
+    };
+  } else if (!widget && body["kind"] === "diff" && typeof body["path"] === "string" && typeof body["patch"] === "string") {
+    widget = {
+      id: `legacy-diff:${crypto.randomUUID()}`,
+      type: "diff",
+      operation: "create",
+      payload: { path: body["path"], patch: body["patch"] },
+    };
+  } else if (!widget && body["kind"] === "chart") {
+    const caption = typeof body["caption"] === "string" && body["caption"].trim() ? body["caption"].trim() : undefined;
+    if ((body["type"] === "line" || body["type"] === "area") && Array.isArray(body["series"])) {
+      const series = body["series"].map((row) => row as { x: string; y: number; series?: string });
+      widget = {
+        id: `legacy-chart:${crypto.randomUUID()}`,
+        type: "chart",
+        operation: "create",
+        payload: { type: body["type"], series, ...(caption ? { caption } : {}) },
+      };
+    } else if ((body["type"] === "bar" || body["type"] === "pie" || body["type"] === "donut") && Array.isArray(body["points"])) {
+      const points = body["points"].map((point) => point as { label: string; value: number });
+      widget = {
+        id: `legacy-chart:${crypto.randomUUID()}`,
+        type: "chart",
+        operation: "create",
+        payload: { type: body["type"], points, ...(caption ? { caption } : {}) },
+      };
+    }
+  }
+
+  if (widget && !isUiWidget(widget)) widget = null;
+  if (widget) {
     void touchRunRecovery(sessionId).catch(() => {});
-    const todos = ((req.body as { todos?: unknown }).todos ?? []) as Todo[];
-    renderPlanCard(sessionId, todos, conversationId, agentSlug).catch((e) =>
-      clog.warn(`[webhook/progress] renderPlanCard failed for ${sessionId}:`, e instanceof Error ? e.message : e),
+    void renderUiWidget(sessionId, widget, conversationId, agentSlug).catch((err) =>
+      clog.warn(`[webhook/progress] ${widget?.type ?? "unknown"} widget failed for ${sessionId}:`, err instanceof Error ? err.message : err),
     );
     return;
   }
@@ -7336,6 +7925,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
               agentSlug: ctx.agentSlug,
               userId: ctx.senderId,
               toolInvocation,
+              ...(ctx.triggerSource ? { triggerSource: ctx.triggerSource } : {}),
               ts: Date.now(),
             });
           }
@@ -7365,7 +7955,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       }, ctx.appToken);
       log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId})`);
     } catch (err) {
-      log.warn("Failed to announce sandbox preview", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Failed to announce sandbox preview", { error: errMsg(err) });
     }
     return;
   }
@@ -7428,7 +8018,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     }
     // else: placeholder mode with no placeholderId (initial post failed) — silently skip
   } catch (err) {
-    log.warn("Failed to publish agent progress signal", { error: err instanceof Error ? err.message : String(err) });
+    log.warn("Failed to publish agent progress signal", { error: errMsg(err) });
   }
 });
 
@@ -7463,7 +8053,7 @@ async function proxyFlowAction(req: Request, res: Response, headers: Record<stri
       body: rawBody ?? JSON.stringify(req.body),
     })) as unknown as Response;
   } catch (err) {
-    clog.error(`[webhook/flow-action-proxy] fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    clog.error(`[webhook/flow-action-proxy] fetch failed: ${errMsg(err)}`);
     res.status(502).json({ type: "error", message: "flow-action proxy failed" });
     return;
   }

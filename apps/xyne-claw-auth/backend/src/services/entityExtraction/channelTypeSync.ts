@@ -23,6 +23,7 @@
  */
 
 import { CONFIG } from "../../config.js";
+import { errMsg } from "../../lib/errors.js";
 import { prisma } from "../../db.js";
 import { createLogger, createTraceId } from "../../logger.js";
 
@@ -104,7 +105,7 @@ export async function syncChannelTypes(
     });
     return { ok: true, entityTypes };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = errMsg(err);
     // Deliberately not rethrown: the types are committed in Postgres and the
     // channel doc is a projection. Surfaced in the API response instead.
     logger.error("[entity-type-sync] channel type write failed", {

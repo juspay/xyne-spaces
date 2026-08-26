@@ -1,4 +1,5 @@
 import { redisService } from "../redis.js";
+import { errMsg } from "./errors.js";
 import { createLogger } from "../logger.js";
 
 const FAST_MODE_PREFIX = "fast-mode:";
@@ -35,7 +36,7 @@ export async function resolveFastMode(
       const raw = await redis.get(key);
       if (raw === "1" || raw === "0") {
         await redis.expire(key, FAST_MODE_TTL_SECONDS).catch((err) => {
-          log.warn("Failed to refresh fast mode override TTL", { error: err instanceof Error ? err.message : String(err) });
+          log.warn("Failed to refresh fast mode override TTL", { error: errMsg(err) });
         });
         return raw === "1";
       }
@@ -43,7 +44,7 @@ export async function resolveFastMode(
       log.warn("Failed to read fast mode override; falling back to agent config", {
         conversationId,
         agentSlug,
-        error: err instanceof Error ? err.message : String(err),
+        error: errMsg(err),
       });
     }
   }

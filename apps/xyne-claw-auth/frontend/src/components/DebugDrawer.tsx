@@ -646,8 +646,10 @@ function DebugTimelineSection({
   const streamThinkingChars = typeof data?.streamThinkingChars === "number" ? data.streamThinkingChars as number : undefined;
   const streamTextChars = typeof data?.streamTextChars === "number" ? data.streamTextChars as number : undefined;
   const streamCharsPerSec = typeof data?.streamCharsPerSec === "number" ? data.streamCharsPerSec as number : undefined;
+  const thinkingConfig = isRecord(data?.thinking) ? data.thinking as Record<string, unknown> : null;
+  const thinkingLevel = thinkingConfig ? asString(thinkingConfig.effectiveLevel) : "";
 
-  const headerMeta = [asString(data?.provider), asString(data?.model), toolsUsed.length ? `${toolsUsed.length} tools` : "", `${visibleEvents.length} events`].filter(Boolean).join(" · ");
+  const headerMeta = [asString(data?.provider), asString(data?.model), thinkingLevel ? `thinking ${thinkingLevel}` : "", toolsUsed.length ? `${toolsUsed.length} tools` : "", `${visibleEvents.length} events`].filter(Boolean).join(" · ");
   const TurnIcon = data?.subagentName ? Workflow : MessageSquareText;
   const turnIconColor = data?.subagentName ? "text-cyan-600 dark:text-cyan-400" : "text-xyne-fg-tertiary";
   return (
@@ -668,6 +670,25 @@ function DebugTimelineSection({
           <p className={`text-[12px] leading-relaxed ${data?.providerError ? "text-red-600 dark:text-red-400" : "text-xyne-fg-secondary"}`}>
             {asString(data?.providerError) || asString(data?.question) || asString(data?.task)}
           </p>
+        )}
+
+        {thinkingConfig && (
+          <details className="group/sm" open>
+            <summary className="flex cursor-pointer list-none items-baseline gap-2 py-1">
+              <ChevronDown size={11} className="shrink-0 self-center text-xyne-fg-tertiary transition-transform -rotate-90 group-open/sm:rotate-0" />
+              <BrainCircuit size={11} className="shrink-0 self-center text-xyne-fg-tertiary" />
+              <span className="text-[12px] font-semibold text-xyne-fg-secondary">Thinking configuration</span>
+            </summary>
+            <div className="ml-1.5 border-l border-xyne-border-subtle pl-4 pt-1.5 pb-1 text-[12px] text-xyne-fg-secondary">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span><span className="text-xyne-fg-muted">Requested:</span> {asString(thinkingConfig.requestedLevel)}</span>
+                <span><span className="text-xyne-fg-muted">Effective:</span> {asString(thinkingConfig.effectiveLevel)}</span>
+                <span><span className="text-xyne-fg-muted">Source:</span> {asString(thinkingConfig.source).replaceAll("_", " ")}</span>
+                <span><span className="text-xyne-fg-muted">Reasoning model:</span> {thinkingConfig.modelSupportsReasoning ? "yes" : "no"}</span>
+              </div>
+              {asString(thinkingConfig.wireMode) && <p className="mt-1 font-mono text-[11px] text-xyne-fg-muted">{asString(thinkingConfig.wireMode)}</p>}
+            </div>
+          </details>
         )}
 
         {(tokenUsage || latency || streamGraph.length > 0) && (
