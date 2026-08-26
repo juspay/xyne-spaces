@@ -73,6 +73,31 @@ export class MessagesACL extends BaseACL<'messages'> {
     if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
       return;
     }
+
+    const conversation = await tx.run(
+      zql.conversations.where('conversationId', message.conversationId).one(),
+    );
+
+    // When the initial message of a thread is deleted while replies still exist,
+    // the message is kept as a tombstone so the thread remains visible. Deleting
+    // the final reply later needs to remove that tombstone and then the empty
+    // conversation. Allow that cleanup only when this message is the deleted
+    // initial message and there are no other messages left in the conversation.
+    // This keeps the normal "only sender can delete" rule for live messages and
+    // for tombstones that still anchor visible replies.
+    if (conversation?.initialMessageId === message.messageId && message.isDeleted) {
+      const remainingMessages = await tx.run(
+        zql.messages.where('conversationId', message.conversationId),
+      );
+      const hasOtherMessages = remainingMessages.some(
+        remainingMessage => remainingMessage.messageId !== message.messageId,
+      );
+
+      if (!hasOtherMessages) {
+        return;
+      }
+    }
+
     throw new MutationACLError('Message delete failed: only the original sender can delete this message', 'messages');
   }
 }

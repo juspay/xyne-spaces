@@ -11,6 +11,7 @@ jest.mock('../../queries', () => ({
     },
     conversations: {
       where: jest.fn(() => ({
+        one: jest.fn(),
         related: jest.fn(() => ({ one: jest.fn() })),
       })),
     },
@@ -72,6 +73,42 @@ describe('MessagesACL.canDelete', () => {
 
     await expect(acl.canDelete({ messageId: 'message-1' }, tx)).rejects.toThrow(
       'Message not found in this workspace',
+    );
+  });
+
+  it('allows cleanup of a deleted initial-message tombstone after the last reply is removed', async () => {
+    const tx = transactionReturning(
+      {
+        messageId: 'root-message',
+        conversationId: 'conversation-1',
+        senderId: 'user-2',
+        msgType: 'USER',
+        isDeleted: true,
+      },
+      { channel: { workspaceId: context.workspaceId } },
+      { initialMessageId: 'root-message' },
+      [{ messageId: 'root-message' }],
+    );
+
+    await expect(acl.canDelete({ messageId: 'root-message' }, tx)).resolves.toBeUndefined();
+  });
+
+  it("does not allow deleting another user's tombstoned initial message while replies still exist", async () => {
+    const tx = transactionReturning(
+      {
+        messageId: 'root-message',
+        conversationId: 'conversation-1',
+        senderId: 'user-2',
+        msgType: 'USER',
+        isDeleted: true,
+      },
+      { channel: { workspaceId: context.workspaceId } },
+      { initialMessageId: 'root-message' },
+      [{ messageId: 'root-message' }, { messageId: 'reply-message' }],
+    );
+
+    await expect(acl.canDelete({ messageId: 'root-message' }, tx)).rejects.toThrow(
+      'Message delete failed: only the original sender can delete this message',
     );
   });
 });

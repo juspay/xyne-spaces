@@ -89,6 +89,19 @@ export class ConversationsACL extends BaseACL<'conversations'> {
     if (conversation.createdBy === this.ctx.userID || conversation.createdBy === 'user') {
       return;
     }
+
+    // Message deletion can legitimately remove the last visible reply from a
+    // thread whose initial message was already tombstoned. By the time the
+    // mutator deletes the conversation, all messages have been removed. Allow
+    // that empty-thread cleanup without giving users permission to delete
+    // conversations that still contain messages owned by others.
+    const remainingMessages = await tx.run(
+      zql.messages.where('conversationId', conversation.conversationId),
+    );
+    if (remainingMessages.length === 0) {
+      return;
+    }
+
     throw new MutationACLError('Conversation delete failed: only the conversation creator can delete it', 'conversations');
   }
 }
