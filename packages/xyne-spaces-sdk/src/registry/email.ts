@@ -137,10 +137,14 @@ export const emailOperations = {
 
   /**
    * Labels defined in a channel.
-   * Maps to: Zero query 'conversationLabelsByChannelId'
+   * Maps to: Zero query 'conversationLabelsByChannelIdV2'
+   *
+   * `isMember` is required by the schema but unread by the query body — an ACL
+   * hint, supplied here so a caller does not have to know about it.
    */
   listLabels: query<{ channelId: string }, ConversationLabel[]>(
-    'conversationLabelsByChannelId'
+    'conversationLabelsByChannelIdV2',
+    { mapArgs: (args) => ({ isMember: true, ...args }) }
   ),
 
   /**

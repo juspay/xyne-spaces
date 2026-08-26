@@ -225,6 +225,19 @@ export const messagesOperations = {
   ),
 
   /**
+   * Close the incident artifact attached to a slash-command message.
+   * Maps to: Zero mutator 'messages.closeSlashCommandArtifact'
+   *
+   * Only the message's author may close it, and only while the artifact is
+   * still ACTIVE — a second call is refused. `timestamp` is stamped here and
+   * is what the closed artifact records as its close time.
+   */
+  closeSlashCommandArtifact: mutator<{ messageId: string }, void>(
+    'messages.closeSlashCommandArtifact',
+    { mapArgs: (args) => ({ ...args, timestamp: now() }) }
+  ),
+
+  /**
    * Remove an attachment from a message.
    * Maps to: Zero mutator 'messageAttachment.delete'
    */

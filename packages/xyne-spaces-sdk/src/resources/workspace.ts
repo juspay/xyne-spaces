@@ -8,6 +8,7 @@
 import { Resource } from './base.js';
 import { workspaceOperations } from '../registry/workspace.js';
 import { newId, newIdMap } from '../core/ids.js';
+import type { SdlcTrackStatus } from '../types/index.js';
 
 export class WorkspaceResource extends Resource {
   // ----- Links -----
@@ -112,6 +113,40 @@ export class WorkspaceResource extends Resource {
   /** Track another branch on a repository. */
   addRepoBranch(id: string, branchName: string): Promise<void> {
     return this.call(workspaceOperations.addRepoBranch, { id, branchName });
+  }
+
+  // ----- SDLC -----
+
+  /** The SDLC repository connected to a channel, or null if there is none. */
+  getSdlcRepoByChannel(channelId: string): Promise<unknown | null> {
+    return this.call(workspaceOperations.getSdlcRepoByChannel, { channelId });
+  }
+
+  /** Tracks on an SDLC repository, oldest first. */
+  listSdlcTracks(repoId: string): Promise<unknown[]> {
+    return this.call(workspaceOperations.listSdlcTracks, { repoId });
+  }
+
+  /**
+   * Start a track on an SDLC repository.
+   *
+   * The track id and timestamp are generated for you. You must be a
+   * participant of the repository's channel.
+   */
+  createSdlcTrack(data: {
+    repoId: string;
+    name: string;
+    description?: string;
+  }): Promise<void> {
+    return this.call(workspaceOperations.createSdlcTrack, data);
+  }
+
+  /** Change a track's name, description, or status. Pass null to clear a description. */
+  updateSdlcTrack(
+    trackId: string,
+    updates: { name?: string; description?: string | null; status?: SdlcTrackStatus }
+  ): Promise<void> {
+    return this.call(workspaceOperations.updateSdlcTrack, { trackId, ...updates });
   }
 
   // ----- Custom emoji -----

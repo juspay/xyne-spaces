@@ -198,9 +198,6 @@ export const ApiKeysModal = (): ReactElement => {
 
                 {confirmingRevoke === key.id ? (
                   <div className='flex shrink-0 items-center gap-1'>
-                    <span className='text-xs text-muted-foreground'>
-                      Revoke — stops working immediately
-                    </span>
                     <Button
                       size='sm'
                       variant='destructive'

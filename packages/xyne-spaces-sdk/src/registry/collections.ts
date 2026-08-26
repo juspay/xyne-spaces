@@ -42,6 +42,45 @@ export const collectionsOperations = {
    */
   listItems: query<{ collectionId: string }, CollectionItem[]>('collectionItems'),
 
+  /**
+   * One collection by id, or nothing if it has been soft-deleted.
+   * Maps to: Zero query 'collectionById'
+   *
+   * The query filters on the primary key but does **not** end in `.one()`, so
+   * the wire shape is a list. Unwrapped here so the declared return type is
+   * honest about there being at most one.
+   */
+  get: query<{ id: string }, Collection | null>('collectionById', {
+    mapResult: (rows) => (rows as Collection[])[0] ?? null,
+  }),
+
+  /**
+   * Every latest-version file beneath a root collection, across its subfolders,
+   * with each file's attachment joined in.
+   * Maps to: Zero query 'collectionFilesByRoot'
+   *
+   * Differs from {@link listItems}, which is one collection's own files:
+   * this walks the whole tree under a root.
+   */
+  listFilesByRoot: query<{ rootCollectionId: string }, CollectionItem[]>(
+    'collectionFilesByRoot'
+  ),
+
+  /**
+   * Root collections with their files already joined.
+   * Maps to: Zero query 'scopedCollectionsWithItems'
+   *
+   * Same scoping as {@link list} — omit both arguments for everything the
+   * caller can reach — but one round trip instead of a list-then-fetch per
+   * collection.
+   */
+  listWithItems: query<{ scopeType?: string; scopeId?: string } | undefined, Collection[]>(
+    'scopedCollectionsWithItems',
+    {
+      mapArgs: (args) => ({ ...(args ?? {}) }),
+    }
+  ),
+
   // ----- Writes -----
 
   /**

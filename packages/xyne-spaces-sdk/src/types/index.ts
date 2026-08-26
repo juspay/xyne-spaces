@@ -368,6 +368,9 @@ export interface Activity {
 export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type TicketStatusV2 = 'TODO' | 'STARTED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
 
+/** Lifecycle of an SDLC track. Mirrors `SDLC_TRACK_STATUSES` in @xyne/shared. */
+export type SdlcTrackStatus = 'ACTIVE' | 'COMPLETED' | 'ARCHIVED';
+
 /**
  * A ticket. Note the stage is referenced by `stageName`, not a stage id, and
  * assignment is `assignedTo` — both match the underlying table.
@@ -432,10 +435,38 @@ export interface CreateTicketInput {
   files?: UploadFileInput[];
 }
 
+/**
+ * What `POST /api/sdk/tickets` returns.
+ *
+ * The controller responds with a full `GetTicketDetailsResponse`, so the
+ * server-decided fields — the allocated `xyneId`, the stage the ticket landed
+ * on, and the status that stage implies — are all available without a second
+ * read. Everything past `xyneId` is optional because it describes the row the
+ * server built rather than the input, and a future controller change should
+ * degrade to "absent" rather than to a type error.
+ */
 export interface CreateTicketResponse {
   id: string;
   conversationId: string;
   xyneId: string;
+  title?: string;
+  description?: string;
+  /** The ticket's status. Named `status` on the wire, not `statusV2`. */
+  status?: TicketStatusV2;
+  priority?: TicketPriority;
+  /** The stage the ticket landed on, decided by the board. */
+  stageName?: string;
+  projectId?: string;
+  boardId?: string;
+  assignedTo?: string | null;
+  createdBy?: string;
+  updatedBy?: string;
+  eta?: number | null;
+  closedAt?: number | null;
+  closedBy?: string | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface SubTicket {

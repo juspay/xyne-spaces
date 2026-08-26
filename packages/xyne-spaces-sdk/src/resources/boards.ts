@@ -20,6 +20,17 @@ export class BoardsResource extends Resource {
     return this.call(boardsOperations.listByProject, { projectId });
   }
 
+  /**
+   * The boards surfaced in a channel.
+   *
+   * Rows are `channel_board_mappings`, each with its `board` joined — a channel
+   * can map to more than one. Use {@link listByProject} when you have a project
+   * rather than a channel.
+   */
+  listByChannel(channelId: string): Promise<unknown[]> {
+    return this.call(boardsOperations.listByChannel, { channelId });
+  }
+
   /** List a project's boards with only the fields a picker needs. */
   listByProjectLite(projectId: string): Promise<Board[]> {
     return this.call(boardsOperations.listByProjectLite, { projectId });

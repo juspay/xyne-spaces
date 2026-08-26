@@ -151,6 +151,16 @@ export class MessagesResource extends Resource {
     return this.call(messagesOperations.setShowInChannel, { messageId, showInChannel });
   }
 
+  /**
+   * Close the incident artifact on a slash-command message.
+   *
+   * Author-only, and only once — closing an already-closed artifact is
+   * refused by the server.
+   */
+  closeSlashCommandArtifact(messageId: string): Promise<void> {
+    return this.call(messagesOperations.closeSlashCommandArtifact, { messageId });
+  }
+
   /** Remove an attachment from a message. */
   deleteAttachment(attachmentId: string): Promise<void> {
     return this.call(messagesOperations.deleteAttachment, { attachmentId });

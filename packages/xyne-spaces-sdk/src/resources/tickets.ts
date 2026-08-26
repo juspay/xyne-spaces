@@ -212,9 +212,14 @@ export class TicketsResource extends Resource {
     return this.call(ticketsOperations.listEmails, { conversationId });
   }
 
-  /** Get the current user's mailbox state for a ticket. */
-  getMailbox(ticketId: string): Promise<unknown> {
-    return this.call(ticketsOperations.getMailbox, { ticketId });
+  /**
+   * Get the current user's mailbox state for a ticket.
+   *
+   * @param channelId - The ticket's channel. Required by the V2 query as an
+   * ACL hint; every ticket read returns it.
+   */
+  getMailbox(ticketId: string, channelId: string): Promise<unknown> {
+    return this.call(ticketsOperations.getMailbox, { ticketId, channelId });
   }
 
   /** Get the RCA linked to a ticket. */

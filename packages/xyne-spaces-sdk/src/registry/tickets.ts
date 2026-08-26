@@ -97,14 +97,12 @@ export const ticketsOperations = {
       appendFiles(form, files);
       return form;
     },
-    mapResult: (raw) => {
-      const result = raw as CreateTicketResponse;
-      return {
-        id: result.id,
-        conversationId: result.conversationId,
-        xyneId: result.xyneId,
-      };
-    },
+    // Passed through rather than rebuilt field by field. The controller
+    // returns a full ticket detail (see `createTicket` in ticketController),
+    // and narrowing it here silently dropped `stageName` and `status` — the
+    // two things a caller most wants back, since the server rather than the
+    // caller decides them.
+    mapResult: (raw) => raw as CreateTicketResponse,
   }),
 
   // ----- Reads -----
@@ -290,9 +288,14 @@ export const ticketsOperations = {
 
   /**
    * The current user's mailbox state for a ticket (inbox / archived, starred).
-   * Maps to: Zero query 'myTicketMailbox'
+   * Maps to: Zero query 'myTicketMailboxV2'
+   *
+   * The V2 query takes the ticket's `channelId` too, as a hint to Zero's ACL
+   * layer, so callers must now pass it. `isMember` is supplied here.
    */
-  getMailbox: query<{ ticketId: string }, unknown>('myTicketMailbox'),
+  getMailbox: query<{ ticketId: string; channelId: string }, unknown>('myTicketMailboxV2', {
+    mapArgs: (args) => ({ isMember: true, ...args }),
+  }),
 
   /**
    * The RCA linked to a ticket.

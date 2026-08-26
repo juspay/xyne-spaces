@@ -7,7 +7,8 @@
  */
 
 import { query, mutator } from './types.js';
-import { now } from '../core/ids.js';
+import { newId, now } from '../core/ids.js';
+import type { SdlcTrackStatus } from '../types/index.js';
 
 export const workspaceOperations = {
   // ----- Links -----
@@ -108,6 +109,59 @@ export const workspaceOperations = {
    * Maps to: Zero mutator 'repo.addBranch'
    */
   addRepoBranch: mutator<{ id: string; branchName: string }, void>('repo.addBranch'),
+
+  // ----- SDLC -----
+
+  /**
+   * The SDLC repository wired to a channel, if there is one.
+   * Maps to: Zero query 'getSdlcRepoByChannelId'
+   *
+   * Ends in `.one()`, so at most one row. A channel with no repository
+   * connected resolves to null rather than an empty list.
+   */
+  getSdlcRepoByChannel: query<{ channelId: string }, unknown | null>(
+    'getSdlcRepoByChannelId'
+  ),
+
+  /**
+   * Tracks belonging to an SDLC repository, oldest first.
+   * Maps to: Zero query 'getSdlcTracks'
+   */
+  listSdlcTracks: query<{ repoId: string }, unknown[]>('getSdlcTracks'),
+
+  /**
+   * Start a track on an SDLC repository.
+   * Maps to: Zero mutator 'sdlc.createTrack'
+   *
+   * The caller only names the repository and the track; the id and timestamp
+   * are generated here, and the id is returned so the new track can be acted
+   * on without a re-read. Permission comes from channel participation in the
+   * repository's channel.
+   */
+  createSdlcTrack: mutator<
+    { repoId: string; name: string; description?: string },
+    void
+  >('sdlc.createTrack', {
+    mapArgs: (args) => ({ id: newId(), timestamp: now(), ...args }),
+  }),
+
+  /**
+   * Change a track's name, description, or status.
+   * Maps to: Zero mutator 'sdlc.updateTrack'
+   *
+   * Only the fields passed are changed. `description` accepts null to clear it.
+   */
+  updateSdlcTrack: mutator<
+    {
+      trackId: string;
+      name?: string;
+      description?: string | null;
+      status?: SdlcTrackStatus;
+    },
+    void
+  >('sdlc.updateTrack', {
+    mapArgs: (args) => ({ timestamp: now(), ...args }),
+  }),
 
   // ----- Custom emoji -----
 

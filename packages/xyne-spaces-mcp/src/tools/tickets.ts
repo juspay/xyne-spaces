@@ -408,11 +408,10 @@ const ticketCreate: ToolDef = {
 		if (requestedAssignee && !assignedTo) throw new Error(`No Spaces user matches "${requestedAssignee}".`);
 
 		const eta = optionalString(args, "eta");
-		// `CreateTicketResponse` declares { id, conversationId, xyneId }, but the
-		// controller returns the full detail — stage and status included — so
-		// the two extra fields are read through a widened local type rather
-		// than dropped from the output.
-		const created = (await sdk.tickets.create({
+		// No cast: `CreateTicketResponse` now declares the server-decided fields
+		// (stageName, status) that the controller actually returns, so the
+		// compiler checks these reads instead of being told to trust them.
+		const created = await sdk.tickets.create({
 			title,
 			description,
 			projectId,
@@ -433,14 +432,14 @@ const ticketCreate: ToolDef = {
 			...(optionalStringArray(args, "draft_attachment_ids")
 				? { draftAttachmentIds: optionalStringArray(args, "draft_attachment_ids")! }
 				: {}),
-		})) as { id?: string; xyneId?: string; conversationId?: string; stageName?: string; status?: string };
+		});
 
 		return ok(
 			[
-				`Created ${created.xyneId ?? "(no key)"}: ${title}`,
-				`  Ticket ID: ${created.id ?? "(none)"}`,
+				`Created ${created.xyneId}: ${title}`,
+				`  Ticket ID: ${created.id}`,
 				`  Stage: ${created.stageName ?? "(none)"} · Status: ${created.status ?? "?"}`,
-				`  Conversation ID: ${created.conversationId ?? "(none)"}`,
+				`  Conversation ID: ${created.conversationId}`,
 			].join("\n"),
 		);
 	},

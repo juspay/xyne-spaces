@@ -11,7 +11,7 @@
       "name": "activeSlashCommandArtifacts",
       "kind": "query",
       "reason": "deferred:in-app banner feed",
-      "note": "Takes no arguments and is scoped entirely to ctx.userID/workspaceId \u2014 it drives the slash-command artifact banner in the product UI. No standalone value for an API client; revisit if artifacts become addressable."
+      "note": "Takes no arguments and is scoped entirely to ctx.userID/workspaceId — it drives the slash-command artifact banner in the product UI. No standalone value for an API client; revisit if artifacts become addressable."
     },
     {
       "name": "activities.markThreadActivitiesAsRead",
@@ -74,6 +74,18 @@
       "note": "Older version of a covered operation."
     },
     {
+      "name": "conversationLabelMappingsByConversationId",
+      "kind": "query",
+      "reason": "superseded-by:conversationLabelMappingsByConversationIdV2",
+      "note": "V2 takes channelId and isMember alongside conversationId, as an ACL hint. Same rows, same ordering."
+    },
+    {
+      "name": "conversationLabelsByChannelId",
+      "kind": "query",
+      "reason": "superseded-by:conversationLabelsByChannelIdV2",
+      "note": "V2 takes isMember alongside channelId as a hint to Zero's ACL layer. Same rows, same ordering; the SDK supplies isMember."
+    },
+    {
       "name": "conversationMessages",
       "kind": "query",
       "reason": "superseded-by:conversationMessagesV2",
@@ -117,15 +129,15 @@
     },
     {
       "name": "getSdlcLinks",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "getSdlcRepoById",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "getSdlcRepos",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "kanbanTicketsPage",
@@ -140,32 +152,38 @@
       "note": "Marked @deprecated \"Unused by frontend\" in queries.ts; returns only ADMIN rows."
     },
     {
+      "name": "myTicketMailbox",
+      "kind": "query",
+      "reason": "superseded-by:myTicketMailboxV2",
+      "note": "V2 takes channelId and isMember alongside ticketId, as an ACL hint. Same row."
+    },
+    {
       "name": "sdlc.createLink",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "sdlc.deleteLink",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "sdlcDiscussionConversation",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "sdlcDiscussionConversations",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "sdlcRelatedConversations",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "sdlcTicketsByIds",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "sdlcUserActivities",
-      "reason": "deferred:sdlc \u2014 the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
       "name": "supportTicketByXyneId",

@@ -115,9 +115,15 @@ export class ConversationsResource extends Resource {
     return this.call(conversationsOperations.listLabels, { channelId });
   }
 
-  /** List the labels applied to a thread. */
-  listAppliedLabels(conversationId: string): Promise<unknown[]> {
-    return this.call(conversationsOperations.listAppliedLabels, { conversationId });
+  /**
+   * List the labels applied to a thread.
+   *
+   * @param channelId - The thread's channel. Required by the V2 query as an
+   * ACL hint; `conversations.get(conversationId)` returns it if you only have
+   * the thread.
+   */
+  listAppliedLabels(conversationId: string, channelId: string): Promise<unknown[]> {
+    return this.call(conversationsOperations.listAppliedLabels, { conversationId, channelId });
   }
 
   /**

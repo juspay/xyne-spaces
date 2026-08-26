@@ -91,6 +91,16 @@ export const boardsOperations = {
   ),
 
   /**
+   * The boards mapped to a channel, with each board joined in.
+   * Maps to: Zero query 'boardsByChannel'
+   *
+   * Reads `channel_board_mappings`, not `boards`, so a row is the mapping and
+   * the board hangs off its `board` relation. A channel can surface more than
+   * one board; ordering is by when the mapping was made.
+   */
+  listByChannel: query<{ channelId: string }, unknown[]>('boardsByChannel'),
+
+  /**
    * Allowed stage transitions on a non-linear board.
    * Maps to: Zero query 'getStageTransitionsByBoardId'
    */

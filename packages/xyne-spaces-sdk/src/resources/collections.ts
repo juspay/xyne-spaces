@@ -35,6 +35,31 @@ export class CollectionsResource extends Resource {
     return this.call(collectionsOperations.listItems, { collectionId });
   }
 
+  /** Get one collection by id. Null if it does not exist or was deleted. */
+  get(id: string): Promise<Collection | null> {
+    return this.call(collectionsOperations.get, { id });
+  }
+
+  /**
+   * Every latest-version file beneath a root collection, across its subfolders.
+   *
+   * Unlike {@link listItems}, which returns one collection's own files, this
+   * walks the whole tree under the root and joins each file's attachment.
+   */
+  listFilesByRoot(rootCollectionId: string): Promise<CollectionItem[]> {
+    return this.call(collectionsOperations.listFilesByRoot, { rootCollectionId });
+  }
+
+  /**
+   * Root collections with their files already joined.
+   *
+   * Same scoping as {@link list}; one round trip instead of a list followed by
+   * a `listItems` per collection.
+   */
+  listWithItems(options?: { scopeType?: string; scopeId?: string }): Promise<Collection[]> {
+    return this.call(collectionsOperations.listWithItems, options);
+  }
+
   /**
    * Create a root collection.
    *

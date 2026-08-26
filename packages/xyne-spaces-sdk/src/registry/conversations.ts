@@ -192,16 +192,26 @@ export const conversationsOperations = {
 
   /**
    * Labels defined for a channel.
-   * Maps to: Zero query 'conversationLabelsByChannelId'
+   * Maps to: Zero query 'conversationLabelsByChannelIdV2'
+   *
+   * `isMember` is required by the schema but unread by the query body — it is
+   * a hint to Zero's ACL layer, and is supplied here so a caller does not have
+   * to know that.
    */
-  listLabels: query<{ channelId: string }, unknown[]>('conversationLabelsByChannelId'),
+  listLabels: query<{ channelId: string }, unknown[]>('conversationLabelsByChannelIdV2', {
+    mapArgs: (args) => ({ isMember: true, ...args }),
+  }),
 
   /**
    * Labels applied to a thread.
-   * Maps to: Zero query 'conversationLabelMappingsByConversationId'
+   * Maps to: Zero query 'conversationLabelMappingsByConversationIdV2'
+   *
+   * The V2 query takes the owning `channelId` as well, for the same ACL reason
+   * as {@link listLabels}, so callers must now pass it.
    */
-  listAppliedLabels: query<{ conversationId: string }, unknown[]>(
-    'conversationLabelMappingsByConversationId'
+  listAppliedLabels: query<{ conversationId: string; channelId: string }, unknown[]>(
+    'conversationLabelMappingsByConversationIdV2',
+    { mapArgs: (args) => ({ isMember: true, ...args }) }
   ),
 
   // ----- Writes -----
