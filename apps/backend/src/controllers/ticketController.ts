@@ -25,6 +25,11 @@ import { evaluateAssignmentRule } from '../utils/assignmentEngine';
 import { syncUserWorkload } from '../utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf, secondaryAssignmentsOf } from '../services/ticketAssignmentService';
 import {
+  priorityConflictService,
+  PriorityConflictValidationError,
+  type PriorityConflictIntake,
+} from '../services/priorityConflictService';
+import {
   buildPartialCustomFieldWritePayload,
   syncCustomFieldValues,
   type CustomFieldWritePayload,
@@ -641,6 +646,43 @@ export class TicketController {
         return;
       }
 
+      // Channels can opt into priority conflict resolution: every ticket needs an ETA, and a
+      // HIGH/CRITICAL ticket may name an existing task it should go ahead of. Naming one is
+      // optional — without it the ticket joins the back of the priority queue. The claim itself
+      // is written inside the creation transaction below so a high-priority ticket can never be
+      // committed without the claim that blocks it.
+      const priorityConflictEnabled =
+        await priorityConflictService.isEnabledForChannel(actualChannelId);
+      let pendingPriorityClaim: { respondentId: string; supersededTicketId: string } | null = null;
+      const priorityIntake: PriorityConflictIntake = {
+        supersededTicketId: req.body.supersededTicketId as string | undefined,
+        supersedeJustification: req.body.supersedeJustification as string | undefined,
+      };
+
+      if (priorityConflictEnabled) {
+        if (!eta) {
+          res.status(400).json({
+            error: 'An ETA is required for tickets in this channel.',
+            field: 'eta',
+          });
+          return;
+        }
+        try {
+          pendingPriorityClaim = await priorityConflictService.validateIntake({
+            channelId: actualChannelId!,
+            priority: priority as string | undefined,
+            raiserId: userId,
+            intake: priorityIntake,
+          });
+        } catch (error) {
+          if (error instanceof PriorityConflictValidationError) {
+            res.status(400).json({ error: error.message, field: error.field });
+            return;
+          }
+          throw error;
+        }
+      }
+
       const queryContext = {
         userID: userId,
         workspaceId: req.user.workspaceId,
@@ -1108,6 +1150,23 @@ export class TicketController {
           }
         }
 
+        // Written inside the transaction so a HIGH/CRITICAL ticket in an opted-in channel can
+        // never be committed without the PENDING claim that blocks it.
+        if (pendingPriorityClaim) {
+          await priorityConflictService.createClaim(
+            {
+              ticketId: ticket.id,
+              supersededTicketId: pendingPriorityClaim.supersededTicketId,
+              channelId: ticket.channelId,
+              workspaceId: ticket.workspaceId,
+              justification: priorityIntake.supersedeJustification!.trim(),
+              raiserId: userId,
+              respondentId: pendingPriorityClaim.respondentId,
+            },
+            tx,
+          );
+        }
+
         return { ticket, conversationId };
       });
 
@@ -1116,6 +1175,18 @@ export class TicketController {
       // Post-commit + fire-and-forget so it can't delay or fail ticket creation.
       if (ticket.stageName) {
         void maybeCreateEntryApprovalRequest(ticket.id, ticket.createdBy, ticket.stageName);
+      }
+
+      // Loop the superseded task's owner in, now that the ticket + claim are committed. The Zero
+      // side-effect handler only sees Zero mutations, so this REST path has to notify directly.
+      if (pendingPriorityClaim) {
+        void priorityConflictService.notifyClaimRaised({
+          ticketId: ticket.id,
+          supersededTicketId: pendingPriorityClaim.supersededTicketId,
+          channelId: ticket.channelId,
+          raiserId: userId,
+          respondentId: pendingPriorityClaim.respondentId,
+        });
       }
 
       const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;

@@ -81,6 +81,7 @@ export { SavedUserConfigurationsACL } from './saved-user-configurations-acl';
 export { TicketAssignmentsACL } from './ticket-assignments-acl';
 export { TicketStageEtaACL } from './ticket-stage-eta-acl';
 export { TicketStageRequestsACL } from './ticket-stage-requests-acl';
+export { PriorityConflictClaimsACL } from './priority-conflict-claims-acl';
 export { UserProfilesACL } from './user-profiles-acl';
 export { UserPreferencesACL } from './user-preferences-acl';
 export { FormsACL } from './forms-acl';

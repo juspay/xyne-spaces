@@ -118,13 +118,21 @@ export type PreviousValue =
   | ChannelParticipantPreviousValue
   | ChannelUserStatusPreviousValue
   | ConversationParticipantPreviousValue
-  | TicketStageRequestPreviousValue;
+  | TicketStageRequestPreviousValue
+  | PriorityConflictClaimPreviousValue;
 
 export interface TicketStageRequestPreviousValue {
   status: string;
   stageId: string;
   submittedBy: string;
   ticketId: string;
+}
+
+export interface PriorityConflictClaimPreviousValue {
+  state: string;
+  ticketId: string;
+  raisedBy: string;
+  respondentId: string;
 }
 
 export interface SideEffectJobConfig {
@@ -166,6 +174,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   channel_user_status: ['update'],
   conversation_participants: ['update'],
   ticket_stage_requests: ['insert', 'update', 'upsert'],
+  priority_conflict_claims: ['insert', 'update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {
