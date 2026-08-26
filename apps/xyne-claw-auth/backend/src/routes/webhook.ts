@@ -125,6 +125,9 @@ import {
   buildGoalSuggestionFlow,
   buildPlanFlow,
   buildAgentCardFlow,
+  buildAgentSummaryFlow,
+  buildMcpSuggestFlow,
+  MAX_AGENT_LIST_CARDS,
   buildCodeFlow,
   buildDiffFlow,
   buildChartFlow,
@@ -140,6 +143,7 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-sha
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
+import { connectorTypesFromText } from "../lib/connector-hints.js";
 
 const clog = createLogger("webhook");
 const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
@@ -592,6 +596,27 @@ import {
   zipAttachmentsToBuffer,
   prepareAgentResultForPosting,
 } from "../surfaces/spaces/attachments.js";
+
+/** Owner display name + id for an agent's card chin ("Created by @x"). */
+/** Connectors shown before the card defers to "Browse MCPs". */
+const MCP_SUGGEST_ROSTER_SAMPLE = 5;
+
+/** Agents listed on the roster card before it defers to "Browse agents". */
+const AGENT_SUMMARY_SAMPLE = 5;
+
+/** Cap on connectors the server offers unprompted, so a card never becomes a list. */
+const MCP_SUGGEST_INFERRED_MAX = 3;
+
+async function agentOwnerCredit(
+  ownerUserId: string | null | undefined,
+): Promise<{ name?: string | null; id?: string | null } | undefined> {
+  if (!ownerUserId) return undefined;
+  const owner = await prisma.user
+    .findUnique({ where: { id: ownerUserId }, select: { id: true, name: true } })
+    .catch(() => null);
+  return owner?.name ? { name: owner.name, id: owner.id } : undefined;
+}
+
 
 function experimentCounts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
   return {
@@ -4678,7 +4703,14 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // the same card serves other agent surfaces (a read-only profile next).
     pendingAgentCard?:
       | { variant: "draft"; agent: DraftAgentSpec }
-      | { variant: "profile"; slug?: string };
+      | { variant: "profile"; slug?: string }
+      // "which agents can do X?" — a stack of read-only cards, capped server-side.
+      | { variant: "profile-list"; slugs: string[] }
+      // "list all my agents" — counts only, with a link into the library.
+      | { variant: "summary" };
+    // Connector cards to post alongside the reply, so the user can connect
+    // without leaving the conversation.
+    pendingConnectorSuggestions?: { serverTypes: string[]; title?: string; listAll?: boolean };
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -5982,9 +6014,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           catalog,
           ctx.senderId,
         );
+        const ownerCredit = await agentOwnerCredit(row.ownerUserId);
         const flow = withSpacesAppId(
           buildAgentCardFlow(
-            { variant: "profile", agent: identityFromAgentRow(row, resolved) },
+            { variant: "profile", agent: identityFromAgentRow(row, resolved, undefined, ownerCredit) },
             {
               agentSlug: ctx.agentSlug!,
               targetSlug,
@@ -6011,6 +6044,238 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       });
     }
   }
+  // Fall back to the server's own reading of the request when the model did not
+  // ask for cards. It routinely misses the moment — most often by assuming a
+  // connector is already connected — and a missing capability is exactly when
+  // the user most needs the offer. Only unconnected connectors survive the
+  // filter below, so a wrong guess costs nothing.
+  // Fail-safe: this runs before the reply is posted, so a throw here would cost
+  // the user their answer. A suggestion is never worth that.
+  let inferredTypes: string[] = [];
+  if (!payload.pendingConnectorSuggestions) {
+    try {
+      inferredTypes = connectorTypesFromText(ctx.task ?? "").slice(0, MCP_SUGGEST_INFERRED_MAX);
+    } catch (err) {
+      log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const pendingConnectorSuggestions =
+    payload.pendingConnectorSuggestions ??
+    (inferredTypes.length > 0 ? { serverTypes: inferredTypes, inferred: true } : undefined);
+  if (pendingConnectorSuggestions && agentCardDeliverable) {
+    try {
+      // Roster mode: the user asked what exists, so the SERVER picks the sample
+      // — the model must not decide which connectors represent the catalog.
+      const listAll = pendingConnectorSuggestions.listAll === true;
+      const totalCount = listAll
+        ? await prisma.mcpServer.count({ where: { enabled: true } })
+        : undefined;
+
+      // Resolve every requested type against the catalog. The model supplies
+      // names only — descriptions and display names come from the row, and an
+      // unknown type is dropped rather than rendered as an empty card.
+      const rows = listAll
+        ? await prisma.mcpServer.findMany({
+            where: { enabled: true },
+            select: { id: true, type: true, name: true, description: true },
+            orderBy: { name: "asc" },
+            take: MCP_SUGGEST_ROSTER_SAMPLE,
+          })
+        : await prisma.mcpServer.findMany({
+            where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
+            select: { id: true, type: true, name: true, description: true },
+          });
+      const byType = new Map(rows.map((row) => [row.type, row]));
+
+      const existing = await prisma.userMcpConnection.findMany({
+        where: { userId: ctx.senderId, mcpServerId: { in: rows.map((r) => r.id) } },
+        select: { mcpServerId: true },
+      });
+      const connectedIds = new Set(existing.map((c) => c.mcpServerId));
+
+      // Roster mode is already ordered by the query; otherwise preserve the
+      // model's ordering, since it ranked them by relevance.
+      const ordered = listAll
+        ? rows
+        : pendingConnectorSuggestions.serverTypes
+            .map((type) => byType.get(type))
+            .filter((row): row is NonNullable<typeof row> => !!row);
+
+      const inferred = (pendingConnectorSuggestions as { inferred?: boolean }).inferred === true;
+
+      const connectors = ordered
+        // An inferred card is unsolicited, so it only earns its place when it
+        // offers something new. A model-requested card still lists connected
+        // ones, because the user asked to see them.
+        .filter((row) => !inferred || !connectedIds.has(row.id))
+        .map((row) => ({
+          serverType: row.type,
+          name: row.name,
+          ...(row.description ? { description: row.description } : {}),
+          connected: connectedIds.has(row.id),
+        }));
+
+      if (connectors.length === 0) {
+        log.info(
+          `[mcp-suggest] skipped — none of ${pendingConnectorSuggestions.serverTypes.join(", ")} are known connectors`,
+        );
+      } else {
+        const flow = withSpacesAppId(
+          buildMcpSuggestFlow({
+            connectors,
+            ...(pendingConnectorSuggestions.title
+              ? { title: pendingConnectorSuggestions.title }
+              : listAll
+                ? { title: "Connectors you can add" }
+                : {}),
+            ...(listAll ? { browseAll: true } : {}),
+            ...(inferred && !pendingConnectorSuggestions.title
+              ? { title: "Connect to unlock this" }
+              : {}),
+            ...(totalCount !== undefined ? { totalCount } : {}),
+            screenKey: `${ctx.senderId}-${connectors.map((c) => c.serverType).join("-")}`,
+            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+            userId: ctx.senderId,
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+          }),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        log.info(`[mcp-suggest] posted ${connectors.length} connector cards conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      log.warn("Failed to post connector suggestions (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (pendingAgentCard?.variant === "summary" && agentCardDeliverable && ctx.agentOrgId) {
+    try {
+      const [total, globalCount, sampleAgents] = await Promise.all([
+        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true } }),
+        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true, scope: "global" } }),
+        // Sample rows for the card. The SERVER picks them — the model must not
+        // decide which agents represent the roster.
+        prisma.agent.findMany({
+          where: { orgId: ctx.agentOrgId, enabled: true },
+          select: { slug: true, name: true, description: true },
+          orderBy: { name: "asc" },
+          take: AGENT_SUMMARY_SAMPLE,
+        }),
+      ]);
+
+      if (total === 0) {
+        log.info(`[agent-card] summary skipped — no agents in org ${ctx.agentOrgId}`);
+      } else {
+        const flow = withSpacesAppId(
+          buildAgentSummaryFlow(
+            {
+              total,
+              global: globalCount,
+              personal: total - globalCount,
+              agents: sampleAgents.map((a) => ({
+                slug: a.slug,
+                name: a.name,
+                ...(a.description ? { description: a.description } : {}),
+              })),
+            },
+            {
+              agentSlug: ctx.agentSlug!,
+              userId: ctx.senderId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+            },
+          ),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        postedAgentProfileCard = true;
+        log.info(`[agent-card] posted roster summary (${total}) conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      log.warn("Failed to post agent summary card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (pendingAgentCard?.variant === "profile-list" && agentCardDeliverable && ctx.agentOrgId) {
+    try {
+      const unique = [
+        ...new Set(pendingAgentCard.slugs.map((slug) => slug.trim()).filter((slug) => slug.length > 0)),
+      ];
+      const capped = unique.slice(0, MAX_AGENT_LIST_CARDS);
+
+      // Matches are rendered as compact roster rows, not full profile cards:
+      // "which agents can review PRs?" wants a scannable shortlist, and five
+      // stacked identity cards buries it. Each row opens the agent's own page.
+      const rows = [];
+      for (const slug of capped) {
+        const row = await agentRepository.findBySlug(slug, ctx.agentOrgId);
+        if (!row) {
+          log.info(`[agent-card] list row skipped — no agent "${slug}" in org ${ctx.agentOrgId}`);
+          continue;
+        }
+        rows.push({
+          slug: row.slug,
+          name: row.name,
+          ...(row.description ? { description: row.description } : {}),
+        });
+      }
+
+      if (rows.length === 0) {
+        log.info(`[agent-card] list card skipped — none of ${unique.length} slugs resolved`);
+      } else {
+        const flow = withSpacesAppId(
+          buildAgentSummaryFlow(
+            {
+              total: rows.length,
+              agents: rows,
+            },
+            {
+              agentSlug: ctx.agentSlug!,
+              userId: ctx.senderId,
+              conversationId: ctx.conversationId,
+              channelId: ctx.channelId,
+            },
+            // Matches, not the whole roster — so the header counts what was
+            // found rather than claiming every agent in the org.
+            `${rows.length} ${rows.length === 1 ? "agent" : "agents"} that can help`,
+          ),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        postedAgentProfileCard = true;
+        log.info(`[agent-card] posted ${rows.length} matching agents conv=${ctx.conversationId}`);
+      }
+    } catch (err) {
+      // Non-fatal: the reply itself still posts below.
+      log.warn("Failed to post matching agent card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   if (
     pendingAgentCard?.variant === "draft" &&
     ctx.responseMode === "conversation" &&
