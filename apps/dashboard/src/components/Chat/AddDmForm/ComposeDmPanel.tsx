@@ -15,7 +15,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useActiveUsers, useUser } from '../../../hooks/useUsers';
+import { useActiveUsers, useActiveUserSearch, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import {
   EVENT_PROPERTIES,
@@ -204,27 +204,40 @@ export const ComposeDmPanel: React.FC = () => {
       }));
   }, [channelResults]);
 
+  const mentionUserResults = useActiveUserSearch(mentionSearchQuery, 10);
+
   const composeMentionItems = useMemo(() => {
     const query = mentionSearchQuery.trim().toLowerCase();
     const isSelfDm = selectedUsers.length === 1 && selectedUsers[0]?.id === context.userID;
-    const selectedUserMentions = selectedUsers
-      .filter(selectedUser => isSelfDm || selectedUser.id !== context.userID)
-      .filter(selectedUser => {
-        if (!query) return true;
 
-        const emailLocalPart = selectedUser.email.split('@')[0] ?? '';
-        return [
-          selectedUser.displayName,
-          selectedUser.name,
-          selectedUser.email,
-          emailLocalPart,
-        ].some(value => value?.toLowerCase().includes(query) ?? false);
-      })
-      .map(selectedUser =>
-        userToMentionResult(selectedUser, selectedUser.id === context.userID, true),
+    const matchesQuery = (candidate: User): boolean => {
+      if (!query) return true;
+
+      const emailLocalPart = candidate.email.split('@')[0] ?? '';
+      return [candidate.displayName, candidate.name, candidate.email, emailLocalPart].some(
+        value => value?.toLowerCase().includes(query) ?? false,
       );
+    };
 
-    if (selectedUsers.length <= 1) return selectedUserMentions;
+    const recipients = selectedUsers
+      .filter(selectedUser => isSelfDm || selectedUser.id !== context.userID)
+      .filter(matchesQuery);
+    const recipientIds = new Set(recipients.map(selectedUser => selectedUser.id));
+
+    const workspaceUsers = mentionUserResults.filter(
+      candidate => !recipientIds.has(candidate.id) && (isSelfDm || candidate.id !== context.userID),
+    );
+
+    const userMentions = [
+      ...recipients.map(selectedUser =>
+        userToMentionResult(selectedUser, selectedUser.id === context.userID, true),
+      ),
+      ...workspaceUsers.map(candidate =>
+        userToMentionResult(candidate, candidate.id === context.userID),
+      ),
+    ];
+
+    if (selectedUsers.length <= 1) return userMentions;
 
     // Offer @channel and @here for group DMs, matching useMentionSearch's special
     // mentions. The backend (sendInitialMessage) handles both in the initial message.
@@ -245,10 +258,10 @@ export const ComposeDmPanel: React.FC = () => {
       },
     ].filter(mention => !query || mention.name.includes(query));
 
-    if (specialMentions.length === 0) return selectedUserMentions;
+    if (specialMentions.length === 0) return userMentions;
 
-    return [...specialMentions, ...selectedUserMentions];
-  }, [mentionSearchQuery, selectedUsers, context.userID]);
+    return [...specialMentions, ...userMentions];
+  }, [mentionSearchQuery, selectedUsers, context.userID, mentionUserResults]);
 
   const channelParticipation = useGetChannelUserStatus(existingDmChannel?.id || '');
   const [latestMessage] = useCachedQuery(
