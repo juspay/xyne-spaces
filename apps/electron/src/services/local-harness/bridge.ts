@@ -22,6 +22,8 @@ import type { HarnessAdapter } from './adapters/types';
 
 const MCP_SERVER_NAME = 'xyne';
 
+class StaleDevicePairingError extends Error {}
+
 const POLL_ERROR_BACKOFF_MS = 5000;
 
 const ADAPTERS: Record<LocalHarnessProvider, HarnessAdapter> = {
@@ -172,10 +174,17 @@ export class LocalHarnessBridge {
         installations: this.installations,
       }),
     });
+    if (res.status === 401) throw new StaleDevicePairingError('Device pairing is no longer valid');
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(body.error ?? `Failed to update this device (HTTP ${res.status})`);
     }
+  }
+
+  private clearPairing(): void {
+    this.store.delete('deviceId');
+    this.store.delete('deviceTokenEnc');
+    this.store.delete('deviceTokenPlain');
   }
 
   // Connect/disconnect ONE harness. The pairing exists only while at least one
@@ -203,8 +212,18 @@ export class LocalHarnessBridge {
     if (next.size === 0) return this.disconnect(cookieHeader);
 
     try {
-      if (this.deviceToken()) await this.syncInstallations();
-      else await this.registerDevice(cookieHeader);
+      if (this.deviceToken()) {
+        try {
+          await this.syncInstallations();
+        } catch (err) {
+          if (!(err instanceof StaleDevicePairingError)) throw err;
+          log.warn('[LocalHarness] stored device token is unknown to the server — re-pairing');
+          this.clearPairing();
+          await this.registerDevice(cookieHeader);
+        }
+      } else {
+        await this.registerDevice(cookieHeader);
+      }
     } catch (err) {
       // Never leave the card showing "connected" for something the server
       // never heard about.
@@ -247,9 +266,7 @@ export class LocalHarnessBridge {
         headers: { Cookie: cookieHeader },
       }).catch((err) => log.warn('[LocalHarness] revoke failed (clearing locally anyway):', err));
     }
-    this.store.delete('deviceId');
-    this.store.delete('deviceTokenEnc');
-    this.store.delete('deviceTokenPlain');
+    this.clearPairing();
     this.store.set('enabledProviders', []);
     this.installations = this.installations.map((i) => ({ ...i, enabled: false }));
     this.harnessSessions.clear();
