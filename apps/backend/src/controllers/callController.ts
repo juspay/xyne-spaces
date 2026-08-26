@@ -429,6 +429,10 @@ export class CallController {
         stage = 'notes_canvas_creation';
         await canvasAuthService.createCanvasForUser(notesCanvasId, userId, {
           title: 'Untitled Notes',
+          metadata: {
+            source: 'call_notes',
+            callId: callExternalId,
+          },
         });
 
         stage = 'detailed_summary_canvas_creation';
