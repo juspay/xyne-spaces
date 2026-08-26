@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.7](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.6...v1.219.0-release-20260825.7) (2026-08-26)
+
+
+### Features
+
+* add seperate key for thread tagging and entity extraction ([#1064](https://github.com/juspay/xyne-spaces/issues/1064)) ([931eb6e](https://github.com/juspay/xyne-spaces/commit/931eb6e7bcc351c06a03938e25eff92624e3120f))
+
 ## [1.219.0-release-20260825.6](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.5...v1.219.0-release-20260825.6) (2026-08-26)
 
 
