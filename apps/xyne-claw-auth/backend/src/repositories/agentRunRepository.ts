@@ -390,10 +390,12 @@ export const agentRunRepository = {
     });
   },
 
-  listByUser: (userId: string, opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
+  /** Accepts one id or the caller's alias pair (canonical + raw Spaces id);
+   *  runs may be keyed by either (see getRequesterAliases). */
+  listByUser: (userIds: string | string[], opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        ...(Array.isArray(userIds) ? { userId: { in: userIds } } : { userId: userIds }),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),

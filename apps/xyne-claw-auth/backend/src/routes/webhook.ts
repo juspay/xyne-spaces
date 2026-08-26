@@ -98,7 +98,7 @@ import {
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
+import { ensureUserExists, orgIdForSpacesUser, resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
@@ -1451,11 +1451,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // If not an agent bot, check if the mentioned user is registered in claw-auth
       // (i.e. they have a Digital Twin set up with MCP connections)
       if (!agent) {
-        let mentionedUser = await userRepository.findById(mentionedUserIds[0]!);
+        const mentionedSpacesUserId = mentionedUserIds[0]!;
+        const mentionedClawUserId = await resolveClawUserIdForSpacesIdentity(mentionedSpacesUserId).catch(() => undefined);
+        let mentionedUser = mentionedClawUserId ? await userRepository.findById(mentionedClawUserId) : null;
         if (!mentionedUser) {
           // JIT-mirror from Spaces — they may exist there but not here.
-          await ensureUserExists(mentionedUserIds[0]!, "webhook").catch(() => {});
-          mentionedUser = await userRepository.findById(mentionedUserIds[0]!);
+          await ensureUserExists(mentionedSpacesUserId, "webhook").catch(() => {});
+          const resolvedUserId = await resolveClawUserIdForSpacesIdentity(mentionedSpacesUserId).catch(() => undefined);
+          mentionedUser = resolvedUserId ? await userRepository.findById(resolvedUserId) : null;
         }
         if (!mentionedUser) {
           log.info(`Ignoring USER_MENTIONED — user ${mentionedUserIds[0]} not registered in claw-auth`);
@@ -1483,10 +1486,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   // Verify the sender has an account in claw-auth — JIT-mirror from Spaces
   // first so a user who's never opened the dashboard still goes through.
-  let senderUser = await userRepository.findById(payload.userId);
+  let senderClawUserId = await resolveClawUserIdForSpacesIdentity(payload.userId).catch(() => undefined);
+  let senderUser = senderClawUserId ? await userRepository.findById(senderClawUserId) : null;
   if (!senderUser) {
     await ensureUserExists(payload.userId, "webhook", agent.orgId ?? undefined).catch(() => {});
-    senderUser = await userRepository.findById(payload.userId);
+    senderClawUserId = await resolveClawUserIdForSpacesIdentity(payload.userId).catch(() => undefined);
+    senderUser = senderClawUserId ? await userRepository.findById(senderClawUserId) : null;
   }
   if (!senderUser) {
     if (eventType === "DIRECT_MESSAGE") {
@@ -1517,6 +1522,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     res.status(422).json({ success: false, error: "Agent misconfigured (no organization)" });
     return;
   }
+
+  // Keep the raw sender id only for Spaces API/DB reads. Everything owned by
+  // Claw (runs, credentials, sessions, authorization) uses this canonical id.
+  const spacesSenderId = payload.userId;
+  const clawSenderId = senderUser.id;
 
   log.info(`${eventType} from user ${payload.userId} → agent ${agent.slug}`);
 
@@ -1586,7 +1596,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // For USER_MENTIONED: run as the mentioned user (their tools, their twin).
   const allMentionedIds = (payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? [];
   const targetUserId = eventType === "USER_MENTIONED" && allMentionedIds.length > 0
-    ? allMentionedIds[0]! : payload.userId;
+    ? (await resolveClawUserIdForSpacesIdentity(
+        allMentionedIds[0]!,
+        (payload as { workspaceId?: string }).workspaceId,
+      ).catch(() => undefined) ?? allMentionedIds[0]!)
+    : clawSenderId;
 
   // Twin dispatch uses the agent selected by the /webhook/digital-twin route.
   const runAgentSlug = agent.slug;
@@ -1946,8 +1960,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const sessionContext: SessionContext = {
       mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
       targetUserId,
-      senderId: payload.userId,
-      senderName: payload.senderName ?? payload.userId,
+      senderId: clawSenderId,
+      senderName: payload.senderName ?? spacesSenderId,
       channelId: payload.channelId,
       channelName: payload.channelName ?? payload.channelId,
       conversationId: payload.conversationId,
@@ -2196,8 +2210,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       );
       const eligibleTwins: Array<{ userId: string; workspaceId: string; respondPolicy: string }> = [];
       for (const uid of mentioned) {
-        const u = await userRepository.findById(uid).catch(() => null);
-        if (!u) {
+        const clawTwinUserId = await resolveClawUserIdForSpacesIdentity(uid).catch(() => undefined);
+        const u = clawTwinUserId ? await userRepository.findById(clawTwinUserId).catch(() => null) : null;
+        if (!clawTwinUserId || !u) {
           log.info(`Twin: skipping ${uid} — not registered in claw-auth`);
           continue;
         }
@@ -2211,7 +2226,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           continue;
         }
         eligibleTwins.push({
-          userId: uid,
+          userId: clawTwinUserId,
           workspaceId: twinAuth.workspaceId,
           respondPolicy: (u as { digitalTwinRespondPolicy?: string }).digitalTwinRespondPolicy ?? "learned",
         });
@@ -2312,7 +2327,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         return;
       }
     }
-    await dispatchRunForTarget(payload.userId, undefined);
+    await dispatchRunForTarget(clawSenderId, (payload as { workspaceId?: string }).workspaceId);
   } catch (err) {
     log.error("Error forwarding:", { error: errMsg(err) });
     if (eventType !== "USER_MENTIONED" && payload.conversationId) {
@@ -2697,6 +2712,16 @@ export async function handleAutomationWebhook(
     res.status(400).json({ success: false, error: "orgId is required" });
     return;
   }
+  // `payload.userId` is the raw, workspace-scoped Spaces membership id. Use
+  // it only to resolve the tenant; every Claw-owned row and pod dispatch must
+  // use the canonical local user id.
+  const workspaceId = payload.workspaceId ?? undefined;
+  const clawUserId = await resolveClawUserIdForSpacesIdentity(userId!, workspaceId).catch(() => undefined);
+  if (!clawUserId) {
+    clog.error(`[webhook/automation-run] canonical user miss spacesUserId=${userId} workspaceId=${workspaceId ?? "none"} sessionId=${sessionId}`);
+    res.status(400).json({ success: false, error: "user identity could not be resolved" });
+    return;
+  }
   const agent = await agentRepository.findBySlug(agentSlug, automationOrgId);
   if (!agent) {
     clog.warn(
@@ -2816,7 +2841,7 @@ export async function handleAutomationWebhook(
         conversationId: payload.conversationId,
         channelId: payload.channelId ?? "",
         ...(payload.channelName ? { channelName: payload.channelName } : {}),
-        userId: userId!,
+        userId: clawUserId,
         agentSlug,
         orgId: agent.orgId,
         ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
@@ -2848,8 +2873,8 @@ export async function handleAutomationWebhook(
     const appToken = decryptStoredField(agent.spacesAppToken!);
     const sessionContext: SessionContext = {
       mentionedUserId: agent.spacesAppUserId!,
-      senderId: userId!,
-      senderName: userId!,
+      senderId: clawUserId,
+      senderName: clawUserId,
       // conversationId/channelId may be absent for new-conversation automations.
       // The resolve-and-forward path doesn't read them; default to "" so the
       // typed context stays valid.
@@ -3034,7 +3059,7 @@ export async function handleAutomationWebhook(
   const resultToken = interpose
     ? mintSessionToken({
         sessionId: sessionId!,
-        userId: userId!,
+        userId: clawUserId,
         agentSlug,
         ...(agent.spacesAppId ? { spacesAppId: agent.spacesAppId } : {}),
         ttlSeconds: 3600,
@@ -3170,7 +3195,7 @@ export async function handleAutomationWebhook(
   // automation engine, which owns its own retry; we deliberately don't layer on.
   if (interpose && status >= 200 && status < 300) {
     const recoveryPayload = {
-      userId: userId!,
+      userId: clawUserId,
       task: task!,
       conversationId: payload.conversationId ?? "",
       agentSlug,
@@ -3193,8 +3218,8 @@ export async function handleAutomationWebhook(
     };
     const recoveryCtx: RecoverySessionContext = {
       mentionedUserId: agent.spacesAppUserId!,
-      senderId: userId!,
-      senderName: userId!,
+      senderId: clawUserId,
+      senderName: clawUserId,
       channelId: payload.channelId ?? "",
       channelName: payload.channelName ?? payload.channelId ?? "",
       conversationId: payload.conversationId ?? "",

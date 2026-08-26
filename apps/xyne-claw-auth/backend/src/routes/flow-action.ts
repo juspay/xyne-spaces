@@ -54,6 +54,7 @@ import { isClawAdmin } from "../middleware/agent-acl.js";
 import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
@@ -612,7 +613,15 @@ async function finishWriteFailure(opts: {
 router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req: Request, res: Response): Promise<void> => {
   const body = req.body as ActionRequest;
   const { actionId, values, context } = body;
-  const { flowJSON, messageId, conversationId, userId: callerUserId } = context;
+  const { flowJSON, messageId, conversationId, userId: rawCallerUserId } = context;
+  // Flow's signed context carries the raw Spaces membership ID. Translate it
+  // for Claw-owned lookups, but retain the source ID so legacy signed cards
+  // that stored that ID remain actionable.
+  const callerUserId = rawCallerUserId
+    ? (await resolveClawUserIdForSpacesIdentity(rawCallerUserId).catch(() => undefined) ?? rawCallerUserId)
+    : undefined;
+  const matchesCallerUserId = (targetUserId: string | undefined): boolean =>
+    !!targetUserId && (targetUserId === rawCallerUserId || targetUserId === callerUserId);
   const data = (flowJSON.data ?? {}) as Record<string, unknown>;
   const actionType = data["actionType"] as string | undefined;
 
@@ -691,7 +700,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return;
         }
         log.info(`[flow-action] automation write approved by ${callerUserId} (${caller.name?.trim() ?? ""}) — automation owner ${writeUserId} tool=${tool}`);
-      } else if (callerUserId !== writeUserId) {
+      } else if (!matchesCallerUserId(writeUserId)) {
         log.error(`[flow-action] Unauthorized: caller ${callerUserId} != expected ${writeUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
@@ -983,7 +992,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           res.json({ type: "error", message: "Invalid skill slug (use lowercase letters, digits and single hyphens)." } satisfies AppActionResponse);
           return;
         }
-        const user = await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } });
+        // Flow cards retain the raw Spaces membership ID in their signed
+        // payload. `callerUserId` above is the matching canonical Claw user
+        // resolved through UserSurfaceIdentity; every Claw-owned relation must
+        // use it rather than the raw card value.
+        const user = await prisma.user.findUnique({ where: { id: callerUserId }, select: { orgId: true } });
         const skillOrgId = user?.orgId;
         if (!skillOrgId) {
           res.json({ type: "error", message: "Could not resolve your organization to create the skill." } satisfies AppActionResponse);
@@ -1004,10 +1017,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           content: content.trim(),
           source: "agent-authored",
           scope: "personal",
-          owner: { connect: { id: writeUserId } },
+          owner: { connect: { id: callerUserId } },
           org: { connect: { id: skillOrgId } },
         });
-        log.info(`[flow-action] create-skill approved slug=${slug} owner=${writeUserId} org=${skillOrgId}`);
+        log.info(`[flow-action] create-skill approved slug=${slug} owner=${callerUserId} org=${skillOrgId}`);
         resp = { type: "close_screen", finalMessage: `✅ Skill "${name}" created.` };
         res.json(resp);
         void replaceFlowCardWithText(messageId, agentSlug, `✅ **Skill created:** ${name} (\`${slug}\`)`, conversationId, undefined, spacesAppId);
@@ -1022,9 +1035,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         res.json({ type: "error", message: `No adapter for ${serverType}` } satisfies AppActionResponse);
         return;
       }
-      const effective = await loadEffectiveCredentials(writeUserId, serverType, agentSlug);
+      // `writeUserId` is the raw ID signed into the Flow card. Credential rows
+      // and MCP execution are Claw-owned, so use the canonical identity that
+      // was resolved and authorization-checked above.
+      const effective = await loadEffectiveCredentials(callerUserId, serverType, agentSlug);
       if (!effective) {
-        res.json({ type: "error", message: `No connection for user ${writeUserId} / ${serverType}` } satisfies AppActionResponse);
+        res.json({ type: "error", message: `No connection for user ${callerUserId} / ${serverType}` } satisfies AppActionResponse);
         return;
       }
       // Private user credential on an approved write → flag the run for the ACL
@@ -1033,12 +1049,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       let toolResult: Awaited<ReturnType<typeof callTool>>;
       try {
-        toolResult = await callTool(writeUserId, serverType, effective.credentials, tool, params);
+        toolResult = await callTool(callerUserId, serverType, effective.credentials, tool, params);
       } catch (err) {
         const errText = sanitizeApprovalToolError(err);
         const userMessage = approvalToolFailureMessage(errText);
         log.error(
-          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
+          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${callerUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
         );
         res.status(422).json({
           type: "error",
@@ -1090,7 +1106,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       // Verify caller is the intended user. Fail closed on missing callerUserId.
-      if (!callerUserId || callerUserId !== mentionedUserId) {
+      if (!callerUserId || !matchesCallerUserId(mentionedUserId)) {
         log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${mentionedUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
@@ -1163,7 +1179,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       // Verify caller is the intended user. Fail closed on missing callerUserId.
-      if (!callerUserId || callerUserId !== answerUserId) {
+      if (!callerUserId || !matchesCallerUserId(answerUserId)) {
         log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${answerUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
@@ -1618,7 +1634,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      if (!callerUserId || callerUserId !== ownerUserId) {
+      if (!callerUserId || !matchesCallerUserId(ownerUserId)) {
         log.error(`[flow-action] clone-approval: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${ownerUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
@@ -1659,7 +1675,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         res.status(400).json({ type: "error", message: "Missing skill-update fields in flowJSON.data" } satisfies AppActionResponse);
         return;
       }
-      if (!callerUserId || callerUserId !== approverUserId) {
+      if (!callerUserId || !matchesCallerUserId(approverUserId)) {
         log.error(`[flow-action] skill-update: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${approverUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
@@ -1876,7 +1892,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // Only the original recipient (the user the suggestion was offered to)
       // can promote it. Prevents anyone else in the thread from hijacking
       // the button to start a goal under someone else's identity.
-      if (!callerUserId || callerUserId !== goalUserId) {
+      if (!callerUserId || !matchesCallerUserId(goalUserId)) {
         log.error(`[flow-action] start-goal: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${goalUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
@@ -2138,7 +2154,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const serverTodos = serverPlan.todos;
 
       // Only the user the server recorded for this plan can approve/reject it.
-      if (!callerUserId || callerUserId !== planUserId) {
+      if (!callerUserId || !matchesCallerUserId(planUserId)) {
         log.error(`[flow-action] plan-approval: unauthorized — caller ${callerUserId ?? "(none)"} != plan owner ${planUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;

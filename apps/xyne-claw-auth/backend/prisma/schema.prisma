@@ -81,6 +81,11 @@ model User {
   org            Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
   orgMemberships OrgMember[]
 
+  // NOTE on Spaces surface coupling: this table stores NO Spaces-derived
+  // keys. Cross-workspace person reuse on the Spaces surface resolves
+  // email-first within an org — (email, orgId) unique is the invariant the
+  // JIT ladder, backfill and spaces-sync routes all lean on.
+
   @@unique([email, orgId])
   @@map("users")
 }
@@ -220,6 +225,7 @@ enum OrgRole {
   OWNER
   ADMIN
   MEMBER
+  COMMUNITY_MEMBER
 }
 
 enum OrgStatus {
@@ -285,6 +291,7 @@ model ConnectedSurface {
   surfaceId       String
   surface         Surface       @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
   surfaceTenantId String        @default("")
+  surfaceOrgId    String?
   accessToken     String?       @db.Text
   refreshToken    String?       @db.Text
   tokenExpiresAt  DateTime?
@@ -295,6 +302,8 @@ model ConnectedSurface {
 
   @@unique([orgId, surfaceId, surfaceTenantId])
   @@index([orgId])
+  @@index([surfaceId, surfaceTenantId])
+  @@index([surfaceId, surfaceOrgId])
   @@map("connected_surfaces")
 }
 
@@ -308,6 +317,12 @@ model UserSurfaceIdentity {
   userId             String?
   user               User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   status             SurfaceStatus @default(ACTIVE)
+  /// Generic per-surface *person* key: the member-level principal the source
+  /// system guarantees per (org, person) — for Spaces this is
+  /// public.org_members.id. Optional (nullable); non-unique because the same
+  /// person legitimately earns one identity row per workspace membership.
+  /// Its only role is to hard-refuse email-collision merges at first contact.
+  surfaceMemberId    String?
   lastSeenAt         DateTime?
   linkedAt           DateTime?
   createdAt          DateTime      @default(now())
@@ -316,6 +331,7 @@ model UserSurfaceIdentity {
   @@unique([surfaceId, surfaceWorkspaceId, surfaceUserId])
   @@index([orgId])
   @@index([userId])
+  @@index([surfaceId, orgId, surfaceMemberId])
   @@map("user_surface_identities")
 }
 
@@ -404,6 +420,7 @@ model SurfaceAccessToken {
   @@map("surface_access_tokens")
 }
 
+/// DEPRECATED legacy fallback for ConnectedSurface.
 /// Maps an external surface's tenant (today: a Spaces workspace, i.e.
 /// public.users.workspaceId) to a claw Organization. One org can have several
 /// tenant links (a Spaces org has several workspaces), so this is a table, not
