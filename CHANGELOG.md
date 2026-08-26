@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.8](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.7...v1.219.0-release-20260825.8) (2026-08-26)
+
+
+### Bug Fixes
+
+* rank profile dropdown reflects the CAC default per tab ([#1075](https://github.com/juspay/xyne-spaces/issues/1075)) ([f137a4a](https://github.com/juspay/xyne-spaces/commit/f137a4a9e2e560e60a5b6a68e51f8f20d0483854))
+
 ## [1.219.0-release-20260825.7](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.6...v1.219.0-release-20260825.7) (2026-08-26)
 
 
