@@ -6,6 +6,7 @@ import { windowFromDays } from "../lib/time-window.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { userRoleRepository, userRepository, auditLogRepository, agentRunRepository, agentRepository, sharedProviderCredentialRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
+import { findUserByAnyId } from "../lib/users-jit.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { evictSession } from "../mcp/runner.js";
@@ -61,7 +62,9 @@ router.post("/roles", requireClawAdmin, asyncHandler(async (req: Request, res: R
   const role = parseRole(body.role);
   if (!role) throw badRequest(`role must be one of: ${GRANTABLE_ROLES.join(", ")}`);
 
-  let targetUser = await userRepository.findById(raw);
+  // `raw` may be a canonical Claw id, a Spaces workspace-scoped alias, or an
+  // email — resolve through all three ladders before giving up.
+  let targetUser = await findUserByAnyId(raw);
   const requesterOrgId = getOrgId(req);
   if (!targetUser && requesterOrgId) {
     targetUser = await prisma.user.findFirst({ where: { email: raw, orgId: requesterOrgId } });
@@ -91,11 +94,13 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
     }
     if (userId === requesterId) { res.status(400).json({ success: false, error: `Cannot revoke your own ${role} role` }); return; }
 
-    const targetUser = await userRepository.findById(userId);
+    // Accept either a canonical Claw id or a Spaces alias for the target.
+    const targetUser = await findUserByAnyId(userId);
     if (!targetUser) { res.status(404).json({ success: false, error: "User not found" }); return; }
+    if (targetUser.id === requesterId) { res.status(400).json({ success: false, error: `Cannot revoke your own ${role} role` }); return; }
 
-    await userRoleRepository.delete(userId, role);
-    await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: userId, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
+    await userRoleRepository.delete(targetUser.id, role);
+    await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: targetUser.id, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
     log.info(`[admin] ${role} revoked from user=${targetUser.id} by ${requesterId}`);
     res.json({ success: true });
   } catch (err: unknown) {
