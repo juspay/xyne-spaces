@@ -1,3 +1,31 @@
+## [1.219.0-release-20260825.7](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.6...v1.219.0-release-20260825.7) (2026-08-26)
+
+
+### Features
+
+* add seperate key for thread tagging and entity extraction ([#1064](https://github.com/juspay/xyne-spaces/issues/1064)) ([931eb6e](https://github.com/juspay/xyne-spaces/commit/931eb6e7bcc351c06a03938e25eff92624e3120f))
+
+## [1.219.0-release-20260825.6](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.5...v1.219.0-release-20260825.6) (2026-08-26)
+
+
+### Bug Fixes
+
+* allow recording sharing without canvases ([#1068](https://github.com/juspay/xyne-spaces/issues/1068)) ([6505cd7](https://github.com/juspay/xyne-spaces/commit/6505cd73d839e7aebbe42a74f17d383452ce90f3))
+
+## [1.219.0-release-20260825.5](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.4...v1.219.0-release-20260825.5) (2026-08-26)
+
+
+### Features
+
+* self-serve Slack DM, group DM & channel migration with streamed-encrypted collection and controlled ingest ([#1053](https://github.com/juspay/xyne-spaces/issues/1053)) ([5318a95](https://github.com/juspay/xyne-spaces/commit/5318a9539552d1d25250a0e2b473428817f6fa36))
+
+## [1.219.0-release-20260825.4](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.3...v1.219.0-release-20260825.4) (2026-08-26)
+
+
+### Features
+
+* backfill isOverdue column in tickets ([#497](https://github.com/juspay/xyne-spaces/issues/497)) ([#1049](https://github.com/juspay/xyne-spaces/issues/1049)) ([0aa03cb](https://github.com/juspay/xyne-spaces/commit/0aa03cb59337c5ae70bfec13fc42ebed1ca47770))
+
 ## [1.219.0-release-20260825.3](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.2...v1.219.0-release-20260825.3) (2026-08-25)
 
 

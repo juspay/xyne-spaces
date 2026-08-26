@@ -82,6 +82,15 @@ const envSchema = Joi.object({
   // Google Cloud Storage Configuration (Workload Identity)
   GCS_PROJECT_ID: Joi.string().allow('').default(''),
   GCS_BUCKET_NAME: Joi.string().allow('').default(''),
+  MIGRATION_GCS_BUCKET: Joi.string().allow('').default(''),
+  MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
+  MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
+  RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
+  MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(1000),      // pause between paged Slack calls during collection
+  MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(200000),  // per-attachment download timeout
+  MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
+  MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
+  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -196,7 +205,7 @@ const envSchema = Joi.object({
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
   ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
-  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-private'),
+  ENTITY_EXTRACTION_MODEL: Joi.string().default('open-fast'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
   // How long a thread's job sits delayed before it runs. This is the debounce
   // window: every message on the thread inside it collapses into one job, so a
@@ -222,6 +231,8 @@ const envSchema = Joi.object({
   IMAGE_GENERATION_ENDPOINT: Joi.string().default(''),
   IMAGE_GENERATION_MODEL: Joi.string().default(''),
   ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // Dedicated LiteLLM key for thread-type classification; falls back to the org's when unset.
+  THREAD_TYPE_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // LiteLLM config specifically for call features (transcript summary, PRD, detailed summary)
   CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
   CALL_LITELLM_MODEL: Joi.string().default(''),
@@ -233,6 +244,8 @@ const envSchema = Joi.object({
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
+  // What the dedicated classification key serves.
+  MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
@@ -614,9 +627,22 @@ export const config = {
     publicKey: envVars.LANGFUSE_PUBLIC_KEY,
     secretKey: envVars.LANGFUSE_SECRET_KEY,
   },
+  migrationEncryption: {
+    keys: envVars.MIGRATION_ENC_KEYS,
+    activeKeyId: envVars.MIGRATION_ENC_ACTIVE,
+  },
+  runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
+  slackMigration: {
+    pageDelayMs: envVars.MIGRATION_SLACK_PAGE_DELAY_MS,
+    fileTimeoutMs: envVars.MIGRATION_SLACK_FILE_TIMEOUT_MS,
+    requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
+    stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
+    ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
+  },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
     bucketName: envVars.GCS_BUCKET_NAME,
+    migrationBucketName: envVars.MIGRATION_GCS_BUCKET,
     bundleBucketName: envVars.GCS_BUNDLE_BUCKET_NAME,
     canvasBucketName: envVars.GCS_CANVAS_BUCKET_NAME,
     docsBucketName: envVars.GCS_DOCS_BUCKET_NAME,
@@ -757,6 +783,7 @@ export const config = {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
     askAiApiKey: envVars.ASK_AI_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
+    threadTypeClassificationApiKey: envVars.THREAD_TYPE_CLASSIFICATION_LITELLM_API_KEY,
     imageGenerationEndpoint: envVars.IMAGE_GENERATION_ENDPOINT,
     imageGenerationModel: envVars.IMAGE_GENERATION_MODEL,
     documentOutlineEnabled: envVars.DOCUMENT_OUTLINE_ENABLED,
@@ -860,6 +887,9 @@ export const config = {
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
+  messageClassification: {
+    model: envVars.MESSAGE_CLASSIFIER_MODEL,
+  },
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,
