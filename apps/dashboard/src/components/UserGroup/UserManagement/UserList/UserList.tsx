@@ -135,11 +135,14 @@ export const UserList = ({
         throw new Error(result.error.message || 'Failed to remove user from group.');
       }
 
-      if (reassignTickets) {
-        toast.success('Member removed', {
-          description: 'Their open tickets are being handed to other eligible members.',
-        });
-      }
+      // "Queued", not "handed off": the enqueue happens post-commit and the job leaves
+      // tickets in place when no eligible replacement exists.
+      toast.success(
+        'Member removed',
+        reassignTickets
+          ? { description: 'Reassignment of their open tickets has been queued.' }
+          : undefined,
+      );
       setRemoveTarget(null);
       onUserRemove?.();
     } catch (error) {

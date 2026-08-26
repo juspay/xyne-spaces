@@ -7518,6 +7518,9 @@ export const mutators = defineMutators({
         stateIds: z.record(z.string(), z.string()).optional(), // Map userId -> stateId
         complexityScoreId: z.string().optional(),
         mappingIds: z.record(z.string(), z.string()).optional(), // Map userId -> mappingId
+        // Server-only: members opted in to a ticket handoff on deactivation. The server
+        // queues it after the states commit; the client optimistic run ignores it.
+        reassignUserIds: z.array(z.string()).optional(),
       }),
       async ({
         tx,

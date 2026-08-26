@@ -25,7 +25,6 @@ import { formatExpiryTime } from '../../../utils/statusUtils';
 import { OnCallRotationModal } from '../OnCallRotationModal/OnCallRotationModal';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { VisibilityTab } from './VisibilityTab';
-import { apiInstance } from '../../../services/clients/apiClient';
 
 interface AssignmentConfigScreenProps {
   userGroupId: string;
@@ -638,7 +637,28 @@ export const AssignmentConfigScreen = ({
         {} as Record<string, string>,
       );
 
+      // Rides along with the states so the handoff commits or rolls back with them.
+      // The server re-derives who actually transitioned active -> inactive.
+      const reassignUserIds = [...pendingReassignUserIds].filter(willReassignOnSave);
+
+      const reassignOnUnavailableChanged =
+        localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
+
       const pendingServerResults = [
+        // Ordered before batchUpdate on purpose: its post-commit handoff reads this setting
+        // from committed rows, and the single-mutation fallback path drains each push's
+        // post-commit tasks separately — so turning it on in this same save would be missed.
+        ...(reassignOnUnavailableChanged
+          ? [
+              zero.mutate(
+                mutators.userGroup.update({
+                  userGroupId,
+                  reassignOnUnavailable: localReassignOnUnavailable,
+                  timestamp: Date.now(),
+                }),
+              ).server,
+            ]
+          : []),
         zero.mutate(
           mutators.assignmentConfig.batchUpdate({
             userGroupId,
@@ -647,6 +667,7 @@ export const AssignmentConfigScreen = ({
             expertiseMappings: expertiseMappingsData,
             userMappings,
             stateIds,
+            reassignUserIds,
             complexityScoreId: uuidv4(),
             mappingIds,
             timestamp: Date.now(),
@@ -674,47 +695,16 @@ export const AssignmentConfigScreen = ({
         );
       }
 
-      // Also update reassign-on-unavailable setting
-      const reassignOnUnavailableChanged =
-        localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
-
-      if (reassignOnUnavailableChanged) {
-        pendingServerResults.push(
-          zero.mutate(
-            mutators.userGroup.update({
-              userGroupId,
-              reassignOnUnavailable: localReassignOnUnavailable,
-              timestamp: Date.now(),
-            }),
-          ).server,
-        );
-      }
-
       const serverResults = await Promise.all(pendingServerResults);
       const failedResult = serverResults.find(result => result.type === 'error');
       if (failedResult?.type === 'error') {
         throw new Error(failedResult.error.message || 'Failed to save assignment configuration');
       }
 
-      // Queue handoffs only after the states above are persisted, so members
-      // deactivated in this same save can't inherit each other's tickets.
-      const reassignTargets = [...pendingReassignUserIds].filter(willReassignOnSave);
-      if (reassignTargets.length > 0) {
-        const outcomes = await Promise.allSettled(
-          reassignTargets.map(targetUserId =>
-            apiInstance.post('/user-assignment-state/reassign-member-tickets', {
-              userId: targetUserId,
-              userGroupId,
-            }),
-          ),
-        );
-        const failedCount = outcomes.filter(outcome => outcome.status === 'rejected').length;
-        if (failedCount > 0) {
-          toast.error(`Couldn't hand off tickets for ${failedCount} member(s)`, {
-            description: 'Availability was saved, but their open tickets stayed assigned to them.',
-            duration: 5000,
-          });
-        }
+      if (reassignUserIds.length > 0) {
+        toast.success('Availability saved', {
+          description: `Ticket handoff queued for ${reassignUserIds.length} member(s).`,
+        });
       }
       setPendingReassignUserIds(new Set());
 

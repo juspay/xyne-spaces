@@ -80,57 +80,6 @@ export class UserAssignmentStateController {
       res.status(500).json({ error: 'Failed to toggle assignment availability' });
     }
   }
-
-  /**
-   * Hand off a member's open tickets in one group after an admin deactivates them
-   * from the group's assignment configuration screen.
-   */
-  async reassignMemberTickets(req: Request, res: Response): Promise<void> {
-    try {
-      const workspaceId = req.user?.workspaceId;
-      const { userId, userGroupId } = req.body;
-
-      if (!workspaceId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      if (typeof userId !== 'string' || !userId) {
-        res.status(400).json({ error: 'userId is required.' });
-        return;
-      }
-
-      if (typeof userGroupId !== 'string' || !userGroupId) {
-        res.status(400).json({ error: 'userGroupId is required.' });
-        return;
-      }
-
-      const result = await userAssignmentStateService.reassignMemberTicketsInGroup(
-        userId,
-        userGroupId,
-        workspaceId
-      );
-
-      if (!result.scheduled) {
-        const status = result.reason === 'REASSIGNMENT_NOT_ALLOWED' ? 403 : 404;
-        res.status(status).json({ success: false, reason: result.reason });
-
-        logger.warn(
-          `⚠️ [ASSIGNMENT-STATE-API] Reassignment for user ${userId} in group ${userGroupId} not scheduled: ${result.reason}`
-        );
-        return;
-      }
-
-      res.json({ success: true, userId, userGroupId });
-
-      logger.info(
-        `👤 [ASSIGNMENT-STATE-API] User ${req.user?.id} queued ticket handoff for member ${userId} in group ${userGroupId}`
-      );
-    } catch (error) {
-      logger.error('❌ [ASSIGNMENT-STATE-API] Error reassigning member tickets:', error);
-      res.status(500).json({ error: 'Failed to reassign member tickets' });
-    }
-  }
 }
 
 export const userAssignmentStateController = new UserAssignmentStateController();
