@@ -72,7 +72,7 @@ async function processReflex(job: Job<AwakeningReflexJobData>): Promise<void> {
   if (!config.enabled || !participatesIn(config, "reflex")) return;
 
   try {
-    const workspaceId = await resolveWorkspaceId(orgId, config.workspaceId);
+    const workspaceId = await resolveWorkspaceId(orgId, agent.spacesAppUserId, config.workspaceId);
     const identity = resolveAgentIdentity(agent, workspaceId);
 
     const sinceMs = (state.reflexWatermarkAt ?? state.watermarkAt).getTime();
@@ -199,6 +199,9 @@ async function processReflex(job: Job<AwakeningReflexJobData>): Promise<void> {
           reflexWatermarkAt: new Date(untilMs),
           reflexLastRunAt: new Date(),
           reflexNextCheckAt: nextCheckAt(config.reflex.checkIntervalMs),
+          // The heartbeat path clears this via markSuccess; a reflex-only agent
+          // has no such path, so a resolved error would otherwise stick forever.
+          lastError: null,
         },
       });
     } catch (err) {
@@ -206,10 +209,18 @@ async function processReflex(job: Job<AwakeningReflexJobData>): Promise<void> {
       throw err;
     }
   } catch (err) {
-    if (err instanceof AwakeningIdentityError || err instanceof WorkspaceResolutionError) {
+    // Fail-closed on identity (see the window worker), retry on workspace.
+    if (err instanceof AwakeningIdentityError) {
       await prisma.agentAwakeningState
         .update({ where: { agentId }, data: { enabled: false, lastError: String(err.message).slice(0, 500) } })
         .catch(() => undefined);
+      return;
+    }
+    if (err instanceof WorkspaceResolutionError) {
+      await prisma.agentAwakeningState
+        .update({ where: { agentId }, data: { lastError: String(err.message).slice(0, 500) } })
+        .catch(() => undefined);
+      log.warn(`[awakening] reflex skipped agent=${agent.slug} (workspace unresolved): ${err.message}`);
       return;
     }
     log.error(`[awakening] reflex check failed agent=${agent.slug}: ${err instanceof Error ? err.message : err}`);

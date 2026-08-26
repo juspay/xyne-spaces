@@ -43,7 +43,7 @@ export const AWAKENING_BOUNDS = {
   injectThreshold: { MIN: 1, MAX: 1_000, DEFAULT: 10 },
   maxInjectionsPerSession: { MIN: 0, MAX: 20, DEFAULT: 3 },
   injectMinIntervalMs: { MIN: 0, MAX: 3_600_000, DEFAULT: 60_000 },
-  instructionsLength: { MIN: 0, MAX: 4_000, DEFAULT: 0 },
+  instructionsLength: { MIN: 0, MAX: 10_000, DEFAULT: 0 },
   replicaSafetyMs: { MIN: 0, MAX: 300_000, DEFAULT: 30_000 },
 } as const;
 

@@ -729,6 +729,38 @@ export async function updateAgent(
   return data.data;
 }
 
+/**
+ * Live awakening state for an agent — the row the background workers actually
+ * read, which is NOT the same flag as `config.awakening.enabled` that the
+ * editor writes. When a worker cannot resolve an agent's identity it disables
+ * that row and records why; without surfacing this the tab shows a toggle that
+ * is on while the agent is switched off.
+ */
+export interface AwakeningStatus {
+  state: {
+    enabled: boolean;
+    lastError: string | null;
+    nextDueAt: string | null;
+    reflexNextCheckAt: string | null;
+    consecutiveFailures: number;
+  } | null;
+  recent: Array<{
+    kind: string;
+    outcome: string;
+    skipReason: string | null;
+    eventCount: number;
+    startedAt: string;
+  }>;
+}
+
+export async function getAwakeningStatus(agentId: string): Promise<AwakeningStatus> {
+  const data = await request<{ success: boolean; data: AwakeningStatus }>(
+    `${AUTH_API_URL}/api/v1/awakening/${agentId}/status`,
+    { method: "GET" },
+  );
+  return data.data;
+}
+
 export async function updateAgentDesignSystem(
   slug: string,
   designSystem: string | null,
@@ -5633,6 +5665,93 @@ export async function fetchGlobalMetrics(userId: string, days: 1 | 7 | 30 = 7, o
   applyAdminOrgScope(qs, orgScope);
   return request<GlobalMetrics>(
     `${AUTH_API_URL}/api/v1/metrics/global?${qs.toString()}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/**
+ * Activity for agents that wake on their own. Kept out of the main metrics
+ * payload because awakened runs have no `userId` — the user-scoped filters the
+ * other endpoints apply would drop them entirely.
+ */
+export interface AwakeningActivity {
+  days: number;
+  totals: {
+    runs: number; ran: number; skipped: number; failed: number;
+    shadow: number; injections: number; events: number;
+  };
+  perDay: Array<{ day: string; ran: number; skipped: number; failed: number }>;
+  byAgent: Array<{
+    agentId: string; agentSlug: string; kind: string; runs: number; ran: number;
+    skipped: number; failed: number; events: number; lastRunAt: string | null;
+  }>;
+  skipReasons: Array<{ reason: string; count: number }>;
+  agents: Array<{
+    agentSlug: string; enabled: boolean; lastError: string | null;
+    nextDueAt: string | null; reflexNextCheckAt: string | null;
+    consecutiveFailures: number;
+  }>;
+}
+
+export async function fetchAwakeningActivity(
+  userId: string,
+  days: 1 | 7 | 30 = 7,
+  orgScope?: AdminOrgScope,
+): Promise<AwakeningActivity> {
+  const qs = new URLSearchParams();
+  qs.set("days", String(days));
+  applyAdminOrgScope(qs, orgScope);
+  return request<AwakeningActivity>(
+    `${AUTH_API_URL}/api/v1/metrics/awakening?${qs.toString()}`,
+    { headers: { "x-user-id": userId } },
+  );
+}
+
+/** One wake ATTEMPT — skipped wakes are rows too, and carry the gate rule. */
+export interface AwakeningRun {
+  id: string;
+  kind: string;
+  outcome: string;
+  skipReason: string | null;
+  eventCount: number;
+  injectionsUsed: number;
+  sessionId: string | null;
+  /** Present only when the wake actually dispatched — links to the transcript. */
+  conversationId: string | null;
+  runStatus: string | null;
+  windowStartMs: number;
+  windowEndMs: number;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+}
+
+export interface AwakeningRunsPage {
+  total: number;
+  limit: number;
+  offset: number;
+  runs: AwakeningRun[];
+}
+
+export async function fetchAwakeningRuns(
+  userId: string,
+  agentId: string,
+  days: 1 | 7 | 30 = 7,
+  limit = 20,
+  offset = 0,
+  orgScope?: AdminOrgScope,
+  /** "heartbeat" | "reflex" — the rollup lists one row per kind, so a
+   *  drill-down must stay scoped to the row that was clicked. */
+  kind?: string,
+): Promise<AwakeningRunsPage> {
+  const qs = new URLSearchParams();
+  qs.set("days", String(days));
+  qs.set("limit", String(limit));
+  qs.set("offset", String(offset));
+  if (kind) qs.set("kind", kind);
+  applyAdminOrgScope(qs, orgScope);
+  return request<AwakeningRunsPage>(
+    `${AUTH_API_URL}/api/v1/metrics/awakening/${encodeURIComponent(agentId)}/runs?${qs.toString()}`,
     { headers: { "x-user-id": userId } },
   );
 }

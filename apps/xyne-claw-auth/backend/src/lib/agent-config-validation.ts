@@ -215,7 +215,7 @@ const AWAKENING_MIN_PERIOD_MS = 5 * 60_000;
 // Mirrors AWAKENING_BOUNDS.instructionsLength.max — resolveAwakeningConfig
 // truncates silently, so the API rejects loudly instead of saving something
 // the runtime would quietly cut in half.
-const AWAKENING_MAX_INSTRUCTIONS = 4_000;
+const AWAKENING_MAX_INSTRUCTIONS = 10_000;
 const AWAKENING_MAX_PERIOD_MS = 24 * 60 * 60_000;
 const AWAKENING_MAX_PATTERNS = 10;
 const AWAKENING_MAX_PATTERN_LEN = 200;

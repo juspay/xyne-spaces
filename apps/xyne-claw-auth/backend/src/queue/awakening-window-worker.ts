@@ -140,7 +140,7 @@ async function processWindow(job: Job<AwakeningWindowJobData>): Promise<void> {
   };
 
   try {
-    const workspaceId = await resolveWorkspaceId(orgId, config.workspaceId);
+    const workspaceId = await resolveWorkspaceId(orgId, agent.spacesAppUserId, config.workspaceId);
     const identity = resolveAgentIdentity(agent, workspaceId);
 
     const rate = await peekRunRate(agentId, config.limits.maxRunsPerHour);
@@ -225,13 +225,26 @@ async function processWindow(job: Job<AwakeningWindowJobData>): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 
-    // A broken identity is a CONFIG problem, not a transient one. Retrying it
-    // every beat just burns the queue; disable and surface it to the admin.
-    if (err instanceof AwakeningIdentityError || err instanceof WorkspaceResolutionError) {
+    // A broken identity is a CONFIG problem AND unfixable by waiting: an agent
+    // with no bot identity must never fall back to a user token, so it stops.
+    if (err instanceof AwakeningIdentityError) {
       await prisma.agentAwakeningState
         .update({ where: { agentId }, data: { enabled: false, lastError: message.slice(0, 500) } })
         .catch(() => undefined);
       log.error(`[awakening] disabled agent=${agent.slug}: ${message}`);
+      return;
+    }
+
+    // A workspace that will not resolve is an operator-fixable gap — a bot user
+    // not yet mirrored into Spaces, a Spaces DB blip, a tenant link nobody
+    // seeded. Record it so the admin can SEE it, but stay enabled and try again
+    // on the normal cadence: disabling here meant a five-minute fix needed a
+    // human to notice and re-save the agent (prod, 2026-08-26).
+    if (err instanceof WorkspaceResolutionError) {
+      await prisma.agentAwakeningState
+        .update({ where: { agentId }, data: { lastError: message.slice(0, 500) } })
+        .catch(() => undefined);
+      log.warn(`[awakening] window skipped agent=${agent.slug} (workspace unresolved): ${message}`);
       return;
     }
 
