@@ -7,6 +7,7 @@ export interface UserDetailsDateRangeInput {
   userEmail: string;
   page: number;
   limit: number;
+  orgId?: string | null;
 }
 
 class TeamIntelligenceUserDashboardService {
@@ -18,6 +19,7 @@ class TeamIntelligenceUserDashboardService {
         userEmail: input.userEmail,
         page: input.page,
         limit: input.limit,
+        orgId: input.orgId,
       });
     } catch (error) {
       logger.error('[TeamIntelligenceUser] getUserDetails failed', { error, input });
@@ -33,6 +35,7 @@ class TeamIntelligenceUserDashboardService {
         userEmail: input.userEmail,
         page: input.page,
         limit: input.limit,
+        orgId: input.orgId,
       });
     } catch (error) {
       logger.error('[TeamIntelligenceUser] getUserPullRequests failed', { error, input });
@@ -40,12 +43,13 @@ class TeamIntelligenceUserDashboardService {
     }
   }
 
-  async getUserOverview(input: { from: Date; to: Date; userEmail: string }) {
+  async getUserOverview(input: { from: Date; to: Date; userEmail: string; orgId?: string | null }) {
     try {
       return await teamIntelligenceUserRepository.getUserOverviewByDate({
         from: input.from,
         to: input.to,
         userEmail: input.userEmail,
+        orgId: input.orgId,
       });
     } catch (error) {
       logger.error('[TeamIntelligenceUser] getUserOverview failed', { error, input });
@@ -53,7 +57,21 @@ class TeamIntelligenceUserDashboardService {
     }
   }
 
-  async getUserChannelRecaps(input: { from: Date; to: Date; userEmail: string; page: number; limit: number }) {
+  async getUserLeadershipSnapshots(input: { from: Date; to: Date; userEmail: string; orgId?: string | null }) {
+    try {
+      return await teamIntelligenceUserRepository.getUserLeadershipSnapshotsByDate({
+        from: input.from,
+        to: input.to,
+        userEmail: input.userEmail,
+        orgId: input.orgId,
+      });
+    } catch (error) {
+      logger.error('[TeamIntelligenceUser] getUserLeadershipSnapshots failed', { error, input });
+      throw error;
+    }
+  }
+
+  async getUserChannelRecaps(input: { from: Date; to: Date; userEmail: string; page: number; limit: number; orgId?: string | null }) {
     try {
       return await teamIntelligenceUserRepository.getUserChannelRecapsByDate({
         from: input.from,

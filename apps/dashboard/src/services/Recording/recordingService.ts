@@ -178,7 +178,16 @@ export interface CitationSegment {
   snippet: string;
 }
 
+export interface RecordingParticipantShare {
+  userId: string | null;
+  userGroupId: string | null;
+  channelId: string | null;
+}
+
 export interface RecordingDetail extends Recording {
+  /** Stringified JSON string[] — read it through getRecordingParticipantIds. */
+  recordingParticipants?: string | null;
+  shares?: readonly RecordingParticipantShare[] | null;
   transcript: string | null;
   identifiedTranscript: string | null;
   hasIdentifiedTranscript: boolean;
@@ -384,6 +393,14 @@ class RecordingService {
         ...(messageContent?.trim() ? { messageContent: messageContent.trim() } : {}),
       });
     return response.data;
+  }
+
+  async manageRecordingParticipant(
+    callId: string,
+    action: 'add' | 'remove',
+    userId: string,
+  ): Promise<void> {
+    await apiInstance.post(`/calls/recordings/${callId}/participants`, { action, userId });
   }
 
   async revokeRecordingAccess(

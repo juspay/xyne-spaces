@@ -51,6 +51,11 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 
+const RecordingParticipantsCommandSchema = z.object({
+  action: z.enum(['add', 'remove']),
+  userId: z.string().min(1).max(64),
+});
+
 const UpdateHeadlessRecordingSchema = z
   .object({
     title: z.string().trim().min(1).max(255).optional(),
@@ -1475,6 +1480,54 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to fetch recording detail:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch recording' });
+    }
+  };
+
+  manageRecordingParticipants = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = RecordingParticipantsCommandSchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      if (input.action === 'add') {
+        const participant = await repositories.users.findById(input.userId);
+        if (
+          !participant ||
+          participant.workspaceId !== req.user!.workspaceId ||
+          participant.leftAt !== null
+        ) {
+          res.status(400).json({ success: false, error: 'User not found in this workspace' });
+          return;
+        }
+      }
+
+      await repositories.calls.updateRecordingParticipants(callId, input.action, input.userId);
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to manage recording participants', { error, callId });
+      res.status(400).json({ success: false, error: 'Failed to update participants' });
     }
   };
 
