@@ -22,10 +22,14 @@ type OatsRecordingQuery =
   | ReturnType<typeof queries.createdOatsRecordings>
   | ReturnType<typeof queries.sharedOatsRecordings>;
 
-const recordingQuery = (scope: OatsRecordingScope, start: RecordingCursor): OatsRecordingQuery =>
+const recordingQuery = (
+  scope: OatsRecordingScope,
+  start: RecordingCursor,
+  participantId: string | null,
+): OatsRecordingQuery =>
   scope === 'created'
-    ? queries.createdOatsRecordings({ limit: FETCH_LIMIT, start })
-    : queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start });
+    ? queries.createdOatsRecordings({ limit: FETCH_LIMIT, start, participantId })
+    : queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start, participantId });
 
 export interface UsePaginatedOatsRecordingsReturn {
   recordings: OatsRecordingEntry[];
@@ -39,6 +43,7 @@ export interface UsePaginatedOatsRecordingsReturn {
 
 export function usePaginatedOatsRecordings(
   scope: OatsRecordingScope,
+  participantId: string | null,
 ): UsePaginatedOatsRecordingsReturn {
   const zero = useZero();
   const [cursor, setCursor] = useState<RecordingCursor>(null);
@@ -47,13 +52,13 @@ export function usePaginatedOatsRecordings(
   const recordingsRef = useRef(recordings);
   recordingsRef.current = recordings;
 
-  const [page, details] = useCachedQuery(recordingQuery(scope, cursor));
+  const [page, details] = useCachedQuery(recordingQuery(scope, cursor, participantId));
 
   useEffect(() => {
     setCursor(null);
     setRecordings([]);
     setHasMoreRecordings(true);
-  }, [scope]);
+  }, [scope, participantId]);
 
   useEffect(() => {
     if (!page || details.type !== 'complete') return;
@@ -75,13 +80,13 @@ export function usePaginatedOatsRecordings(
   const refreshRecordings = useCallback((): void => {
     setCursor(null);
     void zero
-      .run(recordingQuery(scope, null), { type: 'complete' })
+      .run(recordingQuery(scope, null, participantId), { type: 'complete' })
       .then(result => {
         setRecordings((result ?? []) as OatsRecordingEntry[]);
         setHasMoreRecordings((result?.length ?? 0) === FETCH_LIMIT);
       })
       .catch(() => undefined);
-  }, [scope, zero]);
+  }, [scope, participantId, zero]);
 
   useEffect(() => {
     refreshListeners.add(refreshRecordings);

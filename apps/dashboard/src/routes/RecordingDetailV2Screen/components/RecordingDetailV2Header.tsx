@@ -23,6 +23,7 @@ import {
 import { logRecordingError, type RecordingTitleState } from '../../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
+import { RecordingParticipants } from './RecordingParticipants';
 import { useEditableRecordingTitle } from '../useEditableRecordingTitle';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
 import { RecordingShareModal } from './RecordingShareModal';
@@ -304,6 +305,12 @@ export const RecordingDetailV2Header = ({
       {/* Actions row */}
       <div className='flex items-start gap-2'>
         <div className='flex flex-wrap items-center gap-2'>
+          <RecordingParticipants
+            recordingExternalId={recording.externalId}
+            createdByUserId={recording.createdByUserId}
+            recordingParticipants={recording.recordingParticipants}
+            shares={recording.shares}
+          />
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}

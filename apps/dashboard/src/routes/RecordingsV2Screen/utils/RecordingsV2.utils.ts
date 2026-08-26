@@ -12,8 +12,10 @@ import {
   subWeeks,
 } from 'date-fns';
 import { CallStatus } from '@xyne/shared';
+import type { User } from '@xyne/shared/machines';
 import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
 import type { RecordingTitleInput } from '../../../utils/recordingUtils';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export type RecordingDatePreset =
   | 'all-time'
@@ -221,6 +223,35 @@ export function filterRecordingsByOwnership(
 
   const wanted = new Set(selectedCreatorIds);
   return recordings.filter(recording => wanted.has(recording.createdByUserId));
+}
+
+/**
+ * Renders the people a recording is about: "Just you", "Alice", "Alice & you",
+ * "Alice, Bob & 2 others".
+ */
+export function formatRecordingParticipants(
+  participantIds: string[],
+  usersById: Map<string, User>,
+  currentUserId: string | undefined,
+): string {
+  const names: string[] = [];
+  let includesSelf = false;
+
+  for (const id of participantIds) {
+    if (id === currentUserId) {
+      includesSelf = true;
+      continue;
+    }
+    const user = usersById.get(id);
+    if (user) names.push(getUserDisplayName(user));
+  }
+  if (includesSelf) names.push('you');
+
+  const [first, second, ...rest] = names;
+  if (first === undefined) return 'Unknown creator';
+  if (second === undefined) return includesSelf ? 'Just you' : first;
+  if (rest.length === 0) return `${first} & ${second}`;
+  return `${first}, ${second} & ${rest.length} ${rest.length === 1 ? 'other' : 'others'}`;
 }
 
 /**

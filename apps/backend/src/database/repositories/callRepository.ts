@@ -18,6 +18,16 @@ import {
 
 export type { Call, CallParticipant };
 
+function parseRecordingParticipantIds(stored: string | null): string[] {
+  if (!stored) return [];
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Shape of `calls.metadata` as written by this repository.
  * `artifactMessageId` is set only for calls started from a slash-command
@@ -337,6 +347,36 @@ export class CallRepository {
       WHERE "externalId" = ${externalId}
     `;
     return rowsUpdated > 0;
+  }
+
+  async updateRecordingParticipants(
+    externalId: string,
+    action: 'add' | 'remove',
+    userId: string,
+  ): Promise<boolean> {
+    const lockKey = `call-recording-participants:${externalId}`;
+
+    return DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const call = await tx.call.findUnique({
+        where: { externalId },
+        select: { recordingParticipants: true },
+      });
+      if (!call) return false;
+
+      const current = parseRecordingParticipantIds(call.recordingParticipants);
+      const next =
+        action === 'add'
+          ? [...new Set([...current, userId])]
+          : current.filter((id) => id !== userId);
+
+      await tx.call.update({
+        where: { externalId },
+        data: { recordingParticipants: JSON.stringify(next) },
+      });
+      return true;
+    });
   }
 
   async appendLabels(callId: string, labelIds: string[]): Promise<void> {

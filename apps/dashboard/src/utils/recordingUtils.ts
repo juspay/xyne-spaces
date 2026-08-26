@@ -178,6 +178,27 @@ export const normalizeRecordingTags = (tags: string[]): string[] => {
   return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
 };
 
+/**
+ * Reads `calls.recordingParticipants` (stringified JSON string[]) into user ids,
+ * prepending the creator so older rows still resolve to at least one person.
+ */
+export const getRecordingParticipantIds = (
+  createdByUserId: string | undefined,
+  stored: string | null | undefined,
+): string[] => {
+  let ids: string[] = [];
+  if (stored) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed)) ids = parsed.filter((id): id is string => typeof id === 'string');
+    } catch {
+      ids = [];
+    }
+  }
+  if (createdByUserId && !ids.includes(createdByUserId)) return [createdByUserId, ...ids];
+  return ids;
+};
+
 /** Canonical tag name, or null when the text can't make one — tags must start with a letter. */
 export const slugifyRecordingLabel = (raw: string): string | null => {
   const slug = normalizeTagName(raw);
