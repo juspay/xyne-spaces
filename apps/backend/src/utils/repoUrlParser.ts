@@ -1,3 +1,5 @@
+import { VCSProviderType } from '@xyne/shared';
+
 // Parses a Bitbucket Server / Data Center repo URL into projectKey + repoSlug.
 // Handles the three forms Bitbucket emits:
 //   - HTTPS browse:  https://bitbucket.example.net/projects/KEY/repos/slug/browse
@@ -102,4 +104,8 @@ export function parseGitHubRepoUrl(url: string): { owner: string; repo: string }
   const repo = repoSegment?.replace(/\.git$/i, '');
   if (!owner || !repo) return null;
   return { owner, repo };
+}
+
+export function inferVcsProvider(repoUrl: string): VCSProviderType {
+  return parseGitHubRepoUrl(repoUrl) ? VCSProviderType.GITHUB : VCSProviderType.BITBUCKET_SERVER;
 }

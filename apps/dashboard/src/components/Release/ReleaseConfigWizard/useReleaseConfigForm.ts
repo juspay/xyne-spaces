@@ -6,12 +6,10 @@ import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ReleaseTrackingMode,
-  VCSProviderType,
   type ApplicationConfig,
   type Channel,
   type ExistingReleaseConfig,
   type ReleaseTrackingModeValue,
-  type VCSProvider,
   type WizardStep,
 } from './ReleaseConfigWizard.types';
 import { buildApplicationReleaseBoardName, buildMainReleaseBoardName } from './releaseBoardNames';
@@ -54,10 +52,7 @@ export function useReleaseConfigForm({
   const zero = useZero();
   const isEditing = !!existingConfig;
 
-  const [currentStep, setCurrentStep] = useState<WizardStep>(isEditing ? 2 : 1);
-  const [vcsProvider, setVcsProvider] = useState<VCSProvider | null>(
-    existingConfig?.vcsProvider ?? 'BITBUCKET_SERVER',
-  );
+  const [currentStep, setCurrentStep] = useState<WizardStep>(2);
   const [releaseTrackingMode, setReleaseTrackingMode] = useState<ReleaseTrackingModeValue>(
     existingConfig?.releaseTrackingMode ?? ReleaseTrackingMode.COMMIT_RANGE,
   );
@@ -83,7 +78,6 @@ export function useReleaseConfigForm({
   // Sync from existingConfig when Zero delivers the populated rows after initial mount.
   useEffect(() => {
     if (userTouched || !existingConfig) return;
-    if (existingConfig.vcsProvider) setVcsProvider(existingConfig.vcsProvider);
     if (existingConfig.releaseTrackingMode)
       setReleaseTrackingMode(existingConfig.releaseTrackingMode);
     if (existingConfig.applications.length > 0) setApplications(existingConfig.applications);
@@ -113,12 +107,8 @@ export function useReleaseConfigForm({
   // ─── Step navigation ────────────────────────────────────────────────────────
 
   const handleNext = useCallback(() => {
-    if (currentStep === 1 && !vcsProvider) {
-      toast.error('Please select a VCS provider');
-      return;
-    }
     if (currentStep < 2) setCurrentStep(prev => (prev + 1) as WizardStep);
-  }, [currentStep, vcsProvider]);
+  }, [currentStep]);
 
   const handleBack = useCallback(() => {
     if (currentStep > 1) setCurrentStep(prev => (prev - 1) as WizardStep);
@@ -214,7 +204,6 @@ export function useReleaseConfigForm({
           projectId,
           mainBoardId,
           mainBoardName: mainBoardName.trim(),
-          vcsProvider: vcsProvider! as VCSProviderType,
           releaseTrackingMode: releaseTrackingMode as ReleaseTrackingMode,
           channelId: channelIdToSave,
           applications: applicationsData,
@@ -240,7 +229,6 @@ export function useReleaseConfigForm({
     projectId,
     mainBoardId,
     mainBoardName,
-    vcsProvider,
     releaseTrackingMode,
     sharedRepoUrl,
     onSave,
@@ -256,9 +244,7 @@ export function useReleaseConfigForm({
     currentStep,
     handleNext,
     handleBack,
-    // VCS and release mode
-    vcsProvider,
-    setVcsProvider,
+    // Release mode
     releaseTrackingMode,
     setReleaseTrackingMode: updateReleaseTrackingMode,
     // Shared repository

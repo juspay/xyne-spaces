@@ -113,6 +113,7 @@ import {
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions } from '@/utils/mentionParser';
+import { inferVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
@@ -6915,7 +6916,7 @@ export function createMutators(
           projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
-          vcsProvider: z.nativeEnum(VCSProviderType),
+          vcsProvider: z.nativeEnum(VCSProviderType).optional(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
           applications: z.array(
@@ -6938,7 +6939,6 @@ export function createMutators(
             projectId,
             mainBoardId,
             mainBoardName: rawMainBoardName,
-            vcsProvider,
             releaseTrackingMode,
             channelId,
             applications: rawApplications,
@@ -7020,6 +7020,8 @@ export function createMutators(
           if (normalizedRepoUrls.has('') || normalizedRepoUrls.size !== 1) {
             throw new Error('All applications in a release group must use the same repository URL');
           }
+
+          const vcsProvider = inferVcsProvider([...normalizedRepoUrls][0]);
 
           if (!mainBoardName.trim()) {
             throw new Error('Main release board name is required');

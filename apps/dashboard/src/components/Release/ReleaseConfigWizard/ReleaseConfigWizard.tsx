@@ -1,5 +1,5 @@
 /* eslint-disable local-rules/require-tracking-on-click */
-import { CSSProperties, ReactElement, useEffect, useMemo, useState } from 'react';
+import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button';
@@ -29,7 +29,6 @@ import {
   type ExistingReleaseConfig,
   type ReleaseTrackingModeValue,
   type ReleaseConfigWizardProps,
-  type VCSProvider,
 } from './ReleaseConfigWizard.types';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -40,32 +39,6 @@ const INPUT_CLASS =
 const LABEL_CLASS = 'block text-xs font-medium mb-0.5';
 const HELP_CLASS = 'text-[11px] text-muted-foreground mt-0.5';
 
-// ─── VCS provider options (Step 1) ──────────────────────────────────────────
-const VCS_PROVIDERS: Array<{
-  value: VCSProvider;
-  label: string;
-  description: string;
-  enabled: boolean;
-}> = [
-  {
-    value: 'BITBUCKET_SERVER',
-    label: 'Bitbucket Server',
-    description: 'Self-hosted Bitbucket (Data Center)',
-    enabled: true,
-  },
-  {
-    value: 'GITHUB',
-    label: 'GitHub',
-    description: 'GitHub.com or GitHub Enterprise',
-    enabled: true,
-  },
-  {
-    value: 'BITBUCKET_CLOUD',
-    label: 'Bitbucket Cloud',
-    description: 'Atlassian Bitbucket Cloud',
-    enabled: false,
-  },
-];
 
 const RELEASE_TRACKING_MODES: Array<{
   value: ReleaseTrackingModeValue;
@@ -131,31 +104,6 @@ const SelectionCard = ({
   </button>
 );
 
-// ─── Step 1: VCS Provider ────────────────────────────────────────────────────
-interface Step1Props {
-  selected: VCSProvider | null;
-  onSelect: (provider: VCSProvider) => void;
-}
-
-const Step1VCSProvider = ({ selected, onSelect }: Step1Props): ReactElement => (
-  <div className='space-y-2'>
-    <h3 className='text-base font-semibold'>Select Version Control System</h3>
-    <p className='text-xs text-muted-foreground'>Choose your code hosting provider.</p>
-    <div className='grid grid-cols-1 gap-2 mt-3'>
-      {VCS_PROVIDERS.map(provider => (
-        <SelectionCard
-          key={provider.value}
-          isSelected={selected === provider.value}
-          isDisabled={!provider.enabled}
-          onClick={() => onSelect(provider.value)}
-          label={provider.label}
-          description={provider.description}
-          badge={!provider.enabled ? 'Coming soon' : undefined}
-        />
-      ))}
-    </div>
-  </div>
-);
 
 // ─── Step 2: Applications + Channel ─────────────────────────────────────────
 
@@ -565,40 +513,6 @@ const Step3Applications = ({
   );
 };
 
-// ─── WizardProgressBar ───────────────────────────────────────────────────────
-const STEP_LABELS: Record<number, string> = {
-  1: '1. VCS Provider',
-  2: '2. Services',
-};
-
-interface WizardProgressBarProps {
-  currentStep: number;
-  totalSteps: number;
-}
-
-const WizardProgressBar = ({ currentStep, totalSteps }: WizardProgressBarProps): ReactElement => (
-  <div className='mb-4'>
-    <div className='w-full h-1.5 bg-muted rounded-full overflow-hidden'>
-      <div
-        className='h-full bg-primary transition-all w-[var(--progress-width)]'
-        style={{ '--progress-width': `${(currentStep / totalSteps) * 100}%` } as CSSProperties}
-      />
-    </div>
-    <div className='mt-2 flex justify-between text-xs'>
-      {Array.from({ length: totalSteps }, (_, i) => i + 1).map(step => (
-        <span
-          key={step}
-          className={cn(
-            currentStep >= step ? 'text-foreground font-medium' : 'text-muted-foreground',
-          )}
-        >
-          {STEP_LABELS[step]}
-        </span>
-      ))}
-    </div>
-  </div>
-);
-
 // ─── ReleaseConfigWizard (root) ───────────────────────────────────────────────
 function jsonStringArray(value: unknown): string[] {
   return Array.isArray(value)
@@ -687,13 +601,13 @@ const ReleaseConfigWizardForm = ({
     null,
   );
   const handleTestConnection = async (): Promise<void> => {
-    if (!form.sharedRepoUrl.trim() || !form.vcsProvider) return;
+    if (!form.sharedRepoUrl.trim()) return;
     setIsTestingConnection(true);
     setConnectionTest(null);
     try {
       const response = await apiInstance.post<{ ok: boolean; message: string }>(
         '/commits/analyze/test-connection',
-        { repoUrl: form.sharedRepoUrl.trim(), vcsProvider: form.vcsProvider },
+        { repoUrl: form.sharedRepoUrl.trim() },
       );
       setConnectionTest(response.data);
     } catch (err) {
@@ -706,7 +620,7 @@ const ReleaseConfigWizardForm = ({
 
   useEffect(() => {
     setConnectionTest(null);
-  }, [form.sharedRepoUrl, form.vcsProvider]);
+  }, [form.sharedRepoUrl]);
 
   // The form keeps the complete group in memory even when application edit
   // displays one row. The backend uses the submitted list to detect removals.
@@ -716,9 +630,7 @@ const ReleaseConfigWizardForm = ({
   );
 
   const canProceed =
-    form.currentStep === 1
-      ? !!form.vcsProvider
-      : !!form.sharedRepoUrl.trim() && form.applications.some(app => app.name.trim());
+    !!form.sharedRepoUrl.trim() && form.applications.some(app => app.name.trim());
 
   const canSave =
     form.currentStep === 2 &&
@@ -728,7 +640,7 @@ const ReleaseConfigWizardForm = ({
     // hidden (application edit) or the channel failed to prefill.
     (!!form.selectedChannel || !!existingConfig?.channelId);
 
-  const showCancelOnLeft = form.currentStep === 1 || form.isEditing;
+  const showCancelOnLeft = true;
 
   return (
     <Dialog
@@ -744,11 +656,6 @@ const ReleaseConfigWizardForm = ({
       className='max-w-5xl'
     >
       <div className='p-4 w-full'>
-        {!form.isEditing && <WizardProgressBar currentStep={form.currentStep} totalSteps={2} />}
-
-        {form.currentStep === 1 && !form.isEditing && (
-          <Step1VCSProvider selected={form.vcsProvider} onSelect={form.setVcsProvider} />
-        )}
         {form.currentStep === 2 && (
           <Step3Applications
             applications={visibleApplications}

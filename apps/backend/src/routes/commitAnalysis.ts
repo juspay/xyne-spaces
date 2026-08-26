@@ -2,10 +2,11 @@ import { Router, Request, Response } from 'express';
 import { authorize } from '@/middleware/authorize';
 import { CommitAnalysisController } from '@/controllers/commitAnalysisController';
 import { testRepoConnection } from '@/services/release/repoInspector';
-import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
+import { AccessType, BaseTicketType, FormEntityType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
+import { inferVcsProvider } from '@/utils/repoUrlParser';
 import { FormsRepository } from '@/database/repositories/formsRepository';
 import { unifiedBotUserService } from '@/bots/unified/index.js';
 
@@ -136,19 +137,16 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
 });
 
 router.post('/test-connection', authorize('RELEASEMANAGER', AccessType.READ), async (req: Request, res: Response): Promise<void> => {
-  const { repoUrl, vcsProvider } = req.body as { repoUrl?: string; vcsProvider?: string };
-  if (!repoUrl || !vcsProvider) {
-    res.status(400).json({ ok: false, message: 'repoUrl and vcsProvider are required' });
+  const { repoUrl } = req.body as { repoUrl?: string };
+  if (!repoUrl) {
+    res.status(400).json({ ok: false, message: 'repoUrl is required' });
     return;
   }
-  if (!Object.values(VCSProviderType).includes(vcsProvider as VCSProviderType)) {
-    res.status(400).json({ ok: false, message: `invalid vcsProvider: ${vcsProvider}` });
-    return;
-  }
+  const vcsProvider = inferVcsProvider(repoUrl);
   try {
     const result = await testRepoConnection({
       repoUrl,
-      vcsProvider: vcsProvider as VCSProviderType,
+      vcsProvider,
     });
     res.json(result);
   } catch (e) {
