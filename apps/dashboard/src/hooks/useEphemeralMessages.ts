@@ -43,6 +43,27 @@ function clearStore(): void {
   notify();
 }
 
+/**
+ * Drop one message wherever it is held. The dismissal event carries only a messageId —
+ * the server keys the broadcast by the resolved channel id but writes
+ * `conversationId ?? resolvedChannelId` into the message, so the two can differ and the
+ * channel is not a reliable lookup key. The map holds a handful of entries; scan it.
+ */
+function removeMessage(messageId: string): void {
+  for (const [channelId, list] of store) {
+    const next = list.filter(m => m.messageId !== messageId);
+    if (next.length === list.length) continue;
+    if (next.length === 0) store.delete(channelId);
+    else store.set(channelId, next);
+    notify();
+    return;
+  }
+}
+
+function handleEphemeralDismissed(event: { messageId?: string }): void {
+  if (event.messageId) removeMessage(event.messageId);
+}
+
 function handleEphemeralMessage(event: EphemeralMessageEvent): void {
   const message = event.message;
   const channelId = event.channelId;
@@ -97,6 +118,7 @@ export function useEphemeralMessages(channelId: string | undefined): EphemeralMe
       .then(() => {
         if (!active) return;
         websocketService.on('ephemeral_message', handleEphemeralMessage);
+        websocketService.on('ephemeral_dismissed', handleEphemeralDismissed);
         websocketService.on('connect', handleConnect);
       })
       .catch(() => {});
@@ -104,6 +126,7 @@ export function useEphemeralMessages(channelId: string | undefined): EphemeralMe
     return (): void => {
       active = false;
       websocketService.removeListener('ephemeral_message', handleEphemeralMessage);
+      websocketService.removeListener('ephemeral_dismissed', handleEphemeralDismissed);
       websocketService.removeListener('connect', handleConnect);
     };
   }, []);

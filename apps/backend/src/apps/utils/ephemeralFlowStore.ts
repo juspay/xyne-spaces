@@ -26,3 +26,11 @@ export async function getEphemeralFlow(messageId: string): Promise<EphemeralFlow
   const raw = await redisService.get(key(messageId));
   return raw ? (JSON.parse(raw) as EphemeralFlow) : null;
 }
+
+/**
+ * Drop the authorization record once the interaction is over, so the Submit button
+ * cannot be pressed a second time inside the TTL window.
+ */
+export async function deleteEphemeralFlow(messageId: string): Promise<void> {
+  await redisService.del(key(messageId));
+}
