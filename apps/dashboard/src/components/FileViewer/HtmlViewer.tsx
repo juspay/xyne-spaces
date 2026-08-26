@@ -1,6 +1,11 @@
 import React, { useEffect, useState, useCallback, memo } from 'react';
 import { BaseViewerProps } from './utils';
 
+const declaresEncoding = async (file: Blob): Promise<boolean> => {
+  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+  return /<meta[^>]+charset/i.test(new TextDecoder('latin1').decode(head));
+};
+
 const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,11 +22,11 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     setError(null);
 
     try {
-      const text = await source.text();
-      if (!text) throw new Error('File is empty');
+      if (source.size === 0) throw new Error('File is empty');
 
-      const blob = new Blob([text], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
+      const type = (await declaresEncoding(source)) ? 'text/html' : 'text/html;charset=utf-8';
+
+      const url = URL.createObjectURL(source.slice(0, source.size, type));
       setBlobUrl(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load HTML file');
