@@ -8,6 +8,7 @@ import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
+import IntentPlaygroundScreen from './IntentPlaygroundScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
@@ -1154,6 +1155,13 @@ export const router = createBrowserRouter(
                   element: <QuestionnaireScreen />,
                 },
                 {
+                // Dev-only surface for the on-device intent classifier. Bypasses the
+                // public-channel eligibility gate, so it is intentionally not linked
+                // from product UI. See docs/ON_DEVICE_INTENT.md
+                path: 'intent-playground',
+                element: <IntentPlaygroundScreen />,
+              },
+              {
                   path: 'rca',
                   element: <RCAListScreen />,
                 },

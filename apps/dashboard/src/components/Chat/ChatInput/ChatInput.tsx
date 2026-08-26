@@ -25,6 +25,11 @@ import {
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { intentClassifier } from '../../../services/onDeviceIntent';
+import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
+import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
+import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
+import Dialog from '../../ui/Dialog';
 import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
@@ -317,6 +322,16 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+    const [scheduleCallOpen, setScheduleCallOpen] = useState(false);
+    const [addPeopleOpen, setAddPeopleOpen] = useState(false);
+    // On-device intent detections surface as a toast; its action opens the modal below.
+    // The toast hook owns no modal state — ChatInput does, for all three — so a
+    // suggestion opens exactly the same modal the toolbar does.
+    useIntentSuggestionToast({
+      openScheduleCall: () => setScheduleCallOpen(true),
+      openCreateTicket: () => setIsCreateTicketModalOpen(true),
+      openAddPeople: () => setAddPeopleOpen(true),
+    });
     const [ticketDescription, setTicketDescription] = useState('');
     const [recentScheduledFor, setRecentScheduledFor] = useState<number | null>(null);
 
@@ -756,6 +771,18 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
         };
 
+        // On-device intent classification. Fire-and-forget and never awaited — it must
+        // not add a single millisecond to the send path. Gated to public channels inside
+        // the service (fail closed). Phase 1 is measure-only: this emits telemetry and
+        // renders nothing. See docs/ON_DEVICE_INTENT.md
+        const classifyIntent = (sentMessageId: string): void => {
+          intentClassifier.submitForMessage({
+            text: _plainText,
+            messageId: sentMessageId,
+            channel,
+          });
+        };
+
         if (messageId) {
           // When editing a message, ignore alsoSendToChannel state to prevent metadata corruption
           const result = zero.mutate(
@@ -804,11 +831,21 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             );
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
-            handleMutationResult(result, restoreDraft, undefined, undefined, {
-              channelId,
-              conversationId,
-              isReply: true,
-            });
+            handleMutationResult(
+              result,
+              restoreDraft,
+              undefined,
+              // onServerSuccess, NOT here — waiting for the server ack means we never
+              // classify a message that failed to send. (It also used to matter for the
+              // server suggestion path, which raced Zero's optimistic write and 404'd
+              // as `message-not-found`; that path is gone, this reason is not.)
+              () => classifyIntent(newMessageId),
+              {
+                channelId,
+                conversationId,
+                isReply: true,
+              },
+            );
             // Sender has implicitly read up to their own message
             setThreadLastRead(conversationId, messageCreatedAt);
 
@@ -894,6 +931,16 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
             dispatchChatMessageSentEvent(channelId);
+            handleMutationResult(
+              result,
+              restoreDraft,
+              () => dispatchChatMessageSentEvent(channelId),
+              () => classifyIntent(newMessageId),
+              {
+                channelId,
+                isNewConversation: true,
+              },
+            );
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
@@ -1260,6 +1307,22 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             sourceConversation={conversation ?? undefined}
             onTicketCreated={handleTicketCreated}
           />
+        ) : null}
+        {/* Opened by the intent-suggestion toast. */}
+        <ScheduleCallModal
+          isOpen={scheduleCallOpen}
+          onClose={() => setScheduleCallOpen(false)}
+          channelId={channelId}
+          {...(conversation?.conversationId ? { conversationId: conversation.conversationId } : {})}
+        />
+        {channel && addPeopleOpen ? (
+          <Dialog open={addPeopleOpen} onOpenChange={setAddPeopleOpen} title='Add Members'>
+            <AddPeopleForm
+              channelId={channelId}
+              onSuccess={() => setAddPeopleOpen(false)}
+              onCancel={() => setAddPeopleOpen(false)}
+            />
+          </Dialog>
         ) : null}
       </>
     );
