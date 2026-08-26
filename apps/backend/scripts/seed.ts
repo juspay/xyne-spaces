@@ -44,6 +44,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'AUTH', description: 'Authentication endpoints (/api/auth/*)' },
   { name: 'XYNE-APPS', description: 'Xyne Apps management endpoints (/api/apps/*)' },
   { name: 'VESPA', description: 'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*)' },
+  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
 ];
 
 // Default user groups with their permissions

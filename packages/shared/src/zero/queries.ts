@@ -3646,9 +3646,7 @@ export const queries = defineQueries({
           .related('participants')
           .related('channelStats')
           .related('canvasFolders', folder =>
-            folder
-              .where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs'])
-              .related('canvases', canvas => canvas.related('sdlcArtifact')),
+            folder.related('canvases', canvas => canvas.related('sdlcArtifact')),
           ),
       )
       .related('setupExecution')
