@@ -4,14 +4,24 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { teamIntelligenceUserDashboardService } from '@/services/teamIntelligenceUserDashboardService';
+import {
+  leadershipSectionNames,
+  paginateLeadershipSection,
+} from '@/utils/teamIntelligenceLeadershipSections';
 
 // Validation schema for user dashboard queries
 const UserDashboardQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '"from" must be in YYYY-MM-DD format'),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '"to" must be in YYYY-MM-DD format'),
   userEmail: z.string().email('Invalid email format for userEmail'),
-  page: z.string().optional().transform(val => val ? parseInt(val, 10) : 1),
-  limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 10),
+  page: z
+    .string()
+    .optional()
+    .transform((val) => (val ? parseInt(val, 10) : 1)),
+  limit: z
+    .string()
+    .optional()
+    .transform((val) => (val ? parseInt(val, 10) : 10)),
 });
 
 const MettleExtendedEmployeeQuerySchema = z.object({
@@ -19,17 +29,71 @@ const MettleExtendedEmployeeQuerySchema = z.object({
 });
 
 export class TeamIntelligenceUserController {
+  /** Returns one independently paginated section from the newest user snapshot. */
+  getUserLeadershipSection = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const parseResult = UserDashboardQuerySchema.safeParse(req.query);
+      if (!parseResult.success) {
+        res.status(400).json({ error: 'Validation error', details: parseResult.error.errors });
+        return;
+      }
+      const section = req.params.section;
+      if (!section || !leadershipSectionNames('user').includes(section)) {
+        res.status(400).json({
+          error: 'Unknown user leadership section',
+          sections: leadershipSectionNames('user'),
+        });
+        return;
+      }
+
+      const { from, to, userEmail, page, limit } = parseResult.data;
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+      if (fromDate > toDate) {
+        res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) return;
+
+      const result = await teamIntelligenceUserDashboardService.getUserLeadershipSnapshots({
+        from: fromDate,
+        to: toDate,
+        userEmail,
+        orgId,
+      });
+      const snapshot = result.snapshots[0];
+      if (!snapshot) {
+        res.status(404).json({ error: 'No user leadership snapshot found' });
+        return;
+      }
+
+      res.status(200).json({
+        snapshotId: snapshot.id,
+        ...paginateLeadershipSection({
+          scope: 'user',
+          section,
+          summary: snapshot.summary,
+          page: Math.max(1, page),
+          limit: Math.min(100, Math.max(1, limit)),
+        }),
+      });
+    } catch (err) {
+      logger.error('[TeamIntelligenceUser] getUserLeadershipSection error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
   /**
    * Ensures the requested email belongs to a user in the caller's workspace.
-   * The same person may exist in multiple workspaces; access is allowed only
-   * when the target email shares the caller's workspace. Writes a 403 and
-   * returns false otherwise.
+   * Returns the caller's orgId on success, or false (and writes a 403) on
+   * failure. The orgId is used to scope all Team Intelligence data queries
+   * so users only see data ingested for their own organisation.
    */
   private assertEmailInWorkspace = async (
     email: string,
     req: Request,
-    res: Response,
-  ): Promise<boolean> => {
+    res: Response
+  ): Promise<string | false> => {
     const workspaceId = req.user?.workspaceId;
     if (!workspaceId) {
       res.status(403).json({ error: 'Access denied' });
@@ -46,7 +110,12 @@ export class TeamIntelligenceUserController {
       return false;
     }
 
-    return true;
+    const mapping = await db.workspaceOrganization.findFirst({
+      where: { workspaceId },
+      select: { orgId: true },
+    });
+
+    return mapping?.orgId ?? false;
   };
 
   /**
@@ -58,12 +127,15 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map(e => ({ path: e.path.join('.'), message: e.message })),
+          details: parseResult.error.errors.map((e) => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
         });
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(parseResult.data.email, req, res))) {
+      if ((await this.assertEmailInWorkspace(parseResult.data.email, req, res)) === false) {
         return;
       }
 
@@ -120,7 +192,10 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map(e => ({ path: e.path.join('.'), message: e.message })),
+          details: parseResult.error.errors.map((e) => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
         });
         return;
       }
@@ -134,7 +209,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -147,6 +223,7 @@ export class TeamIntelligenceUserController {
         userEmail,
         page: clampedPage,
         limit: clampedLimit,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -165,7 +242,10 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map(e => ({ path: e.path.join('.'), message: e.message })),
+          details: parseResult.error.errors.map((e) => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
         });
         return;
       }
@@ -179,7 +259,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -192,6 +273,7 @@ export class TeamIntelligenceUserController {
         userEmail,
         page: clampedPage,
         limit: clampedLimit,
+        orgId,
       });
 
       res.status(200).json(result);
@@ -211,7 +293,10 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map(e => ({ path: e.path.join('.'), message: e.message })),
+          details: parseResult.error.errors.map((e) => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
         });
         return;
       }
@@ -225,7 +310,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -233,11 +319,58 @@ export class TeamIntelligenceUserController {
         from: fromDate,
         to: toDate,
         userEmail,
+        orgId,
       });
 
       res.status(200).json(result);
     } catch (err) {
       logger.error('[TeamIntelligenceUser] getUserOverview error', { err });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * GET /api/team-intelligence-dashboard/user/leadership-snapshots?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com
+   */
+  getUserLeadershipSnapshots = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const LeadershipSnapshotSchema = UserDashboardQuerySchema.omit({ page: true, limit: true });
+      const parseResult = LeadershipSnapshotSchema.safeParse(req.query);
+      if (!parseResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          details: parseResult.error.errors.map((e) => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
+        });
+        return;
+      }
+
+      const { from, to, userEmail } = parseResult.data;
+      const fromDate = new Date(from);
+      const toDate = new Date(to);
+
+      if (fromDate > toDate) {
+        res.status(400).json({ error: '"from" must be before or equal to "to"' });
+        return;
+      }
+
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
+        return;
+      }
+
+      const result = await teamIntelligenceUserDashboardService.getUserLeadershipSnapshots({
+        from: fromDate,
+        to: toDate,
+        userEmail,
+        orgId,
+      });
+
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('[TeamIntelligenceUser] getUserLeadershipSnapshots error', { err });
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -251,7 +384,10 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map(e => ({ path: e.path.join('.'), message: e.message })),
+          details: parseResult.error.errors.map((e) => ({
+            path: e.path.join('.'),
+            message: e.message,
+          })),
         });
         return;
       }
@@ -265,7 +401,8 @@ export class TeamIntelligenceUserController {
         return;
       }
 
-      if (!(await this.assertEmailInWorkspace(userEmail, req, res))) {
+      const orgId = await this.assertEmailInWorkspace(userEmail, req, res);
+      if (orgId === false) {
         return;
       }
 
@@ -278,6 +415,7 @@ export class TeamIntelligenceUserController {
         userEmail,
         page: clampedPage,
         limit: clampedLimit,
+        orgId,
       });
 
       res.status(200).json(result);

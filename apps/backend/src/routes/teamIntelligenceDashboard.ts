@@ -4,6 +4,15 @@ import { mettleTeamSyncController } from '@/controllers/mettleTeamSyncController
 
 const router = Router();
 
+// GET /api/team-intelligence-dashboard/org/leadership-snapshots?from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get('/leadership-snapshots', teamIntelligenceOrgController.getOrgLeadershipSnapshots);
+
+// Each dashboard section owns its page and page size.
+router.get('/leadership-sections/:section', teamIntelligenceOrgController.getOrgLeadershipSection);
+
+// Stable sidebar grouping based on active goals and the previous month of team evidence.
+router.get('/team-goal-groups', teamIntelligenceOrgController.getTeamGoalGroups);
+
 // GET /api/team-intelligence-dashboard/org/summary?from=YYYY-MM-DD&to=YYYY-MM-DD
 router.get('/summary', teamIntelligenceOrgController.getOrgSummary);
 
