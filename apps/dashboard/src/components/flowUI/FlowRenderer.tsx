@@ -124,7 +124,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       if (props?.name) {
         const value = state.values[props.name];
         newTouched[props.name] = true;
-        if (props.required && (value === undefined || value === '' || value === null)) {
+        if (props.required && isEmptyValue(value)) {
           newErrors[props.name] = 'This field is required';
           isValid = false;
         } else if (props.validation) {
@@ -384,6 +384,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function isEmptyValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length === 0;
+  return value === undefined || value === '' || value === null;
+}
+
 function findFieldInComponents(components: FlowComponent[], name: string): FlowComponent | null {
   for (const c of components) {
     const props = c.props as { name?: string } | undefined;
@@ -399,7 +404,7 @@ function findFieldInComponents(components: FlowComponent[], name: string): FlowC
 function validateRule(rule: ValidationRule, value: unknown): string | null {
   switch (rule.type) {
     case 'required':
-      return value === undefined || value === '' || value === null ? rule.message : null;
+      return isEmptyValue(value) ? rule.message : null;
     case 'min':
       return (value as number) < (rule.value as number) ? rule.message : null;
     case 'max':
