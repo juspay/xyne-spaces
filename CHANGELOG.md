@@ -1,3 +1,10 @@
+## [1.227.0](https://github.com/juspay/xyne-spaces/compare/v1.226.0...v1.227.0) (2026-08-26)
+
+
+### Features
+
+* add recording participants ([#1050](https://github.com/juspay/xyne-spaces/issues/1050)) ([3a2efce](https://github.com/juspay/xyne-spaces/commit/3a2efcebdb58386dae7375d8b16e6bcd0cad7ea5))
+
 ## [1.226.0](https://github.com/juspay/xyne-spaces/compare/v1.225.0...v1.226.0) (2026-08-26)
 
 
