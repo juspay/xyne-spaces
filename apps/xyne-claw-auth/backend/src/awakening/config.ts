@@ -140,7 +140,7 @@ export const AWAKENING_BOUNDS = {
   injectMinIntervalMs: { min: 0, max: 3_600_000, default: 60_000 },
   /** Cap on owner-written run guidance — long enough for real direction,
    *  short enough that it cannot crowd out the window itself. */
-  instructionsLength: { max: 4_000 },
+  instructionsLength: { max: 10_000 },
   /** Guards against a pathological or hostile channel-name pattern. */
   patternLength: { max: 200 },
   patternCount: { max: 10 },
