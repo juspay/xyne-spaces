@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { prisma } from "../db.js";
@@ -838,13 +838,24 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     if (enabled !== undefined && enabled !== existing.enabled) changedFields.push("enabled");
     if (delegationTier !== undefined && delegationTier !== existing.delegationTier) changedFields.push("delegationTier");
     if (systemPrompt !== undefined && systemPrompt.trim() !== existing.systemPrompt) changedFields.push("prompt");
+    const beforePrivacy = parseAgentPrivacy(existing.config as Record<string, unknown> | null);
+    const afterPrivacy = parseAgentPrivacy(normalizedConfig ?? null);
+    const privacyChanged =
+      normalizedConfig !== undefined &&
+      (beforePrivacy.mode !== afterPrivacy.mode ||
+        [...beforePrivacy.whitelist].sort().join(",") !== [...afterPrivacy.whitelist].sort().join(","));
+    if (privacyChanged) changedFields.push("privacy");
     if (changedFields.length > 0) {
       await writeAuditLog({
         ...(requesterId ? { actorUserId: requesterId } : {}),
         eventType: "AGENT_UPDATED",
         targetId: existing.id,
         description: `Agent "${existing.name}" (${existing.slug}) updated: ${changedFields.join(", ")}`,
-        metadata: { changed: changedFields, orgId: existing.orgId },
+        metadata: {
+          changed: changedFields,
+          orgId: existing.orgId,
+          ...(privacyChanged ? { privacyBefore: beforePrivacy, privacyAfter: afterPrivacy } : {}),
+        },
       });
     }
 
