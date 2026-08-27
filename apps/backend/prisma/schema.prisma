@@ -3734,7 +3734,7 @@ model ApplicationReleaseTicket {
   @@schema("public")
 }
 
-model ReleaseTicketRepo {
+model ReleaseRepository {
   workspaceId        String
   id                 String    @id @default(cuid())
   releaseId          String
@@ -3747,8 +3747,8 @@ model ReleaseTicketRepo {
 
   @@unique([releaseId, mainReleaseBoardId])
   @@index([releaseId])
-  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_ticket_repos_releaseId_createdAt_id_idx")
-  @@map("release_ticket_repos")
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_repositories_releaseId_createdAt_id_idx")
+  @@map("release_repositories")
   @@schema("non_zero")
 }
 

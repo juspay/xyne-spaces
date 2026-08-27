@@ -47,7 +47,10 @@ export interface ExistingReleaseConfig {
 export type ReleaseConfigMode =
   | { kind: 'create' }
   | { kind: 'edit-main'; mainBoardId: string }
-  | { kind: 'edit-application'; applicationBoardId: string };
+  | { kind: 'edit-application'; applicationBoardId: string }
+  // Add one new service to an existing repo group — reuses the lean single-row
+  // form, seeded with a blank service appended to the group's app list.
+  | { kind: 'add-application'; mainBoardId: string };
 
 export interface ReleaseConfigWizardProps {
   projectId: string;

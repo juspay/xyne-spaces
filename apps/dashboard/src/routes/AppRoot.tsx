@@ -1487,7 +1487,7 @@ export const router = createBrowserRouter(
                 {
                   path: 'releaseManager',
                   element: (
-                    <ResourceProtectedRoute resourceName='RELEASEMANAGER' minAccess='READ'>
+                    <ResourceProtectedRoute resourceName='RELEASE-MANAGER' minAccess='READ'>
                       <ReleaseManagerView />
                     </ResourceProtectedRoute>
                   ),

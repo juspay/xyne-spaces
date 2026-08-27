@@ -493,6 +493,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: selectedChannelProjectId }),
   );
+  // Read by the open-reset effect without adding `boards` to its deps.
+  const boardsRef = useRef(boards);
+  boardsRef.current = boards;
 
   // Services grouped by main release board → read-only chips under each repo.
   const [releaseApplications] = useCachedQuery(
@@ -862,7 +865,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       form.reset();
-      setTicketKind(initialTicketKind);
+      // Preselected release board (no initialTicketKind) → open in release mode.
+      const preselectedBoard = selectedBoardId
+        ? boardsRef.current?.find(b => b.id === selectedBoardId)
+        : undefined;
+      setTicketKind(
+        preselectedBoard && isReleaseBoard(preselectedBoard.boardType) ? 'release' : initialTicketKind,
+      );
       setHasTitleBeenGenerated(false); // Reset flag when modal opens
       hasPopulatedDeployedCommitId.current = false;
       seedSnapshotRef.current = null;
@@ -1183,11 +1192,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const primaryComplete = filled(df['deployedCommitId']) && filled(df['newCommitId']);
     const additionalsComplete = selectedRepoBoardIds.every(
       id =>
+        Boolean(repoRanges[id]?.branch?.trim()) &&
         Boolean(repoRanges[id]?.deployedCommit?.trim()) &&
         Boolean(repoRanges[id]?.newCommit?.trim()),
     );
     if (!primaryComplete || !additionalsComplete) {
-      return 'Enter the deployed → new commit range for every selected repository';
+      return 'Enter the branch and deployed → new commit range for every selected repository';
     }
     return null;
   }, [

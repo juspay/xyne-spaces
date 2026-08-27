@@ -261,17 +261,30 @@ export function groupDevTicketRowsByRepo(
     }
   }
 
-  const groups: DevTicketRepoGroup[] = [];
+  const rangeByRepo = new Map<string, RepoRangeInput>();
   for (const repo of repos ?? []) {
-    const groupRows = rowsByRepo.get(repo.mainReleaseBoardId);
+    if (!rangeByRepo.has(repo.mainReleaseBoardId)) rangeByRepo.set(repo.mainReleaseBoardId, repo);
+  }
+
+  // Snapshot repos first, then any board a row actually mapped to — so a row
+  // never vanishes when live config drifts from the release snapshot.
+  const orderedKeys = [
+    ...rangeByRepo.keys(),
+    ...[...rowsByRepo.keys()].filter(key => !rangeByRepo.has(key)),
+  ];
+
+  const groups: DevTicketRepoGroup[] = [];
+  for (const key of orderedKeys) {
+    const groupRows = rowsByRepo.get(key);
     if (!groupRows || groupRows.length === 0) continue;
-    const meta = repoMeta.get(repo.mainReleaseBoardId);
+    const meta = repoMeta.get(key);
+    const range = rangeByRepo.get(key);
     groups.push({
-      key: repo.mainReleaseBoardId,
+      key,
       repoUrl: meta?.repoUrl ?? null,
       fallbackName: meta?.name ?? null,
-      rangeFrom: repo.deployedCommit ?? null,
-      rangeTo: repo.newCommit ?? null,
+      rangeFrom: range?.deployedCommit ?? null,
+      rangeTo: range?.newCommit ?? null,
       rows: groupRows,
       testedCount: groupRows.filter(isRowTested).length,
       totalCount: groupRows.length,

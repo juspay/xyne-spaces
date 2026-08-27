@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { FormContextType, FormEntityType } from '@xyne/shared';
+import { AccessType, FormContextType, FormEntityType } from '@xyne/shared';
+import { usePermissions } from '../../hooks/usePermissions';
 import { toast } from 'sonner';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -62,9 +63,9 @@ import { CanvasPreview } from '../../components/Canvas/CanvasPreview/CanvasPrevi
 type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline' | 'releasenotes';
 
 // Shape returned by GET /commits/analyze/repos/:releaseId. Mirrors the
-// non_zero release_ticket_repos row; structurally compatible with the
+// non_zero release_repositories row; structurally compatible with the
 // RepoRangeInput the grouping util consumes.
-type ReleaseTicketRepoRow = {
+type ReleaseRepositoryRow = {
   id: string;
   releaseId: string;
   mainReleaseBoardId: string;
@@ -354,32 +355,33 @@ const ReleaseDetailScreen = (): ReactElement => {
     [artPage, artHasMore],
   );
 
-  // release_ticket_repos lives in the non_zero schema (server-only, not
+  // release_repositories lives in the non_zero schema (server-only, not
   // Zero-replicated), so it's fetched over HTTP instead of synced via Zero.
   // Refetched after a re-run — the only in-screen action that changes these rows.
-  const [releaseTicketRepos, setReleaseTicketRepos] = useState<ReleaseTicketRepoRow[]>([]);
+  const [releaseRepositories, setReleaseRepositories] = useState<ReleaseRepositoryRow[]>([]);
   const [analysisCanvasId, setAnalysisCanvasId] = useState<string | null>(null);
-  const fetchReleaseTicketRepos = useCallback(async (): Promise<void> => {
+  const fetchReleaseRepositories = useCallback(async (): Promise<void> => {
     if (!releaseTicketId) {
-      setReleaseTicketRepos([]);
+      setReleaseRepositories([]);
       setAnalysisCanvasId(null);
       return;
     }
     try {
       const response = await apiInstance.get<{
-        repos: ReleaseTicketRepoRow[];
+        repos: ReleaseRepositoryRow[];
         analysisCanvasId?: string | null;
       }>(`/commits/analyze/repos/${releaseTicketId}`);
-      setReleaseTicketRepos(response.data?.repos ?? []);
+      setReleaseRepositories(response.data?.repos ?? []);
       setAnalysisCanvasId(response.data?.analysisCanvasId ?? null);
     } catch {
-      setReleaseTicketRepos([]);
+      setReleaseRepositories([]);
       setAnalysisCanvasId(null);
+      toast.error('Could not load the repository breakdown for this release. Try refreshing.');
     }
   }, [releaseTicketId]);
   useEffect(() => {
-    void fetchReleaseTicketRepos();
-  }, [fetchReleaseTicketRepos]);
+    void fetchReleaseRepositories();
+  }, [fetchReleaseRepositories]);
   const [applications] = useCachedQuery(
     queries.applicationsByProjectId({ projectId: projectId ?? '' }),
     { enabled: !!projectId },
@@ -459,11 +461,11 @@ const ReleaseDetailScreen = (): ReactElement => {
     [artRows, users, changeCountsByDevTicket],
   );
 
-  const repoCount = releaseTicketRepos?.length ?? 0;
+  const repoCount = releaseRepositories?.length ?? 0;
   const isMultiRepo = repoCount > 1;
   const devTicketRepoGroups = useMemo(
-    () => groupDevTicketRowsByRepo(devTicketRows, releaseTicketRepos, applications),
-    [devTicketRows, releaseTicketRepos, applications],
+    () => groupDevTicketRowsByRepo(devTicketRows, releaseRepositories, applications),
+    [devTicketRows, releaseRepositories, applications],
   );
 
   // Per-board stage lists for release status controls.
@@ -475,6 +477,16 @@ const ReleaseDetailScreen = (): ReactElement => {
   // which loads the release ticket's deployedCommitId / newCommitId / branch
   // from form values, then dispatches the same analysis pipeline as create.
   const [isReRunning, setIsReRunning] = useState(false);
+  // Re-run spends the VCS token, so gate it behind RELEASE-MANAGER (matches the
+  // backend authorize on POST /re-run). The screen itself stays open to members.
+  const permissions = usePermissions();
+  const canReRunAnalysis = permissions.some(
+    permission =>
+      permission.resourceName === 'RELEASE-MANAGER' &&
+      (permission.accessType === AccessType.READ ||
+        permission.accessType === AccessType.WRITE ||
+        permission.accessType === AccessType.ADMIN),
+  );
   const handleReRunAnalysis = async (): Promise<void> => {
     if (!releaseTicketId) return;
     setIsReRunning(true);
@@ -484,7 +496,7 @@ const ReleaseDetailScreen = (): ReactElement => {
         {},
       );
       if (response.data?.success) {
-        void fetchReleaseTicketRepos();
+        void fetchReleaseRepositories();
         toast.success('Commit analysis re-run — check the conversation for the new summary.');
       } else {
         toast.error(response.data?.error ?? 'Re-run failed');
@@ -947,21 +959,23 @@ const ReleaseDetailScreen = (): ReactElement => {
                       </DropdownMenu.Portal>
                     </DropdownMenu.Root>
                   )}
-                  <button
-                    type='button'
-                    onClick={() => void handleReRunAnalysis()}
-                    disabled={isReRunning || !releaseTicketId}
-                    data-track-event='BUTTON_CLICK'
-                    data-track-category='Release'
-                    data-track-name='ReRunCommitAnalysis'
-                    data-track-metadata={JSON.stringify({ releaseTicketId })}
-                    data-testid='rerun-commit-analysis'
-                    title='Re-run commit analysis with the current release configuration — useful after fixing Application regex / paths.'
-                    className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
-                  >
-                    <RefreshCw size={15} className={isReRunning ? 'animate-spin' : ''} />
-                    {isReRunning ? 'Re-running…' : 'Re-run Analysis'}
-                  </button>
+                  {canReRunAnalysis && (
+                    <button
+                      type='button'
+                      onClick={() => void handleReRunAnalysis()}
+                      disabled={isReRunning || !releaseTicketId}
+                      data-track-event='BUTTON_CLICK'
+                      data-track-category='Release'
+                      data-track-name='ReRunCommitAnalysis'
+                      data-track-metadata={JSON.stringify({ releaseTicketId })}
+                      data-testid='rerun-commit-analysis'
+                      title='Re-run commit analysis with the current release configuration — useful after fixing Application regex / paths.'
+                      className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                    >
+                      <RefreshCw size={15} className={isReRunning ? 'animate-spin' : ''} />
+                      {isReRunning ? 'Re-running…' : 'Re-run Analysis'}
+                    </button>
+                  )}
                   <button
                     type='button'
                     onClick={() => void exportDevTickets()}

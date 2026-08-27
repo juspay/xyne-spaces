@@ -44,7 +44,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'AUTH', description: 'Authentication endpoints (/api/auth/*)' },
   { name: 'XYNE-APPS', description: 'Xyne Apps management endpoints (/api/apps/*)' },
   { name: 'VESPA', description: 'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*)' },
-  { name: 'RELEASEMANAGER', description: 'Release Manager tab and repository commit-analysis endpoints (/api/commits/analyze/*)' },
+  { name: 'RELEASE-MANAGER', description: 'Release Manager tab and repository commit-analysis endpoints (/api/commits/analyze/*)' },
 ];
 
 // Default user groups with their permissions

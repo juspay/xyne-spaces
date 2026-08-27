@@ -67,7 +67,7 @@ const ESSENTIAL_RESOURCES = [
       'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*). WRITE or ADMIN access lets a user trigger and manage backfill jobs.',
   },
   {
-    name: 'RELEASEMANAGER',
+    name: 'RELEASE-MANAGER',
     description:
       'Release Manager tab and repository commit-analysis endpoints (/api/commits/analyze/*). Granted per-user so release access is decoupled from workspace admin/owner privilege.',
   },

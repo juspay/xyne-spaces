@@ -578,10 +578,15 @@ const ReleaseConfigWizardForm = ({
     application => application.boardId === applicationBoardId,
   );
   const isApplicationEdit = mode.kind === 'edit-application';
+  const isApplicationAdd = mode.kind === 'add-application';
+  // Both single-service modes wear the lean form: no repo/tracking/channel
+  // controls, no list add/remove — just the one service row.
+  const isSingleService = isApplicationEdit || isApplicationAdd;
 
   const form = useReleaseConfigForm({
     projectId,
     existingConfig,
+    addServiceMode: isApplicationAdd,
     onSave: mainBoard => {
       if (isApplicationEdit && selectedApplication) {
         onSave({ id: selectedApplication.boardId, name: selectedApplication.name });
@@ -591,8 +596,13 @@ const ReleaseConfigWizardForm = ({
     },
   });
 
-  const visibleApplications =
-    isApplicationEdit && selectedApplication
+  // Add mode shows only the freshly-seeded blank row; edit mode shows only the
+  // edited row; otherwise the whole group is visible. The full group always
+  // stays in form state so the save submits every service (see the mutator,
+  // which deletes any app missing from the payload).
+  const visibleApplications = isApplicationAdd
+    ? form.applications.filter(application => application.id === form.addedServiceId)
+    : isApplicationEdit && selectedApplication
       ? form.applications.filter(application => application.boardId === selectedApplication.boardId)
       : form.applications;
 
@@ -632,12 +642,21 @@ const ReleaseConfigWizardForm = ({
   const canProceed =
     !!form.sharedRepoUrl.trim() && form.applications.some(app => app.name.trim());
 
+  // In add mode, gate on the new row itself being filled — the group already
+  // has named services, so the generic "some app has a name" check is always
+  // true and would let an empty add through.
+  const addedService = isApplicationAdd
+    ? form.applications.find(app => app.id === form.addedServiceId)
+    : null;
+  const addedServiceReady = !!addedService?.name.trim() && !!addedService?.regex.trim();
+
   const canSave =
     form.currentStep === 2 &&
     !!form.sharedRepoUrl.trim() &&
     form.applications.some(app => app.name.trim()) &&
+    (!isApplicationAdd || addedServiceReady) &&
     // The save falls back to the group's stored channel when the picker is
-    // hidden (application edit) or the channel failed to prefill.
+    // hidden (single-service modes) or the channel failed to prefill.
     (!!form.selectedChannel || !!existingConfig?.channelId);
 
   const showCancelOnLeft = true;
@@ -649,9 +668,11 @@ const ReleaseConfigWizardForm = ({
       title={
         mode.kind === 'create'
           ? 'Connect Repository'
-          : isApplicationEdit
-            ? 'Edit Service Release Config'
-            : 'Edit Repository Config'
+          : isApplicationAdd
+            ? 'Add Service'
+            : isApplicationEdit
+              ? 'Edit Service Release Config'
+              : 'Edit Repository Config'
       }
       className='max-w-5xl'
     >
@@ -670,8 +691,8 @@ const ReleaseConfigWizardForm = ({
             onReleaseTrackingModeChange={form.setReleaseTrackingMode}
             sharedRepoUrl={form.sharedRepoUrl}
             onSharedRepoUrlChange={form.setSharedRepoUrl}
-            showGroupControls={!isApplicationEdit}
-            allowApplicationListChanges={!isApplicationEdit}
+            showGroupControls={!isSingleService}
+            allowApplicationListChanges={!isSingleService}
             onTestConnection={handleTestConnection}
             isTestingConnection={isTestingConnection}
             connectionTest={connectionTest}
@@ -705,11 +726,13 @@ const ReleaseConfigWizardForm = ({
             >
               {form.isSaving
                 ? 'Saving...'
-                : isApplicationEdit
-                  ? 'Save Service'
-                  : form.isEditing
-                    ? 'Next'
-                    : 'Save Configuration'}
+                : isApplicationAdd
+                  ? 'Add Service'
+                  : isApplicationEdit
+                    ? 'Save Service'
+                    : form.isEditing
+                      ? 'Next'
+                      : 'Save Configuration'}
             </Button>
           )}
         </div>
@@ -738,7 +761,7 @@ export const ReleaseConfigWizard = ({
     [applications, mode.kind, applicationBoardId],
   );
   const mainBoardId =
-    mode.kind === 'edit-main'
+    mode.kind === 'edit-main' || mode.kind === 'add-application'
       ? mode.mainBoardId
       : mode.kind === 'edit-application'
         ? (selectedApplication?.mainReleaseBoardId ?? '')

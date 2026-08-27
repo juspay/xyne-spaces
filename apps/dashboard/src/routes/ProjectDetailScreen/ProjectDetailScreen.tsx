@@ -9,7 +9,16 @@ import {
   type FlowPlan,
 } from '@xyne/shared';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, Edit2, GitBranch, LayoutGrid, Rocket } from 'lucide-react';
+import {
+  ArrowLeft,
+  Boxes,
+  ChevronRight,
+  Edit2,
+  GitBranch,
+  LayoutGrid,
+  Plus,
+  Rocket,
+} from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
@@ -54,6 +63,7 @@ type ReleaseBoardFlow =
   | { kind: 'create'; projectId: string }
   | { kind: 'edit-main'; mainBoardId: string }
   | { kind: 'edit-application'; applicationBoardId: string }
+  | { kind: 'add-application'; mainBoardId: string }
   | null;
 
 const getNextClonedBoardName = (
@@ -183,19 +193,35 @@ const ProjectDetailScreen = (): ReactElement => {
   );
 
   const repositories = useMemo(() => {
-    const counts = new Map<string, number>();
+    type RepoService = {
+      boardId: string;
+      name: string;
+      regex: string;
+      envPaths: readonly string[];
+      migrationPaths: readonly string[];
+    };
+    const servicesByBoard = new Map<string, RepoService[]>();
     const repoUrlByBoard = new Map<string, string>();
     for (const app of applicationList) {
       const id = app.mainReleaseBoardId;
       if (!id) continue;
-      counts.set(id, (counts.get(id) ?? 0) + 1);
+      const services = servicesByBoard.get(id) ?? [];
+      services.push({
+        boardId: app.boardId,
+        name: app.name,
+        regex: app.regex,
+        envPaths: app.envPaths ?? [],
+        migrationPaths: app.migrationPaths ?? [],
+      });
+      servicesByBoard.set(id, services);
       if (app.repoUrl && !repoUrlByBoard.has(id)) repoUrlByBoard.set(id, app.repoUrl);
     }
-    return [...counts.entries()].map(([mainBoardId, appCount]) => ({
+    return [...servicesByBoard.entries()].map(([mainBoardId, services]) => ({
       mainBoardId,
       name: boardNamesById[mainBoardId] ?? mainBoardId,
-      appCount,
+      appCount: services.length,
       repoUrl: repoUrlByBoard.get(mainBoardId) ?? null,
+      services,
     }));
   }, [applicationList, boardNamesById]);
 
@@ -214,6 +240,22 @@ const ProjectDetailScreen = (): ReactElement => {
     setReleaseBoardFlow({ kind: 'edit-main', mainBoardId });
     setShowReleaseConfigModal(true);
   };
+  const openServiceConfig = (applicationBoardId: string): void => {
+    setReleaseBoardFlow({ kind: 'edit-application', applicationBoardId });
+    setShowReleaseConfigModal(true);
+  };
+  const openAddService = (mainBoardId: string): void => {
+    setReleaseBoardFlow({ kind: 'add-application', mainBoardId });
+    setShowReleaseConfigModal(true);
+  };
+  const [expandedRepoIds, setExpandedRepoIds] = useState<Set<string>>(new Set());
+  const toggleRepoExpanded = (mainBoardId: string): void =>
+    setExpandedRepoIds(prev => {
+      const next = new Set(prev);
+      if (next.has(mainBoardId)) next.delete(mainBoardId);
+      else next.add(mainBoardId);
+      return next;
+    });
 
   const editingFlowBoardPlan = useMemo<FlowPlan | null>(() => {
     if (!editingFlowBoard) return null;
@@ -558,35 +600,140 @@ const ProjectDetailScreen = (): ReactElement => {
                       </div>
                     ) : (
                       <div className='space-y-2.5'>
-                        {repositories.map(repo => (
-                          <div
-                            key={repo.mainBoardId}
-                            className='flex items-center gap-3 rounded-xl border border-border bg-muted/40 p-3.5'
-                          >
-                            <RepoDot color={repoColor(repo.mainBoardId)} />
-                            <div className='min-w-0 flex-1'>
-                              <div className='truncate text-sm font-semibold text-foreground'>
-                                {repo.name}
+                        {repositories.map(repo => {
+                          const expanded = expandedRepoIds.has(repo.mainBoardId);
+                          return (
+                            <div
+                              key={repo.mainBoardId}
+                              className='overflow-hidden rounded-xl border border-border bg-muted/40'
+                            >
+                              <div
+                                className='flex cursor-pointer items-center gap-3 p-3.5'
+                                role='button'
+                                tabIndex={0}
+                                onClick={() => toggleRepoExpanded(repo.mainBoardId)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    toggleRepoExpanded(repo.mainBoardId);
+                                  }
+                                }}
+                                data-track-category='ProjectDetail'
+                                data-track-name='ToggleRepositoryServices'
+                                data-track-metadata={JSON.stringify({
+                                  mainBoardId: repo.mainBoardId,
+                                })}
+                              >
+                                <ChevronRight
+                                  size={16}
+                                  className={cn(
+                                    'shrink-0 text-muted-foreground transition-transform',
+                                    expanded && 'rotate-90',
+                                  )}
+                                />
+                                <RepoDot color={repoColor(repo.mainBoardId)} />
+                                <div className='min-w-0 flex-1'>
+                                  <div className='truncate text-sm font-semibold text-foreground'>
+                                    {repo.name}
+                                  </div>
+                                  {repo.repoUrl && (
+                                    <div className='truncate font-mono text-[11.5px] text-muted-foreground'>
+                                      {repoHostPath(repo.repoUrl)}
+                                    </div>
+                                  )}
+                                </div>
+                                <ProviderBadge repoUrl={repo.repoUrl} />
+                                <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
+                                  {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
+                                </span>
+                                <Button
+                                  variant='outline'
+                                  size='sm'
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    openRepositoryConfig(repo.mainBoardId);
+                                  }}
+                                  data-track-category='ProjectDetail'
+                                  data-track-name='EditRepository'
+                                  data-track-metadata={JSON.stringify({
+                                    mainBoardId: repo.mainBoardId,
+                                  })}
+                                >
+                                  <Edit2 size={14} /> Edit repository
+                                </Button>
                               </div>
-                              {repo.repoUrl && (
-                                <div className='truncate font-mono text-[11.5px] text-muted-foreground'>
-                                  {repoHostPath(repo.repoUrl)}
+
+                              {expanded && (
+                                <div className='border-t border-border px-3.5 pb-3.5 pt-2'>
+                                  <div className='mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                                    Services
+                                  </div>
+                                  <div className='space-y-2'>
+                                    {repo.services.map(service => (
+                                      <div
+                                        key={service.boardId}
+                                        className='flex items-center gap-3 rounded-lg border border-border bg-background p-2.5'
+                                      >
+                                        <span className='min-w-[80px] text-sm font-medium text-foreground'>
+                                          {service.name}
+                                        </span>
+                                        <div className='flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-muted-foreground'>
+                                          <span>
+                                            regex{' '}
+                                            <code className='rounded bg-muted px-1 py-0.5 font-mono text-foreground'>
+                                              {service.regex}
+                                            </code>
+                                          </span>
+                                          {service.envPaths.length > 0 && (
+                                            <span>
+                                              env{' '}
+                                              <code className='rounded bg-muted px-1 py-0.5 font-mono text-foreground'>
+                                                {service.envPaths.join(', ')}
+                                              </code>
+                                            </span>
+                                          )}
+                                          {service.migrationPaths.length > 0 && (
+                                            <span>
+                                              migrations{' '}
+                                              <code className='rounded bg-muted px-1 py-0.5 font-mono text-foreground'>
+                                                {service.migrationPaths.join(', ')}
+                                              </code>
+                                            </span>
+                                          )}
+                                        </div>
+                                        <Button
+                                          variant='outline'
+                                          size='sm'
+                                          onClick={() => openServiceConfig(service.boardId)}
+                                          data-track-category='ProjectDetail'
+                                          data-track-name='EditServiceConfig'
+                                          data-track-metadata={JSON.stringify({
+                                            applicationBoardId: service.boardId,
+                                          })}
+                                        >
+                                          <Edit2 size={14} /> Edit service
+                                        </Button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <Button
+                                    variant='ghost'
+                                    size='sm'
+                                    className='mt-2 text-primary'
+                                    onClick={() => openAddService(repo.mainBoardId)}
+                                    data-track-category='ProjectDetail'
+                                    data-track-name='AddService'
+                                    data-track-metadata={JSON.stringify({
+                                      mainBoardId: repo.mainBoardId,
+                                    })}
+                                  >
+                                    <Plus size={14} /> Add service
+                                  </Button>
                                 </div>
                               )}
                             </div>
-                            <ProviderBadge repoUrl={repo.repoUrl} />
-                            <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
-                              {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
-                            </span>
-                            <Button
-                              variant='outline'
-                              size='sm'
-                              onClick={() => openRepositoryConfig(repo.mainBoardId)}
-                            >
-                              Edit
-                            </Button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </Tabs.Content>
@@ -920,9 +1067,12 @@ const ProjectDetailScreen = (): ReactElement => {
             setBoardIdToEdit(null);
           }}
           onSave={targetBoard => {
-            if (releaseBoardFlow.kind === 'edit-application') {
+            if (
+              releaseBoardFlow.kind === 'edit-application' ||
+              releaseBoardFlow.kind === 'add-application'
+            ) {
               // Application boards inherit their board fields and stages from
-              // the main release board, so application edit ends after config.
+              // the main release board, so service add/edit ends after config.
               setShowReleaseConfigModal(false);
               setReleaseBoardFlow(null);
               return;

@@ -2,7 +2,7 @@
 -- for a release means single-repo legacy mode (range read from the ticket form).
 
 -- CreateTable
-CREATE TABLE "non_zero"."release_ticket_repos" (
+CREATE TABLE "non_zero"."release_repositories" (
     "workspaceId" TEXT NOT NULL,
     "id" TEXT NOT NULL,
     "releaseId" TEXT NOT NULL,
@@ -13,17 +13,17 @@ CREATE TABLE "non_zero"."release_ticket_repos" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3),
 
-    CONSTRAINT "release_ticket_repos_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "release_repositories_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
-CREATE INDEX "release_ticket_repos_releaseId_idx"
-    ON "non_zero"."release_ticket_repos"("releaseId");
+CREATE INDEX "release_repositories_releaseId_idx"
+    ON "non_zero"."release_repositories"("releaseId");
 
 -- CreateIndex
-CREATE INDEX "release_ticket_repos_releaseId_createdAt_id_idx"
-    ON "non_zero"."release_ticket_repos"("releaseId", "createdAt" DESC, "id" DESC);
+CREATE INDEX "release_repositories_releaseId_createdAt_id_idx"
+    ON "non_zero"."release_repositories"("releaseId", "createdAt" DESC, "id" DESC);
 
 -- CreateIndex
-CREATE UNIQUE INDEX "release_ticket_repos_releaseId_mainReleaseBoardId_key"
-    ON "non_zero"."release_ticket_repos"("releaseId", "mainReleaseBoardId");
+CREATE UNIQUE INDEX "release_repositories_releaseId_mainReleaseBoardId_key"
+    ON "non_zero"."release_repositories"("releaseId", "mainReleaseBoardId");

@@ -73,6 +73,24 @@ export const BoardsTable = ({
       });
   };
 
+  // Release-manager mode (caller passes onWorkflowFields): the Boards tab edits
+  // every board *as a board* (workflow & fields) — repository and service config
+  // now live on the Repositories tab. Without onWorkflowFields (List Projects)
+  // the original per-type labels and repo/service routing are preserved.
+  const editBoardLabel = (board: BoardWithStages): string =>
+    board.boardType === BoardType.FLOW
+      ? 'Edit Plan'
+      : onWorkflowFields
+        ? 'Edit Board'
+        : getBoardEditLabel(board, applicationBoardIds);
+  const handleBoardEdit = (board: BoardWithStages): void => {
+    if (onWorkflowFields && board.boardType === BoardType.RELEASE) {
+      onWorkflowFields(board);
+    } else {
+      onEdit(board);
+    }
+  };
+
   // Each release board with its app boards underneath, standalone boards last.
   // Preserves input order of the main release boards so callers control sorting.
   const rows: RowKind[] = useMemo(() => {
@@ -228,9 +246,7 @@ export const BoardsTable = ({
                     <div className='flex items-center justify-end gap-2'>
                       <Button
                         variant='secondary'
-                        onClick={() =>
-                          onWorkflowFields ? onWorkflowFields(mainBoard) : onEdit(mainBoard)
-                        }
+                        onClick={() => handleBoardEdit(mainBoard)}
                         data-testid='edit-board-button'
                         data-track-category='Board'
                         data-track-name='Edit_Board_Table'
@@ -240,9 +256,7 @@ export const BoardsTable = ({
                         })}
                       >
                         <Edit2 size={14} />
-                        {onWorkflowFields
-                          ? 'Workflow & Fields'
-                          : getBoardEditLabel(mainBoard, applicationBoardIds)}
+                        {editBoardLabel(mainBoard)}
                       </Button>
                     </div>
                   </td>
@@ -323,7 +337,7 @@ export const BoardsTable = ({
                     <div className='flex items-center justify-end gap-2'>
                       <Button
                         variant='secondary'
-                        onClick={() => onEdit(board)}
+                        onClick={() => handleBoardEdit(board)}
                         data-testid='edit-board-button'
                         data-track-category='Board'
                         data-track-name='Edit_Board_Table'
@@ -333,7 +347,7 @@ export const BoardsTable = ({
                         })}
                       >
                         <Edit2 size={14} />
-                        {getBoardEditLabel(board, applicationBoardIds)}
+                        {editBoardLabel(board)}
                       </Button>
                     </div>
                   </td>
@@ -416,7 +430,7 @@ export const BoardsTable = ({
                     )}
                     <Button
                       variant='secondary'
-                      onClick={() => onEdit(board)}
+                      onClick={() => handleBoardEdit(board)}
                       data-testid='edit-board-button'
                       data-track-category='Board'
                       data-track-name='Edit_Board_Table'
@@ -426,7 +440,7 @@ export const BoardsTable = ({
                       })}
                     >
                       <Edit2 size={14} />
-                      {getBoardEditLabel(board, applicationBoardIds)}
+                      {editBoardLabel(board)}
                     </Button>
                     {onCopyConfig && (
                       <Button

@@ -237,9 +237,9 @@ export class CommitAnalysisController {
     });
     if (!board) return null;
 
-    if (board.releaseTrackingMode === ReleaseTrackingMode.VERSION) {
+    if (board.releaseTrackingMode !== ReleaseTrackingMode.COMMIT_RANGE) {
       logger.warn(
-        `[ReleaseTrigger] skipped: board ${boardId} releaseTrackingMode=VERSION`,
+        `[ReleaseTrigger] skipped: board ${boardId} releaseTrackingMode=${board.releaseTrackingMode ?? 'null'}`,
       );
       return null;
     }
@@ -303,7 +303,10 @@ export class CommitAnalysisController {
     });
     if (!ticket?.boardId) return { contexts: [], skipped: [] };
 
-    const rows = await db.releaseTicketRepo.findMany({ where: { releaseId: releaseTicketId } });
+    const rows = await db.releaseRepository.findMany({
+      where: { releaseId: releaseTicketId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
 
     const entries =
       rows.length === 0
@@ -459,6 +462,11 @@ export class CommitAnalysisController {
             `[ReleaseTrigger] repo analysis failed for ${label}: ${repoError instanceof Error ? repoError.message : String(repoError)}`,
           );
         }
+      }
+
+      // Every repo failed: propagate as an error instead of falling through to success:true.
+      if (failedRepos.length === contexts.length) {
+        throw new Error(`Analysis failed for: ${failedRepos.join(', ')}`);
       }
 
       const primary = contexts[0];

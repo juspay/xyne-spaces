@@ -19,7 +19,7 @@ router.get('/latest-deployed-commit', commitAnalysisController.getLatestDeployed
 // Re-run commit analysis for an existing release ticket. Used by the "Re-run"
 // button on the Release Detail screen — saves the create-delete-recreate dance
 // when the user iterates on Application regex / paths config.
-router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<void> => {
+router.post('/re-run/:ticketId', authorize('RELEASE-MANAGER', AccessType.READ), async (req: Request, res: Response): Promise<void> => {
   const { ticketId } = req.params;
   const userId = req.user?.id;
   if (!userId) {
@@ -61,7 +61,7 @@ router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<vo
     const newCommitId = String(formValues['newCommitId'] ?? '').trim();
     const branch = String(formValues['branch'] ?? '').trim() || 'main';
 
-    const repoCount = await db.releaseTicketRepo.count({ where: { releaseId: ticketId } });
+    const repoCount = await db.releaseRepository.count({ where: { releaseId: ticketId } });
     if (repoCount === 0 && (!deployedCommitId || !newCommitId)) {
       res.status(400).json({
         error:
@@ -92,8 +92,7 @@ router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<vo
     res.json({ success: result.success, canvasUrl: result.canvasUrl, error: result.error });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const safeTicketId = String(ticketId).replace(/[\r\n]/g, '');
-    logger.error(`[CommitAnalysis] re-run failed for ticket=${safeTicketId}: ${msg}`);
+    logger.error('[CommitAnalysis] re-run failed', { ticketId, error: msg });
     res.status(500).json({ error: msg });
   }
 });
@@ -113,7 +112,7 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
     return;
   }
   try {
-    const repos = await db.releaseTicketRepo.findMany({
+    const repos = await db.releaseRepository.findMany({
       where: { releaseId, workspaceId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
@@ -130,13 +129,12 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
     res.json({ repos, analysisCanvasId });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const safeReleaseId = String(releaseId).replace(/[\r\n]/g, '');
-    logger.error(`[CommitAnalysis] repos fetch failed for release=${safeReleaseId}: ${msg}`);
+    logger.error('[CommitAnalysis] repos fetch failed', { releaseId, error: msg });
     res.status(500).json({ error: msg });
   }
 });
 
-router.post('/test-connection', authorize('RELEASEMANAGER', AccessType.READ), async (req: Request, res: Response): Promise<void> => {
+router.post('/test-connection', authorize('RELEASE-MANAGER', AccessType.READ), async (req: Request, res: Response): Promise<void> => {
   const { repoUrl } = req.body as { repoUrl?: string };
   if (!repoUrl) {
     res.status(400).json({ ok: false, message: 'repoUrl is required' });

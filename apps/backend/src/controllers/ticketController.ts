@@ -543,6 +543,33 @@ export class TicketController {
         return;
       }
 
+      // Validate multi-repo release config before the ticket exists (and the 201
+      // is sent) — an incomplete repo would otherwise be silently dropped when
+      // persisting releaseRepos, quietly covering fewer repos than configured.
+      const rawReleaseRepos = dynamicFields?.['releaseRepos'];
+      if (rawReleaseRepos !== undefined) {
+        let parsedReleaseRepos: unknown;
+        try {
+          parsedReleaseRepos =
+            typeof rawReleaseRepos === 'string' ? JSON.parse(rawReleaseRepos) : rawReleaseRepos;
+        } catch {
+          res.status(400).json({ error: 'releaseRepos is not valid JSON' });
+          return;
+        }
+        if (Array.isArray(parsedReleaseRepos)) {
+          const incomplete = parsedReleaseRepos.filter((r: any) => {
+            const has = (key: string): boolean => Boolean(String(r?.[key] ?? '').trim());
+            return !(has('mainReleaseBoardId') && has('branch') && has('deployedCommit') && has('newCommit'));
+          });
+          if (incomplete.length > 0) {
+            res.status(400).json({
+              error: `Each release repo needs mainReleaseBoardId, branch, deployedCommit and newCommit; ${incomplete.length} repo(s) are incomplete.`,
+            });
+            return;
+          }
+        }
+      }
+
       // Unlimited nesting is reserved for FLOW run graphs. Normal boards keep
       // the existing one-level sub-ticket contract.
       if (parentTicketId) {
@@ -1366,7 +1393,7 @@ export class TicketController {
                 newCommit: String(r?.newCommit ?? '').trim(),
               }))
               .filter((r) => r.mainReleaseBoardId && r.branch && r.deployedCommit && r.newCommit);
-            await new ReleaseRepository().createReleaseTicketRepos(completeRepoRows);
+            await new ReleaseRepository().createReleaseRepositories(completeRepoRows);
           }
         } catch (e) {
           logger.error(`[ReleaseTrigger] failed to persist release repos for ticket ${ticket.xyneId}: ${e instanceof Error ? e.message : String(e)}`);
@@ -1381,7 +1408,7 @@ export class TicketController {
           const missing: string[] = [];
           if (!this.commitAnalysisController) missing.push('commitAnalysisController(not initialized — check Bitbucket env vars)');
           if (!releaseTicket) missing.push(`ticketType(=${ticket.ticketType}, want Release/Hotfix)`);
-          if (!hasRepoRows && !hasScalarRange) missing.push('no complete ReleaseTicketRepo rows and no scalar deployedCommitId/newCommitId/branch');
+          if (!hasRepoRows && !hasScalarRange) missing.push('no complete ReleaseRepository rows and no scalar deployedCommitId/newCommitId/branch');
           logger.warn(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: missing=${missing.join(', ')}`);
         }
 

@@ -137,7 +137,7 @@ export const filterNavItemsByPermission = (
 
     let hasAccess = true;
     if (requiresAccess) {
-      if (resourceName === 'SDLC' || resourceName === 'RELEASEMANAGER') {
+      if (resourceName === 'SDLC' || resourceName === 'RELEASE-MANAGER') {
         // Any tier (READ/WRITE/ADMIN) unlocks the screen — Release Manager is
         // granted per-user, so a READ grant must reveal the tab.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
