@@ -791,7 +791,7 @@ export default class XyneDeskSteps {
     mail.channelAlias = channelAlias;
 
     const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
-      apiContext.post('/api/test/desk/incoming-email', {
+      apiContext.post('/api/test/desk/slack-event', {
         data: {
           channelId: channel.id,
           from: mail.from,
@@ -804,7 +804,7 @@ export default class XyneDeskSteps {
       })
     );
 
-    await assertOkResponse(response, 'Mock Slack Desk message injection');
+    await assertOkResponse(response, 'Mock Slack Desk event injection');
 
     const body = (await response.json()) as Record<string, unknown>;
     const conversation = body.conversation as { conversationId?: string } | undefined;
@@ -812,6 +812,7 @@ export default class XyneDeskSteps {
       typeof body.conversationId === 'string' ? body.conversationId : conversation?.conversationId;
     assert.ok(conversationId, 'Expected Slack message response to include conversationId.');
     mail.conversationId = conversationId;
+    await this.fetchAndStoreDeskTicketDetails(mailAlias);
   }
 
   @Step('waiting for mock Desk email <mailAlias> subject to appear in <selector>')
@@ -887,7 +888,35 @@ export default class XyneDeskSteps {
   @Step('verifying mock Desk email <mailAlias> was ingested')
   public async verifyMockEmailWasIngested(mailAlias: string): Promise<void> {
     const mail = assertFixture(mailAlias);
-    assert.ok(mail.conversationId, `Expected mock Desk email "${mailAlias}" to be ingested.`);
+    const details = await this.fetchAndStoreDeskTicketDetails(mailAlias);
+    assert.ok(details.ticket?.id, `Expected mock Desk email "${mailAlias}" to create a ticket.`);
+    assert.equal(details.emails?.[0]?.subject, mail.subject);
+    assert.equal(details.emails?.[0]?.from, mail.from);
+    assert.equal(details.emails?.[0]?.body, mail.body);
+    if (mail.channelAlias) {
+      const user = getStoredUser(DEFAULT_DESK_API_USER_ALIAS);
+      const channel = user.channels[mail.channelAlias];
+      assert.equal(details.ticket?.channelId, channel?.id);
+    }
+  }
+
+  @Step('verifying Desk channel <channelAlias> does not contain email <mailAlias> for user <userAlias>')
+  public async verifyDeskChannelDoesNotContainEmail(
+    channelAlias: string,
+    mailAlias: string,
+    userAlias: string
+  ): Promise<void> {
+    const mail = assertFixture(mailAlias);
+    const channelId = this.getStoredChannelId(channelAlias, userAlias);
+    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+      apiContext.get(`/api/test/desk/channel/${channelId}/tickets`)
+    );
+    await assertOkResponse(response, 'Desk channel ticket listing');
+    const body = (await response.json()) as { tickets?: Array<{ title?: string }> };
+    assert.ok(
+      !(body.tickets ?? []).some(ticket => ticket.title === mail.subject),
+      `Expected channel "${channelAlias}" not to contain email "${mailAlias}".`
+    );
   }
 
   @Step(
@@ -999,19 +1028,21 @@ export default class XyneDeskSteps {
     const channel = user.channels[channelAlias];
     assert.ok(channel?.id, `Expected stored channel "${channelAlias}" to have an id.`);
     assert.ok(mail.conversationId, `Expected mock mail "${mailAlias}" to have a conversationId.`);
-    const replyRecipients = mail.replyTo?.length ? mail.replyTo : [mail.from];
-
-    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
-      apiContext.post(`/api/email/${mail.conversationId}/reply`, {
-        data: {
-          body: `<p>Thanks, we are checking this from Xyne Desk automation.</p>`,
-          type: 'REPLY',
-          to: replyRecipients,
-        },
-      })
-    );
-
-    await assertOkResponse(response, 'Desk reply API');
+    await this.openStoredDeskChannelUrl(channelAlias, userAlias);
+    const page = testContext.activePage;
+    await page.getByText(mail.subject, { exact: false }).first().click();
+    const pill = page.locator('[data-slot="reply-pill"]').first();
+    if (await pill.isVisible().catch(() => false)) await pill.click();
+    const modeButton = page.locator('[data-track-name="ReplyPillModeDropdown"]').first();
+    if (await modeButton.isVisible().catch(() => false)) {
+      await modeButton.click();
+      await page.getByText('Reply', { exact: true }).last().click();
+    }
+    const editor = page.locator('[contenteditable="true"]').last();
+    await editor.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await editor.fill('Thanks, we are checking this from Xyne Desk automation.');
+    await page.getByRole('button', { name: 'Send email' }).last().click();
+    await page.waitForTimeout(500);
   }
 
   @Step(
@@ -1031,19 +1062,21 @@ export default class XyneDeskSteps {
     assert.ok(channel?.id, `Expected stored channel "${channelAlias}" to have an id.`);
     assert.ok(mail.conversationId, `Expected mock mail "${mailAlias}" to have a conversationId.`);
 
-    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
-      apiContext.post(`/api/email/${mail.conversationId}/reply`, {
-        data: {
-          body: `<p>Reply-all response from Xyne Desk automation.</p>`,
-          type: 'REPLY_ALL',
-          to: [mail.replyTo?.[0] ?? mail.from],
-          cc: mail.cc ?? [],
-          bcc: [],
-        },
-      })
-    );
-
-    await assertOkResponse(response, 'Desk reply-all API');
+    await this.openStoredDeskChannelUrl(channelAlias, userAlias);
+    const page = testContext.activePage;
+    await page.getByText(mail.subject, { exact: false }).first().click();
+    const pill = page.locator('[data-slot="reply-pill"]').first();
+    if (await pill.isVisible().catch(() => false)) await pill.click();
+    const modeButton = page.locator('[data-track-name="ReplyPillModeDropdown"]').first();
+    if (await modeButton.isVisible().catch(() => false)) {
+      await modeButton.click();
+      await page.getByText('Reply all', { exact: true }).last().click();
+    }
+    const editor = page.locator('[contenteditable="true"]').last();
+    await editor.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await editor.fill('Reply-all response from Xyne Desk automation.');
+    await page.getByRole('button', { name: 'Send email' }).last().click();
+    await page.waitForTimeout(500);
   }
 
   @Step('composing mock Desk email <mailAlias> from channel <channelAlias> for user <userAlias>')
@@ -1056,7 +1089,6 @@ export default class XyneDeskSteps {
     assertValidUserAlias(userAlias);
 
     const suffix = buildRandomSuffix();
-    const channelId = this.getStoredChannelId(channelAlias, userAlias);
     const mail: MockDeskMailFixture = {
       alias: mailAlias,
       subject: `Desk compose flow ${suffix}`,
@@ -1070,35 +1102,17 @@ export default class XyneDeskSteps {
       channelAlias,
     };
 
-    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
-      apiContext.post('/api/email/compose', {
-        data: {
-          channelId,
-          to: [mail.to],
-          cc: mail.cc ?? [],
-          bcc: mail.bcc ?? [],
-          subject: mail.subject,
-          body: mail.body,
-        },
-      })
-    );
-
-    await assertOkResponse(response, 'Desk compose API');
-
-    const body = (await response.json()) as {
-      conversationId?: string;
-      ticketId?: string;
-      ticketXyneId?: string;
-      threadId?: string;
-    };
-    assert.ok(body.conversationId, 'Expected Desk compose response to include conversationId.');
-    assert.ok(body.ticketId, 'Expected Desk compose response to include ticketId.');
-    mail.conversationId = body.conversationId;
-    mail.ticketId = body.ticketId;
-    mail.xyneId = body.ticketXyneId;
-    if (body.threadId) {
-      mail.threadId = body.threadId;
-    }
+    await this.openStoredDeskChannelUrl(channelAlias, userAlias);
+    const page = testContext.activePage;
+    await page.getByRole('button', { name: 'Compose' }).first().click();
+    const toInput = page.locator('[data-track-name="EditToField"]').first();
+    await toInput.fill(mail.to);
+    await toInput.press('Enter');
+    await page.getByLabel('Subject').fill(mail.subject);
+    const editor = page.locator('[contenteditable="true"]').last();
+    await editor.fill('New composed Desk mail from automation.');
+    await page.getByRole('button', { name: 'Send email' }).last().click();
+    await page.waitForTimeout(500);
     mockDeskMails.set(mailAlias, mail);
   }
 
