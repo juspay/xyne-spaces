@@ -222,6 +222,8 @@ export const FileViewerPanel: React.FC<{
             onClick={() => {
               handleBackNavigation();
             }}
+            data-track-category='knowledge-base'
+            data-track-name='BACK_FROM_FILE_VIEWER'
           >
             <ArrowLeft size={16} />
             Back to Collections
@@ -255,6 +257,8 @@ export const FileViewerPanel: React.FC<{
               onClick={() => {
                 handleBackNavigation();
               }}
+              data-track-category='knowledge-base'
+              data-track-name='BACK_FROM_FILE_VIEWER'
             >
               <ArrowLeft size={16} />
               Back

@@ -542,13 +542,23 @@ const ScheduledMessageModal = ({
           <div className='flex justify-between pt-4'>
             <div>
               {isEditMode && canEdit && (
-                <Button type='button' onClick={() => void handleDelete()}>
+                <Button
+                  type='button'
+                  onClick={() => void handleDelete()}
+                  data-track-category='scheduled-message'
+                  data-track-name='DELETE_SCHEDULED_MESSAGE'
+                >
                   Delete
                 </Button>
               )}
             </div>
             <div className='flex gap-2'>
-              <Button type='button' onClick={() => onOpenChange(false)}>
+              <Button
+                type='button'
+                onClick={() => onOpenChange(false)}
+                data-track-category='scheduled-message'
+                data-track-name='CLOSE_SCHEDULED_MESSAGE_MODAL'
+              >
                 Cancel
               </Button>
               <Button type='submit' disabled={(!canEdit && isEditMode) || isSubmitting}>

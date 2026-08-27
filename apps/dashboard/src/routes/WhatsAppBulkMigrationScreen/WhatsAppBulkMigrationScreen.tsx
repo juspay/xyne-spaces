@@ -613,6 +613,8 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                     </div>
                     <Button
                       onClick={() => void handleStage()}
+                      data-track-category='whatsapp-migration'
+                      data-track-name='STAGE_MIGRATION'
                       disabled={!canStage}
                       loading={isStaging}
                     >
@@ -705,6 +707,8 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                     <div className='flex items-center gap-3'>
                       <Button
                         onClick={() => void handlePreview()}
+                        data-track-category='whatsapp-migration'
+                        data-track-name='PREVIEW_MIGRATION'
                         disabled={!canPreview}
                         loading={isPreviewing}
                         variant='secondary'
@@ -714,6 +718,8 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                       </Button>
                       <Button
                         onClick={() => void handleStart()}
+                        data-track-category='whatsapp-migration'
+                        data-track-name='START_MIGRATION'
                         disabled={!canStart}
                         loading={isStarting}
                       >
@@ -978,6 +984,8 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                   <Button
                     variant='outline'
                     onClick={() => void handlePurgePreview()}
+                    data-track-category='whatsapp-migration'
+                    data-track-name='PREVIEW_PURGE'
                     disabled={isPurgeLoading || !selectedPurgeSourceId}
                   >
                     {isPurgeLoading ? 'Checking…' : 'Preview Delete'}
@@ -985,6 +993,8 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                   <Button
                     variant='destructive'
                     onClick={() => void handlePurgeExecute()}
+                    data-track-category='whatsapp-migration'
+                    data-track-name='EXECUTE_PURGE'
                     disabled={isPurgeLoading || !selectedPurgeSourceId}
                   >
                     {isPurgeLoading ? 'Deleting…' : 'Delete Imported Messages'}
