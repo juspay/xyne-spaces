@@ -715,6 +715,47 @@ router.post('/desk/incoming-email', async (req, res, next) => {
   }
 });
 
+router.post('/desk/slack-event', async (req, res, next) => {
+  try {
+    if (!requireMockDeskEnabled(res)) return;
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : '';
+    const from = getValidEmail(req.body?.from) ?? '';
+    const subject = typeof req.body?.subject === 'string' ? req.body.subject : '';
+    const body = typeof req.body?.body === 'string' ? req.body.body : '';
+    if (!userId || !workspaceId) {
+      return res.status(401).json({ error: 'Authenticated workspace required' });
+    }
+    if (!channelId || !from || !subject) {
+      return res.status(400).json({ error: 'channelId, from, and subject are required' });
+    }
+    const member = await db.channelParticipant.findUnique({
+      where: { channelId_userId: { channelId, userId } },
+      select: { id: true },
+    });
+    if (!member) return res.status(403).json({ error: 'Not a member of this channel' });
+    const created = await emailService.createConversationWithEmail({
+      channelId,
+      userId,
+      emailSubject: subject,
+      emailBody: body,
+      emailTo: [String(req.body?.to ?? 'slack-channel@slack.example.test')],
+      emailFrom: from,
+      externalThreadId: String(
+        req.body?.threadId ?? `mock-slack-thread-${crypto.randomUUID()}`
+      ),
+      externalMessageId: String(
+        req.body?.messageId ?? `mock-slack-message-${crypto.randomUUID()}`
+      ),
+      emailType: EmailType.DEFAULT,
+    });
+    return res.json({ success: true, ...created });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.get('/desk/ticket/:conversationId', async (req, res, next) => {
   try {
     if (!requireMockDeskEnabled(res)) return;
@@ -799,6 +840,31 @@ router.get('/desk/ticket/:conversationId', async (req, res, next) => {
       emails,
       attachments,
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/desk/channel/:channelId/tickets', async (req, res, next) => {
+  try {
+    if (!requireMockDeskEnabled(res)) return;
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    const { channelId } = req.params;
+    if (!userId || !workspaceId) {
+      return res.status(401).json({ error: 'Authenticated workspace required' });
+    }
+    const member = await db.channelParticipant.findUnique({
+      where: { channelId_userId: { channelId, userId } },
+      select: { id: true },
+    });
+    if (!member) return res.status(403).json({ error: 'Not a member of this channel' });
+    const tickets = await db.ticket.findMany({
+      where: { channelId, workspaceId },
+      select: { id: true, conversationId: true, title: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return res.json({ tickets });
   } catch (error) {
     return next(error);
   }
