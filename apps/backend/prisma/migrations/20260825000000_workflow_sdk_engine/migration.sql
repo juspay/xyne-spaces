@@ -33,7 +33,7 @@ ALTER TABLE "workflow"."workflow_execution_states"
 
 -- CreateTable: stores with no existing counterpart. Bare names inside the
 -- dedicated `workflow` schema, matching the SDK's reference layout.
-CREATE TABLE "workflow"."folders" (
+CREATE TABLE "workflow"."sdk_folders" (
     "id" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -42,10 +42,10 @@ CREATE TABLE "workflow"."folders" (
     "isPublic" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" BIGINT NOT NULL,
 
-    CONSTRAINT "folders_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "sdk_folders_pkey" PRIMARY KEY ("id")
 );
 
-CREATE TABLE "workflow"."step_events" (
+CREATE TABLE "workflow"."sdk_step_events" (
     "id" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "executionId" TEXT NOT NULL,
@@ -54,21 +54,21 @@ CREATE TABLE "workflow"."step_events" (
     "data" TEXT NOT NULL,
     "createdAt" BIGINT NOT NULL,
 
-    CONSTRAINT "step_events_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "sdk_step_events_pkey" PRIMARY KEY ("id")
 );
 
-CREATE TABLE "workflow"."static_data" (
+CREATE TABLE "workflow"."sdk_static_data" (
     "workspaceId" TEXT NOT NULL,
     "workflowId" TEXT NOT NULL,
     "key" TEXT NOT NULL,
     "value" JSONB,
     "updatedAt" BIGINT NOT NULL,
 
-    CONSTRAINT "static_data_pkey" PRIMARY KEY ("workflowId","key")
+    CONSTRAINT "sdk_static_data_pkey" PRIMARY KEY ("workflowId","key")
 );
 
 -- `data` holds AES-encrypted credential material (encrypted by the adapter).
-CREATE TABLE "workflow"."credentials" (
+CREATE TABLE "workflow"."sdk_credentials" (
     "workspaceId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "credType" TEXT NOT NULL,
@@ -77,35 +77,35 @@ CREATE TABLE "workflow"."credentials" (
     "createdAt" BIGINT NOT NULL,
     "updatedAt" BIGINT NOT NULL,
 
-    CONSTRAINT "credentials_pkey" PRIMARY KEY ("workspaceId","name")
+    CONSTRAINT "sdk_credentials_pkey" PRIMARY KEY ("workspaceId","name")
 );
 
-CREATE TABLE "workflow"."webhooks" (
+CREATE TABLE "workflow"."sdk_webhooks" (
     "workflowId" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "path" TEXT NOT NULL,
     "secret" TEXT NOT NULL,
     "createdAt" BIGINT NOT NULL,
 
-    CONSTRAINT "webhooks_pkey" PRIMARY KEY ("workflowId")
+    CONSTRAINT "sdk_webhooks_pkey" PRIMARY KEY ("workflowId")
 );
 
-CREATE TABLE "workflow"."resume_payloads" (
+CREATE TABLE "workflow"."sdk_resume_payloads" (
     "executionId" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "payload" TEXT NOT NULL,
     "createdAt" BIGINT NOT NULL,
 
-    CONSTRAINT "resume_payloads_pkey" PRIMARY KEY ("executionId")
+    CONSTRAINT "sdk_resume_payloads_pkey" PRIMARY KEY ("executionId")
 );
 
-CREATE TABLE "workflow"."workflow_callbacks" (
+CREATE TABLE "workflow"."sdk_workflow_callbacks" (
     "workflowId" TEXT NOT NULL,
     "workspaceId" TEXT NOT NULL,
     "secret" TEXT NOT NULL,
     "createdAt" BIGINT NOT NULL,
 
-    CONSTRAINT "workflow_callbacks_pkey" PRIMARY KEY ("workflowId")
+    CONSTRAINT "sdk_workflow_callbacks_pkey" PRIMARY KEY ("workflowId")
 );
 
 -- Polymorphic per-user grants on sdk resources. Lives in `public` (alongside
@@ -124,27 +124,27 @@ CREATE TABLE "public"."sdk_resource_permissions" (
 );
 
 -- CreateIndex
-CREATE INDEX "folders_workspaceId_idx" ON "workflow"."folders"("workspaceId");
+CREATE INDEX "sdk_folders_workspaceId_idx" ON "workflow"."sdk_folders"("workspaceId");
 
-CREATE INDEX "step_events_executionId_stepName_createdAt_idx"
-  ON "workflow"."step_events"("executionId", "stepName", "createdAt");
+CREATE INDEX "sdk_step_events_executionId_stepName_createdAt_idx"
+  ON "workflow"."sdk_step_events"("executionId", "stepName", "createdAt");
 
-CREATE INDEX "step_events_workspaceId_idx" ON "workflow"."step_events"("workspaceId");
+CREATE INDEX "sdk_step_events_workspaceId_idx" ON "workflow"."sdk_step_events"("workspaceId");
 
-CREATE INDEX "static_data_workspaceId_idx" ON "workflow"."static_data"("workspaceId");
+CREATE INDEX "sdk_static_data_workspaceId_idx" ON "workflow"."sdk_static_data"("workspaceId");
 
-CREATE UNIQUE INDEX "webhooks_path_unique" ON "workflow"."webhooks"("path");
+CREATE UNIQUE INDEX "sdk_webhooks_path_unique" ON "workflow"."sdk_webhooks"("path");
 
-CREATE INDEX "webhooks_workspaceId_idx" ON "workflow"."webhooks"("workspaceId");
+CREATE INDEX "sdk_webhooks_workspaceId_idx" ON "workflow"."sdk_webhooks"("workspaceId");
 
-CREATE INDEX "resume_payloads_workspaceId_idx"
-  ON "workflow"."resume_payloads"("workspaceId");
+CREATE INDEX "sdk_resume_payloads_workspaceId_idx"
+  ON "workflow"."sdk_resume_payloads"("workspaceId");
 
-CREATE UNIQUE INDEX "workflow_callbacks_secret_unique"
-  ON "workflow"."workflow_callbacks"("secret");
+CREATE UNIQUE INDEX "sdk_workflow_callbacks_secret_unique"
+  ON "workflow"."sdk_workflow_callbacks"("secret");
 
-CREATE INDEX "workflow_callbacks_workspaceId_idx"
-  ON "workflow"."workflow_callbacks"("workspaceId");
+CREATE INDEX "sdk_workflow_callbacks_workspaceId_idx"
+  ON "workflow"."sdk_workflow_callbacks"("workspaceId");
 
 CREATE INDEX "sdk_resource_permissions_resourceType_resourceId_idx"
   ON "public"."sdk_resource_permissions"("resourceType", "resourceId");

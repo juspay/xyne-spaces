@@ -13,7 +13,7 @@ import { workflowSdkRuntime, workflowSdkPersistence } from './runtime';
 const WORKER_CONCURRENCY = 3;
 
 export const initWorkflowSdkWorkers = async (): Promise<void> => {
-  const queue = await workflowSdkQueue.getQueue();
+  const queue = workflowSdkQueue.getQueue();
 
   void queue.process('execute', WORKER_CONCURRENCY, async job => {
     const { executionId } = job.data as { executionId: string };

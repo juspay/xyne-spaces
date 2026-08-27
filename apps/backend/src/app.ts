@@ -461,15 +461,13 @@ export class App {
     // callback, public multipart trigger); everything else falls through to
     // the authenticated router. The SDK's own authorizer is the ACL here —
     // aclMiddleware serves the legacy resource model and is deliberately absent.
-    if (config.workflowStudioEnabled) {
-      this.app.use('/api/workflow-studio', workflowSdkPublicRouter);
-      this.app.use(
-        '/api/workflow-studio',
-        authMiddleware.authenticate,
-        requireWorkflowStudioAccess,
-        workflowSdkRouter
-      );
-    }
+    this.app.use('/api/workflow-studio', workflowSdkPublicRouter);
+    this.app.use(
+      '/api/workflow-studio',
+      authMiddleware.authenticate,
+      requireWorkflowStudioAccess,
+      workflowSdkRouter
+    );
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
       '/api/agent-tools-mappings',

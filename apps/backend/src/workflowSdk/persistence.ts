@@ -11,10 +11,9 @@
 // GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES ('SDK'). workspaceId is stamped on
 // every inserted row (house convention: denormalized tenant key).
 //
-// Everything WITHOUT a legacy counterpart lives in the `workflow` schema under
-// bare names: folders, step_events, credentials (AES-encrypted here at the
-// adapter boundary), webhooks, workflow_callbacks, resume_payloads,
-// static_data + public.sdk_resource_permissions for grants.
+// Everything WITHOUT a legacy counterpart is `sdk_`-prefixed: workflow.sdk_*
+// (credentials AES-encrypted here at the adapter boundary) plus
+// public.sdk_resource_permissions for the owner rows.
 
 import { randomUUID } from 'crypto';
 import type { Prisma, Workflow } from '@prisma/client';
@@ -58,10 +57,6 @@ import {
 export { SDK_WORKFLOW_TYPE } from './acl';
 
 const createId = (): string => randomUUID();
-
-// Encode/decode createdAt ms as base64 strings for cursor pagination.
-const encodeCursor = (ms: number): string => Buffer.from(String(ms)).toString('base64');
-const decodeCursor = (cursor: string): number => Number(Buffer.from(cursor, 'base64').toString());
 
 /** Best-effort name extraction from the metadata JSON (kept in workflowName for DB browsing). */
 const nameFromMetadata = (metadata: string | null | undefined): string | null => {
@@ -127,52 +122,32 @@ const toCredentialSummary = (r: {
 
 // ── Tenant-key resolution for the child tables ───────────────────────────────
 //
-// step_events / static_data / webhooks / resume_payloads / workflow_callbacks
-// carry a denormalized `workspaceId`, but the PersistenceAdapter methods that
-// write them receive only an execution or workflow id — the SDK interface fixes
-// those signatures. So the value is resolved from the parent here.
-//
-// Memoized because workspaceId is immutable once a row exists (the tenant
-// extension treats reassignment as an anomaly), and appendStepEvent fires many
-// times for the same execution. Bounded so a long-lived worker cannot grow it
-// without limit.
-const WORKSPACE_CACHE_MAX = 5000;
-const workspaceCache = new Map<string, string>();
-
-const rememberWorkspace = (key: string, workspaceId: string): string => {
-  if (workspaceCache.size >= WORKSPACE_CACHE_MAX) workspaceCache.clear();
-  workspaceCache.set(key, workspaceId);
-  return workspaceId;
-};
+// The sdk_* child tables carry a denormalized `workspaceId`, but the
+// PersistenceAdapter methods that write them receive only an execution or
+// workflow id — the SDK fixes those signatures. So it is resolved from the
+// parent here, on an indexed primary key.
 
 /** Workspace owning a workflow. Throws rather than writing an unscoped row. */
 const workspaceOfWorkflow = async (workflowId: string): Promise<string> => {
-  const key = `w:${workflowId}`;
-  const hit = workspaceCache.get(key);
-  if (hit !== undefined) return hit;
   const row = await db.workflow.findFirst({
     where: { id: workflowId, workflowType: SDK_WORKFLOW_TYPE },
     select: { workspaceId: true },
   });
   if (!row?.workspaceId) throw new Error(`No SDK workflow ${workflowId} to resolve a workspace from`);
-  return rememberWorkspace(key, row.workspaceId);
+  return row.workspaceId;
 };
 
 /**
  * Workspace owning an SDK execution. Doubles as the "this is an SDK execution"
- * assertion every write needs, so callers do not repeat the lookup. Throws
- * rather than writing an unscoped row.
+ * assertion every write needs, so callers do not repeat the lookup.
  */
 const workspaceOfExecution = async (executionId: string): Promise<string> => {
-  const key = `e:${executionId}`;
-  const hit = workspaceCache.get(key);
-  if (hit !== undefined) return hit;
   const row = await db.workflowExecution.findFirst({
     where: { id: executionId, workflowType: SDK_WORKFLOW_TYPE },
     select: { workspaceId: true },
   });
   if (!row?.workspaceId) throw new Error(`Execution ${executionId} not found`);
-  return rememberWorkspace(key, row.workspaceId);
+  return row.workspaceId;
 };
 
 type DayCounts = { COMPLETED: number; FAILED: number; RUNNING: number; CANCELLED: number };
@@ -322,7 +297,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     });
   }
 
-  // ── Folders (workflow.folders) ────────────────────────────────────────
+  // ── Folders (workflow.sdk_folders) ────────────────────────────────────────
 
   async listFolders(filter: XyneFilter): Promise<FolderRecord[]> {
     const rows = await getUserAccessibleFolders(filter);
@@ -393,7 +368,15 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   }
 
   async deleteFolder(id: string): Promise<void> {
-    await db.sdkFolder.deleteMany({ where: { id } });
+    // resourceId is polymorphic and so carries no FK — the grants would outlive
+    // the folder. Folders are the only sdk resource with a hard delete;
+    // credentials revoke in place and workflows have no delete route.
+    await db.$transaction(async tx => {
+      await tx.sdkFolder.deleteMany({ where: { id } });
+      await tx.sdkResourcePermission.deleteMany({
+        where: { resourceType: 'folder', resourceId: id },
+      });
+    });
   }
 
   // ── Execution lifecycle (public.workflow_executions, workflowType='SDK') ──
@@ -620,7 +603,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         workflowType: SDK_WORKFLOW_TYPE,
         workflowId: params.workflowId ? params.workflowId : { in: visibleIds },
         ...(params.status ? { status: params.status } : {}),
-        ...(params.cursor ? { createdAt: { lt: new Date(decodeCursor(params.cursor)) } } : {}),
+        ...(params.cursor ? { createdAt: { lt: new Date(Number(params.cursor)) } } : {}),
         ...(params.folderId ? { workflow: { folderId: params.folderId } } : {}),
       },
       select: {
@@ -652,7 +635,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     });
     const nextCursor =
       hasMore && items.length > 0
-        ? encodeCursor(items[items.length - 1]!.createdAt.getTime())
+        ? String(items[items.length - 1]!.createdAt.getTime())
         : undefined;
     return {
       items,
@@ -821,7 +804,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     return existing ? 'skipped-terminal' : 'not-found';
   }
 
-  // ── Static data (workflow.static_data) ────────────────────────────────
+  // ── Static data (workflow.sdk_static_data) ────────────────────────────────
 
   async getStaticData(workflowId: string, key: string): Promise<unknown> {
     const r = await db.sdkStaticData.findUnique({
@@ -849,7 +832,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     await db.sdkStaticData.deleteMany({ where: { workflowId, key } });
   }
 
-  // ── Step events (workflow.step_events) ────────────────────────────────
+  // ── Step events (workflow.sdk_step_events) ────────────────────────────────
 
   async appendStepEvent(
     executionId: string,
@@ -890,7 +873,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     }));
   }
 
-  // ── Credentials (workflow.credentials) ────────────────────────────────
+  // ── Credentials (workflow.sdk_credentials) ────────────────────────────────
 
   async listCredentials(
     filter: XyneFilter,
@@ -1065,7 +1048,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     };
   }
 
-  // ── Webhook registration (workflow.webhooks) ──────────────────────────
+  // ── Webhook registration (workflow.sdk_webhooks) ──────────────────────────
 
   async storeWebhookPath(workflowId: string, path: string, secret: string): Promise<void> {
     await db.sdkWebhook.upsert({
@@ -1090,7 +1073,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     return r ? { workflowId: r.workflowId, path: r.path, secret: r.secret } : null;
   }
 
-  // ── Resume payload (workflow.resume_payloads) ─────────────────────────
+  // ── Resume payload (workflow.sdk_resume_payloads) ─────────────────────────
 
   async persistResumePayload(executionId: string, payload: ResumePayload): Promise<void> {
     await db.sdkResumePayload.upsert({
@@ -1115,7 +1098,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     });
   }
 
-  // ── Workflow callbacks (workflow.workflow_callbacks) ──────────────────
+  // ── Workflow callbacks (workflow.sdk_workflow_callbacks) ──────────────────
 
   async storeWorkflowCallback(record: WorkflowCallbackRecord): Promise<void> {
     await db.sdkWorkflowCallback.upsert({

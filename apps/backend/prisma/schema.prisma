@@ -434,7 +434,7 @@ model Workflow {
   scheduledAt      DateTime? // Do the deployment only after 12 AM
   // v2 workflow-sdk columns — set only on rows with workflowType='SDK'
   // (the @xyne/workflow-sdk engine, src/workflowSdk). Null on legacy rows.
-  folderId         String? // soft ref to workflow.folders.id
+  folderId         String? // soft ref to workflow.sdk_folders.id
   isPublic         Boolean? // workspace-wide visibility (null = false)
   summary          String? // human-facing readme/summary
   /// The SDK's trigger type (MANUAL / CRON / WEBHOOK / ...). Kept out of
@@ -4655,13 +4655,10 @@ model EntityAlias {
 // below cover only what has no legacy counterpart. Bigint ms timestamps.
 // Managed exclusively by backend/src/workflowSdk/persistence.ts.
 //
-// Table names match the SDK's reference layout (xyne-search): bare inside the
-// dedicated `workflow` Postgres schema — workflow.folders, workflow.credentials,
-// etc. — while the Prisma models keep the Sdk prefix so `db.sdkFolder` stays
-// unambiguous next to CanvasFolder/AppIncomingWebhook in a 190-model schema.
-// The one prefixed table is public.sdk_resource_permissions: it sits in the
-// shared `public` schema, where a bare `resource_permissions` would not be
-// self-describing (xyne-search names it the same way).
+// Every table below is `sdk_`-prefixed, so the Prisma model maps 1:1 onto it
+// (db.sdkFolder -> workflow.sdk_folders). The `workflow` schema is a shared
+// catch-all — api_keys, user_sessions, app_incoming_webhooks and 17 others live
+// there — so a bare `credentials` or `webhooks` would read as the app's.
 // ─────────────────────────────────────────────────────────────────────────────
 
 model SdkFolder {
@@ -4674,7 +4671,7 @@ model SdkFolder {
   createdAt   BigInt
 
   @@index([workspaceId])
-  @@map("folders")
+  @@map("sdk_folders")
   @@schema("workflow")
 }
 
@@ -4691,7 +4688,7 @@ model SdkStepEvent {
 
   @@index([executionId, stepName, createdAt])
   @@index([workspaceId])
-  @@map("step_events")
+  @@map("sdk_step_events")
   @@schema("workflow")
 }
 
@@ -4706,7 +4703,7 @@ model SdkStaticData {
 
   @@id([workflowId, key])
   @@index([workspaceId])
-  @@map("static_data")
+  @@map("sdk_static_data")
   @@schema("workflow")
 }
 
@@ -4722,21 +4719,21 @@ model SdkCredential {
   updatedAt   BigInt
 
   @@id([workspaceId, name])
-  @@map("credentials")
+  @@map("sdk_credentials")
   @@schema("workflow")
 }
 
 model SdkWebhook {
   workflowId  String @id
   workspaceId String // denormalized tenant key (stamped on insert, from the workflow)
-  path        String @unique(map: "webhooks_path_unique")
+  path        String @unique(map: "sdk_webhooks_path_unique")
   secret      String
   createdAt   BigInt
 
   workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
-  @@map("webhooks")
+  @@map("sdk_webhooks")
   @@schema("workflow")
 }
 
@@ -4749,20 +4746,20 @@ model SdkResumePayload {
   execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
-  @@map("resume_payloads")
+  @@map("sdk_resume_payloads")
   @@schema("workflow")
 }
 
 model SdkWorkflowCallback {
   workflowId  String @id
   workspaceId String // denormalized tenant key (stamped on insert, from the workflow)
-  secret      String @unique(map: "workflow_callbacks_secret_unique")
+  secret      String @unique(map: "sdk_workflow_callbacks_secret_unique")
   createdAt   BigInt
 
   workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
-  @@map("workflow_callbacks")
+  @@map("sdk_workflow_callbacks")
   @@schema("workflow")
 }
 

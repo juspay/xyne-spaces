@@ -20,7 +20,7 @@ export class BullSchedulerAdapter implements SchedulerAdapter {
     // Remove-then-add: repeatables are keyed by (jobId, cron, tz), so changing
     // the expression would ADD a second schedule instead of replacing it.
     await this.unschedule(workflowId);
-    const queue = await workflowSdkQueue.getQueue();
+    const queue = workflowSdkQueue.getQueue();
     await queue.add(
       'cron-tick',
       { workflowId },
@@ -38,7 +38,7 @@ export class BullSchedulerAdapter implements SchedulerAdapter {
   }
 
   async unschedule(workflowId: string): Promise<void> {
-    const queue = await workflowSdkQueue.getQueue();
+    const queue = workflowSdkQueue.getQueue();
     const repeatables = await queue.getRepeatableJobs();
     for (const job of repeatables.filter(j => j.id === cronJobId(workflowId))) {
       await queue.removeRepeatableByKey(job.key);

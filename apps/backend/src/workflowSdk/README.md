@@ -15,13 +15,14 @@ in the dashboard (`/:workspaceId/workflow-studio`).
   the same mechanism 'Automations' uses;
 - automation/legacy queries all filter their own `workflowType`, so they never see SDK rows.
 
-Stores with no legacy counterpart live in the dedicated `workflow` Postgres
-schema under bare names (matching the SDK's reference layout in xyne-search):
-`workflow.folders`, `step_events`, `credentials`, `webhooks`,
-`workflow_callbacks`, `resume_payloads`, `static_data` — plus
-`public.sdk_resource_permissions` for grants, which keeps its prefix because it
-sits in the shared `public` schema. Prisma models keep the `Sdk` prefix
-(`db.sdkFolder` → `workflow.folders`) to stay unambiguous in a 190-model schema.
+Stores with no legacy counterpart are all `sdk_`-prefixed, so `db.sdkFolder` →
+`workflow.sdk_folders` maps 1:1: `sdk_folders`, `sdk_step_events`,
+`sdk_static_data`, `sdk_credentials`, `sdk_webhooks`, `sdk_resume_payloads`,
+`sdk_workflow_callbacks` in the `workflow` schema, plus
+`public.sdk_resource_permissions`. The prefix is not decorative — `workflow` is
+a shared catch-all holding 20 unrelated tables (`api_keys`, `user_sessions`,
+`app_incoming_webhooks`, ...), so a bare `credentials` or `webhooks` there would
+read as the app's.
 
 | File | Role |
 |---|---|

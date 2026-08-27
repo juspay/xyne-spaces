@@ -30,16 +30,11 @@ const requiredAccessFor = (method: string): AccessType => {
   }
 };
 
-// The row is created by the workflow-sdk migration and never changes id.
-let resourceIdCache: string | null = null;
-
 const workflowStudioResourceId = async (): Promise<string | null> => {
-  if (resourceIdCache) return resourceIdCache;
   const resource = await DatabaseClient.getInstance().resource.findUnique({
     where: { name: WORKFLOW_STUDIO_RESOURCE },
     select: { id: true },
   });
-  if (resource) resourceIdCache = resource.id;
   return resource?.id ?? null;
 };
 

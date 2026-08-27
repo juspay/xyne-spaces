@@ -5,7 +5,6 @@
 
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { workflowSdkRuntime } from './runtime';
 import { MESSAGE_RECEIVED_EVENT } from './triggers/message-received.trigger';
 
@@ -24,9 +23,6 @@ export interface MessageReceivedEvent {
  * which the runtime calls only for workflows that actually listen.
  */
 export async function dispatchMessageReceived(message: MessageReceivedEvent): Promise<void> {
-  // Gated here, not at the call sites: when Studio is off the cost of a message
-  // must be a boolean, not a channel read.
-  if (!config.workflowStudioEnabled) return;
   try {
     const channel = await db.channel
       .findUnique({
