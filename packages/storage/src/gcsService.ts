@@ -158,6 +158,7 @@ export class GCSService {
       });
 
       await new Promise<void>((resolve, reject) => {
+        stream.on('error', (err) => { writeStream.destroy(); reject(err); });
         stream
           .pipe(writeStream)
           .on('finish', resolve)
@@ -235,6 +236,7 @@ export class GCSService {
       });
 
       await new Promise<void>((resolve, reject) => {
+        stream.on('error', (err) => { writeStream.destroy(); reject(err); });
         stream
           .pipe(writeStream)
           .on('finish', resolve)
