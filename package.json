@@ -205,8 +205,6 @@
       }
     },
     "overrides": {
-      "@earendil-works/pi-agent-core": "0.80.7",
-      "@earendil-works/pi-ai": "0.80.7",
       "@excalidraw/excalidraw": "0.18.1",
       "@excalidraw/excalidraw>react": "^19.2.1",
       "@excalidraw/excalidraw>react-dom": "^19.2.1",

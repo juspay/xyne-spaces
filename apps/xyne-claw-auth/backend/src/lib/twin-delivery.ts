@@ -1,4 +1,5 @@
 import { CONFIG } from "../config.js";
+import { errMsg } from "./errors.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "./mention-transform.js";
 import { buildSpacesMentionLookupsDb } from "./mention-lookups.js";
 import { createLogger } from "../logger.js";
@@ -138,7 +139,7 @@ export async function executeTwinApprovalDelivery(
       markdownText = await resolveUnboundMentions(finalContent, buildSpacesMentionLookupsDb(ctx.workspaceId));
     } catch (err) {
       log.warn(
-        `[twin-delivery] mention resolution failed — posting raw: ${err instanceof Error ? err.message : String(err)}`,
+        `[twin-delivery] mention resolution failed — posting raw: ${errMsg(err)}`,
       );
     }
     markdownText = expandSpacesMentions(markdownText);

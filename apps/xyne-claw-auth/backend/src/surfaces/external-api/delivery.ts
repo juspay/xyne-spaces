@@ -2,6 +2,7 @@ import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 import { decryptSurfaceSecret } from "../../lib/surface-resolver.js";
 import { postExternalCallback } from "./api.js";
+import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
 import {
   RETRY_DELAYS_MS,
   MAX_DELIVERY_ATTEMPTS,
@@ -17,7 +18,44 @@ export interface CallbackOriginConfig {
   selfUrl: string;
   internalUrl?: string;
   xyneClawUrl: string;
+  /** Spaces' own in-cluster backend origin(s) — automation result callbacks
+   *  (/api/internal/automations/claw-callback) target these and REQUIRE the
+   *  s2s key. Spaces advertises its own callback host, which may not match a
+   *  single env exactly (e.g. xyne-backend vs xyne-backend-02), so the
+   *  cluster-internal host check below is the real backstop. */
+  spacesInternalUrl?: string;
+  spacesBackendUrl?: string;
   nodeEnv?: string;
+}
+
+/**
+ * A host that can only exist INSIDE the cluster — a Kubernetes service DNS name
+ * or a private/link-local IP literal. Such a host is never an external
+ * integrator, so a callback to it is a trusted internal delivery (gets the s2s
+ * key). External SSRF-to-private is handled separately by assertSafeOutboundUrl
+ * on the genuinely-external delivery path; this predicate only classifies the
+ * trusted Spaces/claw callback targets.
+ */
+function isClusterInternalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    host.endsWith(".svc.cluster.local") ||
+    host.endsWith(".svc") ||
+    host.endsWith(".cluster.local")
+  ) {
+    return true;
+  }
+  // Private / link-local IPv4 literals.
+  if (
+    /^10\./.test(host) ||
+    /^127\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export interface ExternalResultCallbackConfig {
@@ -47,18 +85,32 @@ export function isInternalCallbackOrigin(
     selfUrl: CONFIG.selfUrl,
     internalUrl: CONFIG.internalUrl,
     xyneClawUrl: CONFIG.xyneClawUrl,
+    spacesInternalUrl: CONFIG.spacesInternalUrl,
+    spacesBackendUrl: CONFIG.spacesBackendUrl,
     ...(process.env["NODE_ENV"] ? { nodeEnv: process.env["NODE_ENV"] } : {}),
   },
 ): boolean {
   const candidate = parseUrl(callbackUrl);
   if (!candidate) return false;
 
-  const knownOrigins = [config.selfUrl, config.internalUrl, config.xyneClawUrl]
+  const knownOrigins = [
+    config.selfUrl,
+    config.internalUrl,
+    config.xyneClawUrl,
+    config.spacesInternalUrl,
+    config.spacesBackendUrl,
+  ]
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .map(parseUrl)
     .filter((value): value is URL => value !== null)
     .map((value) => value.origin);
   if (knownOrigins.includes(candidate.origin)) return true;
+
+  // Any in-cluster host is a trusted internal target — covers Spaces backend
+  // service-name drift (xyne-backend vs xyne-backend-02) without enumerating
+  // every replica/service in env. This is the fix for automation result
+  // callbacks silently losing the s2s key and 401ing on Spaces' side.
+  if (isClusterInternalHost(candidate.hostname)) return true;
 
   if (config.nodeEnv === "development") {
     const hostname = candidate.hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -93,6 +145,13 @@ export async function sendExternalResultCallback(
 ): Promise<"delivered" | "refused" | "failed"> {
   if (!isAllowedExternalCallbackUrl(callback.url)) {
     log.warn(`[external-callback] refused unsafe callback target session=${payload.sessionId}`);
+    return "refused";
+  }
+
+  try {
+    await assertSafeOutboundUrl(callback.url);
+  } catch {
+    log.warn(`[external-callback] refused callback target resolving to a blocked address session=${payload.sessionId}`);
     return "refused";
   }
 

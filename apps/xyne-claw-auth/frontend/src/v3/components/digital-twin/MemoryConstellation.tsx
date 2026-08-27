@@ -5,7 +5,7 @@ import { SUBSYSTEM_LABELS } from "./ProposalModal";
 /**
  * Canvas-rendered memory constellation. Nodes are memories; edges are links we
  * can derive client-side: "topic" (same subsystem) and "temporal" (created
- * close in time). Force-directed layout; scroll to zoom, drag to pan, hover to
+ * close in time). Force-directed layout; pinch to zoom, drag to pan, hover to
  * highlight, click to select. Neutral, muted palette.
  *
  * Interaction note: the wheel handler is attached NATIVELY with {passive:false}
@@ -27,13 +27,84 @@ export const SUBSYSTEM_COLOR: Record<string, string> = {
   docs: "#eab308",          // yellow
 };
 export const DEFAULT_COLOR = "#94a3b8";
-// Hindsight's real edge types — muted so they don't fight the node colours.
-const LINK_COLOR = { semantic: "#9a8fc0", temporal: "#7fa890", entity: "#c2a15e" } as const;
-const LINK_TYPES = ["semantic", "temporal", "entity"] as const;
-type LinkType = (typeof LINK_TYPES)[number];
-const LINK_LABEL: Record<LinkType, string> = { semantic: "semantic", temporal: "temporal", entity: "entity" };
-function normalizeLinkType(t: string): LinkType {
-  return t === "temporal" ? "temporal" : t === "entity" ? "entity" : "semantic";
+// Hindsight's full edge vocabulary — every value its memory_links.link_type
+// CHECK constraint allows, each mapped 1:1 so nothing is silently folded into a
+// neighbouring type. `other` is a deliberate catch-all: if a future Hindsight
+// adds an eighth type it shows up as unknown rather than being mislabelled as
+// semantic, which is exactly the bug the old two-branch fallback had.
+//
+// The four causal types share a warm family so they read as related at a glance
+// while staying individually identifiable. In practice only `caused_by` occurs
+// today — the legend hides types with no edges, so the unused ones cost nothing.
+export const LINK_COLOR = {
+  semantic: "#9a8fc0",
+  temporal: "#7fa890",
+  entity: "#c2a15e",
+  causes: "#c08f8f",
+  caused_by: "#c08f8f",
+  enables: "#c08f8f",
+  prevents: "#c08f8f",
+  other: DEFAULT_COLOR,
+} as const;
+/**
+ * Edge colour at rest, before a node is hovered or selected. Hardcoded rather
+ * than read from a theme token so it can be tuned on its own — the design
+ * system's greys are sized for text and borders, not for thousands of hairlines
+ * at low alpha.
+ *
+ * Two values because one grey cannot be right on both a white and a near-black
+ * canvas: on light it has to be dark enough to survive the idle alpha, on dark
+ * it has to be light enough. Tune these directly.
+ */
+export const EDGE_IDLE_COLOR = {
+  light: "#5a5a5a3c",
+  dark: "#a3a3a32e",
+} as const;
+
+/**
+ * Idle edge opacity, scaled to how many edges are actually on screen.
+ *
+ * Overlapping semi-transparent strokes accumulate: at a fixed alpha, 200 edges
+ * read as a faint sketch while 5,000 read as a solid wash, because what the eye
+ * registers is roughly count × alpha. Holding that product near-constant keeps
+ * a sparse graph legible and a dense one from filling in — so a small bank gets
+ * darker lines and a large one gets lighter ones, automatically.
+ *
+ * sqrt rather than 1/n: strictly inverse over-corrects and makes big graphs
+ * vanish. Clamped at both ends so neither extreme runs away. Tune freely —
+ * `base` is the opacity at exactly `refCount` edges. Calibrated so a dense
+ * ~5.8k-edge bank lands on the 0.14 that was hand-tuned against the current
+ * palette — this only *raises* opacity for sparser graphs, it does not change
+ * how a large one already looks.
+ */
+const EDGE_ALPHA = { base: 0.14, refCount: 5800, min: 0.08, max: 0.42 } as const;
+
+export function idleEdgeAlpha(visibleEdgeCount: number): number {
+  if (visibleEdgeCount <= 0) return EDGE_ALPHA.max;
+  return clamp(
+    EDGE_ALPHA.base * Math.sqrt(EDGE_ALPHA.refCount / visibleEdgeCount),
+    EDGE_ALPHA.min,
+    EDGE_ALPHA.max,
+  );
+}
+
+export const LINK_TYPES = [
+  "semantic", "temporal", "entity", "causes", "caused_by", "enables", "prevents", "other",
+] as const;
+export type LinkType = (typeof LINK_TYPES)[number];
+export const LINK_LABEL: Record<LinkType, string> = {
+  semantic: "semantic",
+  temporal: "temporal",
+  entity: "entity",
+  causes: "causes",
+  caused_by: "caused by",
+  enables: "enables",
+  prevents: "prevents",
+  other: "other",
+};
+const KNOWN_TYPES = new Set<string>(LINK_TYPES);
+export function normalizeLinkType(t: string): LinkType {
+  return KNOWN_TYPES.has(t) && t !== "other" ? (t as LinkType) : "other";
 }
 
 /** A raw edge from Hindsight's memory graph, keyed by memory id. */
@@ -173,9 +244,19 @@ interface Props {
   /** Timeline cutoff (epoch ms): only memories created at/before this show — newer
    *  ones fade OUT. Undefined = all visible. Layout never reflows when this changes. */
   visibleUntil?: number;
+  /** Hidden edge types. Pass with onHiddenTypesChange to let a parent (the
+   *  filter rail) own the legend; omit for self-managed toggles. */
+  hiddenTypes?: Set<LinkType>;
+  onHiddenTypesChange?: (next: Set<LinkType>) => void;
+  /** Draw the in-canvas subsystem + edge-type legends. Off when the parent
+   *  renders them somewhere with more room. */
+  showLegends?: boolean;
 }
 
-export function MemoryConstellation({ memories, links, entitiesById, selectedId, onSelect, onNeighbors, expanded, onToggleExpand, visibleUntil }: Props) {
+export function MemoryConstellation({
+  memories, links, entitiesById, selectedId, onSelect, onNeighbors, expanded, onToggleExpand, visibleUntil,
+  hiddenTypes: hiddenTypesProp, onHiddenTypesChange, showLegends = true,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef({ scale: 1, ox: 0, oy: 0 });
@@ -183,13 +264,23 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
   // Tooltip node — set only after a short hover dwell (see the delay effect below).
   const [tipIdx, setTipIdx] = useState<number | null>(null);
   // Edge-type visibility toggles (temporal is the noisiest → hidden by default).
-  const [hiddenTypes, setHiddenTypes] = useState<Set<LinkType>>(() => new Set<LinkType>(["temporal"]));
+  // Edge-type visibility. Controlled when the parent passes hiddenTypes (the
+  // filter rail owns the legend); otherwise self-managed so the component still
+  // works standalone. All types start visible.
+  const [ownHidden, setOwnHidden] = useState<Set<LinkType>>(() => new Set<LinkType>());
+  const hiddenTypes = hiddenTypesProp ?? ownHidden;
+  const setHiddenTypes = (fn: (prev: Set<LinkType>) => Set<LinkType>): void => {
+    if (onHiddenTypesChange) onHiddenTypesChange(fn(hiddenTypes));
+    else setOwnHidden(fn);
+  };
   const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const drawRef = useRef<() => void>(() => {});
 
   const { nodes, edges } = useMemo(() => {
     const g = buildGraph(memories, links);
-    layout(g.nodes, g.edges);
+    // 1.6 spread: at the default the clusters packed into a single blob and
+    // individual nodes were indistinguishable.
+    layout(g.nodes, g.edges, 1.6);
     for (const n of g.nodes) { n.cx = n.x; n.cy = n.y; } // start settled (no intro animation)
     return g;
   }, [memories, links]);
@@ -219,6 +310,8 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
   }, [nodes]);
   // Live mirrors so the RAF loop reads current hover/selection without re-binding.
   const hoverRef = useRef<number | null>(null); hoverRef.current = hover;
+  // Read inside the native wheel listener, which is registered once.
+  const expandedRef = useRef(expanded); expandedRef.current = expanded;
   const selIdxRef = useRef<number | null>(null);
   selIdxRef.current = selectedId ? idToIndex.get(selectedId) ?? null : null;
 
@@ -234,7 +327,11 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
       const cur = rel.get(other);
       if (!cur || e.weight > cur.weight) rel.set(other, { type: e.type, weight: e.weight });
     }
-    const order: Record<LinkType, number> = { semantic: 0, temporal: 1, entity: 2 };
+    const order: Record<LinkType, number> = {
+      semantic: 0, temporal: 1, entity: 2,
+      causes: 3, caused_by: 4, enables: 5, prevents: 6,
+      other: 7,
+    };
     const arr = [...rel.entries()].sort((x, y) =>
       x[1].type !== y[1].type ? order[x[1].type] - order[y[1].type] : y[1].weight - x[1].weight,
     );
@@ -272,7 +369,9 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
     // ×0.82 → a slightly more zoomed-out default with breathing room.
     // Lower floor (0.05) so a DENSE graph (hundreds of memories) actually fits
     // the viewport instead of bottoming out zoomed-in and overflowing.
-    const scale = (clamp(Math.min(W / (gw + 160), H / (gh + 160)), 0.05, 2.4) * 0.82) || 1;
+    // 0.9 rather than 0.82: the layout now carries its own breathing room via
+    // the wider spread, so the fit does not need to double up on margin.
+    const scale = (clamp(Math.min(W / (gw + 140), H / (gh + 140)), 0.05, 2.4) * 0.9) || 1;
     viewRef.current = { scale, ox: W / 2 - ((minX + maxX) / 2) * scale, oy: H / 2 - ((minY + maxY) / 2) * scale };
     drawRef.current();
   }, [nodes]);
@@ -299,15 +398,24 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
     const { hoverT, dimT, visT } = animRef.current;
     // Theme-adaptive ring colour — reads the live CSS var (light vs dark).
     const fg = getComputedStyle(wrap).getPropertyValue("--color-xyne-fg-primary").trim() || "#101828";
+    // Edges rest in one neutral grey and only take their type colour around the
+    // active node. With thousands of links, five hues at once is noise: the
+    // colour means nothing until you have asked a question of a specific node,
+    // and then it answers "how is this connected?" precisely where you looked.
+    // A light foreground means a dark canvas, so the greys swap.
+    const idleEdge = isLightColor(fg) ? EDGE_IDLE_COLOR.dark : EDGE_IDLE_COLOR.light;
 
+    // Density-adaptive: recomputed per frame because hiding an edge type (or the
+    // timeline) changes how many are actually drawn.
+    const idleAlpha = idleEdgeAlpha(visibleEdges.length);
     for (const e of visibleEdges) {
       const A = nodes[e.a]!, B = nodes[e.b]!;
       const vis = Math.min(visT[e.a] ?? 1, visT[e.b] ?? 1); // edge only as visible as its dimmer endpoint
       if (vis < 0.02) continue;
       const lit = active != null && (e.a === active || e.b === active);
-      ctx.strokeStyle = LINK_COLOR[e.type];
+      ctx.strokeStyle = lit ? LINK_COLOR[e.type] : idleEdge;
       // Stronger fade of unrelated edges when a node is active; × timeline visibility.
-      ctx.globalAlpha = (active == null ? 0.14 : lit ? 0.7 : 0.02) * vis;
+      ctx.globalAlpha = (active == null ? idleAlpha : lit ? 0.7 : 0.02) * vis;
       ctx.lineWidth = lit ? 1.4 : 0.8;
       ctx.beginPath(); ctx.moveTo(sx(A.cx), sy(A.cy)); ctx.lineTo(sx(B.cx), sy(B.cy)); ctx.stroke();
     }
@@ -423,18 +531,30 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
   // fit whenever the graph changes
   useEffect(() => { fit(); }, [fit]);
 
-  // native, non-passive wheel → real zoom-to-cursor without page scroll
+  // Native, non-passive wheel. PINCH zooms; a plain scroll is left alone so it
+  // scrolls the page.
+  //
+  // The canvas is tall enough that the memory list sits below the fold, so
+  // swallowing every wheel event to zoom made the page feel stuck — you had to
+  // find a gap beside the graph to scroll past it. A trackpad pinch arrives as
+  // a wheel event with ctrlKey set (and ctrl/⌘+wheel is the same gesture on a
+  // mouse), which separates the two cleanly. preventDefault is still required
+  // on the zoom path, otherwise the browser zooms the whole page instead.
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      // Fullscreen has nothing behind it to scroll, so a plain wheel zooms
+      // there — the reason to yield the gesture only exists inline.
+      const pinch = e.ctrlKey || e.metaKey;
+      if (!pinch && !expandedRef.current) return; // plain scroll → scroll the panel
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       const v = viewRef.current;
-      // More responsive wheel (0.0012 → 0.002) and a much lower min-zoom
-      // (0.15 → 0.05) so you can zoom out far enough to see the whole graph.
-      const factor = Math.exp(-e.deltaY * 0.002);
+      // Pinch produces much smaller deltas than a wheel notch, so it needs a
+      // larger coefficient to feel 1:1; a real wheel keeps the old rate.
+      const factor = Math.exp(-e.deltaY * (e.ctrlKey && !e.metaKey ? 0.01 : 0.002));
       const ns = clamp(v.scale * factor, 0.05, 6);
       const wx = (mx - v.ox) / v.scale, wy = (my - v.oy) / v.scale;
       v.ox = mx - wx * ns; v.oy = my - wy * ns; v.scale = ns;
@@ -511,7 +631,7 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
       </div>
 
       {/* Subsystem colour legend — only the buckets actually present. */}
-      {presentSubsystems.length > 0 && (
+      {showLegends && presentSubsystems.length > 0 && (
         <div className="pointer-events-none absolute left-[12px] top-[10px] flex max-w-[56%] flex-wrap gap-x-[10px] gap-y-[3px]">
           {presentSubsystems.map((s) => (
             <span key={s} className="flex items-center gap-[4px] font-mono text-[10px] text-xyne-fg-muted">
@@ -552,10 +672,10 @@ export function MemoryConstellation({ memories, links, entitiesById, selectedId,
         {visibleUntil == null
           ? `${nodes.length} memories`
           : `${nodes.filter((n) => n.ts <= visibleUntil).length} of ${nodes.length} memories`}{" "}
-        · {visibleEdges.length} links · scroll zoom / drag pan / click details
+        · {visibleEdges.length} links · {expanded ? "scroll" : "pinch"} zoom / drag pan / click details
       </div>
       {/* Edge-type legend doubles as toggles — click to show/hide a link type. */}
-      <div className="absolute bottom-[10px] right-[12px] flex items-center gap-[10px] font-mono text-[10px]">
+      <div className={`absolute bottom-[10px] right-[12px] flex items-center gap-[10px] font-mono text-[10px] ${showLegends ? "" : "hidden"}`}>
         {LINK_TYPES.map((t) => {
           const off = hiddenTypes.has(t);
           return (

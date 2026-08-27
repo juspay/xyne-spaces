@@ -4,6 +4,11 @@
  */
 
 import { CONFIG } from "../config.js";
+import { SpacesApiError } from "../mcp/servers/xyne-spaces-client.js";
+
+// Re-export so callers of these helpers can branch on `err.status` without
+// reaching across into the client module.
+export { SpacesApiError };
 
 export async function spacesAppFetch(
   path: string,
@@ -24,7 +29,7 @@ export async function spacesAppFetch(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+    throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
   }
 
   return res.json();
@@ -42,7 +47,7 @@ export async function spacesAppFetchGet(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+    throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
   }
   return res.json();
 }
@@ -65,7 +70,7 @@ export async function spacesAppFetchMultipart(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+    throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
   }
 
   return res.json();

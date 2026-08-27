@@ -381,7 +381,17 @@ type AttemptResult =
       rawResponse: string;
       meta: AttemptMeta;
     }
-  | { ok: false; error: string; retryable: boolean; rawResponse?: string; meta: AttemptMeta };
+  | {
+      ok: false;
+      error: string;
+      retryable: boolean;
+      rawResponse?: string;
+      meta: AttemptMeta;
+      /** Present on "all-ungrounded": what the model emitted, so the caller can
+       *  fall back to batch-level provenance instead of losing the batch. */
+      emitted?: UserMemoryCuratorEmittedCandidate[];
+      salvageable?: UserMemoryCuratorEmittedCandidate[];
+    };
 
 /** One LLM call + parse + server-side filter. Never throws — always resolves to
  *  an AttemptResult so the retry loop can decide whether to try again. */
@@ -513,6 +523,10 @@ async function runDistillAttempt(
   }
 
   const recordIds = new Set(batch.map((r) => r.id));
+  /** Cited ids that match no record in this batch — kept for diagnostics, since
+   *  "the model cited something" and "the model cited OUR ids" are very
+   *  different failures and the logs could not previously tell them apart. */
+  const unknownCitedIds = new Set<string>();
   const subsystemSet = new Set<UserMemorySubsystem>(USER_MEMORY_SUBSYSTEMS);
   const out: UserMemoryCandidatePayload[] = [];
   const emitted: UserMemoryCuratorEmittedCandidate[] = [];
@@ -558,6 +572,7 @@ async function runDistillAttempt(
     }
     const validIds = groundedOnIds.filter((id) => recordIds.has(id));
     if (validIds.length === 0) {
+      for (const id of groundedOnIds) unknownCitedIds.add(id);
       emitted.push({ ...base, dropReason: "ungrounded" });
       continue;
     }
@@ -570,6 +585,29 @@ async function runDistillAttempt(
     };
     out.push(kept);
     emitted.push({ ...base, verdict: "kept", groundedOnIds: validIds });
+  }
+
+  // Every candidate the model produced was otherwise valid but cited ids we do
+  // not recognise. That is a CITATION failure, not "the batch had nothing worth
+  // remembering" — and it used to look identical to the latter: ok:true with an
+  // empty list, no retry, a whole batch of good candidates silently gone.
+  // Surface it as retryable so the loop gets another attempt.
+  const ungroundedCount = emitted.filter((e) => e.dropReason === "ungrounded").length;
+  if (out.length === 0 && ungroundedCount > 0) {
+    log.warn(
+      `[user-memory-curator] all ${ungroundedCount} candidate(s) cited unknown record ids userId=${userId} ` +
+        `cited=[${Array.from(unknownCitedIds).slice(0, 5).join(", ")}] ` +
+        `expected=[${Array.from(recordIds).slice(0, 3).join(", ")}]`,
+    );
+    return {
+      ok: false,
+      error: "all-ungrounded",
+      retryable: true,
+      rawResponse: raw,
+      meta,
+      emitted,
+      salvageable: out.length === 0 ? emitted.filter((e) => e.dropReason === "ungrounded") : [],
+    };
   }
 
   return { ok: true, candidates: out, emitted, rawResponse: raw, meta };
@@ -672,12 +710,51 @@ export async function distillUserMemory(
   // Exhausted retries (or a permanent failure). Surface the last attempt's
   // context + the failing stage in the trace.
   const f = last as Extract<AttemptResult, { ok: false }>;
+
+  // SALVAGE: the model kept producing good candidates but never cited ids we
+  // recognise. Dropping the whole batch loses real memories over a citation
+  // formatting problem, so fall back to BATCH-level provenance: ground each
+  // candidate on every record in the batch. Coarser than per-record grounding
+  // (the reason it is a last resort, not the default), but the candidate
+  // demonstrably came from these records, and sourceRefs still resolve — which
+  // is what downstream event-timestamp picking needs.
+  if (f.error === "all-ungrounded" && f.salvageable?.length) {
+    const batchIds = batch.map((r) => r.id);
+    const salvaged: UserMemoryCandidatePayload[] = f.salvageable
+      .filter((e) => e.text && typeof e.subsystem === "string")
+      .map((e) => ({
+        text: e.text,
+        subsystem: e.subsystem as UserMemorySubsystem,
+        signalScore: Math.min(1, Math.max(0, e.signalScore ?? 0)),
+        groundedOnIds: batchIds,
+      }));
+    if (salvaged.length > 0) {
+      log.warn(
+        `[user-memory-curator] salvaged ${salvaged.length} candidate(s) with batch-level grounding ` +
+          `after ${attempts} attempt(s) userId=${userId}`,
+      );
+      return {
+        candidates: salvaged,
+        trace: {
+          ...traceBase(f.meta, attempts),
+          ...(f.rawResponse !== undefined ? { rawResponse: f.rawResponse.slice(0, TRACE_TEXT_CAP) } : {}),
+          emitted: (f.emitted ?? []).map((e) =>
+            e.dropReason === "ungrounded"
+              ? { ...e, verdict: "kept" as const, groundedOnIds: batchIds }
+              : e,
+          ),
+          error: "all-ungrounded-salvaged",
+        },
+      };
+    }
+  }
+
   return {
     candidates: [],
     trace: {
       ...traceBase(f.meta, attempts),
       ...(f.rawResponse !== undefined ? { rawResponse: f.rawResponse.slice(0, TRACE_TEXT_CAP) } : {}),
-      emitted: [],
+      emitted: f.emitted ?? [],
       error: f.error,
     },
   };

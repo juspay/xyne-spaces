@@ -12,6 +12,7 @@
  */
 
 import { decrypt, encrypt } from "../crypto.js";
+import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
 import { parseClaudeCred, type ClaudeOAuthBundle } from "./claude-creds.js";
 
@@ -85,7 +86,7 @@ export async function getValidClaudeBearer(
         signal: AbortSignal.timeout(10_000),
       });
     } catch (err) {
-      throw new ClaudeAuthError(`Claude token refresh request failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new ClaudeAuthError(`Claude token refresh request failed: ${errMsg(err)}`);
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
