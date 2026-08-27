@@ -394,6 +394,8 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               variant='outline'
               disabled={isActing}
               onClick={handleReview}
+              data-track-category='NUDGES'
+              data-track-name='REVIEW_NUDGE'
               className='h-8 rounded-[8px] border-border px-[10px] text-sm text-muted-foreground hover:bg-muted/50'
             >
               <Eye className='h-4 w-4' />
@@ -414,6 +416,8 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               variant='outline'
               disabled={isActing}
               onClick={handleOpenRelatedTicket}
+              data-track-category='NUDGES'
+              data-track-name='OPEN_NUDGE_TICKET'
               className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               Open ticket
@@ -431,6 +435,8 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               variant='outline'
               disabled={isActing}
               onClick={handleOpenRelatedMessage}
+              data-track-category='NUDGES'
+              data-track-name='OPEN_NUDGE_MESSAGE'
               className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               View message
@@ -448,6 +454,8 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               variant='outline'
               disabled={isActing}
               onClick={() => setIsScheduleCallModalOpen(true)}
+              data-track-category='NUDGES'
+              data-track-name='OPEN_NUDGE_SCHEDULE_CALL'
               className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               <Phone className='mr-1 h-3.5 w-3.5' />
@@ -470,6 +478,8 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
             variant='ghost'
             disabled={isActing}
             onClick={handleDismiss}
+            data-track-category='NUDGES'
+            data-track-name='DISMISS_NUDGE'
             className='text-muted-foreground'
           >
             Dismiss

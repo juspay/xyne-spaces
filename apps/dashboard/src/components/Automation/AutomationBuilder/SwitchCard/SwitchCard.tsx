@@ -242,6 +242,8 @@ export function SwitchCard({
                         variant='outline'
                         size='sm'
                         onClick={() => setEditingCaseIndex(caseIndex)}
+                        data-track-category='automation-builder'
+                        data-track-name='switch-open-case-editor'
                         className='gap-1 h-7 text-xs'
                       >
                         <Pencil className='size-3' />
@@ -376,7 +378,12 @@ export function SwitchCard({
               >
                 Cancel
               </Button>
-              <Button size='sm' onClick={handleCaseConditionSave}>
+              <Button
+                size='sm'
+                onClick={handleCaseConditionSave}
+                data-track-category='automation-builder'
+                data-track-name='SAVE_SWITCH_CASE'
+              >
                 Save condition
               </Button>
             </div>

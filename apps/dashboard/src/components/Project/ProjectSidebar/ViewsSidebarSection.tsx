@@ -357,10 +357,22 @@ const ViewsSidebarSection = (): ReactElement => {
             )}
           />
           <div className='flex justify-end gap-2'>
-            <Button variant='ghost' size='sm' onClick={() => setRenameTarget(null)}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setRenameTarget(null)}
+              data-track-category='Projects'
+              data-track-name='CANCEL_RENAME_VIEW'
+            >
               Cancel
             </Button>
-            <Button size='sm' onClick={() => void submitRename()} disabled={!renameDraft.trim()}>
+            <Button
+              size='sm'
+              onClick={() => void submitRename()}
+              data-track-category='Projects'
+              data-track-name='CONFIRM_RENAME_VIEW'
+              disabled={!renameDraft.trim()}
+            >
               Save
             </Button>
           </div>
@@ -389,10 +401,22 @@ const ViewsSidebarSection = (): ReactElement => {
             </div>
           </div>
           <div className='flex justify-end gap-2'>
-            <Button variant='ghost' size='sm' onClick={() => setDeleteTarget(null)}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setDeleteTarget(null)}
+              data-track-category='Projects'
+              data-track-name='CANCEL_DELETE_VIEW'
+            >
               Cancel
             </Button>
-            <Button variant='destructive' size='sm' onClick={() => void confirmDelete()}>
+            <Button
+              variant='destructive'
+              size='sm'
+              onClick={() => void confirmDelete()}
+              data-track-category='Projects'
+              data-track-name='CONFIRM_DELETE_VIEW'
+            >
               Delete
             </Button>
           </div>

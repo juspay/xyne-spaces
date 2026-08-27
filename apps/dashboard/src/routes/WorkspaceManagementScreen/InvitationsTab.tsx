@@ -269,6 +269,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     setEntityId('');
                     setChannelId('');
                   }}
+                  data-track-category='WorkspaceManagement'
+                  data-track-name='SELECT_INVITE_ROLE_ADMIN'
                   className={cn(role === WorkspaceRole.ADMIN && 'bg-accent')}
                 >
                   Admin
@@ -280,12 +282,16 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     setEntityId('');
                     setChannelId('');
                   }}
+                  data-track-category='WorkspaceManagement'
+                  data-track-name='SELECT_INVITE_ROLE_MEMBER'
                   className={cn(role === WorkspaceRole.MEMBER && 'bg-accent')}
                 >
                   Member
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setRole(WorkspaceRole.GUEST)}
+                  data-track-category='WorkspaceManagement'
+                  data-track-name='SELECT_INVITE_ROLE_GUEST'
                   className={cn(role === WorkspaceRole.GUEST && 'bg-accent')}
                 >
                   Guest
@@ -294,6 +300,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             </DropdownMenu>
             <Button
               onClick={openConfirmDialog}
+              data-track-category='WorkspaceManagement'
+              data-track-name='OPEN_INVITE_CONFIRM'
               disabled={isSubmitting || !email.trim()}
               className='gap-2'
             >
@@ -442,12 +450,16 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             <Button
               variant='outline'
               onClick={() => setShowConfirmDialog(false)}
+              data-track-category='WorkspaceManagement'
+              data-track-name='CANCEL_SEND_INVITATION'
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button
               onClick={() => void handleSendInvitation()}
+              data-track-category='WorkspaceManagement'
+              data-track-name='SEND_INVITATION'
               disabled={isSubmitting}
               className='gap-2'
             >
@@ -507,6 +519,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     variant='ghost'
                     size='sm'
                     onClick={() => handleRevokeInvitation(invitation.id)}
+                    data-track-category='WorkspaceManagement'
+                    data-track-name='REVOKE_INVITATION'
                     className='text-destructive hover:text-destructive hover:bg-destructive/10'
                   >
                     Revoke

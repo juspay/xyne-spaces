@@ -365,6 +365,8 @@ export const BoardsTable = ({
                       size='iconSm'
                       className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
                       onClick={e => handleCopyId(e, board.id)}
+                      data-track-category='Board'
+                      data-track-name='COPY_BOARD_ID'
                       title='Copy board ID'
                     >
                       {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
