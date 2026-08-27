@@ -2070,12 +2070,19 @@ export class ChannelController {
         return;
       }
 
-      // Validate all participants exist and are active (skip for self-DM)
+      // Validate all participants exist, are active, and are in the caller's
+      // workspace. participantIds arrives in the request body, so resolving it
+      // installation-wide would let a member of one workspace open a DM with any
+      // active account in any other workspace of the organisation — the recipient
+      // gets the message with no prior relationship, and no invitation involved.
+      // The workspace is taken from the session, never from the request.
       const participantUsers = [];
       if (!isSelfDm) {
         for (const participantId of otherParticipantIds) {
-          const user = await this.userRepository.findById(participantId);
+          const user = await this.userRepository.findByIdInWorkspace(participantId, workspaceId);
           if (!user || user.status !== 'ACTIVE') {
+            // Same response whether the user does not exist or is outside the
+            // workspace: telling them apart confirms which accounts exist elsewhere.
             res.status(404).json({
               error: 'Participant not found or inactive',
               userId: participantId
@@ -2530,10 +2537,13 @@ export class ChannelController {
         return;
       }
 
-      // 4. Validate all new userIds are valid, active users
+      // 4. Validate all new userIds are valid, active users in this workspace.
+      // Same reasoning as createNewDM: userIds is caller-supplied, so an
+      // installation-wide lookup would let someone pull an account from another
+      // workspace into an existing group DM.
       const newUsers = [];
       for (const userId of uniqueUserIds) {
-        const user = await this.userRepository.findById(userId);
+        const user = await this.userRepository.findByIdInWorkspace(userId, workspaceId);
         if (!user || user.status !== 'ACTIVE') {
           res.status(404).json({
             error: 'One or more participants not found or inactive',

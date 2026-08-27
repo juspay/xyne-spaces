@@ -143,6 +143,60 @@ export async function assertHostIsExternal(
   }
 }
 
+/** Addresses that passed validation and are the only ones a caller may connect to. */
+export interface PinnedHost {
+  family: 4 | 6;
+  addresses: string[];
+}
+
+/**
+ * Validate a host and return the addresses that passed, so the caller can connect
+ * to those specific addresses instead of resolving the name a second time.
+ *
+ * `assertHostIsExternal` proves a hostname resolved to public addresses at the
+ * moment it was asked. It cannot prove the connection goes there: the HTTP client
+ * performs its own lookup afterwards, and a name the attacker controls can answer
+ * differently the second time — public for the check, internal for the connection.
+ * A short TTL makes that a matter of timing rather than luck. Pinning removes the
+ * second lookup, so the address that was validated is the address used.
+ *
+ * Returns null when there is nothing to pin: the bypass is active, so no
+ * validation happened and there is no vetted address to hold the caller to.
+ */
+export async function resolveExternalHostPinned(
+  host: string,
+  allowPrivate: boolean = isAllowPrivate(),
+): Promise<PinnedHost | null> {
+  if (allowPrivate) return null;
+
+  await assertHostIsExternal(host, false);
+
+  const trimmed = host.trim();
+  const literalKind = isIP(trimmed);
+  if (literalKind === 4) return { family: 4, addresses: [trimmed] };
+  if (literalKind === 6) return { family: 6, addresses: [trimmed] };
+
+  // Re-read the records assertHostIsExternal just validated. A record that changed
+  // between the two calls is caught below: every address is re-checked, and the
+  // connection is held to this set rather than to whatever DNS says at connect time.
+  const [v4, v6] = await Promise.all([
+    dns.resolve4(trimmed).catch(() => [] as string[]),
+    dns.resolve6(trimmed).catch(() => [] as string[]),
+  ]);
+
+  const safeV4 = v4.filter((a) => !isBlockedV4(a));
+  const safeV6 = v6.filter((a) => !isBlockedV6(a));
+
+  if (safeV4.length !== v4.length || safeV6.length !== v6.length) {
+    throw new SsrfBlockedError(trimmed, null, 'DNS answer changed to an internal address between checks');
+  }
+  if (safeV4.length === 0 && safeV6.length === 0) {
+    throw new SsrfBlockedError(trimmed, null, 'no usable public address');
+  }
+
+  return safeV4.length > 0 ? { family: 4, addresses: safeV4 } : { family: 6, addresses: safeV6 };
+}
+
 /**
  * SSRF guard for outbound webhook URLs (app webhooks, automation
  * trigger_webhook). Ensures the host does not resolve to an internal / private /

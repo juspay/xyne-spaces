@@ -44,13 +44,85 @@ export function isBlockedUpload(mimetype?: string, originalName?: string): boole
 }
 
 /**
+ * Extensions accepted by default. Deny-by-default is what the block-list above
+ * cannot give: it only refuses what someone thought to name, so `.hta`, `.lnk`,
+ * `.vbs`, `.jse` and every future variant are accepted until noticed.
+ *
+ * Derived from production rather than from a generic template — 1,801,002
+ * attachments across 330 distinct extensions. This list is every extension that
+ * carries real traffic plus the obvious siblings of each family, and leaves 0.15%
+ * of historical uploads outside it. Notably included because they are established
+ * workflows here and would otherwise break: .apk/.ipa (mobile builds are shared
+ * in channels), .html (45k+ automated reports), .svg (custom emoji are SVGs —
+ * blocking it removed emoji upload entirely once before), .sh/.bash (ops scripts),
+ * .zip, .crt/.pem (certificates), .py.
+ *
+ * Extensions are lower-cased and compared without the dot.
+ */
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  // images
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'heic', 'heif', 'bmp', 'tiff', 'tif', 'ico', 'jfif', 'avif',
+  // video / audio
+  'mp4', 'mov', 'webm', 'm4v', 'avi', 'mkv', 'mp3', 'm4a', 'wav', 'ogg', 'opus', 'aac', 'amr',
+  // documents
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'xlsm', 'xlsb', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+  'rtf', 'pages', 'numbers', 'key', 'eml', 'msg', 'ics', 'vcf',
+  // text / data
+  'txt', 'md', 'csv', 'tsv', 'log', 'json', 'jsonl', 'xml', 'yaml', 'yml', 'toml',
+  'ini', 'conf', 'env', 'sql', 'har', 'html', 'htm', 'xhtml',
+  // archives
+  'zip', 'tar', 'gz', 'tgz', 'bz2', '7z', 'rar', 'xz',
+  // mobile build artifacts
+  'apk', 'ipa', 'aab', 'aar',
+  // source / dev
+  'py', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'sh', 'bash', 'java', 'go', 'rs', 'rb',
+  'c', 'h', 'cpp', 'hpp', 'patch', 'diff', 'ipynb', 'drawio', 'gradle',
+  // keys / certificates
+  'pem', 'crt', 'cer', 'csr', 'pub', 'asc', 'gpg', 'pgp',
+  // other formats with real traffic
+  'bin', 'dat', 'stl', 'kml', 'ditamap', 'xsd', 'ttf', 'otf', 'plist',
+  // Allowed for the reason the block-list above already gives: `.com` matches the
+  // content-id filenames Outlook puts on inline images far more often than any
+  // real executable, and inbound email runs through this same filter. A DOS-era
+  // .com executable is not a meaningful threat, and it downloads as an opaque
+  // octet-stream regardless (see setSafeDownloadHeaders).
+  'com',
+]);
+
+/** `report.log.1` from log rotation — a numeric suffix is not a file format. */
+const NUMERIC_SUFFIX = /^\d{1,3}$/;
+
+export type UploadVerdict = 'allowed' | 'blocked' | 'not-allowlisted';
+
+/**
+ * Files with no extension are accepted. They are 1.67% of production uploads and
+ * still arriving daily, and this runs in multer's fileFilter, which sees the
+ * filename before any bytes — there is nothing to inspect. Closing this properly
+ * means sniffing content further down the stream, which is a separate change.
+ */
+export function classifyUpload(mimetype?: string, originalName?: string): UploadVerdict {
+  if (isBlockedUpload(mimetype, originalName)) return 'blocked';
+
+  const name = (originalName ?? '').toLowerCase().trim();
+  const dot = name.lastIndexOf('.');
+  if (dot === -1 || dot === name.length - 1) return 'allowed';
+
+  const ext = name.slice(dot + 1);
+  if (NUMERIC_SUFFIX.test(ext)) return 'allowed';
+
+  return ALLOWED_UPLOAD_EXTENSIONS.has(ext) ? 'allowed' : 'not-allowlisted';
+}
+
+/**
  * Skips a refused file rather than failing the request: returning an error to multer
  * discards every file in the same multipart upload, which on the inbound-email path would
  * drop the message entirely. Callers see the file missing from req.files.
  */
 const uploadFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
-  if (isBlockedUpload(file.mimetype, file.originalname)) {
+  const verdict = classifyUpload(file.mimetype, file.originalname);
+  if (verdict !== 'allowed') {
     logger.warn('[UPLOAD] Rejected file type', {
+      reason: verdict,
       mimetype: file.mimetype,
       originalname: file.originalname,
     });
