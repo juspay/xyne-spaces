@@ -411,8 +411,9 @@ export class CallController {
         summaryModelPreference,
       } = req.body;
       // Recording summary LLM tier the client carried from its localStorage;
-      // stamped onto the notes canvas so headless call-end auto-generation can
-      // honour a 'thinking' default. Anything but explicit 'thinking' is 'fast'.
+      // stamped onto the detailed summary canvas so headless call-end
+      // auto-generation can honour a 'thinking' default. Anything but explicit
+      // 'thinking' is 'fast'.
       const summaryModelPref: 'fast' | 'thinking' =
         summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
       const userId = req.user?.id;
@@ -446,7 +447,6 @@ export class CallController {
           metadata: {
             source: 'call_notes',
             callId: callExternalId,
-            summaryModelPreference: summaryModelPref,
           },
         });
 
@@ -469,6 +469,7 @@ export class CallController {
           undefined,
           undefined,
           req.user!.workspaceId,
+          { summaryModelPreference: summaryModelPref },
         );
         if (!detailedSummaryCanvasId) {
           throw new Error('Failed to create detailed summary canvas');

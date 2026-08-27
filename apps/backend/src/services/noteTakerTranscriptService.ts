@@ -258,22 +258,24 @@ class NoteTakerTranscriptService {
    * Resolve the recording creator's summary model preference (fast/thinking),
    * defaulting to 'fast' when there's no preference row or the lookup fails.
    * Resolve the recording's summary model tier (fast/thinking), read from the
-   * notes canvas metadata where the client stamped it at recording start (see
-   * callController.initiateCall) — the browser's localStorage is unreachable
-   * from this headless call-end path. Defaults to 'fast' when the canvas is
-   * missing, predates this feature, or the lookup fails.
+   * detailed summary canvas metadata where the client stamped it at recording
+   * start (see callController.initiateCall) — the browser's localStorage is
+   * unreachable from this headless call-end path. Defaults to 'fast' when the
+   * canvas is missing, predates this feature, or the lookup fails.
    */
   private async getSummaryModelPreference(call: Call): Promise<SummaryModelType> {
     const metadata =
       call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
         ? (call.metadata as Record<string, unknown>)
         : {};
-    const notesCanvasId =
-      typeof metadata.notesCanvasId === 'string' ? metadata.notesCanvasId : null;
-    if (!notesCanvasId) return 'fast';
+    const detailedSummaryCanvasId =
+      typeof metadata.detailedSummaryCanvasId === 'string'
+        ? metadata.detailedSummaryCanvasId
+        : null;
+    if (!detailedSummaryCanvasId) return 'fast';
     try {
       const canvas = await db.canvas.findUnique({
-        where: { id: notesCanvasId },
+        where: { id: detailedSummaryCanvasId },
         select: { metadata: true },
       });
       const canvasMeta =

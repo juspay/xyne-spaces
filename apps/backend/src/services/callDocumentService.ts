@@ -1354,7 +1354,10 @@ MANDATORY OUTPUT CONTRACT:
     callTitle?: string | null,
     citationCtx?: CitationContext,
     workspaceIdOverride?: string,
-    options: { deferInsertSideEffects?: boolean } = {},
+    options: {
+      deferInsertSideEffects?: boolean;
+      summaryModelPreference?: 'fast' | 'thinking';
+    } = {},
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1415,6 +1418,12 @@ MANDATORY OUTPUT CONTRACT:
               generatedAt: now.toISOString(),
               mentionedUserIds, // Store mentioned users for side effect handler
               version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+              // Recording summary LLM tier the client carried from its
+              // localStorage at recording start; read back on the headless
+              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
+              ...(options.summaryModelPreference
+                ? { summaryModelPreference: options.summaryModelPreference }
+                : {}),
             },
           },
         });
