@@ -25,7 +25,6 @@ export interface SdlcAgentContextInput {
   setupExecutionId?: string;
   baselineKind?: string;
   generationCommit?: string;
-  artifactKind?: 'PRD' | 'TECH_DOC';
   artifactId?: string;
   ticketId?: string;
   sourceType?: 'CANVAS' | 'TICKET';
@@ -157,7 +156,7 @@ export class SdlcAgentContextService {
             )
           : null,
       artifact: {
-        kind: input.artifactKind ?? null,
+        kind: null,
         id: input.artifactId ?? null,
         sourceType: input.sourceType ?? null,
         sourceId: input.sourceId ?? null,

@@ -1,9 +1,10 @@
 export interface SdlcArtifactCreationPromptInput {
-  kind: 'PRD' | 'TECH_DOC';
+  typeLabel: string;
+  folderId: string;
   title: string;
   repositoryName: string;
   direction?: string;
-  parentPrd?: { canvasId: string; title: string };
+  relatedArtifacts?: Array<{ canvasId: string; title: string }>;
   track?: { id: string; name: string };
 }
 
@@ -11,16 +12,23 @@ export function buildSdlcArtifactCreationPrompt(input: SdlcArtifactCreationPromp
   const direction = input.direction?.trim();
   const repository = JSON.stringify(input.repositoryName);
   const title = JSON.stringify(input.title);
+  const typeLabel = input.typeLabel;
   const trackClause = input.track
-    ? ` inside the SDLC track ${JSON.stringify(input.track.name)}. Pass trackId ${JSON.stringify(input.track.id)} in the spaces-sdlc-mutate-artifact create call so it is assigned to that track`
+    ? ` inside the SDLC track ${JSON.stringify(input.track.name)} (pass trackId ${JSON.stringify(
+        input.track.id,
+      )})`
     : '';
+  const relatedClause =
+    input.relatedArtifacts && input.relatedArtifacts.length > 0
+      ? ` Use these related artifacts as context and pass their canvas IDs as relatedCanvasIds in the create call so they are linked: ${input.relatedArtifacts
+          .map(item => `${JSON.stringify(item.title)} (canvas ID: ${item.canvasId})`)
+          .join(', ')}.`
+      : '';
   const request =
-    input.kind === 'TECH_DOC'
-      ? input.parentPrd
-        ? `Create a Tech Doc titled ${title} for the PRD ${JSON.stringify(input.parentPrd.title)} (canvas ID: ${input.parentPrd.canvasId}) in repository ${repository}${trackClause}.`
-        : `Create a Tech Doc titled ${title} in repository ${repository}${trackClause}. It has no parent PRD.`
-      : input.kind === 'PRD' && input.track
-        ? `Create a PRD titled ${title} in repository ${repository} inside the SDLC track ${JSON.stringify(input.track.name)}. Pass trackId ${JSON.stringify(input.track.id)} in the spaces-sdlc-mutate-artifact create call so the PRD is assigned to that track.`
-        : `Create a PRD titled ${title} in repository ${repository}.`;
+    `Create a ${typeLabel} titled ${title} in repository ${repository}${trackClause}. ` +
+    `Pass folderId ${JSON.stringify(
+      input.folderId,
+    )} in the spaces-sdlc-mutate-artifact create call so it is filed under the ${typeLabel} type.` +
+    relatedClause;
   return direction ? `${request}\n\nUser direction: ${direction}` : request;
 }
