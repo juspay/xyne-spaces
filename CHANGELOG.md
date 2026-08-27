@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.13](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.12...v1.219.0-release-20260825.13) (2026-08-27)
+
+
+### Bug Fixes
+
+* All the click metrics to sudoquery ([#1099](https://github.com/juspay/xyne-spaces/issues/1099)) ([#1141](https://github.com/juspay/xyne-spaces/issues/1141)) ([e1cf03e](https://github.com/juspay/xyne-spaces/commit/e1cf03ef09bd46bce2dfd2491251b62d284edc9a))
+
 ## [1.219.0-release-20260825.12](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.11...v1.219.0-release-20260825.12) (2026-08-27)
 
 
