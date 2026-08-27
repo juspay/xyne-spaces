@@ -50,7 +50,9 @@ function redirectToDesk(
   },
 ): void {
   const query = new URLSearchParams(
-    params.error ? { socialMediaError: params.error } : { socialMediaOAuth: 'success', socialMediaProvider: 'instagram' },
+    params.error
+      ? { socialMediaError: params.error, socialMediaProvider: 'instagram' }
+      : { socialMediaOAuth: 'success', socialMediaProvider: 'instagram' },
   );
   const path = buildSupportPath(params.workspaceId, params.channelId, query);
   res.redirect(postOAuthRedirect(getFrontendUrl(req), path, params.platform ?? 'web'));
@@ -172,8 +174,8 @@ router.post(
         }),
       ]);
 
-      if (!channel || !channel.projectId) {
-        res.status(404).json({ error: 'Channel not found' });
+      if (!channel || !channel.projectId || !pref?.boardId) {
+        res.status(404).json({ error: 'Instagram desk configuration not found' });
         return;
       }
 
@@ -184,7 +186,7 @@ router.post(
         channelId,
         channelName: channel.name,
         projectId: channel.projectId,
-        boardId: pref?.boardId ?? undefined,
+        boardId: pref.boardId,
         assigneeUserGroupId: pref?.assigneeUserGroupId ?? undefined,
         visibility: channel.visibility === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC',
         platform,

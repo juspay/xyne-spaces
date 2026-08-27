@@ -150,24 +150,25 @@ export const metaGraphClient = {
   },
 
   // In-process cache so we don't call Meta's profile API on every single DM.
-  // Key: `${igUserId}:${igsid}`, value: username string. Capped at 500 entries (LRU eviction).
-  _usernameCache: new Map<string, string>(),
+  // Key: `${igUserId}:${igsid}`, value: { username, expiresAt }. Capped at 500 entries (LRU eviction).
+  // TTL is 24h so a username change is picked up on the next DM after expiry.
+  _usernameCache: new Map<string, { username: string; expiresAt: number }>(),
   _usernameCacheMaxSize: 500,
+  _usernameCacheTtlMs: 24 * 60 * 60 * 1000,
 
   async getSenderUsername(accessToken: string, businessIgUserId: string, senderIgsid: string): Promise<string | null> {
     const cacheKey = `${businessIgUserId}:${senderIgsid}`;
     const cached = this._usernameCache.get(cacheKey);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined && cached.expiresAt > Date.now()) return cached.username;
     try {
       const profile = await this.getUserProfile(accessToken, senderIgsid);
       const username = profile.username ?? null;
       if (username) {
         if (this._usernameCache.size >= this._usernameCacheMaxSize) {
-          // Evict oldest entry (Map preserves insertion order)
           const firstKey = this._usernameCache.keys().next().value;
           if (firstKey !== undefined) this._usernameCache.delete(firstKey);
         }
-        this._usernameCache.set(cacheKey, username);
+        this._usernameCache.set(cacheKey, { username, expiresAt: Date.now() + this._usernameCacheTtlMs });
       }
       return username;
     } catch {
