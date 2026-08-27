@@ -1154,6 +1154,29 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     })();
   }, [currentTitle]);
 
+  const handleExportDocx = useCallback((): void => {
+    void (async (): Promise<void> => {
+      try {
+        const result = await editorRef.current?.exportDocx(titleRef.current || currentTitle);
+        if (result?.saved) {
+          if (result.filePath) {
+            toast.success('Document saved successfully', {
+              description: `Saved to ${getDirectoryFromPath(result.filePath)}`,
+            });
+          } else {
+            toast.success('Document download started');
+          }
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to export canvas as .docx');
+        logger.error(Event.CANVAS_MENTION_DEBUG, {
+          message: 'Canvas docx export failed',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+  }, [currentTitle]);
+
   // Rows for the canvas-details popover behind the avatar stack. Any row whose
   // underlying data is missing is dropped rather than rendered empty.
   const canvasDetailRows = useMemo((): { label: string; value: ReactNode }[] => {
@@ -1484,6 +1507,14 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                   >
                                     <File02PdfFormat size={16} className='shrink-0' />
                                     <span className='flex-1'>Export as PDF</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    className='gap-2'
+                                    onClick={handleExportDocx}
+                                    data-testid='canvas-export-docx'
+                                  >
+                                    <FileText size={16} className='shrink-0' />
+                                    <span className='flex-1'>Export as Docx</span>
                                   </DropdownMenuItem>
                                 </DropdownMenuSubContent>
                               </DropdownMenuSub>

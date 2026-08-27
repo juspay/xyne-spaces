@@ -248,6 +248,8 @@ const electronAPI = {
     ipcRenderer.invoke('canvas:export-markdown', { fileName, content }),
   exportCanvasPdf: (fileName: string, html: string) =>
     ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
+  exportCanvasDocx: (fileName: string, data: ArrayBuffer) =>
+    ipcRenderer.invoke('canvas:export-docx', { fileName, data }),
 
   getErrorReportNativeLogs: () => ipcRenderer.invoke('error-report:get-native-logs'),
   getErrorReportScreenSources: () => ipcRenderer.invoke('error-report:get-screen-sources'),

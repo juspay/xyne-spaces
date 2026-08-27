@@ -108,6 +108,9 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       exclude: ['@terrastruct/d2'],
+      // Dynamically imported only from the canvas docx export; pre-bundle it so
+      // the first export click doesn't hit a discover-and-reload failure in dev.
+      include: ['@turbodocx/html-to-docx'],
     },
     server: {
       port: devPort,
@@ -197,6 +200,9 @@ export default defineConfig(({ mode }) => {
       ],
     },
     define: {
+      // @turbodocx/html-to-docx (canvas docx export) is Node-oriented and
+      // references the bare `global` identifier, which does not exist in browsers.
+      global: 'globalThis',
       // Keys are the literal source tokens Vite replaces; only values come from env.
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
       'process.env.VITE_API_URL': JSON.stringify(env.VITE_API_URL),
