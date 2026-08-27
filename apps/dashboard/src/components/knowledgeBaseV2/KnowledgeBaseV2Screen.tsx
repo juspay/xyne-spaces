@@ -1099,15 +1099,27 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end'>
-              <DropdownMenuItem onClick={() => setDialog('folder')}>
+              <DropdownMenuItem
+                onClick={() => setDialog('folder')}
+                data-track-category='knowledge-base'
+                data-track-name='new-folder'
+              >
                 <FolderPlus className='h-4 w-4' strokeWidth={1.75} />
                 New folder
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={onPickFiles}>
+              <DropdownMenuItem
+                onClick={onPickFiles}
+                data-track-category='knowledge-base'
+                data-track-name='PICK_KB_FILES'
+              >
                 <File className='h-4 w-4' strokeWidth={1.75} />
                 Upload files
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => folderInputRef.current?.click()}>
+              <DropdownMenuItem
+                onClick={() => folderInputRef.current?.click()}
+                data-track-category='knowledge-base'
+                data-track-name='PICK_KB_FOLDER'
+              >
                 <FolderOpen className='h-4 w-4' strokeWidth={1.75} />
                 Upload folder
               </DropdownMenuItem>

@@ -42,7 +42,9 @@ import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
   ContextPickerPanel,
+  attachedContextToSelections,
   type ContextSelections,
+  type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
@@ -64,6 +66,10 @@ export interface AIComposerHandle {
   clearContent: () => void;
   focus: () => void;
   setPrompt: (value: string) => void;
+  /** REPLACE the composer's editable context with these items (empty clears it).
+   *  Used on chat switch to carry the opened conversation's last-turn context
+   *  into the composer. */
+  setContext: (items: AttachedContextItem[]) => void;
 }
 
 interface AIComposerProps {
@@ -473,6 +479,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       setPrompt: (nextValue: string): void => {
         setValue(nextValue);
         window.setTimeout(() => textareaRef.current?.focus(), 0);
+      },
+      setContext: (items: AttachedContextItem[]): void => {
+        const next = attachedContextToSelections(items);
+        setSelections({
+          channels: next.channels,
+          tickets: next.tickets,
+          canvases: next.canvases,
+          transcripts: next.transcripts,
+          recordings: next.recordings,
+        });
+        setCollections(next.collections);
+        setFileScopes(next.fileScopes);
+        setFolderScopes(next.folderScopes);
       },
     }),
     [handleFilesAdded],

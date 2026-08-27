@@ -87,6 +87,8 @@ const PersonaTab = ({
               variant='ghost'
               size='sm'
               onClick={onRenameRequested}
+              data-track-category='Claw Agents'
+              data-track-name='REQUEST_RENAME_PERSONA'
               className='h-7'
             >
               <Pencil className='size-3.5' /> Rename

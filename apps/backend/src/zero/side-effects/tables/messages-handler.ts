@@ -378,6 +378,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {
       messageId,
+      ...(conversation?.channelId && { channelId: conversation.channelId }),
       hasAttachment: message.hasAttachment,
     }).catch(error => {
       logger.error('[UserActivityTracking] Failed to track message sent activity:', {

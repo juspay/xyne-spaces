@@ -3061,6 +3061,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={handleCopyTicketViewLink}
+                data-track-category='Tickets'
+                data-track-name='COPY_TICKET_LINK'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 aria-label='Copy Ticket'
               >
                 <LinkIcon size={20} />
@@ -3076,6 +3079,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
                   );
                 }}
+                data-track-category='Tickets'
+                data-track-name='SUMMARIZE_THREAD'
+                data-track-metadata={JSON.stringify({
+                  ticketId: ticket?.id,
+                  channelId: ticket?.channelId,
+                })}
                 title='Summarize thread'
               >
                 <Sparkles size={20} />
@@ -3087,6 +3096,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={() => setShowArchiveConfirmDialog(true)}
+                data-track-category='Tickets'
+                data-track-name='OPEN_ARCHIVE_TICKET_CONFIRM'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 disabled={ticket?.isArchived}
                 aria-label='Archive Ticket'
               >
@@ -3099,6 +3111,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={handleMinimizeExpandedView}
+                data-track-category='Tickets'
+                data-track-name='MINIMIZE_EXPANDED_VIEW'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 aria-label='Copy Ticket'
               >
                 <Minimize2 size={20} />
@@ -4866,11 +4881,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowArchiveConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowArchiveConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_ARCHIVE_TICKET'
+              >
                 Cancel
               </Button>
               <Button
                 onClick={handleArchiveTicket}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_ARCHIVE_TICKET'
                 className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               >
                 Archive Ticket
@@ -4941,11 +4963,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowBoardChangeConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowBoardChangeConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_BOARD_CHANGE'
+              >
                 Cancel
               </Button>
               <Button
                 onClick={confirmBoardChange}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_BOARD_CHANGE'
                 className='bg-primary text-primary-foreground hover:opacity-90'
               >
                 Confirm

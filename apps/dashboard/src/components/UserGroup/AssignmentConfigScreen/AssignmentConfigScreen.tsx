@@ -1179,7 +1179,12 @@ export const AssignmentConfigScreen = ({
                       </Select>
                     </div>
 
-                    <Button variant='outline' onClick={() => setIsRotationModalOpen(true)}>
+                    <Button
+                      variant='outline'
+                      onClick={() => setIsRotationModalOpen(true)}
+                      data-track-category='UserGroups'
+                      data-track-name='OPEN_ON_CALL_ROTATION_MODAL'
+                    >
                       <Settings02 size={16} />
                       Configure on-call sets
                     </Button>

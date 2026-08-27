@@ -406,10 +406,17 @@ export const BookmarkItem = ({
                 e.stopPropagation();
                 setIsCustomReminderModalOpen(false);
               }}
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='OPEN_CUSTOM_REMINDER'
             >
               Cancel
             </Button>
-            <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+            <Button
+              onClick={handleSaveCustomReminder}
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='SAVE_CUSTOM_REMINDER'
+              disabled={!customReminderDate}
+            >
               Save
             </Button>
           </div>

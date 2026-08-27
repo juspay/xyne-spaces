@@ -54,7 +54,14 @@ export const WorkspaceManagementScreen = (): ReactElement => {
     <div data-testid='workspace-management-page' className='h-full bg-muted flex flex-col'>
       {/* Header */}
       <div className='flex items-center gap-4 px-6 py-4 bg-card border-b border-border'>
-        <Button variant='ghost' size='sm' onClick={handleBack} className='gap-2'>
+        <Button
+          variant='ghost'
+          size='sm'
+          onClick={handleBack}
+          data-track-category='workspace-management'
+          data-track-name='BACK_FROM_WORKSPACE_MANAGEMENT'
+          className='gap-2'
+        >
           <ChevronLeft className='w-4 h-4' />
           Back
         </Button>
