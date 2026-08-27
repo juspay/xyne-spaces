@@ -16,6 +16,9 @@ export type ChannelPreferencePatch = {
   metricsEnabled?: boolean;
   frtStageNames?: string | null;
   appWebhookDeliveryEnabled?: boolean;
+  deskReportEnabled?: boolean;
+  deskReportAgentSlug?: string | null;
+  deskReportRangeDays?: number;
 };
 
 /**

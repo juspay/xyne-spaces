@@ -1,3 +1,10 @@
+## [1.238.0](https://github.com/juspay/xyne-spaces/compare/v1.237.1...v1.238.0) (2026-08-27)
+
+
+### Features
+
+* Added desk insights pannel cron job sheduler ([#1019](https://github.com/juspay/xyne-spaces/issues/1019)) ([6208b0b](https://github.com/juspay/xyne-spaces/commit/6208b0b763f01c32520bb206bf10d454820671c0))
+
 ## [1.237.1](https://github.com/juspay/xyne-spaces/compare/v1.237.0...v1.237.1) (2026-08-27)
 
 
