@@ -1,11 +1,10 @@
 import { useCallback, useState } from 'react';
 import {
   CALL_MEDIA_QUALITY_CONFIG,
+  getDetectedMaxCameraHeight,
   setDetectedMaxCameraHeight,
   type CallMediaQuality,
 } from './useCallMediaQualitySettings';
-
-let cachedMaxHeight: number | null | undefined; // undefined = never detected
 
 async function probeMaxCameraHeight(): Promise<number | null> {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return null;
@@ -31,20 +30,19 @@ export function useMaxCameraHeight(): {
   isDetecting: boolean;
   detect: () => void;
 } {
-  const [maxHeight, setMaxHeight] = useState<number | null | undefined>(cachedMaxHeight);
+  const [maxHeight, setMaxHeight] = useState<number | null>(getDetectedMaxCameraHeight());
   const [isDetecting, setIsDetecting] = useState(false);
 
   const detect = useCallback(() => {
     setIsDetecting(true);
     void probeMaxCameraHeight().then(height => {
-      cachedMaxHeight = height;
       setDetectedMaxCameraHeight(height);
       setMaxHeight(height);
       setIsDetecting(false);
     });
   }, []);
 
-  return { maxHeight: maxHeight ?? null, isDetecting, detect };
+  return { maxHeight, isDetecting, detect };
 }
 
 export function filterQualityOptionsByMax<T extends { value: CallMediaQuality }>(

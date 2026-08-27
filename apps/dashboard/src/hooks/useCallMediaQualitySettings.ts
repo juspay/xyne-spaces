@@ -30,10 +30,23 @@ export const CALL_MEDIA_QUALITY_CONFIG: Record<
   '2160p': { width: 3840, height: 2160, frameRate: 30, maxBitrate: 10_000_000 },
 };
 
-let detectedMaxCameraHeight: number | null = null;
+const DETECTED_MAX_CAMERA_HEIGHT_KEY = 'xyne:detected-camera-max-height';
+
+const readStoredMaxCameraHeight = (): number | null => {
+  if (typeof sessionStorage === 'undefined') return null;
+  const parsed = Number(sessionStorage.getItem(DETECTED_MAX_CAMERA_HEIGHT_KEY));
+  return parsed > 0 ? parsed : null;
+};
+
+let detectedMaxCameraHeight: number | null = readStoredMaxCameraHeight();
+
 export const setDetectedMaxCameraHeight = (height: number | null): void => {
   detectedMaxCameraHeight = height;
+  if (height && typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(DETECTED_MAX_CAMERA_HEIGHT_KEY, String(height));
+  }
 };
+export const getDetectedMaxCameraHeight = (): number | null => detectedMaxCameraHeight;
 
 const getHighestCameraQuality = (): CallMediaQuality => {
   if (!detectedMaxCameraHeight) return '1080p';
