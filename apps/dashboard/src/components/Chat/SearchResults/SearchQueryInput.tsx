@@ -1,5 +1,13 @@
-import { ReactElement, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { CornerDownLeft, Loader2, Search, X } from 'lucide-react';
+import {
+  ReactElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from 'react';
+import { Loader2, Search, X } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useShortcut } from '../../../shortcuts';
 
@@ -8,6 +16,12 @@ interface SearchQueryInputProps {
   query: string;
   /** Runs a new search. Receives the trimmed text; '' drops the free-text query. */
   onSubmit: (next: string) => void;
+  /**
+   * Fires on every keystroke with the raw typed text so results refresh live as you
+   * type — the same debounced path the cmd+K palette uses. This does NOT touch the URL;
+   * only `onSubmit` (Enter) commits the query to the URL/history.
+   */
+  onLiveChange: (next: string) => void;
   /** True while a search is in flight — swaps the leading icon for a spinner. */
   isSearching: boolean;
 }
@@ -20,6 +34,7 @@ interface SearchQueryInputProps {
 export function SearchQueryInput({
   query,
   onSubmit,
+  onLiveChange,
   isSearching,
 }: SearchQueryInputProps): ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -40,7 +55,16 @@ export function SearchQueryInput({
     category: 'Navigation',
   });
 
-  const isDirty = value.trim() !== query;
+  // Typing feeds the live search immediately (debounced by the search hook) without
+  // touching the URL. Enter is what commits the query to the URL/history.
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>): void => {
+      const next = event.target.value;
+      setValue(next);
+      onLiveChange(next);
+    },
+    [onLiveChange],
+  );
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>): void => {
@@ -52,17 +76,21 @@ export function SearchQueryInput({
       if (event.key === 'Escape') {
         event.preventDefault();
         // First Escape discards the edit; the box keeps focus so it can be retyped.
+        // Feed the committed query back to the live search too, otherwise the box would
+        // show `query` while the results below stay on the discarded text.
         setValue(query);
+        onLiveChange(query);
       }
     },
-    [onSubmit, query, value],
+    [onLiveChange, onSubmit, query, value],
   );
 
   const handleClear = useCallback((): void => {
     setValue('');
+    onLiveChange('');
     onSubmit('');
     inputRef.current?.focus();
-  }, [onSubmit]);
+  }, [onLiveChange, onSubmit]);
 
   return (
     <div
@@ -79,15 +107,12 @@ export function SearchQueryInput({
       <input
         ref={inputRef}
         value={value}
-        onChange={e => setValue(e.target.value)}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
         placeholder='Search messages, files, tickets…'
         aria-label='Search query'
         className={cn(
-          'flex-1 min-w-0 bg-transparent text-sm placeholder:text-muted-foreground outline-none',
-          // Uncommitted edits sit at full contrast; once Enter lands the text is what the
-          // results below are for, so it settles back to grey.
-          isDirty ? 'text-foreground' : 'text-muted-foreground',
+          'flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none',
         )}
         data-track-category='SEARCH_RESULTS'
         data-track-name='EDIT_QUERY'
@@ -104,12 +129,6 @@ export function SearchQueryInput({
         >
           <X size={14} />
         </button>
-      )}
-      {isDirty && (
-        <span className='hidden sm:inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'>
-          <CornerDownLeft size={11} />
-          to search
-        </span>
       )}
     </div>
   );
