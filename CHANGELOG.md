@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.14](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.13...v1.219.0-release-20260825.14) (2026-08-27)
+
+
+### Bug Fixes
+
+* log fetched new email for channel in Google and Microsoft refetch ([#74](https://github.com/juspay/xyne-spaces/issues/74)) ([#1138](https://github.com/juspay/xyne-spaces/issues/1138)) ([c63e63a](https://github.com/juspay/xyne-spaces/commit/c63e63a0ff89083a309a945c673b1d177ef73001))
+
 ## [1.219.0-release-20260825.13](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.12...v1.219.0-release-20260825.13) (2026-08-27)
 
 
