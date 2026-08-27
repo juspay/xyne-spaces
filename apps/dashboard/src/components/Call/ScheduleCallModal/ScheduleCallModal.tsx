@@ -1038,6 +1038,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 type='button'
                 className='size-7 rounded-lg'
                 onClick={handleClose}
+                data-track-category='calls'
+                data-track-name='CLOSE_SCHEDULE_CALL_MODAL'
               >
                 <X className='size-4' />
               </Button>
@@ -1372,6 +1374,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                   <DropdownMenuItem
                                     className='text-sm rounded-lg p-2'
                                     onClick={() => setIsRecurring(false)}
+                                    data-track-category='calls'
+                                    data-track-name='SET_NOT_RECURRING'
                                   >
                                     Does Not Repeat
                                   </DropdownMenuItem>
@@ -1382,6 +1386,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       setRecurrenceFrequency('DAY');
                                       setRecurrenceDays([]);
                                     }}
+                                    data-track-category='calls'
+                                    data-track-name='SET_RECURRING_DAILY'
                                   >
                                     Daily
                                   </DropdownMenuItem>
@@ -1392,6 +1398,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       setRecurrenceFrequency('WEEK');
                                       setRecurrenceDays(['MO', 'TU', 'WE', 'TH', 'FR']);
                                     }}
+                                    data-track-category='calls'
+                                    data-track-name='SET_RECURRING_WEEKLY'
                                   >
                                     Every Weekday (Mon – Fri)
                                   </DropdownMenuItem>
@@ -1406,6 +1414,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                           setMonthlyType('monthly_nth_weekday');
                                           setRecurrenceDays([]);
                                         }}
+                                        data-track-category='calls'
+                                        data-track-name='SET_RECURRING_MONTHLY'
                                       >
                                         Monthly on {ordinalWord} {weekday}
                                       </DropdownMenuItem>
@@ -1429,6 +1439,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       setIsRecurring(true);
                                       setShowCustomPanel(true);
                                     }}
+                                    data-track-category='calls'
+                                    data-track-name='OPEN_CUSTOM_RECURRENCE'
                                   >
                                     Custom…
                                   </DropdownMenuItem>
@@ -1763,6 +1775,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                           );
                                         }
                                       }}
+                                      data-track-category='calls'
+                                      data-track-name='CANCEL_CUSTOM_RECURRENCE'
                                       className='rounded-lg text-sm leading-5 bg-transparent h-8 gap-2.5'
                                     >
                                       Cancel
@@ -1783,6 +1797,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         }
                                         setShowCustomPanel(false);
                                       }}
+                                      data-track-category='calls'
+                                      data-track-name='APPLY_CUSTOM_RECURRENCE'
                                       className='rounded-lg text-sm leading-5 bg-primary h-8 gap-2.5'
                                     >
                                       Done
@@ -2006,6 +2022,8 @@ const SubmitFooter: React.FC<{
         size='sm'
         className='rounded-lg text-[13px] px-4 h-9'
         onClick={onCancel}
+        data-track-category='calls'
+        data-track-name='CANCEL_SCHEDULE_CALL'
         disabled={isSubmitting}
         type='button'
       >

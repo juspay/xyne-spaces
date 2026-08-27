@@ -983,12 +983,20 @@ const ChannelMembers = ({
               : 'This person will lose access to the channel but may rejoin later.'}
           </p>
           <div className='flex justify-end gap-3'>
-            <Button variant='secondary' onClick={() => setRemoveDialogOpen(false)} className='px-6'>
+            <Button
+              variant='secondary'
+              onClick={() => setRemoveDialogOpen(false)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CANCEL_REMOVE_PARTICIPANT'
+              className='px-6'
+            >
               Cancel
             </Button>
             <Button
               variant='destructive'
               onClick={() => userToRemove && handleRemoveParticipant(userToRemove.id)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CONFIRM_REMOVE_PARTICIPANT'
               className='px-6'
             >
               Remove

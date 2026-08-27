@@ -1013,6 +1013,8 @@ export const ShareCollectionModal = ({
                   <DropdownMenuContent align='start' className='w-56'>
                     <DropdownMenuItem
                       onClick={() => pickVisibility('public')}
+                      data-track-category='knowledge-base'
+                      data-track-name='SET_COLLECTION_PUBLIC'
                       className='flex items-start gap-2 cursor-pointer'
                     >
                       <Globe size={16} className='mt-0.5 text-muted-foreground flex-shrink-0' />
@@ -1028,6 +1030,8 @@ export const ShareCollectionModal = ({
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => pickVisibility('private')}
+                      data-track-category='knowledge-base'
+                      data-track-name='SET_COLLECTION_PRIVATE'
                       className='flex items-start gap-2 cursor-pointer'
                     >
                       <Lock size={16} className='mt-0.5 text-muted-foreground flex-shrink-0' />
@@ -1094,6 +1098,8 @@ export const ShareCollectionModal = ({
                 onClick={() => {
                   void handleShare();
                 }}
+                data-track-category='knowledge-base'
+                data-track-name='SHARE_COLLECTION'
                 className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
               >
                 <Share2 size={16} />
@@ -1101,7 +1107,13 @@ export const ShareCollectionModal = ({
               </Button>
             </div>
           ) : (
-            <Button onClick={handleClose}>Done</Button>
+            <Button
+              onClick={handleClose}
+              data-track-category='knowledge-base'
+              data-track-name='CANCEL_SHARE_COLLECTION'
+            >
+              Done
+            </Button>
           )}
         </div>
       </div>

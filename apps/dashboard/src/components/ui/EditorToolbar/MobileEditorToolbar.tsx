@@ -158,6 +158,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
       <button
         type='button'
         onClick={onClose}
+        data-track-category='MOBILE_EDITOR_TOOLBAR'
+        data-track-name='CLOSE_TOOLBAR'
         className='p-2 rounded-full bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors flex items-center justify-center flex-shrink-0 mr-1'
         aria-label='Close formatting toolbar'
         onMouseDown={e => e.preventDefault()}
@@ -171,6 +173,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleBold}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_BOLD'
           className={buttonClass(isActive.bold)}
           aria-label='Bold'
           aria-pressed={isActive.bold}
@@ -183,6 +187,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleItalic}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_ITALIC'
           className={buttonClass(isActive.italic)}
           aria-label='Italic'
           aria-pressed={isActive.italic}
@@ -195,6 +201,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleStrikethrough}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_STRIKETHROUGH'
           className={buttonClass(isActive.strike)}
           aria-label='Strikethrough'
           aria-pressed={isActive.strike}
@@ -207,6 +215,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleClearFormatting}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='CLEAR_FORMATTING'
           className={buttonClass(false)}
           aria-label='Clear formatting'
           onMouseDown={e => e.preventDefault()}
@@ -218,6 +228,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleCode}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_INLINE_CODE'
           className={buttonClass(isActive.code)}
           aria-label='Inline code'
           aria-pressed={isActive.code}
@@ -233,6 +245,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleCodeBlock}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_CODE_BLOCK'
           className={buttonClass(isActive.codeBlock)}
           aria-label='Code block'
           aria-pressed={isActive.codeBlock}
@@ -245,6 +259,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleLink}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='OPEN_LINK_PROMPT'
           className={buttonClass(isActive.link)}
           aria-label='Insert link'
           aria-pressed={isActive.link}
@@ -260,6 +276,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleBlockquote}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_BLOCKQUOTE'
           className={buttonClass(isActive.blockquote)}
           aria-label='Quote'
           aria-pressed={isActive.blockquote}
@@ -272,6 +290,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleBulletList}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_BULLET_LIST'
           className={buttonClass(isActive.bulletList)}
           aria-label='Bullet list'
           aria-pressed={isActive.bulletList}
@@ -284,6 +304,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         <button
           type='button'
           onClick={handleOrderedList}
+          data-track-category='MOBILE_EDITOR_TOOLBAR'
+          data-track-name='FORMAT_NUMBERED_LIST'
           className={buttonClass(isActive.orderedList)}
           aria-label='Numbered list'
           aria-pressed={isActive.orderedList}
@@ -297,6 +319,8 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
       <button
         type='button'
         onClick={onSend}
+        data-track-category='MOBILE_EDITOR_TOOLBAR'
+        data-track-name='SEND_MESSAGE'
         disabled={disabled || isSending || !hasContent}
         className={`
           p-2 rounded-full transition-all duration-300 flex items-center justify-center flex-shrink-0 ml-1

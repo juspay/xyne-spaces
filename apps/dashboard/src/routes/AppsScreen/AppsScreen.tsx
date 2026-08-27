@@ -487,7 +487,14 @@ const AppsScreen = (): ReactElement => {
                 Showing {filteredApps.length} of {searchTotal}
               </span>
               {hasMore && (
-                <Button variant='outline' size='sm' onClick={loadMore} disabled={isSearching}>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={loadMore}
+                  data-track-category='Apps'
+                  data-track-name='LOAD_MORE_APPS'
+                  disabled={isSearching}
+                >
                   {isSearching ? 'Loading…' : 'Load more'}
                 </Button>
               )}
@@ -501,6 +508,8 @@ const AppsScreen = (): ReactElement => {
                 variant='outline'
                 size='sm'
                 onClick={handlePreviousPage}
+                data-track-category='Apps'
+                data-track-name='APPS_PREV_PAGE'
                 disabled={!hasPreviousPage}
                 className='gap-1'
               >
@@ -512,6 +521,8 @@ const AppsScreen = (): ReactElement => {
                 variant='outline'
                 size='sm'
                 onClick={handleNextPage}
+                data-track-category='Apps'
+                data-track-name='APPS_NEXT_PAGE'
                 disabled={!hasNextPage}
                 className='gap-1'
               >

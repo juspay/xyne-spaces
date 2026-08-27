@@ -1683,6 +1683,53 @@ export class CallController {
   };
 
   /**
+   * POST /api/calls/recordings/:callId/generate-labels
+   * Generate topical labels for a headless recording on demand (list-view action),
+   * mirroring the auto-generation that normally runs off the transcript-ready webhook.
+   */
+  regenerateRecordingLabels = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const labelIds = await noteTakerTranscriptService.regenerateLabels(call);
+      if (labelIds === null) {
+        res.status(404).json({
+          success: false,
+          error: 'Transcript is not available',
+        });
+        return;
+      }
+
+      res.json({ success: true, labelIds });
+    } catch (error) {
+      logger.error(`[${callId}] Failed to generate recording labels`, error);
+      res.status(500).json({ success: false, error: 'Failed to generate recording labels' });
+    }
+  };
+
+  /**
    * GET /api/calls/:callId/download-transcript
    * Download call transcript as text file (formatted .txt only)
    */

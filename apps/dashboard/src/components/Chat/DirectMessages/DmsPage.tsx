@@ -550,6 +550,8 @@ const DmsPage = (): ReactElement => {
                   setDmSearchQuery('');
                   setShowDmSearchDropdown(false);
                 }}
+                data-track-category='DM'
+                data-track-name='CLEAR_DM_SEARCH'
                 aria-label='Clear search'
                 variant='link'
                 size='icon'
@@ -722,6 +724,8 @@ const DmsPage = (): ReactElement => {
                       setDmSearchQuery('');
                       setShowDmSearchDropdown(false);
                     }}
+                    data-track-category='DM'
+                    data-track-name='CLEAR_DM_SEARCH'
                     aria-label='Clear search'
                     variant='link'
                     size='icon'

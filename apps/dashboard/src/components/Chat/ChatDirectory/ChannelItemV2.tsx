@@ -275,6 +275,8 @@ const ChannelItemV2 = memo(
                             e.stopPropagation();
                             onMoveToSection?.(channel.id, section.id);
                           }}
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='MOVE_CHANNEL_TO_SECTION'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -298,6 +300,8 @@ const ChannelItemV2 = memo(
                         e.stopPropagation();
                         onMoveToSection?.(channel.id, null);
                       }}
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='REMOVE_CHANNEL_FROM_SECTION'
                     >
                       <FolderRemove size={14} className='shrink-0' />
                       <span className='flex-1'>Remove from section</span>
