@@ -562,6 +562,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             content: task.trim(),
             parentId: requestedParent?.id ?? null,
             orgId,
+            ...(Array.isArray(attachedContext) && attachedContext.length > 0
+              ? { attachedContext }
+              : {}),
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
@@ -595,6 +598,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             content: task.trim(),
             parentId: userParentId,
             orgId,
+            ...(Array.isArray(attachedContext) && attachedContext.length > 0
+              ? { attachedContext }
+              : {}),
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;

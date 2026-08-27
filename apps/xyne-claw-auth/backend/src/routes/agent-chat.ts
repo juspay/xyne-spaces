@@ -1226,6 +1226,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: requestedParent?.id ?? null,
         orgId: agent.orgId,
+        ...(attachedContextItems.length > 0 ? { attachedContext: attachedContextItems } : {}),
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
@@ -1241,6 +1242,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: userParentId,
         orgId: agent.orgId,
+        ...(attachedContextItems.length > 0 ? { attachedContext: attachedContextItems } : {}),
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
