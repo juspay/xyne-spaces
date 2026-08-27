@@ -1450,7 +1450,11 @@ const BoardEditScreen = ({
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
         <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Board not found</p>
-          <Button onClick={onClose} data-track-category='form' data-track-name='CLOSE_BOARD_EDIT'>
+          <Button
+            onClick={onClose}
+            data-track-category='form'
+            data-track-name='CLOSE_BOARD_NOT_FOUND'
+          >
             Close
           </Button>
         </div>
@@ -1463,7 +1467,11 @@ const BoardEditScreen = ({
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
         <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Project not found</p>
-          <Button onClick={onClose} data-track-category='form' data-track-name='CLOSE_BOARD_EDIT'>
+          <Button
+            onClick={onClose}
+            data-track-category='form'
+            data-track-name='CLOSE_PROJECT_NOT_FOUND'
+          >
             Close
           </Button>
         </div>
