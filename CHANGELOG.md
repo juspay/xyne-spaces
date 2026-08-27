@@ -1,3 +1,10 @@
+## [1.241.0](https://github.com/juspay/xyne-spaces/compare/v1.240.1...v1.241.0) (2026-08-27)
+
+
+### Features
+
+* added-debouncing-in-full-search-page ([#1132](https://github.com/juspay/xyne-spaces/issues/1132)) ([2cb4748](https://github.com/juspay/xyne-spaces/commit/2cb474837722b1acb68a9b526a7205661fe9085f))
+
 ## [1.240.1](https://github.com/juspay/xyne-spaces/compare/v1.240.0...v1.240.1) (2026-08-27)
 
 
