@@ -11,6 +11,8 @@ import {
   type MockDeskMailFixture,
   mockDeskMails,
   mockDlEmails,
+  mockPubSubBatches,
+  mockPubSubMessages,
   slackChannelIds,
 } from '@/tests/03_e2e/11_xyne-desk/xyne-desk-state';
 import { type StoredConversation, testContext } from '@/tests/shared/runtime/test-context';
@@ -720,6 +722,95 @@ export default class XyneDeskSteps {
       threadId: `mock-slack-thread-${suffix}`,
       messageId: `mock-slack-message-${suffix}-inbound`,
     });
+  }
+
+  @Step('generating <count> deterministic Pub/Sub Gmail messages as batch <batchAlias>')
+  public async generateDeterministicPubSubBatch(count: string, batchAlias: string): Promise<void> {
+    const total = Number.parseInt(count, 10);
+    assert.ok(Number.isInteger(total) && total > 0 && total <= 1000, 'Batch size must be 1-1000.');
+    const historyId = String(Date.now());
+    const messageIds: string[] = [];
+    const messages = Array.from({ length: total }, (_, index) => {
+      const messageId = `mock-pubsub-${batchAlias}-${historyId}-${index}`;
+      messageIds.push(messageId);
+      return {
+        messageId,
+        threadId: `mock-pubsub-thread-${batchAlias}-${index}`,
+        from: `bulk-customer-${index}@example.test`,
+        subject: `Bulk Desk Pub/Sub message ${index}`,
+        body: `Deterministic Pub/Sub body ${index}`,
+      };
+    });
+    mockPubSubBatches.set(batchAlias, { messageIds, historyId });
+    const firstMessage = messages[0]!;
+    mockDeskMails.set(batchAlias, {
+      alias: batchAlias,
+      subject: firstMessage.subject,
+      body: firstMessage.body,
+      from: firstMessage.from,
+      to: config.desk.mockDlEmail,
+      threadId: firstMessage.threadId,
+      messageId: firstMessage.messageId,
+    });
+    mockPubSubMessages.set(batchAlias, messages);
+  }
+
+  @Step('publishing deterministic Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias>')
+  public async publishDeterministicPubSubBatch(
+    batchAlias: string,
+    channelAlias: string,
+    userAlias: string,
+  ): Promise<void> {
+    const batch = mockPubSubBatches.get(batchAlias);
+    assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
+    const channelId = this.getStoredChannelId(channelAlias, userAlias);
+    const messages = mockPubSubMessages.get(batchAlias);
+    assert.ok(messages, `Expected Pub/Sub messages for batch "${batchAlias}".`);
+    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+      apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
+        data: { channelId, historyId: batch.historyId, messages },
+      }),
+    );
+    await assertOkResponse(response, 'Deterministic Pub/Sub Gmail batch');
+    const result = (await response.json()) as { published?: number; processed?: number; created?: number; duplicates?: number; skipped?: number };
+    assert.equal(result.published, batch.messageIds.length);
+    assert.equal(result.processed, batch.messageIds.length);
+    assert.equal(result.created, batch.messageIds.length);
+    assert.equal(result.duplicates, 0);
+    assert.equal(result.skipped, 0);
+    const ticketsResponse = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+      apiContext.get(`/api/test/desk/channel/${channelId}/tickets`),
+    );
+    await assertOkResponse(ticketsResponse, 'Desk Pub/Sub ticket verification');
+    const ticketsBody = (await ticketsResponse.json()) as { tickets?: Array<{ title?: string }> };
+    const expectedTitles = new Set(
+      (mockPubSubMessages.get(batchAlias) ?? []).map(message => String(message.subject)),
+    );
+    const actualTitles = (ticketsBody.tickets ?? []).filter(ticket => expectedTitles.has(String(ticket.title)));
+    assert.equal(actualTitles.length, expectedTitles.size);
+    assert.equal(new Set(actualTitles.map(ticket => ticket.title)).size, expectedTitles.size);
+  }
+
+  @Step('republishing deterministic Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias>')
+  public async republishDeterministicPubSubBatch(
+    batchAlias: string,
+    channelAlias: string,
+    userAlias: string,
+  ): Promise<void> {
+    const batch = mockPubSubBatches.get(batchAlias);
+    assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
+    const channelId = this.getStoredChannelId(channelAlias, userAlias);
+    const messages = mockPubSubMessages.get(batchAlias);
+    assert.ok(messages, `Expected Pub/Sub messages for batch "${batchAlias}".`);
+    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+      apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
+        data: { channelId, historyId: batch.historyId, messages },
+      }),
+    );
+    await assertOkResponse(response, 'Deterministic Pub/Sub duplicate batch');
+    const result = (await response.json()) as { created?: number; duplicates?: number };
+    assert.equal(result.created, 0);
+    assert.equal(result.duplicates, batch.messageIds.length);
   }
 
   @Step(

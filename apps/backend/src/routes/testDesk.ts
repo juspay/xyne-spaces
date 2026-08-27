@@ -14,6 +14,9 @@ import { config } from '@/config/env';
 import { encrypt } from '@/services/encryptionService';
 import { emailService } from '@/services/emailService';
 import { mockDeskMailService } from '@/services/mockDeskMailService';
+import { externalSourceCore } from '@/integrations/core/core';
+import { googleAdapter } from '@/integrations/adapters/google';
+import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { logger } from '@/utils/logger';
 import {
   buildMockDeskCredentials as buildMockDeskCredentialsPayload,
@@ -21,6 +24,7 @@ import {
 } from '@/utils/mockDeskCredentials';
 
 const router = Router();
+const channelExternalSourceResolver = new ChannelExternalSourceResolver();
 // Intentionally permissive for automation fixtures; provider-grade RFC validation
 // is covered by the real Gmail/Microsoft integrations.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -751,6 +755,86 @@ router.post('/desk/slack-event', async (req, res, next) => {
       emailType: EmailType.DEFAULT,
     });
     return res.json({ success: true, ...created });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/**
+ * Deterministic Pub/Sub-shaped Gmail bulk fixture. It bypasses Google network
+ * calls but executes the real Google transformer, ExternalSourceCore dedupe/
+ * DL routing, ticket persistence, and Google postprocessor cursor update.
+ */
+router.post('/desk/pubsub/bulk-gmail', async (req, res, next) => {
+  try {
+    if (!requireMockDeskEnabled(res)) return;
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : '';
+    const historyId = typeof req.body?.historyId === 'string' ? req.body.historyId : '';
+    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    if (!userId || !workspaceId) {
+      return res.status(401).json({ error: 'Authenticated workspace required' });
+    }
+    if (!channelId || !/^\d+$/.test(historyId) || messages.length === 0) {
+      return res.status(400).json({ error: 'channelId, numeric historyId, and messages are required' });
+    }
+    if (messages.length > 1000) {
+      return res.status(400).json({ error: 'A maximum of 1000 messages may be published per fixture' });
+    }
+    const member = await db.channelParticipant.findUnique({
+      where: { channelId_userId: { channelId, userId } },
+      select: { id: true },
+    });
+    if (!member) return res.status(403).json({ error: 'Not a member of this channel' });
+    const source = await channelExternalSourceResolver.resolveForChannel(channelId);
+    if (!source || source.workspaceId !== workspaceId) {
+      return res.status(404).json({ error: 'No Google Desk source found for channel' });
+    }
+    const invalid = messages.find(
+      (message: any) =>
+        typeof message?.messageId !== 'string' ||
+        typeof message?.threadId !== 'string' ||
+        typeof message?.from !== 'string' ||
+        typeof message?.subject !== 'string',
+    );
+    if (invalid) {
+      return res.status(400).json({ error: 'Each message requires messageId, threadId, from, and subject' });
+    }
+    const deterministicAdapter = {
+      ...googleAdapter,
+      preprocess: async () =>
+        messages.map((message: any) => ({
+          pubsubData: { emailAddress: source.displayName, historyId },
+          parsedEmail: {
+            messageId: message.messageId,
+            threadId: message.threadId,
+            subject: message.subject,
+            from: message.from,
+            to: Array.isArray(message.to) ? message.to : [source.displayName],
+            cc: Array.isArray(message.cc) ? message.cc : [],
+            bcc: Array.isArray(message.bcc) ? message.bcc : [],
+            replyTo: Array.isArray(message.replyTo) ? message.replyTo : [],
+            body: typeof message.body === 'string' ? message.body : '',
+            date: typeof message.date === 'string' ? message.date : new Date().toISOString(),
+          },
+        })),
+    };
+    const results = await externalSourceCore.ingest(
+      deterministicAdapter,
+      source.name,
+      { messages },
+      source,
+    );
+    return res.json({
+      success: true,
+      published: messages.length,
+      processed: results.length,
+      created: results.filter(result => result.action === 'created').length,
+      duplicates: results.filter(result => result.action === 'duplicate').length,
+      skipped: results.filter(result => result.action === 'skipped').length,
+      results,
+    });
   } catch (error) {
     return next(error);
   }
