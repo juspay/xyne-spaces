@@ -1,3 +1,15 @@
+## [1.234.0](https://github.com/juspay/xyne-spaces/compare/v1.233.1...v1.234.0) (2026-08-27)
+
+
+### Features
+
+* activity actor filter ([#1103](https://github.com/juspay/xyne-spaces/issues/1103)) ([0b393bd](https://github.com/juspay/xyne-spaces/commit/0b393bd028eaaa8ae7a81dd0656b502562a71517))
+
+
+### Bug Fixes
+
+* add support to generate apps using claw ([#855](https://github.com/juspay/xyne-spaces/issues/855)) ([11a759a](https://github.com/juspay/xyne-spaces/commit/11a759adb26f3fd4ab333a38838be30d303a25ef))
+
 ## [1.233.1](https://github.com/juspay/xyne-spaces/compare/v1.233.0...v1.233.1) (2026-08-27)
 
 
