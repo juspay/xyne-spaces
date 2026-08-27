@@ -72,6 +72,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -1309,6 +1310,23 @@ export class EmailService {
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
+
+    // Inbound mail only — an agent-composed thread has no duplicate to find.
+    if (emailType === EmailType.DEFAULT) {
+      ticketDuplicateService.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        userId,
+      }).catch((error: unknown) => {
+        logger.error('[EmailService] Failed to persist duplicate references for ticket', {
+          ticketId: ticket.id,
+          error,
+        });
+      });
+    }
 
     // Enqueue AI classification as a Redis worker job
     await emailClassificationQueue.getQueue().add('classify', {
@@ -2558,6 +2576,24 @@ export class EmailService {
           error,
         );
       });
+
+      // projectId is only assigned on the !existingFirstEmail branch, which is the
+      // same precondition as isNew — guard anyway so a future change can't slip through.
+      if (projectId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: txResult.ticketId,
+          ticketCreatedBy: userId,
+          title: firstEmail.subject,
+          description: firstEmail.body,
+          projectId,
+          userId,
+        }).catch((error: unknown) => {
+          logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
+            ticketId: txResult.ticketId,
+            error,
+          });
+        });
+      }
 
       // Enqueue AI classification as a Redis worker job
       await emailClassificationQueue.getQueue().add('classify', {
