@@ -91,6 +91,7 @@ import {
   isDeskChannelType,
   NotificationLevel,
   computeProjectSectionSuggestions,
+  getCandidateProjectIds,
 } from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -294,11 +295,28 @@ const ChatDirectory = ({
     activeChannelId,
   });
 
-  const [projects] = useCachedQuery(queries.getAllProjectsList());
   const [suggestionDismissed, setSuggestionDismissed] = useState(
     () => localStorage.getItem(SECTION_SUGGESTION_DISMISSED_KEY) === 'true',
   );
   const [showOrganizer, setShowOrganizer] = useState(false);
+  const candidateProjectIdsKey = useMemo(
+    () =>
+      getCandidateProjectIds({
+        channels: channelData ?? [],
+        statuses: allChannelsUserStatus ?? [],
+      }).join(','),
+    [channelData, allChannelsUserStatus],
+  );
+  const projectsQuery = useMemo(
+    () =>
+      queries.projectsByIds({
+        projectIds: candidateProjectIdsKey ? candidateProjectIdsKey.split(',') : [],
+      }),
+    [candidateProjectIdsKey],
+  );
+  const [projects] = useCachedQuery(projectsQuery, {
+    enabled: !suggestionDismissed && candidateProjectIdsKey.length > 0,
+  });
 
   const sectionSuggestions = useMemo(
     () =>
@@ -367,7 +385,7 @@ const ChatDirectory = ({
       const sectionCount = created.length;
       const channelCount = created.reduce((sum, s) => sum + s.channelIds.length, 0);
       toast(
-        `${sectionCount} section${sectionCount === 1 ? '' : 's'} created with ${channelCount} channels.`,
+        `${sectionCount} section${sectionCount === 1 ? '' : 's'} created with ${channelCount} channel${channelCount === 1 ? '' : 's'}.`,
         {
           duration: 8000,
           action: {
@@ -1375,12 +1393,7 @@ const ChatDirectory = ({
           )}
         </Dialog>
 
-        <Dialog
-          open={showOrganizer}
-          onOpenChange={setShowOrganizer}
-          testId='section-organizer-dialog'
-          className='max-w-lg'
-        >
+        <Dialog open={showOrganizer} onOpenChange={setShowOrganizer} className='max-w-lg'>
           {showOrganizer && (
             <SectionOrganizerDialog
               suggestions={sectionSuggestions}
