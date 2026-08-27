@@ -1,4 +1,3 @@
-import { isBaselineCanvasType } from '@xyne/shared';
 import type { SdlcDiscussion, SdlcEntityType, SdlcRelationType } from '@xyne/shared';
 
 export type SdlcDiscussionSurfaceType = NonNullable<SdlcDiscussion['surfaceType']>;
@@ -20,7 +19,7 @@ export interface SdlcDiscussionOwnerLookup {
     repoId: string;
     targetType: Extract<SdlcEntityType, 'CANVAS' | 'TICKET' | 'PULL_REQUEST'>;
     targetId: string;
-    relationType: Extract<SdlcRelationType, 'TECH_DOC' | 'TICKET' | 'PULL_REQUEST'>;
+    relationType: Extract<SdlcRelationType, 'TICKET' | 'PULL_REQUEST'>;
   }) => Promise<{ sourceType: 'CANVAS' | 'TICKET'; sourceId: string } | null>;
 }
 
@@ -34,36 +33,17 @@ export async function resolveSdlcDiscussionOwnerId(
   },
   lookup: SdlcDiscussionOwnerLookup
 ): Promise<string | null> {
-  const canvasOwner = async (
-    canvasId: string,
-    visited = new Set<string>()
-  ): Promise<string | null> => {
-    if (visited.has(canvasId)) return null;
-    visited.add(canvasId);
+  const canvasOwner = async (canvasId: string): Promise<string | null> => {
     const canvas = await lookup.getCanvas(canvasId);
     if (
       !canvas ||
       canvas.workspaceId !== input.workspaceId ||
-      canvas.channelId !== input.channelId
+      canvas.channelId !== input.channelId ||
+      !canvas.artifactType
     ) {
       return null;
     }
-    if (
-      canvas.artifactType === 'PRD' ||
-      canvas.artifactType === 'WIKI' ||
-      isBaselineCanvasType(canvas.artifactType)
-    ) {
-      return canvas.id;
-    }
-    if (canvas.artifactType !== 'TECH_DOC') return null;
-    const link = await lookup.findLinkSource({
-      repoId: input.repoId,
-      targetType: 'CANVAS',
-      targetId: canvas.id,
-      relationType: 'TECH_DOC',
-    });
-    if (!link) return canvas.id;
-    return link.sourceType === 'CANVAS' ? canvasOwner(link.sourceId, visited) : null;
+    return canvas.id;
   };
 
   const ticketOwner = async (ticketId: string): Promise<string | null> => {

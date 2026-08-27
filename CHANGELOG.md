@@ -1,3 +1,24 @@
+## [1.237.1](https://github.com/juspay/xyne-spaces/compare/v1.237.0...v1.237.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* enable xlsx reads for kb files ([#1002](https://github.com/juspay/xyne-spaces/issues/1002)) ([e432f94](https://github.com/juspay/xyne-spaces/commit/e432f940b543b5dace469bfdd11bebd0942bc428))
+
+## [1.237.0](https://github.com/juspay/xyne-spaces/compare/v1.236.0...v1.237.0) (2026-08-27)
+
+
+### Features
+
+* make active call pill in channel open the call's thread on click ([#1072](https://github.com/juspay/xyne-spaces/issues/1072)) ([980155e](https://github.com/juspay/xyne-spaces/commit/980155eead8a03d8b2c8a0f18618c45a08b8ae59))
+
+## [1.236.0](https://github.com/juspay/xyne-spaces/compare/v1.235.0...v1.236.0) (2026-08-27)
+
+
+### Features
+
+* custom SDLC artifact types with folder-based identity ([#1086](https://github.com/juspay/xyne-spaces/issues/1086)) ([#1119](https://github.com/juspay/xyne-spaces/issues/1119)) ([1722617](https://github.com/juspay/xyne-spaces/commit/17226171a975d63a1c8a7b1eeff6d63c51566a73))
+
 ## [1.235.0](https://github.com/juspay/xyne-spaces/compare/v1.234.0...v1.235.0) (2026-08-27)
 
 

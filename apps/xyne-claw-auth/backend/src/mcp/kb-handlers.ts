@@ -20,6 +20,7 @@ import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/sp
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
 import { getSpacesAuthForUser } from "../lib/spaces-db.js";
 import { createLogger } from "../logger.js";
+import { extractXlsxText, isXlsxFile } from "./kb-xlsx.js";
 
 /**
  * Debug sidecar — the YQL spaces actually emitted to Vespa for this call.
@@ -38,6 +39,7 @@ export interface VespaDebugBlock {
 }
 
 const log = createLogger("kb-handlers");
+
 
 export interface KbHandlerResult {
   content: string;
@@ -252,7 +254,7 @@ async function resolveKbContext(
     // retained in the DB by agents.ts (so flipping back to COLLECTIONS
     // restores the picker's previous selection) but dropped from the
     // runtime context. The accessibility layer is the only gate in USER mode.
-    grants: scope === "USER" ? [] : agent.collections.map(c => ({ collectionId: c.collectionId, fileId: c.fileId })),
+    grants: scope === "USER" ? [] : agent.collections.map((c: { collectionId: string; fileId: string | null }) => ({ collectionId: c.collectionId, fileId: c.fileId })),
     accessibleTree: tree,
     accessibleCollectionIds: collections,
     accessibleFileIds: files,
@@ -1008,6 +1010,12 @@ export async function handleKbReadFile(args: {
     const citeToken = `[clf-__TOOL_CALL_ID__#0]`;
 
     if (isLikelyBinary) {
+      if (isXlsxFile(contentType, fileMeta.name)) {
+        const body = await extractXlsxText(buffer, fileMeta.name);
+        const header = `## ${fileMeta.name} ${citeToken}\n\n_collection: ${fileMeta.collectionName}_\n\n---\n\n`;
+        return { content: header + body, citations: [citation] };
+      }
+
       return {
         content:
           `File \`${fileMeta.name}\` ${citeToken} is a binary type (PDF / image / office doc). ` +
