@@ -193,6 +193,7 @@ export class GCSService {
       ifNotExists?: boolean;
       resumable?: boolean;
       timeoutMs?: number;
+      chunkSize?: number;
     }
   ): Promise<GCSUploadResult> {
     try {
@@ -230,6 +231,7 @@ export class GCSService {
         // (412 Precondition Failed otherwise).
         ...(options.ifNotExists ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
         ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+        ...(options.chunkSize ? { chunkSize: options.chunkSize } : {}),
       });
 
       await new Promise<void>((resolve, reject) => {

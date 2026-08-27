@@ -32,6 +32,7 @@ import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './mi
 import { ChannelInput, MigrationJob, MigrationType } from './types';
 
 const PAGE = 200;
+const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 // Timing knobs (validated in config/env.ts): pageDelayMs (throttle paged Slack calls),
 // fileTimeoutMs (per-attachment), requestTimeoutMs (per Slack request), ingestMessageDelayMs (per-message DB/Vespa upper bound).
 const PAGE_DELAY_MS = config.slackMigration.pageDelayMs;
@@ -206,7 +207,7 @@ export class SlackMigrationEngine {
     const pinned = await fetchPinnedMessageTimestamps(client, conv.id).catch(() => new Set<string>());
     const stream = new PassThrough();
     const done = this.storage.uploadStreamToPath(encryptStream(stream), {
-      path: paths.conversation(gcsPrefix, conv.id), contentType: 'application/octet-stream',
+      path: paths.conversation(gcsPrefix, conv.id), contentType: 'application/octet-stream', chunkSize: UPLOAD_CHUNK_SIZE,
     });
     let count = 0;
     let outcome: 'ok' | 'truncated' | 'skipped' = 'ok';
