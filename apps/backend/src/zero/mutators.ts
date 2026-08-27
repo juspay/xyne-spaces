@@ -125,8 +125,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
-import{
-  resolveStepEstimate,
+import {
   evaluateEta,
   buildEtaActivityIntents,
   isTerminalStatus,
