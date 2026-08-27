@@ -30,6 +30,7 @@ import {
 } from '@xyne/shared';
 // import type { Mutators } from '../zero/mutators';
 import { callService } from '../services/Call/callService';
+import { openLink } from '../utils/openLink';
 import { CallType } from '@xyne/shared';
 import { mixpanelService } from '../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
@@ -75,6 +76,23 @@ const logRoomMachineEvent = (
     callId: callId ?? null,
     eventName,
   });
+};
+
+/**
+ * HTTP status behind a rejected API call, when it carried one.
+ *
+ * Read as a field rather than off a typed error class on purpose: the shared
+ * axios instance rewrites every failure into a plain `Error` with `status`
+ * attached (see the response interceptor in services/clients/apiClient), so the
+ * `ApiError` callService would otherwise construct never reaches a caller.
+ * Both shapes expose `status`, so the field is the thing they agree on.
+ */
+const apiErrorStatus = (error: unknown): number | undefined => {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
 };
 
 export interface ParticipantInfo {
@@ -162,7 +180,14 @@ export interface RoomContext {
   // The call a confirmed switch is headed for, held across the teardown of the
   // call being left. Deliberately outside `clearContext`, which runs on the way
   // through `disconnecting`.
-  pendingJoin: { callId: string; viewMode: 'mini' | 'full' } | null;
+  pendingJoin: {
+    callId: string;
+    viewMode: 'mini' | 'full';
+    externalLobbyUrl: string | null;
+  } | null;
+  // The invite URL the current join attempt came from, or null when it came
+  // from inside the app. See the JOIN_CALL event and `routeToExternalCallLobby`.
+  externalLobbyUrl: string | null;
   scopeType: string | null; // Channel scope type (DM, GROUP_DM, DEFAULT, etc.)
   invitedUserId: string | null;
   conversationId: string | null;
@@ -242,6 +267,9 @@ export type RoomMachineEvent =
       // the switch-call flows set it. Without it a JOIN_CALL that lands while
       // another call is live is dropped rather than silently switching calls.
       allowSwitch?: boolean;
+      // Set by the invite-link entry points, and only by them: where to send
+      // the user if this call turns out not to be theirs to join.
+      externalLobbyUrl?: string;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -1302,6 +1330,7 @@ export const roomMachine = setup({
       callId: () => null,
       channelId: () => null,
       externalId: () => null,
+      externalLobbyUrl: () => null,
       invitedUserId: () => null,
       conversationId: () => null,
       artifactMessageId: () => null,
@@ -1343,6 +1372,7 @@ export const roomMachine = setup({
     startPendingJoin: assign({
       callId: ({ context }) => context.pendingJoin?.callId ?? null,
       viewMode: ({ context }) => context.pendingJoin?.viewMode ?? ('mini' as const),
+      externalLobbyUrl: ({ context }) => context.pendingJoin?.externalLobbyUrl ?? null,
       isInitiator: () => false,
       pendingJoin: () => null,
     }),
@@ -1401,6 +1431,26 @@ export const roomMachine = setup({
         description: 'Unable to connect to the room. Please try again.',
         duration: 4000,
       });
+    },
+
+    /**
+     * Hand a call this session cannot see over to the guest lobby.
+     *
+     * Calls are read through the tenant ACL, so one belonging to another
+     * workspace is not "forbidden" to `/calls/join` — it is absent, and comes
+     * back 404. The person holding the link is not necessarily a stranger to
+     * it, though: they may be a member of that other workspace. The lobby is
+     * what settles that, so the invite URL they arrived on is where they go.
+     *
+     * In a new tab, and only ever a new tab: the workspace they are working in
+     * is not the one the call lives in, and joining someone else's call is no
+     * reason to tear them out of it. `openLink` is the app's one external-link
+     * path, so this also picks up the Electron and React Native handling for
+     * free — none of which touch the tab the user is in.
+     */
+    routeToExternalCallLobby: ({ context }) => {
+      if (!context.externalLobbyUrl) return;
+      openLink(context.externalLobbyUrl, null, { force: 'external', silent: true });
     },
     // Sync the background-blur processor with context flag (web only).
     // If enabling fails (e.g. WASM/model load), revert the flag so the toggle
@@ -1468,6 +1518,7 @@ export const roomMachine = setup({
     callId: null,
     channelId: null,
     pendingJoin: null,
+    externalLobbyUrl: null,
     sdlcLink: null,
     scopeType: null,
     invitedUserId: null,
@@ -1583,6 +1634,8 @@ export const roomMachine = setup({
               zero: ({ event }) => (event.type === 'JOIN_CALL' ? (event.zero ?? null) : null),
               viewMode: ({ event }) =>
                 event.type === 'JOIN_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
+              externalLobbyUrl: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.externalLobbyUrl ?? null) : null,
               isInitiator: () => false,
             }),
           ],
@@ -1740,16 +1793,37 @@ export const roomMachine = setup({
             ],
           },
         ],
-        onError: {
-          target: 'failed',
-          actions: [
-            assign({
-              error: ({ event }) =>
-                event.error instanceof Error ? event.error.message : 'Failed to join call',
-            }),
-            'showJoinCallErrorToast',
-          ],
-        },
+        onError: [
+          {
+            // Not a failure to report — the call is simply not one this
+            // workspace can see, and the lobby takes it from here. Guarded on
+            // the invite URL so only link-borne joins open one: an in-app join
+            // button hitting 404 means the call ended, and that belongs in a
+            // toast rather than a tab.
+            guard: ({ context, event }): boolean =>
+              Boolean(context.externalLobbyUrl) && apiErrorStatus(event.error) === 404,
+            target: 'failed',
+            actions: [
+              ({ context }): void => {
+                logRoomMachineEvent(context.callId, 'join_call_routed_to_external_lobby');
+              },
+              assign({
+                error: () => 'Call is not in this workspace',
+              }),
+              'routeToExternalCallLobby',
+            ],
+          },
+          {
+            target: 'failed',
+            actions: [
+              assign({
+                error: ({ event }) =>
+                  event.error instanceof Error ? event.error.message : 'Failed to join call',
+              }),
+              'showJoinCallErrorToast',
+            ],
+          },
+        ],
       },
     },
     connecting: {
@@ -1905,7 +1979,11 @@ export const roomMachine = setup({
               assign({
                 pendingJoin: ({ event }) =>
                   event.type === 'JOIN_CALL'
-                    ? { callId: event.callId, viewMode: event.viewMode ?? ('mini' as const) }
+                    ? {
+                        callId: event.callId,
+                        viewMode: event.viewMode ?? ('mini' as const),
+                        externalLobbyUrl: event.externalLobbyUrl ?? null,
+                      }
                     : null,
                 zero: ({ context, event }) =>
                   event.type === 'JOIN_CALL' ? (event.zero ?? context.zero) : context.zero,

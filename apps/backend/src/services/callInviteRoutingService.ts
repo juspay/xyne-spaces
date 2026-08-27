@@ -3,6 +3,8 @@ import { CallStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { jwtService } from '@/services/jwtService';
+import { UserSessionService } from '@/services/userSessionService';
+import { logger } from '@/utils/logger';
 
 const JOINABLE_CALL_STATUSES = new Set<CallStatus>([
   CallStatus.SCHEDULED,
@@ -14,7 +16,16 @@ export type InternalCallRouteResolution =
   | { result: 'internal'; workspaceId: string }
   | { result: 'external' };
 
+/**
+ * Who the caller says they are. Both credentials below produce one, and the
+ * membership check that follows is the same either way — a claim decides
+ * nothing on its own.
+ */
+type CallInviteClaim = { userId: string; memberId: string };
+
 class CallInviteRoutingService {
+  private readonly userSessionService = new UserSessionService();
+
   /**
    * Resolve a public call invite against the session for the call's workspace.
    * Ambient workspace signals are intentionally ignored: a user browsing
@@ -34,26 +45,19 @@ class CallInviteRoutingService {
     }
 
     const callWorkspaceId = routing.workspaceId;
-    const token = req.cookies?.[`xyne_ws_${callWorkspaceId}_token`] as string | undefined;
-    if (!token) {
+
+    // The access token first, the login session behind it — the same two
+    // credentials, in the same order, that every authenticated route accepts.
+    const claim =
+      this.claimFromWorkspaceToken(req, callWorkspaceId) ?? (await this.claimFromSession(req));
+    if (!claim) {
       return { result: 'external' };
     }
 
-    let payload;
-    try {
-      payload = jwtService.verifyToken(token);
-    } catch {
-      return { result: 'external' };
-    }
-
-    if (payload.workspaceId !== callWorkspaceId || !payload.sub || !payload.memberId) {
-      return { result: 'external' };
-    }
-
-    // Membership may have been removed after the JWT was issued, so the
-    // signed cookie alone is not enough to route into the internal app.
+    // Membership may have been revoked after the credential was issued, so
+    // holding one is not enough to route into the internal app.
     const user = await db.user.findUnique({
-      where: { id: payload.sub },
+      where: { id: claim.userId },
       select: {
         workspaceId: true,
         orgMemberId: true,
@@ -64,8 +68,8 @@ class CallInviteRoutingService {
     if (
       !user ||
       user.workspaceId !== callWorkspaceId ||
-      user.orgMemberId !== payload.memberId ||
-      user.orgMember?.memberId !== payload.memberId ||
+      user.orgMemberId !== claim.memberId ||
+      user.orgMember?.memberId !== claim.memberId ||
       user.leftAt ||
       user.orgMember.leftAt
     ) {
@@ -85,6 +89,60 @@ class CallInviteRoutingService {
     });
 
     return { result: 'internal', workspaceId: callWorkspaceId };
+  }
+
+  /** The workspace-scoped access token for the call's own workspace. */
+  private claimFromWorkspaceToken(req: Request, callWorkspaceId: string): CallInviteClaim | null {
+    const token = req.cookies?.[`xyne_ws_${callWorkspaceId}_token`] as string | undefined;
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = jwtService.verifyToken(token);
+      if (payload.workspaceId !== callWorkspaceId || !payload.sub || !payload.memberId) {
+        return null;
+      }
+      return { userId: payload.sub, memberId: payload.memberId };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The login session, which is what actually keeps a user signed in.
+   *
+   * `xyne_ws_<id>_token` lives 24 hours; `user_session_id` lives a year, and
+   * every authenticated route quietly mints a fresh access token from it (see
+   * authV2Middleware.attemptRefresh). This route is public, so it has no such
+   * middleware in front of it — reading only the access token sent signed-in
+   * members to the guest lobby for the sole reason that they had not opened
+   * Spaces since yesterday.
+   *
+   * Nothing is minted here: the dashboard load this routes to is an
+   * authenticated request, and refreshes the cookie itself.
+   */
+  private async claimFromSession(req: Request): Promise<CallInviteClaim | null> {
+    const sessionId =
+      (req.headers['x-session-id'] as string | undefined) ||
+      (req.cookies?.user_session_id as string | undefined);
+    if (!sessionId) {
+      return null;
+    }
+
+    try {
+      const session = await this.userSessionService.getSessionById(sessionId);
+      if (!session?.user?.id || !session.user.orgMemberId) {
+        return null;
+      }
+      if (session.status !== 'ACTIVE' || new Date() >= session.refreshTokenExpiry) {
+        return null;
+      }
+      return { userId: session.user.id, memberId: session.user.orgMemberId };
+    } catch (err) {
+      logger.warn(`[call-invite-routing] session lookup failed | error=${err}`);
+      return null;
+    }
   }
 }
 

@@ -11,6 +11,14 @@ import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
 
 interface JoinCallParams {
   callId: string;
+  /**
+   * The invite URL this join came from, when it came from one. Set only by the
+   * link entry points; a join the backend turns away as not-in-this-workspace
+   * is sent here rather than reported as a failure. Joins raised from inside
+   * the app — call pills, upcoming-call buttons — leave it unset, so a call
+   * that has simply ended still fails in place instead of navigating away.
+   */
+  externalLobbyUrl?: string;
   onComplete?: () => void;
 }
 
@@ -112,7 +120,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
    * intent this hook has always had — every caller is a user asking to be in
    * the call — so a different call still ends the current one and joins.
    */
-  const joinCall = ({ callId, onComplete }: JoinCallParams): void => {
+  const joinCall = ({ callId, externalLobbyUrl, onComplete }: JoinCallParams): void => {
     if (!callId) return;
 
     requestMediaPermissions();
@@ -122,6 +130,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
       zero,
       viewMode: isMobile ? 'full' : 'mini',
       allowSwitch: true,
+      ...(externalLobbyUrl && { externalLobbyUrl }),
     });
     onComplete?.();
   };

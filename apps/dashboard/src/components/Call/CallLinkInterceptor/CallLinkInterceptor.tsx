@@ -3,7 +3,6 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useIsActiveCallParticipant } from '../../../hooks/useCalls';
 import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
-import { resolveCallLinkTarget } from '../../../utils/callLinkRouting';
 
 /**
  * Opens Xyne call invite links inside Spaces instead of letting them navigate.
@@ -14,10 +13,11 @@ import { resolveCallLinkTarget } from '../../../utils/callLinkRouting';
  * their session, and then get redirected back into the dashboard — the app
  * boots twice and the screen flashes before the call appears.
  *
- * Claiming the click here asks the same routing question up front, and for a
- * member of the call's workspace hands the call straight to `roomActor`:
+ * Claiming the click here hands the call straight to `roomActor` instead:
  * GlobalCallOverlay renders it over the current screen, with no navigation and
- * no reload. Guests and members of other workspaces still go to the lobby.
+ * no reload. Nothing is asked first — a click inside the dashboard comes from a
+ * signed-in member, and the join itself is what knows whether the call is one
+ * of theirs. Only when it says no does the lobby come back into it.
  *
  * Mounted alongside GlobalCallOverlay — the overlay is what a joined call
  * renders into, so this belongs wherever that does.
@@ -30,20 +30,20 @@ export function CallLinkInterceptor(): null {
   const openCallLink = useCallback(
     (callId: string, href: string): void => {
       // The call already lists this user as an active participant, so there is
-      // nothing for the link to do — and it saves the round trip below.
-      // `roomMachine` guards the join itself; this only spares the click.
+      // nothing for the link to do.
       if (isActiveCallParticipant(callId)) {
         return;
       }
-      void resolveCallLinkTarget(callId, href, user?.workspaceId).then(target => {
-        if (target.kind === 'join-in-place') {
-          joinCall({ callId: target.callId });
-          return;
-        }
-        window.location.assign(target.url);
-      });
+      // Straight to the join — no routing probe first. Inside the dashboard the
+      // clicker is a signed-in member by construction, and `/calls/join` reads
+      // calls through the tenant ACL, so it already answers the only question a
+      // probe could: a call outside this workspace is invisible there and comes
+      // back 404. `externalLobbyUrl` is where that answer sends them, and
+      // carrying the href rather than rebuilding it keeps the desktop app right,
+      // where `window.location.origin` is not the Spaces origin.
+      joinCall({ callId, externalLobbyUrl: href });
     },
-    [user?.workspaceId, joinCall, isActiveCallParticipant],
+    [joinCall, isActiveCallParticipant],
   );
 
   // `joinCall` is rebuilt on every roomActor update, so the listeners below read
