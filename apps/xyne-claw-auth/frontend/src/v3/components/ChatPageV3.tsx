@@ -77,6 +77,7 @@ import { DebugDrawer } from "../../components/DebugDrawer";
 import { MessageRatingButtons } from "../../components/MessageRatingButtons";
 import type { AgentLight } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
+import { ReadonlyContextPills } from "./ReadonlyContextPills";
 import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -1782,6 +1783,12 @@ function MessageThread({
                 )}
                 {msg.attachments && msg.attachments.length > 0 && (
                   <ChatAttachmentList attachments={msg.attachments} userId={userId} align="right" />
+                )}
+                {/* Read-only attached-context chip below the message — collapsed
+                    by default, expands left into a horizontal scroll strip.
+                    Mirrors the Ask AI (Spaces) design. */}
+                {!isEditing && msg.contextItems && msg.contextItems.length > 0 && (
+                  <ReadonlyContextPills items={msg.contextItems} expandedWidthClass="max-w-[24rem]" />
                 )}
                 {ts && (
                   <span className="mr-1 flex items-center gap-1 text-[11px] text-xyne-fg-muted">

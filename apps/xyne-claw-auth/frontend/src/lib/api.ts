@@ -3303,7 +3303,15 @@ export async function pollChatMessages(
       reasoningByMsgId.set(m.id, m.reasoning);
     }
   }
-  return { messages: data.data, invocationsByMsgId, reasoningByMsgId };
+  // The backend persists the user's attached context per message in the
+  // `attachedContext` JSON column and returns it on each row. Surface it as
+  // `contextItems` (the field the UI renders) so the read-only pills survive a
+  // reload. Assistant/legacy rows have none.
+  const messages = data.data.map((m) => {
+    const raw = (m as unknown as { attachedContext?: AttachedContextRef[] }).attachedContext;
+    return raw && raw.length > 0 ? { ...m, contextItems: raw } : m;
+  });
+  return { messages, invocationsByMsgId, reasoningByMsgId };
 }
 
 export interface LiveStreamCallbacks {
