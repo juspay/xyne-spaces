@@ -320,6 +320,12 @@ const SearchResults = (): ReactElement => {
     groupByDocType: true,
   });
 
+  // The text the on-screen results actually reflect. Results update live as the user
+  // types (the hook searches `searchedText`) but the URL `query` only commits on Enter,
+  // so query-driven UI (empty-state copy, local-section gating) must read this, not the
+  // stale URL param. Falls back to `query` on first paint before the sync effect runs.
+  const displayQuery = searchedText.trim() || query;
+
   // Sync hook text whenever the URL query param changes; also close sidebar on new search
   useEffect(() => {
     setText(query);
@@ -526,7 +532,7 @@ const SearchResults = (): ReactElement => {
   // Guard against empty query so we don't show all channels before the user types.
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];
-    if (!query.trim()) return [];
+    if (!displayQuery) return [];
     return filteredLocalChannels.map(({ channel: c, searchableNames }) => {
       const isDm = isDMChannel(c.scopeType);
       const title = isDm ? searchableNames?.join(', ') || c.name : c.name;
@@ -539,7 +545,7 @@ const SearchResults = (): ReactElement => {
         metadata: {},
       };
     });
-  }, [isChannelsMode, filters.docType, query, filteredLocalChannels]);
+  }, [isChannelsMode, filters.docType, displayQuery, filteredLocalChannels]);
 
   // Single "narrowing filter active" flag (from:/in:/assignee: + priority:, not the
   // onlyMyChannels scope toggle) — shared by result stripping and local-section suppression.
@@ -619,7 +625,10 @@ const SearchResults = (): ReactElement => {
     // typing, pressing Enter commits the already-searched query to the URL but fires no API
     // call (the hook duplicate-suppresses it) — so resetting here would leave `isLoading`
     // false forever and spin the screen indefinitely. Guard against that.
-    const willFetch = filterKey !== prevFilterKeyRef.current || query !== searchedText.trim();
+    // `query` is already both-ends trimmed (line ~183); the hook dedupes on text.trimEnd()
+    // (useSearchMetrics), so normalize the same way here or a leading-space edit would
+    // disagree with whether the hook actually re-fetches.
+    const willFetch = filterKey !== prevFilterKeyRef.current || query !== searchedText.trimEnd();
     if (willFetch) hasEverLoadedRef.current = false; // reset for new search
     prevFilterKeyRef.current = filterKey;
   }
@@ -849,6 +858,7 @@ const SearchResults = (): ReactElement => {
         <TicketSearchHighlightContext.Provider value={ticketHighlightMap}>
           <ResultsBody
             query={query}
+            displayQuery={displayQuery}
             hasActiveFilters={filtersActive}
             hasEverLoaded={hasEverLoadedRef.current}
             isLoading={isLoading}
@@ -949,6 +959,9 @@ export default SearchResults;
 
 interface ResultsBodyProps {
   query: string;
+  /** The text the visible results reflect (live typed text, falling back to the URL
+   *  query). Drives empty-state copy and local-section gating so they track live typing. */
+  displayQuery: string;
   hasActiveFilters: boolean;
   hasEverLoaded: boolean;
   isLoading: boolean;
@@ -1092,6 +1105,7 @@ function getAttachmentResultIcon(result: DisplaySearchResult): ReactElement {
 
 function ResultsBody({
   query,
+  displayQuery,
   hasActiveFilters,
   hasEverLoaded,
   isLoading,
@@ -1479,19 +1493,16 @@ function ResultsBody({
     // query, filteredLocalChannels returns every channel, so gate on the query to
     // avoid a partial browse (which would also drop 1:1 DMs) and keep the clean
     // empty state until the user types.
-    const showLocalSections = !hasActiveFilters && !!query.trim();
+    const showLocalSections = !hasActiveFilters && !!displayQuery;
     const hasLocalSections =
       showLocalSections && (userResults.length > 0 || filteredLocalChannels.length > 0);
     const hasBackendSections = backendOnly.length > 0;
 
     // True empty: nothing to show at all
     if (!hasLocalSections && !hasBackendSections) {
-      if (!query && !hasActiveFilters) {
+      if (!displayQuery && !hasActiveFilters) {
         return (
-          <EmptyState
-            title='Search for messages, files, and tickets'
-            subtitle='Type above and press Enter to search'
-          />
+          <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
         );
       }
       if (isLoading || !hasEverLoaded) {
@@ -1505,7 +1516,9 @@ function ResultsBody({
         <EmptyState
           title='No results found'
           subtitle={
-            query ? `Nothing matched "${query}"` : 'No results found for the active filters'
+            displayQuery
+              ? `Nothing matched "${displayQuery}"`
+              : 'No results found for the active filters'
           }
         />
       );
@@ -1553,12 +1566,9 @@ function ResultsBody({
 
   // ── Flat view — specific docType tabs and compare mode ──────────────────
   if (results.length === 0) {
-    if (!query && !hasActiveFilters) {
+    if (!displayQuery && !hasActiveFilters) {
       return (
-        <EmptyState
-          title='Search for messages, files, and tickets'
-          subtitle='Type above and press Enter to search'
-        />
+        <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
       );
     }
     if (isLoading || !hasEverLoaded) {
@@ -1571,7 +1581,11 @@ function ResultsBody({
     return (
       <EmptyState
         title='No results found'
-        subtitle={query ? `Nothing matched "${query}"` : 'No results found for the active filters'}
+        subtitle={
+          displayQuery
+            ? `Nothing matched "${displayQuery}"`
+            : 'No results found for the active filters'
+        }
       />
     );
   }

@@ -76,10 +76,13 @@ export function SearchQueryInput({
       if (event.key === 'Escape') {
         event.preventDefault();
         // First Escape discards the edit; the box keeps focus so it can be retyped.
+        // Feed the committed query back to the live search too, otherwise the box would
+        // show `query` while the results below stay on the discarded text.
         setValue(query);
+        onLiveChange(query);
       }
     },
-    [onSubmit, query, value],
+    [onLiveChange, onSubmit, query, value],
   );
 
   const handleClear = useCallback((): void => {
