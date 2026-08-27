@@ -241,6 +241,8 @@ export const UserActivityPanel = ({
         <div className='flex items-center gap-2'>
           <button
             onClick={handleClose}
+            data-track-category='XYNE_AI_SIDEBAR'
+            data-track-name='CLOSE_ACTIVITY_PANEL'
             className={
               isMobile ? mobileActionButtonClass : 'p-1 hover:bg-accent rounded transition-colors'
             }
@@ -257,6 +259,8 @@ export const UserActivityPanel = ({
           {canManageUserActivity && (
             <button
               onClick={() => setAliasManagerOpen(true)}
+              data-track-category='XYNE_AI_SIDEBAR'
+              data-track-name='OPEN_ALIAS_MANAGER'
               className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2 overflow-hidden hover:bg-accent transition-colors'
               title='Manage activity aliases'
               type='button'
@@ -267,6 +271,8 @@ export const UserActivityPanel = ({
           {!isMobile && (
             <button
               onClick={handleXyneAIClose}
+              data-track-category='XYNE_AI_SIDEBAR'
+              data-track-name='CLOSE_XYNE_AI'
               className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             >
               <X className='w-4 h-4 text-muted-foreground' />
@@ -334,6 +340,8 @@ export const UserActivityPanel = ({
         <div className='p-4 border-t border-border flex-shrink-0'>
           <button
             onClick={handleAddToChat}
+            data-track-category='XYNE_AI_SIDEBAR'
+            data-track-name='ADD_ACTIVITY_TO_CHAT'
             className='w-full py-2.5 px-4 bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground text-sm font-medium rounded-lg transition-colors'
           >
             Add {selectedCount} {selectedCount === 1 ? 'activity' : 'activities'} to chat

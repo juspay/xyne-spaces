@@ -105,6 +105,8 @@ export function PresentationModeOverlay({
           transition={{ duration: 0.25, ease: 'easeInOut' }}
           // Fallback: click anywhere to exit when fullscreen API is unavailable
           onClick={fullscreenFailed ? onExit : undefined}
+          data-track-category='CALLS'
+          data-track-name='EXIT_PRESENTATION_MODE'
         >
           {participant ? (
             <ParticipantTile

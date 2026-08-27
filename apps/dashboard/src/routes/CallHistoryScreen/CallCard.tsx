@@ -365,6 +365,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           handleGotoTranscript?.();
                         }}
+                        data-track-category='calls'
+                        data-track-name='GOTO_TRANSCRIPT'
                         disabled={!isUserChannelMember || !handleGotoTranscript}
                         className='text-sm font-medium rounded-lg'
                       >
@@ -376,6 +378,8 @@ export const CallCard = ({
                             e.stopPropagation();
                             onViewExternalChat();
                           }}
+                          data-track-category='calls'
+                          data-track-name='VIEW_EXTERNAL_CHAT'
                           className='text-sm font-medium rounded-lg'
                         >
                           View External Chat
@@ -386,6 +390,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           handleDownloadTranscript?.();
                         }}
+                        data-track-category='calls'
+                        data-track-name='DOWNLOAD_TRANSCRIPT'
                         disabled={!hasTranscript}
                         className='text-sm font-medium rounded-lg'
                       >
@@ -396,6 +402,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           onCallClick();
                         }}
+                        data-track-category='calls'
+                        data-track-name='OPEN_CALL'
                         className='text-sm font-medium rounded-lg'
                       >
                         Start Call
@@ -493,6 +501,8 @@ export const CallCard = ({
                         e.stopPropagation();
                         handleGotoTranscript?.();
                       }}
+                      data-track-category='calls'
+                      data-track-name='GOTO_TRANSCRIPT'
                       disabled={!isUserChannelMember || !handleGotoTranscript}
                       className='text-sm font-medium rounded-lg'
                     >
@@ -504,6 +514,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           onViewExternalChat();
                         }}
+                        data-track-category='calls'
+                        data-track-name='VIEW_EXTERNAL_CHAT'
                         className='text-sm font-medium rounded-lg'
                       >
                         External Huddle
@@ -514,6 +526,8 @@ export const CallCard = ({
                         e.stopPropagation();
                         handleDownloadTranscript?.();
                       }}
+                      data-track-category='calls'
+                      data-track-name='DOWNLOAD_TRANSCRIPT'
                       disabled={!hasTranscript}
                       className='text-sm font-medium rounded-lg'
                     >
@@ -531,6 +545,8 @@ export const CallCard = ({
                     >
                       <Button
                         onClick={handleGotoTranscript}
+                        data-track-category='calls'
+                        data-track-name='GOTO_TRANSCRIPT'
                         variant='outline'
                         size='icon'
                         disabled={!isUserChannelMember || !handleGotoTranscript}
@@ -547,6 +563,8 @@ export const CallCard = ({
                     <span className={!hasTranscript ? 'cursor-not-allowed' : ''}>
                       <Button
                         onClick={handleDownloadTranscript}
+                        data-track-category='calls'
+                        data-track-name='DOWNLOAD_TRANSCRIPT'
                         variant='outline'
                         size='icon'
                         disabled={!hasTranscript}
@@ -580,6 +598,8 @@ export const CallCard = ({
                     e.stopPropagation();
                     onCallClick();
                   }}
+                  data-track-category='calls'
+                  data-track-name='OPEN_CALL'
                   variant='outline'
                   data-testid='call-join-button'
                   className={cn(

@@ -348,6 +348,8 @@ const ProfileView = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
+                data-track-category='PROFILE'
+                data-track-name='CLEAR_STATUS'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
               >

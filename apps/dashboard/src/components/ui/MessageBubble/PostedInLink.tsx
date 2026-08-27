@@ -114,6 +114,8 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
     <button
       type='button'
       onClick={handleClick}
+      data-track-category='MESSAGE'
+      data-track-name='OPEN_POSTED_IN_CHANNEL'
       disabled={!hasAccess}
       className={`flex items-center gap-1.5 text-xs mt-2 ${
         hasAccess

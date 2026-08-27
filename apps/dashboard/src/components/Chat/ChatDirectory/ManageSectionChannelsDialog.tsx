@@ -191,7 +191,14 @@ export const ManageSectionChannelsDialog = ({
       </div>
 
       <div className='flex justify-end gap-3 pt-2'>
-        <Button type='button' variant='outline' size='default' onClick={onClose}>
+        <Button
+          type='button'
+          variant='outline'
+          size='default'
+          onClick={onClose}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='CANCEL_MANAGE_SECTION_CHANNELS'
+        >
           Cancel
         </Button>
         <Button
@@ -199,6 +206,8 @@ export const ManageSectionChannelsDialog = ({
           variant='default'
           size='default'
           onClick={handleSave}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='SAVE_MANAGE_SECTION_CHANNELS'
           className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
         >
           Save

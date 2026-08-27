@@ -1517,6 +1517,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 variant='ghost'
                 className='w-full justify-start'
                 onClick={e => handleReminderPresetSelect(option.option, e)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SELECT_REMINDER_PRESET'
               >
                 {option.label}
               </Button>
@@ -1590,10 +1592,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             </div>
 
             <div className='flex justify-end gap-2 pt-2'>
-              <Button variant='outline' onClick={() => setIsCustomReminderModalOpen(false)}>
+              <Button
+                variant='outline'
+                onClick={() => setIsCustomReminderModalOpen(false)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='CANCEL_CUSTOM_REMINDER'
+              >
                 Cancel
               </Button>
-              <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+              <Button
+                onClick={handleSaveCustomReminder}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SAVE_CUSTOM_REMINDER'
+                disabled={!customReminderDate}
+              >
                 Save
               </Button>
             </div>
