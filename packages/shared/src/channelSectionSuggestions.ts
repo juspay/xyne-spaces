@@ -40,6 +40,49 @@ export interface ComputeProjectSectionSuggestionsInput {
 
 const normalizeName = (name: string): string => name.trim().toLowerCase();
 
+const indexStatuses = (
+  statuses: readonly SuggestionChannelStatus[],
+): Map<string, SuggestionChannelStatus> => {
+  const byChannelId = new Map<string, SuggestionChannelStatus>();
+  for (const status of statuses) {
+    byChannelId.set(status.channelId, status);
+  }
+  return byChannelId;
+};
+
+const selectCandidates = (
+  channels: readonly SuggestionChannel[],
+  statusByChannelId: Map<string, SuggestionChannelStatus>,
+): SuggestionChannel[] =>
+  channels.filter(channel => {
+    if (channel.scopeType !== ChannelScopeType.DEFAULT) return false;
+    if (isDeskChannelType(channel.type)) return false;
+    const status = statusByChannelId.get(channel.id);
+    if (!status) return false;
+    return !status.isDeleted && !status.isStarred && !status.sectionId;
+  });
+
+export interface CandidateProjectIdsInput {
+  channels: readonly SuggestionChannel[];
+  statuses: readonly SuggestionChannelStatus[];
+  minChannels?: number;
+}
+
+export function getCandidateProjectIds(input: CandidateProjectIdsInput): string[] {
+  const { channels, statuses, minChannels = DEFAULT_MIN_CHANNELS } = input;
+
+  const counts = new Map<string, number>();
+  for (const channel of selectCandidates(channels, indexStatuses(statuses))) {
+    counts.set(channel.projectId, (counts.get(channel.projectId) ?? 0) + 1);
+  }
+
+  const ids: string[] = [];
+  for (const [projectId, count] of counts) {
+    if (count >= minChannels) ids.push(projectId);
+  }
+  return ids.sort();
+}
+
 export function computeProjectSectionSuggestions(
   input: ComputeProjectSectionSuggestionsInput,
 ): ProjectSectionSuggestion[] {
@@ -51,18 +94,7 @@ export function computeProjectSectionSuggestions(
     minChannels = DEFAULT_MIN_CHANNELS,
   } = input;
 
-  const statusByChannelId = new Map<string, SuggestionChannelStatus>();
-  for (const status of statuses) {
-    statusByChannelId.set(status.channelId, status);
-  }
-
-  const candidates = channels.filter(channel => {
-    if (channel.scopeType !== ChannelScopeType.DEFAULT) return false;
-    if (isDeskChannelType(channel.type)) return false;
-    const status = statusByChannelId.get(channel.id);
-    if (!status) return false;
-    return !status.isDeleted && !status.isStarred && !status.sectionId;
-  });
+  const candidates = selectCandidates(channels, indexStatuses(statuses));
 
   if (candidates.length === 0) return [];
 

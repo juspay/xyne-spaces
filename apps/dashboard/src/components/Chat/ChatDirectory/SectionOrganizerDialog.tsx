@@ -1,4 +1,11 @@
-import { useCallback, useMemo, useState, type ChangeEvent, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type ReactElement,
+} from 'react';
 import {
   ChatDefault,
   ChevronRight,
@@ -21,6 +28,16 @@ import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 const AUTO_EXPAND_MAX_CHANNELS = 25;
+const TIP_INDEX_KEY = 'xyne:section-organizer-tip-index';
+
+const SECTION_TIPS = [
+  'Drag DMs into a section anytime.',
+  'Your sections are private to you.',
+  'Click a section name to rename it.',
+  'Uncheck a section to skip it.',
+  'Use × to remove a channel and + to add it back.',
+  'Drag channels between sections anytime.',
+];
 
 export interface OrganizerGroup {
   projectId: string;
@@ -157,7 +174,10 @@ export const SectionOrganizerDialog = ({
 
   const selectedGroups = groups
     .filter(g => g.included && includedCount(g) > 0)
-    .map(g => ({ ...g, channelIds: g.channelIds.filter(id => !g.excludedChannelIds.includes(id)) }));
+    .map(g => ({
+      ...g,
+      channelIds: g.channelIds.filter(id => !g.excludedChannelIds.includes(id)),
+    }));
   const takenNames = new Set(existingNames.map(n => n.trim().toLowerCase()));
 
   const invalidNames = new Set<string>();
@@ -172,6 +192,14 @@ export const SectionOrganizerDialog = ({
 
   const canConfirm = selectedGroups.length > 0 && invalidNames.size === 0;
 
+  const [tipIndex] = useState(() => {
+    const stored = Number(localStorage.getItem(TIP_INDEX_KEY));
+    return Number.isInteger(stored) && stored >= 0 ? stored % SECTION_TIPS.length : 0;
+  });
+  useEffect(() => {
+    localStorage.setItem(TIP_INDEX_KEY, String((tipIndex + 1) % SECTION_TIPS.length));
+  }, [tipIndex]);
+
   return (
     <div className='flex max-h-[80vh] flex-col gap-4 p-4' data-testid='section-organizer-dialog'>
       <div className='flex items-start justify-between gap-2'>
@@ -180,9 +208,7 @@ export const SectionOrganizerDialog = ({
             <FolderAi size={16} className='text-primary' />
             Organize your channels
           </div>
-          <div className='mt-1 text-xs text-muted-foreground'>
-            See how your sidebar could look.
-          </div>
+          <div className='mt-1 text-xs text-muted-foreground'>See how your sidebar could look.</div>
         </div>
         <button
           type='button'
@@ -209,84 +235,82 @@ export const SectionOrganizerDialog = ({
         />
       </div>
 
-      <div className='flex min-h-0 flex-1 flex-col'>
-        <div className='min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-sidebar/40 p-2'>
-            {visibleGroups.map(group => {
-              const isOpen = (group.expanded || !!query) && group.included;
-              const hasNameError = invalidNames.has(group.projectId);
-              return (
-                <div key={group.projectId} className='mb-1'>
-                  <div className='flex h-9 items-center gap-1.5 rounded-[10px] border border-transparent px-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'>
-                    <Checkbox
-                      checked={group.included}
-                      onChange={included => updateGroup(group.projectId, { included })}
-                      ariaLabel={`Include ${group.name}`}
-                      label=''
-                      size='sm'
+      <div className='flex min-h-0 flex-col'>
+        <div className='max-h-[22rem] min-h-0 overflow-y-auto rounded-md border border-border bg-sidebar/40 p-2'>
+          {visibleGroups.map(group => {
+            const isOpen = (group.expanded || !!query) && group.included;
+            const hasNameError = invalidNames.has(group.projectId);
+            return (
+              <div key={group.projectId} className='mb-1'>
+                <div className='flex h-9 items-center gap-1.5 rounded-[10px] border border-transparent px-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'>
+                  <Checkbox
+                    checked={group.included}
+                    onChange={included => updateGroup(group.projectId, { included })}
+                    ariaLabel={`Include ${group.name}`}
+                    label=''
+                    size='sm'
+                  />
+                  <button
+                    type='button'
+                    onClick={() => updateGroup(group.projectId, { expanded: !group.expanded })}
+                    aria-label={isOpen ? 'Collapse' : 'Expand'}
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='ORGANIZER_TOGGLE_EXPAND'
+                    className='shrink-0 text-muted-foreground'
+                  >
+                    <ChevronRight
+                      size={13}
+                      className={cn('transition-transform', isOpen && 'rotate-90')}
                     />
-                    <button
-                      type='button'
-                      onClick={() => updateGroup(group.projectId, { expanded: !group.expanded })}
-                      aria-label={isOpen ? 'Collapse' : 'Expand'}
-                      data-track-category='CHAT_SIDEBAR'
-                      data-track-name='ORGANIZER_TOGGLE_EXPAND'
-                      className='shrink-0 text-muted-foreground'
-                    >
-                      <ChevronRight
-                        size={13}
-                        className={cn('transition-transform', isOpen && 'rotate-90')}
-                      />
-                    </button>
-                    <input
-                      value={group.name}
-                      onChange={e => updateGroup(group.projectId, { name: e.target.value })}
-                      maxLength={50}
-                      disabled={!group.included}
-                      data-track-category='CHAT_SIDEBAR'
-                      data-track-name='ORGANIZER_RENAME_SECTION'
-                      className={cn(
-                        'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-sm font-medium text-foreground outline-none focus:border-b-primary',
-                        !group.included && 'text-muted-foreground line-through',
-                        hasNameError && 'border-b-destructive focus:border-b-destructive',
-                      )}
-                    />
-                    <span className='shrink-0 text-xs text-muted-foreground'>
-                      {includedCount(group)}
-                    </span>
-                  </div>
-
-                  {isOpen && (
-                    <div className='pl-6'>
-                      {group.channelIds.map(channelId => {
-                        const channel = channelsById.get(channelId);
-                        if (!channel) return null;
-                        return (
-                          <ChannelLine
-                            key={channelId}
-                            channel={channel}
-                            excluded={group.excludedChannelIds.includes(channelId)}
-                            onToggle={() => toggleChannel(group.projectId, channelId)}
-                          />
-                        );
-                      })}
-                    </div>
-                  )}
+                  </button>
+                  <input
+                    value={group.name}
+                    onChange={e => updateGroup(group.projectId, { name: e.target.value })}
+                    maxLength={50}
+                    disabled={!group.included}
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='ORGANIZER_RENAME_SECTION'
+                    className={cn(
+                      'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-sm font-medium text-foreground outline-none focus:border-b-primary',
+                      !group.included && 'text-muted-foreground line-through',
+                      hasNameError && 'border-b-destructive focus:border-b-destructive',
+                    )}
+                  />
+                  <span className='shrink-0 text-xs text-muted-foreground'>
+                    {includedCount(group)}
+                  </span>
                 </div>
-              );
-            })}
 
-            {visibleGroups.length === 0 && (
-              <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-                No channels found
+                {isOpen && (
+                  <div className='pl-6'>
+                    {group.channelIds.map(channelId => {
+                      const channel = channelsById.get(channelId);
+                      if (!channel) return null;
+                      return (
+                        <ChannelLine
+                          key={channelId}
+                          channel={channel}
+                          excluded={group.excludedChannelIds.includes(channelId)}
+                          onToggle={() => toggleChannel(group.projectId, channelId)}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+            );
+          })}
+
+          {visibleGroups.length === 0 && (
+            <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
+              No channels found
+            </div>
+          )}
         </div>
       </div>
 
       <div className='flex items-center justify-between gap-3'>
-        <span className='text-xs text-muted-foreground'>
-          DMs can be added by dragging them into a section.
-        </span>
+        <span className='text-xs text-muted-foreground'>{SECTION_TIPS[tipIndex]}</span>
         <span className={cn('inline-flex', !canConfirm && 'cursor-not-allowed')}>
           <Button
             type='button'
