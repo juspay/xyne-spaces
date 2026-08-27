@@ -252,8 +252,12 @@ export class TagRepository {
     start: Date,
     end: Date,
   ): Promise<{ conversationId: string; tagCategory: string; tag: string }[]> {
+    // Last email per conversation: a thread is re-tagged per email, so reading
+    // them all put one ticket in several sentiment groups at once.
     const emails = await this.client().email.findMany({
       where: { channelId, createdAt: { gte: start, lte: end } },
+      orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      distinct: ['conversationId'],
       select: { id: true, conversationId: true },
     });
     if (emails.length === 0) return [];
@@ -272,8 +276,8 @@ export class TagRepository {
       select: { sourceId: true, tagCategory: true, tag: true },
     });
 
-    // Every email of a thread carries the thread's tags, so the same triple
-    // comes back once per email — dedupe to one row per conversation. The key is
+    // Dedupe: the same category and tag can be stored twice against one email.
+    // The key is
     // NUL-joined because categories and tags are LLM-authored free text: any
     // printable separator can occur inside them and would fold two distinct
     // triples into one ("customer intent"/"billing" vs "customer"/"intent billing").
