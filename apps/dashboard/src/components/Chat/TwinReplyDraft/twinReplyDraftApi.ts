@@ -22,6 +22,8 @@ export interface TwinReplyDraftView {
   destinationUserName?: string;
   destinationReason?: string;
   sourceMessageId?: string;
+  /** Who the twin is replying to. Resolves their real profile picture. */
+  senderId?: string;
   senderName?: string;
   channelName?: string;
   agentSlug?: string;
