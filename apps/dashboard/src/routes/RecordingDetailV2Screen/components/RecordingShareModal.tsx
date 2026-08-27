@@ -9,9 +9,9 @@ import { useUserGroupSearch, useChannelSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
 import { InputBox } from '../../../components/ui/InputBox';
+import { UnifiedParticipantSearch } from '../../../components/ui/UnifiedParticipantSearch/UnifiedParticipantSearch';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
-import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
-import { useActiveUsers, useActiveUserSearch } from '../../../hooks/useUsers';
+import { useActiveUserSearch } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
@@ -46,7 +46,6 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   onTicketLinkUpdated,
 }) => {
   const { user: currentUser } = useAuth();
-  const activeUsers = useActiveUsers();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
@@ -54,9 +53,6 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   const [sharing, setSharing] = useState(false);
   const [locallyRevokedShareIds, setLocallyRevokedShareIds] = useState<Set<string>>(new Set());
   const inputBoxRef = useRef<InputBoxHandle>(null);
-
-  const userGroups = useUserGroupSearch(searchQuery, 10);
-  const channels = useChannelSearch(searchQuery, 10);
 
   const [recordingRow] = useCachedQuery(
     queries.oatsRecordingByExternalId({ callId: recording.externalId }),
@@ -83,51 +79,15 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     [shares],
   );
 
-  // Combine users, groups, and channels.
-  const options = useMemo(() => {
-    const userOptions = activeUsers
-      .filter(
-        u =>
-          u.id !== recording.createdByUserId &&
-          u.id !== currentUser?.id &&
-          !sharedUserIds.has(u.id),
-      )
-      .map(u => ({
-        label: getUserDisplayName(u),
-        subtitle: u.email ?? '',
-        value: `user:${u.id}`,
-        icon: <Avatar userId={u.id} size='sm' showActiveStatus={false} />,
-      }));
-
-    const groupOptions = userGroups
-      .filter(group => !sharedUserGroupIds.has(group.id))
-      .map(group => ({
-        label: group.name,
-        subtitle: 'Group',
-        value: `user_group:${group.id}`,
-        icon: <Users className='size-3.5 text-muted-foreground' />,
-      }));
-
-    const channelOptions = channels
-      .filter(channel => !sharedChannelIds.has(channel.id))
-      .map(channel => ({
-        label: channel.name,
-        subtitle: 'Channel',
-        value: `channel:${channel.id}`,
-        icon: <Hash className='size-3.5 text-muted-foreground' />,
-      }));
-
-    return [...userOptions, ...groupOptions, ...channelOptions];
-  }, [
-    activeUsers,
-    userGroups,
-    channels,
-    sharedUserIds,
-    sharedUserGroupIds,
-    sharedChannelIds,
-    recording.createdByUserId,
-    currentUser?.id,
-  ]);
+  const excludedUserIds = useMemo(
+    () =>
+      new Set(
+        [recording.createdByUserId, currentUser?.id, ...sharedUserIds].filter((id): id is string =>
+          Boolean(id),
+        ),
+      ),
+    [currentUser?.id, recording.createdByUserId, sharedUserIds],
+  );
 
   // Configure the share message composer.
   const selectedChannelId = useMemo(
@@ -271,12 +231,14 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
         <p className='text-muted-foreground text-[13px] leading-5'>
           Share with people, groups, or channels
         </p>
-        <SearchParticipants
-          options={options}
+        <UnifiedParticipantSearch
           selectedValues={selectedValues}
           onMultiSelect={setSelectedValues}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+          excludedUserIds={excludedUserIds}
+          excludedUserGroupIds={sharedUserGroupIds}
+          excludedChannelIds={sharedChannelIds}
           exclusiveSelection={false}
         />
       </div>
