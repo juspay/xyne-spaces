@@ -301,6 +301,7 @@ const SearchResults = (): ReactElement => {
     isGrouped,
     isSearching: isLoading,
     searchError: error,
+    text: searchedText,
     setText,
     setActiveTab,
     setSelectedMentions,
@@ -595,8 +596,7 @@ const SearchResults = (): ReactElement => {
   const hasEverLoadedRef = useRef(false);
   const autoOpenedResultKeyRef = useRef<string | null>(null);
   const hasManualPanelSelectionRef = useRef(false);
-  const searchRequestKey = JSON.stringify([
-    query,
+  const filterKey = JSON.stringify([
     filters.docType,
     filters.fromUserIds,
     filters.fromEmails,
@@ -608,11 +608,20 @@ const SearchResults = (): ReactElement => {
     filters.onlyMyChannels,
     filters.rankProfile,
   ]);
+  const searchRequestKey = JSON.stringify([query, filterKey]);
   const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
   const prevSearchKeyRef = useRef(searchRequestKey);
+  const prevFilterKeyRef = useRef(filterKey);
   if (searchRequestKey !== prevSearchKeyRef.current) {
     prevSearchKeyRef.current = searchRequestKey;
-    hasEverLoadedRef.current = false; // reset for new search
+    // Only show the loading bridge when a new API call will actually run: a filter change,
+    // or a query the search hook hasn't fetched yet. Since results now update live while
+    // typing, pressing Enter commits the already-searched query to the URL but fires no API
+    // call (the hook duplicate-suppresses it) — so resetting here would leave `isLoading`
+    // false forever and spin the screen indefinitely. Guard against that.
+    const willFetch = filterKey !== prevFilterKeyRef.current || query !== searchedText.trim();
+    if (willFetch) hasEverLoadedRef.current = false; // reset for new search
+    prevFilterKeyRef.current = filterKey;
   }
   if (isLoading) hasEverLoadedRef.current = true;
 
@@ -792,7 +801,12 @@ const SearchResults = (): ReactElement => {
             <ArrowLeft size={16} />
           </button>
           <div className='flex-1 min-w-0'>
-            <SearchQueryInput query={query} onSubmit={handleQuerySubmit} isSearching={isLoading} />
+            <SearchQueryInput
+              query={query}
+              onSubmit={handleQuerySubmit}
+              onLiveChange={setText}
+              isSearching={isLoading}
+            />
           </div>
         </div>
         <div className='mt-3'>
