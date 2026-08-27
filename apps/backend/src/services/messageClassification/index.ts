@@ -163,6 +163,7 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
       }),
     },
     channel.projectId,
+    channel.workspaceId,
     modelName,
   );
 
@@ -395,6 +396,7 @@ const dedicatedCredential = (): OrgLLMCredential | null => {
 async function classifyThread(
   input: ClassifierInput,
   projectId: string,
+  workspaceId: string | null,
   modelName: string,
 ): Promise<Classification> {
   const credential =
