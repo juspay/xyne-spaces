@@ -13,6 +13,7 @@
  */
 
 import { Queue } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { redisService } from "../redis.js";
 
 export type BackfillSource = "messages" | "calls" | "canvases";
@@ -80,7 +81,7 @@ export async function enqueueDigitalTwinBackfill(args: {
       // anyway). This is why callers guard live jobs with backfillJobIsLive
       // before enqueuing; this catch is the defensive backstop that keeps a
       // resume/enable from 500-ing on "locked by another worker".
-      if (/locked by another worker/i.test(err instanceof Error ? err.message : String(err))) {
+      if (/locked by another worker/i.test(errMsg(err))) {
         return id;
       }
       throw err;

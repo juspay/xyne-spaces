@@ -11,9 +11,9 @@ import {
 } from "./agent-card.js";
 import type { AvailableToolsCatalog } from "../routes/tools.js";
 
-// Minimal catalog shaped like buildAvailableToolsCatalog's output. Only the two
-// buckets the resolver reads are populated — everything else is irrelevant here
-// and deliberately stays unmatched (see the "gateway/MCP tokens" test).
+// Minimal catalog shaped like buildAvailableToolsCatalog's output. It includes
+// subagents, custom tools, MCP integration tools and gateway integrations so the
+// resolver can round-trip every agent.config.tools bucket.
 const catalog = {
   subagents: [
     { name: "spaces", description: "", serverType: "xyne-spaces", progressLabel: "", progressLabels: [], source: "builtin" },
@@ -26,7 +26,26 @@ const catalog = {
     { source: "custom:report", tools: [{ slug: "create-html-report", name: "Create Report" }] },
   ],
   serverTools: {},
-  integrations: [],
+  integrations: [
+    {
+      slug: "xyne-spaces",
+      label: "Xyne Spaces",
+      kind: "mcp",
+      connected: true,
+      readTools: [{ slug: "xyne-spaces__spaces-search", name: "spaces-search", description: "", riskLevel: "read" }],
+      writeTools: [{ slug: "xyne-spaces__spaces-create-ticket", name: "spaces-create-ticket", description: "", riskLevel: "write" }],
+      usageCount: 0,
+    },
+    {
+      slug: "gateway:jira/primary",
+      label: "Jira (primary)",
+      kind: "gateway",
+      connected: true,
+      readTools: [{ slug: "gateway:jira/primary__search", name: "search", description: "", riskLevel: "read" }],
+      writeTools: [],
+      usageCount: 0,
+    },
+  ],
 } as unknown as AvailableToolsCatalog;
 
 describe("resolveAgentCapabilities", () => {
@@ -34,6 +53,8 @@ describe("resolveAgentCapabilities", () => {
     const resolved = await resolveAgentCapabilities(["spaces", "web-search"], catalog);
     expect(resolved.subagents).toEqual(["spaces"]);
     expect(resolved.custom).toEqual(["web-search"]);
+    expect(resolved.direct).toEqual([]);
+    expect(resolved.gateway).toEqual([]);
     expect(resolved.unknown).toEqual([]);
     expect(resolved.capabilities).toEqual([
       // iconKey is the subagent's serverType, NOT its name — the brand asset for
@@ -44,18 +65,35 @@ describe("resolveAgentCapabilities", () => {
     ]);
   });
 
-  it("reports unmatched tokens instead of guessing a bucket", async () => {
-    // An MCP/gateway token needs a source-scoped selection key whose bucket
-    // depends on integration state; mis-bucketing it would silently mis-wire the
-    // agent, so it must surface on the card rather than be dropped or assumed.
+  it("persists source-scoped MCP tool slugs into tools.direct", async () => {
     const resolved = await resolveAgentCapabilities(
-      ["spaces", "Bitbucket__create_pull_request", "invented-tool"],
+      ["spaces", "xyne-spaces__spaces-search", "xyne-spaces__spaces-create-ticket"],
       catalog,
     );
     expect(resolved.subagents).toEqual(["spaces"]);
+    expect(resolved.direct).toEqual(["xyne-spaces__spaces-search", "xyne-spaces__spaces-create-ticket"]);
+    expect(resolved.unknown).toEqual([]);
+    expect(resolved.capabilities.map((c) => c.id)).toEqual([
+      "spaces",
+      "xyne-spaces__spaces-search",
+      "xyne-spaces__spaces-create-ticket",
+    ]);
+  });
+
+  it("persists gateway integration slugs into tools.gateway", async () => {
+    const resolved = await resolveAgentCapabilities(["gateway:jira/primary"], catalog);
+    expect(resolved.gateway).toEqual(["gateway:jira/primary"]);
+    expect(resolved.capabilities).toEqual([
+      { id: "gateway:jira/primary", label: "Jira (primary)", kind: "tool" },
+    ]);
+  });
+
+  it("reports truly unmatched tokens", async () => {
+    const resolved = await resolveAgentCapabilities(["spaces", "invented-tool"], catalog);
+    expect(resolved.subagents).toEqual(["spaces"]);
     expect(resolved.custom).toEqual([]);
-    expect(resolved.unknown).toEqual(["Bitbucket__create_pull_request", "invented-tool"]);
-    expect(unknownToolsNote(resolved.unknown)).toContain("Bitbucket__create_pull_request");
+    expect(resolved.unknown).toEqual(["invented-tool"]);
+    expect(unknownToolsNote(resolved.unknown)).toContain("invented-tool");
   });
 
   it("is case- and whitespace-exact (a near miss is reported, never silently matched)", async () => {
@@ -89,14 +127,18 @@ describe("toolIdsFromConfig", () => {
     // The profile card round-trips: config.tools → ids → resolved capabilities,
     // so a live agent's card shows exactly what it was granted.
     expect(
-      toolIdsFromConfig({ tools: { subagents: ["spaces", "google"], custom: ["web-search"] } }),
-    ).toEqual(["spaces", "google", "web-search"]);
+      toolIdsFromConfig({
+        tools: {
+          subagents: ["spaces", "google"],
+          direct: ["xyne-spaces__spaces-search"],
+          gateway: ["gateway:jira/primary"],
+          custom: ["web-search"],
+        },
+      }),
+    ).toEqual(["spaces", "google", "xyne-spaces__spaces-search", "gateway:jira/primary", "web-search"]);
   });
 
-  it("ignores buckets this card does not own, and malformed config", () => {
-    // gateway/direct use a different addressing scheme; reading them here would
-    // render chips whose ids the resolver can never match.
-    expect(toolIdsFromConfig({ tools: { gateway: ["x"], direct: ["y"] } })).toEqual([]);
+  it("ignores malformed config", () => {
     expect(toolIdsFromConfig({ tools: { subagents: "not-an-array" } })).toEqual([]);
     expect(toolIdsFromConfig(null)).toEqual([]);
     expect(toolIdsFromConfig({})).toEqual([]);
@@ -105,8 +147,9 @@ describe("toolIdsFromConfig", () => {
 
 describe("toConfigTools", () => {
   it("omits empty buckets so a tool-less agent gets {}", () => {
-    expect(toConfigTools({ subagents: [], custom: [] })).toEqual({});
-    expect(toConfigTools({ subagents: ["spaces"], custom: [] })).toEqual({ subagents: ["spaces"] });
+    expect(toConfigTools({ subagents: [], direct: [], gateway: [], custom: [] })).toEqual({});
+    expect(toConfigTools({ subagents: ["spaces"], direct: [], gateway: [], custom: [] })).toEqual({ subagents: ["spaces"] });
+    expect(toConfigTools({ subagents: [], direct: ["xyne-spaces__spaces-search"], gateway: [], custom: [] })).toEqual({ direct: ["xyne-spaces__spaces-search"] });
   });
 });
 
@@ -138,6 +181,8 @@ describe("identity builders", () => {
   const resolved = {
     capabilities: [{ id: "spaces", label: "spaces", kind: "subagent" as const }],
     subagents: ["spaces"],
+    direct: [],
+    gateway: [],
     custom: [],
     unknown: [],
   };

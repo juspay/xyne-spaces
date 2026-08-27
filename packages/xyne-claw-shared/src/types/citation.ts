@@ -7,7 +7,7 @@ export interface Citation {
   /** Optional human-friendly label, e.g., "Spaces thread", "Ticket FOO-123". */
   label?: string;
   /** What kind of resource this citation points to. */
-  kind: "thread" | "canvas" | "ticket" | "external" | "collection-item";
+  kind: "thread" | "canvas" | "ticket" | "external" | "collection-item" | "recording";
   /** For kind="thread": channel + conversation IDs. */
   channelId?: string;
   conversationId?: string;
@@ -75,6 +75,12 @@ export interface Citation {
    * rows may carry a root-relative path here instead; both render the same.
    */
   iconUrl?: string;
+  /**
+   * For kind="recording": the call's `externalId` — the id the `/recordings/:id`
+   * route accepts. A note-taker recording has no channel and no thread, so it
+   * cannot be cited as a thread; this is the only link target it has.
+   */
+  recordingId?: string;
   /** For kind="collection-item": spaces CollectionItem.id (the file row). */
   collectionItemId?: string;
   /** For kind="collection-item": spaces Collection.id of the root collection
@@ -176,7 +182,7 @@ export function citationIconKey(c: Citation): CitationIconKey | undefined {
     if (c.app === "gdrive") return "gdrive";
     return undefined;
   }
-  // thread / ticket / canvas / collection-item are all Spaces-native.
+  // thread / ticket / canvas / collection-item / recording are all Spaces-native.
   return "spaces";
 }
 

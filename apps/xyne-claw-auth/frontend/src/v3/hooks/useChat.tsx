@@ -34,6 +34,12 @@ export interface SendOptions {
   modelOverride?: string;
   /** Repository selected in the SDLC Agent composer. */
   researchContext?: { type: "repository"; id: string; name?: string };
+  /** Per-turn provider fast mode toggle (chat sidebar). Overrides the agent's
+   *  saved modelSettings.speed for this run only. */
+  speed?: "standard" | "fast";
+  /** Per-turn thinking level (composer model menu). Overrides the agent's
+   *  saved modelSettings.thinkingLevel for this run only. */
+  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
 }
 
 /** A live event delivered by the /live SSE for a conversation being viewed. */
@@ -295,11 +301,11 @@ interface ChatContextValue {
   /** Branching: produce a sibling assistant under the same user parent.
    *  When assistantMessageId is provided, regenerates THAT assistant's reply;
    *  otherwise regenerates the latest visible assistant. */
-  regenerate: (agentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string) => Promise<void>;
+  regenerate: (agentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => Promise<void>;
   /** Branching: replace the latest visible user message with edited text and
    *  run a new turn as a sibling. Older messages cannot be edited (would
    *  require re-rooting the tree). */
-  editLatestUserMessage: (agentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string) => Promise<void>;
+  editLatestUserMessage: (agentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => Promise<void>;
   /** Branching: select which child of `parentId` should be visible. */
   selectBranch: (parentId: string, messageId: string) => void;
   /** Cancel the in-flight stream for the active session. No-op if nothing
@@ -415,6 +421,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "complete",
         createdAt: new Date().toISOString(),
         parentId: parentAssistantMessageId ?? null,
+        // Show the attached-context pills on the just-sent turn immediately
+        // (matches what a later reload renders from the persisted column).
+        ...(opts?.attachedContext && opts.attachedContext.length > 0
+          ? { contextItems: opts.attachedContext }
+          : {}),
       };
 
       const assistantId = crypto.randomUUID();
@@ -571,6 +582,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             ...(opts?.designSelection ? { designSelection: opts.designSelection } : {}),
             ...(opts?.modelOverride ? { providerOverride: { provider: "litellm", model: opts.modelOverride } } : {}),
             ...(opts?.researchContext ? { researchContext: opts.researchContext } : {}),
+            ...(opts?.speed ? { speed: opts.speed } : {}),
+            ...(opts?.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
           },
         );
 
@@ -681,7 +694,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const regenerate = useCallback(
-    async (agentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string) => {
+    async (agentSlug: string, userId: string, assistantMessageId?: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => {
       const key = activeKey;
       if (!key) return;
       const current = sessions.get(key);
@@ -796,8 +809,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           undefined,                     // signalOrIsEditUserMessage
           undefined,                     // editedUserMessageId
           controller.signal,             // explicit terminal signal
-          // Carry the per-chat model pick so regenerate reruns on the same model.
-          modelOverride ? { providerOverride: { provider: "litellm", model: modelOverride } } : undefined,
+          // Carry the per-chat model pick + fast mode + thinking so regenerate reruns the same way.
+          {
+            ...(modelOverride ? { providerOverride: { provider: "litellm", model: modelOverride } } : {}),
+            ...(speed ? { speed } : {}),
+            ...(thinkingLevel ? { thinkingLevel } : {}),
+          },
         );
         updateSession(key, (s) => {
           const withAssistantId = replaceMessageId(s, assistantId, result.reply.id ?? assistantId);
@@ -858,7 +875,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const editLatestUserMessage = useCallback(
-    async (agentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string) => {
+    async (agentSlug: string, userId: string, userMessageId: string, text: string, modelOverride?: string, speed?: "standard" | "fast", thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high") => {
       const key = activeKey;
       if (!key || !text.trim()) return;
       const current = sessions.get(key);
@@ -885,6 +902,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "complete",
         createdAt: new Date().toISOString(),
         parentId: originalUser.parentId ?? null,
+        // Editing keeps the same attached context — carry it onto the new turn.
+        ...(originalUser.contextItems && originalUser.contextItems.length > 0
+          ? { contextItems: originalUser.contextItems }
+          : {}),
       };
       const assistantPlaceholder: ChatMsg = {
         id: assistantId,
@@ -975,8 +996,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           true,                          // isEditUserMessage flag
           originalUser.id,               // editedUserMessageId
           controller.signal,             // explicit terminal signal
-          // Carry the per-chat model pick so the edited turn reruns on it.
-          modelOverride ? { providerOverride: { provider: "litellm", model: modelOverride } } : undefined,
+          // Carry the per-chat model pick + fast mode + thinking so the edited turn reruns the same way.
+          {
+            ...(modelOverride ? { providerOverride: { provider: "litellm", model: modelOverride } } : {}),
+            ...(speed ? { speed } : {}),
+            ...(thinkingLevel ? { thinkingLevel } : {}),
+          },
         );
         updateSession(key, (s) => {
           const withUserId = result.reply.userMessageId

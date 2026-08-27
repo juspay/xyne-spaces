@@ -16,8 +16,9 @@
  */
 
 import EventEmitter from "events";
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { randomUUID } from "crypto";
+import { asyncHandler, ok, badRequest } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
@@ -188,246 +189,213 @@ async function resolveApproval(
    GET /metrics
    ───────────────────────────────────────────────────────────────────── */
 
-router.get("/metrics", requireClawAdmin, async (req: Request, res: Response) => {
-  try {
-    const scope = getAdminOrgScope(req, "/control-center/metrics");
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+router.get("/metrics", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const scope = getAdminOrgScope(req, "/control-center/metrics");
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
 
-    const [activeSessions, todayRuns, approvals] = await Promise.all([
-      prisma.agentRun.count({ where: { status: "running", ...(scope.orgId ? { orgId: scope.orgId } : {}) } }),
-      prisma.agentRun.findMany({
-        where: { startedAt: { gte: todayStart }, ...(scope.orgId ? { orgId: scope.orgId } : {}) },
-        select: { toolInvocations: true, agentSlug: true, status: true },
-      }),
-      getAllApprovals(),
-    ]);
+  const [activeSessions, todayRuns, approvals] = await Promise.all([
+    prisma.agentRun.count({ where: { status: "running", ...(scope.orgId ? { orgId: scope.orgId } : {}) } }),
+    prisma.agentRun.findMany({
+      where: { startedAt: { gte: todayStart }, ...(scope.orgId ? { orgId: scope.orgId } : {}) },
+      select: { toolInvocations: true, agentSlug: true, status: true },
+    }),
+    getAllApprovals(),
+  ]);
 
-    const runningAgents = new Set(
-      todayRuns.filter((r) => r.status === "running").map((r) => r.agentSlug),
-    ).size;
+  const runningAgents = new Set(
+    todayRuns.filter((r) => r.status === "running").map((r) => r.agentSlug),
+  ).size;
 
-    let toolCallsToday = 0;
-    for (const run of todayRuns) {
-      if (Array.isArray(run.toolInvocations)) {
-        toolCallsToday += run.toolInvocations.length;
-      }
+  let toolCallsToday = 0;
+  for (const run of todayRuns) {
+    if (Array.isArray(run.toolInvocations)) {
+      toolCallsToday += run.toolInvocations.length;
     }
-
-    const pendingApprovals = approvals.filter((a) =>
-      a.status === "pending" && (scope.allOrgs || !scope.orgId || a.orgId === scope.orgId),
-    ).length;
-
-    res.json({
-      success: true,
-      data: {
-        activeSessions,
-        runningAgents,
-        pendingApprovals,
-        toolCallsToday,
-      },
-    });
-  } catch (err) {
-    log.error("[control-center] metrics error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
   }
-});
+
+  const pendingApprovals = approvals.filter((a) =>
+    a.status === "pending" && (scope.allOrgs || !scope.orgId || a.orgId === scope.orgId),
+  ).length;
+
+  ok(res, {
+    activeSessions,
+    runningAgents,
+    pendingApprovals,
+    toolCallsToday,
+  });
+}));
 
 /* ─────────────────────────────────────────────────────────────────────
    GET /agents — live activity feed
    ───────────────────────────────────────────────────────────────────── */
 
-router.get("/agents", requireClawAdmin, async (req: Request, res: Response) => {
-  try {
-    const scope = getAdminOrgScope(req, "/control-center/agents");
-    const limit = Math.min(parseInt((req.query["limit"] as string) || "50", 10), 200);
-    const statusFilter =
-      typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+router.get("/agents", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const scope = getAdminOrgScope(req, "/control-center/agents");
+  const limit = Math.min(parseInt((req.query["limit"] as string) || "50", 10), 200);
+  const statusFilter =
+    typeof req.query["status"] === "string" ? req.query["status"] : undefined;
 
-    const runs = await prisma.agentRun.findMany({
-      where: {
-        ...(statusFilter ? { status: statusFilter } : {}),
-        ...(scope.orgId ? { orgId: scope.orgId } : {}),
-      },
-      orderBy: { startedAt: "desc" },
-      take: limit,
-    });
+  const runs = await prisma.agentRun.findMany({
+    where: {
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(scope.orgId ? { orgId: scope.orgId } : {}),
+    },
+    orderBy: { startedAt: "desc" },
+    take: limit,
+  });
 
-    if (runs.length === 0) {
-      res.json({ success: true, data: [] });
-      return;
-    }
-
-    const slugs = [...new Set(runs.map((r) => r.agentSlug))];
-    const agentMeta = await prisma.agent.findMany({
-      where: { slug: { in: slugs } },
-      select: { slug: true, name: true, color: true },
-    });
-    const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
-    const orgNames = scope.allOrgs ? await getOrgNameMap(runs.map((r) => r.orgId)) : new Map();
-
-    const feed = runs.map((run) => {
-      const meta = metaBySlug.get(run.agentSlug);
-      const name = meta?.name ?? run.agentSlug;
-      const palette = avatarPalette(meta?.color ?? "#6366f1");
-      const invocations = Array.isArray(run.toolInvocations)
-        ? (run.toolInvocations as Array<Record<string, unknown>>)
-        : [];
-      const lastTool =
-        run.currentToolLabel ??
-        (invocations.length > 0
-          ? String(invocations[invocations.length - 1]?.["toolName"] ?? "")
-          : run.toolsUsed.at(-1) ?? "");
-
-      return {
-        id: run.id,
-        sessionId: run.sessionId,
-        name,
-        initials: toInitials(name),
-        avatarBg: palette.bg,
-        avatarText: palette.text,
-        agentSlug: run.agentSlug,
-        task: run.task.length > 140 ? run.task.slice(0, 140) + "…" : run.task,
-        status: toUIStatus(run.status, run.currentToolLabel),
-        integration: lastTool,
-        startedAt: run.startedAt,
-        minutesAgo: minutesAgo(run.startedAt),
-        error: run.error ?? undefined,
-        ...(scope.allOrgs ? withOrgLabel({ orgId: run.orgId }, orgNames) : {}),
-        toolsUsed: run.toolsUsed,
-        progress:
-          run.status === "completed" ? 100 : run.status === "running" ? undefined : undefined,
-        deepLink: buildDeepLink(run.conversationId, run.channelId, run.triggerSource),
-      };
-    });
-
-    res.json({ success: true, data: feed });
-  } catch (err) {
-    log.error("[control-center] agents error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (runs.length === 0) {
+    ok(res, []);
+    return;
   }
-});
+
+  const slugs = [...new Set(runs.map((r) => r.agentSlug))];
+  const agentMeta = await prisma.agent.findMany({
+    where: { slug: { in: slugs } },
+    select: { slug: true, name: true, color: true },
+  });
+  const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
+  const orgNames = scope.allOrgs ? await getOrgNameMap(runs.map((r) => r.orgId)) : new Map();
+
+  const feed = runs.map((run) => {
+    const meta = metaBySlug.get(run.agentSlug);
+    const name = meta?.name ?? run.agentSlug;
+    const palette = avatarPalette(meta?.color ?? "#6366f1");
+    const invocations = Array.isArray(run.toolInvocations)
+      ? (run.toolInvocations as Array<Record<string, unknown>>)
+      : [];
+    const lastTool =
+      run.currentToolLabel ??
+      (invocations.length > 0
+        ? String(invocations[invocations.length - 1]?.["toolName"] ?? "")
+        : run.toolsUsed.at(-1) ?? "");
+
+    return {
+      id: run.id,
+      sessionId: run.sessionId,
+      name,
+      initials: toInitials(name),
+      avatarBg: palette.bg,
+      avatarText: palette.text,
+      agentSlug: run.agentSlug,
+      task: run.task.length > 140 ? run.task.slice(0, 140) + "…" : run.task,
+      status: toUIStatus(run.status, run.currentToolLabel),
+      integration: lastTool,
+      startedAt: run.startedAt,
+      minutesAgo: minutesAgo(run.startedAt),
+      error: run.error ?? undefined,
+      ...(scope.allOrgs ? withOrgLabel({ orgId: run.orgId }, orgNames) : {}),
+      toolsUsed: run.toolsUsed,
+      progress:
+        run.status === "completed" ? 100 : run.status === "running" ? undefined : undefined,
+      deepLink: buildDeepLink(run.conversationId, run.channelId, run.triggerSource),
+    };
+  });
+
+  ok(res, feed);
+}));
 
 /* ─────────────────────────────────────────────────────────────────────
    GET /failures
    ───────────────────────────────────────────────────────────────────── */
 
-router.get("/failures", requireClawAdmin, async (req: Request, res: Response) => {
-  try {
-    const scope = getAdminOrgScope(req, "/control-center/failures");
-    const limit = Math.min(parseInt((req.query["limit"] as string) || "20", 10), 100);
+router.get("/failures", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const scope = getAdminOrgScope(req, "/control-center/failures");
+  const limit = Math.min(parseInt((req.query["limit"] as string) || "20", 10), 100);
 
-    const runs = await prisma.agentRun.findMany({
-      where: { status: "failed", ...(scope.orgId ? { orgId: scope.orgId } : {}) },
-      orderBy: { startedAt: "desc" },
-      take: limit,
-    });
+  const runs = await prisma.agentRun.findMany({
+    where: { status: "failed", ...(scope.orgId ? { orgId: scope.orgId } : {}) },
+    orderBy: { startedAt: "desc" },
+    take: limit,
+  });
 
-    if (runs.length === 0) {
-      res.json({ success: true, data: [] });
-      return;
-    }
-
-    const slugs = [...new Set(runs.map((r) => r.agentSlug))];
-    const agentMeta = await prisma.agent.findMany({
-      where: { slug: { in: slugs } },
-      select: { slug: true, name: true },
-    });
-    const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
-    const orgNames = scope.allOrgs ? await getOrgNameMap(runs.map((r) => r.orgId)) : new Map();
-
-    const failures = runs.map((run) => ({
-      sessionId: run.sessionId,
-      agentSlug: run.agentSlug,
-      ...(scope.allOrgs ? withOrgLabel({ orgId: run.orgId }, orgNames) : {}),
-      agentName: metaBySlug.get(run.agentSlug)?.name ?? run.agentSlug,
-      task: run.task.length > 140 ? run.task.slice(0, 140) + "…" : run.task,
-      error: {
-        message: run.error ?? "Unknown error",
-        recoveryActions: ["retry"] as string[],
-      },
-      failedAt: run.completedAt ?? run.startedAt,
-      deepLink: buildDeepLink(run.conversationId, run.channelId, run.triggerSource),
-    }));
-
-    res.json({ success: true, data: failures });
-  } catch (err) {
-    log.error("[control-center] failures error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (runs.length === 0) {
+    ok(res, []);
+    return;
   }
-});
+
+  const slugs = [...new Set(runs.map((r) => r.agentSlug))];
+  const agentMeta = await prisma.agent.findMany({
+    where: { slug: { in: slugs } },
+    select: { slug: true, name: true },
+  });
+  const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
+  const orgNames = scope.allOrgs ? await getOrgNameMap(runs.map((r) => r.orgId)) : new Map();
+
+  const failures = runs.map((run) => ({
+    sessionId: run.sessionId,
+    agentSlug: run.agentSlug,
+    ...(scope.allOrgs ? withOrgLabel({ orgId: run.orgId }, orgNames) : {}),
+    agentName: metaBySlug.get(run.agentSlug)?.name ?? run.agentSlug,
+    task: run.task.length > 140 ? run.task.slice(0, 140) + "…" : run.task,
+    error: {
+      message: run.error ?? "Unknown error",
+      recoveryActions: ["retry"] as string[],
+    },
+    failedAt: run.completedAt ?? run.startedAt,
+    deepLink: buildDeepLink(run.conversationId, run.channelId, run.triggerSource),
+  }));
+
+  ok(res, failures);
+}));
 
 /* ─────────────────────────────────────────────────────────────────────
    GET /approvals
    ───────────────────────────────────────────────────────────────────── */
 
-router.get("/approvals", requireClawAdmin, async (req: Request, res: Response) => {
-  try {
-    const scope = getAdminOrgScope(req, "/control-center/approvals");
-    const all = await getAllApprovals();
-    const filtered = scope.allOrgs || !scope.orgId ? all : all.filter((a) => a.orgId === scope.orgId);
-    const orgNames = scope.allOrgs ? await getOrgNameMap(filtered.map((a) => a.orgId)) : new Map();
-    res.json({
-      success: true,
-      data: filtered.map((a) => (scope.allOrgs ? withOrgLabel(a, orgNames) : a)),
-    });
-  } catch (err) {
-    log.error("[control-center] approvals list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+router.get("/approvals", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const scope = getAdminOrgScope(req, "/control-center/approvals");
+  const all = await getAllApprovals();
+  const filtered = scope.allOrgs || !scope.orgId ? all : all.filter((a) => a.orgId === scope.orgId);
+  const orgNames = scope.allOrgs ? await getOrgNameMap(filtered.map((a) => a.orgId)) : new Map();
+  ok(res, filtered.map((a) => (scope.allOrgs ? withOrgLabel(a, orgNames) : a)));
+}));
 
 /* ─────────────────────────────────────────────────────────────────────
    POST /approvals — agents write approval requests here (internal/S2S)
    ───────────────────────────────────────────────────────────────────── */
 
-router.post("/approvals", requireS2S, async (req: Request, res: Response) => {
-  try {
-    const { agentSlug, agentName, sessionId, action, targetSystem } = req.body as {
-      agentSlug?: string;
-      agentName?: string;
-      orgId?: string;
-      sessionId?: string;
-      action?: string;
-      targetSystem?: string;
-    };
+router.post("/approvals", requireS2S, asyncHandler(async (req: Request, res: Response) => {
+  const { agentSlug, agentName, sessionId, action, targetSystem } = req.body as {
+    agentSlug?: string;
+    agentName?: string;
+    orgId?: string;
+    sessionId?: string;
+    action?: string;
+    targetSystem?: string;
+  };
 
-    if (!agentSlug || !sessionId || !action) {
-      res
-        .status(400)
-        .json({ success: false, error: "agentSlug, sessionId, and action are required" });
-      return;
-    }
-
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    const approval: ControlCenterApproval = {
-      id,
-      agentSlug,
-      agentName: agentName ?? agentSlug,
-      ...(typeof req.body?.orgId === "string" && req.body.orgId.trim() ? { orgId: req.body.orgId.trim() } : {}),
-      sessionId,
-      action,
-      targetSystem: targetSystem ?? "",
-      status: "pending",
-      createdAt: now,
-      minutesAgo: 0,
-    };
-
-    const redis = redisService.getConnection();
-    await redis.set(
-      `${APPROVAL_PREFIX}${id}`,
-      JSON.stringify(approval),
-      "EX",
-      APPROVAL_TTL_ACTIVE,
-    );
-
-    res.status(201).json({ success: true, data: { id } });
-  } catch (err) {
-    log.error("[control-center] create approval error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (!agentSlug || !sessionId || !action) {
+    throw badRequest("agentSlug, sessionId, and action are required");
   }
-});
+
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const approval: ControlCenterApproval = {
+    id,
+    agentSlug,
+    agentName: agentName ?? agentSlug,
+    ...(typeof req.body?.orgId === "string" && req.body.orgId.trim() ? { orgId: req.body.orgId.trim() } : {}),
+    sessionId,
+    action,
+    targetSystem: targetSystem ?? "",
+    status: "pending",
+    createdAt: now,
+    minutesAgo: 0,
+  };
+
+  const redis = redisService.getConnection();
+  await redis.set(
+    `${APPROVAL_PREFIX}${id}`,
+    JSON.stringify(approval),
+    "EX",
+    APPROVAL_TTL_ACTIVE,
+  );
+
+  res.status(201);
+  ok(res, { id });
+}));
 
 /* ─────────────────────────────────────────────────────────────────────
    POST /approvals/:id/approve
@@ -722,121 +690,110 @@ function dateFilter(
   return { [field]: range };
 }
 
-router.get("/twin-reply-metrics", requireClawAdmin, async (req: Request, res: Response) => {
-  try {
-    const scope = getAdminOrgScope(req, "/control-center/twin-reply-metrics");
-    const { since, until, days, prevSince, prevUntil } = parseWindow(req);
+router.get("/twin-reply-metrics", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const scope = getAdminOrgScope(req, "/control-center/twin-reply-metrics");
+  const { since, until, days, prevSince, prevUntil } = parseWindow(req);
 
-    // Resolve the user identities we can attribute rows to (and, when org-scoped,
-    // the id whitelist to filter on).
-    const users = await prisma.user.findMany({
-      where: scope.orgId ? { orgId: scope.orgId } : {},
-      select: { id: true, name: true, email: true },
-    });
+  // Resolve the user identities we can attribute rows to (and, when org-scoped,
+  // the id whitelist to filter on).
+  const users = await prisma.user.findMany({
+    where: scope.orgId ? { orgId: scope.orgId } : {},
+    select: { id: true, name: true, email: true },
+  });
 
-    if (scope.orgId && users.length === 0) {
-      res.json({
-        success: true,
-        data: emptyTwinReplyMetrics(scope, since, until, days),
-      });
-      return;
+  if (scope.orgId && users.length === 0) {
+    ok(res, emptyTwinReplyMetrics(scope, since, until, days));
+    return;
+  }
+
+  const orgUserIds = users.map((u) => u.id);
+  const userFilter = scope.orgId ? { userId: { in: orgUserIds } } : {};
+
+  const [replyRowsRaw, gateRowsRaw, behaviorRowsRaw] = await Promise.all([
+    prisma.twinResponseFeedback.findMany({
+      where: { ...userFilter, ...dateFilter("proposedAt", since, until) },
+      select: { userId: true, status: true, deliveryAction: true, proposedAt: true, decidedAt: true },
+      orderBy: { proposedAt: "desc" },
+      take: TWIN_ROW_CAP,
+    }),
+    prisma.digitalTwinPipelineEvent.findMany({
+      where: { ...userFilter, runType: "gate", ...dateFilter("createdAt", since, until) },
+      select: { userId: true, status: true, durationMs: true, trace: true },
+      orderBy: { createdAt: "desc" },
+      take: TWIN_ROW_CAP,
+    }),
+    prisma.twinBehaviorSignal.findMany({
+      where: { ...userFilter, ...dateFilter("occurredAt", since, until) },
+      select: { userId: true, outcome: true, gateDecision: true, shouldHaveResponded: true },
+      orderBy: { occurredAt: "desc" },
+      take: TWIN_ROW_CAP,
+    }),
+  ]);
+
+  for (const [label, rows] of [
+    ["reply-feedback", replyRowsRaw],
+    ["gate-events", gateRowsRaw],
+    ["behavior-signals", behaviorRowsRaw],
+  ] as const) {
+    if (rows.length >= TWIN_ROW_CAP) {
+      log.warn(`[control-center] twin-reply-metrics ${label} hit row cap ${TWIN_ROW_CAP}; totals truncated`);
     }
+  }
 
-    const orgUserIds = users.map((u) => u.id);
-    const userFilter = scope.orgId ? { userId: { in: orgUserIds } } : {};
+  const replyRows = replyRowsRaw as ReplyFeedbackRow[];
+  const gateRows = gateRowsRaw as GateEventRow[];
+  const behaviorRows = behaviorRowsRaw as BehaviorRow[];
 
-    const [replyRowsRaw, gateRowsRaw, behaviorRowsRaw] = await Promise.all([
+  const replies = computeReplyAgg(replyRows);
+  const gate = computeGateAgg(gateRows);
+  const behavior = computeBehaviorAgg(behaviorRows);
+
+  const allUserRows = computePerUser(users, replyRows, gateRows, behaviorRows);
+  const byUser = allUserRows.slice(0, TWIN_USER_LIMIT);
+  if (allUserRows.length > TWIN_USER_LIMIT) {
+    log.warn(`[control-center] twin-reply-metrics returning top ${TWIN_USER_LIMIT} of ${allUserRows.length} users`);
+  }
+
+  // Previous-period deltas (preset windows only).
+  let previousApprovalRate: number | null = null;
+  let previousEditRate: number | null = null;
+  let previousRespondRate: number | null = null;
+  if (prevSince && prevUntil) {
+    const [prevReplyRaw, prevGateRaw] = await Promise.all([
       prisma.twinResponseFeedback.findMany({
-        where: { ...userFilter, ...dateFilter("proposedAt", since, until) },
+        where: { ...userFilter, ...dateFilter("proposedAt", prevSince, prevUntil) },
         select: { userId: true, status: true, deliveryAction: true, proposedAt: true, decidedAt: true },
-        orderBy: { proposedAt: "desc" },
         take: TWIN_ROW_CAP,
       }),
       prisma.digitalTwinPipelineEvent.findMany({
-        where: { ...userFilter, runType: "gate", ...dateFilter("createdAt", since, until) },
+        where: { ...userFilter, runType: "gate", ...dateFilter("createdAt", prevSince, prevUntil) },
         select: { userId: true, status: true, durationMs: true, trace: true },
-        orderBy: { createdAt: "desc" },
-        take: TWIN_ROW_CAP,
-      }),
-      prisma.twinBehaviorSignal.findMany({
-        where: { ...userFilter, ...dateFilter("occurredAt", since, until) },
-        select: { userId: true, outcome: true, gateDecision: true, shouldHaveResponded: true },
-        orderBy: { occurredAt: "desc" },
         take: TWIN_ROW_CAP,
       }),
     ]);
-
-    for (const [label, rows] of [
-      ["reply-feedback", replyRowsRaw],
-      ["gate-events", gateRowsRaw],
-      ["behavior-signals", behaviorRowsRaw],
-    ] as const) {
-      if (rows.length >= TWIN_ROW_CAP) {
-        log.warn(`[control-center] twin-reply-metrics ${label} hit row cap ${TWIN_ROW_CAP}; totals truncated`);
-      }
-    }
-
-    const replyRows = replyRowsRaw as ReplyFeedbackRow[];
-    const gateRows = gateRowsRaw as GateEventRow[];
-    const behaviorRows = behaviorRowsRaw as BehaviorRow[];
-
-    const replies = computeReplyAgg(replyRows);
-    const gate = computeGateAgg(gateRows);
-    const behavior = computeBehaviorAgg(behaviorRows);
-
-    const allUserRows = computePerUser(users, replyRows, gateRows, behaviorRows);
-    const byUser = allUserRows.slice(0, TWIN_USER_LIMIT);
-    if (allUserRows.length > TWIN_USER_LIMIT) {
-      log.warn(`[control-center] twin-reply-metrics returning top ${TWIN_USER_LIMIT} of ${allUserRows.length} users`);
-    }
-
-    // Previous-period deltas (preset windows only).
-    let previousApprovalRate: number | null = null;
-    let previousEditRate: number | null = null;
-    let previousRespondRate: number | null = null;
-    if (prevSince && prevUntil) {
-      const [prevReplyRaw, prevGateRaw] = await Promise.all([
-        prisma.twinResponseFeedback.findMany({
-          where: { ...userFilter, ...dateFilter("proposedAt", prevSince, prevUntil) },
-          select: { userId: true, status: true, deliveryAction: true, proposedAt: true, decidedAt: true },
-          take: TWIN_ROW_CAP,
-        }),
-        prisma.digitalTwinPipelineEvent.findMany({
-          where: { ...userFilter, runType: "gate", ...dateFilter("createdAt", prevSince, prevUntil) },
-          select: { userId: true, status: true, durationMs: true, trace: true },
-          take: TWIN_ROW_CAP,
-        }),
-      ]);
-      const prevReply = computeReplyAgg(prevReplyRaw as ReplyFeedbackRow[]);
-      const prevGate = computeGateAgg(prevGateRaw as GateEventRow[]);
-      previousApprovalRate = prevReply.approvalRate;
-      previousEditRate = prevReply.editRate;
-      previousRespondRate = prevGate.respondRate;
-    }
-
-    res.json({
-      success: true,
-      data: {
-        scope: {
-          orgScope: scope.allOrgs ? "all" : "org",
-          userCount: users.length,
-        },
-        window: {
-          since: since ? since.toISOString() : null,
-          until: until ? until.toISOString() : null,
-          days,
-        },
-        replies: { ...replies, previousApprovalRate, previousEditRate },
-        gate: { ...gate, previousRespondRate },
-        behavior,
-        byUser,
-      },
-    });
-  } catch (err) {
-    log.error("[control-center] twin-reply-metrics error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+    const prevReply = computeReplyAgg(prevReplyRaw as ReplyFeedbackRow[]);
+    const prevGate = computeGateAgg(prevGateRaw as GateEventRow[]);
+    previousApprovalRate = prevReply.approvalRate;
+    previousEditRate = prevReply.editRate;
+    previousRespondRate = prevGate.respondRate;
   }
-});
+
+  ok(res, {
+    scope: {
+      orgScope: scope.allOrgs ? "all" : "org",
+      userCount: users.length,
+    },
+    window: {
+      since: since ? since.toISOString() : null,
+      until: until ? until.toISOString() : null,
+      days,
+    },
+    replies: { ...replies, previousApprovalRate, previousEditRate },
+    gate: { ...gate, previousRespondRate },
+    behavior,
+    byUser,
+  });
+}));
 
 /** Zero-valued payload for an org with no users (keeps the client shape stable). */
 function emptyTwinReplyMetrics(

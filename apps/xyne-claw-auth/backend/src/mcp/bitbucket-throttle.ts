@@ -18,6 +18,7 @@
  *       limit, not "permission denied".
  */
 import { callTool } from "./runner.js";
+import { errMsg } from "../lib/errors.js";
 import type { McpCallResult } from "./types.js";
 
 const MAX_CONCURRENT_PER_USER = Number(process.env["BITBUCKET_MAX_CONCURRENCY"] ?? 2);
@@ -112,7 +113,7 @@ export async function callBitbucketThrottled(
         return await callTool(userId, "bitbucket", credentials, tool, params, agentSlug);
       } catch (err) {
         lastErr = err;
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errMsg(err);
 
         // Only the generic "Permission denied" string hides the real status —
         // anything else is already specific, so don't retry/probe it.

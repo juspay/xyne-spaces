@@ -25,6 +25,7 @@
  *   - SPACES_DB_URL configured with GRANT SELECT ON public.installed_apps
  */
 import { createHash } from "node:crypto";
+import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
@@ -98,7 +99,7 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
         const p = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
         stored = { ok: true, fp: fingerprint(p), len: p.length };
       } catch (err) {
-        stored = { ok: false, error: err instanceof Error ? err.message : String(err) };
+        stored = { ok: false, error: errMsg(err) };
       }
     }
   }
@@ -107,46 +108,19 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
   let db: { ok: boolean; fp?: string; len?: number; error?: string };
   if (!agent.spacesAppId) {
     db = { ok: false, error: "agent has no spacesAppId" };
+  } else if (CONFIG.spacesEncryptionKey.length === 0) {
+    db = { ok: false, error: "SPACES_ENCRYPTION_KEY unset" };
   } else {
     try {
-      const spacesEncryptionKeys = CONFIG.spacesEncryptionKeys;
-
-      if (spacesEncryptionKeys.size === 0) {
-        db = {
-          ok: false,
-          error: "Spaces encryption keys unset",
-        };
+      const blob = await getInstalledAppSigningSecret(agent.spacesAppId);
+      if (!blob) {
+        db = { ok: false, error: "no installed_apps row / null signingSecret" };
       } else {
-        const blob = await getInstalledAppSigningSecret(
-          agent.spacesAppId,
-        );
-
-        if (!blob) {
-          db = {
-            ok: false,
-            error: "no installed_apps row / null signingSecret",
-          };
-        } else {
-          const p = decryptSpacesCbc(
-            blob,
-            spacesEncryptionKeys,
-          );
-
-          db = {
-            ok: true,
-            fp: fingerprint(p),
-            len: p.length,
-          };
-        }
+        const p = decryptSpacesCbc(blob, CONFIG.spacesEncryptionKey);
+        db = { ok: true, fp: fingerprint(p), len: p.length };
       }
     } catch (err) {
-      db = {
-        ok: false,
-        error:
-          err instanceof Error
-            ? err.message
-            : String(err),
-      };
+      db = { ok: false, error: errMsg(err) };
     }
   }
 
