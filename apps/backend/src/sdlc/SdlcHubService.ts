@@ -32,6 +32,8 @@ import {
   type ClawDebugArtifactBundle,
 } from '@/services/clawAgentService';
 import { logger } from '@/utils/logger';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { BASELINE_DEFINITIONS } from './baselineDefinitions';
@@ -628,13 +630,16 @@ export class SdlcHubService implements SdlcHub {
       await sdlcVcs.requireCapabilities(actor, input.repoId, [...BASELINE_CAPABILITIES]);
     }
 
-    const folderName =
-      input.kind === 'BASELINE' ? 'Baseline' : input.kind === 'PRD' ? 'PRDs' : 'Tech Docs';
-    const folder = await this.prisma.canvasFolder.findFirst({
-      where: { channelId: repo.channelId, name: folderName },
-      select: { id: true },
-    });
-    if (!folder) throw new AppError(`${folderName} folder not found`, 409);
+    const folder = input.folderId
+      ? await this.prisma.canvasFolder.findFirst({
+          where: { id: input.folderId, channelId: repo.channelId },
+          select: { id: true },
+        })
+      : await this.prisma.canvasFolder.findFirst({
+          where: { channelId: repo.channelId, name: 'Baseline' },
+          select: { id: true },
+        });
+    if (!folder) throw new AppError('Artifact type folder not found', 409);
 
     let baselineGenerationCommit: string | null = null;
     if (input.kind === 'BASELINE') {
@@ -712,18 +717,9 @@ export class SdlcHubService implements SdlcHub {
     }
 
     const content = await convertMarkdownToBlockNote(artifactMarkdown);
-    return commitAndSyncCanvasArtifact(
+    const artifact = await commitAndSyncCanvasArtifact(
       () =>
         this.prisma.$transaction(async (tx) => {
-          if (input.kind === 'TECH_DOC' && input.parentCanvasId) {
-            await this.requireArtifactCanvas(
-              tx,
-              repo.id,
-              repo.channelId!,
-              input.parentCanvasId,
-              'PRD'
-            );
-          }
           const viewAccessId = randomUUID();
           const canvas = await tx.canvas.create({
             data: {
@@ -745,7 +741,7 @@ export class SdlcHubService implements SdlcHub {
               },
             },
           });
-          if ((input.kind === 'PRD' || input.kind === 'TECH_DOC') && input.trackId) {
+          if (input.kind !== 'BASELINE' && input.trackId) {
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
@@ -764,7 +760,10 @@ export class SdlcHubService implements SdlcHub {
               workspaceId: actor.workspaceId,
               repoId: repo.id,
               artifactId: canvas.id,
-              artifactType: canvasTypeForSdlcArtifact(input.kind, input.baselineKind),
+              artifactType:
+                input.kind === 'BASELINE'
+                  ? canvasTypeForSdlcArtifact(input.baselineKind)
+                  : 'DEFAULT',
               artifactStatus: 'ACTIVE',
               ...(input.kind === 'BASELINE' && input.workflowExecutionId
                 ? { workflowExecutionId: input.workflowExecutionId }
@@ -775,19 +774,28 @@ export class SdlcHubService implements SdlcHub {
             },
           });
 
-          if (input.kind === 'TECH_DOC' && input.parentCanvasId) {
-            await tx.sdlcEntityLink.create({
-              data: {
-                workspaceId: actor.workspaceId,
-                repoId: repo.id,
-                sourceType: 'CANVAS',
-                sourceId: input.parentCanvasId,
-                targetType: 'CANVAS',
-                targetId: canvas.id,
-                relationType: 'TECH_DOC',
-                createdBy: actor.userId,
-              },
+          const relatedIds = Array.from(
+            new Set((input.relatedCanvasIds ?? []).filter(id => id !== canvas.id)),
+          );
+          if (relatedIds.length > 0) {
+            const validRelated = await tx.canvas.findMany({
+              where: { id: { in: relatedIds }, channelId: repo.channelId! },
+              select: { id: true },
             });
+            for (const related of validRelated) {
+              await tx.sdlcEntityLink.create({
+                data: {
+                  workspaceId: actor.workspaceId,
+                  repoId: repo.id,
+                  sourceType: 'CANVAS',
+                  sourceId: related.id,
+                  targetType: 'CANVAS',
+                  targetId: canvas.id,
+                  relationType: 'CONTEXT',
+                  createdBy: actor.userId,
+                },
+              });
+            }
           }
           return {
             artifact: {
@@ -802,6 +810,26 @@ export class SdlcHubService implements SdlcHub {
         }),
       syncToYSweet
     );
+    this.enqueueCanvasIndexing(artifact.canvasId, actor.workspaceId, actor.userId);
+    return artifact;
+  }
+
+  private enqueueCanvasIndexing(canvasId: string, workspaceId: string, userId: string): void {
+    void vespaQueue
+      .addJob({
+        schema: fileSchema,
+        jobType: 'feed',
+        docId: canvasId,
+        userId,
+        workspaceId,
+        app: SubApp.CANVAS,
+      })
+      .catch(err => {
+        logger.warn('[SDLC] failed to enqueue canvas indexing', {
+          canvasId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
   }
 
   async updateBaselineDraftFromClaw(
@@ -1224,11 +1252,11 @@ export class SdlcHubService implements SdlcHub {
       where: {
         id: input.canvasId,
         channelId: repo.channelId,
-        sdlcArtifact: { is: { artifactType: input.kind } },
+        sdlcArtifact: { isNot: null },
       },
       select: { id: true, viewAccessId: true, title: true },
     });
-    if (!existing) throw new AppError(`${input.kind} artifact not found`, 404);
+    if (!existing) throw new AppError('SDLC artifact not found', 404);
     const existingEntity = await this.prisma.sdlcArtifact.findUnique({
       where: { artifactId: existing.id },
       select: { generationCommit: true },
@@ -1262,7 +1290,7 @@ export class SdlcHubService implements SdlcHub {
               workspaceId: actor.workspaceId,
               repoId: repo.id,
               artifactId: existing.id,
-              artifactType: input.kind,
+              artifactType: 'DEFAULT',
               generationCommit,
               sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
               createdBy: actor.userId,
@@ -1277,7 +1305,6 @@ export class SdlcHubService implements SdlcHub {
               canvasId: canvas.id,
               viewAccessId: canvas.viewAccessId ?? undefined,
               url: `/chat/canvas/${canvas.viewAccessId ?? canvas.id}`,
-              kind: input.kind,
             },
             canvasId: canvas.id,
             content,
@@ -1380,6 +1407,66 @@ export class SdlcHubService implements SdlcHub {
         createdBy: actor.userId,
       },
       select: { id: true, name: true, description: true, status: true },
+    });
+  }
+
+  async listArtifactTypes(actor: SdlcActor, repoId: string) {
+    const repo = await this.requireRepositoryRole(actor, repoId, false);
+    if (!repo?.channelId) throw new AppError('SDLC repository not found', 404);
+    return this.prisma.canvasFolder.findMany({
+      where: { channelId: repo.channelId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true, createdAt: true },
+    });
+  }
+
+  async createArtifactType(actor: SdlcActor, repoId: string, name: string) {
+    const repo = await this.requireRepositoryRole(actor, repoId, false);
+    if (!repo?.channelId || !repo.projectId) {
+      throw new AppError('SDLC repository not found', 404);
+    }
+    const trimmed = name.trim();
+    if (!trimmed) throw new AppError('Artifact type name is required', 400);
+    const existing = await this.prisma.canvasFolder.findFirst({
+      where: { channelId: repo.channelId, name: trimmed },
+      select: { id: true },
+    });
+    if (existing) throw new AppError('An artifact type with this name already exists', 409);
+    return this.prisma.canvasFolder.create({
+      data: {
+        id: randomUUID(),
+        workspaceId: actor.workspaceId,
+        projectId: repo.projectId,
+        channelId: repo.channelId,
+        name: trimmed,
+        createdBy: actor.userId,
+      },
+      select: { id: true, name: true },
+    });
+  }
+
+  async renameArtifactType(actor: SdlcActor, repoId: string, folderId: string, name: string) {
+    const repo = await this.requireRepositoryRole(actor, repoId, false);
+    if (!repo?.channelId) throw new AppError('SDLC repository not found', 404);
+    const trimmed = name.trim();
+    if (!trimmed) throw new AppError('Artifact type name is required', 400);
+    const folder = await this.prisma.canvasFolder.findFirst({
+      where: { id: folderId, channelId: repo.channelId },
+      select: { id: true, name: true },
+    });
+    if (!folder) throw new AppError('Artifact type not found', 404);
+    if (folder.name === 'Baseline') {
+      throw new AppError('Repo Knowledge cannot be renamed', 400);
+    }
+    const clash = await this.prisma.canvasFolder.findFirst({
+      where: { channelId: repo.channelId, name: trimmed, id: { not: folderId } },
+      select: { id: true },
+    });
+    if (clash) throw new AppError('An artifact type with this name already exists', 409);
+    return this.prisma.canvasFolder.update({
+      where: { id: folderId },
+      data: { name: trimmed },
+      select: { id: true, name: true },
     });
   }
 
@@ -1548,22 +1635,6 @@ export class SdlcHubService implements SdlcHub {
       where: { id: entity.artifactId, channelId },
       select: { id: true, viewAccessId: true },
     });
-  }
-
-  private async requireArtifactCanvas(
-    tx: TransactionClient,
-    _repoId: string,
-    channelId: string,
-    canvasId: string,
-    artifactType: string
-  ): Promise<void> {
-    const canvas = await tx.canvas.findFirst({
-      where: { id: canvasId, channelId, sdlcArtifact: { is: { artifactType } } },
-      select: { id: true },
-    });
-    if (!canvas) {
-      throw new AppError(`${artifactType} canvas not found`, 404);
-    }
   }
 
   private async requireLinkSource(
