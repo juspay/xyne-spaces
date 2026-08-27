@@ -2466,7 +2466,6 @@ model ExternalMessage {
   entityId           String?               // Entity ID for MESSAGE, Email ID
   messageId          String                // Link to our Message (no FK constraint)
   direction          String                // INCOMING | OUTGOING
-  messageTimestamp   DateTime?             // Actual send time from the provider (t1). Used for 24h window checks instead of createdAt.
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

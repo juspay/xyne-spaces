@@ -58,7 +58,7 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     // If the customer last messaged > 24h ago the window has expired; treat this
     // DM as the start of a new conversation so a new ticket is created.
     const latest = await this.externalMessageRepo.findLatestForIgsid(source.id, igsid);
-    const latestTime = latest?.messageTimestamp ?? latest?.createdAt;
+    const latestTime = latest?.createdAt;
     const newMessageTime = new Date(messaging.timestamp * 1000).getTime();
     const windowExpired = !latestTime || newMessageTime - latestTime.getTime() > INSTAGRAM_REPLY_WINDOW_MS;
 

@@ -8,7 +8,7 @@ export interface InstagramOAuthState {
   channelId?: string;
   channelName: string;
   projectId: string;
-  boardId?: string;
+  boardId: string;
   assigneeUserGroupId?: string;
   visibility: 'PUBLIC' | 'PRIVATE';
   platform: 'web' | 'electron';
@@ -30,6 +30,7 @@ export const instagramOAuthStateService = createOAuthStateService<InstagramOAuth
     (state.mode !== 'reconnect' || !!state.channelId) &&
     !!state.channelName &&
     !!state.projectId &&
+    !!state.boardId &&
     (state.visibility === 'PUBLIC' || state.visibility === 'PRIVATE') &&
     (state.platform === 'web' || state.platform === 'electron'),
 });

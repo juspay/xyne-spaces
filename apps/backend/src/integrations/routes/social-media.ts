@@ -18,6 +18,8 @@ const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
 
 router.use(express.json());
+// Meta's data-deletion callback sends signed_request as application/x-www-form-urlencoded
+router.use(express.urlencoded({ extended: false }));
 router.use(googlePlayRoutes);
 router.use(instagramRoutes);
 

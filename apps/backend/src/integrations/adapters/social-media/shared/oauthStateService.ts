@@ -8,8 +8,12 @@ interface OAuthStateServiceOptions<TState> {
   validate: (parsed: Partial<TState>) => boolean;
 }
 
+type BetterOmit<T, K extends string | number | symbol> = {
+  [P in keyof T as P extends K ? never : P]: T[P];
+};
+
 interface OAuthStateService<TState> {
-  create(input: Omit<TState, 'purpose' | 'codeVerifier' | 'createdAt'>): Promise<{ state: string; codeChallenge: string }>;
+  create(input: BetterOmit<TState, 'purpose' | 'codeVerifier' | 'createdAt'>): Promise<{ state: string; codeChallenge: string }>;
   consume(state: string): Promise<TState | null>;
 }
 
