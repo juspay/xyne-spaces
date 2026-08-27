@@ -70,7 +70,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's

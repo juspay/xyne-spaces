@@ -236,6 +236,12 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const [alwaysOn, setAlwaysOn] = useState<boolean>(seedAlwaysOn);
   const [savedAlwaysOn, setSavedAlwaysOn] = useState<boolean>(seedAlwaysOn);
 
+  /** Whether a failed configured provider may fall through to the keyless
+   * Spaces/platform provider. Defaults on to preserve existing agents. */
+  const seedFallbackToSpaces = (agent.config as Record<string, unknown> | undefined)?.["providerFallbackToSpaces"] !== false;
+  const [fallbackToSpaces, setFallbackToSpaces] = useState<boolean>(seedFallbackToSpaces);
+  const [savedFallbackToSpaces, setSavedFallbackToSpaces] = useState<boolean>(seedFallbackToSpaces);
+
   /**
    * Which provider the agent's SUBAGENTS run on, when they have no explicit
    * per-subagent override:
@@ -317,6 +323,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const orderIsDirty =
     JSON.stringify(providerOrder) !== JSON.stringify(savedOrder) ||
     alwaysOn !== savedAlwaysOn ||
+    fallbackToSpaces !== savedFallbackToSpaces ||
     subagentMode !== savedSubagentMode ||
     automationMode !== savedAutomationMode ||
     fastMode !== savedFastMode ||
@@ -573,6 +580,11 @@ export function ProviderTabV3({ agent, userId }: Props) {
       // backend treats undefined as true anyway.
       if (alwaysOn) delete cfg.providerAlwaysOn;
       else cfg.providerAlwaysOn = false;
+      // Provider failure policy. Default is to fall through to Spaces; when the
+      // owner turns this off, a bad/expired/out-of-quota provider fails visibly
+      // instead of silently answering from the platform key.
+      if (fallbackToSpaces) delete cfg.providerFallbackToSpaces;
+      else cfg.providerFallbackToSpaces = false;
       // Subagent provider routing. Omit when "spaces" (the default) to keep the
       // JSON config minimal — the backend/runtime treat undefined as "spaces".
       if (subagentMode === "parent") cfg.subagentProviderMode = "parent";
@@ -606,12 +618,15 @@ export function ProviderTabV3({ agent, userId }: Props) {
       await updateAgent(agent.slug, { config: cfg });
       // Keep the prop-derived config in step (the Spaces row merges against it).
       const live = agent.config as Record<string, unknown>;
+      if (cfg.providerFallbackToSpaces !== undefined) live["providerFallbackToSpaces"] = cfg.providerFallbackToSpaces;
+      else delete live["providerFallbackToSpaces"];
       if (cfg.modelSettings) live["modelSettings"] = cfg.modelSettings;
       else delete live["modelSettings"];
       // Mirror the just-saved state so future edits compute against it
       // and the dirty check clears (button returns to its quiet default).
       setSavedOrder([...providerOrder]);
       setSavedAlwaysOn(alwaysOn);
+      setSavedFallbackToSpaces(fallbackToSpaces);
       setSavedSubagentMode(subagentMode);
       setSavedAutomationMode(automationMode);
       setSavedFastMode(fastMode);
@@ -778,6 +793,23 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     On /upgrade
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* Provider failure policy — controls only the implicit terminal
+                fallback to the Spaces/platform provider. Explicit provider-order
+                entries above still behave as configured. */}
+            <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-xyne-fg-primary">Fallback to Spaces provider</div>
+                  <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
+                    {fallbackToSpaces
+                      ? "On — if the selected provider is invalid, out of quota, or unavailable, the run can continue on the Spaces platform provider."
+                      : "Off — provider credential failures fail visibly instead of silently answering from the Spaces platform provider."}
+                  </p>
+                </div>
+                <Switch checked={fallbackToSpaces} onChange={setFallbackToSpaces} ariaLabel="Fallback to Spaces provider" />
               </div>
             </div>
 
