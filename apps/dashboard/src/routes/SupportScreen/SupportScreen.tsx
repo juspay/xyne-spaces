@@ -3416,6 +3416,7 @@ const SupportScreen = (): ReactElement => {
                                   id='assignee'
                                   active={hasAssigneeFilter}
                                   open={assigneeOpen}
+                                  data-testid='desk-filter-assignee'
                                 />
                               </Popover.Trigger>
                               <Popover.Content
@@ -3443,6 +3444,7 @@ const SupportScreen = (): ReactElement => {
                                   id='priority'
                                   active={hasPriorityFilter}
                                   open={priorityOpen}
+                                  data-testid='desk-filter-priority'
                                 />
                               </Popover.Trigger>
                               <Popover.Content
@@ -3469,6 +3471,7 @@ const SupportScreen = (): ReactElement => {
                                   id='stages'
                                   active={hasStagesFilter}
                                   open={stagesOpen}
+                                  data-testid='desk-filter-status'
                                 />
                               </Popover.Trigger>
                               <Popover.Content
