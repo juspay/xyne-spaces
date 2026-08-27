@@ -172,8 +172,7 @@ schema mail {
 
     # Flattened copy of ticketFormFields.fieldValue, indexed for Desk/All lexical search.
     field ticketFormFieldValues type array<string> {
-      indexing: attribute | summary | index
-      attribute: fast-search
+      indexing: index | summary
       index: enable-bm25
     }
 
