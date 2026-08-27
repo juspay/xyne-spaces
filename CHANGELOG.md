@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.12](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.11...v1.219.0-release-20260825.12) (2026-08-27)
+
+
+### Features
+
+* custom SDLC artifact types with folder-based identity ([#1129](https://github.com/juspay/xyne-spaces/issues/1129)) ([dc33c2c](https://github.com/juspay/xyne-spaces/commit/dc33c2c08dc0ca70fdcab19c592367dca54160f9))
+
 ## [1.219.0-release-20260825.11](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.10...v1.219.0-release-20260825.11) (2026-08-27)
 
 
