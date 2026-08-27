@@ -26,8 +26,9 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     // Verify requesting user is a channel participant and get their record
     const requestingParticipant = await this.verifyChannelParticipant(args.channelId, tx, 'insert');
 
-    // Check addUserPolicy: if ADMINS_ONLY, only admins can add users
-    const addUserPolicy = channel?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+    // Check addUserPolicy: if ADMINS_ONLY, only admins can add users.
+    const channelStats = await tx.run(zql.channel_stats.where('channelId', '=', args.channelId).one());
+    const addUserPolicy = channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
     if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
       throw new MutationACLError('Channel user status insert failed: only channel admins can add users to this channel', 'channel_user_status');
     }
@@ -82,10 +83,10 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
         throw new MutationACLError('Channel user status restore failed: invalid keys', 'channel_user_status');
       }
       
-      const channel = await tx.run(zql.channels.where('id', '=', status.channelId).one());
+      const channelStats = await tx.run(zql.channel_stats.where('channelId', '=', status.channelId).one());
       const requestingParticipant = await this.verifyChannelParticipant(status.channelId, tx, 'update');
       
-      const addUserPolicy = channel?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+      const addUserPolicy = channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
       if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
         throw new MutationACLError('Channel user status restore failed: only channel admins can restore users to this channel', 'channel_user_status');
       }
