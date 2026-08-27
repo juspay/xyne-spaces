@@ -2212,6 +2212,9 @@ model EmailChannelPreference {
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
   appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
+  deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
+  deskReportAgentSlug    String?
+  deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
