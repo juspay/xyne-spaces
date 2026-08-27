@@ -192,6 +192,22 @@ export class CallService {
     return response.data.labels;
   }
 
+  /** Rewrites the call's detailed summary with `summaryTemplateId`, reusing the same canvas. */
+  async regenerateCallSummary(
+    callId: string,
+    summaryTemplateId: string,
+  ): Promise<{ summaryTemplateId: string; detailedSummaryCanvasId: string }> {
+    const response = await apiInstance.post<{
+      success: true;
+      summaryTemplateId: string;
+      detailedSummaryCanvasId: string;
+    }>(`/calls/${callId}/regenerate-summary`, { summaryTemplateId });
+    return {
+      summaryTemplateId: response.data.summaryTemplateId,
+      detailedSummaryCanvasId: response.data.detailedSummaryCanvasId,
+    };
+  }
+
   async updateMeetingStatus(callId: string, data: UpdateRsvpRequest): Promise<void> {
     try {
       await apiInstance.post(`/calls/${callId}/rsvp`, data);

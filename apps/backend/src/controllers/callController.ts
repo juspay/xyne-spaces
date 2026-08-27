@@ -1806,6 +1806,61 @@ export class CallController {
   };
 
   /**
+   * POST /api/calls/:callId/regenerate-summary
+   * Rewrite a regular call's detailed summary with a different template.
+   * Recordings keep their own creator-only endpoint at
+   * /recordings/:callId/generate-summary; this one is open to the call's audience,
+   * matching who can already open the summary it rewrites.
+   */
+  regenerateCallSummary = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = RegenerateHeadlessSummarySchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType === CallType.HEADLESS ||
+        !workspaceId ||
+        call.workspaceId !== workspaceId
+      ) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      const result = await transcriptService.regenerateCallSummary(call, input.summaryTemplateId);
+      if (!result) {
+        res.status(404).json({
+          success: false,
+          error: 'Transcript is not available or summary generation failed',
+        });
+        return;
+      }
+
+      res.json({ success: true, ...result });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        return;
+      }
+      logger.error(`[${callId}] Failed to regenerate call summary`, error);
+      res.status(500).json({ success: false, error: 'Failed to regenerate call summary' });
+    }
+  };
+
+  /**
    * GET /api/calls/:callId/download-transcript
    * Download call transcript as text file (formatted .txt only)
    */

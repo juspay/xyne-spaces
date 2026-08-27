@@ -1,18 +1,10 @@
 /**
- * Summary-template picker for the call detail view. The tab pill itself is the
- * trigger; the menu inside is the shared `SummaryTemplateMenu`, the same one the
- * recording detail screen hangs off its summary tab.
- *
- * Browsing, creating and editing templates all work here; **applying** one does
- * not. Regeneration goes through `POST /calls/recordings/:callId/generate-summary`,
- * which rejects anything that isn't `CallType.HEADLESS`, and writes its canvas to
- * `call.metadata.detailedSummaryCanvasId` rather than the call message metadata
- * this screen reads. Until a call-side path exists, selecting a template says so
- * instead of firing a request that would 404.
+ * Summary-template pill for the call detail view: the tab pill is the trigger, the
+ * menu inside is the shared `SummaryTemplateMenu`. The rewrite itself is owned by
+ * `useCallSummaryRegeneration` on the screen, since the content pane swaps panels
+ * for its duration — this renders only the pill half.
  */
-
 import { useState, type ReactElement } from 'react';
-import { toast } from 'sonner';
 import { ChevronBigDown } from '@xyne/icons';
 import { Popover } from '../../components/ui/Popover';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
@@ -31,6 +23,8 @@ import {
   getTemplateIcon,
 } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import { useSelf } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { cn } from '../../utils/classNames';
@@ -41,11 +35,13 @@ const DEFAULT_TEMPLATE_OPTION: SummaryTemplateOption = {
   icon: '✨',
 };
 
-const UNSUPPORTED_MESSAGE = "Summary templates aren't available for calls yet";
-
 interface CallSummaryTemplatePickerProps {
-  /** Template the call's existing summary was written with, when one is recorded. */
+  /** Template the visible summary was written with, from useCallSummaryRegeneration. */
   selectedTemplateId?: string | null;
+  /** True while a rewrite is in flight; disables Regenerate and spins its icon. */
+  isRegenerating: boolean;
+  /** Starts a rewrite with the chosen template. */
+  onApplyTemplate: (templateId: string) => void;
   /** True while the detailed summary is the visible pane. */
   isActive: boolean;
   /** Called when an inactive pill is clicked, to switch to the summary pane. */
@@ -56,6 +52,8 @@ interface CallSummaryTemplatePickerProps {
 
 export function CallSummaryTemplatePicker({
   selectedTemplateId,
+  isRegenerating,
+  onApplyTemplate,
   isActive,
   onSelect,
   className,
@@ -80,15 +78,26 @@ export function CallSummaryTemplatePicker({
       })),
   ];
 
+  // The list is only fetched once the menu opens, so on a fresh visit look up the
+  // applied template directly — otherwise the pill reads "Default summary".
+  const storedTemplateId = selectedTemplateId ?? '';
+  const [storedTemplate] = useCachedQuery(
+    queries.summaryTemplateById({ templateId: storedTemplateId }),
+    { enabled: storedTemplateId.length > 0 && storedTemplateId !== DEFAULT_TEMPLATE_OPTION.id },
+  );
+
   const selectedTemplate =
-    templateOptions.find(template => template.id === selectedTemplateId) ?? DEFAULT_TEMPLATE_OPTION;
+    templateOptions.find(template => template.id === selectedTemplateId) ??
+    (storedTemplate && storedTemplate.id === storedTemplateId
+      ? {
+          id: storedTemplate.id,
+          name: storedTemplate.name,
+          icon: getTemplateIcon(storedTemplate.name),
+        }
+      : DEFAULT_TEMPLATE_OPTION);
 
   const fullLabel = getSummaryTemplateLabel(selectedTemplate);
   const label = truncateTemplateName(fullLabel);
-
-  const notifyUnsupported = (): void => {
-    toast.info(UNSUPPORTED_MESSAGE);
-  };
 
   const trigger = (
     <button
@@ -99,9 +108,10 @@ export function CallSummaryTemplatePicker({
         if (!isActive) onSelect();
       }}
       title={fullLabel}
+      aria-busy={isRegenerating}
       data-track-category='CallDetail'
       data-track-name='open_summary_templates'
-      className={cn('max-w-[200px]', className)}
+      className={cn('max-w-[200px]', isRegenerating && 'cursor-wait', className)}
     >
       <SummaryTemplateGlyph template={selectedTemplate} size='trigger' className='shrink-0' />
       <span className='truncate'>{label}</span>
@@ -117,7 +127,7 @@ export function CallSummaryTemplatePicker({
         trigger={trigger}
         open={isActive && isMenuOpen}
         onOpenChange={open => {
-          if (!isActive) return;
+          if (!isActive || isRegenerating) return;
           if (open) setShouldLoadTemplates(true);
           setIsMenuOpen(open);
         }}
@@ -131,8 +141,9 @@ export function CallSummaryTemplatePicker({
           selectedTemplate={selectedTemplate}
           templates={templateOptions}
           isLoading={templatesLoading}
-          onSelectTemplate={notifyUnsupported}
-          onRegenerate={notifyUnsupported}
+          isRegenerating={isRegenerating}
+          onSelectTemplate={onApplyTemplate}
+          onRegenerate={() => onApplyTemplate(selectedTemplate.id)}
           onOpenTemplates={() => setTemplatesModalMode('browse')}
           onNewTemplate={() => setTemplatesModalMode('new')}
           onRequestClose={() => setIsMenuOpen(false)}
@@ -157,9 +168,9 @@ export function CallSummaryTemplatePicker({
             currentUserName={getUserDisplayName(currentUser)}
             startWithNewTemplate={templatesModalMode === 'new'}
             onClose={() => setTemplatesModalMode(null)}
-            onApply={() => {
+            onApply={template => {
               setTemplatesModalMode(null);
-              toast.info(UNSUPPORTED_MESSAGE);
+              onApplyTemplate(template.id);
             }}
           />
         </Dialog>

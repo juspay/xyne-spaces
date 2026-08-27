@@ -25,6 +25,10 @@ export interface SummaryGenerationPanelProps {
   initialProgress?: number;
   initialStageIndex?: number;
   onProgressPause?: (progress: number, stageIndex: number) => void;
+  /** The word the copy uses for what is being summarized: 'recording' or 'call'. */
+  summarySubject?: string;
+  /** Analytics namespace of the host screen. */
+  trackCategory?: string;
 }
 
 /** A status line shown while Scribe works, swapped in once `atMs` has elapsed. */
@@ -74,6 +78,8 @@ export const SummaryGenerationPanel = ({
   initialProgress = 0,
   initialStageIndex = 0,
   onProgressPause,
+  summarySubject = 'recording',
+  trackCategory = 'RecordingDetailV2',
 }: SummaryGenerationPanelProps): ReactElement => {
   // —— State and hooks ———
   const shouldReduceMotion = useReducedMotion() ?? false;
@@ -160,7 +166,7 @@ export const SummaryGenerationPanel = ({
               <div className='min-w-0 flex-1'>
                 <p className='font-semibold text-foreground'>Something went wrong</p>
                 <p className='mt-1 text-pretty text-sm text-muted-foreground'>
-                  Scribe couldn&rsquo;t generate a summary for this recording. Your notes and
+                  Scribe couldn&rsquo;t generate a summary for this {summarySubject}. Your notes and
                   transcript are untouched.
                 </p>
                 <div className='mt-3 flex flex-wrap items-center gap-2.5'>
@@ -170,7 +176,7 @@ export const SummaryGenerationPanel = ({
                     onClick={onRetry}
                     disabled={!canGenerate}
                     className='shrink-0 gap-1.5 bg-foreground py-2 px-3 text-sm rounded-xl font-medium text-background transition-opacity duration-150 hover:bg-foreground hover:opacity-90'
-                    data-track-category='RecordingDetailV2'
+                    data-track-category={trackCategory}
                     data-track-name='retry_summary'
                   >
                     <XyneAIStar size={12} />
@@ -183,7 +189,7 @@ export const SummaryGenerationPanel = ({
                       variant='outline'
                       onClick={onReadTranscript}
                       className='shrink-0 rounded-xl border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-none transition-[border-color,color] duration-150 hover:bg-background hover:text-foreground'
-                      data-track-category='RecordingDetailV2'
+                      data-track-category={trackCategory}
                       data-track-name='read_transcript_after_summary_failure'
                     >
                       Read the transcript
@@ -210,12 +216,12 @@ export const SummaryGenerationPanel = ({
                 </span>
                 <div className='min-w-0'>
                   <p className='text-sm font-medium text-foreground'>
-                    This recording hasn&rsquo;t been summarized yet
+                    This {summarySubject} hasn&rsquo;t been summarized yet
                   </p>
                   <p className='mt-1 text-sm text-muted-foreground'>
                     {canGenerate
                       ? 'Transcript ready. Scribe takes up to 2 minutes to write the recap, decisions and action items — often less.'
-                      : 'A summary needs a transcript. This recording doesn’t have one yet.'}
+                      : `A summary needs a transcript. This ${summarySubject} doesn’t have one yet.`}
                   </p>
                 </div>
               </div>
@@ -225,7 +231,7 @@ export const SummaryGenerationPanel = ({
                 onClick={onGenerate}
                 disabled={!canGenerate}
                 className='h-8 shrink-0 gap-2 rounded-xl px-3 text-xs font-medium bg-foreground text-background hover:bg-foreground/80 hover:text-background disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed'
-                data-track-category='RecordingDetailV2'
+                data-track-category={trackCategory}
                 data-track-name='generate_summary'
               >
                 <XyneAIStar size={12} />

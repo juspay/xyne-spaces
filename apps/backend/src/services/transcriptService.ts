@@ -1,5 +1,5 @@
 import { repositories } from '@/database/repositories';
-import { getCanvasUrl } from '@/services/canvasService';
+import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
@@ -21,7 +21,12 @@ import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelT
 import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
-import { callDocumentService } from '@/services/callDocumentService';
+import {
+  callDocumentService,
+  numberTranscriptSegments,
+  type CitationContext,
+} from '@/services/callDocumentService';
+import { mergeRecordingSummaryMarkedItems } from '@/services/recordingSummaryMarkedItems';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -1312,13 +1317,112 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
-   * Generate a small set of topical labels and persist each as a generic Tag
-   * row (sourceId = call.id, sourceType = 'CALL'), returning the resulting tag
-   * ids for Call.labels. Returns [] on any failure — callers treat that as
-   * "nothing to add", never clobbering a previously-saved good result.
+   * Generate or rewrite a regular call's detailed summary with a given template.
    *
-   * Shared by both transcript pipelines; `logPath` tags the logs with whichever
-   * one is calling.
+   * A rewrite edits the canvas in place, so the URL already on the call message
+   * stays valid; a first generation makes a new canvas and has to stamp that URL.
+   * Recordings instead point from Call.metadata.detailedSummaryCanvasId (see
+   * regenerateSummary in the note-taker service). Null means nothing was written;
+   * the caller returns 404.
+   */
+  async regenerateCallSummary(
+    call: Call,
+    templateId: string,
+  ): Promise<{ summaryTemplateId: string; detailedSummaryCanvasId: string } | null> {
+    const callId = call.externalId;
+    const workspaceId = call.workspaceId;
+    if (!workspaceId) {
+      logger.warn(`[${callId}] regenerate_call_summary_skipped`, { reason: 'no_workspace' });
+      return null;
+    }
+
+    // A first generation needs the call message, both to hang the canvas off the
+    // conversation and to stamp the pointer the detail screen reads.
+    const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
+    const callMessage = existingCanvas ? null : await repositories.messages.findHeadMessageByCallId(callId);
+    if (!existingCanvas && !callMessage) {
+      logger.warn(`[${callId}] regenerate_call_summary_skipped`, { reason: 'no_call_message' });
+      return null;
+    }
+
+    const formattedTranscript = await this.getTranscriptContent(callId);
+    if (!formattedTranscript) {
+      logger.warn(`[${callId}] regenerate_call_summary_skipped`, { reason: 'no_transcript' });
+      return null;
+    }
+
+    // Numbered segments let the LLM cite them; the map turns `[clf-n]` tokens in
+    // the reply into canvas citation chips.
+    const { numbered, segments } = numberTranscriptSegments(formattedTranscript);
+    const citationCtx: CitationContext = {
+      callId,
+      segments: new Map(segments.map(segment => [segment.n, segment])),
+    };
+
+    const generated = await callDocumentService.generateRecordingSummary(
+      numbered,
+      callId,
+      templateId,
+      undefined,
+      citationCtx.segments,
+    );
+    if (!generated) {
+      logger.error(`[${callId}] regenerate_call_summary_failed`, { reason: 'generation_failed' });
+      return null;
+    }
+
+    const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
+    if (!xyneAutomaticBot) {
+      logger.error(`[${callId}] regenerate_call_summary_failed`, { reason: 'bot_not_found' });
+      return null;
+    }
+
+    const { canvasId } = await callDocumentService.createOrUpdateDetailedSummaryCanvas(
+      callId,
+      generated.summary,
+      xyneAutomaticBot.id,
+      callMessage?.conversationId ?? null,
+      call.channelId,
+      call.startedAt,
+      call.createdByUserId,
+      call.title,
+      citationCtx,
+      workspaceId,
+    );
+    if (!canvasId) {
+      logger.error(`[${callId}] regenerate_call_summary_failed`, { reason: 'canvas_update_failed' });
+      return null;
+    }
+
+    if (callMessage) {
+      await callDocumentService.linkDetailedSummaryToCallMessage(
+        callMessage.conversationId,
+        callId,
+        getCanvasUrl(canvasId),
+      );
+    }
+
+    // Re-read after the LLM round trip; merging keeps anything already ticked off.
+    const current = await repositories.calls.findByExternalId(callId);
+    const markedItems = mergeRecordingSummaryMarkedItems(
+      current?.markedItems ?? call.markedItems,
+      generated.markedItems,
+    ) as Prisma.InputJsonValue[];
+    await repositories.calls.update(call.id, {
+      summaryTemplateId: generated.template.id,
+      markedItems,
+    });
+
+    logger.info(`[${callId}] regenerate_call_summary_completed`, {
+      template_id: generated.template.id,
+    });
+    return { summaryTemplateId: generated.template.id, detailedSummaryCanvasId: canvasId };
+  }
+
+  /**
+   * Generate topical labels and persist each as a Tag row, returning ids for
+   * Call.labels. Returns [] on any failure, so a bad run never clobbers good
+   * labels. `logPath` names the calling pipeline in the logs.
    */
   async generateAndSaveLabels(
     call: Call,
@@ -1879,9 +1983,8 @@ Output ONLY the processed transcript, nothing else.`;
         logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
         return [];
       });
-      // HEADLESS recordings label themselves on the note-taker path, which owns
-      // their whole post-transcript pipeline — running here too would just spend
-      // a second LLM call to rediscover the same tags.
+      // Recordings already label themselves on the note-taker path; running here
+      // too would spend a second LLM call on the same tags.
       const labelsPromise =
         call.callType === CallType.HEADLESS
           ? Promise.resolve([] as string[])
@@ -1984,8 +2087,7 @@ Output ONLY the processed transcript, nothing else.`;
         return ticketSuggestions;
       });
 
-      // appendLabels merges rather than overwrites, so a label the user typed
-      // while the transcript was still processing survives this write.
+      // appendLabels merges, so a label typed mid-processing survives this write.
       const labelsUiPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
         try {

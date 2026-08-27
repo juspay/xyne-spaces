@@ -23,7 +23,12 @@ import { useAllChannels, useAllVisibleChannels } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
 import { CallLabelPicker } from './CallLabelPicker';
+import { useCallSummaryRegeneration } from './useCallSummaryRegeneration';
+import { SummaryGenerationPanel } from '../RecordingDetailV2Screen/components/SummaryGenerationPill/SummaryGenerationPanel';
 import { callService } from '../../services/Call/callService';
+
+/** Past this, in-call generation is not coming on its own — offer the button instead. */
+const SUMMARY_PENDING_GRACE_MS = 60 * 60 * 1000;
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -111,7 +116,16 @@ export default function CallDetailScreen(): ReactElement {
     return getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
   }, [callMessage]);
 
-  const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId);
+  // A call with a transcript but no canvas still gets the tab: within the grace
+  // window it shows the pending state, and past it the offer to generate — the
+  // same treatment the recording detail screen gives an overdue summary.
+  const hasCallTranscript = Boolean(call?.transcript?.trim());
+  const summaryEndedAtMs = call?.endedAt ? new Date(call.endedAt).getTime() : null;
+  const summaryPendingExpired =
+    !detailedSummaryCanvasId &&
+    summaryEndedAtMs !== null &&
+    Date.now() - summaryEndedAtMs > SUMMARY_PENDING_GRACE_MS;
+  const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId) || hasCallTranscript;
 
   const hasRecording = useMemo<boolean>(() => {
     if (!conversationMessages || !call?.externalId) return false;
@@ -218,8 +232,14 @@ export default function CallDetailScreen(): ReactElement {
       (call.channelId && visibleChannels.some(c => c.id === call.channelId))),
   );
 
-  // `call` comes off navigation state, so it never re-resolves from Zero. Labels
-  // are held here instead and reseeded whenever a different call is opened.
+  // Owned here, not in the pill: rewriting swaps the content pane for a panel.
+  const summaryRegeneration = useCallSummaryRegeneration(
+    call?.externalId ?? '',
+    call?.summaryTemplateId,
+  );
+
+  // `call` comes off navigation state and never re-resolves from Zero, so labels
+  // are held here and reseeded when a different call is opened.
   const [labels, setLabels] = useState<string[]>(call?.labels ?? []);
   const labelsUpdateSeqRef = useRef(0);
   useEffect(() => {
@@ -413,7 +433,9 @@ export default function CallDetailScreen(): ReactElement {
               >
                 {hasDetailedSummaryTab && (
                   <CallSummaryTemplatePicker
-                    selectedTemplateId={call.summaryTemplateId}
+                    selectedTemplateId={summaryRegeneration.appliedTemplateId}
+                    isRegenerating={summaryRegeneration.isRegenerating}
+                    onApplyTemplate={templateId => void summaryRegeneration.regenerate(templateId)}
                     isActive={activeTab === 'detailed-summary'}
                     onSelect={() => setSelectedTab('detailed-summary')}
                     className={pillClassName(activeTab === 'detailed-summary')}
@@ -458,8 +480,29 @@ export default function CallDetailScreen(): ReactElement {
                   <Loader2 className='size-4 animate-spin' />
                   Loading...
                 </div>
-              ) : activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
-                <DetailedSummaryCanvasTab canvasId={detailedSummaryCanvasId} />
+              ) : activeTab === 'detailed-summary' ? (
+                detailedSummaryCanvasId &&
+                !summaryRegeneration.isRegenerating &&
+                !summaryRegeneration.hasFailed ? (
+                  <DetailedSummaryCanvasTab
+                    key={`${detailedSummaryCanvasId}:${summaryRegeneration.canvasNonce}`}
+                    canvasId={detailedSummaryCanvasId}
+                  />
+                ) : (
+                  <SummaryGenerationPanel
+                    isAwaiting={
+                      summaryRegeneration.isRegenerating ||
+                      (!detailedSummaryCanvasId && !summaryPendingExpired)
+                    }
+                    canGenerate={hasCallTranscript}
+                    hasFailed={summaryRegeneration.hasFailed}
+                    generationRunId={summaryRegeneration.runNonce}
+                    onGenerate={summaryRegeneration.retry}
+                    onRetry={summaryRegeneration.retry}
+                    summarySubject='call'
+                    trackCategory='CallDetail'
+                  />
+                )
               ) : (
                 (() => {
                   const prd = prdEntries.find(e => e.id === activeTab);

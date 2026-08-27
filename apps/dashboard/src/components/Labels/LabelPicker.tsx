@@ -78,7 +78,7 @@ export function SuggestedLabelChip({
   label: string;
   onConfirm: () => void;
   onReject: () => void;
-  trackCategory: string;
+  trackCategory?: string | undefined;
 }): ReactElement {
   const theme = getTagTheme(label);
   return (

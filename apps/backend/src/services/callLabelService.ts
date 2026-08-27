@@ -14,12 +14,8 @@ const CALL_LABEL_CATEGORY = 'topic';
 const MAX_GENERATED_LABELS = 4;
 
 /**
- * Turns label text into Tag rows on a call. Shared by both transcript pipelines
- * — the note-taker one for HEADLESS recordings and processCallWithSummary for
- * regular calls — so generated and typed labels mint identical rows either way.
- *
- * Deliberately holds no reference to transcriptService: that service calls into
- * here, and the note-taker service calls into both.
+ * Turns label text into Tag rows on a call, for both transcript pipelines.
+ * Imports nothing from transcriptService on purpose — that service calls in here.
  */
 class CallLabelService {
   /** Normalize a label into the Tag framework's required format (lowercase, hyphenated). */
@@ -30,10 +26,7 @@ class CallLabelService {
     return TAG_FORMAT_REGEX.test(safe) ? safe : null;
   }
 
-  /**
-   * Reuse an existing label tag for this call if a prior run already created
-   * it, else create it via the generic Tag framework.
-   */
+  /** Reuses this call's existing tag for `slug`, else creates one. */
   async getOrCreateLabelTag(call: Call, slug: string, method: TagMethod): Promise<string | null> {
     const existing = await tagRepository.findActiveTag(call.id, CALL_TAG_SOURCE_TYPE, CALL_LABEL_CATEGORY, slug);
     if (existing) {
@@ -64,11 +57,7 @@ class CallLabelService {
     }
   }
 
-  /**
-   * Persist LLM-generated label text as `llm` Tag rows, returning the ids for
-   * Call.labels. Returns [] on any failure — callers treat that as "nothing to
-   * add", never clobbering a previously-saved good result.
-   */
+  /** Persists generated label text as Tag rows of `method`, returning ids for Call.labels. */
   async persistGeneratedLabels(
     call: Call,
     rawLabels: string[],

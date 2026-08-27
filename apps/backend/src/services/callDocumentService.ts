@@ -1916,6 +1916,19 @@ A comprehensive detailed summary has been generated from this call.
   /**
    * Update call message metadata with canvas URL (generic method)
    */
+  /**
+   * Point a call's message at a newly created detailed-summary canvas. Only needed
+   * for a first generation — a rewrite edits the canvas in place, so the URL the
+   * message already carries stays correct.
+   */
+  async linkDetailedSummaryToCallMessage(
+    conversationId: string,
+    callId: string,
+    canvasUrl: string,
+  ): Promise<void> {
+    await this.updateCallMessageMetadata(conversationId, callId, 'detailedSummaryCanvasUrl', canvasUrl);
+  }
+
   private async updateCallMessageMetadata(
     conversationId: string,
     callId: string,

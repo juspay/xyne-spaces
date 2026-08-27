@@ -114,8 +114,12 @@ router.get('/:callId/participants', callController.getCallParticipants);
 // Get call chat history (for recording detail page)
 router.get('/:callId/chat-history', callController.getCallChatHistory);
 
-// Update a call's labels (any workspace member; recordings use /recordings/:callId)
+// Update a call's labels (the call's audience; recordings use /recordings/:callId)
 router.patch('/:callId/labels', callController.updateCallLabels);
+
+// Regenerate a call's detailed summary with a different template (recordings use
+// /recordings/:callId/generate-summary)
+router.post('/:callId/regenerate-summary', callController.regenerateCallSummary);
 
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
