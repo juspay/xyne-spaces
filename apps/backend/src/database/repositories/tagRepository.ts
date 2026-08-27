@@ -27,9 +27,6 @@ interface InsertTagRowData {
   updatedBy?: string | null;
 }
 
-/** Email ids per `IN` lookup, well under Postgres' 65,535 bind-parameter ceiling. */
-const EMAIL_ID_CHUNK = 5000;
-
 export class TagRepository {
   private db = DatabaseClient.getInstance();
 
@@ -265,25 +262,15 @@ export class TagRepository {
     // to `public.emails` to traverse, so the conversation is joined back here.
     const conversationByEmailId = new Map(emails.map(e => [e.id, e.conversationId]));
 
-    // Chunked: every id is a bind parameter, and Postgres' extended protocol
-    // caps those at 65,535 — one busy desk over a wide window clears that, and
-    // the driver rejects the query rather than returning a short answer.
-    const emailIds = [...conversationByEmailId.keys()];
-    const tags: { sourceId: string; tagCategory: string; tag: string }[] = [];
-    for (let i = 0; i < emailIds.length; i += EMAIL_ID_CHUNK) {
-      const chunk = await this.client().tag.findMany({
-        where: {
-          sourceId: { in: emailIds.slice(i, i + EMAIL_ID_CHUNK) },
-          sourceType: 'desk-email',
-          configKey,
-          isDeleted: false,
-        },
-        select: { sourceId: true, tagCategory: true, tag: true },
-      });
-      // Appended, not spread: `push(...chunk)` passes one argument per row and
-      // blows the engine's argument limit on a large chunk.
-      for (const row of chunk) tags.push(row);
-    }
+    const tags = await this.client().tag.findMany({
+      where: {
+        sourceId: { in: [...conversationByEmailId.keys()] },
+        sourceType: 'desk-email',
+        configKey,
+        isDeleted: false,
+      },
+      select: { sourceId: true, tagCategory: true, tag: true },
+    });
 
     // Every email of a thread carries the thread's tags, so the same triple
     // comes back once per email — dedupe to one row per conversation. The key is

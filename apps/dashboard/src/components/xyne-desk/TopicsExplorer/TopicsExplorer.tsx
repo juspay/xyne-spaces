@@ -69,13 +69,6 @@ const dateTimeMs = (date: Date, time: string, isEnd: boolean): number => {
   return result.getTime();
 };
 
-/**
- * Page size handed to `supportTicketsPageV3`, which takes one per its keyset
- * pagination contract. The rollup counts client-side, so this is a whole-window
- * read rather than a page, and the notice below says so when it is reached.
- */
-const TICKET_PAGE_LIMIT = 20000;
-
 const startOfDay = (ms: number): number => {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
@@ -91,8 +84,8 @@ export interface TopicsExplorerProps {
   supportBase: string;
   /**
    * Board-derived option lists, passed in rather than derived from the synced
-   * rows: the row cap and the range would otherwise hide configured-but-unused
-   * values, so the filter menus would not match the ticket list's own.
+   * rows: the date range would otherwise hide configured-but-unused values, so
+   * the filter menus would not match the ticket list's own.
    */
   availableAiCategories: string[];
   availableStages: { name: string; status?: TicketStatusV2 }[];
@@ -147,14 +140,11 @@ export const TopicsExplorer = ({
   // state change, including each mouse move.
   const ticketsQuery = useMemo(
     () =>
-      queries.supportTicketsPageV3({
+      queries.topicsExplorerTickets({
         channelId,
         isMember,
         createdAtStart: startMs,
         createdAtEnd: endMs,
-        limit: TICKET_PAGE_LIMIT,
-        start: null,
-        dir: 'forward',
       }),
     [channelId, isMember, startMs, endMs],
   );
@@ -352,10 +342,6 @@ export const TopicsExplorer = ({
   // No useMemo: templateFor indexes a module-level table, so the reference is stable.
   const layout = templateFor(tiles.length);
 
-  // Only once the sync settles: mid-stream the count is still climbing, so an
-  // early check flashes the cap warning.
-  const isTruncated = isTicketsReady && allTickets.length >= TICKET_PAGE_LIMIT;
-
   // Formatted through each level's own dimension: raw keys are ids for Assignee
   // and `category:tag` for AI tags.
   const crumbs = [
@@ -372,11 +358,6 @@ export const TopicsExplorer = ({
       id: 'overlap',
       tone: 'muted' as const,
       text: 'A ticket can carry several tags, so these groups overlap and add up to more than the total.',
-    },
-    isTruncated && {
-      id: 'rows',
-      tone: 'warn' as const,
-      text: `Showing the ${TICKET_PAGE_LIMIT.toLocaleString()} most recent tickets — older ones are excluded from these totals. Narrow the range for exact counts.`,
     },
     openBlockers.length > 0 && {
       id: 'noOpen',
