@@ -1,9 +1,10 @@
 /**
  * Presentation tools as a Spaces-thread default.
  *
- * The presentation tools (post-code-block / post-diff / post-chart / visualize
- * — see packages/xyne-claw-shared/src/tools/presentation.ts) render the agent's
- * answer as a CARD inside a Spaces thread. claw-auth's renderUiWidget
+ * The presentation tools (post-code-block / post-diff / post-chart / visualize,
+ * plus ask-user-question — see packages/xyne-claw-shared/src/tools/presentation.ts)
+ * render a CARD inside a Spaces thread: the agent's answer, or the question it
+ * needs answered before it can produce one. claw-auth's renderUiWidget
  * (routes/webhook.ts) posts them through /chat/postMessage, so they only mean
  * anything on a run that has a thread to post into.
  *
@@ -124,10 +125,16 @@ export function buildPresentationPrimer(
     "",
     `Every thread run is given the \`${PRESENTATION_CATALOG_SOURCE}\` catalog. You have it because of WHERE`,
     "this run came from, not because this agent was configured with those tools, so",
-    "treat them as yours to use. They are not loaded yet: once you know what your",
-    `answer is, call \`load-tools\` with catalog \`${PRESENTATION_CATALOG_SOURCE}\` to pull in the whole set at once.`,
+    "treat them as yours to use. They are not loaded yet — pull in the whole set at once",
+    `with \`load-tools\` (catalog \`${PRESENTATION_CATALOG_SOURCE}\`) as soon as you know you need any of them:`,
+    "once you know what your answer is, or the moment you find you cannot answer without",
+    "asking the user something.",
     "",
     "How to present the answer:",
+    "- Blocked on a decision or a missing fact only the user has → ask with the",
+    "  question card instead of guessing. Ask BEFORE you do the work, batch related",
+    "  questions into one card, and stop your turn there — the answer arrives as a new",
+    "  message. Don't spend a card on something you could look up yourself.",
     "- Code the reader will copy or apply (a patch, a config, a query they should run)",
     "  → post it as a card. A change to an existing file → post it as a diff.",
     "- Numbers worth comparing — a trend, a breakdown, a ranking → post a chart.",

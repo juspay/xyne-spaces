@@ -1793,6 +1793,38 @@ export interface RunTaskOptions {
 
 const FAST_MODE_ACTIVE_TOOLS_CUSTOM_TYPE = "xyne.fastMode.activeToolSet";
 
+/**
+ * Make a mid-run `load-tools` take effect on the NEXT ASSISTANT TURN, which is
+ * what that tool tells the model it does.
+ * We own ONLY the tools refresh. If a future pi ships its own prepareNextTurn,
+ * that one keeps ownership of the context and we just re-pin the tool list.
+ */
+export function keepLoopToolsFresh(agent: PiLoopAgent): void {
+  const priorPrepareNextTurn = agent.prepareNextTurn;
+  agent.prepareNextTurn = async (signal) => {
+    const prior = await priorPrepareNextTurn?.(signal);
+    const base = prior?.context ?? {
+      systemPrompt: agent.state.systemPrompt,
+      messages: agent.state.messages.slice(),
+    };
+    return { ...prior, context: { ...base, tools: agent.state.tools.slice() } };
+  };
+}
+
+/** The slice of pi's `Agent` that {@link keepLoopToolsFresh} touches. */
+export interface PiLoopAgent {
+  prepareNextTurn?: (
+    signal?: AbortSignal,
+  ) =>
+    | import("@earendil-works/pi-agent-core").AgentLoopTurnUpdate
+    | undefined
+    | Promise<import("@earendil-works/pi-agent-core").AgentLoopTurnUpdate | undefined>;
+  readonly state: Pick<
+    import("@earendil-works/pi-agent-core").AgentState,
+    "systemPrompt" | "messages" | "tools"
+  >;
+}
+
 const LOCAL_FILE_TOOL_NAMES = ["read", "write", "grep", "find", "ls"] as const;
 
 /** Pi's global tool allowlist for the path-scoped local Claw workspace. */
@@ -2251,6 +2283,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       ...activeSet,
     ];
     session.setActiveToolsByName([...new Set(baseActiveToolNames)]);
+    keepLoopToolsFresh(session.agent);
     fastToolController.getActiveToolSet = () => [...activeSet];
     fastToolController.loadTools = async (names: string[]) => {
       const maxActiveTools = fastActiveToolBudget;
