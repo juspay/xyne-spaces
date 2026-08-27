@@ -485,6 +485,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
         notesCanvasId: null,
         detailedSummaryCanvasId: null,
         detailedSummaryReady: null,
+        summaryModelUsed: null,
         citationSegments: [],
       };
       const endedAt = recordingRow.endedAt ? new Date(recordingRow.endedAt).toISOString() : null;
