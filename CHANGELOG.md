@@ -1,3 +1,10 @@
+## [1.233.1](https://github.com/juspay/xyne-spaces/compare/v1.233.0...v1.233.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* Desk Analytics Fixes ([#1041](https://github.com/juspay/xyne-spaces/issues/1041)) ([c2e7a5b](https://github.com/juspay/xyne-spaces/commit/c2e7a5b63c5f0fe5cbdf5be656dbe22a4c82b9fc))
+
 ## [1.233.0](https://github.com/juspay/xyne-spaces/compare/v1.232.0...v1.233.0) (2026-08-27)
 
 
