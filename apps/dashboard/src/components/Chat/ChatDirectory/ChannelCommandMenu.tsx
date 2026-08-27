@@ -4513,6 +4513,8 @@ const ChannelCommandMenu = ({
                     variant='secondary'
                     size='sm'
                     onClick={toggleDeskMergeMode}
+                    data-track-category='SEARCH'
+                    data-track-name='TOGGLE_DESK_MERGE_MODE'
                     className={MERGE_BAR_BUTTON_NO_RING}
                   >
                     Cancel
@@ -4529,6 +4531,8 @@ const ChannelCommandMenu = ({
                       variant='ghost'
                       size='sm'
                       onClick={clearDeskMergeSelection}
+                      data-track-category='SEARCH'
+                      data-track-name='CLEAR_DESK_MERGE_SELECTION'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Clear
@@ -4537,6 +4541,8 @@ const ChannelCommandMenu = ({
                       variant='secondary'
                       size='sm'
                       onClick={toggleDeskMergeMode}
+                      data-track-category='SEARCH'
+                      data-track-name='TOGGLE_DESK_MERGE_MODE'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Cancel
@@ -4545,6 +4551,8 @@ const ChannelCommandMenu = ({
                       size='sm'
                       disabled={selectedMergeTickets.size < 2}
                       onClick={() => setShowMergeDialog(true)}
+                      data-track-category='SEARCH'
+                      data-track-name='OPEN_MERGE_DIALOG'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Merge {selectedMergeTickets.size > 0 ? `(${selectedMergeTickets.size})` : ''}

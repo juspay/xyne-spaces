@@ -345,6 +345,8 @@ const ConversationHeader = ({
                   setInfoDefaultTab('notifications');
                   setIsInfoOpen(true);
                 }}
+                data-track-category='CHANNELS'
+                data-track-name='OPEN_CHANNEL_NOTIFICATIONS'
                 className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               >
                 <span className='shrink-0'>
@@ -427,11 +429,18 @@ const ConversationHeader = ({
                     setInfoDefaultTab('about');
                     setIsInfoOpen(true);
                   }}
+                  data-track-category='CHANNELS'
+                  data-track-name='OPEN_CHANNEL_ABOUT'
                 >
                   <InformationCircle size={16} className='shrink-0' />
                   Channel details
                 </DropdownMenuItem>
-                <DropdownMenuItem className='gap-2' onClick={() => handleOpenAllLinks()}>
+                <DropdownMenuItem
+                  className='gap-2'
+                  onClick={() => handleOpenAllLinks()}
+                  data-track-category='CHANNELS'
+                  data-track-name='OPEN_ALL_CHANNEL_LINKS'
+                >
                   <ExternalLinkSquare size={16} className='shrink-0' />
                   Open all links
                 </DropdownMenuItem>
@@ -449,6 +458,8 @@ const ConversationHeader = ({
                           key={section.id}
                           className='gap-2'
                           onClick={() => handleMoveToSection(section.id)}
+                          data-track-category='CHANNELS'
+                          data-track-name='MOVE_CHANNEL_TO_SECTION'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -469,6 +480,8 @@ const ConversationHeader = ({
                     <DropdownMenuItem
                       className='gap-2 text-destructive focus:text-destructive'
                       onClick={handleLeaveChannel}
+                      data-track-category='CHANNELS'
+                      data-track-name='LEAVE_CHANNEL'
                     >
                       <UserArrowRight size={16} className='shrink-0' />
                       Leave channel
@@ -483,6 +496,8 @@ const ConversationHeader = ({
               variant='ghost'
               size='sm'
               onClick={onClose}
+              data-track-category='CHANNELS'
+              data-track-name='CLOSE_CONVERSATION_HEADER'
               className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               aria-label='Close'
             >

@@ -252,6 +252,8 @@ export const AppsTable = ({
                   e.stopPropagation();
                   void handleCopyBotUserId(app);
                 }}
+                data-track-category='Apps'
+                data-track-name='COPY_BOT_USER_ID'
                 title='Copy bot user ID'
                 className='h-6 w-6 p-0'
               >
@@ -326,6 +328,8 @@ export const AppsTable = ({
               variant='ghost'
               size='sm'
               onClick={() => void handleCopyToken(app.id)}
+              data-track-category='Apps'
+              data-track-name='COPY_APP_TOKEN'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
@@ -354,6 +358,8 @@ export const AppsTable = ({
               variant='ghost'
               size='sm'
               onClick={() => void handleCopySigningSecret(app.id)}
+              data-track-category='Apps'
+              data-track-name='COPY_APP_SIGNING_SECRET'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={

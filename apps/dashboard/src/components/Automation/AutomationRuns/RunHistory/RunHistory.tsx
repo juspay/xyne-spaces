@@ -201,6 +201,8 @@ export function RunHistory({
                   onClick={() => {
                     void fetchNextPage();
                   }}
+                  data-track-category='automation-runs'
+                  data-track-name='LOAD_MORE_RUNS'
                 >
                   {isFetchingNextPage ? 'Loading…' : 'Load more'}
                 </Button>

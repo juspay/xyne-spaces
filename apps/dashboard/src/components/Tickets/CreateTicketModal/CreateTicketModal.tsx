@@ -2400,6 +2400,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     variant='ghost'
                     size='icon'
                     onClick={resetDuplicateState}
+                    data-track-category='TICKETS'
+                    data-track-name='RESET_DUPLICATE_STATE'
                     className='size-6 '
                   >
                     <X strokeWidth={2.33} className='size-3.5' />

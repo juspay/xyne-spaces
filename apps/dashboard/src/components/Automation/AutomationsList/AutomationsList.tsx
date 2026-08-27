@@ -228,7 +228,12 @@ export function AutomationsList({
               Approvals
             </Button>
           </Link>
-          <Button onClick={onCreate} className='font-semibold'>
+          <Button
+            onClick={onCreate}
+            data-track-category='automations-list'
+            data-track-name='CREATE_AUTOMATION'
+            className='font-semibold'
+          >
             <Plus className='size-4' />
             New automation
           </Button>
@@ -462,7 +467,12 @@ function EmptyState({
         Build a no-code workflow that runs on a trigger — a schedule, a manual click, or an event
         from your workspace.
       </p>
-      <Button size='sm' onClick={onCreate}>
+      <Button
+        size='sm'
+        onClick={onCreate}
+        data-track-category='automations-list'
+        data-track-name='CREATE_AUTOMATION'
+      >
         <Plus className='size-4' />
         Create your first automation
       </Button>

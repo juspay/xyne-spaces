@@ -280,7 +280,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 ? `${activeAttachments.length} files`
                 : activeAttachments[0]?.originalFilename}
             </span>
-            <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
+            <button
+              type='button'
+              onClick={() => setIsExpanded(!isExpanded)}
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_ATTACHMENT_LIST'
+            >
               {isExpanded ? (
                 <ChevronDown className='w-4 h-4 text-muted-foreground' />
               ) : (
@@ -299,6 +304,8 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                     void downloadAttachment(attachment.id, attachment.originalFilename);
                   });
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='DOWNLOAD_ALL_ATTACHMENTS'
                 className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
               >
                 <span>Download all</span>
@@ -889,6 +896,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ) : showAvatar && sender?.userType === UserType.APP ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -991,6 +1000,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ) : showAvatar && sender ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -1086,6 +1097,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <Button
                       variant='ghost'
                       onClick={() => handleUserClick(sender.id)}
+                      data-track-category='MESSAGE'
+                      data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                       className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
                       aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                     >
@@ -1106,6 +1119,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <Button
                           variant='ghost'
                           onClick={() => handleUserClick(sender.id)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                           className='text-sm font-semibold text-foreground hover:underline p-0 h-auto min-w-0'
                           aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                         >
@@ -1147,6 +1162,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <Tooltip content={formatFullTimestamp(message.createdAt)} side='top'>
                 <h3
                   onClick={searchItemView ? undefined : handleTimestampClick}
+                  data-track-category='MESSAGE'
+                  data-track-name='OPEN_THREAD_FROM_TIMESTAMP'
                   onKeyDown={
                     searchItemView
                       ? undefined
@@ -1366,6 +1383,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <button
                           type='button'
                           onClick={() => handleUserClick(forwardedMessageData.originalSenderId)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_ORIGINAL_SENDER_PROFILE'
                           className='text-xs font-medium text-foreground hover:underline cursor-pointer bg-transparent border-0 p-0'
                         >
                           {getUserDisplayName(originalSender) ||
@@ -1790,6 +1809,8 @@ export const ReactionView = ({
                   });
                   e.stopPropagation();
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='TOGGLE_REACTION'
                 onTouchStart={e => {
                   if (isMobile) {
                     e.stopPropagation();

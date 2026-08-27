@@ -176,6 +176,8 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
                 className='bg-secondary text-secondary-foreground hover:bg-accent'
                 size='sm'
                 onClick={() => void handleAddToChannel()}
+                data-track-category='MESSAGE'
+                data-track-name='ADD_USER_TO_CHANNEL'
                 disabled={isLoading}
               >
                 {isLoading ? 'Adding...' : 'Add Them'}
@@ -185,6 +187,8 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
               className='bg-secondary text-secondary-foreground hover:bg-accent'
               size='sm'
               onClick={() => void handleIgnore()}
+              data-track-category='MESSAGE'
+              data-track-name='IGNORE_NON_PARTICIPANT'
               disabled={isLoading}
             >
               {canAddMembers ? 'Do Nothing' : 'Got it'}

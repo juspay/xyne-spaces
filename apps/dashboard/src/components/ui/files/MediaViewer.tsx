@@ -186,6 +186,8 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       aria-label='File viewer - click or press Enter to close'
       className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 pointer-events-auto'
       onClick={onClose}
+      data-track-category='FILE_VIEWER'
+      data-track-name='CLOSE_MEDIA_VIEWER_BACKDROP'
       onKeyDown={(e): void => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -204,6 +206,8 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
                 e.stopPropagation();
                 handleDownload();
               }}
+              data-track-category='FILE_VIEWER'
+              data-track-name='DOWNLOAD_FROM_MEDIA_VIEWER'
               className='p-2 rounded-full hover:bg-background/10 transition-colors text-white'
               title='Download file'
             >
@@ -212,6 +216,8 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
           )}
           <button
             onClick={onClose}
+            data-track-category='FILE_VIEWER'
+            data-track-name='CLOSE_MEDIA_VIEWER'
             className='p-2 rounded-full hover:bg-background/10 transition-colors text-white'
             title='Close (Esc)'
           >
@@ -237,6 +243,8 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
             </div>
             <button
               onClick={onClose}
+              data-track-category='FILE_VIEWER'
+              data-track-name='CLOSE_MEDIA_VIEWER'
               className='px-6 py-2 bg-muted-foreground text-white rounded-lg hover:bg-foreground transition-colors'
             >
               Close

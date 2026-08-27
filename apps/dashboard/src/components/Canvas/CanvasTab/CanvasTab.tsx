@@ -1110,7 +1110,13 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               <span className='font-medium text-foreground'>{previewUpdatedAtText}</span>
             </div>
             <div className='flex items-center gap-2'>
-              <Button variant='secondary' size='sm' onClick={handleBackToCurrentVersion}>
+              <Button
+                variant='secondary'
+                size='sm'
+                onClick={handleBackToCurrentVersion}
+                data-track-category='CANVAS'
+                data-track-name='BACK_TO_CURRENT_VERSION'
+              >
                 Back to current
               </Button>
               {hasVersionDiff && (
@@ -1118,6 +1124,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   variant={showVersionDiff ? 'default' : 'secondary'}
                   size='sm'
                   onClick={() => setShowVersionDiff(prev => !prev)}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_VERSION_DIFF'
                   aria-pressed={showVersionDiff}
                 >
                   <GitCompare size={14} />
@@ -1129,6 +1137,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   variant='default'
                   size='sm'
                   onClick={() => void handleRestoreVersion(previewVersion)}
+                  data-track-category='CANVAS'
+                  data-track-name='RESTORE_CANVAS_VERSION'
                   loading={restoringVersionId === previewVersion.id}
                 >
                   <RotateCcw size={14} />
