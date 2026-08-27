@@ -28,12 +28,7 @@ import type {
   Todo,
   UiWidget,
 } from "xyne-claw-shared";
-// pi-ai is pinned to 0.80.7 repo-wide by the pnpm override in the root
-// package.json (a security fix — see "Fix/GitHub vulnerabilities" #812). 0.80
-// moved getModels/getProviders (and completeSimple) out of the main entry into
-// the `/compat` shim; the ThinkingLevel type stays top-level.
-import { getModels, getProviders } from "@earendil-works/pi-ai/compat";
-import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
 import {
   hasSession,
