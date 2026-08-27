@@ -1023,22 +1023,14 @@ const ChatListV3: React.FC<ChatListProps> = ({
       } | null;
       const ticketId = conversationMetadata?.ticketId || messageMetadata?.ticketId;
 
-      const createdAt = conversation?.createdAt;
-      const createdAtMs = createdAt instanceof Date ? createdAt.getTime() : Number(createdAt);
-      const sourceHash = Number.isFinite(createdAtMs)
-        ? `#origin=${encodeURIComponent(conversationId)}&createdAt=${createdAtMs}`
-        : `#origin=${encodeURIComponent(conversationId)}`;
-
       if (ticketId) {
         standaloneNavigate(
           navigate,
-          `${baseRoute}/${channelId}/${conversationId}/${ticketId}?selectedTab=thread${sourceHash}`,
+          `${baseRoute}/${channelId}/${conversationId}/${ticketId}?selectedTab=thread`,
           { event: e },
         );
       } else {
-        standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}${sourceHash}`, {
-          event: e,
-        });
+        standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event: e });
       }
     },
     [channelId, conversations, navigate],

@@ -1,4 +1,5 @@
 import React, { useMemo, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
@@ -6,6 +7,8 @@ import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
+import { useRouteContext } from '../../../hooks/useRouteContext';
+import { standaloneNavigate } from '../../../utils/electronApp';
 import { roomActor } from '../../../machines/roomMachine';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -37,10 +40,23 @@ export const CallCard: React.FC<CallCardProps> = ({
 }) => {
   const allUsers = useUsers();
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { baseRoute } = useRouteContext();
 
   const isCurrentCall = currentCallId === call.externalId;
   const channel = useChannel(call.channelId || '');
   const participantCount = getCallParticipantCount(call);
+  const conversationId = call.metadata?.conversationId;
+
+  const handleOpenThread = (e?: React.MouseEvent): void => {
+    if (!conversationId || !call.channelId) return;
+    onActionClick?.();
+    standaloneNavigate(
+      navigate,
+      `${baseRoute}/${call.channelId}/${conversationId}#origin=${encodeURIComponent(conversationId)}`,
+      { event: e },
+    );
+  };
 
   // ── Confirmation modal for switching calls ──
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
@@ -127,14 +143,33 @@ export const CallCard: React.FC<CallCardProps> = ({
         {/* Call info */}
         <div className='flex-1 min-w-0'>
           <div className={cn('flex items-center gap-2', isMobileLiveCall ? 'justify-center' : '')}>
-            <div
-              className={cn(
-                'text-sm font-semibold text-foreground',
-                isMobileLiveCall ? 'text-md mb-1' : '',
-              )}
-            >
-              {callTitle}
-            </div>
+            {conversationId ? (
+              <button
+                type='button'
+                onClick={e => {
+                  e.stopPropagation();
+                  handleOpenThread(e);
+                }}
+                title='Open conversation'
+                data-track-category='CALL'
+                data-track-name='OpenThreadFromCallCard'
+                className={cn(
+                  'text-sm font-semibold text-foreground text-left bg-transparent border-0 p-0 cursor-pointer hover:underline focus-visible:underline focus:outline-none',
+                  isMobileLiveCall ? 'text-md mb-1' : '',
+                )}
+              >
+                {callTitle}
+              </button>
+            ) : (
+              <div
+                className={cn(
+                  'text-sm font-semibold text-foreground',
+                  isMobileLiveCall ? 'text-md mb-1' : '',
+                )}
+              >
+                {callTitle}
+              </div>
+            )}
             {!isCurrentCall && (
               <div className='text-xs text-muted-foreground mt-0.5'>
                 {call.startedAt
