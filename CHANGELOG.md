@@ -1,3 +1,10 @@
+## [1.230.4](https://github.com/juspay/xyne-spaces/compare/v1.230.3...v1.230.4) (2026-08-27)
+
+
+### Bug Fixes
+
+* search performance upgrade ([#1061](https://github.com/juspay/xyne-spaces/issues/1061)) ([3659fa3](https://github.com/juspay/xyne-spaces/commit/3659fa3b7df016e685427e3ec6c5391d407f3c47))
+
 ## [1.230.3](https://github.com/juspay/xyne-spaces/compare/v1.230.2...v1.230.3) (2026-08-26)
 
 
