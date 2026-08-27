@@ -27,6 +27,9 @@ interface InsertTagRowData {
   updatedBy?: string | null;
 }
 
+/** Email ids per `IN` lookup, well under Postgres' 65,535 bind-parameter ceiling. */
+const EMAIL_ID_CHUNK = 5000;
+
 export class TagRepository {
   private db = DatabaseClient.getInstance();
 
@@ -244,47 +247,66 @@ export class TagRepository {
    *
    * Where `findConversationIdsByEmailTags` answers "which threads match this
    * filter?", this is the grouping read: the caller gets the tag values themselves
-   * so it can bucket tickets by category. At `rowCap` the tail is cut and
-   * `truncated` says so, so the client warns rather than silently under-report.
+   * so it can bucket tickets by category.
    */
   async findGeneratedTagsByConversation(
     channelId: string,
     configKey: string,
     start: Date,
     end: Date,
-    rowCap = 50000,
-  ): Promise<{ rows: { conversationId: string; tagCategory: string; tag: string }[]; truncated: boolean }> {
-    const rows = await this.db.$queryRaw<{ conversationId: string; tagCategory: string; tag: string }[]>`
-      SELECT DISTINCT
-        e."conversationId" AS "conversationId",
-        t."tagCategory"    AS "tagCategory",
-        t.tag              AS "tag"
-      FROM public.emails e
-      JOIN non_zero.tags t
-        ON t."sourceId" = e.id
-       AND t."sourceType" = 'desk-email'
-       AND t."configKey" = ${configKey}
-       AND t."isDeleted" = false
-      WHERE e."channelId" = ${channelId}
-        AND e."createdAt" >= ${start}
-        AND e."createdAt" <= ${end}
-      -- Deterministic: without an ORDER BY, a truncated result is an arbitrary
-      -- subset that can differ between refetches, so the groupings would shift.
-      ORDER BY "conversationId", "tagCategory", "tag"
-      -- One over the cap, so a full page is distinguishable from an exact fit.
-      LIMIT ${rowCap + 1}
-    `;
+  ): Promise<{ conversationId: string; tagCategory: string; tag: string }[]> {
+    const emails = await this.client().email.findMany({
+      where: { channelId, createdAt: { gte: start, lte: end } },
+      select: { id: true, conversationId: true },
+    });
+    if (emails.length === 0) return [];
 
-    const truncated = rows.length > rowCap;
-    const capped = truncated ? rows.slice(0, rowCap) : rows;
+    // Tags hang off the email (`sourceId`), and `non_zero.tags` has no relation
+    // to `public.emails` to traverse, so the conversation is joined back here.
+    const conversationByEmailId = new Map(emails.map(e => [e.id, e.conversationId]));
+
+    // Chunked: every id is a bind parameter, and Postgres' extended protocol
+    // caps those at 65,535 — one busy desk over a wide window clears that, and
+    // the driver rejects the query rather than returning a short answer.
+    const emailIds = [...conversationByEmailId.keys()];
+    const tags: { sourceId: string; tagCategory: string; tag: string }[] = [];
+    for (let i = 0; i < emailIds.length; i += EMAIL_ID_CHUNK) {
+      const chunk = await this.client().tag.findMany({
+        where: {
+          sourceId: { in: emailIds.slice(i, i + EMAIL_ID_CHUNK) },
+          sourceType: 'desk-email',
+          configKey,
+          isDeleted: false,
+        },
+        select: { sourceId: true, tagCategory: true, tag: true },
+      });
+      // Appended, not spread: `push(...chunk)` passes one argument per row and
+      // blows the engine's argument limit on a large chunk.
+      for (const row of chunk) tags.push(row);
+    }
+
+    // Every email of a thread carries the thread's tags, so the same triple
+    // comes back once per email — dedupe to one row per conversation. The key is
+    // NUL-joined because categories and tags are LLM-authored free text: any
+    // printable separator can occur inside them and would fold two distinct
+    // triples into one ("customer intent"/"billing" vs "customer"/"intent billing").
+    const seen = new Set<string>();
+    const rows: { conversationId: string; tagCategory: string; tag: string }[] = [];
+    for (const { sourceId, tagCategory, tag } of tags) {
+      const conversationId = conversationByEmailId.get(sourceId);
+      if (!conversationId) continue;
+      const key = `${conversationId}\u0000${tagCategory}\u0000${tag}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ conversationId, tagCategory, tag });
+    }
 
     logger.info('[TAG-REPO] findGeneratedTagsByConversation success', {
       channelId,
-      count: capped.length,
-      truncated,
+      count: rows.length,
     });
 
-    return { rows: capped, truncated };
+    return rows;
   }
 }
 

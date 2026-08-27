@@ -144,11 +144,6 @@ export const UNASSIGNED_FILTER_VALUE = 'unassigned';
 // transport (query args, saved views, counts requests) without schema changes.
 export const ASSIGNEE_INVERT_MARKER = '!invert';
 
-// Ceiling on rows `topicsExplorerTickets` syncs into the browser. Zero has no
-// aggregation, so the Topics Explorer counts client-side; without a cap the
-// panel's longest range on a busy desk would sync tens of thousands at once.
-export const TOPICS_EXPLORER_TICKET_LIMIT = 20000;
-
 export interface ParsedAssigneeFilter {
   inverted: boolean;
   includeUnassigned: boolean;
@@ -1432,30 +1427,6 @@ export const queries: AnyQueryRegistry = defineQueries({
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
         );
     }
-  ),
-
-  // Topics Explorer: tickets for one desk in a created-at window, rolled up
-  // client-side. The row cap keeps that sync bounded; no relations are pulled,
-  // since every grouping reads a column on the ticket itself.
-  // channelId + isMember are forwarded to TicketsACL for membership gating.
-  topicsExplorerTickets: defineQuery(
-    z.object({
-      channelId: z.string(),
-      isMember: z.boolean(),
-      createdAtStart: z.number(),
-      createdAtEnd: z.number(),
-    }).refine(
-      args => args.createdAtStart <= args.createdAtEnd,
-      'createdAtStart must be less than or equal to createdAtEnd',
-    ),
-    ({ args: { channelId, createdAtStart, createdAtEnd } }) =>
-      zql.tickets
-        .where('channelId', channelId)
-        .where('isArchived', false)
-        .where('createdAt', '>=', createdAtStart)
-        .where('createdAt', '<=', createdAtEnd)
-        .orderBy('createdAt', 'desc')
-        .limit(TOPICS_EXPLORER_TICKET_LIMIT),
   ),
 
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).

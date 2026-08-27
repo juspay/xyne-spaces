@@ -89,20 +89,28 @@ export const TopicsTreemap = ({
             className={cn(
               'absolute flex min-w-0 flex-col justify-between overflow-hidden rounded-[10px] p-3 text-left',
               'outline-none transition-[filter] duration-150',
-              interactive ? 'cursor-pointer' : 'cursor-default',
+              // A dashed edge marks a tile that does nothing when clicked: the
+              // cursor alone left sighted users to find out by clicking, where
+              // the aria-label already says so. Not opacity — fading the tile
+              // blends fill and ink toward the panel and breaks the palette's
+              // paired AA contrast.
+              interactive ? 'cursor-pointer' : 'cursor-default border-2 border-dashed',
               isHovered && 'z-10',
             )}
             style={{
               ...shapeStyle(shape),
               background: tile.fill,
               color: tile.ink,
+              ...(interactive ? {} : { borderColor: tile.ink }),
               // Inset ring so the focus/hover indicator sits inside the tile's own bounds.
               boxShadow: isHovered ? `inset 0 0 0 3px ${tile.ink}` : undefined,
               filter: isHovered ? 'brightness(1.08)' : undefined,
             }}
             aria-label={label}
             data-track-category='TOPICS_EXPLORER'
-            data-track-name='SELECT_TOPIC_TILE'
+            // Only on a tile that does something: otherwise the funnel counts
+            // clicks that were never actions.
+            data-track-name={interactive ? 'SELECT_TOPIC_TILE' : undefined}
           >
             <span className='min-w-0'>
               <span className='block truncate text-sm font-semibold'>{tile.name}</span>

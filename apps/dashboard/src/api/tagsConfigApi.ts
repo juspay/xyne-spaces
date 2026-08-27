@@ -33,8 +33,6 @@ export interface ConversationGeneratedTags {
 
 export interface GeneratedTagsByConversation {
   conversations: ConversationGeneratedTags[];
-  /** True when the server capped the result, so counts are incomplete. */
-  truncated: boolean;
 }
 
 export const tagsConfigApi = {
@@ -103,9 +101,6 @@ export const tagsConfigApi = {
       `/channels/${channelId}/tags-config/generated-tags-by-conversation`,
       { params: { startMs, endMs } },
     );
-    return {
-      conversations: res.data.conversations ?? [],
-      truncated: res.data.truncated === true,
-    };
+    return { conversations: res.data.conversations ?? [] };
   },
 };

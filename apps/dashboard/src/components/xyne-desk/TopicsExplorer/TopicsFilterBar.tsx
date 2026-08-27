@@ -54,8 +54,8 @@ export interface TopicsFilterBarProps {
   onChange: (filters: TicketFilters) => void;
   availableAiCategories: string[];
   availableStages: { name: string; status?: TicketStatusV2 }[];
-  /** True while AI-tag conversation ids are being resolved server-side. */
-  isResolvingTags?: boolean;
+  /** True while the window's AI tags are loading, so the tag filter cannot apply yet. */
+  isLoadingTags?: boolean;
 }
 
 export const TopicsFilterBar = ({
@@ -64,7 +64,7 @@ export const TopicsFilterBar = ({
   onChange,
   availableAiCategories,
   availableStages,
-  isResolvingTags,
+  isLoadingTags,
 }: TopicsFilterBarProps): ReactElement => {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState<FilterId | null>(null);
@@ -242,7 +242,7 @@ export const TopicsFilterBar = ({
         </button>
       )}
 
-      {isResolvingTags && <span className='text-xs text-muted-foreground'>Resolving tags…</span>}
+      {isLoadingTags && <span className='text-xs text-muted-foreground'>Loading tags…</span>}
     </div>
   );
 };

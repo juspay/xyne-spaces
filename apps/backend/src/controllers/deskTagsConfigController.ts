@@ -29,9 +29,9 @@ const epochMsToDate = (raw: unknown): Date | null => {
 /**
  * Server-side ceiling on the generated-tags window. The Topics Explorer caps at
  * 30 calendar days client-side, but that is not a control: without this a
- * hand-crafted multi-year request scans the channel's whole email table and
- * joins the tag rows before any limit applies. 31 days of milliseconds, since
- * a 30-day inclusive range runs 00:00 on day one to 23:59 on day thirty.
+ * hand-crafted multi-year request reads the channel's whole email table and
+ * every tag row hanging off it. 31 days of milliseconds, since a 30-day
+ * inclusive range runs 00:00 on day one to 23:59 on day thirty.
  */
 const MAX_TAG_RANGE_MS = 31 * 24 * 60 * 60 * 1000;
 
@@ -277,7 +277,7 @@ export class DeskTagsConfigController {
     }
 
     try {
-      const { rows, truncated } = await tagRepository.findGeneratedTagsByConversation(
+      const rows = await tagRepository.findGeneratedTagsByConversation(
         channelId,
         deskEmailConfigKey(channelId),
         start,
@@ -296,7 +296,7 @@ export class DeskTagsConfigController {
         tags,
       }));
 
-      res.status(200).json({ conversations, truncated });
+      res.status(200).json({ conversations });
     } catch (error) {
       logger.error('[DESK-TAGS-CONFIG] getGeneratedTagsByConversation failed', { channelId, error });
       res.status(500).json({ error: 'Failed to load generated tags by conversation' });

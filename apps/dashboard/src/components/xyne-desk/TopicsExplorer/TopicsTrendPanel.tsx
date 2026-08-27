@@ -1,13 +1,14 @@
 import { memo, type ReactElement } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts';
 import { cn } from '../../../utils/classNames';
+import type { TrendPoint } from './TopicsExplorer.utils';
 
 /** One trend row: a group's label plus its daily-volume sparkline. */
 export interface TopicsTrendRow {
   key: string;
   label: string;
   colour: string;
-  points: { day: string; count: number }[];
+  points: TrendPoint[];
   /** False when clicking would do nothing, matching the paired tile. */
   canSelect: boolean;
 }
@@ -24,7 +25,7 @@ const TrendTooltipContent = ({
   payload?: { payload?: unknown }[];
 }): ReactElement | null => {
   if (!active || !payload?.length) return null;
-  const p = payload[0]?.payload as { day: string; count: number } | undefined;
+  const p = payload[0]?.payload as TrendPoint | undefined;
   if (!p) return null;
   return (
     <div className='rounded-[8px] border border-border bg-background px-3 py-2 text-xs shadow-md'>
@@ -73,10 +74,12 @@ const TrendRowBase = ({
     className={cn(
       'grid w-full grid-cols-[minmax(96px,150px)_1fr] items-center gap-3 border-b border-border/60 px-4 py-2 text-left transition-colors last:border-b-0',
       isHovered ? 'bg-accent/50' : 'hover:bg-accent/30',
-      row.canSelect ? 'cursor-pointer' : 'cursor-default',
+      // Muted label, matching its paired tile's inert state. The token keeps a
+      // guaranteed contrast where a blanket opacity would not.
+      row.canSelect ? 'cursor-pointer' : 'cursor-default text-muted-foreground',
     )}
     data-track-category='TOPICS_EXPLORER'
-    data-track-name='SELECT_GROUP_ROW'
+    data-track-name={row.canSelect ? 'SELECT_GROUP_ROW' : undefined}
   >
     <span className='flex min-w-0 items-center gap-2'>
       <span className='h-2.5 w-2.5 shrink-0 rounded-full' style={{ background: row.colour }} />

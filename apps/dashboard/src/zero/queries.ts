@@ -4,7 +4,6 @@ export {
   queries,
   UNASSIGNED_FILTER_VALUE,
   ASSIGNEE_INVERT_MARKER,
-  TOPICS_EXPLORER_TICKET_LIMIT,
   parseAssigneeFilter,
 } from '@xyne/shared/zero/queries';
 export const zql = createBuilder(schema);

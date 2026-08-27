@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { CalendarView, type DateRangeValue } from '../../ui/DateRangeFilter';
 
-const DEFAULT_MAX_DAYS = 90;
+const MAX_CUSTOM_DAYS = 90;
 
 const startOfDay = (d: Date): Date => {
   const r = new Date(d);
@@ -17,11 +17,9 @@ const endOfDay = (d: Date): Date => {
   r.setHours(23, 59, 59, 999);
   return r;
 };
-/** Calendar days a range covers, inclusive — what the preset labels count. */
-const spanDays = (r: DateRangeValue): number =>
-  Math.round(
-    (startOfDay(r.endDate).getTime() - startOfDay(r.startDate).getTime()) / (24 * 60 * 60 * 1000),
-  ) + 1;
+/** Days a range spans, as the custom-range guard has always measured them. */
+const rangeDays = (r: DateRangeValue): number =>
+  (r.endDate.getTime() - r.startDate.getTime()) / (24 * 60 * 60 * 1000);
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
@@ -181,7 +179,7 @@ export interface DeskMetricsDateRangePickerProps {
   startTime: string;
   endTime: string;
   onChange: (dr: DateRangeValue, st: string, et: string) => void;
-  /** Longest selectable span, in calendar days. Hides longer presets too. */
+  /** Longest selectable range, in days. Hides longer presets too. */
   maxDays?: number;
 }
 
@@ -190,7 +188,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
   startTime,
   endTime,
   onChange,
-  maxDays = DEFAULT_MAX_DAYS,
+  maxDays = MAX_CUSTOM_DAYS,
 }) => {
   const [open, setOpen] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
@@ -244,7 +242,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
           className='z-50 w-[264px] rounded-xl border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 duration-150'
         >
           <div className='p-1'>
-            {PRESETS.filter(p => spanDays(p.getValue()) <= maxDays).map(p => (
+            {PRESETS.filter(p => rangeDays(p.getValue()) <= maxDays).map(p => (
               <button
                 key={p.label}
                 type='button'
@@ -303,7 +301,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
                 <button
                   type='button'
                   onClick={() => {
-                    if (spanDays(pendingRange) > maxDays) {
+                    if (rangeDays(pendingRange) > maxDays) {
                       toast.error(`Date range cannot exceed ${maxDays} days`);
                       return;
                     }

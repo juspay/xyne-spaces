@@ -2,12 +2,12 @@ import { parseAssigneeFilter, UNASSIGNED_FILTER_VALUE } from '../../../zero/quer
 import type { TicketFilters } from '../../Tickets/TicketFilters/types';
 
 // The rollup runs client-side over synced rows, so the window stays short
-// enough that one desk's tickets fit under the row cap.
+// enough that one desk's tickets fit in the browser.
 export const MAX_RANGE_DAYS = 30;
 export const MAX_DEPTH = 4;
 export const MS_PER_DAY = 86_400_000;
 /** Key used when a ticket has no value for a dimension. */
-export const NONE_KEY = '__none__';
+const NONE_KEY = '__none__';
 
 /** Ticket fields the rollup reads. Structurally assignable from a synced Zero row. */
 export interface TopicsTicket {
@@ -26,7 +26,7 @@ export interface TopicsTicket {
  * Grouping has to collapse the same way, or one person splits across two buckets
  * and neither drills through correctly.
  */
-export const assigneeKey = (assignedTo: string | null | undefined): string => {
+const assigneeKey = (assignedTo: string | null | undefined): string => {
   if (!assignedTo) return UNASSIGNED_FILTER_VALUE;
   const bare = assignedTo.replace(/^(?:user|userGroup|group):/, '');
   return bare || UNASSIGNED_FILTER_VALUE;
@@ -174,7 +174,7 @@ export type DimensionMap = ReadonlyMap<DimensionKey, Dimension>;
 
 // Re-typed as a uniform record: `satisfies` alone keeps each entry's literal
 // shape, dropping the optional fields at the call site.
-export const DIMENSIONS: Record<StaticDimensionKey, Dimension> = DIMENSION_DEFS;
+const DIMENSIONS: Record<StaticDimensionKey, Dimension> = DIMENSION_DEFS;
 const STATIC_DIMENSION_KEYS = Object.keys(DIMENSIONS) as StaticDimensionKey[];
 
 /** Placeholder for a key that no longer resolves, e.g. a tag category the range dropped. */
@@ -311,8 +311,8 @@ export const usefulDimensions = (
 
 /**
  * Desk's own ticket filters over the synced rows. Every filter but AI tags is a
- * column on the Zero row; AI tags live in `non_zero.tags`, so those arrive
- * pre-resolved server-side as a conversation-id whitelist.
+ * column on the Zero row; AI tags live in `non_zero.tags`, so those arrive as a
+ * conversation-id list the caller derives from the window's fetched tags.
  */
 export const applyTicketFilters = (
   tickets: readonly TopicsTicket[],

@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault } from '@xyne/icons';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
-import { queries, TOPICS_EXPLORER_TICKET_LIMIT } from '../../../zero/queries';
+import { queries } from '../../../zero/queries';
 // Not useCachedQuery: this rollup is throwaway, not warm-start state.
 import { useQuery } from '../../../hooks/useQuery';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
@@ -69,8 +69,12 @@ const dateTimeMs = (date: Date, time: string, isEnd: boolean): number => {
   return result.getTime();
 };
 
-/** Server-side row cap in `filterConversationsByTags`. */
-const TAG_FILTER_CONVERSATION_CAP = 1000;
+/**
+ * Page size handed to `supportTicketsPageV3`, which takes one per its keyset
+ * pagination contract. The rollup counts client-side, so this is a whole-window
+ * read rather than a page, and the notice below says so when it is reached.
+ */
+const TICKET_PAGE_LIMIT = 20000;
 
 const startOfDay = (ms: number): number => {
   const d = new Date(ms);
@@ -106,24 +110,20 @@ export const TopicsExplorer = ({
   const navigate = useNavigate();
   const [dims, setDims] = useState<DimensionKey[]>(['priority', 'aiCategory']);
   const [filters, setFilters] = useState<TicketFilters>({});
-  // AI tags/sentiment live outside Zero, so they resolve to conversation ids.
-  const [tagConversationIds, setTagConversationIds] = useState<string[] | null>(null);
-  const [isResolvingTags, setIsResolvingTags] = useState(false);
-  const [tagError, setTagError] = useState(false);
-  const [tagFilterCapped, setTagFilterCapped] = useState(false);
+  // AI tags/sentiment live outside Zero, so they arrive per conversation.
   const [aiTagsByConversation, setAiTagsByConversation] = useState<ConversationTagMap>(
     () => new Map<string, readonly ConversationTag[]>(),
   );
   const [isLoadingAiTagDimensions, setIsLoadingAiTagDimensions] = useState(false);
-  const [aiTagDimensionsTruncated, setAiTagDimensionsTruncated] = useState(false);
+  const [aiTagsFailed, setAiTagsFailed] = useState(false);
   const [path, setPath] = useState<string[]>([]);
   const [page, setPage] = useState(0);
-  const [dateRange, setDateRange] = useState<DateRangeValue>(() => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - (MAX_RANGE_DAYS - 1));
-    return { startDate: start, endDate: end };
-  });
+  // Defaults to today: the rollup runs client-side over synced rows, so the
+  // panel opens on the cheapest window and widens only when asked.
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => ({
+    startDate: new Date(),
+    endDate: new Date(),
+  }));
   const [startTime, setStartTime] = useState('00:00');
   const [endTime, setEndTime] = useState('23:59');
   const [hovered, setHovered] = useState<string | null>(null);
@@ -147,11 +147,14 @@ export const TopicsExplorer = ({
   // state change, including each mouse move.
   const ticketsQuery = useMemo(
     () =>
-      queries.topicsExplorerTickets({
+      queries.supportTicketsPageV3({
         channelId,
         isMember,
         createdAtStart: startMs,
         createdAtEnd: endMs,
+        limit: TICKET_PAGE_LIMIT,
+        start: null,
+        dir: 'forward',
       }),
     [channelId, isMember, startMs, endMs],
   );
@@ -167,48 +170,13 @@ export const TopicsExplorer = ({
   // A deferred frame counts as loading, so a partial rollup never renders as final.
   const isTicketsReady = details.type === 'complete' && !isSyncingRows;
 
-  useEffect(() => {
-    const tags = filters.generatedTags;
-    setTagError(false);
-    setTagFilterCapped(false);
-    if (!tags || tags.length === 0) {
-      setTagConversationIds(null);
-      setIsResolvingTags(false);
-      return;
-    }
-    setTagConversationIds(null);
-    setIsResolvingTags(true);
-    let cancelled = false;
-    tagsConfigApi
-      .filterConversationsByTags(channelId, tags)
-      .then(ids => {
-        if (cancelled) return;
-        setTagConversationIds(ids);
-        // This whitelist is the denominator of every box, so hitting the cap
-        // makes the counts wrong and has to be said out loud.
-        setTagFilterCapped(ids.length >= TAG_FILTER_CONVERSATION_CAP);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setTagConversationIds([]);
-        setTagError(true);
-        // Otherwise an API failure renders a confident "No tickets match".
-        toast.error(getApiErrorMessage(err, 'Could not resolve AI tags'));
-      })
-      .finally(() => {
-        if (!cancelled) setIsResolvingTags(false);
-      });
-    return (): void => {
-      cancelled = true;
-    };
-  }, [channelId, filters.generatedTags]);
-
   // Tag categories are grouping dimensions, so they load with the panel and the
   // date range rather than with the tag filter.
   useEffect(() => {
     if (!open || !channelId) return;
     let cancelled = false;
     setIsLoadingAiTagDimensions(true);
+    setAiTagsFailed(false);
     tagsConfigApi
       .getGeneratedTagsByConversation(channelId, startMs, endMs)
       .then(result => {
@@ -218,12 +186,11 @@ export const TopicsExplorer = ({
           if (row.conversationId) next.set(row.conversationId, row.tags ?? []);
         }
         setAiTagsByConversation(next);
-        setAiTagDimensionsTruncated(result.truncated);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setAiTagsByConversation(new Map<string, readonly ConversationTag[]>());
-        setAiTagDimensionsTruncated(false);
+        setAiTagsFailed(true);
         // Otherwise the AI tag dimensions vanish from "Group by" unexplained.
         toast.error(getApiErrorMessage(err, 'Could not load AI tag categories'));
       })
@@ -246,8 +213,26 @@ export const TopicsExplorer = ({
     [aiTagsByConversation, configuredTagCategories],
   );
 
-  // Derived, not set in the effect, which committed one frame of unfiltered results first.
-  const tagsPending = !!filters.generatedTags?.length && tagConversationIds === null;
+  /**
+   * The AI-tag filter reads the same window-scoped map the groupings read, so a
+   * ticket that passes the filter cannot then land in the grouping's "no tags in
+   * this range" bucket. Resolving it server-side scanned all history instead,
+   * which is exactly how the two scopes came apart.
+   */
+  const tagConversationIds = useMemo<string[] | null>(() => {
+    const selected = filters.generatedTags;
+    if (!selected?.length) return null;
+    const wanted = new Set(selected);
+    const matched: string[] = [];
+    for (const [conversationId, tags] of aiTagsByConversation) {
+      if (tags.some(t => wanted.has(`${t.category}:${t.tag}`))) matched.push(conversationId);
+    }
+    return matched;
+  }, [filters.generatedTags, aiTagsByConversation]);
+
+  // The map is the filter's only source, so a filter set while it loads has to
+  // hold the list empty rather than render one frame of unfiltered counts.
+  const tagsPending = !!filters.generatedTags?.length && isLoadingAiTagDimensions;
 
   const tickets = useMemo(
     () => applyTicketFilters(allTickets, filters, tagsPending ? [] : tagConversationIds),
@@ -347,21 +332,29 @@ export const TopicsExplorer = ({
     return { tiles: built, openBlockers: [...blockers] };
   }, [nodes, scoped.length, isOverlapping, isDrillable, validPath, dimensions, activeDims]);
 
-  /** One trend row per tile, so the two panels cannot drift in order or shade. */
-  const rowsWithTrend = tiles.map((tile, i) => ({
-    key: tile.nodeKey,
-    label: tile.name,
-    colour: tile.fill,
-    points: trend[i] ?? [],
-    canSelect: isDrillable || tile.canOpen,
-  }));
+  /**
+   * One trend row per tile, so the two panels cannot drift in order or shade.
+   * Memoized because `hovered` changes on every mouse move: rebuilt row objects
+   * would defeat `TrendRow`'s memo and re-render every chart on each move.
+   */
+  const rowsWithTrend = useMemo(
+    () =>
+      tiles.map((tile, i) => ({
+        key: tile.nodeKey,
+        label: tile.name,
+        colour: tile.fill,
+        points: trend[i] ?? [],
+        canSelect: isDrillable || tile.canOpen,
+      })),
+    [tiles, trend, isDrillable],
+  );
 
   // No useMemo: templateFor indexes a module-level table, so the reference is stable.
   const layout = templateFor(tiles.length);
 
   // Only once the sync settles: mid-stream the count is still climbing, so an
   // early check flashes the cap warning.
-  const isTruncated = isTicketsReady && allTickets.length >= TOPICS_EXPLORER_TICKET_LIMIT;
+  const isTruncated = isTicketsReady && allTickets.length >= TICKET_PAGE_LIMIT;
 
   // Formatted through each level's own dimension: raw keys are ids for Assignee
   // and `category:tag` for AI tags.
@@ -383,17 +376,7 @@ export const TopicsExplorer = ({
     isTruncated && {
       id: 'rows',
       tone: 'warn' as const,
-      text: `Showing the ${TOPICS_EXPLORER_TICKET_LIMIT.toLocaleString()} most recent tickets — older ones are excluded from these totals. Narrow the range for exact counts.`,
-    },
-    tagFilterCapped && {
-      id: 'tagFilter',
-      tone: 'warn' as const,
-      text: `The AI tag filter matched at least ${TAG_FILTER_CONVERSATION_CAP.toLocaleString()} conversations, which is the server cap — these counts exclude the rest. Narrow the tags or the range for exact counts.`,
-    },
-    aiTagDimensionsTruncated && {
-      id: 'aiTags',
-      tone: 'warn' as const,
-      text: 'AI tag data was capped for this range — tickets beyond the cap count as untagged in the AI tag groupings. Narrow the range for exact counts.',
+      text: `Showing the ${TICKET_PAGE_LIMIT.toLocaleString()} most recent tickets — older ones are excluded from these totals. Narrow the range for exact counts.`,
     },
     openBlockers.length > 0 && {
       id: 'noOpen',
@@ -549,7 +532,7 @@ export const TopicsExplorer = ({
                 }}
                 availableAiCategories={availableAiCategories}
                 availableStages={availableStages}
-                isResolvingTags={isResolvingTags}
+                isLoadingTags={tagsPending}
               />
 
               <span className='ml-auto'>
@@ -755,10 +738,13 @@ export const TopicsExplorer = ({
               <div className='min-h-0 flex-1 p-2'>
                 {tiles.length === 0 ? (
                   <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                    {tagError
-                      ? 'Could not load AI tags — clear that filter or retry.'
-                      : isResolvingTags
-                        ? 'Resolving AI tags…'
+                    {/* The tag fetch feeds the filter, so its failure has to be
+                        named here — otherwise a dead filter reads as a confident
+                        "No tickets match". */}
+                    {tagsPending
+                      ? 'Loading AI tags…'
+                      : aiTagsFailed && !!filters.generatedTags?.length
+                        ? 'Could not load AI tags — clear that filter or retry.'
                         : isTicketsReady
                           ? 'No tickets match'
                           : 'Loading tickets…'}
@@ -780,7 +766,10 @@ export const TopicsExplorer = ({
             <section className={PANEL}>
               <header className={PANEL_HEADER}>
                 <h3 className={PANEL_TITLE}>Daily volume</h3>
-                <span className='text-xs text-muted-foreground'>last {rangeDays} days</span>
+                {/* Not "last N days": the range can be any window, e.g. Yesterday. */}
+                <span className='text-xs text-muted-foreground'>
+                  {rangeDays} {rangeDays === 1 ? 'day' : 'days'}
+                </span>
               </header>
 
               <TopicsTrendPanel
