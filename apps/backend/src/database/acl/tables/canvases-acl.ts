@@ -3,23 +3,10 @@ import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
 
 /**
- * ACL for the `canvas` model.
- *
- * The non-guest branch previously scoped to `workspaceId` only, so any
- * workspace member could read every canvas in the workspace via /api/query.
- * Canvases default to `visibility: PRIVATE`, which made private documents
- * readable by id.
- *
- * Now mirrors the (already-correct) `CanvasParticipantsACL`:
- *   - same workspace, AND
- *   - creator, OR PUBLIC, OR a direct / user-group / channel-share participant.
- *
- * Deliberately NOT an arm: membership of the canvas' home `channelId`. Call PRD
- * and detailed-summary canvases are created PRIVATE with `channelId` set and
- * access granted explicitly (callDocumentService), and neither
- * `canvasAuthService.checkCanvasAccess` nor the Zero read filter
- * (`applyCanvasVisibilityQueryFilter`) treats home-channel membership as
- * access. Adding it here would let any channel member read those documents.
+ * Non-guest reads are scoped to workspace + reachable canvases:
+ * creator, PUBLIC, or explicit user/group/channel share.
+ * Home-channel membership is intentionally excluded; private call/summary
+ * canvases must be shared through CanvasParticipant rows.
  */
 export class CanvasesACL extends BaseQueryACL<
   Prisma.CanvasWhereInput,
