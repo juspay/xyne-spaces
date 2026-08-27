@@ -26,6 +26,8 @@ import {
   getCanvasById,
 } from '../services/canvasService.js';
 
+const sanitizeLogValue = (value: string): string => value.replace(/[\r\n]/g, '');
+
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
 
@@ -80,7 +82,7 @@ export class CanvasController {
       });
       await enqueueCanvasPermissionRefresh(canvasId).catch((error) =>
         logger.warn(
-          `[CANVAS-MENTIONS] Failed to enqueue permission refresh for canvas ${canvasId}: ${error instanceof Error ? error.message : 'Unknown error'}`
+          `[CANVAS-MENTIONS] Failed to enqueue permission refresh for canvas ${sanitizeLogValue(canvasId)}: ${error instanceof Error ? sanitizeLogValue(error.message) : 'Unknown error'}`
         )
       );
       return true;
@@ -126,7 +128,7 @@ export class CanvasController {
     });
     await enqueueCanvasPermissionRefresh(canvasId).catch((error) =>
       logger.warn(
-        `[CANVAS-MENTIONS] Failed to enqueue permission refresh for canvas ${canvasId}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `[CANVAS-MENTIONS] Failed to enqueue permission refresh for canvas ${sanitizeLogValue(canvasId)}: ${error instanceof Error ? sanitizeLogValue(error.message) : 'Unknown error'}`
       )
     );
     return true;
