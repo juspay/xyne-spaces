@@ -116,6 +116,7 @@ export class DeskMetricsController {
         priorities: TicketPriority[];
         userGroupIds: string[];
         tagValues: string[];
+        aiCategories: string[];
         customFieldFilter?: CustomFieldFilterArg;
       }
     | { ok: false; error: string } {
@@ -167,6 +168,13 @@ export class DeskMetricsController {
       );
       const userGroupIds = parseJsonStringArray(getStringQueryParam(req, 'userGroupIds'));
       const tagValues = parseJsonStringArray(getStringQueryParam(req, 'tagValues'));
+      const aiCategories = [
+        ...new Set(
+          parseJsonStringArray(getStringQueryParam(req, 'aiCategories'))
+            .map(v => v.trim())
+            .filter(v => v.length > 0),
+        ),
+      ];
       const customFieldKeys = parseJsonStringArray(getStringQueryParam(req, 'customFieldKeys'));
 
       const parsePerKeyFilters = (
@@ -210,6 +218,7 @@ export class DeskMetricsController {
         priorities,
         userGroupIds,
         tagValues,
+        aiCategories,
         ...(customFieldFilter ? { customFieldFilter } : {}),
       };
   }
@@ -224,6 +233,7 @@ export class DeskMetricsController {
       priorities: TicketPriority[];
       userGroupIds: string[];
       tagValues: string[];
+      aiCategories: string[];
       customFieldFilter?: CustomFieldFilterArg;
     },
   ): Promise<DeskMetricsResponse> {
@@ -236,6 +246,7 @@ export class DeskMetricsController {
       priorities: query.priorities,
       userGroupIds: query.userGroupIds,
       tagValues: query.tagValues,
+      aiCategories: query.aiCategories,
       customFieldFilter: query.customFieldFilter,
     });
   }

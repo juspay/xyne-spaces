@@ -20,6 +20,7 @@ export async function getDeskMetrics(
   priorities?: TicketPriority[],
   userGroupIds?: string[],
   tagValues?: string[],
+  aiCategories?: string[],
 ): Promise<DeskMetricsResponse> {
   const params: Record<string, string> = { timeRange };
   if (assigneeIds && assigneeIds.length > 0) params['assigneeIds'] = JSON.stringify(assigneeIds);
@@ -28,6 +29,8 @@ export async function getDeskMetrics(
   if (userGroupIds && userGroupIds.length > 0)
     params['userGroupIds'] = JSON.stringify(userGroupIds);
   if (tagValues && tagValues.length > 0) params['tagValues'] = JSON.stringify(tagValues);
+  if (aiCategories && aiCategories.length > 0)
+    params['aiCategories'] = JSON.stringify(aiCategories);
   if (customFieldFilter && customFieldFilter.keys.length > 0) {
     params['customFieldKeys'] = JSON.stringify(customFieldFilter.keys);
     if (customFieldFilter.perKeyFilters)
@@ -48,6 +51,7 @@ export async function getAggregateDeskMetrics(
   priorities?: TicketPriority[],
   userGroupIds?: string[],
   tagValues?: string[],
+  aiCategories?: string[],
 ): Promise<DeskMetricsAggregateResponse> {
   const params: Record<string, string> = {
     timeRange,
@@ -59,6 +63,8 @@ export async function getAggregateDeskMetrics(
   if (userGroupIds && userGroupIds.length > 0)
     params['userGroupIds'] = JSON.stringify(userGroupIds);
   if (tagValues && tagValues.length > 0) params['tagValues'] = JSON.stringify(tagValues);
+  if (aiCategories && aiCategories.length > 0)
+    params['aiCategories'] = JSON.stringify(aiCategories);
   if (customFieldFilter && customFieldFilter.keys.length > 0) {
     params['customFieldKeys'] = JSON.stringify(customFieldFilter.keys);
     if (customFieldFilter.perKeyFilters)

@@ -99,6 +99,18 @@ const isTicketPriorityArray = (v: unknown): v is TicketPriority[] =>
 const isPerKeyValues = (v: unknown): v is Record<string, string[]> =>
   typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every(isStringArray);
 
+const CHART_VIEWS = ['priority', 'trend', 'assignee', 'tags'] as const;
+export type ChartView = (typeof CHART_VIEWS)[number];
+
+const isChartView = (value: unknown): value is ChartView =>
+  CHART_VIEWS.includes(value as ChartView);
+
+const ACTIVE_TABS = ['overview', 'agents', 'desks'] as const;
+export type ActiveTab = (typeof ACTIVE_TABS)[number];
+
+const isActiveTab = (value: unknown): value is ActiveTab =>
+  ACTIVE_TABS.includes(value as ActiveTab);
+
 interface StoredFilters {
   rangeLabel: RangeLabel;
   customStart?: string;
@@ -111,9 +123,12 @@ interface StoredFilters {
   selectedUserGroupIds: string[];
   selectedTagCategory: string | null;
   selectedTagValues: string[];
+  selectedAiCategories: string[];
   // Per-field selected values or text terms: { Tag: ['EMI', 'UPI'], Tone: ['Neutral'] }
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
+  chartView: ChartView;
+  activeTab: ActiveTab;
 }
 
 const DEFAULT_STORED: StoredFilters = {
@@ -126,8 +141,11 @@ const DEFAULT_STORED: StoredFilters = {
   selectedUserGroupIds: [],
   selectedTagCategory: null,
   selectedTagValues: [],
+  selectedAiCategories: [],
   selectedCustomFieldValues: {},
   comparedChannelIds: [],
+  chartView: 'priority',
+  activeTab: 'overview',
 };
 
 const readStorage = (key: string): StoredFilters => {
@@ -165,11 +183,16 @@ const readStorage = (key: string): StoredFilters => {
       selectedTagCategory:
         typeof p['selectedTagCategory'] === 'string' ? p['selectedTagCategory'] : null,
       selectedTagValues: isStringArray(p['selectedTagValues']) ? p['selectedTagValues'] : [],
+      selectedAiCategories: isStringArray(p['selectedAiCategories'])
+        ? p['selectedAiCategories']
+        : [],
       // Handle migration from old string[] format → default to empty
       selectedCustomFieldValues: isPerKeyValues(p['selectedCustomFieldValues'])
         ? p['selectedCustomFieldValues']
         : {},
       comparedChannelIds: isStringArray(p['comparedChannelIds']) ? p['comparedChannelIds'] : [],
+      chartView: isChartView(p['chartView']) ? p['chartView'] : DEFAULT_STORED.chartView,
+      activeTab: isActiveTab(p['activeTab']) ? p['activeTab'] : DEFAULT_STORED.activeTab,
     };
     if (typeof p['customStart'] === 'string') result.customStart = p['customStart'];
     if (typeof p['customEnd'] === 'string') result.customEnd = p['customEnd'];
@@ -197,8 +220,11 @@ export interface PersistedDeskMetricsFilters {
   selectedUserGroupIds: string[];
   selectedTagCategory: string | null;
   selectedTagValues: string[];
+  selectedAiCategories: string[];
   selectedCustomFieldValues: Record<string, string[]>;
   comparedChannelIds: string[];
+  chartView: ChartView;
+  activeTab: ActiveTab;
   setDateRange: (dr: DateRangeValue, st: string, et: string) => void;
   setSelectedAssigneeIds: (ids: string[]) => void;
   setSelectedStageNames: (names: string[]) => void;
@@ -206,8 +232,11 @@ export interface PersistedDeskMetricsFilters {
   setSelectedUserGroupIds: (ids: string[]) => void;
   setSelectedTagCategory: (cat: string | null) => void;
   setSelectedTagValues: (vals: string[]) => void;
+  setSelectedAiCategories: (categories: string[]) => void;
   setSelectedCustomFieldValues: (vals: Record<string, string[]>) => void;
   setComparedChannelIds: (ids: string[]) => void;
+  setChartView: (view: ChartView) => void;
+  setActiveTab: (tab: ActiveTab) => void;
 }
 
 export const usePersistedDeskMetricsFilters = (
@@ -294,6 +323,13 @@ export const usePersistedDeskMetricsFilters = (
     [persist],
   );
 
+  const setSelectedAiCategories = useCallback(
+    (categories: string[]) => {
+      persist(prev => ({ ...prev, selectedAiCategories: categories }));
+    },
+    [persist],
+  );
+
   const setSelectedCustomFieldValues = useCallback(
     (vals: Record<string, string[]>) => {
       persist(prev => ({ ...prev, selectedCustomFieldValues: vals }));
@@ -309,6 +345,20 @@ export const usePersistedDeskMetricsFilters = (
     [persist, channelId],
   );
 
+  const setChartView = useCallback(
+    (view: ChartView) => {
+      persist(prev => ({ ...prev, chartView: view }));
+    },
+    [persist],
+  );
+
+  const setActiveTab = useCallback(
+    (tab: ActiveTab) => {
+      persist(prev => ({ ...prev, activeTab: tab }));
+    },
+    [persist],
+  );
+
   return {
     dateRange,
     startTime: stored.startTime,
@@ -319,8 +369,11 @@ export const usePersistedDeskMetricsFilters = (
     selectedUserGroupIds: stored.selectedUserGroupIds,
     selectedTagCategory: stored.selectedTagCategory,
     selectedTagValues: stored.selectedTagValues,
+    selectedAiCategories: stored.selectedAiCategories,
     selectedCustomFieldValues: stored.selectedCustomFieldValues,
     comparedChannelIds: stored.comparedChannelIds,
+    chartView: stored.chartView,
+    activeTab: stored.activeTab,
     setDateRange,
     setSelectedAssigneeIds,
     setSelectedStageNames,
@@ -328,7 +381,10 @@ export const usePersistedDeskMetricsFilters = (
     setSelectedUserGroupIds,
     setSelectedTagCategory,
     setSelectedTagValues,
+    setSelectedAiCategories,
     setSelectedCustomFieldValues,
     setComparedChannelIds,
+    setChartView,
+    setActiveTab,
   };
 };
