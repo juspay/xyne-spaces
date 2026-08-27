@@ -48,7 +48,7 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
-import { callLobbyService } from '../../../services/Call/callLobbyService';
+import { resolveCallLinkTarget } from '../../../utils/callLinkRouting';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -125,30 +125,23 @@ export const InternalXyneLink = ({
   });
   const [copied, setCopied] = useState(false);
 
+  // Call links are normally claimed by <CallLinkInterceptor />, which joins in
+  // place without leaving the page. This is the fallback for trees that render
+  // messages without a call overlay to join into — the panel webview and the
+  // detached windows — where routing by navigation is all that is available.
   const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>): void => {
     onClick?.(event);
     if (event.defaultPrevented) return;
     if (parsedLink?.kind !== 'call' || !parsedLink.callId) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
+    const { callId } = parsedLink;
     event.preventDefault();
-    void callLobbyService
-      .resolveInternalRoute(parsedLink.callId)
-      .then(resolution => {
-        if (resolution.result === 'internal') {
-          window.location.assign(
-            `/${encodeURIComponent(resolution.workspaceId)}/call/${encodeURIComponent(parsedLink.callId!)}`,
-          );
-          return;
-        }
-
-        // Users without a valid session for the call's workspace enter through
-        // the external lobby in the same Spaces tab.
-        window.location.assign(resolvedHref);
-      })
-      .catch(() => {
-        window.location.assign(resolvedHref);
-      });
+    void resolveCallLinkTarget(callId, resolvedHref, undefined).then(target => {
+      if (target.kind === 'navigate') {
+        window.location.assign(target.url);
+      }
+    });
   };
 
   if (!resolvedHref || !parsedLink) {
