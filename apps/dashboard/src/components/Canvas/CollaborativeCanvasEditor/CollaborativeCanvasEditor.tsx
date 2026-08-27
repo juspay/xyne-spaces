@@ -55,8 +55,10 @@ import {
 import { apiInstance } from '../../../services/clients/apiClient';
 import type { CanvasParticipant, CollaborativeCanvasEditorRef } from '../Canvas.types';
 import { filterSuggestionItems } from '@blocknote/core/extensions';
-import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
-import { insertGroupMention } from 'blocknote-layout-extensions';
+import {
+  getWhiteboardSlashMenuItems,
+  insertGroupMention as insertGroupMentionUntyped,
+} from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
 import { createElement } from 'react';
@@ -92,6 +94,22 @@ const buildCanvasDictionary = (placeholder: string): typeof en => ({
 });
 
 const canvasDictionary = buildCanvasDictionary(DEFAULT_CANVAS_PLACEHOLDER);
+
+type CollaborativeCanvasEditorForView = BlockNoteEditor<
+  BlockSchema,
+  InlineContentSchema,
+  StyleSchema
+>;
+type GroupMentionTarget = {
+  id: string;
+  name: string;
+  alias?: string | null;
+};
+
+const insertGroupMention = insertGroupMentionUntyped as unknown as (
+  editor: CollaborativeCanvasEditorForView,
+  group: GroupMentionTarget,
+) => void;
 
 interface CollaborativeCanvasEditorProps {
   canvasId: string;
