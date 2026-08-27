@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { ok } from "../lib/http.js";
 import { REPO_CONFIGS, SBX_GIT } from "xyne-claw-shared";
 
 const router = Router();
@@ -18,7 +19,7 @@ router.get("/repos", (_req, res) => {
     name: c.name,
     description: c.description,
   }));
-  res.json({ success: true, data });
+  ok(res, data);
 });
 
 /**
@@ -30,7 +31,7 @@ router.get("/repos", (_req, res) => {
  */
 router.get("/sbx-git-repos", (_req, res) => {
   const data = Object.entries(SBX_GIT.repoPaths).map(([key, path]) => ({ key, path }));
-  res.json({ success: true, data });
+  ok(res, data);
 });
 
 export default router;

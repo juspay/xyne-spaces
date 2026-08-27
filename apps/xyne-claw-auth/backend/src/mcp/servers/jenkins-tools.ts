@@ -11,6 +11,7 @@
  */
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { errMsg } from "../../lib/errors.js";
 
 // ─── Config ───────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ async function triggerBuild(
     }
     return { success: false, error: `Jenkins returned ${response.status}` };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    return { success: false, error: errMsg(err) };
   }
 }
 
@@ -240,7 +241,7 @@ export const tools: JenkinsTool[] = [
         );
       } catch (err) {
         return text(
-          `Could not reach Jenkins at ${config.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+          `Could not reach Jenkins at ${config.baseUrl}: ${errMsg(err)}`,
           true,
         );
       }

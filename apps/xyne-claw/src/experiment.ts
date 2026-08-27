@@ -17,7 +17,7 @@ export interface ExperimentContext {
    *  Each unexplored path is recorded as an open conjecture; closing every one of
    *  them (proved/refuted, with evidence) is the exit. The deadline still applies
    *  as a hard safety cap so the loop stays bounded. */
-  kind?: "understanding" | "framework" | "security";
+  kind?: "understanding" | "framework" | "security" | "repo-history";
 }
 
 /** Minimum closed paths before an "exhausted" frontier is believed. Guards the
@@ -343,16 +343,34 @@ export function buildExperimentTools(
                 );
               }
             }
-            // A framework opportunity is a COUNT, not an opinion. The failure
-            // mode is "this could be abstracted" with nothing behind it, so a
-            // close must cite at least 3 occurrences — two is a coincidence.
+            // A framework opportunity is a STRUCTURAL claim, not taste — and NOT
+            // just duplication. The old gate demanded ">=3 identical occurrences",
+            // which reduced framework mode to a dedup linter and wrongly refused
+            // the opportunities that matter most (convention drift, missing paved
+            // paths, change-amplification) precisely because their sites VARY.
+            //
+            // Replaced with a tag-agnostic contract the agent self-tags into:
+            //   Tag:        <the agent's own word for the shape of the gap>
+            //   evidence:   at least one file:line the gap actually lives at
+            //   Prevents:   the concrete bug / drift / change-amplification the
+            //               framework would have stopped — this is what separates
+            //               an opportunity from taste, and it holds for ANY tag.
+            // The ledger does NOT judge whether the evidence fits the tag; that
+            // subjective call is the checker's job (experiment-review).
             if (ctx.kind === "framework" && status === "proved") {
               const note = typeof p["note"] === "string" ? p["note"] : "";
-              const citations = note.match(/[\w./-]+\.[A-Za-z][\w]*:\d+/g) ?? [];
-              if (citations.length < 3) {
+              const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
+              const hasCitation = /[\w./-]+\.[A-Za-z][\w]*:\d+/.test(note);
+              const hasConsequence = /(^|\n)\s*(prevents|consequence):\s*\S/i.test(note);
+              if (!hasTag || !hasCitation || !hasConsequence) {
+                const missing = [
+                  !hasTag ? "a `Tag:` line (your own word for the shape — e.g. convention-drift, missing-paved-path, change-amplification, duplication; reuse a tag already in the ledger if it fits)" : null,
+                  !hasCitation ? "at least one `file.ext:LINE` where the gap lives" : null,
+                  !hasConsequence ? "a `Prevents:` line naming the concrete bug, drift, or change-amplification the framework would have stopped" : null,
+                ].filter(Boolean).join("; ");
                 return textResult(
-                  `Cannot close this opportunity: \`note\` cites ${citations.length} occurrence(s); a framework opportunity needs at least 3, each as file.ext:LINE. Two occurrences is a coincidence, three is a pattern. If you cannot find a third, refute it — the repetition is probably incidental.`,
-                  { error: true, needsOccurrences: true, found: citations.length },
+                  `Cannot close this opportunity — the note is missing: ${missing}. A framework opportunity is not \"this could be abstracted\"; it is a named structural gap with evidence and a cost. If you cannot name what it prevents, it is taste — refute it and move on.`,
+                  { error: true, needsFrameworkContract: true },
                 );
               }
             }
@@ -362,6 +380,28 @@ export function buildExperimentTools(
                 return textResult(
                   "Cannot close this path: `note` needs at least one file:line citation (e.g. `src/foo/bar.ts:214`) showing where the behaviour actually lives, plus what the code does and why. A description that only restates the name does not close a path.",
                   { error: true, needsCitation: true },
+                );
+              }
+            }
+            // repo-history: a distilled batch is only "proved" when it yields a
+            // durable RULE tied to the SHA it came from and a theme TAG. This
+            // stops the failure mode of recording a changelog ("commit X changed
+            // Y") instead of the reusable coding decision someone rebuilding the
+            // repo would follow. Reconciliation-against-HEAD is the checker's job.
+            if (ctx.kind === "repo-history" && status === "proved") {
+              const note = typeof p["note"] === "string" ? p["note"] : "";
+              const hasRule = /(^|\n)\s*rule:\s*\S/i.test(note);
+              const hasSha = /(^|\n)\s*sha:\s*[0-9a-f]{7,}/i.test(note);
+              const hasTag = /(^|\n)\s*tag:\s*[a-z][\w-]*/i.test(note);
+              if (!hasRule || !hasSha || !hasTag) {
+                const missing = [
+                  !hasRule ? "a `Rule:` line (the durable instruction someone rebuilding the repo would follow — not a changelog of what changed)" : null,
+                  !hasSha ? "a `sha:` line naming the commit this rule derives from" : null,
+                  !hasTag ? "a `Tag:` line (kebab-case theme — e.g. error-handling, provider-fallback, security; reuse a tag already in the ledger if it fits)" : null,
+                ].filter(Boolean).join("; ");
+                return textResult(
+                  `Cannot close this batch — the note is missing: ${missing}. Record the DECISION (the rule), not the diff. If the batch establishes no durable rule, refute it and advance the cursor.`,
+                  { error: true, needsRepoHistoryContract: true },
                 );
               }
             }
@@ -437,7 +477,17 @@ export function buildExperimentTools(
         const report = typeof p["report"] === "string" ? p["report"] : "";
         const deadline = deadlineMs(ctx);
         const pastDeadline = Date.now() >= deadline;
-        if (ctx.kind === "understanding" || ctx.kind === "framework" || ctx.kind === "security") {
+        // NOTE: "security" is deliberately NOT here. Understanding and framework
+        // runs enumerate a bounded set (code paths, duplication candidates) and
+        // can genuinely exhaust it. Attack surface cannot be enumerated that
+        // way — there is always one more endpoint — so an exhaustion gate would
+        // either never open or open on a false claim of completeness. A security
+        // run is time-boxed and exits on the deadline like /experiment.
+        // repo-history is progress-gated but shares this machinery: its frontier
+        // is the commit batches ahead of the cursor, so `open === 0` means the
+        // walk has reached HEAD (nothing left to enumerate). Same exit + .md
+        // deliverable gate as framework.
+        if (ctx.kind === "understanding" || ctx.kind === "framework" || ctx.kind === "repo-history") {
           // Coverage-gated exit: the run ends when the enumerated code-path
           // frontier is EXHAUSTED (open conjectures -> 0), not when the clock
           // runs out. The deadline is only a hard safety cap so the loop stays
@@ -462,7 +512,14 @@ export function buildExperimentTools(
           // The cheapest way to satisfy an exhaustion gate is to enumerate less,
           // so the gate has to require that enumeration happened at all.
           const frontierExhausted = open === 0 && closed >= MIN_CLOSED_PATHS;
-          if (!pastDeadline && !frontierExhausted) {
+          // repo-history is COMMIT-bound, not time-bound: every commit from the
+          // initial sha to HEAD must be walked, so the deadline is NOT an escape
+          // hatch — the ONLY exit is an exhausted commit frontier (cursor at
+          // HEAD). For understanding/framework the deadline still releases the run
+          // as a safety cap. (The epoch loop keeps chaining past the deadline for
+          // repo-history too — see continueExperiment.)
+          const deadlineReleases = ctx.kind !== "repo-history";
+          if ((!pastDeadline || !deadlineReleases) && !frontierExhausted) {
             const openStr = open === undefined ? "unknown" : String(open);
             const why = open === 0 && closed < MIN_CLOSED_PATHS
               ? `Only ${closed} path(s) closed — an exhausted frontier means the scope was enumerated, not that one path was explained. Enumerate every reachable path in scope (at least ${MIN_CLOSED_PATHS}) before the frontier counts as empty.`
@@ -478,11 +535,20 @@ export function buildExperimentTools(
           // list so the run cannot end (even at the safety cap) until the doc
           // exists. Fail OPEN only when the ledger is unreachable: we cannot
           // strand a finished run on our own inability to check.
-          const hasHtml = deliveredArtifacts.some((f) => f.toLowerCase().endsWith(".html"));
-          if (ledgerReadOk && !hasHtml) {
+          // The deliverable's FORMAT is kind-specific: an understanding run
+          // produces a self-contained .html explanation; a framework run
+          // produces a markdown report of tagged opportunities. Requiring .html
+          // for framework (the old bug) refused every correctly-finished
+          // framework run and told it to draw SVG diagrams for a dedup report.
+          const wantsHtml = ctx.kind === "understanding" || ctx.kind === "repo-history";
+          const ext = wantsHtml ? ".html" : ".md";
+          const hasDeliverable = deliveredArtifacts.some((f) => f.toLowerCase().endsWith(ext));
+          if (ledgerReadOk && !hasDeliverable) {
             return textResult(
-              `❌ Cannot end: the explanation document has not been delivered (epoch ${ctx.epoch}). Write ONE self-contained .html covering the scope you explained — grouped sections, inline-SVG diagrams (no <script>, no CDN), and a file:line citation for every claim — then send it with sandbox-deliver-files and end again. The frontier is closed; only the deliverable is missing. Your report was NOT accepted.`,
-              { refused: true, reason: "missing-html-artifact" },
+              wantsHtml
+                ? `❌ Cannot end: the explanation document has not been delivered (epoch ${ctx.epoch}). Write ONE self-contained .html covering the scope you explained — grouped sections, inline-SVG diagrams (no <script>, no CDN), and a file:line citation for every claim — then send it with sandbox-deliver-files and end again. The frontier is closed; only the deliverable is missing. Your report was NOT accepted.`
+                : `❌ Cannot end: the report has not been delivered (epoch ${ctx.epoch}). Write ONE markdown report — group the opportunities by their Tag, and for each give the file:line evidence, the abstraction, what it Prevents, and the migration cost — then send it with sandbox-deliver-files and end again. The candidate list is exhausted; only the deliverable is missing. Your report was NOT accepted.`,
+              { refused: true, reason: wantsHtml ? "missing-html-artifact" : "missing-md-artifact" },
             );
           }
         } else if (!pastDeadline) {

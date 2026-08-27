@@ -11,6 +11,7 @@
  * (POST /claw/api/v1/admin/error-pipeline/token — CLAW_ADMIN).
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { errMsg } from "../lib/errors.js";
 import jwt from "jsonwebtoken";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { ERROR_PIPELINE } from "../config.js";
@@ -62,7 +63,7 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
       toolsUsed: [],
     });
   } catch (err) {
-    log.error(`[run-result] finalize ${p.sessionId} failed — returning 500 so Claw retries: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[run-result] finalize ${p.sessionId} failed — returning 500 so Claw retries: ${errMsg(err)}`);
     res.status(500).json({ success: false, error: "finalize failed" });
     return;
   }
@@ -94,7 +95,7 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
         log.warn(`[run-result] no orgId for user ${p.userId} — skipping conversation persistence`);
       }
     } catch (err) {
-      log.warn(`[run-result] conversation persistence failed for ${p.sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[run-result] conversation persistence failed for ${p.sessionId}: ${errMsg(err)}`);
     }
   }
 });
@@ -117,7 +118,7 @@ function validateIngestAuth(req: Request, res: Response, next: NextFunction): vo
       next();
       return;
     } catch (err) {
-      log.warn(`[auth] ingest JWT rejected: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[auth] ingest JWT rejected: ${errMsg(err)}`);
       res.status(401).json({ success: false, error: "Invalid or expired ingest token" });
       return;
     }
@@ -230,7 +231,7 @@ errorPipelineIngestRouter.post("/ingest", validateIngestAuth, async (req: Reques
       }
     } catch (err) {
       summary.failed++;
-      log.error(`[ingest] enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`[ingest] enqueue failed: ${errMsg(err)}`);
     }
   }
 

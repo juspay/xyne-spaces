@@ -1,4 +1,5 @@
 import { Queue, Worker, type Job } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { Redis } from "ioredis";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
@@ -102,6 +103,11 @@ export interface RecoverySessionContext {
    *  never gets its result and the run is retried pointlessly. */
   resultForwardUrl?: string;
   resolveMentions?: boolean;
+  /** Mirrors SessionContext.isAutomation — see src/lib/session-context.ts.
+   *  Carried through recovery so a replayed automation run still gets the
+   *  app-mode Spaces MCP swap even when it has neither externalResultCallback
+   *  nor resolveMentions (plain-callback automations set neither). */
+  isAutomation?: boolean;
   workspaceId?: string;
 }
 
@@ -122,6 +128,9 @@ interface RunRecoveryState {
   sandboxDeferrals?: number;
   /** Count of explicit drain handoffs for this root run. Caps deploy crash-loop ping-pong. */
   handoffsUsed?: number;
+  /** Count of watchdog firings survived because the run was still ALIVE in claw
+   *  (see isRunStillExecuting). Capped so a genuinely wedged run still exits. */
+  livenessRearms?: number;
   dispatchPayload: RecoveryDispatchPayload;
   sessionContext: RecoverySessionContext;
   sessionHistory: string[];
@@ -186,6 +195,83 @@ function isSessionLockedFailure(error?: string | null): boolean {
  *  run until a SandboxClaim binds. */
 function isSandboxUnavailableFailure(error?: string | null): boolean {
   return error === "sandbox_unavailable" || error?.includes("sandbox_unavailable") === true;
+}
+
+/** Failures a retry can never fix.
+ *
+ *  The GCS archive guard is the motivating case: claw refuses to run when it
+ *  finds a NEWER conversation archive than the one it holds, because running
+ *  would clobber it. That refusal is a deliberate safety stop, not a transient
+ *  fault — re-dispatching just hits the same guard, so it burned all three
+ *  attempts and then told the user the request "still failed" (2026-08-18
+ *  session 988ef507). Exhaust immediately instead, with the real reason. */
+function isNonRetryableFailure(error?: string | null): boolean {
+  if (!error) return false;
+  return (
+    error.includes("Failed to restore newer GCS archive") ||
+    error.includes("refusing to run again")
+  );
+}
+
+/** Max watchdog firings a still-alive run may survive. At the default 20-min
+ *  timeout this allows ~8h of genuine long-running work before we stop
+ *  believing the liveness probe and let the normal retry path take over. */
+const MAX_LIVENESS_REARMS = Number(process.env["RUN_RECOVERY_MAX_LIVENESS_REARMS"] ?? 24);
+
+/**
+ * Is this session STILL EXECUTING inside claw?
+ *
+ * Heartbeat age is a weak death signal: it only advances on progress events, so
+ * a run inside one long tool call looks identical to a dead one. Asking claw
+ * directly is the difference between "hasn't spoken recently" and "is gone".
+ *
+ * Fails OPEN (returns false → allow the retry) on any error or timeout: if claw
+ * is unreachable the run really is unrecoverable, and preserving the old
+ * behaviour there matters more than avoiding a duplicate.
+ */
+async function isRunStillExecuting(sessionId: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/alive`,
+      {
+        method: "GET",
+        headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!res.ok) return false;
+    const body = (await res.json()) as { alive?: boolean };
+    return body.alive === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Did any attempt in this run's history actually DELIVER?
+ *
+ * Exhaustion is decided from recovery state, which knows nothing about whether
+ * a retry produced a result — so a thread could receive two finished designs
+ * and still be told the request failed 3/3 times (2026-08-18 /design thread).
+ * A completed run carrying a non-empty result is proof the user got an answer;
+ * the alarming card is then worse than silence. Best-effort: a query failure
+ * must never suppress a legitimate warning, so it returns false.
+ */
+async function anyAttemptDelivered(state: RunRecoveryState): Promise<boolean> {
+  const sessions = [...new Set([state.rootSessionId, ...state.sessionHistory])];
+  if (sessions.length === 0) return false;
+  try {
+    const { prisma } = await import("../db.js");
+    const delivered = await prisma.agentRun.count({
+      where: { sessionId: { in: sessions }, status: "completed", NOT: { result: null } },
+    });
+    return delivered > 0;
+  } catch (err) {
+    log.warn(
+      `[run-recovery] delivered-check failed root=${state.rootSessionId}: ${errMsg(err)}`,
+    );
+    return false;
+  }
 }
 
 /** Scheduled fires use a one-shot `scheduled_<jobId>_<ts>` conversationId. The
@@ -267,7 +353,7 @@ async function deferSandboxRetry(
   await scheduleDispatch(state.rootSessionId, "sandbox_unavailable — waiting for write capacity", delayMs);
   if (state.sandboxDeferrals === 1) {
     await notifySandboxDeferred(state).catch((err) => {
-      log.warn(`[run-recovery] sandbox-deferred notice failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[run-recovery] sandbox-deferred notice failed root=${state.rootSessionId}: ${errMsg(err)}`);
     });
   }
   log.info(`[run-recovery] sandbox unavailable deferred root=${state.rootSessionId} deferral=${state.sandboxDeferrals}/${CONFIG.maxSandboxDeferrals} retryInMs=${delayMs}`);
@@ -415,7 +501,7 @@ export async function cancelRunRecovery(sessionId: string): Promise<boolean> {
       .getJob(dispatchJobId(rootSessionId))
       .then((job) => (job ? job.remove() : undefined)),
   ]).catch((err) =>
-    log.warn(`[run-recovery] cancel cleanup partial for root=${rootSessionId}: ${err instanceof Error ? err.message : String(err)}`),
+    log.warn(`[run-recovery] cancel cleanup partial for root=${rootSessionId}: ${errMsg(err)}`),
   );
 
   log.info(`[run-recovery] cancelled recovery root=${rootSessionId} via /stop (dropped watchdog + dispatch)`);
@@ -482,8 +568,19 @@ async function markExhausted(state: RunRecoveryState, reason: string): Promise<v
   state.retryScheduled = false;
   await saveState(state);
   await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+
+  // If any attempt actually answered, the user already has what they asked for
+  // and a "recovery exhausted" card just tells them the service is broken while
+  // its output sits above it. Record it, don't announce it.
+  if (await anyAttemptDelivered(state)) {
+    log.info(
+      `[run-recovery] exhausted but an attempt delivered root=${state.rootSessionId} reason="${reason}" — suppressing user-facing notice`,
+    );
+    return;
+  }
+
   await notifyExhausted(state).catch((err) => {
-    log.warn("[run-recovery] Failed to notify exhausted run:", err instanceof Error ? err.message : String(err));
+    log.warn("[run-recovery] Failed to notify exhausted run:", errMsg(err));
   });
 }
 
@@ -560,7 +657,7 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
         state.retryScheduled = false;
         state.lastHeartbeatAt = Date.now();
         await enqueueLockContentionRun(state).catch((enqueueErr) => {
-          log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)}`);
+          log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${errMsg(enqueueErr)}`);
         });
         await saveState(state);
         await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
@@ -588,7 +685,7 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
 
     log.info(`[run-recovery] Retry dispatched root=${state.rootSessionId} attempt=${state.retriesUsed}/${state.maxRetries} newSession=${newSessionId}`);
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    const errorMsg = errMsg(err);
     if (state.retriesUsed >= state.maxRetries) {
       await markExhausted(state, `retry dispatch exception: ${errorMsg}`);
       return;
@@ -617,6 +714,28 @@ async function processRecoveryJob(job: Job<RunRecoveryJobData>): Promise<void> {
   if (age < state.timeoutMs) {
     await scheduleWatchdog(state.rootSessionId, state.activeSessionId, state.timeoutMs - age);
     return;
+  }
+
+  // A silent run is not necessarily a dead run. Heartbeats only land on
+  // progress events, so a run inside ONE long tool call (browser QA, a big
+  // build) goes quiet while working — and re-dispatching it starts a SECOND
+  // agent on the same request. That is how one /design ask became four runs
+  // across two sandboxes and delivered the same HTML twice (2026-08-18).
+  // Ask claw whether the session is still executing before believing the clock.
+  if (await isRunStillExecuting(state.activeSessionId)) {
+    state.livenessRearms = (state.livenessRearms ?? 0) + 1;
+    if (state.livenessRearms <= MAX_LIVENESS_REARMS) {
+      state.lastHeartbeatAt = Date.now();
+      await saveState(state);
+      await scheduleWatchdog(state.rootSessionId, state.activeSessionId, state.timeoutMs);
+      log.info(
+        `[run-recovery] watchdog deferred — run still executing root=${state.rootSessionId} session=${state.activeSessionId} rearm=${state.livenessRearms}/${MAX_LIVENESS_REARMS}`,
+      );
+      return;
+    }
+    log.warn(
+      `[run-recovery] run still reports alive but exceeded ${MAX_LIVENESS_REARMS} re-arms root=${state.rootSessionId} — treating as wedged`,
+    );
   }
 
   if (state.retriesUsed >= state.maxRetries) {
@@ -677,7 +796,7 @@ async function purgeAllRecoveryState(): Promise<void> {
     }
     log.warn(`[run-recovery] PURGE_ON_START: deleted ${purged} recovery key(s) — nothing will re-arm this boot. Unset RUN_RECOVERY_PURGE_ON_START after this deploy.`);
   } catch (err) {
-    log.error("[run-recovery] purge failed:", err instanceof Error ? err.message : String(err));
+    log.error("[run-recovery] purge failed:", errMsg(err));
   }
 }
 
@@ -734,7 +853,7 @@ async function rearmRunningRecoveries(): Promise<void> {
       log.info(`[run-recovery] Startup re-arm: re-scheduled ${rearmed}/${running} running recoveries (${expired} stale → exhausted)`);
     }
   } catch (err) {
-    log.error("[run-recovery] Startup re-arm scan failed:", err instanceof Error ? err.message : String(err));
+    log.error("[run-recovery] Startup re-arm scan failed:", errMsg(err));
   }
 }
 
@@ -823,7 +942,7 @@ export function startHandoffSignalConsumer(): void {
           log.info(`[handoff-signal] consumed session=${sessionId} — no re-dispatch (stale/duplicate/no recovery state)`);
         }
       } catch (err) {
-        log.error(`[handoff-signal] consume loop error: ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`[handoff-signal] consume loop error: ${errMsg(err)}`);
         await new Promise((resolve) => setTimeout(resolve, 2_000));
       }
     }
@@ -975,13 +1094,13 @@ export async function handleRunHandoff(sessionId: string): Promise<{ rootSession
       throw new Error(body.error ?? `HTTP ${runRes.status}`);
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const errMsg = msg ? `handoff dispatch failed: ${msg}` : "handoff dispatch failed";
-    state.lastError = errMsg;
+    const msg = errMsg(err);
+    const errText = msg ? `handoff dispatch failed: ${msg}` : "handoff dispatch failed";
+    state.lastError = errText;
     state.retryScheduled = true;
     state.lastHeartbeatAt = Date.now();
     await saveState(state);
-    await scheduleDispatch(state.rootSessionId, errMsg, state.retryBackoffMs);
+    await scheduleDispatch(state.rootSessionId, errText, state.retryBackoffMs);
     return null;
   }
 
@@ -1018,6 +1137,15 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
 
   if (state.status !== "running") {
     return { retried: false, exhausted: state.status === "exhausted", rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
+  }
+
+  // Refusals a retry cannot fix: exhaust now rather than spending three
+  // attempts re-hitting the same guard and then blaming "interruptions".
+  if (status === "failed" && isNonRetryableFailure(error)) {
+    await removeWatchdog(state.rootSessionId, state.activeSessionId).catch(() => {});
+    await getQueue().getJob(dispatchJobId(state.rootSessionId)).then((job) => (job ? job.remove() : undefined)).catch(() => {});
+    await markExhausted(state, error ?? "non-retryable failure");
+    return { retried: false, exhausted: true, rootSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries, terminalDrop: true };
   }
 
   if (status === "failed" && isSandboxUnavailableFailure(error)) {
@@ -1065,7 +1193,7 @@ export async function handleRunCompletion(sessionId: string, status: "completed"
     state.retryScheduled = false;
     state.lastHeartbeatAt = Date.now();
     const recovered = await enqueueLockContentionRun(state).catch((err) => {
-      log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[run-recovery] lock contention enqueue failed root=${state.rootSessionId}: ${errMsg(err)}`);
       return false;
     });
     await saveState(state);

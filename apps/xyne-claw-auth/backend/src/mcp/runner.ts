@@ -1,4 +1,5 @@
 import path from "node:path";
+import { errMsg } from "../lib/errors.js";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
@@ -38,7 +39,7 @@ const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
     try {
       return strictSchemaValidator.getValidator(schema);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       if (!warnedSchemaCompileFailures.has(message)) {
         warnedSchemaCompileFailures.add(message);
         log.warn(
@@ -69,7 +70,7 @@ async function resolveAppTokenForAppUser(appUserId: string): Promise<string | nu
     return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
   } catch (err) {
     log.warn(
-      `[mcp/runner] app-token resolve failed for app user ${appUserId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[mcp/runner] app-token resolve failed for app user ${appUserId}: ${errMsg(err)}`,
     );
     return null;
   }
@@ -198,26 +199,48 @@ async function getOrCreateSession(
   // creds-loader's "live-first hit" is computed and then thrown away — the
   // child keeps calling Spaces with a stale env-baked token and 401s.
   if (serverType === "xyne-spaces" || serverType === "xyne-dashboard") {
-    const live = await getSpacesAuthForUser(userId, "mcp-runner");
-    if (live) {
+    // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
+    // cluster, regardless of whether a live login session exists. The agent's
+    // app token is resolved so the spaces tools authenticate via /api/apps/*
+    // (no user session needed).
+    if (agentSlug === "onyx-ask-ai") {
+      if (!CONFIG.onyxVespaEndpoint.trim()) {
+        throw new Error("[mcp/runner] onyx dispatch but ONYX_EVAL_VESPA_ENDPOINT is unset — refusing to spawn (no prod fallback).");
+      }
+      const appToken = await resolveAppTokenForAppUser(userId);
+      log.info(`[mcp/runner] onyx-routing for bench agent (slug=${agentSlug}, user=${userId}) → ${CONFIG.onyxVespaEndpoint} (appToken=${appToken ? "resolved" : "missing"})`);
       credentials = {
         ...credentials,
-        token: live.token,
-        sessionId: live.sessionId,
-        workspaceId: live.workspaceId,
+        authMode: "app",
         userId,
+        workspaceId: CONFIG.onyxWorkspaceId,
+        directVespa: "true",
+        vespaEndpoint: CONFIG.onyxVespaEndpoint,
+        url: CONFIG.spacesBackendUrl,
+        ...(appToken ? { token: appToken } : {}),
       };
     } else {
-      // No login session for this userId. If it's an agent's app user, fall back
-      // to the agent's app token in APP MODE so the spaces tools work headlessly
-      // via /api/apps/* (no user session needed).
-      const appToken = await resolveAppTokenForAppUser(userId);
-      if (appToken) {
-        log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
-        const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
-        credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
+      const live = await getSpacesAuthForUser(userId, "mcp-runner");
+      if (live) {
+        credentials = {
+          ...credentials,
+          token: live.token,
+          sessionId: live.sessionId,
+          workspaceId: live.workspaceId,
+          userId,
+        };
       } else {
-        credentials = { ...credentials, userId };
+        // No login session for this userId. If it's an agent's app user, fall
+        // back to the agent's app token in APP MODE so the spaces tools work
+        // headlessly via /api/apps/* (no user session needed).
+        const appToken = await resolveAppTokenForAppUser(userId);
+        if (appToken) {
+          const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+          log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
+          credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
+        } else {
+          credentials = { ...credentials, userId };
+        }
       }
     }
   }

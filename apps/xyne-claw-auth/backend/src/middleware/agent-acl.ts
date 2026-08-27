@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { userRoleRepository, agentShareRepository } from "../repositories/index.js";
 import { agentRepository } from "../repositories/index.js";
 import { prisma } from "../db.js";
+import { unauthorized } from "../lib/http.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-acl");
@@ -38,6 +39,12 @@ export async function hasSearchEvalAccess(userId: string): Promise<boolean> {
 export function getRequesterId(req: Request): string | undefined {
   const id = req.headers["x-user-id"];
   return typeof id === "string" && id.trim() ? id.trim() : undefined;
+}
+
+export function requireRequester(req: Request, message?: string): string {
+  const id = getRequesterId(req);
+  if (!id) throw unauthorized(message);
+  return id;
 }
 
 /**

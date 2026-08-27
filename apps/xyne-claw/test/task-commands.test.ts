@@ -229,9 +229,11 @@ describe("/spec task command", () => {
     expect(parseTaskCommand("/specs XYNE-1")).toBeNull();
   });
 
-  it("binds the run with a delivery contract rather than a required tool", () => {
+  it("binds the run with a command-owned skill and delivery contract", () => {
     const command = parseTaskCommand("/spec XYNE-1");
     expect(command?.requiredTool).toBeUndefined();
+    expect(command?.skillPaths).toEqual(["spec-skills"]);
+    expect(command?.instruction).toContain("Ticket Specs skill");
     const outputFormat = command?.agentConfigOverlay?.["outputFormat"] as
       | { type?: string; template?: string }
       | undefined;
@@ -239,25 +241,27 @@ describe("/spec task command", () => {
     expect(outputFormat?.template).toBe(SPEC_QUESTION_OUTLINE);
   });
 
-  it("fixes the sections while leaving the questions to the ticket", () => {
+  it("keeps the first turn as a context-first interview", () => {
     for (const heading of [
       "Problem statement",
       "Solutioning",
-      "Implementation details",
       "Test cases",
+      "Implementation details",
       "Out of scope",
     ]) {
       expect(SPEC_QUESTION_OUTLINE).toContain(heading);
     }
-    expect(SPEC_QUESTION_OUTLINE).toContain("Skip any section that does not apply");
-    expect(SPEC_QUESTION_OUTLINE).toContain("no greeting");
+    expect(SPEC_QUESTION_OUTLINE).toContain("summarize the ticket/context");
+    expect(SPEC_QUESTION_OUTLINE).toContain("existing description/Specification state");
+    expect(SPEC_QUESTION_OUTLINE).toContain("contextual clarification questions");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT mechanically ask");
   });
 
-  it("asks a bug what broke and why, without duplicating the RCA record", () => {
-    expect(SPEC_QUESTION_OUTLINE).toContain("BUG");
-    expect(SPEC_QUESTION_OUTLINE).toContain("Reproduction");
-    expect(SPEC_QUESTION_OUTLINE).toContain("Root cause");
-    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT ask for severity, bug type,");
+  it("allows technical context but prevents implementation-derived specs and same-turn writes", () => {
+    expect(SPEC_QUESTION_OUTLINE).toContain("technical context or code/PR context");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT derive requirement intent solely from implementation");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Ask the minimum useful batch of questions");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT create, draft, or update the Specification");
   });
 
   it("keeps the overlay off the agent's own config", () => {

@@ -8,6 +8,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -187,7 +188,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     if (!resolved) return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
     return callProxyTool(resolved.tool, resolved.manifest, (args ?? {}) as Record<string, unknown>);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     return { content: [{ type: "text", text: `research-agent-mcp error: ${msg}` }], isError: true };
   }
 });
