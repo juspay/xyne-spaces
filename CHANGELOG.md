@@ -1,3 +1,10 @@
+## [1.231.0](https://github.com/juspay/xyne-spaces/compare/v1.230.4...v1.231.0) (2026-08-27)
+
+
+### Features
+
+* recording summary fixes ([#1060](https://github.com/juspay/xyne-spaces/issues/1060)) ([852a47d](https://github.com/juspay/xyne-spaces/commit/852a47d9722cb745d28974c6a7f34f595f1400b5))
+
 ## [1.230.4](https://github.com/juspay/xyne-spaces/compare/v1.230.3...v1.230.4) (2026-08-27)
 
 
