@@ -86,6 +86,33 @@ function sanitizeInput(input: string | null): string {
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
 }
 
+/**
+ * Some legacy custom-template prompts cause the model to copy the template
+ * prompt-generation response shape and return { "systemPrompt": "..." }.
+ * Accept that response defensively, but keep ordinary Markdown untouched.
+ */
+function normalizeDetailedSummaryMarkdown(content: string): string {
+  const trimmed = content.trim();
+  const fencedJson = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+  const candidate = fencedJson ?? trimmed;
+
+  try {
+    const parsed: unknown = JSON.parse(candidate);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>).systemPrompt === 'string'
+    ) {
+      return ((parsed as Record<string, unknown>).systemPrompt as string).trim();
+    }
+  } catch {
+    // Normal Markdown is not JSON and should pass through unchanged.
+  }
+
+  return content;
+}
+
 function renderPromptTemplate(template: string, values: Record<string, string>): string {
   const replacements = new Map(Object.entries(values));
   return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) =>
@@ -1033,16 +1060,21 @@ export class CallDocumentService {
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta
-        ? accumulated => onDelta(stripRecordingSummaryMarkedItemAnnotations(accumulated))
+        ? accumulated => onDelta(
+            stripRecordingSummaryMarkedItemAnnotations(
+              normalizeDetailedSummaryMarkdown(accumulated),
+            ),
+          )
         : undefined,
     );
 
     if (!rawSummary) return null;
 
+    const normalizedSummary = normalizeDetailedSummaryMarkdown(rawSummary);
     const markedItems = citationSegments
-      ? extractMarkedItemsFromRecordingSummary(rawSummary, citationSegments)
+      ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
       : [];
-    const summary = stripRecordingSummaryMarkedItemAnnotations(rawSummary);
+    const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
     return { summary, template, markedItems };
   }
@@ -1091,6 +1123,14 @@ export class CallDocumentService {
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
     const sanitizedSystemPrompt = systemPrompt ? sanitizeInput(systemPrompt) : '';
+    const effectiveSystemPrompt = sanitizedSystemPrompt
+      ? `${sanitizedSystemPrompt}
+
+MANDATORY OUTPUT CONTRACT:
+- Return only the completed meeting summary as Markdown.
+- Never wrap the summary in JSON or emit a systemPrompt, summary, content, or markdown property.
+- Follow the section structure, formatting, citation, and marked-item requirements in the user prompt.`
+      : '';
 
     const buildPrompt = () => {
       let prompt = renderPromptTemplate(promptTemplate, {
@@ -1109,7 +1149,7 @@ export class CallDocumentService {
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
-      ...(sanitizedSystemPrompt ? { systemPrompt: sanitizedSystemPrompt } : {}),
+      ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
       onDelta,
     });
 

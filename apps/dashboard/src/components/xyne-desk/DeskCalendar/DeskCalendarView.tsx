@@ -47,7 +47,9 @@ export const DeskCalendarView = ({
   // `conversationIds`. Every other caller (TicketListView, SupportScreen's own nav
   // queries) renames it before spreading; skipping that here silently drops the
   // "AI Tags" filter for this view since the zod schema just strips the unknown key.
-  const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
+  // The grid groups by createdAt, so the date range must filter on createdAt too.
+  const { conversationIdWhitelist, lastEmailAtStart, lastEmailAtEnd, ...restTicketFilter } =
+    ticketFilter;
 
   const [rows, rowsDetails] = useCachedQuery(
     queries.supportTicketsPageV3({
@@ -57,6 +59,8 @@ export const DeskCalendarView = ({
       ...(conversationIdWhitelist !== undefined
         ? { conversationIds: conversationIdWhitelist }
         : {}),
+      createdAtStart: ticketFilter.createdAtStart ?? lastEmailAtStart,
+      createdAtEnd: ticketFilter.createdAtEnd ?? lastEmailAtEnd,
       limit: 500,
       start: null,
       dir: 'forward',

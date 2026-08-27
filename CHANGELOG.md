@@ -1,3 +1,30 @@
+## [1.233.0](https://github.com/juspay/xyne-spaces/compare/v1.232.0...v1.233.0) (2026-08-27)
+
+
+### Features
+
+* Add copy link option for public recordings ([#1057](https://github.com/juspay/xyne-spaces/issues/1057)) ([9148f1d](https://github.com/juspay/xyne-spaces/commit/9148f1d98db7f58b9e2f75fea93854e0bb145146))
+
+## [1.232.0](https://github.com/juspay/xyne-spaces/compare/v1.231.0...v1.232.0) (2026-08-27)
+
+
+### Features
+
+* pin only the breadcrumb on the recording detail screen ([#1081](https://github.com/juspay/xyne-spaces/issues/1081)) ([46594be](https://github.com/juspay/xyne-spaces/commit/46594beffd3a36f5c3423db863fcff6755d0914c))
+
+
+### Bug Fixes
+
+* calender view in desk needs to take created at ([#1102](https://github.com/juspay/xyne-spaces/issues/1102)) ([a05581e](https://github.com/juspay/xyne-spaces/commit/a05581e411dc1e10e592e4988a1679c1a44665d7))
+* twin why popover ([#901](https://github.com/juspay/xyne-spaces/issues/901)) ([e88a21e](https://github.com/juspay/xyne-spaces/commit/e88a21e09542b20dd3d18cc18d42e13940beda38))
+
+## [1.231.0](https://github.com/juspay/xyne-spaces/compare/v1.230.4...v1.231.0) (2026-08-27)
+
+
+### Features
+
+* recording summary fixes ([#1060](https://github.com/juspay/xyne-spaces/issues/1060)) ([852a47d](https://github.com/juspay/xyne-spaces/commit/852a47d9722cb745d28974c6a7f34f595f1400b5))
+
 ## [1.230.4](https://github.com/juspay/xyne-spaces/compare/v1.230.3...v1.230.4) (2026-08-27)
 
 

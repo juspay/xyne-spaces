@@ -6,14 +6,11 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { MinimizeLineArrow, Share02, Spinner } from '@xyne/icons';
+import { MinimizeLineArrow, Spinner } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
-import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';
-import XyneAIStar from '../../../components/icons/xyne-ai/XyneAIStar';
 import { useSelf } from '../../../hooks/useUsers';
 import {
   recordingService,
@@ -26,19 +23,17 @@ import { formatDuration } from '../../../utils/dateUtils';
 import { RecordingParticipants } from './RecordingParticipants';
 import { useEditableRecordingTitle } from '../useEditableRecordingTitle';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
-import { RecordingShareModal } from './RecordingShareModal';
 import { RecordingSharedWithAvatars } from './RecordingSharedWithAvatars';
 import { RecordingTicketLink, type RecordingTicketTarget } from './RecordingTicketLink';
 
 export interface RecordingDetailV2HeaderProps {
   recording: RecordingDetail;
   isLive: boolean;
-  backTo: string;
   titleState?: RecordingTitleState;
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
   onTicketLinkUpdated: (ticketLink: RecordingTicketLinkState) => void;
-  onAskAI: () => void;
+  onOpenShare: () => void;
   onMinimize?: () => void;
 }
 
@@ -107,17 +102,14 @@ export const EditableTitleInput = ({
 export const RecordingDetailV2Header = ({
   recording,
   isLive,
-  backTo,
   titleState,
   onTitleUpdated,
   onLabelsUpdated,
   onTicketLinkUpdated,
-  onAskAI,
+  onOpenShare,
   onMinimize,
 }: RecordingDetailV2HeaderProps): ReactElement => {
-  const navigate = useNavigate();
   const currentUser = useSelf();
-  const [showShareModal, setShowShareModal] = useState(false);
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
   const labelsUpdateSeqRef = useRef(0);
 
@@ -206,30 +198,6 @@ export const RecordingDetailV2Header = ({
 
   return (
     <header className='mb-6'>
-      {/* Breadcrumb */}
-      <nav aria-label='Breadcrumb' className='mb-3'>
-        <ol className='flex items-center gap-1.5 text-sm'>
-          <li>
-            <button
-              type='button'
-              onClick={() => void navigate(backTo)}
-              className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
-              data-track-category='RecordingDetailV2'
-              data-track-name='breadcrumb_recordings'
-            >
-              Recordings
-            </button>
-          </li>
-          <li aria-hidden='true' className='text-muted-foreground'>
-            /
-          </li>
-          {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
-          <li className='truncate text-foreground'>
-            {isGeneratingTitle ? 'Generating title…' : displayTitle}
-          </li>
-        </ol>
-      </nav>
-
       {/* Title */}
       <div className='mb-4 flex items-start gap-3'>
         <div className='min-w-0'>
@@ -325,26 +293,10 @@ export const RecordingDetailV2Header = ({
             onChange={labels => void handleLabelsChange(labels)}
           />
           {canShare && (
-            <>
-              <RecordingSharedWithAvatars
-                recordingExternalId={recording.externalId}
-                onOpen={() => setShowShareModal(true)}
-              />
-              <Tooltip content='Share' side='top'>
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='iconSm'
-                  onClick={() => setShowShareModal(true)}
-                  className='w-7 h-6 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-                  aria-label='Share recording'
-                  data-track-category='RecordingDetailV2'
-                  data-track-name='share_recording'
-                >
-                  <Share02 className='size-3.5' />
-                </Button>
-              </Tooltip>
-            </>
+            <RecordingSharedWithAvatars
+              recordingExternalId={recording.externalId}
+              onOpen={onOpenShare}
+            />
           )}
           {onMinimize && (
             <Tooltip content='Minimize to overlay' side='top'>
@@ -362,38 +314,7 @@ export const RecordingDetailV2Header = ({
               </Button>
             </Tooltip>
           )}
-
-          {canShare && showShareModal && (
-            <Dialog
-              open={showShareModal}
-              onOpenChange={open => !open && setShowShareModal(false)}
-              title='Share recording'
-              data-testid='recording-share-modal'
-            >
-              <RecordingShareModal
-                recording={recording}
-                onClose={() => setShowShareModal(false)}
-                onTicketLinkUpdated={onTicketLinkUpdated}
-              />
-            </Dialog>
-          )}
         </div>
-        {!isLive && (
-          <Tooltip content='Ask AI about this recording' side='top'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={onAskAI}
-              className='ml-auto h-7 gap-2 rounded-lg w-24 text-[13px] font-medium border-muted-foreground/20'
-              data-track-category='RecordingDetailV2'
-              data-track-name='ask_ai_recording'
-            >
-              <XyneAIStar />
-              Ask AI
-            </Button>
-          </Tooltip>
-        )}
       </div>
     </header>
   );

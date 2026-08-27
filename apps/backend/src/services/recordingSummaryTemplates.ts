@@ -17,7 +17,8 @@ INSUFFICIENT TRANSCRIPT (check this first, before anything else below):
 FORMATTING:
 - Use Markdown headings, short paragraphs, and bullet lists. DO NOT use markdown tables anywhere.
 - Never leave a bare paragraph line as the last line of a section, directly above a \`---\` separator — Markdown turns it into a setext heading. Write such content as a bullet instead.
-- Preserve every section heading from the MARKDOWN TEMPLATE exactly, including its leading \`###\` marker and emoji.
+- Preserve every section heading from the MARKDOWN TEMPLATE exactly, including its leading \`###\` marker and emoji, except for the Decisions and Action Items headings described below.
+- Render the Decisions heading with a yellow dot (\`### 🟡 Decisions\`) and the Action Items heading with an orange dot (\`### 🟠 Action Items\`), replacing any existing emoji on those two headings. Keep the dots on the headings, not on individual bullets.
 - Never convert a template heading into plain text, bold text, or a list item.
 - Keep bullets concise; put supporting detail inline after an em dash.
 
@@ -124,10 +125,10 @@ export const DEFAULT_RECORDING_SUMMARY_FIELDS = `### 💡 Key Takeaways
 - [Main point discussed]
 - [Notable names, numbers, dates, or quotes]
 ---
-### ✅ Decisions
+### 🟡 Decisions
 - [Decision] — Owner: [Person] ([why / context])
 ---
-### 📋 Action Items
+### 🟠 Action Items
 - [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]
 ---
 ### 🔗 Open Items & Follow-up

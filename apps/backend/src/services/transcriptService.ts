@@ -1129,7 +1129,7 @@ Output ONLY the processed transcript, nothing else.`;
       return null;
     }
 
-    return extracted.content.substring(0, 50);
+    return extracted.content.substring(0, 60);
   }
 
   /**

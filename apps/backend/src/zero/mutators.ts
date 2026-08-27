@@ -7,6 +7,7 @@ import {
   MessageType,
   CallType,
   CallStatus,
+  CallVisibility,
   RecurringCallSeriesStatus,
   CallOrigin,
   InvitationResponse,
@@ -4572,6 +4573,7 @@ export function createMutators(
             markedItems: [],
             recordingParticipants: '[]',
             xyneManaged: false,
+            visibility: CallVisibility.PRIVATE,
             metadata: {
               systemMessageId,
               conversationId,

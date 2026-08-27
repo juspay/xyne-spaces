@@ -35,6 +35,12 @@ const GeneratedSystemPromptResponseSchema = z.object({
   systemPrompt: z.string().trim().min(100).max(12_000),
 });
 
+const SUMMARY_MARKDOWN_OUTPUT_CONTRACT = `MANDATORY OUTPUT FORMAT:
+- Output only the completed meeting summary as Markdown.
+- Never output JSON, a JSON object, a systemPrompt property, a summary property, a content property, or a markdown property.
+- Never wrap the Markdown in a code fence.
+- Start directly with the first required level-three Markdown heading and preserve the required section order.`;
+
 function sanitize(value: string | null | undefined, maxLength: number): string {
   if (!value) return '';
   const withoutControls = [...value]
@@ -89,13 +95,18 @@ The generated system prompt will be passed to another LLM together with a meetin
 - say "Not discussed" when a required section has no supporting transcript content;
 - prohibit invented details, people, decisions, deadlines, and action items;
 - follow the user prompt's formatting and citation rules without weakening or replacing them;
+- explicitly require the downstream summary LLM to output only raw Markdown, starting with the first required level-three heading;
+- explicitly prohibit the downstream summary LLM from returning JSON, code fences, or properties named systemPrompt, summary, content, or markdown;
+- treat the JSON response shape requested below only as the transport envelope for this prompt-generation request; never copy that JSON-output requirement into the generated systemPrompt value;
 - be self-contained and reusable, without including a transcript or example summary.
 
 INPUT JSON:
 ${buildPayload(input)}
 
 Return ONLY valid JSON in this shape:
-{"systemPrompt":"the complete generated system prompt"}`,
+{"systemPrompt":"the complete generated system prompt"}
+
+The outer JSON object is required only so the application can extract the generated prompt. Inside the systemPrompt string, require the downstream meeting-summary model to return raw Markdown, never JSON.`,
     });
 
     if (!result.ok) {
@@ -121,7 +132,10 @@ Return ONLY valid JSON in this shape:
       return null;
     }
 
-    return parsed.data.systemPrompt;
+    const generatedPrompt = parsed.data.systemPrompt
+      .replace(/\s+$/, '')
+      .slice(0, 12_000 - SUMMARY_MARKDOWN_OUTPUT_CONTRACT.length - 2);
+    return `${generatedPrompt}\n\n${SUMMARY_MARKDOWN_OUTPUT_CONTRACT}`;
   }
 
   async draftMeetingContext(
