@@ -931,6 +931,29 @@ export default class XyneDeskSteps {
       .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
   }
 
+  @Step('verifying Desk priority and status filters work for channel <channelAlias> user <userAlias>')
+  public async verifyDeskFiltersWork(channelAlias: string, userAlias: string): Promise<void> {
+    await this.openStoredDeskChannelUrl(channelAlias, userAlias);
+    const page = testContext.activePage;
+    await page.locator("[data-testid='desk-filter-priority']").click();
+    const high = page.locator("[data-testid='priority-filter-high']");
+    await high.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await high.click();
+    assert.match((await high.getAttribute('class')) ?? '', /bg-accent/);
+
+    await page.locator("[data-testid='desk-filter-status']").click();
+    const statusSearch = page.getByPlaceholder('Search status...');
+    await statusSearch.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    const statusOption = page.getByRole('button', { name: 'In Progress', exact: true }).last();
+    await statusOption.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await statusOption.click();
+
+    const clear = page.locator("[data-testid='desk-filter-clear']");
+    await clear.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await clear.click();
+    await clear.waitFor({ state: 'hidden', timeout: DESK_UI_TIMEOUT_MS });
+  }
+
   @Step('verifying Desk AI and rewrite controls are available for email <mailAlias>')
   public async verifyDeskAiAndRewriteControlsAvailable(mailAlias: string): Promise<void> {
     const mail = assertFixture(mailAlias);
@@ -1332,6 +1355,8 @@ export default class XyneDeskSteps {
     assert.equal(latest.status, 'sent');
     assert.equal(latest.from, mail.to);
     assert.deepEqual(latest.to, mail.replyTo?.length ? mail.replyTo : [mail.from]);
+    assert.deepEqual(latest.cc ?? [], []);
+    assert.deepEqual(latest.bcc ?? [], []);
     assert.equal(latest.subject, `Re: ${mail.subject}`);
     assert.match(String(latest.body), /Xyne Desk automation/);
   }
@@ -1360,6 +1385,7 @@ export default class XyneDeskSteps {
     assert.equal(latest.from, mail.to);
     assert.deepEqual(latest.to, [mail.replyTo?.[0] ?? mail.from]);
     assert.deepEqual(latest.cc, mail.cc ?? []);
+    assert.deepEqual(latest.bcc ?? [], []);
     assert.equal(latest.subject, `Re: ${mail.subject}`);
     assert.match(String(latest.body), /Reply-all response/);
   }
