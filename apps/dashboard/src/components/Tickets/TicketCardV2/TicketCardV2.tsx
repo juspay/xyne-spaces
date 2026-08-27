@@ -12,11 +12,14 @@ type TicketCardSummary = {
   assignedTo?: string | null;
   createdBy?: string | null;
   createdAt?: number | null;
+  updatedAt?: number | null;
   eta?: number | null;
   xyneId?: string | null;
   stageName?: string | null;
   ticketType?: string | null;
   channelId?: string | null;
+  boardId?: string | null;
+  boardName?: string | null;
   conversationId?: string | null;
 };
 
@@ -43,8 +46,8 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     updatedBy: summary.createdBy ?? '',
     assignedTo: summary.assignedTo ?? null,
     createdAt: summary.createdAt ?? now,
-    updatedAt: summary.createdAt ?? now,
-    statusUpdatedAt: summary.createdAt ?? now,
+    updatedAt: summary.updatedAt ?? summary.createdAt ?? now,
+    statusUpdatedAt: summary.updatedAt ?? summary.createdAt ?? now,
     merchantId: null,
     conversationId: summary.conversationId ?? '',
     channelId: summary.channelId ?? '',
@@ -57,7 +60,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     xyneId: summary.xyneId ?? summary.id,
     projectId: '',
     userGroupId: '',
-    boardId: '',
+    boardId: summary.boardId ?? '',
     stageName: summary.stageName ?? '',
     isStageOverdue: false,
     ticketType: summary.ticketType ?? null,

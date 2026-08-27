@@ -28,6 +28,7 @@ export interface SearchContext {
   xyneId?: string;
   ticketStatus?: string;
   boardId?: string;
+  boardName?: string;
   assignedTo?: string;
   assigneeName?: string;
   createdBy?: string;
@@ -36,6 +37,7 @@ export interface SearchContext {
   stageName?: string;
   projectId?: string;
   createdAtTimestamp?: number;
+  updatedAtTimestamp?: number;
   ticketType?: string;
   userGroupId?: string;
   tags?: string[];
