@@ -1,12 +1,6 @@
 import { Readable } from 'node:stream';
 import { classifyUpload, __screenExecutableContentForTest } from './upload';
 
-/**
- * The cases here are drawn from two places: the production extension distribution
- * (1,801,002 attachments), and the reproduction steps of the MAPT finding this
- * filter answers. A change that breaks one of the "allowed" cases is a change that
- * breaks live traffic, so they are named with their volume where it is large.
- */
 describe('classifyUpload', () => {
   it('blocks executables and server-side scripts regardless of declared type', () => {
     expect(classifyUpload('application/octet-stream', 'payload.exe')).toBe('blocked');
@@ -19,22 +13,17 @@ describe('classifyUpload', () => {
   });
 
   it('keeps allowing the types this product is actually used for', () => {
-    // Mobile builds are shared in channels — a shipped feature, and named in the report.
     expect(classifyUpload('application/octet-stream', 'app-release.apk')).toBe('allowed');
     expect(classifyUpload('application/octet-stream', 'Xyne.IPA')).toBe('allowed');
-    // 45,794 HTML uploads, still ~52/day: automated reports.
     expect(classifyUpload('text/html', 'report.html')).toBe('allowed');
-    // Custom emoji are SVGs. Blocking this removed emoji upload entirely once before.
+    // custom emoji are SVGs
     expect(classifyUpload('image/svg+xml', 'emoji.svg')).toBe('allowed');
-    // 341 real DevOps scripts.
     expect(classifyUpload('application/x-sh', 'deploy.sh')).toBe('allowed');
-    // 23,454 screen recordings, up to 858MB.
     expect(classifyUpload('application/octet-stream', 'demo.mov')).toBe('allowed');
-    // 13,408 uploads.
     expect(classifyUpload('application/octet-stream', 'firmware.bin')).toBe('allowed');
   });
 
-  it('allows the files the report reproduced with, which are normal usage here', () => {
+  it('allows files that look risky but are normal usage here', () => {
     expect(classifyUpload('application/zip', 'bundle.zip')).toBe('allowed');
     expect(classifyUpload('application/octet-stream', 'server.crt')).toBe('allowed');
     expect(classifyUpload('text/x-python', 'analyse.py')).toBe('allowed');
@@ -62,8 +51,7 @@ describe('classifyUpload', () => {
     // report.log.1 — a numeric suffix is rotation, not a format.
     expect(classifyUpload('application/octet-stream', 'app.log.1')).toBe('allowed');
     expect(classifyUpload('application/octet-stream', 'app.log.12')).toBe('allowed');
-    // 29,989 uploads (1.67%) arrive with no extension and are still arriving daily.
-    // The filename cannot classify these; content screening covers them instead.
+    // extensionless: the filename cannot classify it; content screening covers it
     expect(classifyUpload('application/octet-stream', 'attachment')).toBe('allowed');
   });
 
@@ -118,12 +106,9 @@ describe('executable content screening', () => {
   });
 
   /**
-   * The regression this guards: a file shorter than the sniff length is fully
-   * consumed while reading its head. An earlier implementation put the bytes back
-   * with readable.unshift, which is a no-op once the stream has ended — every small
-   * upload would have been stored as an empty file. Most attachments are small
-   * (production p50 is 23kB, and plenty are under 4100 bytes), so this was the
-   * common path, not an edge case.
+   * Regression guard: a file shorter than the sniff length is fully consumed while
+   * reading its head, and putting the bytes back with readable.unshift is a no-op
+   * once the stream has ended — small uploads would store as empty files.
    */
   it.each([
     ['smaller than the sniff length', pngImage, 300],
@@ -152,5 +137,18 @@ describe('executable content screening', () => {
       'text/plain',
     );
     expect((await drain(body)).length).toBe(0);
+  });
+
+  it('rejects rather than hanging when the upload errors mid-stream', async () => {
+    // A client disconnecting before the head is read must fail the request, not
+    // leave it pending: 'readable' and 'end' never fire after an error.
+    const stream = new Readable({ read() {} });
+    stream.on('error', () => {}); // the storage engine attaches this for logging
+    stream.push(Buffer.alloc(50)); // shorter than the sniff length, so more is awaited
+    setTimeout(() => stream.destroy(new Error('ECONNRESET')), 20);
+
+    await expect(
+      __screenExecutableContentForTest(stream, 'partial.bin', 'application/octet-stream'),
+    ).rejects.toThrow(/ECONNRESET/);
   });
 });

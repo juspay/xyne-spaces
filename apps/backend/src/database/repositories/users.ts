@@ -57,16 +57,11 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
   }
 
   /**
-   * Resolve a user id that the caller supplied, scoped to the caller's workspace.
-   *
-   * `findById` answers "does this user exist" for the whole installation. That is
-   * the right question for a trusted id the server already resolved, and the wrong
-   * one for an id that arrived in a request body: a workspace member could name any
-   * active user in any workspace and be treated as having a relationship with them.
-   *
-   * Returns null when the user does not exist AND when they exist outside the
-   * workspace, so callers cannot tell the two apart. Distinguishing them would let
-   * a caller enumerate accounts in workspaces they cannot see.
+   * Resolve a caller-supplied user id, scoped to the caller's workspace. Use this
+   * for ids from a request body: `findById` matches installation-wide, so it would
+   * let a member reference any user in any workspace. Returns null both when the
+   * user does not exist and when they exist elsewhere, so the two cannot be told
+   * apart to enumerate accounts.
    */
   async findByIdInWorkspace(id: string, workspaceId: string): Promise<User | null> {
     return await this.db.user.findFirst({

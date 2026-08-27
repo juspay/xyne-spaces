@@ -153,17 +153,10 @@ export interface PinnedHost {
 
 /**
  * Validate a host and return the addresses that passed, so the caller can connect
- * to those specific addresses instead of resolving the name a second time.
- *
- * `assertHostIsExternal` proves a hostname resolved to public addresses at the
- * moment it was asked. It cannot prove the connection goes there: the HTTP client
- * performs its own lookup afterwards, and a name the attacker controls can answer
- * differently the second time — public for the check, internal for the connection.
- * A short TTL makes that a matter of timing rather than luck. Pinning removes the
- * second lookup, so the address that was validated is the address used.
- *
- * Returns null when there is nothing to pin: the bypass is active, so no
- * validation happened and there is no vetted address to hold the caller to.
+ * to exactly those instead of resolving the name again. `assertHostIsExternal`
+ * proves the name resolved to public addresses when asked; it cannot stop the HTTP
+ * client resolving again and getting a different (internal) answer — DNS rebinding.
+ * Returns null when the bypass is active and there is nothing to pin.
  */
 export async function resolveExternalHostPinned(
   host: string,
@@ -178,9 +171,7 @@ export async function resolveExternalHostPinned(
   if (literalKind === 4) return { family: 4, addresses: [trimmed] };
   if (literalKind === 6) return { family: 6, addresses: [trimmed] };
 
-  // Re-read the records assertHostIsExternal just validated. A record that changed
-  // between the two calls is caught below: every address is re-checked, and the
-  // connection is held to this set rather than to whatever DNS says at connect time.
+  // Re-check every resolved address; the connection is held to this set.
   const [v4, v6] = await Promise.all([
     dns.resolve4(trimmed).catch(() => [] as string[]),
     dns.resolve6(trimmed).catch(() => [] as string[]),
@@ -200,20 +191,11 @@ export async function resolveExternalHostPinned(
 }
 
 /**
- * HTTP/HTTPS agents whose DNS lookup is fixed to addresses that already passed
- * validation, so the connection cannot land somewhere other than what was checked.
- *
- * Lives beside resolveExternalHostPinned because the two are a pair: one decides
- * which addresses are permissible, the other is what holds the request to them.
- * Splitting them invites a caller to take the verdict and then connect however it
- * likes, which is the gap this closes.
- *
- * The request URL keeps its hostname, so SNI and certificate verification still
- * happen against the name — only address selection is fixed. Any hostname other
- * than the validated one fails closed: a redirect is re-validated by the caller and
- * receives its own agents, so a lookup for anything else means something is wrong.
- * keepAlive is off so a pinned socket cannot be reused for a later request to the
- * same host under a different verdict.
+ * HTTP/HTTPS agents whose DNS lookup is fixed to `pinned`, so a request cannot
+ * connect anywhere other than the validated addresses. The URL keeps its hostname,
+ * so TLS still verifies against the name — only address selection is pinned. Any
+ * other hostname fails closed (a redirect is re-validated and gets its own agents),
+ * and keepAlive is off so a pinned socket is not reused under a later verdict.
  */
 export function pinnedAgentsFor(
   hostname: string,

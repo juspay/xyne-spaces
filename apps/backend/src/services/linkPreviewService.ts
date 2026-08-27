@@ -114,14 +114,10 @@ export class LinkPreviewService {
    * following redirects manually so each hop is re-checked. Link previews have
    * no legitimate internal target, so internal hosts are always refused.
    *
-   * DATA_SOURCE_ALLOW_PRIVATE_HOSTS is honoured only in local development. That
-   * switch exists so a developer can point a dashboard data source at a database
-   * on a private address; it is not a statement about link previews, which have
-   * no internal target in any environment. Reading it unqualified meant setting
-   * it in a shared non-production environment — where data-source connectors may
-   * legitimately need it — silently turned this method into an unguarded fetch of
-   * any address the caller named. Mirrors assertWebhookUrlSafe, which narrows the
-   * same switch the same way and for the same reason.
+   * DATA_SOURCE_ALLOW_PRIVATE_HOSTS is honoured only in local development — it
+   * exists for dashboard data-source connectors, not link previews, and reading it
+   * unqualified would disable this guard wherever a connector needs it. Mirrors
+   * assertWebhookUrlSafe.
    */
   private async safeGet(initialUrl: string): Promise<AxiosResponse> {
     const MAX_REDIRECTS = 5;
@@ -144,10 +140,7 @@ export class LinkPreviewService {
         maxContentLength: this.MAX_CONTENT_LENGTH,
         maxRedirects: 0, // follow manually so each hop is re-validated above
         validateStatus: (status) => status >= 200 && status < 400,
-        // Connect to the addresses that were just validated rather than resolving
-        // the name again. The URL is unchanged, so TLS still verifies against the
-        // hostname; only address selection is fixed. Without this the client's own
-        // lookup can return a different answer from the one that was checked.
+        // Connect to the validated addresses rather than re-resolving the name.
         ...(pinned ? pinnedAgentsFor(parsed.hostname, pinned) : {}),
       });
 

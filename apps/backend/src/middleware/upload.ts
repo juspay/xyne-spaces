@@ -46,20 +46,11 @@ export function isBlockedUpload(mimetype?: string, originalName?: string): boole
 }
 
 /**
- * Extensions accepted by default. Deny-by-default is what the block-list above
- * cannot give: it only refuses what someone thought to name, so `.hta`, `.lnk`,
- * `.vbs`, `.jse` and every future variant are accepted until noticed.
- *
- * Derived from production rather than from a generic template — 1,801,002
- * attachments across 330 distinct extensions. This list is every extension that
- * carries real traffic plus the obvious siblings of each family, and leaves 0.15%
- * of historical uploads outside it. Notably included because they are established
- * workflows here and would otherwise break: .apk/.ipa (mobile builds are shared
- * in channels), .html (45k+ automated reports), .svg (custom emoji are SVGs —
- * blocking it removed emoji upload entirely once before), .sh/.bash (ops scripts),
- * .zip, .crt/.pem (certificates), .py.
- *
- * Extensions are lower-cased and compared without the dot.
+ * Extensions accepted by default; anything else is refused. Derived from the
+ * production upload distribution, so it includes types that look unusual but are
+ * established workflows here and would break if dropped: .apk/.ipa (builds shared
+ * in channels), .html (automated reports), .svg (custom emoji are SVGs),
+ * .sh/.bash, .crt/.pem. Compared lower-cased, without the dot.
  */
 const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   // images
@@ -83,11 +74,8 @@ const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   'pem', 'crt', 'cer', 'csr', 'pub', 'asc', 'gpg', 'pgp',
   // other formats with real traffic
   'bin', 'dat', 'stl', 'kml', 'ditamap', 'xsd', 'ttf', 'otf', 'plist',
-  // Allowed for the reason the block-list above already gives: `.com` matches the
-  // content-id filenames Outlook puts on inline images far more often than any
-  // real executable, and inbound email runs through this same filter. A DOS-era
-  // .com executable is not a meaningful threat, and it downloads as an opaque
-  // octet-stream regardless (see setSafeDownloadHeaders).
+  // Outlook uses .com content-id filenames for inline images; inbound email runs
+  // through this filter. Downloads as an opaque octet-stream regardless.
   'com',
 ]);
 
@@ -97,10 +85,9 @@ const NUMERIC_SUFFIX = /^\d{1,3}$/;
 export type UploadVerdict = 'allowed' | 'blocked' | 'not-allowlisted';
 
 /**
- * Files with no extension are accepted. They are 1.67% of production uploads and
- * still arriving daily, and this runs in multer's fileFilter, which sees the
- * filename before any bytes — there is nothing to inspect. Closing this properly
- * means sniffing content further down the stream, which is a separate change.
+ * Extension-based verdict. Files with no extension are allowed here — the
+ * filename cannot classify them, and content screening in the storage engine
+ * covers them instead.
  */
 export function classifyUpload(mimetype?: string, originalName?: string): UploadVerdict {
   if (isBlockedUpload(mimetype, originalName)) return 'blocked';
@@ -115,38 +102,23 @@ export function classifyUpload(mimetype?: string, originalName?: string): Upload
   return ALLOWED_UPLOAD_EXTENSIONS.has(ext) ? 'allowed' : 'not-allowlisted';
 }
 
-/**
- * Bytes read from the head of an upload before deciding what it really is. 4100 is
- * what file-type asks for: enough for every signature it recognises, including the
- * ones that are not at offset zero.
- */
+/** file-type's recommended read length; covers signatures not at offset zero. */
 const SNIFF_BYTES = 4100;
 
 /**
- * Content that is an executable program no matter what the file is called. The
- * filename and the declared MIME type are both supplied by the client, so neither
- * survives contact with an attacker; these come from the bytes.
- *
- * Deliberately narrow. The question asked here is not "is this type allowed" — the
- * allow-list already answered that — but "is this a program". A legitimate upload
- * does not accidentally begin with a PE, ELF or Mach-O header, so a match is
- * conclusive rather than a heuristic, and there is no false-positive tail to trade
- * against. Broadening it to compare the detected type against the declared
- * extension would reject real files: .apk, .jar, .docx and .xlsx are all Zip
- * containers, and text formats — .csv, .json, .md, source code — have no signature
- * at all and detect as nothing.
+ * Executable formats, refused whatever the file is named. Kept narrow on purpose:
+ * only content that is unambiguously a program. Nothing legitimate begins with a
+ * PE/ELF/Mach-O header, so there is no false-positive tail — whereas matching the
+ * detected type against the declared extension would reject real files, since
+ * .apk/.jar/.docx/.xlsx are all Zip containers and text has no signature at all.
  */
 const EXECUTABLE_CONTENT = new Set(['exe', 'elf', 'macho']);
 
 /**
- * Read the first bytes of a stream, and return a stream that still yields the whole
- * file — the bytes just read, followed by whatever remains.
- *
- * Rebuilding the stream rather than calling `readable.unshift` is deliberate. A file
- * shorter than the sniff length is fully consumed by the read, and unshifting onto a
- * stream that has already ended does not restore it: the upload that followed would
- * store nothing. Most attachments are small enough for that to be the common case,
- * not the edge case.
+ * Read the first bytes of a stream and return a stream that still yields the whole
+ * file — the head, then the remainder. Rebuilds the stream rather than using
+ * `readable.unshift`, which is a no-op once a stream has ended: a file shorter than
+ * the sniff length is fully consumed by the read, and most attachments are small.
  */
 async function readHeadAndRewind(
   stream: Readable,
@@ -155,17 +127,41 @@ async function readHeadAndRewind(
   const chunks: Buffer[] = [];
   let total = 0;
 
-  while (total < byteCount && !stream.readableEnded) {
-    const chunk = stream.read() as Buffer | null;
-    if (chunk === null) {
-      await new Promise<void>((resolve) => {
-        stream.once('readable', resolve);
-        stream.once('end', resolve);
-      });
-      continue;
-    }
-    chunks.push(chunk);
-    total += chunk.length;
+  // A stream error (a client disconnecting mid-upload is the common one) must
+  // reject rather than leave this pending: 'readable'/'end' never fire after an
+  // error. Listeners are removed on the first of the three to settle so a large
+  // file does not accumulate one per chunk read.
+  if (!stream.readableEnded) {
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        stream.off('readable', onReadable);
+        stream.off('end', onDone);
+        stream.off('error', onError);
+      };
+      const onReadable = () => {
+        let chunk: Buffer | null;
+        while (total < byteCount && (chunk = stream.read() as Buffer | null) !== null) {
+          chunks.push(chunk);
+          total += chunk.length;
+        }
+        if (total >= byteCount) {
+          cleanup();
+          resolve();
+        }
+      };
+      const onDone = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      stream.on('readable', onReadable);
+      stream.once('end', onDone);
+      stream.once('error', onError);
+      onReadable();
+    });
   }
 
   const head = Buffer.concat(chunks);
@@ -183,16 +179,10 @@ async function readHeadAndRewind(
 }
 
 /**
- * Refuse a file whose contents are an executable, whatever its name says.
- *
- * This runs in the storage engine rather than in fileFilter because fileFilter is
- * handed the filename before any bytes have arrived — there is nothing to inspect
- * there. It is also what covers uploads with no extension, which the allow-list
- * cannot classify and which are 1.67% of production traffic.
- *
- * Unlike a filtered extension, this fails the request instead of quietly dropping
- * the file. A rejected extension is routine and expected; content that claims to be
- * a screenshot and is actually a Windows binary is not, and should not be silent.
+ * Refuse a file whose contents are an executable, whatever its name says. Runs in
+ * the storage engine, not fileFilter, which only sees the filename — and this is
+ * what covers extensionless uploads the allow-list cannot classify. Fails the
+ * request rather than silently dropping the file, unlike a filtered extension.
  */
 async function screenExecutableContent(
   stream: Readable,
@@ -215,11 +205,7 @@ async function screenExecutableContent(
   throw new AppError('File content is not permitted', 400);
 }
 
-/**
- * Exposed for tests. The screening itself runs inside the storage engines, which
- * need a live multipart request to exercise; this lets the stream handling be
- * tested directly, and that is where the risk is.
- */
+/** Exposed for tests; the storage engines that call it need a live request. */
 export const __screenExecutableContentForTest = screenExecutableContent;
 
 /**
