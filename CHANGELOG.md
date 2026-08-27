@@ -1,3 +1,10 @@
+## [1.237.1](https://github.com/juspay/xyne-spaces/compare/v1.237.0...v1.237.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* enable xlsx reads for kb files ([#1002](https://github.com/juspay/xyne-spaces/issues/1002)) ([e432f94](https://github.com/juspay/xyne-spaces/commit/e432f940b543b5dace469bfdd11bebd0942bc428))
+
 ## [1.237.0](https://github.com/juspay/xyne-spaces/compare/v1.236.0...v1.237.0) (2026-08-27)
 
 
