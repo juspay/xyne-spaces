@@ -30,7 +30,8 @@ type FlowComponentType =
   | 'plan'
   | 'agent'
   | 'mcpConfigure'
-  | 'pr';
+  | 'pr'
+  | 'sandbox';
 
 interface FlowComponentStyle {
   padding?: string;

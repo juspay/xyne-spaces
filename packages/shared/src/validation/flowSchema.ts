@@ -890,6 +890,40 @@ export const mcpConfigureComponentSchema = baseComponentSchema.extend({
 export type McpCredentialField = z.infer<typeof mcpCredentialFieldSchema>;
 export type McpConfigureProps = z.infer<typeof mcpConfigurePropsSchema>;
 
+// ── Sandbox artifact (read-only resource links) ─────────────────────────────
+// The agent acquired a kata sandbox: one card listing the resources it exposes,
+// each row an icon + label + "Open". Read-only — no flow-action round-trip.
+//
+// There is no discriminant and no status: every row carries the same shape, and
+// a row exists exactly when its URL does. Row labels and glyphs are DERIVED in
+// the renderer (SandboxNode) from the field name, never shipped on the wire —
+// the emitter has no business naming "Live preview".
+//
+// `previewUrl` is required because the card exists to announce the live preview;
+// `codeUrl` is optional so a sandbox without a code server renders one row
+// rather than a dead link.
+export const sandboxPropsSchema = z
+  .object({
+    /** noVNC preview — the human-drivable chromium session. */
+    previewUrl: z.string().min(1),
+    /** Code-server / diff browser for the sandbox workspace. */
+    codeUrl: z.string().min(1).optional(),
+    /** One line of prose above the rows, e.g. what the agent is doing and who
+     *  can join in. Prose, not presentation — it is also what the DM/channel
+     *  list preview shows for this message (utils/flowPreview reads `desc`),
+     *  which is why the card carries no flow title. */
+    desc: z.string().optional(),
+  })
+  .strict();
+
+export const sandboxComponentSchema = baseComponentSchema.extend({
+  type: z.literal('sandbox'),
+  props: sandboxPropsSchema,
+});
+
+// TS mirror inferred from the schema so the two can't drift.
+export type SandboxProps = z.infer<typeof sandboxPropsSchema>;
+
 // Recursive container schemas need z.lazy
 export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
   z.discriminatedUnion('type', [
@@ -918,6 +952,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     agentComponentSchema,
     mcpConfigureComponentSchema,
     slashCommandArtifactComponentSchema,
+    sandboxComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
       type: z.literal('row'),
@@ -954,7 +989,8 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'mcpConfigure', 'row', 'column', 'card',
+  'pr_approval', 'call_schedule', 'user_question', 'code', 'diff', 'ticket', 'chart',
+  'agent', 'mcpConfigure', 'slash_command_artifact', 'sandbox', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema
