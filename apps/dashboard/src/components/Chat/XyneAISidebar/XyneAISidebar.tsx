@@ -2051,7 +2051,6 @@ const XyneAISidebar = ({
                 onShowHistory={() => setShowHistorySidebar(true)}
                 onShowUserActivity={() => setShowUserActivityPanel(true)}
                 isMobile={isMobile}
-                isCompact={isCompactSidebar}
                 isTight={isTightSidebar}
                 title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
                 selectedAgent={selectedAgent}

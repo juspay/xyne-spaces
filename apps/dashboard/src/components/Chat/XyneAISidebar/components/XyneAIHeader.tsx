@@ -36,7 +36,6 @@ interface XyneAIHeaderProps {
   hideHistory?: boolean;
   selectedAgent?: AccessibleClawAgent | null;
   onShowDebugger?: (() => void) | undefined;
-  isCompact?: boolean;
   isTight?: boolean;
   hideClose?: boolean;
   dense?: boolean;
