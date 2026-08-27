@@ -15,11 +15,13 @@
  */
 
 import type { Citation } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
 import { getSpacesAuthForUser } from "../lib/spaces-db.js";
 import { createLogger } from "../logger.js";
+import { extractXlsxText, isXlsxFile } from "./kb-xlsx.js";
 
 /**
  * Debug sidecar — the YQL spaces actually emitted to Vespa for this call.
@@ -38,6 +40,7 @@ export interface VespaDebugBlock {
 }
 
 const log = createLogger("kb-handlers");
+
 
 export interface KbHandlerResult {
   content: string;
@@ -252,7 +255,7 @@ async function resolveKbContext(
     // retained in the DB by agents.ts (so flipping back to COLLECTIONS
     // restores the picker's previous selection) but dropped from the
     // runtime context. The accessibility layer is the only gate in USER mode.
-    grants: scope === "USER" ? [] : agent.collections.map(c => ({ collectionId: c.collectionId, fileId: c.fileId })),
+    grants: scope === "USER" ? [] : agent.collections.map((c: { collectionId: string; fileId: string | null }) => ({ collectionId: c.collectionId, fileId: c.fileId })),
     accessibleTree: tree,
     accessibleCollectionIds: collections,
     accessibleFileIds: files,
@@ -701,7 +704,7 @@ export async function handleKbSearch(args: {
       workspaceId: auth.workspaceId,
     });
   } catch (err) {
-    log.warn(`[kb-search] vespa call failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-search] vespa call failed: ${errMsg(err)}`);
     return { content: `KB search failed: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 
@@ -726,7 +729,7 @@ export async function handleKbSearch(args: {
       }) : "none"}`
     );
   } catch (e) {
-    log.warn(`[kb-search] DEBUG log of response shape failed: ${e instanceof Error ? e.message : String(e)}`);
+    log.warn(`[kb-search] DEBUG log of response shape failed: ${errMsg(e)}`);
   }
 
   // Capture for attachment to the result below. Spaces returns the YQL +
@@ -1008,6 +1011,12 @@ export async function handleKbReadFile(args: {
     const citeToken = `[clf-__TOOL_CALL_ID__#0]`;
 
     if (isLikelyBinary) {
+      if (isXlsxFile(contentType, fileMeta.name)) {
+        const body = await extractXlsxText(buffer, fileMeta.name);
+        const header = `## ${fileMeta.name} ${citeToken}\n\n_collection: ${fileMeta.collectionName}_\n\n---\n\n`;
+        return { content: header + body, citations: [citation] };
+      }
+
       return {
         content:
           `File \`${fileMeta.name}\` ${citeToken} is a binary type (PDF / image / office doc). ` +
@@ -1020,7 +1029,7 @@ export async function handleKbReadFile(args: {
     const body = text.length > 100_000 ? text.slice(0, 100_000) + "\n\n…(truncated to 100k characters)" : text;
     return { content: header + body, citations: [citation] };
   } catch (err) {
-    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${errMsg(err)}`);
     return { content: `Failed to read file \`${args.fileId}\`: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 }
@@ -1161,7 +1170,7 @@ export async function handleKbGetChunks(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-get-chunks failed: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -1297,7 +1306,7 @@ export async function handleKbSearchWithinDoc(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-search-within-doc failed: ${err instanceof Error ? err.message : "unknown error"}`,

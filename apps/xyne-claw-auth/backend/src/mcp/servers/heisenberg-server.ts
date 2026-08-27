@@ -1,4 +1,5 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -29,7 +30,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
   try {
     return await tool.handler((args ?? {}) as Record<string, unknown>);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errMsg(error);
     process.stderr.write(`[heisenberg-server] tool=${name} failed: ${message}\n`);
     return {
       content: [{ type: "text", text: `Heisenberg MCP error: ${message}` }],

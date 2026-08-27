@@ -87,7 +87,7 @@ export interface SessionContext {
    */
   progressMessageId?: string;
   /**
-   * MessageId of the live plan/todo card (todo-write → kind:"plan" progress
+   * MessageId of the live plan/todo card (todo-write → ui-widget progress
    * event). Posted once, then updated in place on every subsequent todo-write.
    * Undefined until the first todo-write of the run.
    */
@@ -113,6 +113,9 @@ export interface SessionContext {
   externalResultCallback?: ExternalResultCallbackConfig;
   /** Terminal result target for a run dispatched from a per-agent Slack app. */
   slackDelivery?: SlackDeliveryTarget;
+  /** Surface that dispatched this run. Used by MCP tool filtering to apply
+   *  surface-scoped default tools without mutating the stored agent config. */
+  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
   /**
    * When true, the result-forward branch resolves the agent's plain `@Name`
    * mentions into clickable/notifying Spaces mentions (name→userId via
@@ -122,6 +125,15 @@ export interface SessionContext {
    * auto-draft forward, which must NOT inject mention spans into a draft body.
    */
   resolveMentions?: boolean;
+  /**
+   * True when this session was dispatched by the Spaces automation webhook
+   * (app-user run, no human in the thread). This is the EXPLICIT gate the
+   * MCP layer uses to serve Spaces tools in app mode (routes/mcp.ts injects
+   * `xyne-spaces-app-tools` instead of the user `xyne-spaces` server).
+   * Older in-flight sessions predate this flag; mcp.ts falls back to the
+   * resolveMentions/externalResultCallback proxy for those.
+   */
+  isAutomation?: boolean;
   /**
    * Workspace ID of the mentioned user for Digital Twin (USER_MENTIONED)
    * flows. Captured at webhook-receive time via getSpacesAuthForUser and
@@ -432,3 +444,55 @@ export async function deleteSession(sessionId: string): Promise<void> {
   }
 }
 
+
+// ── Last rendered plan todos (conversation-scoped) ───────────────────────────
+// The live plan card is fire-and-forget: every todo-write re-renders it and
+// nothing keeps the list afterwards. A todo only leaves `in_progress` when the
+// NEXT todo-write arrives, so a run that ends without one — the model forgot to
+// close the step, or it crashed mid-step — leaves the card frozen mid-flight
+// with a row spinning forever on a run that is definitively over.
+//
+// This snapshot is the only record of what the card currently shows, so it is
+// what /webhook/result reconciles against at run end. Written on every render;
+// cleared once reconciled.
+const PLAN_LAST_TODOS_PREFIX = "plan-last-todos:";
+
+/** Mirrors xyne-claw-shared's `Todo` structurally, without the dependency. */
+export interface PlanTodoSnapshot {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed" | "failed";
+}
+
+function planLastTodosKey(conversationId: string, agentSlug: string): string {
+  return `${PLAN_LAST_TODOS_PREFIX}${conversationId}:${agentSlug}`;
+}
+
+export async function setPlanLastTodos(
+  conversationId: string,
+  agentSlug: string,
+  todos: PlanTodoSnapshot[],
+): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.set(planLastTodosKey(conversationId, agentSlug), JSON.stringify(todos), "EX", SESSION_TTL);
+}
+
+export async function getPlanLastTodos(
+  conversationId: string,
+  agentSlug: string,
+): Promise<PlanTodoSnapshot[] | null> {
+  const redis = redisService.getConnection();
+  const raw = await redis.get(planLastTodosKey(conversationId, agentSlug));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as PlanTodoSnapshot[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearPlanLastTodos(conversationId: string, agentSlug: string): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.del(planLastTodosKey(conversationId, agentSlug)).catch(() => {});
+}

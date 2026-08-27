@@ -63,7 +63,8 @@ export function parseSdlcAgentRunContext(value: unknown): Record<string, unknown
   ) return null;
   if (
     input["operation"] === "artifact" &&
-    (!nonEmptyString(execution["workflowExecutionId"]) ||
+    (!["PRD", "TECH_DOC"].includes(String(artifact["kind"] ?? "")) ||
+      !nonEmptyString(execution["workflowExecutionId"]) ||
       !nonEmptyString(execution["sessionId"]))
   ) return null;
   if (
