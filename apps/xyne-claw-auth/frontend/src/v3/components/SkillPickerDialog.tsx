@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { Dialog } from "./ui/Dialog";
 import { Button } from "./ui/Button";
@@ -8,13 +8,16 @@ import { listSkills, type Skill } from "../../lib/api";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Viewer's id — without it the listing is global-scope only and the viewer's
+   *  own personal skills are invisible here. */
+  userId?: string;
   /** Currently-selected skill IDs (controlled). */
   selectedIds: string[];
   /** Called with the full new selection when the user clicks Apply. */
   onApply: (nextIds: string[]) => void;
 }
 
-export function SkillPickerDialog({ open, onOpenChange, selectedIds, onApply }: Props) {
+export function SkillPickerDialog({ open, onOpenChange, userId, selectedIds, onApply }: Props) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -24,14 +27,22 @@ export function SkillPickerDialog({ open, onOpenChange, selectedIds, onApply }: 
     if (open) setSelected(new Set(selectedIds));
   }, [open, selectedIds]);
 
+  // Cache the listing per userId rather than "once ever": the previous guard
+  // (skills.length > 0) meant a userId arriving after the first fetch could
+  // never refresh the list, so the viewer's personal skills stayed missing for
+  // the component's lifetime — the exact bug passing userId is meant to fix.
+  const fetchedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!open || skills.length > 0) return;
+    if (!open) return;
+    const key = userId ?? "";
+    if (fetchedFor.current === key) return;
+    fetchedFor.current = key;
     setLoading(true);
-    listSkills()
+    listSkills(userId)
       .then(setSkills)
-      .catch(() => {})
+      .catch(() => { fetchedFor.current = null; })
       .finally(() => setLoading(false));
-  }, [open, skills.length]);
+  }, [open, userId]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

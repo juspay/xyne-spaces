@@ -4,6 +4,7 @@
  * command registration, and registration removal.
  */
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../../../lib/errors.js";
 import { prisma } from "../../../db.js";
 import { createLogger } from "../../../logger.js";
 import { getOrgId, getRequesterId, isClawAdmin, isOrgAdmin } from "../../../middleware/agent-acl.js";
@@ -561,7 +562,7 @@ router.post("/agents/:slug/register-command", requireUserAuth, async (req: Reque
   } catch (error) {
     log.error("[surfaces-slack] Slash-command registration failed", {
       errorType: error instanceof Error ? error.name : "UnknownError",
-      message: error instanceof Error ? error.message : String(error),
+      message: errMsg(error),
     });
     res.status(500).json({ success: false, error: "Failed to register Slack command" });
   }

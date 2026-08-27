@@ -1,4 +1,5 @@
 import { Worker, type Job } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { redisService } from "../redis.js";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
@@ -49,10 +50,10 @@ export function initDailyBriefWorker(): Worker<DailyBriefJobData> {
       : {}),
   });
   worker.on("failed", (job, err) => {
-    log.error(`[daily-brief-worker] job ${job?.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[daily-brief-worker] job ${job?.id} failed: ${errMsg(err)}`);
   });
   worker.on("error", (err) => {
-    log.error(`[daily-brief-worker] worker error: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[daily-brief-worker] worker error: ${errMsg(err)}`);
   });
   log.info(`[daily-brief-worker] started (concurrency=${concurrency}, rateMax=${CONFIG.dailyBriefRateMax}/${CONFIG.dailyBriefRateDurationMs}ms)`);
   return worker;
