@@ -419,6 +419,12 @@ export enum CallStatus {
 }
 
 // @ts-ignore TS1294
+export enum CallVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
+}
+
+// @ts-ignore TS1294
 export enum RecordingType {
   AUDIO_ONLY = 'AUDIO_ONLY',
   AUDIO_SCREEN = 'AUDIO_SCREEN',
