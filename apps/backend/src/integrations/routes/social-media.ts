@@ -34,6 +34,8 @@ function parseBackfill(
 }
 
 router.use(express.json());
+// Meta's data-deletion callback sends signed_request as application/x-www-form-urlencoded
+router.use(express.urlencoded({ extended: false }));
 router.use(googlePlayRoutes);
 // Meta's data-deletion callback sends signed_request as application/x-www-form-urlencoded
 router.use(express.urlencoded({ extended: false }));
