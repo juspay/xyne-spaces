@@ -3154,6 +3154,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // past the prelude check then sees the signal fire would emit twice. Used
   // by the debug panel to show "Cancelled" alongside session_start/session_end.
   let cancelDebugEmitted = false;
+  // The run-level abort signal fires for BOTH a genuine user cancel (/cancel,
+  // /stop) and the ordinary end-of-turn abort that terminal tools issue after
+  // they deliver (submit-response, respond-to-user, propose-plan, emit-brief).
+  // Labelling every abort "user-cancel" made successful deliveries look like
+  // someone had killed the run. Only handoff.isUserCancelled() — set solely by
+  // the /cancel endpoint — means a human actually cancelled.
+  const resolveAbortReason = (): string =>
+    handoff?.isUserCancelled?.() === true ? "user-cancel" : "terminal-tool-abort";
   const emitCancelDebugOnce = (reason: string) => {
     if (cancelDebugEmitted) return;
     cancelDebugEmitted = true;
@@ -3181,7 +3189,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     if (userSig?.aborted) {
       stopSession();
       if (handoff?.isRequested() === true && handoff?.isUserCancelled() !== true) throw buildHandoffError();
-      emitCancelDebugOnce("signal-already-aborted");
+      emitCancelDebugOnce(`signal-already-aborted:${resolveAbortReason()}`);
       throw buildCancelledError();
     }
     if (stallSig.aborted) { stopSession(); throw buildProviderStallError(); }
@@ -3198,7 +3206,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           reject(buildHandoffError());
           return;
         }
-        emitCancelDebugOnce("user-cancel");
+        emitCancelDebugOnce(resolveAbortReason());
         reject(buildCancelledError());
       };
       const onStallAbort = () => { cleanup(); stopSession(); reject(buildProviderStallError()); };
@@ -3220,7 +3228,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const promptWithAbort = async (makePrompt: () => Promise<unknown>): Promise<void> => {
     if (abortSignal?.aborted) {
       if (handoff?.isRequested() === true && handoff?.isUserCancelled() !== true) throw buildHandoffError();
-      emitCancelDebugOnce("signal-already-aborted");
+      emitCancelDebugOnce(`signal-already-aborted:${resolveAbortReason()}`);
       throw buildCancelledError();
     }
     if (handoff?.isRequested() === true && handoff?.isUserCancelled() !== true) throw buildHandoffError();

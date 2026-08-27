@@ -77,6 +77,27 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "credit-workspace-template-a",
     "credit-workspace-template-b",
   ],
+  // hyperswitch: 2-way. Stormed THREE times in 24h on 2026-08-26/27, each a
+  // RESOURCE_OPERATION_RATE_EXCEEDED on whichever single snapshot it pointed at
+  // (v6 -> v7 -> v8). Cutting a fresh snapshot bought roughly one working pod
+  // each time before the new snapshot's budget went too — measured: v8 was 20
+  // minutes old with three PVCs already throttled on it. Claim volume is LOW
+  // (2 claims/hour), so this is not load: it is the retry loop. A failed clone
+  // retries every 12-30s, and the unlettered pool kept spawning replacements
+  // that could not bind, so retry traffic alone held the source above its
+  // ceiling. Rotation breaks that by giving retries a different snapshot.
+  //
+  // Clones are 80Gi (vs euler/credit at 200Gi), so a/b is cheap; add c/d if
+  // Doc Agent fan-out starts arriving concurrently.
+  //
+  // Infra side is created by:
+  //   BASE_TEMPLATE=hyperswitch-workspace-template BASE_WARMPOOL=hyperswitch-warmpool \
+  //   GOLDEN_PVC=hyperswitch-golden-pvc SNAP_PREFIX=hyperswitch-golden-snap-rot \
+  //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  "hyperswitch-workspace-template": [
+    "hyperswitch-workspace-template-a",
+    "hyperswitch-workspace-template-b",
+  ],
 };
 
 // Per-base round-robin cursor. Process-local (each claw pod has its own), which
