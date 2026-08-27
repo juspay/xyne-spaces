@@ -14,6 +14,8 @@ export interface TopicTile {
   /** Empty when the level's groups overlap, where a percentage would mislead. */
   share: string;
   sharePct: number;
+  /** False when clicking would do nothing: a leaf the ticket list cannot express. */
+  canOpen: boolean;
 }
 
 export interface TopicsTreemapProps {
@@ -42,9 +44,15 @@ export const TopicsTreemap = ({
       const isHovered = hovered === tile.nodeKey;
       const shape = layout[i];
       if (!shape) return null;
+      const interactive = drillable || tile.canOpen;
+      const action = drillable
+        ? 'Opens sub-groups'
+        : tile.canOpen
+          ? 'Opens ticket list'
+          : 'Grouping only — the ticket list has no filter for this field';
       const label = `${tile.name}: ${tile.count}${
         tile.share ? `, ${tile.share} of tickets at this level` : ''
-      }. ${drillable ? 'Opens sub-groups' : 'Opens ticket list'}`;
+      }. ${action}`;
       return (
         // Shared Tooltip: it portals out of the transformed dialog and handles collisions.
         <Tooltip
@@ -59,14 +67,21 @@ export const TopicsTreemap = ({
                 {tile.share ? `${tile.count} · ${tile.share}` : tile.count}
               </span>
               <span className='mt-0.5 block text-muted-foreground'>
-                {drillable ? 'Click to drill down' : 'Click to open tickets'}
+                {drillable
+                  ? 'Click to drill down'
+                  : tile.canOpen
+                    ? 'Click to open tickets'
+                    : 'Grouping only — no ticket-list filter for this field'}
               </span>
             </span>
           }
         >
           <button
             type='button'
-            onClick={() => onSelect(tile.nodeKey)}
+            // Still focusable and hoverable when inert, so the shared highlight
+            // with the trend panel keeps working; only the action is withheld.
+            onClick={interactive ? (): void => onSelect(tile.nodeKey) : undefined}
+            aria-disabled={!interactive}
             onMouseEnter={() => onHover(tile.nodeKey)}
             onFocus={() => onHover(tile.nodeKey)}
             onMouseLeave={() => onHover(null)}
@@ -74,6 +89,7 @@ export const TopicsTreemap = ({
             className={cn(
               'absolute flex min-w-0 flex-col justify-between overflow-hidden rounded-[10px] p-3 text-left',
               'outline-none transition-[filter] duration-150',
+              interactive ? 'cursor-pointer' : 'cursor-default',
               isHovered && 'z-10',
             )}
             style={{

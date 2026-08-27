@@ -8,6 +8,8 @@ export interface TopicsTrendRow {
   label: string;
   colour: string;
   points: { day: string; count: number }[];
+  /** False when clicking would do nothing, matching the paired tile. */
+  canSelect: boolean;
 }
 
 /**
@@ -60,12 +62,18 @@ const TrendRowBase = ({
 }): ReactElement => (
   <button
     type='button'
-    onClick={() => onSelect(row.key)}
+    onClick={row.canSelect ? (): void => onSelect(row.key) : undefined}
+    aria-disabled={!row.canSelect}
     onMouseEnter={() => onHover(row.key)}
     onMouseLeave={() => onHover(null)}
+    // Focus mirrors hover, so tabbing through the rows highlights the paired
+    // tile the same way pointing at one does.
+    onFocus={() => onHover(row.key)}
+    onBlur={() => onHover(null)}
     className={cn(
       'grid w-full grid-cols-[minmax(96px,150px)_1fr] items-center gap-3 border-b border-border/60 px-4 py-2 text-left transition-colors last:border-b-0',
       isHovered ? 'bg-accent/50' : 'hover:bg-accent/30',
+      row.canSelect ? 'cursor-pointer' : 'cursor-default',
     )}
     data-track-category='TOPICS_EXPLORER'
     data-track-name='SELECT_GROUP_ROW'

@@ -1,11 +1,8 @@
-import { UNASSIGNED_FILTER_VALUE } from '../../../zero/queries';
+import { parseAssigneeFilter, UNASSIGNED_FILTER_VALUE } from '../../../zero/queries';
 import type { TicketFilters } from '../../Tickets/TicketFilters/types';
 
-/**
- * Longest range the panel offers, and the range it opens on. The rollup runs
- * client-side over synced rows, so the window stays short enough that one desk's
- * tickets fit under the row cap; the trend charts the whole range for the same reason.
- */
+// The rollup runs client-side over synced rows, so the window stays short
+// enough that one desk's tickets fit under the row cap.
 export const MAX_RANGE_DAYS = 30;
 export const MAX_DEPTH = 4;
 export const MS_PER_DAY = 86_400_000;
@@ -15,30 +12,30 @@ export const NONE_KEY = '__none__';
 /** Ticket fields the rollup reads. Structurally assignable from a synced Zero row. */
 export interface TopicsTicket {
   createdAt: number;
-  /** Needed to apply the AI-tag filter, which resolves to conversation ids. */
   conversationId: string;
   userGroupId?: string | null;
   priority: string;
   stageName: string;
   assignedTo?: string | null;
   aiCategory?: string | null;
-  aiSubCategory?: string | null;
-  aiPriority?: string | null;
-  /** From `.related('tagMappings')`; `tagName` is denormalized on the row. */
-  tagMappings?: readonly { tagName: string }[];
 }
 
-export interface DimensionContext {
-  /** Resolves assignee ids to display names; raw ids are meaningless as labels. */
-  userName: (id: string) => string;
-}
+/**
+ * `assignedTo` is stored either bare or prefixed (`user:`/`group:`/`userGroup:`),
+ * which is why the ticket-list filter expands a bare id back into every form.
+ * Grouping has to collapse the same way, or one person splits across two buckets
+ * and neither drills through correctly.
+ */
+export const assigneeKey = (assignedTo: string | null | undefined): string => {
+  if (!assignedTo) return UNASSIGNED_FILTER_VALUE;
+  const bare = assignedTo.replace(/^(?:user|userGroup|group):/, '');
+  return bare || UNASSIGNED_FILTER_VALUE;
+};
 
 export interface Dimension {
   label: string;
-  /** Group keys — raw column values, since these travel to the ticket list as filter params. */
   values: (ticket: TopicsTicket) => string[];
-  /** Human-readable text for a key. Defaults to the key itself. */
-  format?: (key: string, ctx: DimensionContext) => string;
+  format?: (key: string) => string;
   /** URL value for the "no value" bucket. `null` means the ticket list cannot express it. */
   emptyParam?: string | null;
   /** True when a ticket can land in more than one bucket, so groups overlap. */
@@ -47,12 +44,10 @@ export interface Dimension {
   param?: string;
 }
 
-/** One LLM tag on a conversation, as returned by the tags-config API. */
 export interface ConversationTag {
   category: string;
   tag: string;
 }
-/** LLM tags keyed by conversation id, so a ticket can look up its own. */
 export type ConversationTagMap = ReadonlyMap<string, readonly ConversationTag[]>;
 
 export interface TopicNode {
@@ -71,10 +66,7 @@ export interface Swatch {
   ink: string;
 }
 
-/**
- * Purple ramp, deepest first, shared by a group's tile and its trend row so the
- * two panels read as one view. One shade per box on a full page — see MAX_BOXES.
- */
+// Shared by a group's tile and its trend row so the two panels read as one view.
 const PALETTE: readonly Swatch[] = [
   { fill: '#4C1D95', ink: '#FFFFFF' },
   { fill: '#5B21B6', ink: '#FFFFFF' },
@@ -86,7 +78,6 @@ const PALETTE: readonly Swatch[] = [
   { fill: '#DDD6FE', ink: '#1F1147' },
 ];
 
-/** Shade by rank within the page. */
 export const swatchFor = (index: number): Swatch => PALETTE[index % PALETTE.length] as Swatch;
 
 const GRID_COLUMNS = 8;
@@ -94,8 +85,8 @@ const GRID_ROWS = 6;
 /** Half-gap between adjacent boxes, in px. */
 const GUTTER = 3;
 
+/** Cell coords on the GRID_COLUMNS x GRID_ROWS grid. */
 export interface BoxShape {
-  /** Cell coords on the GRID_COLUMNS x GRID_ROWS grid. */
   x: number;
   y: number;
   w: number;
@@ -103,10 +94,9 @@ export interface BoxShape {
 }
 
 /**
- * Layout per box count over the 8x6 grid, indexed by count. One string per
- * template, `x,y,w,h` boxes separated by spaces, in rank order so areas step
- * down with volume. Every template tiles all 48 cells, so the panel is always
- * full, and no box is under 2 rows tall, which is what label + count + bar needs.
+ * Layout per box count, indexed by count: `x,y,w,h` boxes separated by spaces,
+ * in rank order. Every template tiles all 48 cells, and no box is under 2 rows
+ * tall, which is what label + count + bar needs.
  */
 const SPECS: readonly string[] = [
   '',
@@ -130,10 +120,8 @@ const LAYOUT_TEMPLATES: BoxShape[][] = SPECS.map(spec =>
     }),
 );
 
-/**
- * Largest page a template exists for. Capped by the palette too, so a page can
- * never run past the ramp and give two groups the same shade.
- */
+// Capped by the palette too, so a page never runs past the ramp and gives two
+// groups the same shade.
 export const MAX_BOXES = Math.min(LAYOUT_TEMPLATES.length - 1, PALETTE.length);
 
 export const templateFor = (count: number): BoxShape[] =>
@@ -153,11 +141,8 @@ const one = (v: string | null | undefined): string[] => [
   v === null || v === undefined || v === '' ? NONE_KEY : v,
 ];
 
-/**
- * A single-valued Zero column. `emptyParam` is always null: the ticket list has
- * no "has no value" filter for these columns, so a drill-through reports the
- * level as dropped instead.
- */
+// `emptyParam` is always null: the ticket list has no "has no value" filter for
+// these columns, so a drill-through reports the level as dropped instead.
 const single = (
   label: string,
   read: (ticket: TopicsTicket) => string | null | undefined,
@@ -171,68 +156,34 @@ const single = (
   emptyParam: null,
 });
 
-/**
- * Groupable dimensions, in "Group by" option order. Zero-backed columns only;
- * LLM tag categories live in `non_zero.tags`, so `buildDimensions` adds those.
- */
+// Both map to a filter the ticket list already applies, so a tile opens the set
+// it counted. Every other grouping is a tag category configured in Desk
+// Settings, added by `buildDimensions` — no category is ever named here.
 const DIMENSION_DEFS = {
-  aiCategory: single('AI Category', t => t.aiCategory, 'Unclassified', 'aiCategory'),
-  aiSubCategory: single('AI Sub-category', t => t.aiSubCategory, 'Unclassified'),
-  tag: {
-    label: 'Tag',
-    // Multi-valued, so groups deliberately sum to more than the parent. A ticket
-    // whose mappings are all blank falls back to NONE_KEY rather than no bucket.
-    values: (t): string[] => {
-      const names = (t.tagMappings ?? []).map(m => m.tagName).filter(Boolean);
-      return names.length > 0 ? names : [NONE_KEY];
-    },
-    format: (key): string => (key === NONE_KEY ? 'Untagged' : key),
-    multi: true,
-    // No `param`: SupportScreen parses `tags` but never applies it, so emitting
-    // one would open an unfiltered list.
-    emptyParam: null,
-  },
   priority: single('Priority', t => t.priority, 'No priority', 'priority'),
-  aiPriority: single('AI Priority', t => t.aiPriority, 'Not scored'),
-  stageName: single('Stage', t => t.stageName, 'No stage', 'stages'),
-  assignedTo: {
-    label: 'Assignee',
-    // Keys are user ids so the drill-through filters correctly; names are display only.
-    values: (t): string[] => [t.assignedTo ? t.assignedTo : UNASSIGNED_FILTER_VALUE],
-    format: (key, ctx): string =>
-      key === UNASSIGNED_FILTER_VALUE ? 'Unassigned' : ctx.userName(key),
-    // No `emptyParam`: the unassigned bucket already uses the sentinel the ticket
-    // list understands, so this dimension never yields NONE_KEY.
-    param: 'assignee',
-  },
+  aiCategory: single('AI Category', t => t.aiCategory, 'Unclassified', 'aiCategory'),
 } satisfies Record<string, Dimension>;
 
-/** Zero-backed dimensions, whose keys are known at compile time. */
 export type StaticDimensionKey = keyof typeof DIMENSION_DEFS;
 
-/**
- * Prefix marking a data-driven LLM-tag dimension. The category suffix only
- * exists at runtime, so the key type stays open — but narrower than `string`.
- */
+// The category suffix only exists at runtime, so the key type stays open.
 export const AI_TAG_DIMENSION_PREFIX = 'aiTag:';
 export type AiTagDimensionKey = `${typeof AI_TAG_DIMENSION_PREFIX}${string}`;
 export type DimensionKey = StaticDimensionKey | AiTagDimensionKey;
-/** Every offerable dimension for the current data, static and derived alike. */
 export type DimensionMap = ReadonlyMap<DimensionKey, Dimension>;
 
 // Re-typed as a uniform record: `satisfies` alone keeps each entry's literal
-// shape, which drops the optional `multi` / `param` fields at the call site.
+// shape, dropping the optional fields at the call site.
 export const DIMENSIONS: Record<StaticDimensionKey, Dimension> = DIMENSION_DEFS;
 const STATIC_DIMENSION_KEYS = Object.keys(DIMENSIONS) as StaticDimensionKey[];
 
-/** Placeholder for a key that no longer resolves, e.g. a tag category the range no longer covers. */
+/** Placeholder for a key that no longer resolves, e.g. a tag category the range dropped. */
 const MISSING_DIMENSION: Dimension = {
   label: 'Unavailable',
   values: () => [NONE_KEY],
   emptyParam: null,
 };
 
-/** Safe lookup: callers never have to assert a runtime key exists. */
 export const dimensionFor = (dimensions: DimensionMap, key: DimensionKey | undefined): Dimension =>
   key ? (dimensions.get(key) ?? MISSING_DIMENSION) : MISSING_DIMENSION;
 
@@ -244,29 +195,26 @@ const titleise = (raw: string): string =>
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 
-export const aiTagDimensionKey = (category: string): AiTagDimensionKey =>
-  `${AI_TAG_DIMENSION_PREFIX}${category}`;
-
 /**
- * One dimension per LLM tag category in the fetched data. Keys are the
- * `"category:tag"` composite the ticket list's `generatedTags` filter expects,
- * so a drill-through carries a value the list can read back.
+ * Static dimensions plus one per configured tag category. `tagCategories` is the
+ * desk's own config, not the categories present in `tagsByConversation`: reading
+ * the sample would drop a category the range happens not to cover, so the
+ * "Group by" list would shift with the date range and lose a selection.
  */
-export const buildDimensions = (tagsByConversation: ConversationTagMap): DimensionMap => {
-  const categories = new Set<string>();
-  for (const tags of tagsByConversation.values()) {
-    for (const { category } of tags) if (category) categories.add(category);
-  }
-
+export const buildDimensions = (
+  tagsByConversation: ConversationTagMap,
+  tagCategories: readonly string[],
+): DimensionMap => {
   const map = new Map<DimensionKey, Dimension>(
     STATIC_DIMENSION_KEYS.map(key => [key, DIMENSIONS[key]] as const),
   );
 
-  for (const category of [...categories].sort((a, b) => a.localeCompare(b))) {
+  const categories = [...new Set(tagCategories.filter(Boolean))];
+  for (const category of categories.sort((a, b) => a.localeCompare(b))) {
     const prefix = `${category}:`;
-    map.set(aiTagDimensionKey(category), {
-      // "AI Tag · " keeps these distinct from the user-applied "Tag" dimension and
-      // from the static AI columns, which a category named "priority" would shadow.
+    map.set(`${AI_TAG_DIMENSION_PREFIX}${category}`, {
+      // Prefixed: a desk can name a category "priority", which would otherwise
+      // be indistinguishable from the ticket's own Priority grouping.
       label: `AI Tag · ${titleise(category)}`,
       values: ticket => {
         const keys = (tagsByConversation.get(ticket.conversationId) ?? [])
@@ -274,12 +222,16 @@ export const buildDimensions = (tagsByConversation: ConversationTagMap): Dimensi
           .map(t => `${prefix}${t.tag}`);
         return keys.length > 0 ? [...new Set(keys)] : [NONE_KEY];
       },
+      // "in this range": the tag fetch is bounded by the panel's date window, so
+      // a ticket tagged outside it lands here rather than in its tag's box.
       format: key =>
-        key === NONE_KEY ? 'Not tagged' : key.startsWith(prefix) ? key.slice(prefix.length) : key,
-      // A conversation can carry several tags in one category.
+        key === NONE_KEY
+          ? 'No tags in this range'
+          : key.startsWith(prefix)
+            ? key.slice(prefix.length)
+            : key,
       multi: true,
       param: 'generatedTags',
-      // The ticket list can filter for a tag, but not for the absence of one.
       emptyParam: null,
     });
   }
@@ -287,28 +239,52 @@ export const buildDimensions = (tagsByConversation: ConversationTagMap): Dimensi
   return map;
 };
 
-/** Display text for a group key. */
-export const labelFor = (dim: Dimension, key: string, ctx: DimensionContext): string =>
-  dim.format?.(key, ctx) ?? key;
+export const labelFor = (dim: Dimension, key: string): string => dim.format?.(key) ?? key;
+
+export interface DrillLevel {
+  dim: Dimension;
+  key: string;
+}
+
+export interface DrillPlan {
+  assignments: { param: string; value: string }[];
+  /** Levels the ticket list has no filter for, or no value for. */
+  dropped: string[];
+  /**
+   * Levels sharing a param with an earlier level at a different value. The list
+   * ORs repeated params, so emitting both opens a strictly wider set than the
+   * tile counted — nested AI-tag levels all share `generatedTags`.
+   */
+  conflicting: string[];
+}
 
 /**
- * Distinct values for a Zero-backed dimension, most common first — powers the
- * filter menus. NONE_KEY is dropped: it is the grouping sentinel for "no value",
- * and the filters compare against the real column, so it would match nothing.
+ * A drill path as ticket-list search params. Every level must be expressible for
+ * the opened list to equal the tile; `dropped` and `conflicting` are the two
+ * ways that fails, and the caller stays put on either.
  */
-export const distinctValues = (
-  tickets: readonly TopicsTicket[],
-  key: StaticDimensionKey,
-): string[] => {
-  const counts = new Map<string, number>();
-  for (const ticket of tickets) {
-    for (const value of DIMENSIONS[key].values(ticket)) {
-      if (value !== NONE_KEY) counts.set(value, (counts.get(value) ?? 0) + 1);
+export const planDrill = (levels: readonly DrillLevel[]): DrillPlan => {
+  const assignments: { param: string; value: string }[] = [];
+  const dropped: string[] = [];
+  const conflicting: string[] = [];
+  const claimed = new Map<string, string>();
+
+  for (const { dim, key } of levels) {
+    const value = key === NONE_KEY ? dim.emptyParam : key;
+    if (!dim.param || value === null || value === undefined) {
+      dropped.push(dim.label);
+      continue;
     }
+    const existing = claimed.get(dim.param);
+    if (existing !== undefined) {
+      if (existing !== value) conflicting.push(dim.label);
+      continue;
+    }
+    claimed.set(dim.param, value);
+    assignments.push({ param: dim.param, value });
   }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([value]) => value);
+
+  return { assignments, dropped, conflicting };
 };
 
 /** Dimensions worth offering: a column where every ticket shares one value splits nothing. */
@@ -320,8 +296,8 @@ export const usefulDimensions = (
   if (tickets.length === 0) return keys;
   return keys.filter(key => {
     // Always offered: grouping by a tag nothing carries honestly shows one
-    // "Untagged" box, where hiding the option makes it look missing.
-    if (key === 'tag' || key.startsWith(AI_TAG_DIMENSION_PREFIX)) return true;
+    // "not tagged" box, where hiding the option makes it look missing.
+    if (key.startsWith(AI_TAG_DIMENSION_PREFIX)) return true;
     const seen = new Set<string>();
     for (const ticket of tickets) {
       for (const value of dimensionFor(dimensions, key).values(ticket)) {
@@ -334,8 +310,8 @@ export const usefulDimensions = (
 };
 
 /**
- * Desk's own ticket filters, applied to the synced rows. Every filter but AI tags
- * is a column on the Zero row; AI tags live in `non_zero.tags`, so those arrive
+ * Desk's own ticket filters over the synced rows. Every filter but AI tags is a
+ * column on the Zero row; AI tags live in `non_zero.tags`, so those arrive
  * pre-resolved server-side as a conversation-id whitelist.
  */
 export const applyTicketFilters = (
@@ -346,9 +322,16 @@ export const applyTicketFilters = (
   const aiCategory = filters.aiCategory?.length ? new Set(filters.aiCategory) : null;
   const priority = filters.priority?.length ? new Set<string>(filters.priority) : null;
   const stages = filters.stages?.length ? new Set(filters.stages) : null;
-  const assignee = filters.assignee?.length ? new Set(filters.assignee) : null;
   const groups = filters.userGroups?.length ? new Set(filters.userGroups) : null;
   const conversations = tagConversationIds ? new Set(tagConversationIds) : null;
+
+  // Through the same parser the ticket query uses, so the invert marker and the
+  // "unassigned" sentinel mean here exactly what they mean there.
+  const parsed = filters.assignee?.length ? parseAssigneeFilter(filters.assignee) : null;
+  const assignee =
+    parsed && (parsed.ids.length > 0 || parsed.includeUnassigned)
+      ? { ...parsed, ids: new Set(parsed.ids) }
+      : null;
 
   if (!aiCategory && !priority && !stages && !assignee && !groups && !conversations) return tickets;
 
@@ -356,7 +339,13 @@ export const applyTicketFilters = (
     if (aiCategory && !aiCategory.has(t.aiCategory ?? '')) return false;
     if (priority && !priority.has(t.priority)) return false;
     if (stages && !stages.has(t.stageName)) return false;
-    if (assignee && !assignee.has(t.assignedTo ?? UNASSIGNED_FILTER_VALUE)) return false;
+    if (assignee) {
+      const key = assigneeKey(t.assignedTo);
+      const hit =
+        key === UNASSIGNED_FILTER_VALUE ? assignee.includeUnassigned : assignee.ids.has(key);
+      // Inverting turns the selection into its complement, so a hit is a miss.
+      if (hit === assignee.inverted) return false;
+    }
     if (groups && !groups.has(t.userGroupId ?? '')) return false;
     if (conversations && !conversations.has(t.conversationId)) return false;
     return true;
@@ -364,11 +353,7 @@ export const applyTicketFilters = (
 };
 
 /** Group tickets by one dimension, ranked by volume. Every group is returned; paging trims. */
-export const groupLevel = (
-  tickets: readonly TopicsTicket[],
-  dim: Dimension,
-  ctx: DimensionContext,
-): TopicNode[] => {
+export const groupLevel = (tickets: readonly TopicsTicket[], dim: Dimension): TopicNode[] => {
   const buckets = new Map<string, TopicsTicket[]>();
   for (const ticket of tickets) {
     for (const value of dim.values(ticket)) {
@@ -379,10 +364,9 @@ export const groupLevel = (
   }
   return [...buckets.entries()]
     .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
-    .map(([key, group]) => ({ key, label: labelFor(dim, key, ctx), tickets: group }));
+    .map(([key, group]) => ({ key, label: labelFor(dim, key), tickets: group }));
 };
 
-/** Tickets belonging to one group of this level. */
 export const ticketsForKey = (
   tickets: readonly TopicsTicket[],
   dim: Dimension,
@@ -394,7 +378,6 @@ const toDayKey = (ms: number): string => {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 };
 
-/** First millisecond of the trend window, walking calendar days back from `endMs`. */
 const trendStartMs = (days: number, endMs: number): number => {
   const cursor = new Date(endMs);
   cursor.setHours(0, 0, 0, 0);
@@ -402,11 +385,7 @@ const trendStartMs = (days: number, endMs: number): number => {
   return cursor.getTime();
 };
 
-/**
- * Highest single-day count across every node — the shared Y domain. Counts
- * directly rather than reducing over buildTrend, which allocates a point array
- * per node to read one number.
- */
+/** Highest single-day count across every node — the shared Y domain. */
 export const maxDailyCount = (nodes: TopicNode[], days: number, endMs: number): number => {
   const startMs = trendStartMs(days, endMs);
   const byDay = new Map<string, number>();

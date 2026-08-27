@@ -3625,6 +3625,8 @@ const SupportScreen = (): ReactElement => {
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
                   supportBase={supportBase}
+                  availableAiCategories={availableAiCategories}
+                  availableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>

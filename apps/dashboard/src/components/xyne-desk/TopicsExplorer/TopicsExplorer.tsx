@@ -15,13 +15,13 @@ import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault } from '@xyne/ico
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { queries, TOPICS_EXPLORER_TICKET_LIMIT } from '../../../zero/queries';
-// Not useCachedQuery: this rollup is throwaway, not warm-start state worth
-// re-stringifying into IndexedDB on every live update.
+// Not useCachedQuery: this rollup is throwaway, not warm-start state.
 import { useQuery } from '../../../hooks/useQuery';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
-import { useUsersById } from '../../../hooks/useUsers';
+import { useDeskTagsConfig } from '../../../hooks/useDeskTagsConfig';
 import { tagsConfigApi } from '../../../api/tagsConfigApi';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import type { TicketStatusV2 } from '@xyne/shared';
 import type { TicketFilters } from '../../Tickets/TicketFilters/types';
 import { TopicsFilterBar } from './TopicsFilterBar';
 import { TopicsTreemap } from './TopicsTreemap';
@@ -30,32 +30,29 @@ import {
   MAX_DEPTH,
   MAX_BOXES,
   MAX_RANGE_DAYS,
-  NONE_KEY,
   MS_PER_DAY,
   applyTicketFilters,
   buildDimensions,
   buildTrend,
   dimensionFor,
-  distinctValues,
   groupLevel,
   labelFor,
   maxDailyCount,
+  planDrill,
   swatchFor,
   templateFor,
   ticketsForKey,
   usefulDimensions,
   type ConversationTag,
   type ConversationTagMap,
-  type DimensionContext,
   type DimensionKey,
   type TopicsTicket,
 } from './TopicsExplorer.utils';
 
 /**
- * Topics Explorer — desk-scoped ticket volume grouped by any stack of columns.
- * Treemap left, one daily-volume trend row per group right, sharing order and
- * shade so the panels read as one view. Zero has no aggregation, so the rollup
- * runs client-side — hence one channel and a bounded created-at window.
+ * Desk-scoped ticket volume grouped by any stack of columns: treemap left, one
+ * daily-volume trend row per group right. Zero has no aggregation, so the
+ * rollup runs client-side — hence one channel and a bounded created-at window.
  */
 
 const PAGER_BUTTON =
@@ -88,6 +85,13 @@ export interface TopicsExplorerProps {
   channelName?: string;
   /** Desk base path (e.g. `/ws/support`), used for the ticket-list drill-through. */
   supportBase: string;
+  /**
+   * Board-derived option lists, passed in rather than derived from the synced
+   * rows: the row cap and the range would otherwise hide configured-but-unused
+   * values, so the filter menus would not match the ticket list's own.
+   */
+  availableAiCategories: string[];
+  availableStages: { name: string; status?: TicketStatusV2 }[];
 }
 
 export const TopicsExplorer = ({
@@ -96,19 +100,17 @@ export const TopicsExplorer = ({
   channelId,
   channelName,
   supportBase,
+  availableAiCategories,
+  availableStages,
 }: TopicsExplorerProps): ReactElement => {
   const navigate = useNavigate();
-  const usersById = useUsersById();
-  // Both defaults carry a ticket-list filter, so the drill-through lands on
-  // exactly the tickets in the tile; aiSubCategory has none and would widen.
-  const [dims, setDims] = useState<DimensionKey[]>(['aiCategory', 'priority']);
+  const [dims, setDims] = useState<DimensionKey[]>(['priority', 'aiCategory']);
   const [filters, setFilters] = useState<TicketFilters>({});
   // AI tags/sentiment live outside Zero, so they resolve to conversation ids.
   const [tagConversationIds, setTagConversationIds] = useState<string[] | null>(null);
   const [isResolvingTags, setIsResolvingTags] = useState(false);
   const [tagError, setTagError] = useState(false);
   const [tagFilterCapped, setTagFilterCapped] = useState(false);
-  // LLM tags per conversation, which power the `aiTag:*` grouping dimensions.
   const [aiTagsByConversation, setAiTagsByConversation] = useState<ConversationTagMap>(
     () => new Map<string, readonly ConversationTag[]>(),
   );
@@ -116,7 +118,6 @@ export const TopicsExplorer = ({
   const [aiTagDimensionsTruncated, setAiTagDimensionsTruncated] = useState(false);
   const [path, setPath] = useState<string[]>([]);
   const [page, setPage] = useState(0);
-  // Same picker as Desk Metrics: presets plus an explicit custom range.
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => {
     const end = new Date();
     const start = new Date();
@@ -136,13 +137,13 @@ export const TopicsExplorer = ({
     return {
       startMs: from,
       endMs: to,
-      // Calendar days spanned, inclusive — not elapsed time, which a custom time
-      // makes fractional: 1 Aug 09:00 → 5 Aug 17:00 is 4.3 elapsed but 5 days.
+      // Calendar days spanned, inclusive — elapsed time goes fractional once a
+      // custom start/end time is set.
       rangeDays: Math.max(Math.round((startOfDay(to) - startOfDay(from)) / MS_PER_DAY) + 1, 1),
     };
   }, [dateRange, startTime, endTime]);
 
-  // Memoized: a fresh query object rebuilds the ZQL AST and rehashes it on every
+  // Memoized: a fresh query object rebuilds and rehashes the ZQL AST on every
   // state change, including each mouse move.
   const ticketsQuery = useMemo(
     () =>
@@ -158,26 +159,13 @@ export const TopicsExplorer = ({
 
   const [rows, details] = useQuery(ticketsQuery, queryOptions);
 
-  // Zero pushes a new array identity on every sync frame while rows stream in.
-  // Deferring re-runs the rollup on the settled array rather than every push.
+  // Zero pushes a new array identity on every sync frame while rows stream in;
+  // deferring re-runs the rollup on the settled array rather than every push.
   const deferredRows = useDeferredValue(rows);
   const isSyncingRows = rows !== deferredRows;
-  // No `as unknown as`: the assignability check is what makes a Zero schema
-  // rename fail the build rather than silently empty a grouping.
   const allTickets = useMemo<readonly TopicsTicket[]>(() => deferredRows ?? [], [deferredRows]);
-  // A deferred frame counts as loading, so the panel never flashes a partial
-  // rollup as if it were final.
+  // A deferred frame counts as loading, so a partial rollup never renders as final.
   const isTicketsReady = details.type === 'complete' && !isSyncingRows;
-
-  const ctx = useMemo<DimensionContext>(
-    () => ({
-      userName: (id): string => {
-        const user = usersById.get(id);
-        return user?.displayName ?? user?.name ?? user?.email ?? 'Unknown user';
-      },
-    }),
-    [usersById],
-  );
 
   useEffect(() => {
     const tags = filters.generatedTags;
@@ -188,7 +176,6 @@ export const TopicsExplorer = ({
       setIsResolvingTags(false);
       return;
     }
-    // `tagsPending` covers the render before this runs; see the derivation below.
     setTagConversationIds(null);
     setIsResolvingTags(true);
     let cancelled = false;
@@ -197,8 +184,8 @@ export const TopicsExplorer = ({
       .then(ids => {
         if (cancelled) return;
         setTagConversationIds(ids);
-        // This whitelist is the denominator of every box, so hitting the server's
-        // 1000-row cap makes the counts wrong and has to be said out loud.
+        // This whitelist is the denominator of every box, so hitting the cap
+        // makes the counts wrong and has to be said out loud.
         setTagFilterCapped(ids.length >= TAG_FILTER_CONVERSATION_CAP);
       })
       .catch((err: unknown) => {
@@ -248,21 +235,18 @@ export const TopicsExplorer = ({
     };
   }, [open, channelId, startMs, endMs]);
 
-  const dimensions = useMemo(() => buildDimensions(aiTagsByConversation), [aiTagsByConversation]);
+  // Category list comes from the desk's own tag config, so "Group by" offers
+  // exactly what Desk Settings configured — not whatever the range happens to
+  // have tagged.
+  const { categories: tagCategories } = useDeskTagsConfig(channelId, open && !!channelId);
+  const configuredTagCategories = useMemo(() => Object.keys(tagCategories), [tagCategories]);
 
-  // From the whole range, not the filtered subset, so a choice never disappears
-  // once something else is selected.
-  const availableAiCategories = useMemo(
-    () => distinctValues(allTickets, 'aiCategory'),
-    [allTickets],
-  );
-  const availableStages = useMemo(
-    () => distinctValues(allTickets, 'stageName').map(name => ({ name })),
-    [allTickets],
+  const dimensions = useMemo(
+    () => buildDimensions(aiTagsByConversation, configuredTagCategories),
+    [aiTagsByConversation, configuredTagCategories],
   );
 
-  // A resolving AI-tag filter matches nothing. Derived, not set in the effect,
-  // which committed one frame of fully unfiltered results first.
+  // Derived, not set in the effect, which committed one frame of unfiltered results first.
   const tagsPending = !!filters.generatedTags?.length && tagConversationIds === null;
 
   const tickets = useMemo(
@@ -271,11 +255,11 @@ export const TopicsExplorer = ({
   );
   const available = useMemo(() => usefulDimensions(tickets, dimensions), [tickets, dimensions]);
 
-  // A chosen tag category can vanish when the range changes, so the selection is
-  // derived — pruning in an effect would commit one render against a dead dimension.
+  // A chosen tag category can vanish when the range changes; pruning in an
+  // effect would commit one render against a dead dimension.
   const activeDims = useMemo<DimensionKey[]>(() => {
     const kept = dims.filter(key => dimensions.has(key));
-    return kept.length > 0 ? kept : ['aiCategory'];
+    return kept.length > 0 ? kept : ['priority'];
   }, [dims, dimensions]);
 
   /** Walk the drill path, one dimension per step. */
@@ -296,13 +280,12 @@ export const TopicsExplorer = ({
     }
 
     return {
-      // Every group at this level, ranked by volume. Paginated for display.
-      allNodes: groupLevel(current, dimensionFor(dimensions, activeDims[dimIndex]), ctx),
+      allNodes: groupLevel(current, dimensionFor(dimensions, activeDims[dimIndex])),
       depth: dimIndex,
       scoped: current,
       validPath: walked,
     };
-  }, [tickets, activeDims, dimensions, ctx, path]);
+  }, [tickets, activeDims, dimensions, path]);
 
   const pageCount = Math.max(Math.ceil(allNodes.length / MAX_BOXES), 1);
   // Clamp rather than reset: paging state can outlive a filter change.
@@ -312,12 +295,12 @@ export const TopicsExplorer = ({
     [allNodes, safePage],
   );
 
-  // Charts exactly the queried range: MAX_RANGE_DAYS keeps it short enough that a
-  // fixed bucket count would only ever fabricate zeros past the end of the range.
+  // Charts exactly the queried range; a fixed bucket count would fabricate
+  // zeros past its end.
   const trend = useMemo(() => buildTrend(nodes, rangeDays, endMs), [nodes, rangeDays, endMs]);
 
-  // Y domain spans EVERY group at this level, not just the page — per-page
-  // scaling drew a group peaking at 8 as tall as one peaking at 1,500.
+  // Spans every group at this level, not just the page: per-page scaling drew a
+  // group peaking at 8 as tall as one peaking at 1,500.
   const trendMax = useMemo(
     () => maxDailyCount(allNodes, rangeDays, endMs),
     [allNodes, rangeDays, endMs],
@@ -325,26 +308,44 @@ export const TopicsExplorer = ({
 
   const currentDim = dimensionFor(dimensions, activeDims[depth]);
   const isOverlapping = currentDim.multi === true;
-  // A tile opens sub-groups only when another dimension sits below this one;
-  // otherwise it is a leaf and the click belongs to the ticket list.
+  // A leaf tile's click belongs to the ticket list, not to another level.
   const isDrillable = activeDims.length > depth + 1;
 
-  const tiles = useMemo(() => {
+  // A leaf can only open the ticket list when every level of its path maps to a
+  // filter param. Where it cannot, the tile stays inert rather than opening a
+  // wider list than it counted — `openBlockers` names the fields responsible.
+  const { tiles, openBlockers } = useMemo(() => {
     const total = scoped.length || 1;
-    return nodes.map((node, i) => {
+    const blockers = new Set<string>();
+
+    const built = nodes.map((node, i) => {
       const share = Math.round((node.tickets.length / total) * 100);
+      let canOpen = true;
+      if (!isDrillable) {
+        const plan = planDrill(
+          [...validPath, node.key].map((key, level) => ({
+            dim: dimensionFor(dimensions, activeDims[level]),
+            key,
+          })),
+        );
+        canOpen = plan.dropped.length === 0 && plan.conflicting.length === 0;
+        for (const label of [...plan.dropped, ...plan.conflicting]) blockers.add(label);
+      }
       return {
         name: node.label,
         nodeKey: node.key,
         ...swatchFor(i),
         count: `${node.tickets.length.toLocaleString()} tickets`,
-        // Percentages of a level whose groups overlap do not add up, so they are
+        // Percentages of an overlapping level do not add up, so they are
         // suppressed everywhere at once — tile text, aria-label and tooltip.
         share: isOverlapping ? '' : `${share}%`,
         sharePct: share,
+        canOpen,
       };
     });
-  }, [nodes, scoped.length, isOverlapping]);
+
+    return { tiles: built, openBlockers: [...blockers] };
+  }, [nodes, scoped.length, isOverlapping, isDrillable, validPath, dimensions, activeDims]);
 
   /** One trend row per tile, so the two panels cannot drift in order or shade. */
   const rowsWithTrend = tiles.map((tile, i) => ({
@@ -352,28 +353,27 @@ export const TopicsExplorer = ({
     label: tile.name,
     colour: tile.fill,
     points: trend[i] ?? [],
+    canSelect: isDrillable || tile.canOpen,
   }));
 
-  // No useMemo: templateFor indexes a module-level table, so the reference is already stable.
+  // No useMemo: templateFor indexes a module-level table, so the reference is stable.
   const layout = templateFor(tiles.length);
 
-  // Only once the sync has settled: mid-stream the count is still climbing, so
-  // an early check flashes the cap warning.
+  // Only once the sync settles: mid-stream the count is still climbing, so an
+  // early check flashes the cap warning.
   const isTruncated = isTicketsReady && allTickets.length >= TOPICS_EXPLORER_TICKET_LIMIT;
 
-  /**
-   * Root plus one crumb per drilled level. Formatted through the level's own
-   * dimension: raw keys are user ids for Assignee and `category:tag` for AI tags.
-   */
+  // Formatted through each level's own dimension: raw keys are ids for Assignee
+  // and `category:tag` for AI tags.
   const crumbs = [
     { label: 'All tickets', to: [] as string[] },
     ...validPath.map((key, i) => ({
-      label: labelFor(dimensionFor(dimensions, activeDims[i]), key, ctx),
+      label: labelFor(dimensionFor(dimensions, activeDims[i]), key),
       to: path.slice(0, i + 1),
     })),
   ];
 
-  /** Caveats shown above the panels. One list beats three near-identical blocks. */
+  /** Caveats shown above the panels, so a capped or partial rollup says so. */
   const notices = [
     isOverlapping && {
       id: 'overlap',
@@ -395,50 +395,51 @@ export const TopicsExplorer = ({
       tone: 'warn' as const,
       text: 'AI tag data was capped for this range — tickets beyond the cap count as untagged in the AI tag groupings. Narrow the range for exact counts.',
     },
+    openBlockers.length > 0 && {
+      id: 'noOpen',
+      tone: 'muted' as const,
+      text: `The ticket list has no filter for ${openBlockers.join(' or ')}, so these boxes can be read and charted here but not opened as a ticket list.`,
+    },
   ].filter(Boolean) as { id: string; tone: 'muted' | 'warn'; text: string }[];
 
   const openTickets = useCallback(
     (nodeKey: string): void => {
+      const plan = planDrill(
+        [...validPath, nodeKey].map((key, i) => ({
+          dim: dimensionFor(dimensions, activeDims[i]),
+          key,
+        })),
+      );
+
+      // Guard, not a user path: the tile is already inert when this holds, since
+      // a list that cannot express every level is wider than the box clicked.
+      if (plan.dropped.length > 0 || plan.conflicting.length > 0) return;
+
       const params = new URLSearchParams();
-      const dropped: string[] = [];
 
       // TicketFilters keys are already the search-param names the ticket list
-      // reads, so the active filters serialise straight through.
+      // reads. Object-valued ones (roleAssignments, dynamicFields) have no
+      // scalar form, so they are left out rather than stringified.
+      const appendScalar = (key: string, value: unknown): void => {
+        if (typeof value === 'string') params.append(key, value);
+        else if (typeof value === 'number' || typeof value === 'boolean') {
+          params.append(key, String(value));
+        }
+      };
       for (const [key, value] of Object.entries(filters)) {
-        if (Array.isArray(value)) value.forEach(v => params.append(key, String(v)));
-        else if (value !== undefined && value !== null) params.append(key, String(value));
+        if (Array.isArray(value)) value.forEach(v => appendScalar(key, v));
+        else appendScalar(key, value);
       }
 
-      // The drill path overrides any filter on the same field: the list ORs
-      // repeated params, so Assignee={alice,bob} drilled into alice would open
-      // both. Cleared once per param, since every aiTag level shares `generatedTags`.
-      const overridden = new Set<string>();
-
-      [...validPath, nodeKey].forEach((key, i) => {
-        const dimKey = activeDims[i];
-        const dim = dimKey ? dimensions.get(dimKey) : undefined;
-        if (!dim) return;
-        // The "no value" bucket needs its own param: emitting the internal
-        // sentinel would open a list the filter silently ignores.
-        const value = key === NONE_KEY ? dim.emptyParam : key;
-        if (!dim.param || value === null || value === undefined) {
-          dropped.push(dim.label);
-          return;
-        }
-        if (!overridden.has(dim.param)) {
-          params.delete(dim.param);
-          overridden.add(dim.param);
-        }
-        params.append(dim.param, value);
-      });
+      // The drill path replaces any filter on the same field: the list ORs
+      // repeated params, so Assignee={alice,bob} drilled into alice opens both.
+      for (const { param, value } of plan.assignments) {
+        params.delete(param);
+        params.append(param, value);
+      }
 
       params.set('createdDateStart', String(startMs));
       params.set('createdDateEnd', String(endMs));
-      if (dropped.length > 0) {
-        toast.info(
-          `Opened without ${[...new Set(dropped)].join(' and ')} — the ticket list has no filter for it.`,
-        );
-      }
       onClose();
       void navigate(`${supportBase}/${channelId}?${params.toString()}`);
     },
@@ -456,10 +457,8 @@ export const TopicsExplorer = ({
     ],
   );
 
-  /**
-   * Pages and keeps focus alive: the pressed button goes `disabled` at either
-   * end, dropping focus to <body> and dead-ending keyboard paging.
-   */
+  // Moves focus at either end: the pressed button goes `disabled`, dropping
+  // focus to <body> and dead-ending keyboard paging.
   const goToPage = (next: number): void => {
     const target = Math.min(Math.max(next, 0), pageCount - 1);
     setPage(target);
@@ -473,12 +472,9 @@ export const TopicsExplorer = ({
     setPage(0);
   }, []);
 
-  /**
-   * Regroup, keeping the first `keepLevels` drilled steps. Only the levels at or
-   * below the one that changed are invalidated — the keys above it were produced
-   * by dimensions that did not move, so dropping them threw the user back to the
-   * root for an edit that did not touch their branch.
-   */
+  // Keeps the first `keepLevels` drilled steps: the keys above the edited level
+  // came from dimensions that did not move, so dropping them would throw the
+  // user back to the root for an edit outside their branch.
   const regroup = useCallback(
     (next: DimensionKey[], keepLevels: number): void => {
       setDims(next);
@@ -489,12 +485,13 @@ export const TopicsExplorer = ({
 
   const onTileClick = useCallback(
     (nodeKey: string): void => {
-      const node = nodes.find(n => n.key === nodeKey);
-      if (!node) return;
-      if (isDrillable) showPath([...validPath, nodeKey]);
-      else openTickets(node.key);
+      if (isDrillable) {
+        showPath([...validPath, nodeKey]);
+        return;
+      }
+      if (tiles.find(t => t.nodeKey === nodeKey)?.canOpen) openTickets(nodeKey);
     },
-    [isDrillable, nodes, openTickets, showPath, validPath],
+    [isDrillable, tiles, openTickets, showPath, validPath],
   );
 
   const selectClass =
@@ -632,8 +629,7 @@ export const TopicsExplorer = ({
                   type='button'
                   onClick={() => {
                     const unused = available.find(k => !activeDims.includes(k));
-                    // Appending a level leaves every existing level untouched, so the
-                    // whole drill path survives.
+                    // Appending leaves existing levels untouched, so the path survives.
                     if (unused) regroup([...activeDims, unused], validPath.length);
                   }}
                   className='rounded-md border border-dashed border-border px-2 py-1 text-sm text-muted-foreground hover:text-foreground'

@@ -1264,7 +1264,8 @@ export const queries = defineQueries({
     },
   ),
   // Topics Explorer: tickets for one desk in a created-at window, rolled up
-  // client-side. The row cap and the single relation keep that sync bounded.
+  // client-side. The row cap keeps that sync bounded; no relations are pulled,
+  // since every grouping reads a column on the ticket itself.
   // channelId + isMember are forwarded to TicketsACL for membership gating.
   topicsExplorerTickets: defineQuery(
     z.object({
@@ -1283,10 +1284,7 @@ export const queries = defineQueries({
         .where('createdAt', '>=', createdAtStart)
         .where('createdAt', '<=', createdAtEnd)
         .orderBy('createdAt', 'desc')
-        .limit(TOPICS_EXPLORER_TICKET_LIMIT)
-        // tagMappings carries a denormalized `tagName`, so grouping by tag needs
-        // no second lookup. LLM tags live in `non_zero.tags`, which Zero skips.
-        .related('tagMappings'),
+        .limit(TOPICS_EXPLORER_TICKET_LIMIT),
   ),
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
   // channelId + isMember are forwarded to TicketsACL for membership gating.

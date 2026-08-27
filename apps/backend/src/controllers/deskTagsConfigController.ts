@@ -16,14 +16,24 @@ import { tagRepository } from '@/database/repositories/tagRepository';
 
 /**
  * Epoch-ms query param as a Date, or null when it is missing or unusable. The
- * empty-string guard matters: Number('') is 0, so `?startMs=` would otherwise
- * read as epoch 0 and scan all history.
+ * blank guard is trimmed: Number('') and Number('  ') are both 0, so `?startMs=`
+ * or `?startMs=%20` would otherwise read as epoch 0 and scan all history.
  */
 const epochMsToDate = (raw: unknown): Date | null => {
-  const ms = typeof raw === 'string' && raw ? Number(raw) : NaN;
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  const ms = trimmed ? Number(trimmed) : NaN;
   const date = new Date(ms);
   return Number.isFinite(ms) && !Number.isNaN(date.getTime()) ? date : null;
 };
+
+/**
+ * Server-side ceiling on the generated-tags window. The Topics Explorer caps at
+ * 30 calendar days client-side, but that is not a control: without this a
+ * hand-crafted multi-year request scans the channel's whole email table and
+ * joins the tag rows before any limit applies. 31 days of milliseconds, since
+ * a 30-day inclusive range runs 00:00 on day one to 23:59 on day thirty.
+ */
+const MAX_TAG_RANGE_MS = 31 * 24 * 60 * 60 * 1000;
 
 export class DeskTagsConfigController {
   private channelParticipantRepo = new ChannelParticipantRepository();
@@ -256,6 +266,12 @@ export class DeskTagsConfigController {
     if (!start || !end || start > end) {
       res.status(400).json({
         error: 'startMs and endMs must be epoch-millisecond values, with startMs before endMs',
+      });
+      return;
+    }
+    if (end.getTime() - start.getTime() > MAX_TAG_RANGE_MS) {
+      res.status(400).json({
+        error: `Date range cannot exceed ${MAX_TAG_RANGE_MS / (24 * 60 * 60 * 1000)} days`,
       });
       return;
     }
