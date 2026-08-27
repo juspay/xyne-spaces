@@ -94,7 +94,7 @@ const DESK_SOURCES: ReadonlyArray<{
   {
     value: DeskType.SOCIAL_MEDIA,
     label: 'Social media',
-    description: 'Create support tickets from Google Play reviews',
+    description: 'Connect Instagram or Google Play to receive and reply to DMs and reviews',
     icon: Share2,
   },
 ];
@@ -143,7 +143,9 @@ interface AddChannelFormProps {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      platform?: 'web' | 'electron';
       applications?: GooglePlayApplicationInput[];
+      socialMediaProvider?: 'instagram' | 'google-play';
     },
   ) => void;
   onCancel: () => void;
@@ -173,6 +175,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [googlePlayApplications, setGooglePlayApplications] = useState<GooglePlayApplicationRow[]>([
     createGooglePlayApplication(),
   ]);
+  const [socialMediaProvider, setSocialMediaProvider] = useState<'instagram' | 'google-play'>(
+    'instagram',
+  );
   const selectedCallSource: CallSource = 'OZONETEL';
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
@@ -281,7 +286,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         if (deskType === DeskType.APP && !selectedInstalledAppId) return;
         if (
           deskType === DeskType.SOCIAL_MEDIA &&
-          (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)
+          ((socialMediaProvider === 'google-play' &&
+            (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)) ||
+            (socialMediaProvider === 'instagram' && !value.boardId))
         )
           return;
       }
@@ -316,15 +323,20 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.SOCIAL_MEDIA) {
+          const isElectron = typeof window.electronAPI?.openExternal === 'function';
           onSubmit?.({
             ...value,
             connector: null,
             channelType: 'SOCIAL_MEDIA',
             deskType: DeskType.SOCIAL_MEDIA,
-            applications: googlePlayApplications.map(application => ({
-              displayName: application.displayName.trim(),
-              packageName: application.packageName,
-            })),
+            socialMediaProvider,
+            platform: isElectron ? 'electron' : 'web',
+            ...(socialMediaProvider === 'google-play' && {
+              applications: googlePlayApplications.map(application => ({
+                displayName: application.displayName.trim(),
+                packageName: application.packageName,
+              })),
+            }),
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.DL) {
@@ -392,7 +404,12 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
     (requireConnector &&
       deskType === DeskType.SOCIAL_MEDIA &&
+      socialMediaProvider === 'google-play' &&
       (!areGooglePlayApplicationsValid(googlePlayApplications) || !boardIdValue)) ||
+    (requireConnector &&
+      deskType === DeskType.SOCIAL_MEDIA &&
+      socialMediaProvider === 'instagram' &&
+      !boardIdValue) ||
     (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
@@ -411,7 +428,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
-      if (deskType === DeskType.SOCIAL_MEDIA) {
+      if (deskType === DeskType.SOCIAL_MEDIA && socialMediaProvider === 'google-play') {
         if (googlePlayApplications.some(application => !application.displayName.trim()))
           return 'Please enter a display name for every application';
         if (
@@ -425,6 +442,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           googlePlayApplications.length
         )
           return 'Android package names must be unique';
+        if (!boardIdValue) return 'Please select a board';
+      }
+      if (deskType === DeskType.SOCIAL_MEDIA && socialMediaProvider === 'instagram') {
         if (!boardIdValue) return 'Please select a board';
       }
       if (deskType === DeskType.CALL && !ozonetelConfig?.configured)
@@ -767,137 +787,150 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <label htmlFor='social-provider' className='text-sm font-medium text-foreground'>
               Source <span className='text-muted-foreground'>*</span>
             </label>
-            <Select value='GOOGLE_PLAY' disabled>
+            <Select
+              value={socialMediaProvider}
+              onValueChange={v => setSocialMediaProvider(v as 'instagram' | 'google-play')}
+            >
               <SelectTrigger id='social-provider' className='w-full'>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='GOOGLE_PLAY'>Google Play reviews</SelectItem>
+                <SelectItem value='instagram'>Instagram DMs</SelectItem>
+                <SelectItem value='google-play'>Google Play reviews</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className='space-y-3'>
-            <div className='flex items-center justify-between'>
-              <div className='text-sm font-medium text-foreground'>
-                Google Play applications <span className='text-muted-foreground'>*</span>
-              </div>
-              <button
-                type='button'
-                onClick={() =>
-                  setGooglePlayApplications(applications => [
-                    ...applications,
-                    createGooglePlayApplication(),
-                  ])
-                }
-                disabled={googlePlayApplications.length >= 20}
-                className='inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50'
-                data-track-category='ADD_CHANNEL_FORM'
-                data-track-name='ADD_GOOGLE_PLAY_APPLICATION'
-              >
-                <Plus className='size-4' />
-                Add application
-              </button>
-            </div>
-            {googlePlayApplications.map((application, index) => {
-              const duplicatePackage =
-                Boolean(application.packageName) &&
-                googlePlayApplications.some(
-                  (candidate, candidateIndex) =>
-                    candidateIndex !== index && candidate.packageName === application.packageName,
-                );
-              const invalidPackage =
-                Boolean(application.packageName) &&
-                !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName);
-              return (
-                <div
-                  key={application.id}
-                  className='space-y-3 rounded-lg border border-border bg-muted/20 p-3'
+
+          {socialMediaProvider === 'instagram' && (
+            <p className='text-sm text-muted-foreground'>
+              You&apos;ll be redirected to Instagram to authorize access. DMs from customers will
+              automatically create tickets in this desk.
+            </p>
+          )}
+          {socialMediaProvider === 'google-play' && (
+            <div className='space-y-3'>
+              <div className='flex items-center justify-between'>
+                <div className='text-sm font-medium text-foreground'>
+                  Google Play applications <span className='text-muted-foreground'>*</span>
+                </div>
+                <button
+                  type='button'
+                  onClick={() =>
+                    setGooglePlayApplications(applications => [
+                      ...applications,
+                      createGooglePlayApplication(),
+                    ])
+                  }
+                  disabled={googlePlayApplications.length >= 20}
+                  className='inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50'
+                  data-track-category='ADD_CHANNEL_FORM'
+                  data-track-name='ADD_GOOGLE_PLAY_APPLICATION'
                 >
-                  <div className='flex items-center justify-between'>
-                    <span className='text-sm font-medium text-foreground'>
-                      Application {index + 1}
-                    </span>
-                    {googlePlayApplications.length > 1 && (
-                      <button
-                        type='button'
-                        onClick={() =>
+                  <Plus className='size-4' />
+                  Add application
+                </button>
+              </div>
+              {googlePlayApplications.map((application, index) => {
+                const duplicatePackage =
+                  Boolean(application.packageName) &&
+                  googlePlayApplications.some(
+                    (candidate, candidateIndex) =>
+                      candidateIndex !== index && candidate.packageName === application.packageName,
+                  );
+                const invalidPackage =
+                  Boolean(application.packageName) &&
+                  !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName);
+                return (
+                  <div
+                    key={application.id}
+                    className='space-y-3 rounded-lg border border-border bg-muted/20 p-3'
+                  >
+                    <div className='flex items-center justify-between'>
+                      <span className='text-sm font-medium text-foreground'>
+                        Application {index + 1}
+                      </span>
+                      {googlePlayApplications.length > 1 && (
+                        <button
+                          type='button'
+                          onClick={() =>
+                            setGooglePlayApplications(applications =>
+                              applications.filter(
+                                (_, applicationIndex) => applicationIndex !== index,
+                              ),
+                            )
+                          }
+                          className='text-muted-foreground hover:text-destructive'
+                          aria-label={`Remove application ${index + 1}`}
+                          data-track-category='ADD_CHANNEL_FORM'
+                          data-track-name='REMOVE_GOOGLE_PLAY_APPLICATION'
+                        >
+                          <Trash2 className='size-4' />
+                        </button>
+                      )}
+                    </div>
+                    <div className='space-y-2'>
+                      <label
+                        htmlFor={`google-play-app-name-${index}`}
+                        className='text-sm text-foreground'
+                      >
+                        App display name
+                      </label>
+                      <Input
+                        id={`google-play-app-name-${index}`}
+                        value={application.displayName}
+                        onChange={event =>
                           setGooglePlayApplications(applications =>
-                            applications.filter(
-                              (_, applicationIndex) => applicationIndex !== index,
+                            applications.map((candidate, applicationIndex) =>
+                              applicationIndex === index
+                                ? { ...candidate, displayName: event.target.value }
+                                : candidate,
                             ),
                           )
                         }
-                        className='text-muted-foreground hover:text-destructive'
-                        aria-label={`Remove application ${index + 1}`}
-                        data-track-category='ADD_CHANNEL_FORM'
-                        data-track-name='REMOVE_GOOGLE_PLAY_APPLICATION'
+                        placeholder='Xyne'
+                        autoComplete='off'
+                      />
+                    </div>
+                    <div className='space-y-2'>
+                      <label
+                        htmlFor={`android-package-name-${index}`}
+                        className='text-sm text-foreground'
                       >
-                        <Trash2 className='size-4' />
-                      </button>
-                    )}
+                        Android package name
+                      </label>
+                      <Input
+                        id={`android-package-name-${index}`}
+                        value={application.packageName}
+                        onChange={event =>
+                          setGooglePlayApplications(applications =>
+                            applications.map((candidate, applicationIndex) =>
+                              applicationIndex === index
+                                ? { ...candidate, packageName: event.target.value.trim() }
+                                : candidate,
+                            ),
+                          )
+                        }
+                        placeholder='com.example.app'
+                        autoComplete='off'
+                        aria-invalid={invalidPackage || duplicatePackage}
+                      />
+                      {invalidPackage && (
+                        <p className='text-sm text-destructive'>Enter a valid package name.</p>
+                      )}
+                      {duplicatePackage && (
+                        <p className='text-sm text-destructive'>
+                          This package name has already been added.
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className='space-y-2'>
-                    <label
-                      htmlFor={`google-play-app-name-${index}`}
-                      className='text-sm text-foreground'
-                    >
-                      App display name
-                    </label>
-                    <Input
-                      id={`google-play-app-name-${index}`}
-                      value={application.displayName}
-                      onChange={event =>
-                        setGooglePlayApplications(applications =>
-                          applications.map((candidate, applicationIndex) =>
-                            applicationIndex === index
-                              ? { ...candidate, displayName: event.target.value }
-                              : candidate,
-                          ),
-                        )
-                      }
-                      placeholder='Xyne'
-                      autoComplete='off'
-                    />
-                  </div>
-                  <div className='space-y-2'>
-                    <label
-                      htmlFor={`android-package-name-${index}`}
-                      className='text-sm text-foreground'
-                    >
-                      Android package name
-                    </label>
-                    <Input
-                      id={`android-package-name-${index}`}
-                      value={application.packageName}
-                      onChange={event =>
-                        setGooglePlayApplications(applications =>
-                          applications.map((candidate, applicationIndex) =>
-                            applicationIndex === index
-                              ? { ...candidate, packageName: event.target.value.trim() }
-                              : candidate,
-                          ),
-                        )
-                      }
-                      placeholder='com.example.app'
-                      autoComplete='off'
-                      aria-invalid={invalidPackage || duplicatePackage}
-                    />
-                    {invalidPackage && (
-                      <p className='text-sm text-destructive'>Enter a valid package name.</p>
-                    )}
-                    {duplicatePackage && (
-                      <p className='text-sm text-destructive'>
-                        This package name has already been added.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            <p className='text-xs text-muted-foreground'>
-              One Google authorization will be used for every application in this channel.
-            </p>
-          </div>
+                );
+              })}
+              <p className='text-xs text-muted-foreground'>
+                One Google authorization will be used for every application in this channel.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

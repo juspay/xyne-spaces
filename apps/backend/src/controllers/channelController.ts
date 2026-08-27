@@ -1516,6 +1516,8 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
+      } else if (source?.sourceType === ExternalSourcePlatform.INSTAGRAM) {
+        connectedLabel = source.displayName ?? null;
       } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
         const reviewSources = await db.externalSource.findMany({
           where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },

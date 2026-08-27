@@ -21,6 +21,7 @@ export enum ExternalSourcePlatform {
   GOOGLE = 'google',
   APP_DESK = 'app-desk',
   OZONETEL = 'ozonetel',
+  INSTAGRAM = 'instagram',
   GOOGLE_PLAY = 'google-play-reviews',
 }
 

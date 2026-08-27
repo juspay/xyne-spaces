@@ -3,7 +3,7 @@
  * Public endpoints for syncing data from external sources
  */
 
-import express, { Router, Request, Response } from 'express';
+import express, { Router, Request, Response, NextFunction } from 'express';
 import { DeskType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authenticate } from '../core/authenticate';
@@ -18,7 +18,10 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { decrypt } from '@/services/encryptionService';
+import { metaGraphClient } from '@/integrations/adapters/social-media/instagram/metaGraphClient';
 
 const router = Router();
 
@@ -40,26 +43,97 @@ router.use(webhookLimiter);
  * Returns "OK" without authentication - used by external services to verify endpoint
  * Matches Haskell implementation: webhookGetHandler _ _ = pure "OK"
  */
-router.get('/:sourceName/ingest', (_req, res: Response) => {
-  return res.status(200).send('OK');
-});
+router.get(
+  '/:sourceName/ingest',
+  (req, res, next) => {
+    // Only run adapterResolver when hub.mode is present (Meta-style webhook verification).
+    // Otherwise return plain 200 OK — preserves behaviour for Slack/Microsoft/Ozonetel health probes
+    // and any external service that GETs the endpoint to verify it's reachable.
+    if (req.query['hub.mode']) {
+      return adapterResolver(req, res, () => next());
+    }
+    return next();
+  },
+  (_req, res: Response) => {
+    return res.status(200).send('OK');
+  },
+);
+
+function requireValidHubSignature(req: Request, res: Response, next: NextFunction): void {
+  const sigHeader = req.headers['x-hub-signature-256'];
+  const sig = Array.isArray(sigHeader) ? (sigHeader[0] ?? '') : (sigHeader ?? '');
+  const secret = (appConfig.META_IG_APP_SECRET || appConfig.META_APP_SECRET) as string;
+  if (!secret || !sig) {
+    res.status(401).json({ error: 'Missing signature' });
+    return;
+  }
+  const rawBodyReq = req as RawBodyRequest;
+  if (!metaGraphClient.verifyWebhookSignature(rawBodyReq.rawBody, sig, secret)) {
+    res.status(401).json({ error: 'Invalid signature' });
+    return;
+  }
+  next();
+}
+
+async function resolveMessageEditRecipient(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const body = req.body as Record<string, unknown>;
+  const entry = (body?.entry as Array<Record<string, unknown>>)?.[0];
+  const messaging = (entry?.messaging as Array<Record<string, unknown>>)?.[0];
+  const edit = messaging?.message_edit as Record<string, unknown> | undefined;
+  const mid = edit?.mid as string | undefined;
+  const numEdit = edit?.num_edit as number | undefined;
+
+  if (mid !== undefined && numEdit === 0) {
+    try {
+      const sources = await db.externalSource.findMany({
+        where: { sourceType: ExternalSourcePlatform.INSTAGRAM, isActive: true },
+        select: { credentials: true, externalIdentifier: true },
+      });
+      for (const src of sources) {
+        if (!src.credentials || !src.externalIdentifier) continue;
+        try {
+          const creds = JSON.parse(decrypt(src.credentials)) as { accessToken: string };
+          const fetched = await metaGraphClient.getMessage(creds.accessToken, mid);
+          const recipientId = fetched?.to?.data?.[0]?.id;
+          if (recipientId === src.externalIdentifier) {
+            entry._resolvedRecipientId = recipientId;
+            // Cache the fetched message so flow.ts can reuse it without a second Meta API call.
+            entry._resolvedMessage = fetched;
+            logger.info('[IG ingest] Resolved message_edit recipient', { mid, recipientId });
+            break;
+          }
+        } catch (err) {
+          logger.error('[IG ingest] getMessage failed during recipient resolution', { mid, error: String(err) });
+        }
+      }
+      if (!entry._resolvedRecipientId) {
+        logger.warn('[IG ingest] Could not resolve recipient for message_edit', { mid });
+      }
+    } catch (err) {
+      logger.error('[IG ingest] Error during message_edit recipient resolution', { error: err });
+    }
+  }
+  next();
+}
 
 /**
- * External source sync endpoint
  * POST /api/external-source-sync/:sourceName/ingest
  *
- * Flow:
- * 1. adapterResolver - Resolve adapter from sourceName
- * 2. authenticate - Authenticate using adapter.authenticate()
- * 3. handler - Orchestrate preprocess → transform → sync
- *
- * Note: express.json() with verify callback is applied at app level
- * This provides both req.body (parsed) and req.rawBody (raw string)
+ * Unified webhook ingestion endpoint for all external sources.
+ * Instagram adds two pre-auth middlewares gated on sourceName:
+ *   1. requireValidHubSignature — verifies Meta HMAC-SHA256 signature
+ *   2. resolveMessageEditRecipient — resolves recipient for message_edit.num_edit=0 events
+ * Both must run before adapterResolver so the recipient id is known when getSourceNameFromDB runs.
+ * Meta's configured webhook URL (/instagram/ingest) routes here with sourceName='instagram'.
  */
 router.post(
   '/:sourceName/ingest',
-  adapterResolver, // Resolve adapter, attach to req
-  authenticate, // Authenticate using req.adapter
+  (req: Request, res: Response, next: NextFunction) =>
+    req.params.sourceName === 'instagram' ? requireValidHubSignature(req, res, next) : next(),
+  (req: Request, res: Response, next: NextFunction) =>
+    req.params.sourceName === 'instagram' ? resolveMessageEditRecipient(req, res, next) : next(),
+  adapterResolver,
+  authenticate,
   async (req, res: Response) => {
     const startTime = Date.now();
 

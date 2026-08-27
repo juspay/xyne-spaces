@@ -14,7 +14,7 @@ import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { logger, Event } from '../../../utils/logger';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
-import { TicketPriority, MailboxState } from '@xyne/shared';
+import { DeskType, TicketPriority, MailboxState } from '@xyne/shared';
 import type { MailboxFolder } from '../../xyne-desk/DeskFolders/DeskMailboxSidebar';
 import {
   ticketMatchesDynamicFieldEntries,
@@ -131,6 +131,7 @@ interface TicketListViewProps {
   onPageChange?: (pageIndex: number) => void;
   onToggleSelectAll?: (rows: SelectableRow[], select: boolean) => void;
   onTicketsLoaded?: (tickets: SupportTicketRow[]) => void;
+  deskType?: string;
 }
 
 export interface SelectableRow {
@@ -168,7 +169,9 @@ export const TicketListView = function TicketListView({
   onPageChange,
   onToggleSelectAll,
   onTicketsLoaded,
+  deskType,
 }: TicketListViewProps): React.ReactElement {
+  const isSocialMedia = deskType === DeskType.SOCIAL_MEDIA;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { userID } = useAuthContextValues();
 
@@ -765,6 +768,7 @@ export const TicketListView = function TicketListView({
             isActive={isActive}
             showExtraFields={showExtraFields}
             gridTemplate={ticketListGridTemplate}
+            {...(deskType !== undefined && { deskType })}
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
@@ -965,7 +969,13 @@ export const TicketListView = function TicketListView({
                   getTicketListColumnAlignClass(column.key),
                 )}
               >
-                <span className='min-w-0 truncate'>{column.label}</span>
+                <span className='min-w-0 truncate'>
+                  {isSocialMedia && column.key === 'emails'
+                    ? 'Messages'
+                    : isSocialMedia && column.key === 'latestEmail'
+                      ? 'Latest message'
+                      : column.label}
+                </span>
               </div>
             ))}
           </div>

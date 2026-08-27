@@ -12,12 +12,16 @@ import {
   canAccessSocialMediaChannel,
 } from './social-media/access';
 import googlePlayRoutes from './social-media/google-play';
+import instagramRoutes from './social-media/instagram';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
 
 router.use(express.json());
+// Meta's data-deletion callback sends signed_request as application/x-www-form-urlencoded
+router.use(express.urlencoded({ extended: false }));
 router.use(googlePlayRoutes);
+router.use(instagramRoutes);
 
 router.post(
   '/:conversationId/reply',
@@ -54,15 +58,16 @@ router.post(
         res.status(400).json({ error: error.message });
         return;
       }
-      logger.error(`${TAG} Failed to send review reply`, {
+      logger.error(`${TAG} Failed to send reply`, {
         conversationId: req.params.conversationId,
         error,
       });
-      res.status(500).json({ error: 'Failed to send review reply' });
+      res.status(500).json({ error: 'Failed to send reply' });
     }
-  }
+  },
 );
 
+// POST /:channelId/sync — manual sync trigger for polling sources (e.g. Google Play)
 router.post(
   '/:channelId/sync',
   authV2Middleware.authenticate,
@@ -70,12 +75,7 @@ router.post(
     try {
       const workspaceId = req.user!.workspaceId!;
       if (
-        !(await authorizeSocialMediaManager(
-          req.params.channelId,
-          req.user!.id,
-          workspaceId,
-          res
-        ))
+        !(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))
       ) {
         return;
       }
@@ -122,9 +122,10 @@ router.post(
       logger.error(`${TAG} Manual source sync failed`, { error });
       res.status(500).json({ error: 'Failed to synchronize review source' });
     }
-  }
+  },
 );
 
+// POST /:channelId/disconnect — deactivate all sources on a channel
 router.post(
   '/:channelId/disconnect',
   authV2Middleware.authenticate,
@@ -132,12 +133,7 @@ router.post(
     try {
       const workspaceId = req.user!.workspaceId!;
       if (
-        !(await authorizeSocialMediaManager(
-          req.params.channelId,
-          req.user!.id,
-          workspaceId,
-          res
-        ))
+        !(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))
       ) {
         return;
       }
@@ -146,7 +142,9 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+          sourceType: {
+            in: [ExternalSourcePlatform.GOOGLE_PLAY, ExternalSourcePlatform.INSTAGRAM],
+          },
         },
         data: { isActive: false },
       });
@@ -163,7 +161,7 @@ router.post(
       logger.error(`${TAG} Failed to disconnect source`, { error });
       res.status(500).json({ error: 'Failed to disconnect social media source' });
     }
-  }
+  },
 );
 
 export default router;

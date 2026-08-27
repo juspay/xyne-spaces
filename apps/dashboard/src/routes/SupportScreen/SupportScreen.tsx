@@ -167,7 +167,10 @@ import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBod
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
-import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
+import {
+  startGooglePlayOAuth,
+  startInstagramOAuth,
+} from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
@@ -226,6 +229,7 @@ import { CallParticipantsSelectionModal } from '../../components/Call/CallPartic
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
+import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
@@ -293,8 +297,9 @@ interface PersistedComposeInstance {
   savedAt?: number;
 }
 
-/** Desk types with no "new message" concept: calls aren't composed, and Slack/app
- *  desks can only reply into a thread that already exists externally. */
+/** Desk types with no "new message" concept: calls aren't composed, Slack/app
+ *  desks can only reply into an existing thread, and social media DMs originate
+ *  from the customer side only. */
 const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new Set([
   ChannelType.CALL,
   ChannelType.SLACK,
@@ -1410,6 +1415,48 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     }
+
+    const socialMediaOAuth = searchParams.get('socialMediaOAuth');
+    const socialMediaProvider = searchParams.get('socialMediaProvider');
+    const socialMediaError = searchParams.get('socialMediaError');
+    if (socialMediaOAuth === 'success' && socialMediaProvider === 'instagram') {
+      toast.success('Instagram account connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError && socialMediaProvider === 'instagram') {
+      // mismatch error carries the expected handle: "instagram_account_mismatch:@xyne.spaces"
+      const [errorCode, errorPayload] = socialMediaError.split(':');
+      const mismatchMessage = errorPayload
+        ? `This channel is connected to ${errorPayload}. Please log into that account on instagram.com and try reconnecting.`
+        : 'Instagram account mismatch — please make sure the correct account is active in your browser and try reconnecting.';
+      const socialMediaErrorMessages: Record<string, string> = {
+        instagram_account_mismatch: mismatchMessage,
+        instagram_auth_denied: 'Instagram authorization was denied. Please try again.',
+        instagram_account_already_connected:
+          'This Instagram account is already connected to another channel.',
+        instagram_connection_failed: 'Failed to connect Instagram. Please try again.',
+      };
+      toast.error(
+        socialMediaErrorMessages[errorCode ?? ''] ??
+          'Instagram connection error. Please try again.',
+      );
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    }
   }, [searchParams, setSearchParams, navigate, queryClient]);
 
   // Sync panel open/close with the URL so back button works correctly
@@ -1878,7 +1925,9 @@ const SupportScreen = (): ReactElement => {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      platform?: 'web' | 'electron';
       applications?: Array<{ displayName: string; packageName: string }>;
+      socialMediaProvider?: 'instagram' | 'google-play';
     },
   ) => {
     const {
@@ -1888,13 +1937,41 @@ const SupportScreen = (): ReactElement => {
       dlEmail,
       slackChannelId,
       installedAppId,
+      platform: formPlatform,
       applications,
+      socialMediaProvider,
       channelType: _submittedChannelType,
       ...rest
     } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SOCIAL_MEDIA') {
+      if (socialMediaProvider === 'instagram') {
+        if (!rest.boardId) {
+          toast.error('A board is required for Instagram setup');
+          return;
+        }
+        void startInstagramOAuth({
+          name: rest.name,
+          projectId: rest.projectId,
+          boardId: rest.boardId,
+          ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+          platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
+        })
+          .then(authUrl => {
+            setShowCreateChannelModal(false);
+            if (isElectron && window.electronAPI?.openExternal) {
+              window.electronAPI.openExternal(authUrl);
+            } else {
+              window.location.href = authUrl;
+            }
+          })
+          .catch(error => {
+            toast.error(error instanceof Error ? error.message : 'Failed to start Instagram OAuth');
+          });
+        return;
+      }
       if (!applications?.length || !rest.boardId) {
         toast.error('At least one Google Play application and a board are required');
         return;
@@ -1908,7 +1985,7 @@ const SupportScreen = (): ReactElement => {
           assigneeUserGroupId: rest.assigneeUserGroupId,
         }),
         visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-        platform: isElectron ? 'electron' : 'web',
+        platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
       })
         .then(authorizationUrl => {
           setShowCreateChannelModal(false);
@@ -2069,8 +2146,10 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     const connected = searchParams.get('socialMediaOAuth') === 'success';
+    const provider = searchParams.get('socialMediaProvider');
     const error = searchParams.get('socialMediaError');
     const failedPackage = searchParams.get('socialMediaPackage');
+    if (provider === 'instagram') return; // handled by the Instagram useEffect above
     if (!connected && !error) return;
     if (connected) {
       toast.success('Google Play reviews connected successfully');
@@ -2087,6 +2166,7 @@ const SupportScreen = (): ReactElement => {
       previous => {
         const next = new URLSearchParams(previous);
         next.delete('socialMediaOAuth');
+        next.delete('socialMediaProvider');
         next.delete('socialMediaError');
         next.delete('socialMediaPackage');
         return next;
@@ -2229,7 +2309,7 @@ const SupportScreen = (): ReactElement => {
           : c.type === ChannelType.SOCIAL_MEDIA
             ? {
                 label: 'Social',
-                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
               }
             : c.type === ChannelType.CALL
               ? {
@@ -3526,6 +3606,9 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         showExtraFields={true}
                         activeTicketId={ticketId}
+                        {...(channelPreference?.deskType !== undefined && {
+                          deskType: channelPreference.deskType,
+                        })}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
                         onBoardIdReady={handleChannelBoardIdResolved}
@@ -4643,7 +4726,8 @@ export const SupportTicketDetail = ({
                   </Tooltip>
                   {emails.length > 0 &&
                     channel?.type !== ChannelType.SLACK &&
-                    channel?.type !== ChannelType.APP && (
+                    channel?.type !== ChannelType.APP &&
+                    (channel?.type !== ChannelType.SOCIAL_MEDIA || channelIntegrationInfo.sourceType !== 'instagram') && (
                       <>
                         <div className='w-px h-4 bg-border' />
                         <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
@@ -5004,6 +5088,15 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
+            {channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
+              <InstagramCustomerHistory
+                channelId={channelId}
+                conversationId={conversationId}
+                onTicketClick={xyneId => {
+                  void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
+                }}
+              />
+            )}
             <div
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
@@ -5015,8 +5108,8 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
-                    maxLength={350}
+                    placeholder={channelIntegrationInfo.sourceType === 'instagram' ? 'Reply to this message…' : 'Reply to this review…'}
+                    maxLength={channelIntegrationInfo.sourceType === 'instagram' ? 1000 : 350}
                     trackingCategory='social-media-composer'
                   />
                 ) : null

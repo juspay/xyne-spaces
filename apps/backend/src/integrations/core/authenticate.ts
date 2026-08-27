@@ -92,8 +92,10 @@ export async function authenticate(
       logger.warn(
         `Skipping ingest for disconnected source: ${resolvedSourceName} (isActive=false)`,
       );
-      res.status(504).json({
-        success: false,
+      // Return 200 so the webhook provider stops retrying — a 504 signals an error
+      // and causes Meta/Slack/etc. to retry indefinitely for a deliberately disconnected source.
+      res.status(200).json({
+        success: true,
         skipped: true,
         reason: 'inactive_source',
         sourceName: resolvedSourceName,

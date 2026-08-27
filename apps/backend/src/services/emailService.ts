@@ -1322,7 +1322,8 @@ export class EmailService {
 
     // Enqueue tag generation for this email (fire-and-forget — must not block ingestion).
     // Priority 1 (high) so live inbound emails are always processed before bulk historical fetches.
-    if (config.enableTagGenerationPipeline) {
+    // Skip social media channels — DMs and reviews are short texts that don't benefit from LLM tagging.
+    if (config.enableTagGenerationPipeline && channel.type !== ChannelType.SOCIAL_MEDIA) {
       void tagGenerationPipeline.addGenerationJob({
         sourceId: email.id,
         sourceType: DESK_EMAIL_SOURCE_TYPE,
@@ -1576,7 +1577,7 @@ export class EmailService {
         logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);
       });
 
-      if (config.enableTagGenerationPipeline && channel?.workspaceId) {
+      if (config.enableTagGenerationPipeline && channel?.workspaceId && channel.type !== ChannelType.SOCIAL_MEDIA) {
         void tagGenerationPipeline.addGenerationJob({
           sourceId: email.id,
           sourceType: DESK_EMAIL_SOURCE_TYPE,
