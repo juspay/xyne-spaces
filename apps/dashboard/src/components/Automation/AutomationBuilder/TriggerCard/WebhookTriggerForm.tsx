@@ -2,6 +2,19 @@ import { useMemo } from 'react';
 import { SchemaJsonEditor, type SchemaTree } from '../SchemaForm/SchemaJsonEditor';
 import type { ValidationIssue } from '../../Automation.types';
 
+const BODY_SCHEMA_EXAMPLE: SchemaTree = {
+  customerId: 'string',
+  amount: 'number',
+  metadata: {
+    source: 'string',
+  },
+};
+
+const HEADER_SCHEMA_EXAMPLE: SchemaTree = {
+  'x-signature': 'secret',
+  'x-api-version': 'string',
+};
+
 interface WebhookTriggerConfigShape {
   bodySchema?: SchemaTree;
   headerSchema?: SchemaTree;
@@ -43,26 +56,28 @@ export function WebhookTriggerForm({
   return (
     <div className='flex flex-col gap-5'>
       <Field
-        label='Request body'
-        description='JSON shape callers must POST. Declared keys are required on every call (extras allowed); a 400 is returned on mismatch. Downstream steps read these as {{trigger.body.*}}.'
+        label='Request body schema'
+        description='This is not a sample request body. Declare each variable name and its type, for example { customerId: "string" }. Callers must POST those fields; downstream steps read them as {{trigger.body.customerId}}.'
         error={issuesAt.get('bodySchema')}
       >
         <SchemaJsonEditor
           value={bodySchema}
           onChange={next => setField('bodySchema', next)}
+          example={BODY_SCHEMA_EXAMPLE}
           emptyHint='No body fields required — any JSON body is accepted.'
         />
       </Field>
 
       <Field
-        label='Request headers'
-        description='Header names callers must send. Declared headers are required (extras allowed). Mark a header sensitive by giving it the "secret" type — its value is redacted before the request is stored. Downstream steps read these as {{trigger.headers.*}}.'
+        label='Request header schema'
+        description='Declare required header variable names and their types. Mark a sensitive header as "secret" so its value is redacted before storage. Downstream steps read them as {{trigger.headers.x-signature}}.'
         error={issuesAt.get('headerSchema')}
       >
         <SchemaJsonEditor
           value={headerSchema}
           onChange={next => setField('headerSchema', next)}
           allowSecret
+          example={HEADER_SCHEMA_EXAMPLE}
           emptyHint='No required headers.'
         />
       </Field>

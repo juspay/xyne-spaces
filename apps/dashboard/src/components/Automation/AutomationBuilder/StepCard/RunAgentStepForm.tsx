@@ -8,6 +8,12 @@ import type { VariablePickerSource } from '../VariablePicker/VariablePicker.type
 import type { ValidationIssue } from '../../Automation.types';
 import { fetchClawAgents, type ClawAgent } from '../../../../api/automationsApi';
 
+const AGENT_OUTPUT_SCHEMA_EXAMPLE: SchemaTree = {
+  summary: 'string',
+  priority: 'string',
+  needsFollowUp: 'boolean',
+};
+
 interface RunAgentConfigShape {
   agentSlug?: string;
   prompt?: string;
@@ -186,14 +192,15 @@ export function RunAgentStepForm({
 
       {/* Output schema — JSON editor with nesting support */}
       <FieldRow
-        label='Expected output'
-        description='JSON shape the agent will return. Leaves are type strings ("string" | "number" | "boolean" | "object" | "array"); use a nested object for nested fields. Downstream steps see top-level keys as variables before this step runs.'
+        label='Expected agent output schema'
+        description='Declare each variable the agent must return and its type, for example { result: "string" }. The default { result: "string" } is kept for new agent steps so downstream steps always have a usable variable.'
         error={issuesAt.get('outputSchema')}
       >
         <SchemaJsonEditor
           value={outputSchema}
           onChange={next => setField('outputSchema', next)}
           readOnly={readOnly}
+          example={AGENT_OUTPUT_SCHEMA_EXAMPLE}
           emptyHint='Empty schema — downstream steps will see no variables.'
         />
       </FieldRow>
