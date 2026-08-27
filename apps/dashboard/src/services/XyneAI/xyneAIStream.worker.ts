@@ -20,7 +20,15 @@ export interface WorkerStartStreamMessage {
       ticketIds?: string[];
       callIds?: string[];
       attachedContext?: Array<{
-        type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity';
+        type:
+          | 'channel'
+          | 'ticket'
+          | 'canvas'
+          | 'call'
+          | 'activity'
+          | 'collection'
+          | 'folder'
+          | 'file';
         id: string;
         title: string;
         threadId?: string;
