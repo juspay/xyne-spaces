@@ -591,7 +591,7 @@ export class App {
       sdlcArtifactVersionsInternalRoutes
     );
     this.app.post(
-      '/api/internal/desk-report/callback/:channelId',
+      '/api/internal/desk-report/callback/:channelId/:attachmentId',
       validateS2SKey,
       handleDeskReportCallback,
     );

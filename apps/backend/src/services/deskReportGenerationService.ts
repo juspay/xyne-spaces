@@ -2,10 +2,13 @@ import { randomUUID } from 'crypto';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { runClawAgent, listS2SClawAgents } from '@/services/clawAgentService';
+import { runClawAgent } from '@/services/clawAgentService';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { storageService } from '@/services/storage';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
+
+const DESK_REPORT_SCHEDULER_ACTOR_ID = 'desk-report-scheduler';
 
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
 // A run with no callback (crash, dropped webhook) is reaped as failed past this age.
@@ -46,7 +49,9 @@ export class DeskReportGenerationService {
     const results: DeskReportGenerationResult[] = [];
     for (const pref of preferences) {
       try {
-        const result = await this.generateReportForChannel(pref);
+        const result = await runAsServiceActor(DESK_REPORT_SCHEDULER_ACTOR_ID, pref.workspaceId, () =>
+          this.generateReportForChannel(pref),
+        );
         results.push(result);
       } catch (error) {
         logger.error(`[DeskReport] Unexpected error for channel ${pref.channelId}:`, error);
@@ -109,49 +114,14 @@ export class DeskReportGenerationService {
 
     const channel = await db.channel.findUnique({ where: { id: channelId }, select: { name: true } });
     const channelName = channel?.name ?? channelId;
-
-    let dispatchBlockedMessage: string | null = null;
-    {
-      let agentExists: boolean;
-      try {
-        const agents = await listS2SClawAgents();
-        agentExists = agents.some((a) => a.slug === agentSlug);
-      } catch (err) {
-        logger.error(`[DeskReport] failed to check agent existence for ${agentSlug}:`, err);
-        agentExists = true; // fail open on a transient lookup error — let the dispatch attempt itself decide
-      }
-      if (!agentExists) {
-        dispatchBlockedMessage = pref.deskReportAgentSlug?.trim()
-          ? `Agent "${agentSlug}" isn't configured in this workspace. Pick a different agent for Desk Report in Desk Settings → Agent.`
-          : `The default Desk Report agent isn't installed in this workspace yet. Ask an admin to install it, or pick a different agent in Desk Settings → Agent.`;
-      }
-    }
-    if (dispatchBlockedMessage) {
-      logger.warn(`[DeskReport] channel ${channelId}: cannot dispatch — ${dispatchBlockedMessage}`, { channelId, agentSlug });
-      await messageAttachmentRepo.create({
-        entityId: channelId,
-        entityType: DESK_REPORT_ENTITY_TYPE,
-        originalFilename: `${channelName}-desk-report.html`,
-        size: 0,
-        mimetype: 'text/html',
-        url: '',
-        uploadedByUserId: owner.id,
-        createdBy: owner.id,
-        storageProvider: config.fileStorage.provider,
-        conversationId: null,
-        workspaceId,
-        uploadStatus: AttachmentUploadStatus.FAILED,
-        metadata: { rangeDays, agentSlug, triggeredBy: 'cron', error: dispatchBlockedMessage },
-      });
-      return { channelId, success: false, error: dispatchBlockedMessage };
-    }
-    // Reached only when agentSlug was picked AND confirmed to exist above.
-    const resolvedAgentSlug = agentSlug as string;
+    const resolvedAgentSlug = agentSlug;
 
     // Write a pending placeholder first so the sidebar panel can show
-    // "Generating…" while the agent run is in flight.
+    // "Generating…" while the agent run is in flight. The callback URL below
+    // embeds this row's own id so a stale/delayed callback can only ever
+    // complete THIS run's row, never a different pending row for the same channel.
     const sessionId = randomUUID();
-    await messageAttachmentRepo.create({
+    const pending = await messageAttachmentRepo.create({
       entityId: channelId,
       entityType: DESK_REPORT_ENTITY_TYPE,
       originalFilename: `${channelName}-desk-report.html`,
@@ -175,7 +145,7 @@ export class DeskReportGenerationService {
 
     const rangeLabel = rangeDays === 1 ? 'the last 1 day' : `the last ${rangeDays} days`;
     const task = `Generate a desk html report for ${channelName} for ${rangeLabel}.`;
-    const callbackUrl = `${config.backendUrl.replace(/\/$/, '')}/api/internal/desk-report/callback/${encodeURIComponent(channelId)}`;
+    const callbackUrl = `${config.backendUrl.replace(/\/$/, '')}/api/internal/desk-report/callback/${encodeURIComponent(channelId)}/${encodeURIComponent(pending.id)}`;
 
     const { dispatched } = await runClawAgent({
       agentSlug: resolvedAgentSlug,
@@ -189,29 +159,29 @@ export class DeskReportGenerationService {
     });
 
     if (!dispatched) {
+      const errorMessage = pref.deskReportAgentSlug?.trim()
+        ? `Agent "${resolvedAgentSlug}" isn't configured in this workspace. Pick a different agent for Desk Report in Desk Settings → Agent.`
+        : `The default Desk Report agent isn't installed in this workspace yet. Ask an admin to install it, or pick a different agent in Desk Settings → Agent.`;
       logger.warn('[DeskReport] no installed-app webhook for agent — marking failed', {
         channelId,
         agentSlug: resolvedAgentSlug,
       });
-      await this.markLatestPending(channelId, AttachmentUploadStatus.FAILED, 'Agent not installed for this workspace');
-      return { channelId, success: false, error: 'Agent not installed for this workspace' };
+      await this.markPendingFailed(pending.id, errorMessage);
+      return { channelId, success: false, error: errorMessage };
     }
 
     logger.info(`[DeskReport] dispatched report generation for channel ${channelId} (agent=${resolvedAgentSlug})`);
     return { channelId, success: true };
   }
 
-  /** Flip the most recent pending row for a channel to failed, e.g. on dispatch failure. */
-  private async markLatestPending(channelId: string, status: AttachmentUploadStatus.FAILED, errorMessage?: string): Promise<void> {
-    const pending = await db.messageAttachment.findFirst({
-      where: { entityType: DESK_REPORT_ENTITY_TYPE, entityId: channelId, isDeleted: false, uploadStatus: AttachmentUploadStatus.PENDING },
-      orderBy: { createdAt: 'desc' },
-    });
+  /** Flip a specific pending row to failed by id, e.g. on dispatch failure. */
+  private async markPendingFailed(id: string, errorMessage?: string): Promise<void> {
+    const pending = await db.messageAttachment.findUnique({ where: { id } });
     if (!pending) return;
     const metadata = (pending.metadata as Record<string, unknown> | null) ?? {};
     await db.messageAttachment.update({
-      where: { id: pending.id },
-      data: { uploadStatus: status, metadata: { ...metadata, error: errorMessage ?? 'Generation failed' } },
+      where: { id },
+      data: { uploadStatus: AttachmentUploadStatus.FAILED, metadata: { ...metadata, error: errorMessage ?? 'Generation failed' } },
     });
   }
 

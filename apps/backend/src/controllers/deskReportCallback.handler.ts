@@ -68,15 +68,15 @@ function extractHtmlAttachment(
 }
 
 export async function handleDeskReportCallback(
-  req: Request<{ channelId: string }>,
+  req: Request<{ channelId: string; attachmentId: string }>,
   res: Response,
 ): Promise<void> {
-  const { channelId } = req.params;
+  const { channelId, attachmentId } = req.params;
   const payload = (req.body ?? {}) as Record<string, unknown>;
   const sessionId = typeof payload['sessionId'] === 'string' ? payload['sessionId'] : undefined;
   const status = typeof payload['status'] === 'string' ? payload['status'] : undefined;
 
-  logger.info('[DeskReport] callback received', { channelId, sessionId, status });
+  logger.info('[DeskReport] callback received', { channelId, attachmentId, sessionId, status });
 
   try {
     const channel = await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
@@ -88,12 +88,11 @@ export async function handleDeskReportCallback(
     const runScoped = <T>(fn: () => Promise<T>): Promise<T> =>
       runAsServiceActor('desk-report-callback', workspaceId, fn);
 
-    // Only ever matches a row still 'pending' — a stale/duplicated webhook
-    // delivery arriving after the row already settled must never flip an
-    // already-completed (or failed) report.
+    // Matched by the exact row id embedded in the callback URL at dispatch time
     const pending = await runScoped(() =>
       db.messageAttachment.findFirst({
         where: {
+          id: attachmentId,
           entityType: AttachmentEntityType.DESK_REPORT,
           entityId: channelId,
           isDeleted: false,
@@ -102,7 +101,7 @@ export async function handleDeskReportCallback(
       }),
     );
     if (!pending) {
-      logger.warn('[DeskReport] callback: no pending row found for channel — dropping', { channelId, sessionId });
+      logger.warn('[DeskReport] callback: no matching pending row — dropping', { channelId, attachmentId, sessionId });
       res.json({ success: true, persisted: false });
       return;
     }
