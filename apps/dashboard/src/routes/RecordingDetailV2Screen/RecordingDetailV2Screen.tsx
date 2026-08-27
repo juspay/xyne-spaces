@@ -354,10 +354,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
     if (localSessionEnded) scrollContainerRef.current?.scrollTo({ top: 0 });
   }, [localSessionEnded]);
 
-  const liveTabRecordingIdRef = useRef<string | null>(null);
-  if (isLive && recordingId && liveTabRecordingIdRef.current !== recordingId) {
-    liveTabRecordingIdRef.current = recordingId;
-    setTabPreference(requestedTab === 'notes' ? 'notes' : getLiveRecordingV2Tab(recordingId));
+  // Set the default tab once per recording: an explicit `?tab=notes` deep link wins,
+  // otherwise the remembered per-recording pane while it's live, or summary if it's
+  // already ended on arrival (as opposed to watching it end live, which wasLiveRef
+  // below handles).
+  const initialTabRecordingIdRef = useRef<string | null>(null);
+  if (recording && initialTabRecordingIdRef.current !== recordingId) {
+    initialTabRecordingIdRef.current = recordingId ?? null;
+    setTabPreference(
+      requestedTab === 'notes'
+        ? 'notes'
+        : isLive
+          ? getLiveRecordingV2Tab(recordingId)
+          : 'secondary',
+    );
   }
 
   // j/k keyboard navigation between recordings
