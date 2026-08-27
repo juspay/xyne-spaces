@@ -14,7 +14,7 @@ export const CALL_MEDIA_QUALITY_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: '720p', label: '720p', description: 'Lower bandwidth' },
+  { value: '720p', label: '720p', description: 'HD' },
   { value: '1080p', label: '1080p', description: 'Full HD' },
   { value: '1440p', label: '1440p', description: '2K' },
   { value: '2160p', label: '2160p', description: '4K' },
@@ -30,8 +30,36 @@ export const CALL_MEDIA_QUALITY_CONFIG: Record<
   '2160p': { width: 3840, height: 2160, frameRate: 30, maxBitrate: 10_000_000 },
 };
 
+const DETECTED_MAX_CAMERA_HEIGHT_KEY = 'xyne:detected-camera-max-height';
+
+const readStoredMaxCameraHeight = (): number | null => {
+  if (typeof sessionStorage === 'undefined') return null;
+  const parsed = Number(sessionStorage.getItem(DETECTED_MAX_CAMERA_HEIGHT_KEY));
+  return parsed > 0 ? parsed : null;
+};
+
+let detectedMaxCameraHeight: number | null = readStoredMaxCameraHeight();
+
+export const setDetectedMaxCameraHeight = (height: number | null): void => {
+  detectedMaxCameraHeight = height;
+  if (height && typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(DETECTED_MAX_CAMERA_HEIGHT_KEY, String(height));
+  }
+};
+export const getDetectedMaxCameraHeight = (): number | null => detectedMaxCameraHeight;
+
+const getHighestCameraQuality = (): CallMediaQuality => {
+  if (!detectedMaxCameraHeight) return '1080p';
+  const supported = CALL_MEDIA_QUALITY_OPTIONS.filter(
+    option => CALL_MEDIA_QUALITY_CONFIG[option.value].height <= detectedMaxCameraHeight!,
+  );
+  return supported.at(-1)?.value ?? '1080p';
+};
+
 const DEFAULT_SETTINGS: CallMediaQualitySettings = {
-  videoQuality: '2160p',
+  get videoQuality() {
+    return getHighestCameraQuality();
+  },
   screenShareQuality: '2160p',
 };
 
