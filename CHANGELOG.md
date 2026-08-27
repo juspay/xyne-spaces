@@ -1,3 +1,17 @@
+## [1.230.3](https://github.com/juspay/xyne-spaces/compare/v1.230.2...v1.230.3) (2026-08-26)
+
+
+### Bug Fixes
+
+* fixed external call ui bug ([#1110](https://github.com/juspay/xyne-spaces/issues/1110)) ([fc4898f](https://github.com/juspay/xyne-spaces/commit/fc4898fde5877cca0c7f3a615aefee56fedd94e0))
+
+## [1.230.2](https://github.com/juspay/xyne-spaces/compare/v1.230.1...v1.230.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* stop Participants sidebar buttons from dropping clicks in active calls ([#1105](https://github.com/juspay/xyne-spaces/issues/1105)) ([ff5fafa](https://github.com/juspay/xyne-spaces/commit/ff5fafa8e002076687b81581e59b252fa020ec94))
+
 ## [1.230.1](https://github.com/juspay/xyne-spaces/compare/v1.230.0...v1.230.1) (2026-08-26)
 
 
