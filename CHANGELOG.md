@@ -1,3 +1,10 @@
+## [1.240.0](https://github.com/juspay/xyne-spaces/compare/v1.239.0...v1.240.0) (2026-08-27)
+
+
+### Features
+
+* added-context-scope-in-persistant-storage ([#1116](https://github.com/juspay/xyne-spaces/issues/1116)) ([2d14e78](https://github.com/juspay/xyne-spaces/commit/2d14e78093cbb8d70a9474df31f20c6da4cff0f4))
+
 ## [1.239.0](https://github.com/juspay/xyne-spaces/compare/v1.238.0...v1.239.0) (2026-08-27)
 
 
