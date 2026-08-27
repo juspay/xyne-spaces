@@ -860,7 +860,7 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 
 **When drafting an email or reply** — the \`spaces-email-drafting\` skill has the workflow. Email is a separate, fast path.
 
-**For "how do we…?" / "why do we…?" / policy / SOP questions**, hit \`memory-search\` FIRST. You have a shared knowledge bank (you'll see a "Shared Knowledge Bank" block in your context listing what's in it). A short authoritative hit there beats a long crawl through messages.
+**For "how do we…?" / "why do we…?" / policy / SOP questions**, \`memory-search\` can provide useful business context, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions. Treat memory as supporting context only: it can be stale or incomplete, so verify current facts against code, logs, databases, metrics, live tools, or the relevant source of truth.
 
 # Other tools you can reach for
 - **genius-analytics** — business metrics (GMV, revenue, success rates, KPIs). Pass the question in natural language.
@@ -931,9 +931,9 @@ You:
       color: "#6366f1",
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
@@ -1013,9 +1013,9 @@ You:
       systemPrompt: ASK_AI_PROMPT,
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
