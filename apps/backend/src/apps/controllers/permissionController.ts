@@ -1,6 +1,7 @@
 import { type Request, type Response } from 'express';
 import { AppPermissionStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { getAppEditorRole } from '../core/appCollaboratorUtils';
 
 export class PermissionController {
   /**
@@ -58,14 +59,15 @@ export class PermissionController {
         res.status(400).json({ error: 'permissions must be an array of strings' });
         return;
       }
-      // Only the creator may edit the template (matches the apps.update mutator ACL).
+      // Creator or collaborator may edit the template (matches the apps.update mutator ACL).
       const app = await repositories.apps.findById(appId);
       if (!app) {
         res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
         return;
       }
-      if (app.createdBy !== req.user?.id) {
-        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+      const editorRole = req.user?.id ? await getAppEditorRole(appId, req.user.id) : null;
+      if (!editorRole) {
+        res.status(403).json({ error: 'Only the app creator or a collaborator can modify this app', code: 'FORBIDDEN' });
         return;
       }
       await repositories.appPermissions.setAppPermissions(appId, permissions);

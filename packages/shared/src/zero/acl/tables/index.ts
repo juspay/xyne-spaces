@@ -1,5 +1,6 @@
 export { ActivitiesACL } from './activities-acl';
 export { AppsACL } from './apps-acl';
+export { AppCollaboratorsACL } from './app-collaborators-acl';
 export { InstalledAppsACL } from './installed-apps-acl';
 export { CollectionsACL } from './collections-acl';
 export { CollectionItemsACL } from './collection-items-acl';

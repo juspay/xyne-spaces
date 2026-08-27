@@ -89,6 +89,17 @@ const AppsScreen = (): ReactElement => {
     { enabled: view === 'marketplace' },
   );
 
+  // The caller's collaborator rows — collaborators may edit an app template like the creator,
+  // so the Edit/copy gating in AppsTable needs to know which apps I collaborate on.
+  const [myCollaborations] = useCachedQuery(queries.getMyAppCollaborations());
+  const myCollaborationsByAppId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const row of myCollaborations ?? []) {
+      map[row.appId] = row.collaboratorType;
+    }
+    return map;
+  }, [myCollaborations]);
+
   // Org/Marketplace views need to know what's installed in MY workspace (for Installed status
   // and the version-gated Update button). Fetch my installs unpaginated, only on those views.
   const [myInstalls] = useCachedQuery(
@@ -461,6 +472,7 @@ const AppsScreen = (): ReactElement => {
                 dataSource={view === 'installed' ? 'install' : 'app'}
                 installedVersionByAppId={effectiveInstalledVersionByAppId}
                 orgNamesById={effectiveOrgNamesById}
+                myCollaborationsByAppId={myCollaborationsByAppId}
                 {...(view === 'org' ? { onPromote: handlePromoteApp } : {})}
                 canPromote={isXyneAppsAdmin}
                 isPromoting={isPromoting}

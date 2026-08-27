@@ -71,7 +71,22 @@ export class AppsRepository extends BaseRepository<
       updatedAt: now,
     };
 
-    return await this.create(appData);
+    const app = await this.create(appData);
+
+    // Seed the creator as an ADMIN collaborator so every app has an explicit admin who can
+    // manage collaborators (the creator also stays an implicit admin as a fallback).
+    await this.db.appCollaborator.create({
+      data: {
+        workspaceId: creator.workspaceId,
+        appId: app.id,
+        userId: data.createdBy,
+        collaboratorType: 'ADMIN',
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    return app;
   }
 
   async findById(id: string) {

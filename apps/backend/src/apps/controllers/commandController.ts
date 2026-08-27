@@ -11,6 +11,7 @@ import {
 } from '@/database/repositories/appCommandRepository';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { getAppEditorRole } from '../core/appCollaboratorUtils';
 import { SsrfBlockedError } from '@/utils/ssrfGuard';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { ConversationParticipation, MessageType } from '@xyne/shared';
@@ -299,9 +300,10 @@ export class CommandController {
         res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
         return;
       }
-      // Only the creator may edit the template (matches the apps.update mutator ACL).
-      if (app.createdBy !== req.user?.id) {
-        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+      // Creator or collaborator may edit the template (matches the apps.update mutator ACL).
+      const createRole = req.user?.id ? await getAppEditorRole(parsed.appId, req.user.id) : null;
+      if (!createRole) {
+        res.status(403).json({ error: 'Only the app creator or a collaborator can modify this app', code: 'FORBIDDEN' });
         return;
       }
       const command = await appCommandRepository.create(parsed.appId, parsed.body);
@@ -333,9 +335,10 @@ export class CommandController {
         res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
         return;
       }
-      // Only the creator may edit the template (matches the apps.update mutator ACL).
-      if (app.createdBy !== req.user?.id) {
-        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+      // Creator or collaborator may edit the template (matches the apps.update mutator ACL).
+      const updateRole = req.user?.id ? await getAppEditorRole(parsed.appId, req.user.id) : null;
+      if (!updateRole) {
+        res.status(403).json({ error: 'Only the app creator or a collaborator can modify this app', code: 'FORBIDDEN' });
         return;
       }
       const command = await appCommandRepository.update(parsed.appId, parsed.body);
@@ -404,9 +407,10 @@ export class CommandController {
         res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
         return;
       }
-      // Only the creator may edit the template (matches the apps.update mutator ACL).
-      if (app.createdBy !== req.user?.id) {
-        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
+      // Creator or collaborator may edit the template (matches the apps.update mutator ACL).
+      const deleteRole = req.user?.id ? await getAppEditorRole(params.data.appId, req.user.id) : null;
+      if (!deleteRole) {
+        res.status(403).json({ error: 'Only the app creator or a collaborator can modify this app', code: 'FORBIDDEN' });
         return;
       }
       await appCommandRepository.deleteByAppIdNameAndType(
