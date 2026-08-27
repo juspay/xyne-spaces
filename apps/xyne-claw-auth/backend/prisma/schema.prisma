@@ -66,6 +66,7 @@ model User {
   /// digitalTwinEnabled opt-in pattern.
   dailyBriefEnabled   Boolean                @default(false)
   dailyBriefEnabledAt DateTime?
+  dailyBriefActivity  DailyBriefActivity[]
   /// Per-user, per-agent custom instructions (injected into every agent run for
   /// this user) + feature-generated content (first consumer: Daily Brief).
   agentInstructions   UserAgentInstruction[]
@@ -652,6 +653,37 @@ model GeneratedContent {
   @@index([userId, kind, dateBucket])
   @@index([status, kind])
   @@map("generated_content")
+}
+
+/// One row per user per day per activity kind, so a distinct-user count over any
+/// date range is an exact COUNT(DISTINCT) rather than a fixed-window sketch.
+/// Upserted, so repeat activity on the same day bumps `count` instead of adding rows.
+model DailyBriefActivity {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  orgId  String
+
+  /// "view" | "regenerate" | "switch".
+  kind       String
+  /// Calendar bucket the activity happened on (IST), matching GeneratedContent.
+  dateBucket String
+  /// How many times this user did this on this day.
+  count      Int      @default(1)
+  /// Regenerations that signal dissatisfaction — excludes retry_after_failure.
+  /// A counter rather than an origin string: the row is unique per user/kind/day,
+  /// so a single value would be last-write-wins across mixed origins.
+  rejectionCount Int  @default(0)
+  /// First occurrence on this day.
+  occurredAt DateTime @default(now())
+  /// Most recent occurrence on this day.
+  lastSeenAt DateTime @default(now())
+
+  @@unique([userId, kind, dateBucket])
+  @@index([orgId])
+  @@index([kind, dateBucket])
+  @@map("daily_brief_activity")
 }
 
 model AgentChainWorkflow {

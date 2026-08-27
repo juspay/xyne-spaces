@@ -18,8 +18,10 @@ import {
   type DailyBriefPayload,
 } from "../services/dailyBrief.js";
 import {
+  recordDailyBriefOptInChange,
   recordDailyBriefRegeneration,
   recordDailyBriefSwitch,
+  recordDailyBriefViewed,
   type BriefSwitchSource,
 } from "../otel/daily-brief-metrics.js";
 
@@ -64,6 +66,9 @@ router.put("/config", asyncHandler(async (req: Request, res: Response) => {
     if (typeof body.enabled !== "boolean") {
       throw badRequest("enabled must be a boolean");
     }
+    const before = await prisma.user
+      .findUnique({ where: { id: userId }, select: { dailyBriefEnabled: true } })
+      .catch(() => null);
     await prisma.user.update({
       where: { id: userId },
       data: {
@@ -71,6 +76,9 @@ router.put("/config", asyncHandler(async (req: Request, res: Response) => {
         ...(body.enabled ? { dailyBriefEnabledAt: new Date() } : {}),
       },
     });
+    if (before && before.dailyBriefEnabled !== body.enabled) {
+      recordDailyBriefOptInChange(body.enabled);
+    }
   }
 
   if (body.instructions !== undefined || body.instructionsEnabled !== undefined) {
@@ -107,6 +115,7 @@ router.put("/config", asyncHandler(async (req: Request, res: Response) => {
 /** GET /latest — today's stored brief (falls back to the most recent one). */
 router.get("/latest", asyncHandler(async (req: Request, res: Response) => {
   const userId = requireRequester(req);
+  const orgId = getOrgId(req);
   const today = briefDateBucket();
   const todays = await generatedContentRepository.findForBucket(userId, DAILY_BRIEF_KIND, today);
   const row = todays ?? (await generatedContentRepository.findLatest(userId, DAILY_BRIEF_KIND));
@@ -114,6 +123,7 @@ router.get("/latest", asyncHandler(async (req: Request, res: Response) => {
     ok(res, { status: "none" });
     return;
   }
+  if (orgId) void recordDailyBriefViewed(userId, orgId, today);
   ok(res, {
     status: row.status,
     date: row.dateBucket,
@@ -180,6 +190,7 @@ router.get("/by-date/:date", asyncHandler(async (req: Request, res: Response) =>
 router.post("/switched", async (req: Request, res: Response) => {
   try {
     const userId = getRequesterId(req);
+    const orgId = getOrgId(req);
     if (!userId) {
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
@@ -189,7 +200,7 @@ router.post("/switched", async (req: Request, res: Response) => {
     // open the label up to arbitrary cardinality.
     const body = req.body as { source?: unknown };
     const source: BriefSwitchSource = body.source === "date_picker" ? "date_picker" : "history_menu";
-    await recordDailyBriefSwitch(userId, source, briefDateBucket());
+    if (orgId) await recordDailyBriefSwitch(userId, orgId, source, briefDateBucket());
     res.status(204).end();
   } catch (err) {
     log.error("[daily-brief] post switched", err);
@@ -204,6 +215,7 @@ router.post("/switched", async (req: Request, res: Response) => {
  */
 router.post("/regenerate", async (req: Request, res: Response) => {
   const userId = getRequesterId(req);
+  const orgId = getOrgId(req);
   if (!userId) {
     res.status(401).json({ success: false, error: "Unauthorized" });
     return;
@@ -231,12 +243,15 @@ router.post("/regenerate", async (req: Request, res: Response) => {
   const existing = await generatedContentRepository
     .findForBucket(userId, DAILY_BRIEF_KIND, dateBucket)
     .catch(() => null);
-  void recordDailyBriefRegeneration(userId, dateBucket, existing);
+  const attempt = orgId
+    ? await recordDailyBriefRegeneration(userId, orgId, dateBucket, existing)
+    : 1;
   send("start", { date: dateBucket });
   try {
     const result = await generateDailyBrief(userId, {
       signal: abort.signal,
       trigger: "regenerate",
+      attempt,
       onProgress: (label) => send("progress", { label }),
     });
     if (result) {
