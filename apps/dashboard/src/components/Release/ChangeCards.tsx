@@ -187,6 +187,8 @@ const ChangeCard = ({
       <button
         type='button'
         onClick={() => setOpen(prev => !prev)}
+        data-track-category='Release'
+        data-track-name='TOGGLE_CHANGE_CARD'
         className='w-full flex items-center gap-2 px-4 py-3 hover:bg-muted/40 transition-colors text-left'
       >
         <span className='text-xs text-muted-foreground w-3 shrink-0'>{open ? '▼' : '▶'}</span>

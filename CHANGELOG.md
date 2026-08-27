@@ -1,3 +1,18 @@
+## [1.239.0](https://github.com/juspay/xyne-spaces/compare/v1.238.0...v1.239.0) (2026-08-27)
+
+
+### Features
+
+* Generate labels action of the recording pill ([#985](https://github.com/juspay/xyne-spaces/issues/985)) ([ea8d38c](https://github.com/juspay/xyne-spaces/commit/ea8d38cacdce3a163fdfa07e87cf4c5def9f06c0))
+
+
+### Bug Fixes
+
+* All the click metrics to sudoquery ([#1099](https://github.com/juspay/xyne-spaces/issues/1099)) ([7454dda](https://github.com/juspay/xyne-spaces/commit/7454ddae3c676cc13b1767dc778514bb1ca8aa73))
+* guard app navigator history buttons ([#480](https://github.com/juspay/xyne-spaces/issues/480)) ([43c90cf](https://github.com/juspay/xyne-spaces/commit/43c90cfc696bafc2a4f06cb6829ceb367662eb4c))
+* On-demand camera resolutuion selection for video zoomed and cropped issue ([#1085](https://github.com/juspay/xyne-spaces/issues/1085)) ([289939f](https://github.com/juspay/xyne-spaces/commit/289939f851499e767f91596a864a19a9794131f1))
+* show agent display name in progress pill ([#1092](https://github.com/juspay/xyne-spaces/issues/1092)) ([73dc9da](https://github.com/juspay/xyne-spaces/commit/73dc9da68a4c32efb8a0c2b79579e383425bc121))
+
 ## [1.238.0](https://github.com/juspay/xyne-spaces/compare/v1.237.1...v1.238.0) (2026-08-27)
 
 

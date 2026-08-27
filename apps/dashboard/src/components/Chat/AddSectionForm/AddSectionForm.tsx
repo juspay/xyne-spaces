@@ -119,7 +119,14 @@ export const AddSectionForm = ({
         {showError && <p className='text-sm text-destructive'>{nameError}</p>}
       </div>
       <div className='flex justify-end gap-3 pt-2'>
-        <Button variant='outline' size='default' type='button' onClick={onCancel}>
+        <Button
+          variant='outline'
+          size='default'
+          type='button'
+          onClick={onCancel}
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='CANCEL_ADD_SECTION'
+        >
           Cancel
         </Button>
         <Tooltip content={nameError ?? ''} side='top' {...(!nameError && { open: false })}>

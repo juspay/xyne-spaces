@@ -23,6 +23,7 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
 router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+router.post('/recordings/:callId/generate-labels', callController.regenerateRecordingLabels);
 router.get(
   '/recordings/:callId/email-compose-context',
   recordingEmailController.getComposeContext,
