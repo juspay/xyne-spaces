@@ -86,6 +86,7 @@ import { Menu, MenuItem } from "./ui/Menu";
 import { Menu as BaseMenu } from "@base-ui-components/react/menu";
 import { Badge } from "./ui/Badge";
 import { SidePanel } from "./ui/SidePanel";
+import { useSnackbar } from "./ui/Snackbar";
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 
@@ -109,6 +110,125 @@ function fmtDateShort(iso: string): string {
   const now = new Date();
   if (d.toDateString() === now.toDateString()) return fmtTime(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatAttachmentSize(size?: number): string | null {
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) return null;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function attachmentKindLabel(attachment: ChatAttachmentMeta): string {
+  const name = attachment.originalFilename.toLowerCase();
+  const mime = attachment.mimeType.toLowerCase();
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (mime.startsWith("image/")) return "Image";
+  if (mime.startsWith("video/")) return "Video";
+  if (mime.includes("zip") || name.endsWith(".zip")) return "ZIP";
+  if (mime.includes("presentation") || name.endsWith(".pptx")) return "PPTX";
+  if (mime.includes("spreadsheet") || name.endsWith(".xlsx") || name.endsWith(".csv")) return "Sheet";
+  return "File";
+}
+
+async function fetchChatAttachmentBlob(attachment: ChatAttachmentMeta, userId: string): Promise<Blob> {
+  const response = await fetch(chatAttachmentDownloadUrl(attachment.id), {
+    credentials: "include",
+    headers: { "x-user-id": userId },
+  });
+  if (!response.ok) throw new Error(`Download failed: HTTP ${response.status}`);
+  return response.blob();
+}
+
+function ChatAttachmentList({
+  attachments,
+  userId,
+  align = "left",
+}: {
+  attachments: ChatAttachmentMeta[];
+  userId: string;
+  align?: "left" | "right";
+}) {
+  const { show: showSnackbar } = useSnackbar();
+  if (!attachments.length) return null;
+
+  const openAttachment = async (attachment: ChatAttachmentMeta): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(await fetchChatAttachmentBlob(attachment, userId));
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Could not open attachment",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
+
+  const downloadAttachment = async (attachment: ChatAttachmentMeta): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(await fetchChatAttachmentBlob(attachment, userId));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.originalFilename;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      showSnackbar({
+        variant: "success",
+        title: "Download complete",
+        description: `${attachment.originalFilename} has been downloaded successfully`,
+      });
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Download failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
+
+  return (
+    <div className={`flex flex-col gap-2 ${align === "right" ? "items-end" : "items-start"}`}>
+      {attachments.map((attachment) => {
+        const kind = attachmentKindLabel(attachment);
+        const size = formatAttachmentSize(attachment.size);
+        return (
+          <div
+            key={attachment.id}
+            data-id="chat-attachment-card"
+            className="flex w-[min(420px,75vw)] items-center gap-3 rounded-[12px] border border-xyne-border bg-xyne-surface px-3 py-2 shadow-sm"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-xyne-surface-subtle text-[10px] font-bold uppercase text-xyne-fg-secondary ring-1 ring-xyne-border-subtle">
+              {kind === "File" ? <FileIcon size={18} /> : kind}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-semibold text-xyne-fg-primary">{attachment.originalFilename}</p>
+              <p className="truncate text-[11px] text-xyne-fg-muted">
+                {[kind, size].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="rounded-md border border-xyne-border-subtle px-2 py-1 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                onClick={() => { void openAttachment(attachment); }}
+              >
+                View
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-xyne-border-subtle px-2 py-1 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                onClick={() => { void downloadAttachment(attachment); }}
+              >
+                Download
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 
@@ -1660,6 +1780,9 @@ function MessageThread({
                     {stripMalformedCitations(msg.content)}
                   </div>
                 )}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <ChatAttachmentList attachments={msg.attachments} userId={userId} align="right" />
+                )}
                 {ts && (
                   <span className="mr-1 flex items-center gap-1 text-[11px] text-xyne-fg-muted">
                     <TimerIcon size={10} />
@@ -1773,7 +1896,11 @@ function MessageThread({
                 </div>
               )}
 
-              {ts && !isStream && (hasText || hasInvocations) && (
+              {msg.attachments && msg.attachments.length > 0 && (
+                <ChatAttachmentList attachments={msg.attachments} userId={userId} />
+              )}
+
+              {ts && !isStream && (hasText || hasInvocations || (msg.attachments?.length ?? 0) > 0) && (
                 <div className="ml-1 flex items-center gap-2 text-[11px] text-xyne-fg-muted">
                   <span className="flex items-center gap-1">
                     <TimerIcon size={10} />
