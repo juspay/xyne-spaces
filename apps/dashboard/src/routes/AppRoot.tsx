@@ -1108,7 +1108,7 @@ export const router = createBrowserRouter(
                     { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                     { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
                     { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
-                  {
+                    {
                       path: 'knowledge',
                       element: <AIKnowledgeScreen />,
                       children: [
