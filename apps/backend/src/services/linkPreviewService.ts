@@ -1,46 +1,8 @@
 import axios, { AxiosResponse } from 'axios';
 import { parse } from 'node-html-parser';
 import {logger} from '@/utils/logger';
-import http from 'node:http';
-import https from 'node:https';
-import { resolveExternalHostPinned, type PinnedHost } from '@/utils/ssrfGuard';
+import { resolveExternalHostPinned, pinnedAgentsFor } from '@/utils/ssrfGuard';
 import { config } from '@/config/env';
-
-/**
- * HTTP/HTTPS agents whose DNS lookup is fixed to addresses that already passed the
- * SSRF check, closing the window between validating a name and connecting to it.
- *
- * Any hostname other than the one that was validated fails closed — a redirect is
- * re-validated by the caller and gets its own agents, so a lookup for anything else
- * here means something is wrong. keepAlive stays off so the pinned socket cannot be
- * reused for a later request to the same host under a different verdict.
- */
-function pinnedAgents(hostname: string, pinned: PinnedHost) {
-  const lookup = (
-    host: string,
-    options: { all?: boolean },
-    callback: (
-      err: NodeJS.ErrnoException | null,
-      address: string | Array<{ address: string; family: number }>,
-      family?: number,
-    ) => void,
-  ): void => {
-    if (host !== hostname) {
-      callback(new Error(`Refusing to resolve unexpected host "${host}"`), '', 4);
-      return;
-    }
-    if (options?.all) {
-      callback(null, pinned.addresses.map((address) => ({ address, family: pinned.family })));
-      return;
-    }
-    callback(null, pinned.addresses[0]!, pinned.family);
-  };
-
-  return {
-    httpAgent: new http.Agent({ keepAlive: false, lookup: lookup as never }),
-    httpsAgent: new https.Agent({ keepAlive: false, lookup: lookup as never }),
-  };
-}
 
 export interface ExternalLinkMetadata {
   type?: 'external';
@@ -186,7 +148,7 @@ export class LinkPreviewService {
         // the name again. The URL is unchanged, so TLS still verifies against the
         // hostname; only address selection is fixed. Without this the client's own
         // lookup can return a different answer from the one that was checked.
-        ...(pinned ? pinnedAgents(parsed.hostname, pinned) : {}),
+        ...(pinned ? pinnedAgentsFor(parsed.hostname, pinned) : {}),
       });
 
       // Not a redirect → this is the final response.

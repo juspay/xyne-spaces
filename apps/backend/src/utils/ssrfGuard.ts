@@ -1,5 +1,7 @@
 
 import { promises as dns } from 'node:dns';
+import http from 'node:http';
+import https from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -195,6 +197,52 @@ export async function resolveExternalHostPinned(
   }
 
   return safeV4.length > 0 ? { family: 4, addresses: safeV4 } : { family: 6, addresses: safeV6 };
+}
+
+/**
+ * HTTP/HTTPS agents whose DNS lookup is fixed to addresses that already passed
+ * validation, so the connection cannot land somewhere other than what was checked.
+ *
+ * Lives beside resolveExternalHostPinned because the two are a pair: one decides
+ * which addresses are permissible, the other is what holds the request to them.
+ * Splitting them invites a caller to take the verdict and then connect however it
+ * likes, which is the gap this closes.
+ *
+ * The request URL keeps its hostname, so SNI and certificate verification still
+ * happen against the name — only address selection is fixed. Any hostname other
+ * than the validated one fails closed: a redirect is re-validated by the caller and
+ * receives its own agents, so a lookup for anything else means something is wrong.
+ * keepAlive is off so a pinned socket cannot be reused for a later request to the
+ * same host under a different verdict.
+ */
+export function pinnedAgentsFor(
+  hostname: string,
+  pinned: PinnedHost,
+): { httpAgent: http.Agent; httpsAgent: https.Agent } {
+  const lookup = (
+    host: string,
+    options: { all?: boolean },
+    callback: (
+      err: NodeJS.ErrnoException | null,
+      address: string | Array<{ address: string; family: number }>,
+      family?: number,
+    ) => void,
+  ): void => {
+    if (host !== hostname) {
+      callback(new Error(`Refusing to resolve unexpected host "${host}"`), '', 4);
+      return;
+    }
+    if (options?.all) {
+      callback(null, pinned.addresses.map((address) => ({ address, family: pinned.family })));
+      return;
+    }
+    callback(null, pinned.addresses[0]!, pinned.family);
+  };
+
+  return {
+    httpAgent: new http.Agent({ keepAlive: false, lookup: lookup as never }),
+    httpsAgent: new https.Agent({ keepAlive: false, lookup: lookup as never }),
+  };
 }
 
 /**
