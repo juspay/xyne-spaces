@@ -2974,10 +2974,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
   const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return undefined;
-    const uniqueTags = new Set(projectTags.map(tag => tag.name));
-    return Array.from(uniqueTags).sort();
-  }, [projectTags]);
+    if (projectTags && projectTags.length > 0) {
+      const uniqueTags = new Set(projectTags.map(tag => tag.name));
+      return Array.from(uniqueTags).sort();
+    }
+    // My Tickets view (no project context): derive tags from already-loaded tickets
+    const tagSet = new Set<string>();
+    tagsByTicketId.forEach(tags => tags.forEach(tag => tagSet.add(tag.name)));
+    return tagSet.size > 0 ? Array.from(tagSet).sort() : undefined;
+  }, [projectTags, tagsByTicketId]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
