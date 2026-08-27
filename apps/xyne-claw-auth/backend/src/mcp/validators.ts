@@ -274,8 +274,23 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
 register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
   const artifactType = String(params["artifactType"] ?? "");
   const action = String(params["action"] ?? "");
-  if (!["WIKI", "BASELINE", "PRD", "TECH_DOC"].includes(artifactType)) {
-    return "artifactType must be WIKI, BASELINE, PRD, or TECH_DOC";
+  const folderId = String(params["folderId"] ?? "").trim();
+  if (folderId && action === "create") {
+    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+    for (const key of ["title", "markdown", "trackId"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
+    }
+    return null;
+  }
+  if (!artifactType && action === "update") {
+    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+    for (const key of ["canvasId", "markdown"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
+    }
+    return null;
+  }
+  if (!["WIKI", "BASELINE"].includes(artifactType)) {
+    return "artifactType must be WIKI or BASELINE (artifact creates use folderId; updates use canvasId)";
   }
   if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
   if (artifactType === "BASELINE") {
@@ -288,22 +303,6 @@ register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
     if (action === "upsert_section") {
       for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
         if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
-      }
-    }
-    return null;
-  }
-  if (artifactType === "PRD" || artifactType === "TECH_DOC") {
-    if (!["create", "update"].includes(action)) return `${artifactType} action must be create or update`;
-    if (action === "create") {
-      for (const key of ["title", "markdown"]) {
-        if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
-      }
-      if (artifactType === "TECH_DOC" && !String(params["parentCanvasId"] ?? "").trim()) {
-        return "parentCanvasId is required for TECH_DOC create";
-      }
-    } else {
-      for (const key of ["canvasId", "markdown"]) {
-        if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
       }
     }
     return null;
