@@ -31,6 +31,7 @@ import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
 import * as skillManagement from "./skill-management/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
+import * as reactArtifact from "./react-artifact/index.js";
 import * as recordSkill from "./record-skill/index.js";
 import * as agentTools from "./agent-tools/index.js";
 
@@ -133,6 +134,7 @@ register(researchAgent.reviewPullRequest);
 // Register create-ppt tools
 register(createPpt.createPptTool);
 register(createPpt.editPptTool);
+register(reactArtifact.createReactArtifactTool);
 
 // Register create-html-report tool — renders a markdown report into a
 // standalone HTML file and attaches it, leaving a short summary inline in

@@ -147,6 +147,8 @@ interface PersistedAttachment {
   mimeType: string;
   originalFilename: string;
   size: number;
+  /** Allowlisted subset of ChatAttachment.metadata — see persistRunStreamResult. */
+  metadata?: { reactArtifact: unknown };
 }
 
 type StreamBusEvent =
@@ -290,6 +292,11 @@ export async function persistRunStreamResult(args: {
         const safeName = att.fileName.replace(/[^\w.\-]+/g, "_").slice(0, 200);
         const destPath = `chat-attachments/${args.userId}/${year}/${month}/${Date.now()}-${randomUUID()}-${safeName}`;
         await gcsService.uploadFile(buffer, destPath, att.mimeType);
+        // Tool-supplied metadata (e.g. create-react-artifact's manifest) rides
+        // the attachment rather than the tool-result text, which pi truncates.
+        // Without persisting it here the artifact would survive a reload only
+        // via the /agents/:convId/messages path and be missing from this run.
+        const hasMetadata = att.metadata && Object.keys(att.metadata).length > 0;
         const row = await prisma.chatAttachment.create({
           data: {
             chatMessageId: assistantMsg.id,
@@ -299,13 +306,18 @@ export async function persistRunStreamResult(args: {
             originalFilename: att.fileName,
             mimeType: att.mimeType,
             size: buffer.length,
+            ...(hasMetadata ? { metadata: att.metadata as import("@prisma/client").Prisma.InputJsonValue } : {}),
           },
         });
+        // Only `reactArtifact` goes back over the wire — the same allowlist the
+        // message-history serializer applies, so `url` never reaches a client.
+        const reactArtifact = att.metadata?.["reactArtifact"];
         persistedAttachments.push({
           id: row.id,
           mimeType: row.mimeType,
           originalFilename: row.originalFilename,
           size: row.size,
+          ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
         });
       } catch (attErr) {
         log.error(`[run-stream] Failed to persist attachment ${att.fileName}:`, errMsg(attErr));

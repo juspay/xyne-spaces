@@ -41,6 +41,8 @@ import { organizationsRouter } from "./routes/organizations.js";
 import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { agentChatRouter, agentChatInternalRouter } from "./routes/agent-chat.js";
+import { artifactAppsRouter } from "./routes/artifact-apps.js";
+import { artifactAppAgentsRouter } from "./routes/artifact-app-agents.js";
 import { designSharesRouter, publicDesignSharesRouter } from "./routes/design-shares.js";
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
 import { experimentsInternalRouter } from "./routes/experiments-internal.js";
@@ -215,6 +217,8 @@ app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
 app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
 app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
+app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
+app.use(`${BASE}/artifact-app-agents`, requireAuth, artifactAppAgentsRouter);
 app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designSharesRouter);
 app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw

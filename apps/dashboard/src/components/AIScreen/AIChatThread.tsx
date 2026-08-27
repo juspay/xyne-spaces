@@ -68,6 +68,7 @@ import {
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
+import { MessageReactArtifacts } from './ReactArtifact';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -1169,6 +1170,17 @@ function ChatMessageBubble({
               ) : (
                 renderAnswerBlock(displayContent)
               )}
+            </div>
+          )}
+
+          {!isUser && <MessageReactArtifacts message={message} />}
+
+          {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool) */}
+          {!isUser && message.attachments && message.attachments.length > 0 && (
+            <div className='mt-2 space-y-2'>
+              {message.attachments.map((attachment, index) => (
+                <AttachmentPreview key={index} attachment={attachment} />
+              ))}
             </div>
           )}
 

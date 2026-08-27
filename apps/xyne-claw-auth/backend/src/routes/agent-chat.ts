@@ -2282,16 +2282,25 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       ? await agentRunRepository.listByConversation(req.params.convId, userId)
       : await agentRunRepository.listByUser(userId || "", { conversationId: req.params.convId });
 
-    // Strip internal GCS paths from attachment metadata before sending to client
+    // Strip internal GCS paths from attachment metadata before sending to client.
+    // `reactArtifact` is the one metadata key allowed through: it is the small
+    // manifest (title/entry/file paths/dep names) the dashboard's artifact card
+    // renders from, and it carries no storage paths. Everything else — including
+    // slideJson, which has its own ACL'd endpoint — stays server-side. Keep this
+    // an explicit allowlist: passing `a.metadata` wholesale would leak `url`.
     const serialized = messages.map((m) => {
-      const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null }> }).attachments ?? [];
-      const attachments = attachmentsRaw.map((a) => ({
-        id: a.id,
-        mimeType: a.mimeType,
-        originalFilename: a.originalFilename,
-        width: a.width,
-        height: a.height,
-      }));
+      const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null; metadata?: Record<string, unknown> | null }> }).attachments ?? [];
+      const attachments = attachmentsRaw.map((a) => {
+        const reactArtifact = a.metadata && typeof a.metadata === "object" ? a.metadata["reactArtifact"] : undefined;
+        return {
+          id: a.id,
+          mimeType: a.mimeType,
+          originalFilename: a.originalFilename,
+          width: a.width,
+          height: a.height,
+          ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
+        };
+      });
       return { ...m, attachments };
     });
 
@@ -2983,9 +2992,14 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // Get all messages for this user+agent, grouped by conversation
     const allMessages = await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
 
-    // Group by conversationId
+    // Group by conversationId, skipping artifact-app threads. Those are real,
+    // durable conversations, but their prompts are written by app code on the
+    // user's behalf — surfacing them here would bury the user's own chats under
+    // machine-generated ones. They stay visible in the Agent Control Center via
+    // triggerSource "app". The id prefix is the marker, same as "scheduled_".
     const convMap = new Map<string, typeof allMessages>();
     for (const msg of allMessages) {
+      if (msg.conversationId.startsWith("app_")) continue;
       const list = convMap.get(msg.conversationId) ?? [];
       list.push(msg);
       convMap.set(msg.conversationId, list);

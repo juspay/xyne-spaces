@@ -7,6 +7,7 @@ import AgentsV2 from './agents/AgentsV2';
 import SubagentsV2 from './subagents/SubagentsV2';
 import SkillsV2 from './skills/SkillsV2';
 import McpV2 from './mcp/McpV2';
+import AppsV2 from './apps/AppsV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
 
 interface LibraryTab {
@@ -44,6 +45,14 @@ const LIBRARY_TABS = [
     label: 'MCP',
     content: McpV2,
     searchPlaceholder: 'Search MCP servers',
+    create: null,
+  },
+  {
+    id: 'apps',
+    label: 'Apps',
+    content: AppsV2,
+    searchPlaceholder: 'Search apps',
+    // Apps are created by saving one out of a chat, never from a blank form.
     create: null,
   },
 ] as const satisfies readonly LibraryTab[];

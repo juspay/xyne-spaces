@@ -3211,6 +3211,28 @@ async function processTask(
       }
     }
 
+    // An artifact app must NEVER be able to build another artifact app. Left
+    // alone, an app that asks its agent to "make me a dashboard for this" gets
+    // one, whose agent can be asked again — the same unbounded self-replication
+    // the schedule-task ban above exists to stop, with the same inability to
+    // kill it from the outside once a chain is in flight. Apps also lose
+    // schedule-task, so one cannot arm a cron that keeps invoking agents after
+    // the user has closed and forgotten it.
+    //
+    // This filter is the AUTHORITATIVE half of the guard. claw-auth also strips
+    // both slugs from tools.custom at dispatch, but that alone is not enough:
+    // an agent with no tools config gets every tool by default, so there would
+    // be nothing there to filter.
+    const isArtifactAppRun =
+      eventType === "artifact_app" || (conversationId?.startsWith("app_") ?? false);
+    if (isArtifactAppRun) {
+      const before = allTools.length;
+      allTools = allTools.filter((t) => t.name !== "create-app" && t.name !== "schedule-task");
+      if (allTools.length !== before) {
+        log("Artifact-app run — create-app + schedule-task removed (self-replication ban)");
+      }
+    }
+
     // Read-only routing (sbx-git): scheduled / automation runs are diverted to
     // the SHARED read-only sbx-git sandbox (see sandboxRepoSetup → resolveSbxGit),
     // so they must not carry mutating sandbox tools. Strip them here as the

@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./tools": "./src/tools/index.ts",
     "./tools/pgm": "./src/tools/pgm/index.ts",
-    "./tools/google": "./src/tools/google/index.ts"
+    "./tools/google": "./src/tools/google/index.ts",
+    "./tools/react-artifact": "./src/tools/react-artifact/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
