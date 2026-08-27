@@ -19,6 +19,7 @@
  */
 
 import { Prisma } from "@prisma/client";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 
 import { createLogger } from "../logger.js";
@@ -245,7 +246,7 @@ export async function selectNegativeSessions(opts: {
   `).catch((err) => {
     // ChatMessage table might not exist in some environments; the agent_runs
     // branch alone is still useful. Log and degrade.
-    log.warn("[failure-curator] frustrated query failed, returning empty:", err instanceof Error ? err.message : String(err));
+    log.warn("[failure-curator] frustrated query failed, returning empty:", errMsg(err));
     return [] as Array<{
       sessionId: string; completedAt: Date; conversationId: string | null;
       userId: string; task: string; result: string | null; error: string | null;

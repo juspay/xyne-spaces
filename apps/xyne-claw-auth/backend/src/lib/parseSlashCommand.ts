@@ -27,6 +27,9 @@ export type SlashCommand =
   // `/queue` — show the messages currently waiting behind the active run for
   // this conversation (the mid-run message queue). Read-only; short-circuits.
   | { kind: "queueShow" }
+  // `/queue <message>` — append a message behind the active run without
+  // interrupting it. Short-circuits after enqueueing.
+  | { kind: "queueAdd"; message: string }
   // `/queue clear` — drop the messages waiting behind the active run (does NOT
   // stop the current run — that's `/stop`). Short-circuits.
   | { kind: "queueClear" }
@@ -114,6 +117,13 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   // `/queue` — exact match only; show the mid-run message queue for this thread.
   if (lower === "/queue") {
     return { kind: "queueShow" };
+  }
+  // `/queue <message>` — explicit opt-out from same-user interrupt-with-reply.
+  // It appends the message behind the active run and does not touch that run.
+  if (lower.startsWith("/queue ")) {
+    const message = trimmed.slice("/queue ".length).trim();
+    if (message.length === 0) return { kind: "queueShow" };
+    return { kind: "queueAdd", message: message.slice(0, 20_000) };
   }
   // `/compact` or `/compact <instructions>`.
   if (lower === "/compact") {
