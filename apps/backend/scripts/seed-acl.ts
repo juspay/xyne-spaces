@@ -69,7 +69,7 @@ const ESSENTIAL_RESOURCES = [
   {
     name: 'RELEASE-MANAGER',
     description:
-      'Release Manager tab and repository commit-analysis endpoints (/api/commits/analyze/*). Granted per-user so release access is decoupled from workspace admin/owner privilege.',
+      'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.',
   },
 ];
 

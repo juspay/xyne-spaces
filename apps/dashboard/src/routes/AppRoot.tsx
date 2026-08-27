@@ -1486,11 +1486,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'releaseManager',
-                  element: (
-                    <ResourceProtectedRoute resourceName='RELEASE-MANAGER' minAccess='READ'>
-                      <ReleaseManagerView />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <ReleaseManagerView />,
                 },
                 {
                   path: 'listProjects/:projectId',

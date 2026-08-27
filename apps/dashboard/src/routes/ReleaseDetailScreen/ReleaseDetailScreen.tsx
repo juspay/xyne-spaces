@@ -18,9 +18,9 @@ import {
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { AccessType, FormContextType, FormEntityType } from '@xyne/shared';
-import { usePermissions } from '../../hooks/usePermissions';
+import { FormContextType, FormEntityType } from '@xyne/shared';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
@@ -477,16 +477,6 @@ const ReleaseDetailScreen = (): ReactElement => {
   // which loads the release ticket's deployedCommitId / newCommitId / branch
   // from form values, then dispatches the same analysis pipeline as create.
   const [isReRunning, setIsReRunning] = useState(false);
-  // Re-run spends the VCS token, so gate it behind RELEASE-MANAGER (matches the
-  // backend authorize on POST /re-run). The screen itself stays open to members.
-  const permissions = usePermissions();
-  const canReRunAnalysis = permissions.some(
-    permission =>
-      permission.resourceName === 'RELEASE-MANAGER' &&
-      (permission.accessType === AccessType.READ ||
-        permission.accessType === AccessType.WRITE ||
-        permission.accessType === AccessType.ADMIN),
-  );
   const handleReRunAnalysis = async (): Promise<void> => {
     if (!releaseTicketId) return;
     setIsReRunning(true);
@@ -502,8 +492,7 @@ const ReleaseDetailScreen = (): ReactElement => {
         toast.error(response.data?.error ?? 'Re-run failed');
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Re-run failed';
-      toast.error(msg);
+      toast.error(getApiErrorMessage(err, 'Re-run failed'));
     } finally {
       setIsReRunning(false);
     }
@@ -959,23 +948,21 @@ const ReleaseDetailScreen = (): ReactElement => {
                       </DropdownMenu.Portal>
                     </DropdownMenu.Root>
                   )}
-                  {canReRunAnalysis && (
-                    <button
-                      type='button'
-                      onClick={() => void handleReRunAnalysis()}
-                      disabled={isReRunning || !releaseTicketId}
-                      data-track-event='BUTTON_CLICK'
-                      data-track-category='Release'
-                      data-track-name='ReRunCommitAnalysis'
-                      data-track-metadata={JSON.stringify({ releaseTicketId })}
-                      data-testid='rerun-commit-analysis'
-                      title='Re-run commit analysis with the current release configuration — useful after fixing Application regex / paths.'
-                      className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
-                    >
-                      <RefreshCw size={15} className={isReRunning ? 'animate-spin' : ''} />
-                      {isReRunning ? 'Re-running…' : 'Re-run Analysis'}
-                    </button>
-                  )}
+                  <button
+                    type='button'
+                    onClick={() => void handleReRunAnalysis()}
+                    disabled={isReRunning || !releaseTicketId}
+                    data-track-event='BUTTON_CLICK'
+                    data-track-category='Release'
+                    data-track-name='ReRunCommitAnalysis'
+                    data-track-metadata={JSON.stringify({ releaseTicketId })}
+                    data-testid='rerun-commit-analysis'
+                    title='Re-run commit analysis with the current release configuration — useful after fixing Application regex / paths.'
+                    className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                  >
+                    <RefreshCw size={15} className={isReRunning ? 'animate-spin' : ''} />
+                    {isReRunning ? 'Re-running…' : 'Re-run Analysis'}
+                  </button>
                   <button
                     type='button'
                     onClick={() => void exportDevTickets()}

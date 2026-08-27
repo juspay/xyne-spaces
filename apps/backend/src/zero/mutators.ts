@@ -924,6 +924,25 @@ export function createMutators(
   asyncTasks: Array<() => Promise<void>>,
   awaitedPostCommitTasks: Array<() => Promise<void>>,
 ) {
+  // Release-config edits are open to workspace/org ADMIN and OWNER by role, and
+  // to anyone individually granted RELEASE-MANAGER WRITE. Mirrors the HTTP
+  // authorizePrivilegedOrResource middleware.
+  const assertReleaseManageAccess = async (): Promise<void> => {
+    const isPrivileged =
+      authData.role === WorkspaceRole.ADMIN ||
+      authData.role === WorkspaceRole.OWNER ||
+      authData.orgRole === OrgRole.ADMIN ||
+      authData.orgRole === OrgRole.OWNER;
+    if (isPrivileged) return;
+    const resource = await repositories.resources.findByName('RELEASE-MANAGER');
+    if (
+      !resource ||
+      !(await repositories.resourceAccess.hasAccess(authData.sub, resource.id, AccessType.WRITE))
+    ) {
+      throw new Error('This endpoint requires administrator or owner privileges');
+    }
+  };
+
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -6944,6 +6963,8 @@ export function createMutators(
             applications: rawApplications,
           },
         }) => {
+          await assertReleaseManageAccess();
+
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
@@ -8051,6 +8072,10 @@ export function createMutators(
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          if (board.boardType === BoardType.RELEASE) {
+            await assertReleaseManageAccess();
           }
 
           const [ownedApplication, applicationBoardOwner] = await Promise.all([

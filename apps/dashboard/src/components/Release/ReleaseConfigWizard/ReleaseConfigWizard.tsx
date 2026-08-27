@@ -19,6 +19,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { cn } from '../../../utils/classNames';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { SearchChannel } from '../../ui/SearchChannel/SearchChannel';
 import { ChannelScopeType } from '@xyne/shared';
 import { useReleaseConfigForm } from './useReleaseConfigForm';
@@ -621,8 +622,7 @@ const ReleaseConfigWizardForm = ({
       );
       setConnectionTest(response.data);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Test failed';
-      setConnectionTest({ ok: false, message: msg });
+      setConnectionTest({ ok: false, message: getApiErrorMessage(err, 'Test failed') });
     } finally {
       setIsTestingConnection(false);
     }

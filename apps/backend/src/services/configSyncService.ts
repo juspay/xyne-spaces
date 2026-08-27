@@ -224,7 +224,7 @@ export class ConfigSyncService {
         await prisma.resource.create({
           data: {
             name: 'RELEASE-MANAGER',
-            description: 'Release Manager tab and repository commit-analysis endpoints (/api/commits/analyze/*)'
+            description: 'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.'
           }
         });
         logger.info('Successfully created RELEASE-MANAGER resource');

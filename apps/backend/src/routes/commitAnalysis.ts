@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { authorize } from '@/middleware/authorize';
+import { authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { CommitAnalysisController } from '@/controllers/commitAnalysisController';
 import { testRepoConnection } from '@/services/release/repoInspector';
 import { AccessType, BaseTicketType, FormEntityType } from '@xyne/shared';
@@ -19,7 +19,7 @@ router.get('/latest-deployed-commit', commitAnalysisController.getLatestDeployed
 // Re-run commit analysis for an existing release ticket. Used by the "Re-run"
 // button on the Release Detail screen — saves the create-delete-recreate dance
 // when the user iterates on Application regex / paths config.
-router.post('/re-run/:ticketId', authorize('RELEASE-MANAGER', AccessType.READ), async (req: Request, res: Response): Promise<void> => {
+router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
   const { ticketId } = req.params;
   const userId = req.user?.id;
   if (!userId) {
@@ -134,7 +134,7 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
   }
 });
 
-router.post('/test-connection', authorize('RELEASE-MANAGER', AccessType.READ), async (req: Request, res: Response): Promise<void> => {
+router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
   const { repoUrl } = req.body as { repoUrl?: string };
   if (!repoUrl) {
     res.status(400).json({ ok: false, message: 'repoUrl is required' });
