@@ -12,8 +12,14 @@ import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-he
  *
  * Now mirrors the (already-correct) `CanvasParticipantsACL`:
  *   - same workspace, AND
- *   - creator, OR PUBLIC, OR a direct/group/channel participant, OR the canvas
- *     lives in a channel the caller is a member of.
+ *   - creator, OR PUBLIC, OR a direct / user-group / channel-share participant.
+ *
+ * Deliberately NOT an arm: membership of the canvas' home `channelId`. Call PRD
+ * and detailed-summary canvases are created PRIVATE with `channelId` set and
+ * access granted explicitly (callDocumentService), and neither
+ * `canvasAuthService.checkCanvasAccess` nor the Zero read filter
+ * (`applyCanvasVisibilityQueryFilter`) treats home-channel membership as
+ * access. Adding it here would let any channel member read those documents.
  */
 export class CanvasesACL extends BaseQueryACL<
   Prisma.CanvasWhereInput,
@@ -56,16 +62,13 @@ export class CanvasesACL extends BaseQueryACL<
     if (userGroupIds.length) participantMatchers.push({ userGroupId: { in: userGroupIds } })
     if (channelIds.length) participantMatchers.push({ channelId: { in: channelIds } })
 
-    const or: Prisma.CanvasWhereInput[] = [
-      { createdBy: userId },
-      { visibility: 'PUBLIC' },
-      { participants: { some: { OR: participantMatchers } } },
-    ]
-    if (channelIds.length) or.push({ channelId: { in: channelIds } })
-
     return {
       workspaceId: this.ctx.workspaceId,
-      OR: or,
+      OR: [
+        { createdBy: userId },
+        { visibility: 'PUBLIC' },
+        { participants: { some: { OR: participantMatchers } } },
+      ],
     }
   }
 
