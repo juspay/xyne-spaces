@@ -19,6 +19,7 @@
  */
 
 import { createLogger } from "../logger.js";
+import { errMsg } from "./errors.js";
 
 const log = createLogger("mention-transform");
 
@@ -262,7 +263,7 @@ export async function resolveUnboundMentions(
           });
         }
       } catch (err) {
-        log.warn(`[mention] byName "${name}" threw: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[mention] byName "${name}" threw: ${errMsg(err)}`);
         // Swallow per-name failures so one bad lookup doesn't kill the post.
       }
     }),
@@ -280,7 +281,7 @@ export async function resolveUnboundMentions(
           });
         }
       } catch (err) {
-        log.warn(`[mention] byEmail "${email}" threw: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[mention] byEmail "${email}" threw: ${errMsg(err)}`);
       }
     }),
     ...[...handlesToResolve].map(async (handle) => {
@@ -294,7 +295,7 @@ export async function resolveUnboundMentions(
           });
         }
       } catch (err) {
-        log.warn(`[mention] byHandle "${handle}" threw: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[mention] byHandle "${handle}" threw: ${errMsg(err)}`);
         // Same fallthrough as above.
       }
     }),
@@ -310,7 +311,7 @@ export async function resolveUnboundMentions(
           });
         }
       } catch (err) {
-        log.warn(`[mention] byGroupAlias "${alias}" threw: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[mention] byGroupAlias "${alias}" threw: ${errMsg(err)}`);
         // Same fallthrough as above.
       }
     }),

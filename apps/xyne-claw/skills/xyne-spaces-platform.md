@@ -98,7 +98,7 @@ Per-user stream of mentions, replies, assignments, notifications. Reach: **`spac
 
 ## Knowledge base / shared memory — the authoritative shortcut
 
-Verified facts, decisions, and SOPs captured across past sessions. Reach: **`memory-search`**. **Best first stop** for "how do we…?", "why do we…?", "what's the policy on…?". A short authoritative hit here beats a long crawl through messages. You'll see a "Shared Knowledge Bank" block at the top of your context listing the subsystem clusters that have memories — use those names with the `subsystem` filter to narrow. Memories can go stale: if one contradicts something the user just said or just happened live, trust the live data.
+Business knowledge, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions captured across past sessions. Reach: **`memory-search`** when that context helps. Treat memory as supporting context only: it can be stale or incomplete, so verify current facts against code, logs, databases, metrics, live tools, or the current conversation.
 
 ## Automations & scheduled messages
 

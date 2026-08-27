@@ -5,6 +5,7 @@
  * heavy work happens after the response is committed.
  */
 import type { Prisma } from "@prisma/client";
+import { errMsg } from "../../../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../../../db.js";
 import { createLogger } from "../../../logger.js";
@@ -136,7 +137,7 @@ async function processBoundSlackEvent(input: {
     text: `⏳ ${surfaceAgent.agent.name} is working on it…`,
   }).catch((error) =>
     log.warn("[surfaces-slack] failed to post working acknowledgement", {
-      error: error instanceof Error ? error.message : String(error),
+      error: errMsg(error),
     }),
   );
 }
@@ -267,7 +268,7 @@ router.post("/events", async (req: Request, res: Response) => {
       }).catch(async (error) => {
         log.error("[surfaces-slack] asynchronous event dispatch failed", {
           eventId: event.eventId,
-          error: error instanceof Error ? error.message : String(error),
+          error: errMsg(error),
         });
         try {
           const botToken = await agentBotToken(surfaceAgent.id, event.surfaceTenantId);
@@ -284,7 +285,7 @@ router.post("/events", async (req: Request, res: Response) => {
         } catch (replyError) {
           log.warn("[surfaces-slack] failed to post dispatch failure reply", {
             eventId: event.eventId,
-            error: replyError instanceof Error ? replyError.message : String(replyError),
+            error: errMsg(replyError),
           });
         }
       });

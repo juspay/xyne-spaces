@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  LightningIcon,
   PlusIcon,
   PaperPlaneTiltIcon,
   StopIcon,
@@ -76,6 +77,7 @@ import { DebugDrawer } from "../../components/DebugDrawer";
 import { MessageRatingButtons } from "../../components/MessageRatingButtons";
 import type { AgentLight } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
+import { ReadonlyContextPills } from "./ReadonlyContextPills";
 import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -85,6 +87,7 @@ import { Menu, MenuItem } from "./ui/Menu";
 import { Menu as BaseMenu } from "@base-ui-components/react/menu";
 import { Badge } from "./ui/Badge";
 import { SidePanel } from "./ui/SidePanel";
+import { useSnackbar } from "./ui/Snackbar";
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 
@@ -108,6 +111,125 @@ function fmtDateShort(iso: string): string {
   const now = new Date();
   if (d.toDateString() === now.toDateString()) return fmtTime(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatAttachmentSize(size?: number): string | null {
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) return null;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function attachmentKindLabel(attachment: ChatAttachmentMeta): string {
+  const name = attachment.originalFilename.toLowerCase();
+  const mime = attachment.mimeType.toLowerCase();
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (mime.startsWith("image/")) return "Image";
+  if (mime.startsWith("video/")) return "Video";
+  if (mime.includes("zip") || name.endsWith(".zip")) return "ZIP";
+  if (mime.includes("presentation") || name.endsWith(".pptx")) return "PPTX";
+  if (mime.includes("spreadsheet") || name.endsWith(".xlsx") || name.endsWith(".csv")) return "Sheet";
+  return "File";
+}
+
+async function fetchChatAttachmentBlob(attachment: ChatAttachmentMeta, userId: string): Promise<Blob> {
+  const response = await fetch(chatAttachmentDownloadUrl(attachment.id), {
+    credentials: "include",
+    headers: { "x-user-id": userId },
+  });
+  if (!response.ok) throw new Error(`Download failed: HTTP ${response.status}`);
+  return response.blob();
+}
+
+function ChatAttachmentList({
+  attachments,
+  userId,
+  align = "left",
+}: {
+  attachments: ChatAttachmentMeta[];
+  userId: string;
+  align?: "left" | "right";
+}) {
+  const { show: showSnackbar } = useSnackbar();
+  if (!attachments.length) return null;
+
+  const openAttachment = async (attachment: ChatAttachmentMeta): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(await fetchChatAttachmentBlob(attachment, userId));
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Could not open attachment",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
+
+  const downloadAttachment = async (attachment: ChatAttachmentMeta): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(await fetchChatAttachmentBlob(attachment, userId));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.originalFilename;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      showSnackbar({
+        variant: "success",
+        title: "Download complete",
+        description: `${attachment.originalFilename} has been downloaded successfully`,
+      });
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Download failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
+
+  return (
+    <div className={`flex flex-col gap-2 ${align === "right" ? "items-end" : "items-start"}`}>
+      {attachments.map((attachment) => {
+        const kind = attachmentKindLabel(attachment);
+        const size = formatAttachmentSize(attachment.size);
+        return (
+          <div
+            key={attachment.id}
+            data-id="chat-attachment-card"
+            className="flex w-[min(420px,75vw)] items-center gap-3 rounded-[12px] border border-xyne-border bg-xyne-surface px-3 py-2 shadow-sm"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-xyne-surface-subtle text-[10px] font-bold uppercase text-xyne-fg-secondary ring-1 ring-xyne-border-subtle">
+              {kind === "File" ? <FileIcon size={18} /> : kind}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-semibold text-xyne-fg-primary">{attachment.originalFilename}</p>
+              <p className="truncate text-[11px] text-xyne-fg-muted">
+                {[kind, size].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="rounded-md border border-xyne-border-subtle px-2 py-1 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                onClick={() => { void openAttachment(attachment); }}
+              >
+                View
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-xyne-border-subtle px-2 py-1 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                onClick={() => { void downloadAttachment(attachment); }}
+              >
+                Download
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 
@@ -193,63 +315,200 @@ function ProviderSelect({
  * lets any chat participant pin one for the current conversation. Empty models
  * ⇒ renders nothing (agent has no litellm credential). value "" = agent default
  * (no override). See ChatPageV3's fetch effect + handleSend(modelOverride). */
-function ModelSelect({
-  value,
+const CHAT_THINKING_OPTIONS: Array<{ value: "off" | "minimal" | "low" | "medium" | "high" | null; label: string }> = [
+  { value: null, label: "Default" },
+  { value: "off", label: "Off" },
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+export type ChatThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+
+/**
+ * Combined model + thinking picker for the chat composer, styled after the
+ * Claude app's model menu: the trigger leads with the model name
+ * ("Recommended" when no pin, thinking level beside it when set); the menu
+ * holds the Recommended row (agent's configured model in brackets), a search
+ * bar over the agent's allowed model list, and a Thinking entry whose options
+ * fly out to the right side.
+ */
+function ModelThinkingMenu({
   models,
   defaultModel,
+  selectedModel,
+  onSelectModel,
+  thinkingLevel,
+  onSelectThinking,
   disabled,
-  onChange,
 }: {
-  value: string;
   models: Array<{ id: string; name: string }>;
   defaultModel: string | null;
-  disabled: boolean;
-  onChange: (model: string) => void;
+  selectedModel: string;
+  onSelectModel: (model: string) => void;
+  thinkingLevel: ChatThinkingLevel | null;
+  onSelectThinking: (v: ChatThinkingLevel | null) => void;
+  disabled?: boolean;
 }) {
-  const options = useMemo(
-    () => [
-      { value: "", label: defaultModel ? `Default (${defaultModel})` : "Agent default" },
-      ...models.map((m) => ({ value: m.id, label: m.name })),
-    ],
-    [models, defaultModel],
-  );
-  if (models.length === 0) return null;
-  const current = options.find((o) => o.value === value) ?? options[0];
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const close = () => { setOpen(false); setQuery(""); setThinkingOpen(false); };
+
+  const selected = models.find((m) => m.id === selectedModel) ?? null;
+  const q = query.trim().toLowerCase();
+  const filtered = q ? models.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : models;
+  const thinkingLabel = CHAT_THINKING_OPTIONS.find((o) => o.value === thinkingLevel)?.label ?? "Default";
+
+  const rowClass = (active: boolean) =>
+    `flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+      active ? "bg-xyne-surface-sunken font-medium text-xyne-fg-primary" : "text-xyne-fg-primary hover:bg-xyne-surface-subtle"
+    }`;
 
   return (
-    <Menu
-      side="bottom"
-      align="start"
-      trigger={(triggerProps) => (
-        <button
-          {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
-          type="button"
-          data-id="model-select"
-          disabled={disabled}
-          className="flex w-full items-center gap-2 rounded-lg border border-xyne-border-subtle bg-xyne-surface px-3 py-2 text-left text-[13px] transition-colors hover:border-xyne-border hover:bg-xyne-surface-subtle disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
-            Model
-          </span>
-          <span className="flex-1 truncate font-medium text-xyne-fg-primary">
-            {current?.label ?? value}
-          </span>
-          <CaretDownIcon size={12} className="shrink-0 text-xyne-fg-tertiary" />
-        </button>
+    <div className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        data-id="model-thinking-trigger"
+        title={selected ? selected.id : defaultModel ? `Recommended (${defaultModel})` : "Recommended model"}
+        aria-label="Model and thinking"
+        onClick={() => (open ? close() : setOpen(true))}
+        className={`flex h-8 items-center gap-1.5 rounded-full bg-xyne-surface-subtle px-3 text-[12px] font-medium transition-colors ${
+          disabled ? "cursor-not-allowed opacity-50" : "hover:bg-xyne-surface-sunken"
+        } text-xyne-fg-primary`}
+      >
+        <SparkleIcon size={13} className="shrink-0 text-xyne-brand" />
+        <span className="max-w-[150px] truncate">{selected ? selected.name : defaultModel ?? "Recommended"}</span>
+        {thinkingLevel && <span className="text-xyne-fg-tertiary">{thinkingLabel}</span>}
+        <CaretDownIcon size={11} className="shrink-0 text-xyne-fg-tertiary" />
+      </button>
+
+      {open && (
+        <>
+          {/* click-outside backdrop */}
+          <div className="fixed inset-0 z-40" onClick={close} aria-hidden />
+          <div
+            data-id="model-thinking-menu"
+            className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-xl border border-xyne-border bg-xyne-surface p-1 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.35)]"
+          >
+            {/* Recommended — clears the pin; the run uses the agent's configured model. */}
+            <button
+              type="button"
+              data-id="model-option-recommended"
+              onClick={() => { onSelectModel(""); close(); }}
+              className={rowClass(selectedModel === "")}
+            >
+              <span className="flex min-w-0 flex-col items-start gap-0.5">
+                <span className="font-medium">{defaultModel ?? "Recommended"}</span>
+                {defaultModel && (
+                  <span className="max-w-full truncate text-[11px] text-xyne-fg-tertiary">(Recommended)</span>
+                )}
+              </span>
+              {selectedModel === "" && <CheckIcon size={13} className="shrink-0 text-xyne-brand" />}
+            </button>
+
+            {models.length > 0 && (
+              <>
+                <div className="mx-1 my-1 h-px bg-xyne-border-subtle" />
+                <div className="mx-1 my-0.5 flex items-center gap-1.5 rounded-lg border border-xyne-border bg-xyne-surface-subtle px-2 py-1.5">
+                  <MagnifyingGlassIcon size={13} className="shrink-0 text-xyne-fg-muted" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search models…"
+                    data-id="model-search"
+                    className="w-full bg-transparent text-[13px] text-xyne-fg-primary outline-none placeholder:text-xyne-fg-muted"
+                  />
+                </div>
+                <div className="flex max-h-72 flex-col overflow-auto">
+                  {filtered.length === 0 ? (
+                    <div className="px-2.5 py-2 text-[13px] text-xyne-fg-tertiary">No models match</div>
+                  ) : (
+                    filtered.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        title={m.id}
+                        data-id={`model-option-${m.id}`}
+                        onClick={() => { onSelectModel(m.id); close(); }}
+                        className={rowClass(selectedModel === m.id)}
+                      >
+                        <span className="truncate font-mono text-[12.5px]">{m.name}</span>
+                        {selectedModel === m.id && <CheckIcon size={13} className="shrink-0 text-xyne-brand" />}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+
+            <div className="mx-1 my-1 h-px bg-xyne-border-subtle" />
+            {/* Thinking — options fly out to the right side. */}
+            <div className="relative">
+              <button
+                type="button"
+                data-id="thinking-expand"
+                aria-expanded={thinkingOpen}
+                onClick={() => setThinkingOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-xyne-fg-primary hover:bg-xyne-surface-subtle"
+              >
+                <span className="flex items-center gap-1.5 font-medium">
+                  <BrainIcon size={13} className="shrink-0 text-xyne-fg-tertiary" />
+                  Thinking
+                </span>
+                <span className="flex items-center gap-1 text-xyne-fg-tertiary">
+                  {thinkingLabel}
+                  <CaretRightIcon size={11} className="shrink-0" />
+                </span>
+              </button>
+              {thinkingOpen && (
+                <div className="absolute bottom-0 right-0 z-50 w-36 translate-x-[calc(100%+8px)] rounded-xl border border-xyne-border bg-xyne-surface p-1 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.35)]">
+                  {CHAT_THINKING_OPTIONS.map((o) => (
+                    <button
+                      key={o.label}
+                      type="button"
+                      data-id={`thinking-option-${o.label.toLowerCase()}`}
+                      onClick={() => { onSelectThinking(o.value); close(); }}
+                      className={rowClass(o.value === thinkingLevel)}
+                    >
+                      <span>{o.label}</span>
+                      {o.value === thinkingLevel && <CheckIcon size={13} className="shrink-0 text-xyne-brand" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
-    >
-      {options.map((opt) => (
-        <MenuItem
-          key={opt.value || "__default__"}
-          selected={opt.value === value}
-          onSelect={() => { if (opt.value !== value) onChange(opt.value); }}
-          trailing={opt.value === value ? <CheckIcon size={12} className="text-xyne-brand" /> : undefined}
-        >
-          {opt.label}
-        </MenuItem>
-      ))}
-    </Menu>
+    </div>
   );
+}
+
+/* ── fast mode toggle ────────────────────────────────────────────── */
+
+/** localStorage key for the per-agent chat fast-mode preference. */
+function fastModeStorageKey(agentSlug: string): string {
+  return `chat-fast-mode:${agentSlug}`;
+}
+
+export function readStoredFastMode(agentSlug: string | null | undefined): boolean {
+  if (!agentSlug) return false;
+  try {
+    return localStorage.getItem(fastModeStorageKey(agentSlug)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredFastMode(agentSlug: string, enabled: boolean): void {
+  try {
+    if (enabled) localStorage.setItem(fastModeStorageKey(agentSlug), "1");
+    else localStorage.removeItem(fastModeStorageKey(agentSlug));
+  } catch {
+    /* storage unavailable (private mode / quota) — preference is session-only */
+  }
 }
 
 /* ── typing indicator ────────────────────────────────────────────── */
@@ -1522,6 +1781,15 @@ function MessageThread({
                     {stripMalformedCitations(msg.content)}
                   </div>
                 )}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <ChatAttachmentList attachments={msg.attachments} userId={userId} align="right" />
+                )}
+                {/* Read-only attached-context chip below the message — collapsed
+                    by default, expands left into a horizontal scroll strip.
+                    Mirrors the Ask AI (Spaces) design. */}
+                {!isEditing && msg.contextItems && msg.contextItems.length > 0 && (
+                  <ReadonlyContextPills items={msg.contextItems} expandedWidthClass="max-w-[24rem]" />
+                )}
                 {ts && (
                   <span className="mr-1 flex items-center gap-1 text-[11px] text-xyne-fg-muted">
                     <TimerIcon size={10} />
@@ -1635,7 +1903,11 @@ function MessageThread({
                 </div>
               )}
 
-              {ts && !isStream && (hasText || hasInvocations) && (
+              {msg.attachments && msg.attachments.length > 0 && (
+                <ChatAttachmentList attachments={msg.attachments} userId={userId} />
+              )}
+
+              {ts && !isStream && (hasText || hasInvocations || (msg.attachments?.length ?? 0) > 0) && (
                 <div className="ml-1 flex items-center gap-2 text-[11px] text-xyne-fg-muted">
                   <span className="flex items-center gap-1">
                     <TimerIcon size={10} />
@@ -1927,10 +2199,6 @@ function LeftPanel({
   onPickAgent,
   onClearAgent,
   onProviderChange,
-  litellmModels,
-  litellmDefaultModel,
-  selectedModel,
-  onModelChange,
   onNewConversation,
   onSelectConv,
   onTogglePin,
@@ -1946,10 +2214,6 @@ function LeftPanel({
   selectedProvider: string;
   providers: ProviderCredential[];
   providerChanging: boolean;
-  litellmModels: Array<{ id: string; name: string }>;
-  litellmDefaultModel: string | null;
-  selectedModel: string;
-  onModelChange: (model: string) => void;
   isPinned: (convId: string) => boolean;
   titleFor: (conv: ConversationWithAgent) => string;
   onPickAgent: () => void;
@@ -2088,13 +2352,6 @@ function LeftPanel({
           providers={providers}
           disabled={!activeAgent || providerChanging}
           onChange={onProviderChange}
-        />
-        <ModelSelect
-          value={selectedModel}
-          models={litellmModels}
-          defaultModel={litellmDefaultModel}
-          disabled={!activeAgent}
-          onChange={onModelChange}
         />
       </div>
 
@@ -2538,6 +2795,13 @@ export interface InputAreaProps {
    *  we slot it in as a render prop so positioning relative to the input
    *  card lives here. */
   renderMentionPicker?: () => React.ReactNode;
+  /** Per-chat provider fast mode (optional — only the agent chat wires it).
+   *  Rendered as a ⚡ pill in the button row next to attach / mention. */
+  fastMode?: boolean;
+  onToggleFastMode?: (enabled: boolean) => void;
+  /** Combined model + thinking picker (optional — only the agent chat wires
+   *  it). Rendered in the button row after the fast-mode pill. */
+  modelMenu?: React.ReactNode;
 }
 
 /**
@@ -2569,6 +2833,9 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
     mentionOpen,
     onToggleMention,
     renderMentionPicker,
+    fastMode,
+    onToggleFastMode,
+    modelMenu,
   },
   ref,
 ) {
@@ -2792,6 +3059,29 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               >
                 <AtIcon size={14} />
               </button>
+              {onToggleFastMode && (
+                <button
+                  type="button"
+                  data-id="fast-mode-toggle"
+                  data-enabled={fastMode ? "1" : "0"}
+                  role="switch"
+                  aria-checked={!!fastMode}
+                  aria-label="Use fast mode"
+                  title={fastMode
+                    ? "Fast mode ON for this chat — click to use the agent's default"
+                    : "Fast mode OFF (agent default) — click for faster output from the provider's fast tier"}
+                  onClick={() => onToggleFastMode(!fastMode)}
+                  className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-colors ${
+                    fastMode
+                      ? "bg-amber-500 text-white hover:bg-amber-600"
+                      : "bg-xyne-surface-subtle text-xyne-fg-tertiary hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                  }`}
+                >
+                  <LightningIcon size={13} weight={fastMode ? "fill" : "bold"} />
+                  Fast mode
+                </button>
+              )}
+              {modelMenu}
             </div>
 
             {sending ? (
@@ -4737,6 +5027,11 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const [litellmModels, setLitellmModels] = useState<Array<{ id: string; name: string }>>([]);
   const [litellmDefaultModel, setLitellmDefaultModel] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  // Per-chat provider fast mode — remembered per agent in localStorage so the
+  // choice sticks across reloads. ON ⇒ every turn in this chat sends speed=fast.
+  const [fastMode, setFastMode] = useState<boolean>(false);
+  // Per-chat thinking level from the composer's model menu (null = agent default).
+  const [thinkingLevel, setThinkingLevel] = useState<ChatThinkingLevel | null>(null);
   const [leftPanelWidth, setLeftPanelWidth]   = useState<number>(() => {
     try {
       const saved = localStorage.getItem("chat-left-panel-width");
@@ -4966,6 +5261,8 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
    * (no litellm credential, or error) ⇒ the picker hides itself. */
   useEffect(() => {
     setSelectedModel("");
+    setThinkingLevel(null);
+    setFastMode(readStoredFastMode(activeAgentSlug));
     if (!activeAgentSlug || !userId) {
       setLitellmModels([]);
       setLitellmDefaultModel(null);
@@ -5377,15 +5674,24 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     setEditedDesignHtml(null);
   }, [conversationId, displayedDesignVersion?.messageId, mode]);
 
+  const handleFastModeChange = useCallback((enabled: boolean) => {
+    setFastMode(enabled);
+    if (activeAgentSlug) writeStoredFastMode(activeAgentSlug, enabled);
+  }, [activeAgentSlug]);
+  // Only an explicit ON is sent — OFF means "whatever the agent is configured
+  // with", so the agent-level setting still applies.
+  const speedOverride = fastMode ? ("fast" as const) : undefined;
+  const thinkingOverride = thinkingLevel ?? undefined;
+
   const handleRegenerate = useCallback((assistantMessageId: string) => {
     if (!activeAgentSlug || sending) return;
-    void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined);
-  }, [activeAgentSlug, sending, regenerate, userId, selectedModel]);
+    void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined, speedOverride, thinkingOverride);
+  }, [activeAgentSlug, sending, regenerate, userId, selectedModel, speedOverride, thinkingOverride]);
 
   const handleEditUserMessage = useCallback((userMessageId: string, text: string) => {
     if (!activeAgentSlug || sending) return;
-    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text, selectedModel || undefined);
-  }, [activeAgentSlug, sending, editLatestUserMessage, userId, selectedModel]);
+    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text, selectedModel || undefined, speedOverride, thinkingOverride);
+  }, [activeAgentSlug, sending, editLatestUserMessage, userId, selectedModel, speedOverride, thinkingOverride]);
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
@@ -5488,6 +5794,10 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
           } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
+          // Per-chat provider fast mode (composer toggle).
+          ...(speedOverride ? { speed: speedOverride } : {}),
+          // Per-chat thinking level (composer model menu).
+          ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
         });
         if (designSelectionSnapshot) setDesignSelection(null);
         if (manualEditsSnapshot.length > 0) {
@@ -5508,7 +5818,7 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
     };
 
     void dispatch();
-  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
+  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, speedOverride, thinkingOverride, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
 
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
     if (!activeAgentSlug) throw new Error("No active agent selected");
@@ -5587,10 +5897,6 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
             onPickAgent={() => setShowModal(true)}
             onClearAgent={handleClearAgent}
             onProviderChange={handleProviderChange}
-            litellmModels={litellmModels}
-            litellmDefaultModel={litellmDefaultModel}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
             onNewConversation={handleNewConversation}
             onSelectConv={handleSelectConv}
             onTogglePin={handleTogglePin}
@@ -5790,6 +6096,19 @@ export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
                   onRemoveContext={handleRemoveContext}
                   mentionOpen={mentionOpen}
                   onToggleMention={handleToggleMention}
+                  fastMode={fastMode}
+                  onToggleFastMode={handleFastModeChange}
+                  modelMenu={
+                    <ModelThinkingMenu
+                      models={litellmModels}
+                      defaultModel={litellmDefaultModel}
+                      selectedModel={selectedModel}
+                      onSelectModel={setSelectedModel}
+                      thinkingLevel={thinkingLevel}
+                      onSelectThinking={setThinkingLevel}
+                      disabled={sending}
+                    />
+                  }
                   renderMentionPicker={() => (
                     <ContextPicker
                       slug={activeAgent.slug}

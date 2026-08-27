@@ -17,7 +17,8 @@
  *     LinkedIn MCP server.
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
+import { asyncHandler, ok, notFound, unauthorized, badRequest } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -109,37 +110,28 @@ router.use("/:userId", pinUserIdParam);
 router.get(
   "/:userId/oauth/rapidapi-linkedin/token",
   requireSessionTokenForUserParam,
-  async (req: Request<{ userId: string }>, res: Response) => {
-    try {
-      const { userId } = req.params;
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = req.params as { userId: string };
 
-      const connection = await prisma.userMcpConnection.findFirst({
-        where: { userId, mcpServer: { type: "rapidapi-linkedin" } },
-        include: { mcpServer: true },
-      });
+    const connection = await prisma.userMcpConnection.findFirst({
+      where: { userId, mcpServer: { type: "rapidapi-linkedin" } },
+      include: { mcpServer: true },
+    });
 
-      if (!connection) {
-        res.status(404).json({
-          success: false,
-          error: "No LinkedIn (RapidAPI) connection found for this user.",
-        });
-        return;
-      }
-
-      const decrypted = decrypt(
-        connection.encryptedCreds,
-        connection.iv,
-        connection.authTag,
-        CONFIG.encryptionKey,
-      );
-      const creds = JSON.parse(decrypted) as RapidApiLinkedInCreds;
-
-      res.json({ success: true, data: { accessToken: creds.apiKey } });
-    } catch (err) {
-      log.error("[rapidapi-linkedin] token error:", err);
-      res.status(500).json({ success: false, error: "Internal server error" });
+    if (!connection) {
+      throw notFound("No LinkedIn (RapidAPI) connection found for this user.");
     }
-  },
+
+    const decrypted = decrypt(
+      connection.encryptedCreds,
+      connection.iv,
+      connection.authTag,
+      CONFIG.encryptionKey,
+    );
+    const creds = JSON.parse(decrypted) as RapidApiLinkedInCreds;
+
+    ok(res, { accessToken: creds.apiKey });
+  }),
 );
 
 // ── POST /:userId/oauth/rapidapi-linkedin/connect ──────────────────────────
@@ -150,43 +142,27 @@ router.get(
  */
 router.post(
   "/:userId/oauth/rapidapi-linkedin/connect",
-  async (req: Request<{ userId: string }>, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { apiKey } = req.body as { apiKey?: string };
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = req.params as { userId: string };
+    const { apiKey } = req.body as { apiKey?: string };
 
-      if (!apiKey?.trim()) {
-        res.status(400).json({
-          success: false,
-          error: "apiKey is required in the request body.",
-        });
-        return;
-      }
-
-      const trimmedKey = apiKey.trim();
-
-      // Validate the key against RapidAPI before storing.
-      const valid = await validateRapidApiKey(trimmedKey);
-      if (!valid) {
-        res.status(401).json({
-          success: false,
-          error: "The provided X-RapidAPI-Key was rejected by RapidAPI (HTTP 403).",
-        });
-        return;
-      }
-
-      await storeApiKey(userId, trimmedKey);
-
-      log.info(`[rapidapi-linkedin] Stored API key for user ${userId}`);
-      res.json({
-        success: true,
-        data: { message: "LinkedIn (RapidAPI) connected successfully." },
-      });
-    } catch (err) {
-      log.error("[rapidapi-linkedin] connect error:", err);
-      res.status(500).json({ success: false, error: "Internal server error" });
+    if (!apiKey?.trim()) {
+      throw badRequest("apiKey is required in the request body.");
     }
-  },
+
+    const trimmedKey = apiKey.trim();
+
+    // Validate the key against RapidAPI before storing.
+    const valid = await validateRapidApiKey(trimmedKey);
+    if (!valid) {
+      throw unauthorized("The provided X-RapidAPI-Key was rejected by RapidAPI (HTTP 403).");
+    }
+
+    await storeApiKey(userId, trimmedKey);
+
+    log.info(`[rapidapi-linkedin] Stored API key for user ${userId}`);
+    ok(res, { message: "LinkedIn (RapidAPI) connected successfully." });
+  }),
 );
 
 // ── Validation helper ──────────────────────────────────────────────────────

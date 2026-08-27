@@ -17,6 +17,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "./errors.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
@@ -176,7 +177,7 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
     const result = await callTool(userId, serverType, credentials, tool, params);
     return { ok: true, content: result.content };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     return { ok: false, content: "", error: msg };
   }
 }

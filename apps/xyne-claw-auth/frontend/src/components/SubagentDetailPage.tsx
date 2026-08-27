@@ -122,7 +122,7 @@ export function SubagentDetailPage({ userId, isAdmin, mode }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const [avail, sks] = await Promise.all([getAvailableTools(), listSkills()]);
+      const [avail, sks] = await Promise.all([getAvailableTools(), listSkills(userId)]);
       setAvailable(avail);
       setSkills(sks);
       if (mode === "edit") {

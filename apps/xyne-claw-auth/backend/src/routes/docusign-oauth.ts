@@ -17,7 +17,7 @@
  * callback for an arbitrary userId.
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -33,6 +33,7 @@ import {
   getDocuSignClientCredentials,
 } from "../lib/docusign-config.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-state.js";
+import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("docusign-oauth");
@@ -75,7 +76,7 @@ export async function ensureDocuSignServer() {
   const healthcheckSpec = { name: "getUserInfo", params: {} };
   return prisma.mcpServer.upsert({
     where: { type: "docusign" },
-    update: { writeToolPolicy, healthcheckSpec, transport: "http" },
+    update: { writeToolPolicy, healthcheckSpec, transport: "http", isOauth: true },
     create: {
       type: "docusign",
       name: "DocuSign",
@@ -85,6 +86,7 @@ export async function ensureDocuSignServer() {
       writeToolPolicy,
       healthcheckSpec,
       connectorMeta: { scope: "global", mode: "self-serve" },
+      isOauth: true,
     },
   });
 }
@@ -153,28 +155,23 @@ export const docusignOAuthProvider: OAuthTokenProvider = {
  * POST /:userId/oauth/docusign/authorize
  * Returns the DocuSign consent URL with an HMAC-signed `state`.
  */
-router.post("/:userId/oauth/docusign/authorize", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-    const { redirectUri } = req.body as { redirectUri?: string };
+router.post("/:userId/oauth/docusign/authorize", asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
+  const { userId } = req.params;
+  const { redirectUri } = req.body as { redirectUri?: string };
 
-    const callbackUri = redirectUri ?? defaultCallbackUri();
+  const callbackUri = redirectUri ?? defaultCallbackUri();
 
-    const { clientId } = getDocuSignClientCredentials();
+  const { clientId } = getDocuSignClientCredentials();
 
-    const authUrl = new URL(DOCUSIGN_AUTH_URL);
-    authUrl.searchParams.set("client_id", clientId);
-    authUrl.searchParams.set("redirect_uri", callbackUri);
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("scope", DOCUSIGN_SCOPES);
-    authUrl.searchParams.set("state", signOAuthState(userId, { redirectUri: callbackUri }));
+  const authUrl = new URL(DOCUSIGN_AUTH_URL);
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("redirect_uri", callbackUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", DOCUSIGN_SCOPES);
+  authUrl.searchParams.set("state", signOAuthState(userId, { redirectUri: callbackUri }));
 
-    res.json({ success: true, data: { authUrl: authUrl.toString() } });
-  } catch (err) {
-    log.error("[docusign-oauth] authorize error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  ok(res, { authUrl: authUrl.toString() });
+}));
 
 // ── Programmatic callback (POST) ───────────────────────────────────────────
 
@@ -182,43 +179,34 @@ router.post("/:userId/oauth/docusign/authorize", async (req: Request<{ userId: s
  * POST /:userId/oauth/docusign/callback
  * Programmatic exchange — frontend passes code + state from the redirect URL.
  */
-router.post("/:userId/oauth/docusign/callback", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const { userId } = req.params;
-    const { code, state } = req.body as { code?: string; state?: string };
+router.post("/:userId/oauth/docusign/callback", asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
+  const { userId } = req.params;
+  const { code, state } = req.body as { code?: string; state?: string };
 
-    if (!code || !state) {
-      res.status(400).json({ success: false, error: "code and state are required" });
-      return;
-    }
-
-    let verified;
-    try {
-      verified = verifyOAuthState(state);
-    } catch (err) {
-      const reason = err instanceof OAuthStateError ? err.reason : "malformed";
-      res.status(400).json({ success: false, error: `Invalid state (${reason})` });
-      return;
-    }
-
-    if (verified.userId !== userId) {
-      res.status(403).json({ success: false, error: "State userId mismatch" });
-      return;
-    }
-
-    const redirectUri = (verified.extra?.["redirectUri"] as string | undefined) ?? defaultCallbackUri();
-    const result = await exchangeAndStore(userId, code, redirectUri);
-    if (!result.ok) {
-      res.status(result.status).json({ success: false, error: result.error });
-      return;
-    }
-
-    res.json({ success: true, data: { message: "DocuSign account connected successfully" } });
-  } catch (err) {
-    log.error("[docusign-oauth] callback error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (!code || !state) {
+    throw badRequest("code and state are required");
   }
-});
+
+  let verified;
+  try {
+    verified = verifyOAuthState(state);
+  } catch (err) {
+    const reason = err instanceof OAuthStateError ? err.reason : "malformed";
+    throw badRequest(`Invalid state (${reason})`);
+  }
+
+  if (verified.userId !== userId) {
+    throw forbidden("State userId mismatch");
+  }
+
+  const redirectUri = (verified.extra?.["redirectUri"] as string | undefined) ?? defaultCallbackUri();
+  const result = await exchangeAndStore(userId, code, redirectUri);
+  if (!result.ok) {
+    throw new HttpError(result.status, result.error);
+  }
+
+  ok(res, { message: "DocuSign account connected successfully" });
+}));
 
 // ── Browser-redirect callback (GET) ───────────────────────────────────────
 

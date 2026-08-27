@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
@@ -31,7 +32,7 @@ function sendControlError(res: Response, error: unknown): void {
     return;
   }
   log.error("Admin Digital Twin control failed", {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg(error),
   });
   res.status(500).json({ success: false, error: "Internal server error" });
 }
