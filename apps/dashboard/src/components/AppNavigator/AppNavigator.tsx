@@ -1,9 +1,11 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useSelector } from '@xstate/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, SearchBig } from '@xyne/icons';
 import { invokeShortcut } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
+import { roomActor } from '../../machines/roomMachine';
 
 const buttonClass = cn(
   'size-7 flex items-center justify-center rounded-[10px] border border-transparent transition-colors',
@@ -31,6 +33,10 @@ const AppNavigator = (): ReactElement => {
   const location = useLocation();
   const [historyIndex, setHistoryIndex] = useState(getHistoryIndex);
   const maxHistoryIndexRef = useRef(historyIndex);
+  const shouldHideForFullCall = useSelector(
+    roomActor,
+    state => state.matches('connected') && state.context.viewMode === 'full',
+  );
 
   useEffect(() => {
     const nextHistoryIndex = getHistoryIndex();
@@ -52,6 +58,10 @@ const AppNavigator = (): ReactElement => {
       void navigate(1);
     }
   };
+
+  if (shouldHideForFullCall) {
+    return <></>;
+  }
 
   return (
     <div
