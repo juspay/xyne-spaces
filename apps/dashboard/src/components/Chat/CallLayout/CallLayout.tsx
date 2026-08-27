@@ -19,6 +19,12 @@ import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 
 interface CallLayoutProps {
   callId: string;
+  /**
+   * When provided, the call pill label becomes a hover-highlighted button that
+   * opens the thread the call is happening in. Wired from the channel bubble so a
+   * viewer can jump into the call's thread to see context before joining.
+   */
+  onOpenThread?: (e?: React.MouseEvent) => void;
 }
 
 interface CallData {
@@ -28,7 +34,7 @@ interface CallData {
   participants?: Array<{ userId: string; response?: string | null }>;
 }
 
-export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
+export const CallLayout: React.FC<CallLayoutProps> = ({ callId, onOpenThread }) => {
   const allUsers = useUsers();
   const { user } = useAuth();
   const { joinCall } = useCallJoinOrInitiate();
@@ -93,11 +99,26 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
           <div className='flex items-center gap-4 min-w-0'>
             <div className='flex items-center gap-2 min-w-0'>
               <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
-              {!isMobile && (
-                <span className='text-sm font-medium truncate whitespace-nowrap min-w-0'>
-                  {callStatusText}
-                </span>
-              )}
+              {!isMobile &&
+                (onOpenThread ? (
+                  <button
+                    type='button'
+                    onClick={e => {
+                      e.stopPropagation();
+                      onOpenThread(e);
+                    }}
+                    title='Open thread'
+                    data-track-category='CALL'
+                    data-track-name='OpenThreadFromCallLayout'
+                    className='text-sm font-medium truncate whitespace-nowrap min-w-0 bg-transparent border-0 p-0 text-left text-white cursor-pointer hover:underline focus-visible:underline focus:outline-none'
+                  >
+                    {callStatusText}
+                  </button>
+                ) : (
+                  <span className='text-sm font-medium truncate whitespace-nowrap min-w-0'>
+                    {callStatusText}
+                  </span>
+                ))}
             </div>
 
             {callDuration && (

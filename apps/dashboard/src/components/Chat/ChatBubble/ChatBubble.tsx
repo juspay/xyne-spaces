@@ -1472,7 +1472,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         />
       )}
 
-      {conversation?.callId && context === 'channel' && <CallLayout callId={conversation.callId} />}
+      {conversation?.callId && context === 'channel' && (
+        <CallLayout
+          callId={conversation.callId}
+          {...(replies?.onOpenThread && { onOpenThread: replies.onOpenThread })}
+        />
+      )}
 
       {projectId && conversation && (
         <BotBubble
