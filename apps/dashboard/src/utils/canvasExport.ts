@@ -21,6 +21,8 @@ export interface CanvasPdfExportResult {
 
 export type CanvasMarkdownExportResult = CanvasPdfExportResult;
 
+export type CanvasDocxExportResult = CanvasPdfExportResult;
+
 // Custom canvas block types that have no text/markdown representation. The lossy
 // serializers silently drop them. When the live editor DOM is available we
 // rasterize the rendered block (whiteboard drawing / AI output) to a PNG and
@@ -214,7 +216,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function triggerDownload(filename: string, content: string, mime: string): void {
+function triggerDownload(filename: string, content: string | Blob, mime: string): void {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -326,5 +328,34 @@ export async function exportCanvasAsPDF(
     ),
   );
   printWindow.document.close();
+  return { saved: true };
+}
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+export async function exportCanvasAsDocx(
+  editor: CanvasExportEditor,
+  title: string,
+  domRoot?: HTMLElement | null,
+): Promise<CanvasDocxExportResult> {
+  const blocks = await normalizeBlocksForExport(editor.document, domRoot);
+  const rawBodyHtml = await Promise.resolve(editor.blocksToHTMLLossy(blocks));
+  const bodyHtml = DOMPurify.sanitize(rawBodyHtml, {
+    USE_PROFILES: { html: true },
+    ADD_DATA_URI_TAGS: ['img'],
+  });
+  const { default: HTMLtoDOCX } = await import('@turbodocx/html-to-docx');
+  const out = await HTMLtoDOCX(buildPdfHtml(title, bodyHtml), null, {
+    title: title || 'Untitled Canvas',
+    table: { row: { cantSplit: true } },
+  });
+  const blob = out instanceof Blob ? out : new Blob([out as ArrayBuffer], { type: DOCX_MIME });
+  const filename = `${sanitizeFilename(title)}.docx`;
+
+  if (window.electronAPI?.exportCanvasDocx) {
+    return window.electronAPI.exportCanvasDocx(filename, await blob.arrayBuffer());
+  }
+
+  triggerDownload(filename, blob, DOCX_MIME);
   return { saved: true };
 }
