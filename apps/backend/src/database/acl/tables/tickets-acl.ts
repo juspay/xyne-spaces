@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
+import {
+  getAccessibleTicketIds,
+  getConnectAccessibleChannelIds,
+  isGuestContext,
+} from './channel-access-helper'
 
 export class TicketsACL extends BaseQueryACL<
   Prisma.TicketWhereInput,
@@ -12,17 +16,26 @@ export class TicketsACL extends BaseQueryACL<
 
   async getWhereClause(): Promise<Prisma.TicketWhereInput> {
     const ctx = this.ctx
+    // Slack-Connect: tickets on connect channels the caller is an active member of, across orgs.
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+    const connectBranch: Prisma.TicketWhereInput = { channelId: { in: connectChannelIds } }
+
     if (isGuestContext(ctx)) {
       const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
 
       return {
-        workspaceId: this.ctx.workspaceId ?? '',
-        id: { in: ticketIds },
+        OR: [
+          {
+            workspaceId: this.ctx.workspaceId ?? '',
+            id: { in: ticketIds },
+          },
+          connectBranch,
+        ],
       }
     }
 
     return {
-      workspaceId: this.ctx.workspaceId,
+      OR: [{ workspaceId: this.ctx.workspaceId }, connectBranch],
     }
   }
 

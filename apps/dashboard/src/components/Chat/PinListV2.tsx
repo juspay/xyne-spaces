@@ -11,12 +11,15 @@ import { formatDatePill } from '../../utils/dateUtils';
 
 interface PinListProps {
   channelId: string;
+  // Slack-Connect: pointer id for navigation/URLs; host `channelId` is for content only.
+  navChannelId?: string | undefined;
 }
 
-const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
+const PinListV2: React.FC<PinListProps> = ({ channelId, navChannelId }) => {
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
   const { setActiveTab } = useContext(ConversationTabContext);
+  const routeChannelId = navChannelId ?? channelId;
 
   const userChannelStatus = useGetChannelUserStatus(channelId);
   const [pinned] = useCachedQuery(
@@ -36,7 +39,7 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
     window.location.hash = '';
     window.location.hash = `origin=${convId}`;
 
-    void navigate(`${baseRoute}/${channelId}#origin=${convId}`, {
+    void navigate(`${baseRoute}/${routeChannelId}#origin=${convId}`, {
       replace: false,
     });
   };
@@ -78,6 +81,7 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
                 <ChatBubble
                   message={msg}
                   channelId={channelId}
+                  navChannelId={routeChannelId}
                   showAvatar={true}
                   conversation={conv}
                   variant='pinned'

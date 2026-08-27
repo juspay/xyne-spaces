@@ -1,8 +1,16 @@
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, ConversationPreviousValue } from '../types';
 import { db } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { ChannelScopeType } from '@xyne/shared';
+import { connectDmService } from '@/services/connectDmService';
+import { logger } from '@/utils/logger';
+
+// Slack-Connect Phase 1: side-effects run under WHOEVER triggered the write (often a GUEST), but a cross-org
+// DM/GroupDM's conversation, channel, and participants live in the HOST workspace. A caller-scoped read
+// returns null for those → the handler bails before materialising / counting. Read under system scope so it
+// can see the host-workspace rows. (Phase 2 = a proper connect-aware scope that keeps tenant isolation.)
 
 
 export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
@@ -10,16 +18,30 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     const {entityId: conversationId} = job;
 
-    const conversation = await db.conversation.findUnique({
-      where: { conversationId },
-      select: { channelId: true, createdBy: true }
-    });
+    const conversation = await runAsSystem(async () =>
+      db.conversation.findUnique({
+        where: { conversationId },
+        select: { channelId: true, createdBy: true }
+      })
+    );
 
     if (!conversation) {
       return;
     }
 
-    const [channel, channelParticipantsRaw] = await Promise.all([
+    // Slack-Connect: a cross-org DM's guest pointers are materialised lazily on its FIRST conversation
+    // (the composer's silent auto-creates only make the hidden host channel, so intermediate group
+    // selections don't litter guest orgs). Idempotent + no-op unless this is a connect DM/GroupDM whose
+    // foreign members aren't linked yet.
+    await connectDmService
+      .materializeForHostDmChannel(conversation.channelId)
+      .catch(err =>
+        logger.error(
+          `[ConversationsHandler] connect DM materialise failed for ${conversation.channelId}: ${err}`,
+        ),
+      );
+
+    const [channel, channelParticipantsRaw] = await runAsSystem(async () => Promise.all([
       db.channel.findUnique({
         where: { id: conversation.channelId },
         select: { scopeType: true }
@@ -28,7 +50,7 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
         where: { channelId: conversation.channelId },
         select: { userId: true }
       })
-    ]);
+    ]));
 
     // Non DM channels unread count is handled by messages handler because of activity creation
     const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
@@ -47,7 +69,7 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const previousValue = job.previousValue as ConversationPreviousValue | undefined;
 
-    const [channel, channelParticipantsRaw] = await Promise.all([
+    const [channel, channelParticipantsRaw] = await runAsSystem(async () => Promise.all([
       db.channel.findUnique({
         where: { id: previousValue?.channelId },
         select: { scopeType: true }
@@ -56,7 +78,7 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
         where: { channelId: previousValue?.channelId },
         select: { userId: true }
       })
-    ]);
+    ]));
 
     if (channelParticipantsRaw.length === 0 && !previousValue?.channelId) {
       return;

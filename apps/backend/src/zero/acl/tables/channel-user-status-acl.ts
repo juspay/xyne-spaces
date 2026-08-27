@@ -3,6 +3,7 @@ import { ChannelAddUserPolicy, ChannelRole, ChannelScopeType, NotificationLevel,
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
+import { isActiveConnectMember } from '../core/guest-access';
 
 // Disallowed notification levels for DM channels
 const DISALLOWED_DM_NOTIFICATION_LEVELS = [NotificationLevel.MENTIONS_ONLY, NotificationLevel.THREADS_ONLY];
@@ -21,6 +22,13 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     // Fetch the channel to check workspace and addUserPolicy
     const channel = await tx.run(zql.channels.where('id', '=', args.channelId).one());
     if (!channel) throw new MutationACLError('Channel user status insert failed: channel does not exist', 'channel_user_status');
+
+    // Slack-Connect: an active connect member may write status rows on the host channel
+    // cross-org (e.g. seeding the added user's status during a guest-initiated add).
+    if (await isActiveConnectMember(this.ctx, tx, args.channelId)) {
+      return;
+    }
+
     await this.verifyChannelInWorkspace(args.channelId, tx, channel.workspaceId);
 
     // Verify requesting user is a channel participant and get their record
@@ -41,6 +49,13 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     if (!status) {
       throw new MutationACLError('Channel user status update failed: status record does not exist', 'channel_user_status');
     }
+
+    // Slack-Connect: an active connect member may update status rows on the host channel
+    // cross-org (e.g. restoring a re-added member's status during a guest-initiated add).
+    if (await isActiveConnectMember(this.ctx, tx, status.channelId)) {
+      return;
+    }
+
     await this.verifyChannelInWorkspace(status.channelId, tx);
 
     const argsKeys = Object.keys(args);

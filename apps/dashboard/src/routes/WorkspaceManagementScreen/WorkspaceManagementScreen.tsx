@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
-import { Settings, Mail, ChevronLeft, UserCheck, GitBranch, LayoutGrid } from 'lucide-react';
+import { Settings, Mail, ChevronLeft, UserCheck, GitBranch, Link2, LayoutGrid } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -9,6 +9,7 @@ import { GeneralAndMembersTab } from './GeneralAndMembersTab';
 import { InvitationsTab } from './InvitationsTab';
 import { GuestUsersTab } from './GuestUsersTab';
 import { RepositoryCredentialsTab } from './RepositoryCredentialsTab';
+import { ConnectInvitationsTab } from './ConnectInvitationsTab';
 import { ToolbarTab } from './ToolbarTab';
 import * as Tabs from '@radix-ui/react-tabs';
 
@@ -79,6 +80,7 @@ export const WorkspaceManagementScreen = (): ReactElement => {
               />
               <TabTrigger value='invitations' icon={Mail} label='Invitations' />
               <TabTrigger value='guests' icon={UserCheck} label='Guest Users' />
+              <TabTrigger value='connect-invitations' icon={Link2} label='Connect channel invitations'/>
               <TabTrigger value='toolbar' icon={LayoutGrid} label='Toolbar' />
             </Tabs.List>
           </Tabs.Root>
@@ -101,6 +103,9 @@ export const WorkspaceManagementScreen = (): ReactElement => {
               </Tabs.Content>
               <Tabs.Content value='guests' className='outline-none h-full'>
                 <GuestUsersTab isActive={activeTab === 'guests'} />
+              </Tabs.Content>
+              <Tabs.Content value='connect-invitations' className='outline-none h-full'>
+                <ConnectInvitationsTab isActive={activeTab === 'connect-invitations'} />
               </Tabs.Content>
               <Tabs.Content value='toolbar' className='outline-none h-full'>
                 <ToolbarTab isActive={activeTab === 'toolbar'} />

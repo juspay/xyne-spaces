@@ -2,33 +2,35 @@ import type { Query } from '@rocicorp/zero';
 import {type Schema, type Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
-import { guestTicketAccessWhere, isGuestContext } from '../core/guest-acl-utils';
+import { guestChannelAccessWhere, isGuestContext, channelVisibleWhere } from '../core/guest-acl-utils';
 
 export class TicketTagsACL extends BaseQueryACL<'ticket_tags'> {
   constructor(ctx: Context) {
     super(ctx, 'ticket_tags');
   }
 
+  // NOTE: 'ticket_tags' is opted out of the define-query.ts workspace backstop (Slack-Connect),
+  // so every branch must be fully self-scoping via the ticket's channel gate.
   canSelect<TReturn>(query: Query<'ticket_tags', Schema, TReturn>): Query<'ticket_tags', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
-      return query.whereExists('ticket', (t) =>
-        t
-          .where('workspaceId', '=', this.ctx.workspaceId)
-          .where(guestTicketAccessWhere(this.ctx)),
+      return query.whereExists('ticket', (t: any) =>
+        t.whereExists('channel', (ch: any) =>
+          ch.where(channelVisibleWhere(this.ctx, guestChannelAccessWhere(this.ctx))),
+        ),
       );
     }
 
-    return query.whereExists('ticket', (t) =>
-      t
-        .where('workspaceId', '=', this.ctx.workspaceId)
-        .whereExists('channel', (ch) =>
-          ch.where(({ or, cmp, exists }) =>
+    return query.whereExists('ticket', (t: any) =>
+      t.whereExists('channel', (ch: any) =>
+        ch.where(
+          channelVisibleWhere(this.ctx, ({ or, cmp, exists }: any) =>
             or(
               cmp('visibility', ChannelVisibility.PUBLIC),
-              exists('participants', (p) => p.where('userId', this.ctx.userID))
-            )
-          )
-        )
+              exists('participants', (p: any) => p.where('userId', this.ctx.userID)),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

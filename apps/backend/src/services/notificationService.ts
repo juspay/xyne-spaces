@@ -179,11 +179,14 @@ class NotificationService {
     data: NotificationData,
     deliveryMethod: NotificationDeliveryMethod = NotificationDeliveryMethod.BROWSER
   ) {
-    // Prefer a caller-provided workspace (the event's workspace); otherwise derive
-    // it from the recipient's own workspace-scoped User row. resolveWorkspaceIdFromModel
-    // resolves under a system context, so it is safe even for cross-workspace recipients.
+    // Slack-Connect (§12): a notification MUST land in the RECIPIENT's home workspace to be
+    // visible to them (notifications are workspace-scoped reads). Prefer the recipient's own
+    // workspace — identical to the event workspace for same-org recipients, and correctly homing
+    // a cross-org connect recipient to their tenant. Fall back to the caller-provided workspace
+    // only if the recipient can't be resolved. resolveWorkspaceIdFromModel runs under a system
+    // context, so it is safe for cross-workspace recipients.
     const workspaceId =
-      data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId }));
+      (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })) ?? data.workspaceId;
     return await repositories.notifications.create({
       workspaceId,
       userId,
@@ -869,10 +872,11 @@ class NotificationService {
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
 
-            // Resolve the tenant ONCE — see createFCMNotification.
+            // Resolve the tenant ONCE — see createFCMNotification. Slack-Connect (§12): prefer the
+            // RECIPIENT's home workspace so cross-org connect notifications land in their tenant.
             const sessionData: NotificationData = {
               ...data,
-              workspaceId: data.workspaceId ?? (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })),
+              workspaceId: (await resolveWorkspaceIdFromModel(prisma, 'user', { id: userId })) ?? data.workspaceId,
             };
 
             for (const session of sessions) {

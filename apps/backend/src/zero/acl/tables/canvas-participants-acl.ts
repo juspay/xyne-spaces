@@ -2,6 +2,7 @@ import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/
 import { CanvasRole, CanvasVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { isActiveConnectMember } from '../core/guest-access';
 import { zql } from '../../queries';
 
 
@@ -55,12 +56,22 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     return this.strongerRole(groupBest, channelBest);
   }
 
+  /** Slack-Connect: is this canvas hosted in a connect channel the caller actively belongs to? */
+  private async isConnectCanvas(
+    canvas: { channelId?: string | null },
+    tx: Transaction<Schema>,
+  ): Promise<boolean> {
+    return Boolean(canvas.channelId) && isActiveConnectMember(this.ctx, tx, canvas.channelId as string);
+  }
+
   private async verifyWorkspace(canvasId: string, tx: Transaction<Schema>): Promise<void> {
     const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
     if (!canvas) throw new MutationACLError('Canvas participant not found: canvas does not exist', 'canvas_participants');
-    
+
     // If canvas has channel, verify through channel
     if (canvas.channelId) {
+      // Slack-Connect: an active connect member of the host channel bypasses the workspace fence.
+      if (await isActiveConnectMember(this.ctx, tx, canvas.channelId)) return;
       const channel = await tx.run(zql.channels.where('id', canvas.channelId).one());
       if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
         throw new MutationACLError('Canvas participant not found in this workspace', 'canvas_participants');
@@ -85,6 +96,10 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     const canvas = await tx.run(zql.canvases.where('id', args.canvasId).one());
     if (!canvas) {
       throw new MutationACLError('Canvas participant insert failed: the specified canvas does not exist', 'canvas_participants');
+    }
+    // Slack-Connect: an active connect member of the host channel may manage participants cross-org.
+    if (await this.isConnectCanvas(canvas, tx)) {
+      return;
     }
     await this.verifyWorkspace(args.canvasId, tx);
     if (canvas.visibility === CanvasVisibility.PUBLIC) {
@@ -112,6 +127,11 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     if (!canvasParticipant) {
       throw new MutationACLError('Canvas participant update failed: participant record does not exist', 'canvas_participants');
     }
+    // Slack-Connect: an active connect member of the host channel may manage participants cross-org.
+    const updateCanvas = await tx.run(zql.canvases.where('id', canvasParticipant.canvasId).one());
+    if (updateCanvas && (await this.isConnectCanvas(updateCanvas, tx))) {
+      return;
+    }
     await this.verifyWorkspace(canvasParticipant.canvasId, tx);
     if (args.role) {
       const effectiveRole = await this.getRequesterEffectiveRole(canvasParticipant.canvasId, tx);
@@ -137,6 +157,11 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     const canvasParticipant = await tx.run(zql.canvas_participants.where('id', args.id).one());
     if (!canvasParticipant) {
       throw new MutationACLError('Canvas participant delete failed: participant record does not exist', 'canvas_participants');
+    }
+    // Slack-Connect: an active connect member of the host channel may manage participants cross-org.
+    const deleteCanvas = await tx.run(zql.canvases.where('id', canvasParticipant.canvasId).one());
+    if (deleteCanvas && (await this.isConnectCanvas(deleteCanvas, tx))) {
+      return;
     }
     await this.verifyWorkspace(canvasParticipant.canvasId, tx);
     if (canvasParticipant.userId === this.ctx.userID) {

@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
+import {
+  getGuestAccessibleCanvasIds,
+  getConnectAccessibleChannelIds,
+  isGuestContext,
+} from './channel-access-helper'
 
 export class CanvasesACL extends BaseQueryACL<
   Prisma.CanvasWhereInput,
@@ -11,6 +15,9 @@ export class CanvasesACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasWhereInput> {
+    // Slack-Connect: canvases on connect channels the caller is an active member of.
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+
     if (isGuestContext(this.ctx)) {
       const canvasIds = await getGuestAccessibleCanvasIds(
         this.prisma,
@@ -19,19 +26,29 @@ export class CanvasesACL extends BaseQueryACL<
       )
 
       return {
-        id: { in: canvasIds },
+        OR: [{ id: { in: canvasIds } }, { channelId: { in: connectChannelIds } }],
       }
     }
 
-    return { workspaceId: this.ctx.workspaceId }
+    return {
+      OR: [{ workspaceId: this.ctx.workspaceId }, { channelId: { in: connectChannelIds } }],
+    }
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+    return {
+      OR: [{ workspaceId: this.ctx.workspaceId }, { channelId: { in: connectChannelIds } }],
+    }
   }
 
   async canCreate(data: Prisma.CanvasUncheckedCreateInput): Promise<boolean> {
     if (data.channelId) {
+      // Slack-Connect: an active connect member may create canvases on the host channel cross-org.
+      const connectChannelIds = await getConnectAccessibleChannelIds(this.prisma, this.ctx.userId)
+      if (connectChannelIds.includes(data.channelId as string)) {
+        return true
+      }
       const channel = await this.prisma.channel.findFirst({
         where: { id: data.channelId, workspaceId: this.ctx.workspaceId },
         select: { isArchived: true },

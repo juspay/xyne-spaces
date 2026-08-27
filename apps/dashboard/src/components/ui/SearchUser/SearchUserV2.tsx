@@ -4,6 +4,7 @@ import { Hash, Lock, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import {
   getUserDisplayName,
   isUserDeactivated,
@@ -52,6 +53,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   mergedItems,
   onSelectChannel,
 }) => {
+  const authContext = useAuthContextValues();
   const [pillsWidth, setPillsWidth] = useState(0);
   const [pillsHeight, setPillsHeight] = useState(0);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
@@ -231,6 +233,11 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
     const displayName = getUserDisplayName(user);
     const deactivated = isUserDeactivated(user);
     const isCurrentUser = currentUserId && user.id === currentUserId;
+    // Slack-Connect: a user from another workspace (reachable via a shared connect channel).
+    const isExternal =
+      !!authContext.workspaceId &&
+      !!user.workspaceId &&
+      user.workspaceId !== authContext.workspaceId;
     return (
       <BaseCombobox.Item
         key={user.id}
@@ -269,6 +276,11 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
 
             {isCurrentUser ? ' (you)' : ''}
           </span>
+          {isExternal && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 shrink-0'>
+              External
+            </span>
+          )}
           {deactivated && (
             <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
               Deactivated

@@ -6,6 +6,7 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../TicketDetails/TicketDetails';
 import ThreadMessages from '../../Chat/ThreadPannel';
+import { useHostToPointerChannelId } from '../../../hooks/useHostChannelId';
 import { ChevronLeft, X } from 'lucide-react';
 
 const TicketView = (): ReactElement => {
@@ -17,6 +18,7 @@ const TicketView = (): ReactElement => {
   }>();
 
   const navigate = useNavigate();
+  const resolveHostToPointer = useHostToPointerChannelId();
 
   // Query ticket data to get xyneId and channelId
   const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: ticketId || '' }), {
@@ -65,7 +67,7 @@ const TicketView = (): ReactElement => {
           <Link
             to={
               ticket.channelId
-                ? `/chat/dir/${ticket.channelId}?tab=tickets&layout=table`
+                ? `/chat/dir/${resolveHostToPointer(ticket.channelId)}?tab=tickets&layout=table`
                 : `/projects/${projectId}/${boardId}`
             }
             className='p-1 rounded-md text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors duration-200'

@@ -102,6 +102,16 @@ class CanvasAuthService {
       return true;
     }
 
+    // Slack-Connect: an active connect member has effective access to the (host) channel's
+    // canvases cross-org, even without a host channel_participants row.
+    const connectMember = await db.connectChannelMember.findFirst({
+      where: { channelId, userId, leftAt: null },
+      select: { id: true },
+    });
+    if (connectMember) {
+      return true;
+    }
+
     if (context?.role !== WorkspaceRole.GUEST) {
       return false;
     }
@@ -282,10 +292,29 @@ class CanvasAuthService {
         currentUserContext
       );
 
-      const canEdit = isCreator || hasOwnerRole || hasEditorRole || isSdlcBaselineChannelAdmin;
+      // Slack-Connect (rulebook R2.5): a connect member's channel-wide access follows the canvas's
+      // VISIBILITY exactly like a normal channel — only PUBLIC canvases are open to the whole
+      // (connect) channel, and only for VIEW. A PRIVATE canvas stays creator / explicit-participant
+      // only. EDITING any canvas requires explicit access (creator / OWNER / EDITOR); being a connect
+      // member never grants edit on its own, even on a public canvas — matching normal channels.
+      const hasConnectChannelViewAccess =
+        canvas.channelId && canvas.visibility === CanvasVisibility.PUBLIC
+          ? await this.hasEffectiveChannelAccess(
+              userId,
+              currentUserContext,
+              canvas.channelId,
+            )
+          : false;
+
+      const canEdit =
+        isCreator || hasOwnerRole || hasEditorRole || isSdlcBaselineChannelAdmin;
 
       const canView =
-        canEdit || hasViewerRole || hasPublicVisibilityAccess || hasGuestContainerAccess;
+        canEdit ||
+        hasViewerRole ||
+        hasPublicVisibilityAccess ||
+        hasGuestContainerAccess ||
+        hasConnectChannelViewAccess;
 
       const hasAccess = canView;
 
@@ -399,7 +428,14 @@ class CanvasAuthService {
         });
 
         if (!channelMembership) {
-          throw new Error('User does not have permission to create canvas in this channel');
+          // Slack-Connect: an active connect member may create canvases on the host channel cross-org.
+          const connectMember = await db.connectChannelMember.findFirst({
+            where: { channelId: resolvedChannelId, userId, leftAt: null },
+            select: { id: true },
+          });
+          if (!connectMember) {
+            throw new Error('User does not have permission to create canvas in this channel');
+          }
         }
       } else if (resolvedProjectId) {
         const projectChannelMembership = await db.channelParticipant.findFirst({
@@ -423,6 +459,10 @@ class CanvasAuthService {
       if (!creator?.workspaceId) {
         throw new Error(`Could not find workspaceId for user ${userId}`);
       }
+      // Slack-Connect: keep the creator's workspace on the row. The canvas is still visible +
+      // editable by BOTH orgs because reads/writes are gated on connect membership of its channel
+      // (not on canvas.workspaceId). Stamping the host workspace here tripped the tenant write
+      // guard, so we don't.
       const workspaceId = creator.workspaceId;
 
       await db.$transaction([

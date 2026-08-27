@@ -6,6 +6,7 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
+import { connectDmService } from '@/services/connectDmService';
 import { slackService } from '@/services/slackService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -422,6 +423,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         select: { allowThreadBroadcastMentions: true },
       })),
     ]);
+
+    // Slack-Connect reliability net: a cross-org DM/GroupDM's guest side is materialised lazily on its
+    // first conversation via the conversations side-effect — but that job isn't always enqueued (e.g. the
+    // conversation is created server-side in createNewDM, bypassing the Zero side-effect), leaving the DM
+    // wired only on the initiator side. The message side-effect ALWAYS runs, so re-fire the materialiser
+    // here too. Idempotent + no-op unless it's a connect-enabled DM/GroupDM with a foreign org not yet linked.
+    if (
+      channel?.scopeType === ChannelScopeType.DM ||
+      channel?.scopeType === ChannelScopeType.GROUP_DM
+    ) {
+      void connectDmService
+        .materializeForHostDmChannel(channelId)
+        .catch(err =>
+          logger.error(`[MessagesHandler] connect DM materialise failed for ${channelId}: ${err}`),
+        );
+    }
 
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({

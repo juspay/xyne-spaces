@@ -7,6 +7,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { parseTicketMd } from '@xyne/shared';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { useHostToPointerChannelId } from '../../../hooks/useHostChannelId';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation } from 'react-router-dom';
 import { SearchResultsContext } from '../SearchResults/SearchResultsContext';
@@ -50,9 +51,13 @@ const TicketDisplayModeV2: React.FC<{
   const { isMobile } = usePlatform();
   const location = useLocation();
   const { onSelectThread: onSelectSearchThread } = useContext(SearchResultsContext);
+  const resolveHostToPointer = useHostToPointerChannelId();
 
   const resolvedChannelId = ticket.channelId || channelId;
   const resolvedConversationId = ticket.conversationId || conversationId;
+  // Slack-Connect: tickets carry the HOST channelId; routing that blanks the guest's channel
+  // header. Resolve to the guest's pointer for navigation URLs (no-op for host / non-connect).
+  const navChannelId = resolveHostToPointer(resolvedChannelId ?? '');
 
   if (!resolvedChannelId || !resolvedConversationId) {
     return null;
@@ -77,7 +82,7 @@ const TicketDisplayModeV2: React.FC<{
 
     if (!isMobile && isCmdClick) {
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
-      const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
+      const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${navChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
       window.open(ticketUrl, '_blank');
       return;
     }
@@ -95,11 +100,11 @@ const TicketDisplayModeV2: React.FC<{
     if (conversationContext === 'channel' || conversationContext === 'thread') {
       standaloneNavigate(
         navigate,
-        `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}/${ticket.id}?selectedTab=details`,
+        `${baseRoute}/${navChannelId}/${resolvedConversationId}/${ticket.id}?selectedTab=details`,
         { event },
       );
     } else if (resolvedChannelId && resolvedConversationId) {
-      standaloneNavigate(navigate, `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}`, {
+      standaloneNavigate(navigate, `${baseRoute}/${navChannelId}/${resolvedConversationId}`, {
         event,
       });
     }

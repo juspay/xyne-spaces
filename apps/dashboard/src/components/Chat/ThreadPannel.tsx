@@ -11,6 +11,7 @@ import { Button } from '../ui/Button';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { useChannel, useChannelParticipation } from '../../hooks/useChannels';
+import { useHostChannelId, useIsConnectMember } from '../../hooks/useHostChannelId';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
@@ -181,7 +182,9 @@ export const ThreadMessages = ({
   // header entirely (hideHeader / underTicketView), so they are excluded already.
   const isDraggableThreadPanel = onClose === undefined && !previewCardMode;
 
-  const channelId = propChannelId || paramChannelId;
+  const rawChannelId = propChannelId || paramChannelId;
+  // Slack-Connect: thread content lives on the HOST channel; resolve a guest pointer id to it.
+  const channelId = useHostChannelId(rawChannelId) ?? rawChannelId;
   const conversationId = propConversationId || paramConversationId;
   const ticketId = propTicketId !== undefined ? propTicketId || undefined : paramTicketId;
   const messageLoadStartTimeRef = useRef<number | null>(null);
@@ -189,6 +192,11 @@ export const ThreadMessages = ({
   // Track derived values from ticket
   const [derivedConversationId, setDerivedConversationId] = useState(conversationId || '');
   const [derivedChannelId, setDerivedChannelId] = useState(channelId || '');
+
+  // Slack-Connect: identity/navigation stays on the guest's POINTER id (rawChannelId); only
+  // content reads use the host-resolved derivedChannelId. Navigating "back to channel" with
+  // the host id would rewrite the URL to a channel the guest doesn't own, blanking the header.
+  const navChannelId = rawChannelId || derivedChannelId;
 
   const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
@@ -204,7 +212,10 @@ export const ThreadMessages = ({
   // channel as a fallback so a subscribed thread in a closed DM is not treated
   // as proof that the user is a non-member.
   const participationStatus = useChannelParticipation(derivedChannelId);
-  const isMember = !!participationStatus;
+  // Slack-Connect: a connect member counts as a member (they have no host channel_user_status),
+  // so the thread renders content instead of a "Join channel" prompt.
+  const isConnectMember = useIsConnectMember(derivedChannelId);
+  const isMember = !!participationStatus || isConnectMember;
 
   // Single enriched query: replaces getConversationById + ticketById + conversationMessagesV2
   // (4 pipelines → 1 pipeline, 178ms → 44ms hydration)
@@ -309,7 +320,15 @@ export const ThreadMessages = ({
   );
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
-  const { displayName: channelDisplayName } = useChannelDisplayName(channel, currentUser?.id ?? '');
+  // Slack-Connect: content/permissions use the host channel (derivedChannelId), but the
+  // channel *identity* shown in the header must stay on the guest's own pointer channel
+  // (rawChannelId). Resolving the name from derivedChannelId makes it blink/disappear while
+  // useHostChannelId flips pointer→host; the pointer channel is already synced, so it's stable.
+  const displayChannel = useChannel(rawChannelId || derivedChannelId);
+  const { displayName: channelDisplayName } = useChannelDisplayName(
+    displayChannel ?? channel,
+    currentUser?.id ?? '',
+  );
   const isDmThread =
     channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
 
@@ -880,16 +899,16 @@ export const ThreadMessages = ({
         void navigate('/chat/activity', { replace: true });
       } else if (fromTable || isFromTickets) {
         // Navigate to tickets tab if coming from tickets/table
-        void navigate(buildChannelRoute(derivedChannelId, { tab: 'tickets' }), {
+        void navigate(buildChannelRoute(navChannelId, { tab: 'tickets' }), {
           replace: true,
         });
       } else {
         // Navigate to channel (messages tab)
-        void navigate(`${baseRoute}/${derivedChannelId}`, { replace: true });
+        void navigate(`${baseRoute}/${navChannelId}`, { replace: true });
       }
     } else {
       // Navigate to channel (messages tab)
-      void navigate(`${baseRoute}/${derivedChannelId}`, { replace: isMobile });
+      void navigate(`${baseRoute}/${navChannelId}`, { replace: isMobile });
     }
   };
 
@@ -901,7 +920,7 @@ export const ThreadMessages = ({
     params.delete('focusThread');
     const qs = params.toString();
     void navigate(
-      `${baseRoute}/${derivedChannelId}/${derivedConversationId}${qs ? `?${qs}` : ''}${location.hash}`,
+      `${baseRoute}/${navChannelId}/${derivedConversationId}${qs ? `?${qs}` : ''}${location.hash}`,
     );
   };
 
@@ -909,7 +928,10 @@ export const ThreadMessages = ({
   // matches ConversationHeader's action row.
   const actionIconClass = 'text-muted-foreground hover:text-foreground';
 
-  const showBreadcrumb = (isFocusedThread || showChannelLink) && !isStandaloneWindow() && !!channel;
+  // Slack-Connect: gate on displayChannel (the guest's pointer channel), not `channel`
+  // (the host channel), which is undefined for a guest and would hide the name entirely.
+  const showBreadcrumb =
+    (isFocusedThread || showChannelLink) && !isStandaloneWindow() && !!displayChannel;
   const focusedChannelBreadcrumb = showBreadcrumb ? (
     <Tooltip content={`Open ${isDmThread ? '' : '#'}${channelDisplayName}`}>
       <button

@@ -22,6 +22,7 @@ import {
 } from '@xyne/icons';
 import CompactActionsMenu, { ActionMenuItem } from '../../ui/CompactActionsMenu';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { useConnectAwareParticipantCount } from '../../../hooks/useHostChannelId';
 import Dialog from '../../ui/Dialog';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
@@ -81,6 +82,9 @@ const ConversationHeader = ({
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
   const channelUserStatus = useGetChannelUserStatus(channelId);
+  // Slack-Connect: true roster count — for a connect channel (host or guest pointer) this is
+  // the cross-org connect_channel_member count, not the guest pointer's local-only stat.
+  const memberCount = useConnectAwareParticipantCount(channel);
   useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
@@ -189,14 +193,12 @@ const ConversationHeader = ({
     },
     {
       icon: <UserTwo size={16} />,
-      label: `Members (${channel.channelStats?.participantCount ?? 0})`,
+      label: `Members (${memberCount})`,
       onSelect: () => {
         setInfoDefaultTab('members');
         setIsInfoOpen(true);
       },
-      visible:
-        (channel.channelStats?.participantCount ?? 0) > 1 &&
-        !isOneToOneDMChannel(channel.scopeType),
+      visible: memberCount > 1 && !isOneToOneDMChannel(channel.scopeType),
     },
     {
       icon: <NotificationBellOn size={16} />,
@@ -315,29 +317,27 @@ const ConversationHeader = ({
           className='flex items-center gap-1 shrink-0'
           style={APP_NO_DRAG_STYLE}
         >
-          {!isCompact &&
-            (channel.channelStats?.participantCount ?? 0) > 1 &&
-            !isOneToOneDMChannel(channel.scopeType) && (
-              <Tooltip content='View members'>
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  onClick={() => {
-                    setInfoDefaultTab('members');
-                    setIsInfoOpen(true);
-                  }}
-                  className={cn('h-7 gap-1.5 px-2 rounded-[10px]', actionIconClass)}
-                  data-track-category='CHANNELS'
-                  data-track-name='VIEW_MEMBERS'
-                  data-track-metadata={JSON.stringify({ channelId })}
-                >
-                  <span className='shrink-0'>
-                    <UserTwo size={16} />
-                  </span>
-                  <span className='shrink-0'>{channel.channelStats?.participantCount ?? 0}</span>
-                </Button>
-              </Tooltip>
-            )}
+          {!isCompact && memberCount > 1 && !isOneToOneDMChannel(channel.scopeType) && (
+            <Tooltip content='View members'>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => {
+                  setInfoDefaultTab('members');
+                  setIsInfoOpen(true);
+                }}
+                className={cn('h-7 gap-1.5 px-2 rounded-[10px]', actionIconClass)}
+                data-track-category='CHANNELS'
+                data-track-name='VIEW_MEMBERS'
+                data-track-metadata={JSON.stringify({ channelId })}
+              >
+                <span className='shrink-0'>
+                  <UserTwo size={16} />
+                </span>
+                <span className='shrink-0'>{memberCount}</span>
+              </Button>
+            </Tooltip>
+          )}
           {!isCompact && channelUserStatus && (
             <Tooltip content='Notifications'>
               <Button
@@ -404,7 +404,7 @@ const ConversationHeader = ({
             targetUserIds={targetUserId ? [targetUserId] : []}
             scopeType={channel.scopeType}
             channelName={displayName}
-            participantCount={channel.channelStats?.participantCount ?? 0}
+            participantCount={memberCount}
             callDisplayName={displayName}
             isMember={!!channelUserStatus}
             disabled={channel.isArchived}

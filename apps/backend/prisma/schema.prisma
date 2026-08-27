@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "ConnectRequest"]
 }
 
 datasource db {
@@ -1774,6 +1774,8 @@ model Channel {
   isMigrated      Boolean?                @default(false)
   addUserPolicy   String?                @default("EVERYONE")
   isArchived      Boolean                @default(false)
+  // Slack-Connect: marks this channel connect-capable (enables the invite UI).
+  isConnectEnabled Boolean               @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
 
@@ -1803,6 +1805,87 @@ model Channel {
   @@index([workspaceId, name, id])
   @@map("channels")
   @@schema("public")
+}
+
+// ── Slack-Connect (cross-workspace shared channels) ──────────────────────────
+// One org HOSTS a channel (owns all data, stamped with host workspaceId); other
+// orgs join as guests using their real home userId (no synthetic users)
+
+// workspace-check:ignore — cross-org link table: spans host+guest workspaces by design; no single workspaceId.
+model ConnectChannel {
+  id               String   @id @default(cuid())
+  hostChannelId    String   // the real channel that holds all the data (= connect channel identity)
+  hostWorkspaceId  String   // org that owns/created the channel
+  guestWorkspaceId String   // org that was invited in
+  guestChannelId   String?  // guest org's local pointer channel that resolves back to host
+  status           String   // "ACTIVE" now; "REVOKED" reserved for a FUTURE disconnect feature. Set in code.
+  createdBy        String   // user who connected this guest org
+  createdAt        DateTime // set in code (no DB default — house convention)
+  updatedAt        DateTime // set in code
+
+  @@unique([hostChannelId, guestWorkspaceId]) // one link per (channel, guest org);
+  //                                             leading col also serves WHERE hostChannelId = ?
+  @@map("connect_channel")
+  @@schema("public")
+}
+
+// workspace-check:ignore — cross-org roster: members come from multiple workspaces (userWorkspaceId per row).
+model ConnectChannelMember {
+  id              String    @id @default(cuid())
+  channelId       String    // = ConnectChannel.hostChannelId (the host channel)
+  userId          String    // real home-workspace userId (no synthetic user)
+  userWorkspaceId String    // the member's home org
+  leftAt          DateTime? // null = active; set on leave (cleared on rejoin). Row is KEPT so departed
+                            // authors still resolve. Reachability/membership queries filter leftAt IS NULL.
+  createdAt       DateTime  // set in code (no DB default — house convention)
+
+  @@unique([channelId, userId]) // no dup members; also indexes channelId prefix → member list
+  @@index([userId, channelId])  // reachability: "which connect channels is this user in"
+  @@map("connect_channel_member")
+  @@schema("public")
+}
+
+// The invite/approval handshake between host and guest orgs. Deliberately its
+// own table (not the workspace-scoped Invitation) because a connect request must
+// be readable by BOTH orgs and must persist as an audit log of rejected/expired
+// attempts. Generic via entityId/entityType (CHANNEL now) for future reuse.
+// workspace-check:ignore — cross-org handshake: readable by BOTH host and guest orgs (hostWorkspaceId/guestWorkspaceId).
+model ConnectRequest {
+  id                   String    @id @default(cuid())
+  entityId             String    // the shared entity's id
+  entityType           String    // "CHANNEL" for now, other types in future. Set in code.
+  hostWorkspaceId      String
+  invitedBy            String    // host member
+
+  // invitee — email only at send; workspace/user resolved at accept
+  inviteEmail          String
+  inviteToken          String    @unique // accept-URL id
+
+  // resolved when the guest member accepts
+  guestUserId          String?
+  guestWorkspaceId     String?   // the workspace the guest chose to join as
+  guestEntityConfig    Json?     // guest's entity config captured at accept; SURVIVES rejection
+
+  // handshake state machine
+  status               String    // starts at "AWAITING_HOST_ADMIN"; both admin gates mandatory. Set in code.
+  // AWAITING_HOST_ADMIN | AWAITING_GUEST | AWAITING_GUEST_ADMIN | ACTIVE | REJECTED | EXPIRED
+  hostAdminApprovedBy  String?
+  hostAdminApprovedAt  DateTime?
+  guestAcceptedAt      DateTime?
+  guestAdminApprovedBy String?
+  guestAdminApprovedAt DateTime?
+  rejectedBy           String?
+  rejectedAt           DateTime?
+  expiresAt            DateTime? // ONLY bounds the AWAITING_GUEST (email-acceptance) step
+
+  createdAt            DateTime  // set in code (no DB default — house convention)
+  updatedAt            DateTime  // set in code
+
+  @@index([hostWorkspaceId, status])  // host admin outbox
+  @@index([guestWorkspaceId, status]) // guest admin inbox
+  @@index([inviteEmail, status])      // guest member inbox (pre-resolution)
+  @@map("connect_request")
+  @@schema("non_zero")
 }
 
 // Additive channel-to-board association. Board.projectId remains the source of

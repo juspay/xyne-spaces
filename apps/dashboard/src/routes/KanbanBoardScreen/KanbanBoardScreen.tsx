@@ -84,6 +84,7 @@ import {
 } from '../../hooks/useChannels';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
+import { useHostToPointerChannelId } from '../../hooks/useHostChannelId';
 import { mutators } from '../../zero/mutators';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -487,6 +488,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // click and route desk/support tickets to the Support desk instead of chat.
   const allChannels = useAllChannels();
   const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
+
+  // Slack-Connect: tickets live on the HOST channel (ticket.channelId = host id), but a guest
+  // navigates their local POINTER channel. Routing a ticket open with the host id blanks the
+  // conversation header (useVisibleChannel(host) is null for the guest) — the same class of bug
+  // fixed for thread opening. Resolve host → my pointer so ticket routes stay on the channel the
+  // guest actually has; a no-op for host viewers / non-connect tickets.
+  const resolveHostToPointer = useHostToPointerChannelId();
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
     initialColumns ? new Set(initialColumns) : new Set(DEFAULT_VISIBLE_COLUMNS),
   );
@@ -3136,11 +3144,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ? `/support/${ticket.channelId}/${ticket.xyneId}`
         : `/support/${ticket.channelId}`;
 
+      // Slack-Connect: for the CHAT ticket panel, route on the guest's pointer channel (falls back
+      // to the ticket's own channel for non-connect / host viewers). Desk/support routes keep the
+      // host channelId — the Support screen resolves content by host id directly.
+      const navChannelId = resolveHostToPointer(ticket.channelId);
+
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
         const relativeUrl = isDeskTicket
           ? supportRoute
-          : `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
+          : `/chat/dir/${navChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
         window.open(`${ws ? `/${ws}` : ''}${relativeUrl}`, '_blank');
         return;
       }
@@ -3158,12 +3171,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       // On desktop: use tab-based route for expanded view in ConversationPannel
       if (isMobile) {
         void navigate(
-          `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
+          `${baseRoute}/${navChannelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
           navState,
         );
       } else {
         void navigate(
-          buildChannelRoute(ticket.channelId, {
+          buildChannelRoute(navChannelId, {
             tab: 'tickets',
             ticketId: ticket.id,
             conversationId: ticket.conversationId,
@@ -3172,7 +3185,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         );
       }
     },
-    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels],
+    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels, resolveHostToPointer],
   );
 
   const openCreateForColumn = useCallback(
