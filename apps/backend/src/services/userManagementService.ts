@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import axios from 'axios';
 import FormData from 'form-data';
@@ -442,10 +443,12 @@ export class UserManagementService {
           })
         : [],
       canvasIds.length
-        ? this.prisma.canvas.findMany({
+        // Ids come from guest access grants, so the admin is auditing access an outsider
+        // already has — the grant must render with its title, not 'Unknown entity'.
+        ? withWorkspaceScope(async () => await this.prisma.canvas.findMany({
             where: { id: { in: [...new Set(canvasIds)] } },
             select: { id: true, title: true },
-          })
+          }))
         : [],
     ]);
 

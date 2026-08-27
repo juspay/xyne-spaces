@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
+import { getUserGroupIds } from './user-group-helper'
 
 /**
  * Non-guest reads are scoped to workspace + reachable canvases:
@@ -31,19 +32,16 @@ export class CanvasesACL extends BaseQueryACL<
 
     const userId = this.ctx.userId
 
-    const userGroupIds = (
-      await this.prisma.userGroupMapping.findMany({
-        where: { userId },
-        select: { userGroupId: true },
-      })
-    ).map((m) => m.userGroupId)
-
-    const channelIds = (
-      await this.prisma.channelParticipant.findMany({
+    // Parallel: this runs on every per-user canvas read. Zero's equivalent filter needs no
+    // lookups, but CanvasParticipant has no userGroup/channel relation to traverse here.
+    const [userGroupIds, channelParticipations] = await Promise.all([
+      getUserGroupIds(this.prisma, userId),
+      this.prisma.channelParticipant.findMany({
         where: { userId },
         select: { channelId: true },
-      })
-    ).map((c) => c.channelId)
+      }),
+    ])
+    const channelIds = channelParticipations.map((c) => c.channelId)
 
     const participantMatchers: Prisma.CanvasParticipantWhereInput[] = [{ userId }]
     if (userGroupIds.length) participantMatchers.push({ userGroupId: { in: userGroupIds } })
