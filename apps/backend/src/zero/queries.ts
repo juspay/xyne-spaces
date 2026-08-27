@@ -43,6 +43,7 @@ import {
   TicketReferenceRelation,
   DelayedMessageStatus,
   RecapEntityType,
+  UserType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -2755,14 +2756,24 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({
       limit: z.number(),
       start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+      participantId: z.string().nullable(),
     }),
-    ({ ctx, args: { limit, start } }) => {
+    ({ ctx, args: { limit, start, participantId } }) => {
       let query = zql.calls
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
         .where('createdByUserId', ctx.userID)
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
+
+      if (participantId) {
+        query = query.where(({ or, cmp }) =>
+          or(
+            cmp('createdByUserId', participantId),
+            cmp('recordingParticipants', 'LIKE', `%"${participantId}"%`),
+          ),
+        );
+      }
 
       if (start) {
         query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
@@ -2775,8 +2786,9 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({
       limit: z.number(),
       start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+      participantId: z.string().nullable(),
     }),
-    ({ ctx, args: { limit, start } }) => {
+    ({ ctx, args: { limit, start, participantId } }) => {
       let query = zql.calls
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
@@ -2795,6 +2807,15 @@ export const queries: AnyQueryRegistry = defineQueries({
         )
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
+
+      if (participantId) {
+        query = query.where(({ or, cmp }) =>
+          or(
+            cmp('createdByUserId', participantId),
+            cmp('recordingParticipants', 'LIKE', `%"${participantId}"%`),
+          ),
+        );
+      }
 
       if (start) {
         query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
@@ -2976,8 +2997,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       types: z.array(z.string()),
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
       isRead: z.boolean().optional(),
+      actorTypes: z.array(z.nativeEnum(UserType)).optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead } }) => {
+    ({ args: { limit, start, types, classification, isRead, actorTypes } }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -2994,6 +3016,16 @@ export const queries: AnyQueryRegistry = defineQueries({
 
       if (isRead !== undefined) {
         query = query.where('isRead', isRead);
+      }
+
+      // Actor kind lives on users.userType, not on the activity row, so this has to
+      // reach through the `actor` relationship. Must stay in step with the client
+      // definition in packages/shared/src/zero/queries.ts — this is the copy the
+      // server actually executes via handleQueryRequest.
+      if (actorTypes && actorTypes.length > 0) {
+        query = query.whereExists('actor', (actor: any) =>
+          actor.where('userType', 'IN', actorTypes)
+        );
       }
 
       query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
@@ -4314,9 +4346,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           .related('participants')
           .related('channelStats')
           .related('canvasFolders', folder =>
-            folder
-              .where('name', 'IN', ['Baseline', 'PRDs', 'Tech Docs'])
-              .related('canvases', canvas => canvas.related('sdlcArtifact')),
+            folder.related('canvases', canvas => canvas.related('sdlcArtifact')),
           ),
       )
       .related('setupExecution')

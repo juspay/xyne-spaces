@@ -81,7 +81,6 @@ import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { ThreadAssistDock, type TwinSourceInfo } from './TwinReplyDraft/ThreadAssistDock';
-import { TwinReasoningDrawer } from './TwinReplyDraft/TwinReasoningDrawer';
 import { useThreadAssist } from './TwinReplyDraft/useThreadAssist';
 import type {
   PostedTarget,
@@ -496,6 +495,7 @@ export const ThreadMessages = ({
             }
           : undefined;
       return {
+        ...(draft.senderId ? { userId: draft.senderId } : {}),
         ...(draft.senderName ? { name: draft.senderName } : {}),
         ...(text ? { text } : {}),
         ...(onJump ? { onJump } : {}),
@@ -517,7 +517,11 @@ export const ThreadMessages = ({
         recap={assist.recap}
         reply={assist.reply}
         onPosted={handleTwinPosted}
-        onOpenReasoning={setReasoningDraft}
+        onReasoningOpenChange={(d: TwinReplyDraftView, open: boolean) =>
+          setReasoningDraft(open ? d : undefined)
+        }
+        reasoningOpen={!!reasoningDraft}
+        conversationId={derivedConversationId ?? ''}
         resolveSource={resolveTwinSource}
         attached={attached}
         {...(attached && { onBeginEdit: (d: TwinReplyDraftView) => setTwinEditDraftId(d.id) })}
@@ -526,15 +530,6 @@ export const ThreadMessages = ({
     ) : null;
   const twinDock = renderTwinDock(true);
   const twinDockCard = renderTwinDock(false);
-
-  const reasoningDrawer = (
-    <TwinReasoningDrawer
-      open={!!reasoningDraft}
-      draft={reasoningDraft}
-      conversationId={derivedConversationId ?? ''}
-      onClose={() => setReasoningDraft(undefined)}
-    />
-  );
 
   // Check if the route is /threads (with optional workspace prefix)
   const isThreadsRoute = location.pathname.endsWith('/chat/dir/threads');
@@ -1018,7 +1013,6 @@ export const ThreadMessages = ({
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
-        {reasoningDrawer}
         <Tabs.Root
           value={underTicketActiveTab}
           onValueChange={value => setUnderTicketActiveTab(value as UnderTicketTabType)}
@@ -1202,7 +1196,6 @@ export const ThreadMessages = ({
         <DragAndDropOverlay isVisible={isDragging} />
         {/* pt-3 only (not py-3): a second padded header always follows this one, and its
             own pt-3 supplies the 12px below — py-3 here would double it to 24px. */}
-        {reasoningDrawer}
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
             <div className='flex gap-2 items-center min-w-0'>

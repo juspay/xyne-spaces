@@ -1278,7 +1278,11 @@ export const mutators = defineMutators({
       z.object({ channelId: z.string(), updatedAt: z.number() }),
       async ({ tx, ctx, args: { channelId, updatedAt } }) => {
         const participation = await tx.run(
-          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!participation) {
@@ -4695,7 +4699,12 @@ export const mutators = defineMutators({
       },
     ),
     removeUsers: defineMutator(
-      z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
+      z.object({
+        userGroupId: z.string(),
+        userIds: z.array(z.string()),
+        // Server-only: the server queues the ticket handoff after the delete commits.
+        reassignTickets: z.boolean().optional(),
+      }),
       async ({ tx, args: { userGroupId, userIds } }) => {
         // Remove users from group
         // Find all mappings to be removed using individual queries
@@ -7620,6 +7629,9 @@ export const mutators = defineMutators({
         stateIds: z.record(z.string(), z.string()).optional(), // Map userId -> stateId
         complexityScoreId: z.string().optional(),
         mappingIds: z.record(z.string(), z.string()).optional(), // Map userId -> mappingId
+        // Server-only: members opted in to a ticket handoff on deactivation. The server
+        // queues it after the states commit; the client optimistic run ignores it.
+        reassignUserIds: z.array(z.string()).optional(),
       }),
       async ({
         tx,

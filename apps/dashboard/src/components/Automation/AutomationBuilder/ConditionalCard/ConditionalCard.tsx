@@ -256,7 +256,7 @@ export function ConditionalCard({
             </div>
           </Dialog>
 
-          <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+          <div className='flex gap-4 overflow-x-auto pb-2'>
             <BranchSteps
               label='If true'
               accent='green'

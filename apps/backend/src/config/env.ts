@@ -88,6 +88,15 @@ const envSchema = Joi.object({
   // Google Cloud Storage Configuration (Workload Identity)
   GCS_PROJECT_ID: Joi.string().allow('').default(''),
   GCS_BUCKET_NAME: Joi.string().allow('').default(''),
+  MIGRATION_GCS_BUCKET: Joi.string().allow('').default(''),
+  MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
+  MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
+  RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
+  MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(1000),      // pause between paged Slack calls during collection
+  MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(200000),  // per-attachment download timeout
+  MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
+  MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
+  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -110,6 +119,9 @@ const envSchema = Joi.object({
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
+  TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
+  TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
+  TEAM_INTELLIGENCE_ORG_JOB_CONCURRENCY: Joi.number().integer().min(1).default(1),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
@@ -254,6 +266,13 @@ const envSchema = Joi.object({
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
   LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
+  TEAM_INTELLIGENCE_LLM_MODEL: Joi.string().default('open-fast'),
+  TEAM_INTELLIGENCE_LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
+  TEAM_INTELLIGENCE_LLM_GLOBAL_CONCURRENCY: Joi.number().integer().min(1).default(8),
+  TEAM_INTELLIGENCE_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_USER_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_TEAM_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_ORG_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
   // Dynamic Dashboard tunables
   DASHBOARD_AI_SSE_PING_INTERVAL_MS: Joi.number().default(20000),
   DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT: Joi.number().default(30),
@@ -608,6 +627,7 @@ export const config = {
     litellmBaseUrl: envVars.LITELLM_BASE_URL,
     litellmModel: envVars.ACTIVITY_CLASSIFICATION_MODEL,
     requestTimeoutMs: envVars.LLM_REQUEST_TIMEOUT_MS,
+    teamIntelligenceRequestTimeoutMs: envVars.TEAM_INTELLIGENCE_LLM_REQUEST_TIMEOUT_MS,
     // Call-specific LiteLLM config (falls back to main litellm if not set)
     callLitellmApiKey: envVars.CALL_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
     callLitellmModel: envVars.CALL_LITELLM_MODEL,
@@ -622,9 +642,22 @@ export const config = {
     publicKey: envVars.LANGFUSE_PUBLIC_KEY,
     secretKey: envVars.LANGFUSE_SECRET_KEY,
   },
+  migrationEncryption: {
+    keys: envVars.MIGRATION_ENC_KEYS,
+    activeKeyId: envVars.MIGRATION_ENC_ACTIVE,
+  },
+  runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
+  slackMigration: {
+    pageDelayMs: envVars.MIGRATION_SLACK_PAGE_DELAY_MS,
+    fileTimeoutMs: envVars.MIGRATION_SLACK_FILE_TIMEOUT_MS,
+    requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
+    stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
+    ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
+  },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
     bucketName: envVars.GCS_BUCKET_NAME,
+    migrationBucketName: envVars.MIGRATION_GCS_BUCKET,
     bundleBucketName: envVars.GCS_BUNDLE_BUCKET_NAME,
     canvasBucketName: envVars.GCS_CANVAS_BUCKET_NAME,
     docsBucketName: envVars.GCS_DOCS_BUCKET_NAME,
@@ -647,6 +680,17 @@ export const config = {
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
+  teamIntelligence: {
+    model: envVars.TEAM_INTELLIGENCE_LLM_MODEL as string,
+    userJobConcurrency: envVars.TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY as number,
+    teamJobConcurrency: envVars.TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY as number,
+    orgJobConcurrency: envVars.TEAM_INTELLIGENCE_ORG_JOB_CONCURRENCY as number,
+    llmGlobalConcurrency: envVars.TEAM_INTELLIGENCE_LLM_GLOBAL_CONCURRENCY as number,
+    sectionConcurrency: envVars.TEAM_INTELLIGENCE_SECTION_CONCURRENCY as string,
+    userSectionConcurrency: envVars.TEAM_INTELLIGENCE_USER_SECTION_CONCURRENCY as string,
+    teamSectionConcurrency: envVars.TEAM_INTELLIGENCE_TEAM_SECTION_CONCURRENCY as string,
+    orgSectionConcurrency: envVars.TEAM_INTELLIGENCE_ORG_SECTION_CONCURRENCY as string,
+  },
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,

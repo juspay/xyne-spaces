@@ -27,7 +27,7 @@ interface ResolvedArtifact {
   canvasId: string;
   title: string;
   path: string | null;
-  artifactKind: 'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC';
+  artifactKind: 'WIKI' | 'BASELINE' | 'ARTIFACT';
   archived: boolean;
   content: Prisma.JsonValue | null;
 }
@@ -53,10 +53,9 @@ function wikiActionFromVersionName(name: string): WikiRevisionEvidence['action']
 function artifactKindForCanvasType(
   artifactType: string | null | undefined
 ): ResolvedArtifact['artifactKind'] | null {
-  if (artifactType === 'WIKI' || artifactType === 'PRD' || artifactType === 'TECH_DOC') {
-    return artifactType;
-  }
-  return isBaselineCanvasType(artifactType) ? 'BASELINE' : null;
+  if (!artifactType) return null;
+  if (artifactType === 'WIKI') return 'WIKI';
+  return isBaselineCanvasType(artifactType) ? 'BASELINE' : 'ARTIFACT';
 }
 
 function shortCommitRef(commitSha: string): string {
@@ -127,7 +126,7 @@ export class SdlcArtifactVersionStore {
     repoId: string;
     workspaceId: string;
     userId: string;
-    kinds?: Array<'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC'>;
+    kinds?: Array<'WIKI' | 'BASELINE' | 'ARTIFACT'>;
     includeArchived?: boolean;
   }) {
     const repo = await this.requireRepository(input);

@@ -6,7 +6,7 @@
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
 import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
-import { CallType } from '@xyne/shared';
+import { CallType, CallVisibility } from '@xyne/shared';
 
 export interface RecordingSession {
   /** Public Call ID used by the recording routes (same value as externalId). */
@@ -124,10 +124,11 @@ export type SummaryTemplatePublicationAction =
   | 'deny';
 
 export interface RecordingSharingResult {
-  action: 'grant' | 'revoke' | 'link_ticket' | 'unlink_ticket';
+  action: 'grant' | 'revoke' | 'link_ticket' | 'unlink_ticket' | 'set_visibility';
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
   shares?: Array<{ id: string; target: RecordingShareTarget; access: string }>;
+  visibility?: CallVisibility;
 }
 
 export interface RegenerateRecordingSummaryResult {
@@ -178,7 +179,16 @@ export interface CitationSegment {
   snippet: string;
 }
 
+export interface RecordingParticipantShare {
+  userId: string | null;
+  userGroupId: string | null;
+  channelId: string | null;
+}
+
 export interface RecordingDetail extends Recording {
+  /** Stringified JSON string[] — read it through getRecordingParticipantIds. */
+  recordingParticipants?: string | null;
+  shares?: readonly RecordingParticipantShare[] | null;
   transcript: string | null;
   identifiedTranscript: string | null;
   hasIdentifiedTranscript: boolean;
@@ -191,6 +201,7 @@ export interface RecordingDetail extends Recording {
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
   citationSegments: CitationSegment[];
+  visibility?: CallVisibility;
   /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
   googleDocs?: RecordingGoogleDocLink[];
   hasRecording?: boolean;
@@ -386,6 +397,14 @@ class RecordingService {
     return response.data;
   }
 
+  async manageRecordingParticipant(
+    callId: string,
+    action: 'add' | 'remove',
+    userId: string,
+  ): Promise<void> {
+    await apiInstance.post(`/calls/recordings/${callId}/participants`, { action, userId });
+  }
+
   async revokeRecordingAccess(
     callId: string,
     targets: RecordingShareTarget[],
@@ -394,6 +413,18 @@ class RecordingService {
       await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
         action: 'revoke',
         targets,
+      });
+    return response.data;
+  }
+
+  async setRecordingVisibility(
+    callId: string,
+    visibility: CallVisibility,
+  ): Promise<RecordingSharingResult> {
+    const response: AxiosResponse<{ success: true } & RecordingSharingResult> =
+      await apiInstance.post(`/calls/recordings/${callId}/sharing`, {
+        action: 'set_visibility',
+        visibility,
       });
     return response.data;
   }

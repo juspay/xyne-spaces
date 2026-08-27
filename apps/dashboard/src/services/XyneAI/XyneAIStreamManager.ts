@@ -6,6 +6,7 @@ import { logger, Event as LogEvent } from '../../utils/logger';
  * Uses Web Worker for streaming to run on a separate thread
  */
 import { apiInstance, BASE_URL } from '../clients/apiClient';
+import { consumeConversationLiveStream } from './liveConversationStream';
 import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
 import { parsePartialSummarizerJSON } from '../../utils/partialJsonParser';
 import {
@@ -1680,6 +1681,7 @@ class XyneAIStreamManager {
           fileName: string;
           mimeType: string;
           data: string;
+          metadata?: MessageAttachment['metadata'];
         }>
       | undefined;
 
@@ -1691,6 +1693,11 @@ class XyneAIStreamManager {
       data: att.data,
       // Parse dimensions if present in data URL or metadata
       ...parseAttachmentDimensions(att.data),
+      // Tool-generated metadata (e.g. the React-artifact manifest). On this live
+      // path the id is a placeholder and the bytes are inline in `data`; after a
+      // reload it is the reverse — a real attachment id and no bytes. Consumers
+      // must handle both.
+      ...(att.metadata ? { metadata: att.metadata } : {}),
     }));
 
     updateMessages(prev =>
@@ -2097,67 +2104,13 @@ class XyneAIStreamManager {
     // missed window), and NEVER leaves an infinite spinner: if the stream dies
     // for good without a `done`, we finalize with what we have + reconcile.
     void (async () => {
-      let reconnects = 0;
-      const MAX_RECONNECTS = 3;
-      while (!closed && !abort.signal.aborted) {
-        try {
-          // SSE stream: must use fetch for a readable response body
-          // (`res.body.getReader()`) — axios can't stream in the browser.
-          // eslint-disable-next-line local-rules/no-fetch-use-axios
-          const res = await fetch(
-            `${BASE_URL}/xyne-ai/v2/conversations/${encodeURIComponent(convId)}/live?agentSlug=${encodeURIComponent(agentSlug)}`,
-            {
-              credentials: 'include',
-              headers: { Accept: 'text/event-stream' },
-              signal: abort.signal,
-            },
-          );
-          if (res.ok && res.body) {
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let currentEvent = '';
-            let dataLines: string[] = [];
-            const flush = (): void => {
-              if (currentEvent && dataLines.length > 0) {
-                let parsed: Record<string, unknown> = {};
-                try {
-                  parsed = JSON.parse(dataLines.join('\n')) as Record<string, unknown>;
-                } catch {
-                  parsed = {};
-                }
-                reconnects = 0; // events are flowing — reset the retry budget
-                onEvent(currentEvent, parsed);
-              }
-              currentEvent = '';
-              dataLines = [];
-            };
-            for (;;) {
-              const { done, value } = await reader.read();
-              if (done || closed) break;
-              buffer += decoder.decode(value, { stream: true });
-              let nl: number;
-              while ((nl = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.slice(0, nl).replace(/\r$/, '');
-                buffer = buffer.slice(nl + 1);
-                if (line === '') {
-                  flush();
-                  continue;
-                }
-                if (line.startsWith(':')) continue; // heartbeat
-                if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
-                else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
-              }
-            }
-          }
-        } catch {
-          /* aborted or network error — fall through to the retry decision */
-        }
-        if (closed || abort.signal.aborted) break;
-        reconnects += 1;
-        if (reconnects > MAX_RECONNECTS) break;
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
+      await consumeConversationLiveStream({
+        conversationId: convId,
+        agentSlug,
+        signal: abort.signal,
+        isClosed: () => closed,
+        onEvent,
+      });
 
       // Ended WITHOUT a `done` (transport died / retries exhausted). Don't leave
       // the bot spinning forever: finalize with the accumulated content and

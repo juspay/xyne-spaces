@@ -25,6 +25,7 @@ import {
   CallOrigin,
   CallStatus,
   CallType,
+  CallVisibility,
   ChannelScopeType,
   InvitationResponse,
   MeetingStatus,
@@ -160,6 +161,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
     instanceDate: null,
     recordingEnabled: false,
     recordingUrl: null,
+    recordingParticipants: '[]',
     transcript: context?.hasTranscript ? 'available' : undefined,
     aiSummary: null,
     startedAt,
@@ -186,6 +188,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
     labels: [],
     markedItems: [],
     xyneManaged: false,
+    visibility: CallVisibility.PRIVATE,
     participants: Array.from({ length: participantCount }, (_, index) => {
       const userId = participantUserIds[index] || '';
       const displayName = stripSearchHighlight(participantNames[index]);

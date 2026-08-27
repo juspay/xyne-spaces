@@ -48,6 +48,7 @@ import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import {
   DropdownMenu,
@@ -84,6 +85,7 @@ const ConversationHeader = ({
   // Slack-Connect: true roster count — for a connect channel (host or guest pointer) this is
   // the cross-org connect_channel_member count, not the guest pointer's local-only stat.
   const memberCount = useConnectAwareParticipantCount(channel);
+  useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');

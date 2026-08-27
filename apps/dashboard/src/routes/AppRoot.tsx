@@ -3,10 +3,12 @@ import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
+import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
+import IntentPlaygroundScreen from './IntentPlaygroundScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
@@ -206,6 +208,7 @@ import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScree
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
+import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
@@ -235,6 +238,7 @@ import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
 import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
+import ArtifactAppScreen from './AIScreen/library/apps/ArtifactAppScreen';
 import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
 import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
 import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
@@ -1071,7 +1075,16 @@ export const router = createBrowserRouter(
                   element: <HomeScreen />,
                 },
                 {
+                  path: 'slack-migration',
+                  element: <SlackMigration />,
+                },
+                {
                   path: 'ai',
+                  element: (
+                    <ToolbarProtectedRoute path='/ai'>
+                      <Outlet />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     { index: true, element: <Navigate to='chat/new' replace /> },
                     { path: 'chat/new', element: <AIScreen /> },
@@ -1095,6 +1108,7 @@ export const router = createBrowserRouter(
                     { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
                     { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                     { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+                    { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
                     {
                       path: 'knowledge',
                       element: <AIKnowledgeScreen />,
@@ -1144,6 +1158,13 @@ export const router = createBrowserRouter(
                   element: <QuestionnaireScreen />,
                 },
                 {
+                  // Dev-only surface for the on-device intent classifier. Bypasses the
+                  // public-channel eligibility gate, so it is intentionally not linked
+                  // from product UI. See docs/ON_DEVICE_INTENT.md
+                  path: 'intent-playground',
+                  element: <IntentPlaygroundScreen />,
+                },
+                {
                   path: 'rca',
                   element: <RCAListScreen />,
                 },
@@ -1158,6 +1179,11 @@ export const router = createBrowserRouter(
                     // Directory routes (nested under dir)
                     {
                       path: 'dir',
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/dir'>
+                          <Outlet />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         {
                           index: true,
@@ -1266,7 +1292,11 @@ export const router = createBrowserRouter(
                     // DM routes (full screen with DM list sidebar)
                     {
                       path: 'dm',
-                      element: <DmsPage />,
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/dm'>
+                          <DmsPage />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         { index: true, element: null },
                         { path: 'compose', element: <KeyedComposeDmPanel /> },
@@ -1306,7 +1336,11 @@ export const router = createBrowserRouter(
                     // Canvas (full screen with 2-panel layout on desktop)
                     {
                       path: 'canvas',
-                      element: <CanvasPanel />,
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/canvas'>
+                          <CanvasPanel />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         {
                           index: true,
@@ -1321,7 +1355,11 @@ export const router = createBrowserRouter(
                     // Activity (full screen with activity list sidebar)
                     {
                       path: 'activity',
-                      element: <ActivityListView />,
+                      element: (
+                        <ToolbarProtectedRoute path='/chat/activity'>
+                          <ActivityListView />
+                        </ToolbarProtectedRoute>
+                      ),
                       children: [
                         { index: true, element: null },
                         // Desk/Support tickets opened from the Activity list render
@@ -1376,9 +1414,11 @@ export const router = createBrowserRouter(
                 {
                   path: 'claw-agents',
                   element: (
-                    <GuestBlockedRoute>
-                      <ClawAgentsScreen />
-                    </GuestBlockedRoute>
+                    <ToolbarProtectedRoute path='/claw-agents'>
+                      <GuestBlockedRoute>
+                        <ClawAgentsScreen />
+                      </GuestBlockedRoute>
+                    </ToolbarProtectedRoute>
                   ),
                   children: [
                     { index: true, element: <AgentsTab /> },
@@ -1412,7 +1452,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'knowledge-base',
-                  element: <KnowledgeBaseV2Layout />,
+                  element: (
+                    <ToolbarProtectedRoute path='/knowledge-base'>
+                      <KnowledgeBaseV2Layout />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     {
                       index: true,
@@ -1441,7 +1485,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'memory',
-                  element: <MemoryScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/memory'>
+                      <MemoryScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'analytics',
@@ -1557,7 +1605,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'releaseManager',
-                  element: <ReleaseManagerView />,
+                  element: (
+                    <ToolbarProtectedRoute path='/releaseManager'>
+                      <ReleaseManagerView />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'listProjects/:projectId',
@@ -1569,7 +1621,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'calls',
-                  element: <CallHistoryScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/calls'>
+                      <CallHistoryScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     {
                       path: ':callId/detail',
@@ -1587,7 +1643,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'recordings',
-                  element: <RecordingsRoute />,
+                  element: (
+                    <ToolbarProtectedRoute path='/recordings'>
+                      <RecordingsRoute />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'recordings/:recordingId',
@@ -1673,7 +1733,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'browser',
-                  element: <BrowserTabsScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/browser'>
+                      <BrowserTabsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'workspace-management',
@@ -1701,11 +1765,19 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'scheduled-messages',
-                  element: <ScheduledMessageScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/scheduled-messages'>
+                      <ScheduledMessageScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'automations',
-                  element: <AutomationsScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/automations'>
+                      <AutomationsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     { index: true, element: <AutomationsListScreen /> },
                     { path: 'approvals', element: <AutomationApprovalsScreen /> },
@@ -1717,7 +1789,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'apps',
-                  element: <AppsScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/apps'>
+                      <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'resource-access',
@@ -1761,7 +1837,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'guide',
-                  element: <UserGuideScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/guide'>
+                      <UserGuideScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
               ],
             },

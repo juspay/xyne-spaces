@@ -195,7 +195,7 @@ const toVespaProjectTicket = (result: {
   };
 }): VespaProjectTicket => ({
   id: result.id,
-  title: result.title,
+  title: result.title?.replace(/<\/?hi>/gi, '') ?? '',
   ...(result.searchContext?.xyneId !== undefined
     ? { xyneId: result.searchContext.xyneId ?? null }
     : {}),

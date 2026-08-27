@@ -15,6 +15,13 @@ router.get('/pull-requests', teamIntelligenceUserController.getUserPullRequests)
 // GET /api/team-intelligence-dashboard/user/overview?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com
 router.get('/overview', teamIntelligenceUserController.getUserOverview);
 
+// GET /api/team-intelligence-dashboard/user/leadership-snapshots?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com
+router.get('/leadership-snapshots', teamIntelligenceUserController.getUserLeadershipSnapshots);
+router.get(
+  '/leadership-sections/:section',
+  teamIntelligenceUserController.getUserLeadershipSection
+);
+
 // GET /api/team-intelligence-dashboard/user/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&userEmail=user@example.com&page=1&limit=10
 router.get('/channel-recaps', teamIntelligenceUserController.getUserChannelRecaps);
 

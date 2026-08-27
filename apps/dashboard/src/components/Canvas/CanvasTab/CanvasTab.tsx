@@ -28,6 +28,7 @@ import {
 } from '../CanvasVersionHistory';
 import { isBaselineCanvasType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
+  AudioLines,
   ArrowLeft,
   Archive,
   Folder,
@@ -49,7 +50,12 @@ import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useChannel } from '../../../hooks/useChannels';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
-import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
+import {
+  filterExcludedCallGeneratedCanvases,
+  filterExcludedRecordingGeneratedCanvases,
+  getRecordingCanvasCallId,
+  isExcludedRecordingGeneratedCanvas,
+} from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
 import {
@@ -122,6 +128,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const z = useZero();
   const { filter: activeFilter, setFilter: setActiveFilter } = usePersistedCanvasPreferences();
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
+  const [onlyRecordingGeneratedCanvases, setOnlyRecordingGeneratedCanvases] = useState(false);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
   const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [view, setView] = useState<'list' | 'editor'>('list');
@@ -150,8 +157,14 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     [canvasList],
   );
   const canvases = useMemo(
-    () => filterExcludedCallGeneratedCanvases(canvasItems, excludeCallGeneratedCanvases),
-    [canvasItems, excludeCallGeneratedCanvases],
+    () =>
+      onlyRecordingGeneratedCanvases
+        ? canvasItems.filter(isExcludedRecordingGeneratedCanvas)
+        : filterExcludedRecordingGeneratedCanvases(
+            filterExcludedCallGeneratedCanvases(canvasItems, excludeCallGeneratedCanvases),
+            true,
+          ),
+    [canvasItems, excludeCallGeneratedCanvases, onlyRecordingGeneratedCanvases],
   );
   const folders = useMemo(() => (zeroFolders as CanvasFolder[] | undefined) ?? [], [zeroFolders]);
   const [canvas, setCanvas] = useState<Canvas | null>(null);
@@ -265,6 +278,15 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const isCanvasOwner = canvas?.createdBy === user?.id || effectiveAccessLevel === CanvasRole.OWNER;
   const isChannelArchived = !!channel?.isArchived;
+  const recordingCallId = canvas ? getRecordingCanvasCallId(canvas) : null;
+
+  const handleOpenRecordingNotes = useCallback((): void => {
+    if (!recordingCallId) return;
+
+    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+      state: { from: `${location.pathname}${location.search}` },
+    });
+  }, [location.pathname, location.search, navigate, recordingCallId]);
 
   useEffect(() => {
     previewVersionRef.current = null;
@@ -783,6 +805,15 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   />
                 </div>
               </Tooltip>
+              <Tooltip content='Only recording canvases' className='px-2 py-1 text-[10px]'>
+                <div className='origin-left scale-90'>
+                  <Switch
+                    id='only-channel-recording-generated-canvases'
+                    checked={onlyRecordingGeneratedCanvases}
+                    onCheckedChange={setOnlyRecordingGeneratedCanvases}
+                  />
+                </div>
+              </Tooltip>
               <Tooltip content='Only archived' className='px-2 py-1 text-[10px]'>
                 <div className='flex origin-left scale-90 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground'>
                   <Archive size={14} />
@@ -1033,6 +1064,24 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           {/* Share Button */}
           {canvas?.id && (
             <div className='ml-2 flex items-center gap-2'>
+              {recordingCallId && (
+                <Button
+                  variant='secondary'
+                  size='iconSm'
+                  onClick={handleOpenRecordingNotes}
+                  title='Open recording notes'
+                  aria-label='Open recording notes'
+                  data-track-category='CANVAS'
+                  data-track-name='Open_Recording_Notes_From_Channel_Canvas'
+                  data-track-metadata={JSON.stringify({
+                    canvasId: canvas.id,
+                    recordingId: recordingCallId,
+                    channelId,
+                  })}
+                >
+                  <AudioLines size={16} strokeWidth={2.2} />
+                </Button>
+              )}
               <Button
                 variant='secondary'
                 size='sm'

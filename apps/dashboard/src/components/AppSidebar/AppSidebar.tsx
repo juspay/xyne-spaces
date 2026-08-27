@@ -45,6 +45,7 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { usePinnedArtifactApps } from '../../hooks/usePinnedArtifactApps';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -55,8 +56,6 @@ import {
   railShortcutsAvailable,
 } from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
-import { useAILandingDefault } from '../../hooks/useAILandingDefault';
-import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, isElectronApp } from '../../utils/electronApp';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
@@ -155,10 +154,10 @@ const AppSidebar = (): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
-  const { aiLandingDefault } = useAILandingDefault();
   const currentUser = useSelf();
   const visibleNavigationItems = useVisibleNavigationItems();
   const { toolbarPaths } = useToolbarItems();
+  const { pinnedApps } = usePinnedArtifactApps();
   const missedCallCount = useMissedCallCount();
   const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
@@ -369,30 +368,6 @@ const AppSidebar = (): ReactElement => {
           ) : (
             <nav>
               <ul className='relative flex flex-col gap-4'>
-                {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
-                {aiLandingDefault && (
-                  <li key='/ai' className='relative'>
-                    <Tooltip content='Xyne AI' side='right' delayDuration={0}>
-                      <Link
-                        to={prefixWs('/ai')}
-                        onClick={() => handleNavigationClick('Xyne AI')}
-                        data-testid='nav-xyne-ai'
-                        data-track-category='App_Sidebar'
-                        data-track-name='Sidebar_Nav_Item'
-                        data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
-                        className={cn(
-                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
-                          activeRoute === '/ai'
-                            ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                            : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                        )}
-                      >
-                        <XyneAISidebarIcon size={16} />
-                      </Link>
-                    </Tooltip>
-                  </li>
-                )}
-
                 {toolbarItems.map((item, index) => {
                   const shortcutIndex =
                     railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
@@ -459,6 +434,37 @@ const AppSidebar = (): ReactElement => {
                               {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
                             </span>
                           )}
+                        </Link>
+                      </Tooltip>
+                    </li>
+                  );
+                })}
+
+                {/* Pinned artifact apps — user-generated apps promoted to the
+                    rail from the AI Library. Stored per-device in localStorage. */}
+                {pinnedApps.map(app => {
+                  const path = `/ai/library/app/${app.id}`;
+                  const isActive = activeRoute === path;
+                  const initial = app.title.trim().charAt(0).toUpperCase() || '?';
+                  return (
+                    <li key={app.id} className='relative'>
+                      <Tooltip content={app.title} side='right' delayDuration={0}>
+                        <Link
+                          to={prefixWs(path)}
+                          onClick={() => handleNavigationClick(app.title)}
+                          aria-label={app.title}
+                          data-testid={`nav-artifact-app-${app.id}`}
+                          data-track-category='App_Sidebar'
+                          data-track-name='Sidebar_Pinned_App'
+                          data-track-metadata={JSON.stringify({ appId: app.id })}
+                          className={cn(
+                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
+                            isActive
+                              ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                              : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                          )}
+                        >
+                          {initial}
                         </Link>
                       </Tooltip>
                     </li>
@@ -580,11 +586,12 @@ const AppSidebar = (): ReactElement => {
               hasValidStatus ? (
                 <div
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
-                  style={{ backgroundColor: 'var(--sidebar-border)' }}
                   data-testid='profile-icon'
                 >
+                  <div className='absolute inset-x-0 top-0 bottom-2 rounded-lg bg-sidebar-border' />
+
                   {/* Status Emoji at Top Center */}
-                  <div className='absolute top-0 left-1/2 -translate-x-1/2'>
+                  <div className='absolute top-0 left-1/2 -translate-x-1/2 z-10'>
                     <StatusIndicator
                       statusEmoji={currentUser?.statusEmoji}
                       statusContent={currentUser?.statusContent}
@@ -595,7 +602,7 @@ const AppSidebar = (): ReactElement => {
                   </div>
 
                   {/* Avatar at Bottom - overlaps container slightly */}
-                  <div className='relative flex'>
+                  <div className='relative z-10 flex'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-lg' />
                     ) : (

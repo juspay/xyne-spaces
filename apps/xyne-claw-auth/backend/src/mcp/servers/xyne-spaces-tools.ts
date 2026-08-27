@@ -3622,9 +3622,13 @@ const spacesCanvases: ToolDef = {
         if (c.lastEditedAt) parts.push(`  Last edited: ${toIST(c.lastEditedAt)}`);
         else if (c.updatedAt) parts.push(`  Updated: ${toIST(c.updatedAt)}`);
         parts.push(`  ID: ${c.id}`);
-        if (c.viewAccessId) {
-          pushCanvasCitation(citations, c.viewAccessId, idx + 1, c.title);
-        }
+        // Prefer viewAccessId, but fall back to the canonical canvas id: the
+        // Spaces `getCanvas` query resolves a canvas by id OR viewAccessId OR
+        // editAccessId (see backend zero/queries.ts), so `/chat/canvas/<id>` is
+        // a valid link too. Without this fallback, canvases that never got a
+        // viewAccessId (older/locally-seeded rows) emit no citation at all and
+        // render as an empty token in the answer.
+        pushCanvasCitation(citations, c.viewAccessId || c.id, idx + 1, c.title);
         return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
       });
 
@@ -4003,12 +4007,12 @@ const spacesCreateTicket: ToolDef = {
       sdlcRepoId: {
         type: "string",
         description:
-          "Required with sourceCanvasId when creating an implementation ticket for an SDLC Tech Doc. The SDLC repository ID from repository mode.",
+          "Required with sourceCanvasId when creating an implementation ticket for an SDLC artifact. The SDLC repository ID from repository mode.",
       },
       sourceCanvasId: {
         type: "string",
         description:
-          "Required with sdlcRepoId when creating an implementation ticket for an SDLC Tech Doc. The Tech Doc canvas ID to link to the new ticket.",
+          "Required with sdlcRepoId when creating an implementation ticket for an SDLC artifact. The artifact canvas ID to link to the new ticket.",
       },
       priority: {
         type: "string",
@@ -4088,7 +4092,7 @@ const spacesCreateTicket: ToolDef = {
           }, sdlcSpacesAuth());
         } catch (linkError) {
           return err(
-            `Ticket ${data.xyneId} was created, but its Tech Doc link failed: ${linkError instanceof Error ? linkError.message : String(linkError)}. Do not create a duplicate ticket.`,
+            `Ticket ${data.xyneId} was created, but its artifact link failed: ${linkError instanceof Error ? linkError.message : String(linkError)}. Do not create a duplicate ticket.`,
           );
         }
       }
@@ -4889,7 +4893,7 @@ const sdlcSourceReferencesSchema = {
 } as const;
 
 function sdlcMutationVariant(
-  artifactType: "WIKI" | "BASELINE" | "PRD" | "TECH_DOC",
+  artifactType: "WIKI" | "BASELINE",
   action: string,
   required: readonly string[],
   propertyOverrides: Record<string, unknown> = {},
@@ -4909,10 +4913,13 @@ function sdlcMutationVariant(
 const spacesSdlcMutateArtifact: ToolDef = {
   name: SDLC_TOOL_NAMES.mutateArtifact,
   description:
-    "Create or mutate one trusted-repository SDLC artifact. Supports PRD/Tech Doc creation, incremental " +
-    "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Creating a PRD or Tech " +
-    "Doc requires trackId (the SDLC track it belongs to); a Tech Doc may also set parentCanvasId to link a parent " +
-    "PRD, but that is optional. Trusted repository and execution identity is injected by the platform.",
+    "Create or mutate one trusted-repository SDLC artifact. Supports artifact create/update, incremental " +
+    "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Artifact types are canvas " +
+    "folders on the repo's SDLC channel: PRD and Tech Docs are seeded built-in types, and users can add custom " +
+    "types; list them via spaces-sdlc-list-artifact-types. To create an artifact of any type, pass its folderId " +
+    "(from that tool) plus trackId (the SDLC track it belongs to). To update an artifact, pass its canvasId and " +
+    "markdown. Link related artifacts via relatedCanvasIds. Trusted repository and execution identity is " +
+    "injected by the platform.",
   inputSchema: {
     type: "object",
     properties: {
@@ -4921,7 +4928,7 @@ const spacesSdlcMutateArtifact: ToolDef = {
       actorUserId: { type: "string", minLength: 1 },
       executionId: { type: "string", minLength: 1 },
       sessionId: { type: "string", minLength: 1 },
-      artifactType: { type: "string", enum: ["WIKI", "BASELINE", "PRD", "TECH_DOC"] },
+      artifactType: { type: "string", enum: ["WIKI", "BASELINE"] },
       baselineKind: {
         type: "string",
         enum: [...SDLC_BASELINE_KINDS],
@@ -4943,14 +4950,32 @@ const spacesSdlcMutateArtifact: ToolDef = {
       commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
       sourcePaths: sdlcSourcePathsSchema,
       sourceReferences: sdlcSourceReferencesSchema,
-      kind: { type: "string", enum: ["PRD", "TECH_DOC"] },
-      parentCanvasId: { type: "string", minLength: 1 },
-      trackId: { type: "string", minLength: 1, description: "Required when creating a PRD or Tech Doc: the SDLC track the artifact belongs to. Get it from spaces-sdlc-list-artifacts or the user's chosen track." },
+      folderId: { type: "string", minLength: 1, description: "The artifact-type folder id to create the artifact under; get it from spaces-sdlc-list-artifact-types. Required for every artifact create." },
+      relatedCanvasIds: { type: "array", items: { type: "string", minLength: 1 }, description: "Optional canvas ids of existing artifacts to link as related context on create." },
+      trackId: { type: "string", minLength: 1, description: "Required when creating an artifact: the SDLC track it belongs to. Get it from spaces-sdlc-list-artifacts or the user's chosen track." },
       generationCommit: { type: "string", maxLength: 255 },
       canvasId: { type: "string", minLength: 1, description: "Canonical SDLC Canvas ID from the canvas URL or artifact response" },
     },
-    required: ["artifactType", "action"],
+    required: ["action"],
     oneOf: [
+      {
+        type: "object",
+        properties: {
+          action: { const: "create" },
+          folderId: { type: "string", minLength: 1 },
+        },
+        required: ["action", "folderId", "title", "markdown", "trackId"],
+        not: { required: ["artifactType"] },
+      },
+      {
+        type: "object",
+        properties: {
+          action: { const: "update" },
+          canvasId: { type: "string", minLength: 1 },
+        },
+        required: ["action", "canvasId", "markdown"],
+        not: { required: ["artifactType"] },
+      },
       sdlcMutationVariant("WIKI", "create", ["commitSha", "path", "title", "markdown", "sourcePaths"]),
       sdlcMutationVariant("WIKI", "update", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
       sdlcMutationVariant("WIKI", "restore", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
@@ -4962,10 +4987,6 @@ const spacesSdlcMutateArtifact: ToolDef = {
       sdlcMutationVariant("BASELINE", "begin", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
       sdlcMutationVariant("BASELINE", "upsert_section", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title", "sectionKey", "sectionTitle", "markdown", "sourceReferences"], { markdown: { maxLength: 1_000_000 }, sourceReferences: { minItems: 1 } }),
       sdlcMutationVariant("BASELINE", "finalize", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
-      sdlcMutationVariant("PRD", "create", ["title", "markdown", "trackId"]),
-      sdlcMutationVariant("PRD", "update", ["canvasId", "markdown"]),
-      sdlcMutationVariant("TECH_DOC", "create", ["title", "markdown", "trackId"]),
-      sdlcMutationVariant("TECH_DOC", "update", ["canvasId", "markdown"]),
     ],
   },
   async handler(args, ctx) {
@@ -5016,7 +5037,6 @@ async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
         canvasId: string;
         viewAccessId?: string;
         url?: string;
-        kind: string;
       };
     };
     const artifact = data.artifact;
@@ -5025,7 +5045,6 @@ async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
     return okCited(
       prefixChunk(1, "SDLC artifact created", [
         `Canvas ID: ${artifact.canvasId}`,
-        `Kind: ${artifact.kind}`,
         `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
       ]),
       citations,
@@ -5044,23 +5063,21 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
     }
     return updateSdlcBaseline(args, ctx);
   }
-  if (artifactType === "PRD" || artifactType === "TECH_DOC") {
-    if (action === "create") {
-      return createSdlcArtifact({ ...args, kind: artifactType }, ctx);
+  const folderId = String(args["folderId"] ?? "").trim();
+  if (action === "create" && folderId) {
+    return createSdlcArtifact(args, ctx);
+  }
+  if (action === "update" && !artifactType && String(args["canvasId"] ?? "").trim()) {
+    try {
+      const data = (await spacesFetch("/api/sdlc/claw/artifacts/update", {
+        method: "POST",
+        headers: { "x-xyne-acting-user-id": ctx.userId },
+        body: JSON.stringify(args),
+      }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
+      return ok(JSON.stringify(data.artifact));
+    } catch (e) {
+      return err(`Update SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
     }
-    if (action === "update") {
-      try {
-        const data = (await spacesFetch("/api/sdlc/claw/artifacts/update", {
-          method: "POST",
-          headers: { "x-xyne-acting-user-id": ctx.userId },
-          body: JSON.stringify({ ...args, kind: artifactType }),
-        }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string; kind: string } };
-        return ok(JSON.stringify(data.artifact));
-      } catch (e) {
-        return err(`Update SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-    return err(`${artifactType} action must be create or update.`);
   }
   if (artifactType !== "WIKI") return err("Unsupported SDLC artifactType.");
   if (action === "move") {
@@ -5150,7 +5167,7 @@ const sdlcArtifactSelectorSchema = {
       additionalProperties: false,
       properties: {
         type: { const: "SDLC_CANVAS" },
-        canvasId: { type: "string", minLength: 1, maxLength: 256, description: "Repo Knowledge, PRD, or Tech Doc Canvas ID" },
+        canvasId: { type: "string", minLength: 1, maxLength: 256, description: "Repo Knowledge or artifact Canvas ID" },
       },
       required: ["type", "canvasId"],
     },
@@ -5159,7 +5176,7 @@ const sdlcArtifactSelectorSchema = {
 
 const spacesSdlcListArtifactVersions: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifactVersions,
-  description: "List a bounded newest-first page of immutable versions for one trusted-repository SDLC Wiki page, Repo Knowledge document, PRD, or Tech Doc. Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
+  description: "List a bounded newest-first page of immutable versions for one trusted-repository SDLC Wiki page, Repo Knowledge document, or artifact (any type). Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
   inputSchema: {
     type: "object",
     properties: {
@@ -5263,15 +5280,49 @@ const spacesSdlcCreateTrack: ToolDef = {
   },
 };
 
+async function callSdlcArtifactTypes(
+  path: string,
+  args: Record<string, unknown>,
+  ctx: HandlerContext,
+): Promise<ToolResult> {
+  try {
+    const data = await spacesFetch(`/api/sdlc/claw/artifact-types${path}`, {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    }, sdlcSpacesAuth());
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC artifact types error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+const spacesSdlcListArtifactTypes: ToolDef = {
+  name: SDLC_TOOL_NAMES.listArtifactTypes,
+  description:
+    "List the SDLC artifact types (canvas folders) in a trusted repository. Each type is a folder on the repo's SDLC channel; PRD and Tech Doc are seeded built-in types and users can add more custom types. Call this before creating an artifact of a custom type to get its folderId, then pass that folderId to spaces-sdlc-mutate-artifact create.",
+  inputSchema: {
+    type: "object",
+    properties: { repoId: { type: "string", minLength: 1 } },
+    required: ["repoId"],
+  },
+  async handler(args, ctx) {
+    return callSdlcArtifactTypes("/list", args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return callSdlcArtifactTypes("/list", args, ctx);
+  },
+};
+
 const spacesSdlcListArtifacts: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifacts,
-  description: "List current trusted-repository Wiki, Baseline, PRD, and Tech Doc artifacts. Returns bounded identity and current-state metadata without historical bodies.",
+  description: "List current trusted-repository Wiki, Baseline, and artifact documents (every artifact type, seeded or custom). Returns bounded identity and current-state metadata without historical bodies.",
   inputSchema: {
     type: "object",
     properties: {
       repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
       executionId: { type: "string" }, sessionId: { type: "string" },
-      kinds: { type: "array", items: { type: "string", enum: ["WIKI", "BASELINE", "PRD", "TECH_DOC"] } },
+      kinds: { type: "array", items: { type: "string", enum: ["WIKI", "BASELINE", "ARTIFACT", "PRD", "TECH_DOC"] }, description: "Filter by kind. ARTIFACT covers every artifact type (seeded or custom); PRD/TECH_DOC are accepted as legacy aliases for ARTIFACT." },
       includeArchived: { type: "boolean" },
     },
     required: ["repoId", "workspaceId", "actorUserId"],
@@ -8178,6 +8229,7 @@ export const tools: ToolDef[] = [
   spacesSdlcReadArtifact,
   spacesSdlcListTracks,
   spacesSdlcCreateTrack,
+  spacesSdlcListArtifactTypes,
   spacesSdlcMutateArtifact,
   spacesSdlcCreatePullRequest,
   spacesSdlcListArtifactVersions,

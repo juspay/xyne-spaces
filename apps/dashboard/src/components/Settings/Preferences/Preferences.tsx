@@ -47,6 +47,7 @@ import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
+import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -845,6 +846,8 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
       <div className='space-y-3'>
+        <IntentSuggestionsToggle />
+
         <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
           <p className='text-sm font-medium text-foreground'>Show send indicators</p>
           <Switch

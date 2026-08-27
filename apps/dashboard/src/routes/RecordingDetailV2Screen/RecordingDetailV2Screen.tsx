@@ -14,7 +14,11 @@ import {
 import { useShortcut } from '../../shortcuts';
 import { StickyNote } from 'lucide-react';
 import { toast } from 'sonner';
-import { logRecordingError } from '../../utils/recordingUtils';
+import {
+  logRecordingError,
+  NO_TRANSCRIPT_AFTER_MS,
+  resolveRecordingTitle,
+} from '../../utils/recordingUtils';
 import {
   getRecordingV2Tab,
   setRecordingV2Tab,
@@ -42,6 +46,7 @@ import {
   EnvelopeDefault,
   Hashtag,
   SidebarRightClose,
+  Share02,
 } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
@@ -52,7 +57,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
+import XyneAIStar from '../../components/icons/xyne-ai/XyneAIStar';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
+import { RecordingShareModal } from './components/RecordingShareModal';
 import { RecordingDetailV2Skeleton } from './components/RecordingDetailV2Skeleton';
 import { RecordingLoadError } from './components/RecordingLoadError/RecordingLoadError';
 import {
@@ -97,6 +104,10 @@ import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 interface RecordingNavState {
   recordingIds?: string[];
   from?: string;
+  justStopped?: boolean;
+  durationMs?: number;
+  endedAtMs?: number;
+  hasTranscript?: boolean;
 }
 
 const AUDIO_POLL_INTERVAL_MS = 10_000;
@@ -140,6 +151,16 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const requestedTab = useMemo(
+    () => new URLSearchParams(location.search).get('tab'),
+    [location.search],
+  );
+  const navState = location.state as RecordingNavState | null;
+  const justStopped = navState?.justStopped === true;
+  const stoppedAtMs = navState?.endedAtMs ?? null;
+  const capturedTranscript =
+    navState?.hasTranscript === true &&
+    (stoppedAtMs === null || Date.now() - stoppedAtMs < NO_TRANSCRIPT_AFTER_MS);
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const currentUser = useSelf();
 
@@ -147,10 +168,20 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const [loading, setLoading] = useState(true);
   /** Why the recording couldn't be opened — classified, so the screen can say why. */
   const [failure, setFailure] = useState<RecordingLoadFailure | null>(null);
+
+  if (recording && recording.externalId !== recordingId) {
+    setRecording(null);
+    setLoading(true);
+    setFailure(null);
+  }
+
   // Which of the two panes to show. The concrete second tab (transcript while live,
   // summary once ended) is derived below, so only the notes/not-notes choice is held.
-  const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(getRecordingV2Tab);
+  const [tabPreference, setTabPreference] = useState<RecordingV2Tab>(() =>
+    requestedTab === 'notes' ? 'notes' : justStopped ? 'secondary' : getRecordingV2Tab(),
+  );
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
   const [postToEmailNonce, setPostToEmailNonce] = useState(0);
@@ -182,6 +213,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Which line the transcript panel opens on: set by a timeline marker, null when the
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
+
+  useEffect(() => {
+    if (requestedTab === 'notes') {
+      setTabPreference('notes');
+    }
+  }, [recordingId, requestedTab]);
 
   const exportGoogleDoc = async (documentTitle?: string): Promise<void> => {
     if (!recording || isExportingGoogleDoc) return;
@@ -296,7 +333,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // Stopping clears the local session at once, but the API keeps reporting the
   // recording live until the LiveKit webhook lands. Trusting the local stop makes the
   // screen change over in one step instead of twice, seconds apart.
-  const [localSessionEnded, setLocalSessionEnded] = useState(false);
+  const [localSessionEnded, setLocalSessionEnded] = useState(justStopped);
   /** Which recording this tab was last running, so the edge below only fires for it. */
   const ownedLiveSessionRef = useRef<string | null>(null);
   // Tracks the live→ended edge, which is what moves the user onto the summary below.
@@ -317,14 +354,23 @@ export default function RecordingDetailV2Screen(): ReactElement {
     if (localSessionEnded) scrollContainerRef.current?.scrollTo({ top: 0 });
   }, [localSessionEnded]);
 
-  const liveTabRecordingIdRef = useRef<string | null>(null);
-  if (isLive && recordingId && liveTabRecordingIdRef.current !== recordingId) {
-    liveTabRecordingIdRef.current = recordingId;
-    setTabPreference(getLiveRecordingV2Tab(recordingId));
+  // Set the default tab once per recording: an explicit `?tab=notes` deep link wins,
+  // otherwise the remembered per-recording pane while it's live, or summary if it's
+  // already ended on arrival (as opposed to watching it end live, which wasLiveRef
+  // below handles).
+  const initialTabRecordingIdRef = useRef<string | null>(null);
+  if (recording && initialTabRecordingIdRef.current !== recordingId) {
+    initialTabRecordingIdRef.current = recordingId ?? null;
+    setTabPreference(
+      requestedTab === 'notes'
+        ? 'notes'
+        : isLive
+          ? getLiveRecordingV2Tab(recordingId)
+          : 'secondary',
+    );
   }
 
   // j/k keyboard navigation between recordings
-  const navState = location.state as RecordingNavState | null;
   const recordingIds = navState?.recordingIds;
   const backTo = navState?.from ?? '/recordings';
   const currentIndex = useMemo(
@@ -370,10 +416,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
     setPendingSummaryTemplateId(request?.templateId ?? null);
     if (request?.templateId) setShouldLoadSummaryTemplates(true);
     setSummaryFailed(false);
-    setLocalSessionEnded(false);
+    setLocalSessionEnded(justStopped);
+    if (justStopped) setTabPreference('secondary');
     ownedLiveSessionRef.current = null;
     wasLiveRef.current = false;
-  }, [recordingId]);
+  }, [recordingId, justStopped]);
 
   /**
    * Ending the recording retires the transcript segment in favour of the summary
@@ -403,15 +450,37 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const titleState = useRecordingTitleState({
     title: recordingRow ? recordingRow.title : (recording?.title ?? null),
     isEnded: !isLive,
-    endedAtMs: recordingRow?.endedAt ?? (recording?.endedAt ? Date.parse(recording.endedAt) : null),
-    hasTranscript: !!recordingRow?.transcript || !!recording?.hasTranscript,
+    endedAtMs:
+      recordingRow?.endedAt ?? (recording?.endedAt ? Date.parse(recording.endedAt) : stoppedAtMs),
+    hasTranscript: capturedTranscript || !!recordingRow?.transcript || !!recording?.hasTranscript,
     hasSummary: !!recordingRow?.aiSummary || !!recording?.hasSummary,
   });
 
   useEffect(() => {
-    if (!recordingRow) return;
+    if (!recordingRow || recordingRow.externalId !== recordingId) return;
     setRecording(prev => {
-      if (!prev) return prev;
+      const base: RecordingDetail = prev ?? {
+        id: recordingRow.id,
+        externalId: recordingRow.externalId,
+        title: recordingRow.title ?? '',
+        createdByUserId: recordingRow.createdByUserId,
+        startedAt: new Date(recordingRow.startedAt).toISOString(),
+        endedAt: null,
+        durationMs: navState?.durationMs ?? null,
+        hasTranscript: !!recordingRow.transcript,
+        hasSummary: !!recordingRow.aiSummary,
+        transcript: null,
+        identifiedTranscript: null,
+        hasIdentifiedTranscript: false,
+        aiSummary: null,
+        conversationId: null,
+        channelId: recordingRow.channelId ?? null,
+        messageId: null,
+        notesCanvasId: null,
+        detailedSummaryCanvasId: null,
+        detailedSummaryReady: null,
+        citationSegments: [],
+      };
       const endedAt = recordingRow.endedAt ? new Date(recordingRow.endedAt).toISOString() : null;
       // Ticket linkage has no column of its own — it rides in Call.metadata,
       // the same place the notes canvas link lives. Keep the REST result live
@@ -425,40 +494,42 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const rawNotesCanvasId = metadata?.['notesCanvasId'] ?? metadata?.['notesCanvasViewAccessId'];
       const googleDocs = parseRecordingGoogleDocLinks(metadata?.['googleDocs']);
       const next: RecordingDetail = {
-        ...prev,
-        title: recordingRow.title || prev.title,
-        labels: recordingRow.labels ?? prev.labels,
+        ...base,
+        title: recordingRow.title || base.title,
+        labels: recordingRow.labels ?? base.labels,
+        recordingParticipants: recordingRow.recordingParticipants ?? base.recordingParticipants,
+        shares: recordingRow.shares ?? base.shares,
         linkedTicketId,
         linkedTicketMessageId:
           typeof rawLinkedTicketMessageId === 'string' ? rawLinkedTicketMessageId : null,
         detailedSummaryCanvasId:
           typeof rawDetailedSummaryCanvasId === 'string'
             ? rawDetailedSummaryCanvasId
-            : prev.detailedSummaryCanvasId,
+            : base.detailedSummaryCanvasId,
         detailedSummaryReady:
           typeof rawDetailedSummaryReady === 'boolean'
             ? rawDetailedSummaryReady
-            : prev.detailedSummaryReady,
+            : base.detailedSummaryReady,
         notesCanvasId:
-          prev.notesCanvasId ?? (typeof rawNotesCanvasId === 'string' ? rawNotesCanvasId : null),
+          base.notesCanvasId ?? (typeof rawNotesCanvasId === 'string' ? rawNotesCanvasId : null),
         // An empty list here means metadata hasn't carried the key yet (older
         // recording, or the export write is still in flight) — keep what we have.
-        googleDocs: googleDocs.length > 0 ? googleDocs : (prev.googleDocs ?? []),
-        markedItems: recordingRow.markedItems ?? prev.markedItems,
-        summaryTemplateId: recordingRow.summaryTemplateId ?? prev.summaryTemplateId ?? null,
-        aiSummary: recordingRow.aiSummary ?? prev.aiSummary,
+        googleDocs: googleDocs.length > 0 ? googleDocs : (base.googleDocs ?? []),
+        markedItems: recordingRow.markedItems ?? base.markedItems,
+        summaryTemplateId: recordingRow.summaryTemplateId ?? base.summaryTemplateId ?? null,
+        aiSummary: recordingRow.aiSummary ?? base.aiSummary,
         hasSummary: !!recordingRow.aiSummary,
         endedAt,
         durationMs: endedAt
           ? new Date(endedAt).getTime() - new Date(recordingRow.startedAt).getTime()
-          : prev.durationMs,
+          : base.durationMs,
       };
       if (recordingRow.status) {
         next.status = recordingRow.status as NonNullable<RecordingDetail['status']>;
       }
-      return isSameRecordingSnapshot(prev, next) ? prev : next;
+      return prev && isSameRecordingSnapshot(prev, next) ? prev : next;
     });
-  }, [recordingRow]);
+  }, [recordingRow, recordingId, recording?.externalId, navState?.durationMs]);
 
   useEffect(() => {
     const request = getSummaryRequest(recordingId);
@@ -527,7 +598,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
       setFailure(null);
       const data = await recordingService.getRecordingDetail(id);
       loadedRecordingIdRef.current = id;
-      setRecording(data);
+      setRecording(prev =>
+        prev && data.durationMs === null && prev.durationMs !== null
+          ? { ...data, durationMs: prev.durationMs }
+          : data,
+      );
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.loadRecording', err);
       const loadFailure = classifyRecordingLoadFailure(err);
@@ -781,7 +856,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     markSummaryRequested(recordingId);
   }, [recordingId, recording, recordingRow, transcriptText, awaitingSummary, summaryFailed]);
 
-  if (loading) {
+  if (loading && !recording) {
     return <RecordingDetailV2Skeleton />;
   }
 
@@ -810,6 +885,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const hasDetailedSummary =
     !!recording.detailedSummaryCanvasId && recording.detailedSummaryReady !== false;
   const isOwner = recording.createdByUserId === currentUser?.id;
+  const isGeneratingTitle = titleState?.kind === 'generating';
+  // Sharing needs a summary canvas to share, and a live recording has nothing final yet.
+  const canShare = !isLive && Boolean(recording.detailedSummaryCanvasId);
+  const breadcrumbTitle =
+    titleState && titleState.kind !== 'generating'
+      ? titleState.text
+      : resolveRecordingTitle(recording.title);
   const summaryTemplateOptions: RecordingSummaryTemplate[] = [
     DEFAULT_SUMMARY_TEMPLATE_OPTION,
     ...summaryTemplates
@@ -836,7 +918,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   // Nothing to summarize without a transcript, so the offer waits for one to exist.
   const hasTranscript =
-    !!transcriptText?.trim() || !!recordingRow?.transcript || !!recording.hasTranscript;
+    capturedTranscript ||
+    !!transcriptText?.trim() ||
+    !!recordingRow?.transcript ||
+    !!recording.hasTranscript;
 
   // Past the grace window the auto-pending shimmer would be a lie — the in-call
   // generation isn't coming. An explicit regenerate still shimmers via
@@ -911,158 +996,214 @@ export default function RecordingDetailV2Screen(): ReactElement {
           .join(' ')}
       >
         <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
-          <div className='sticky top-0 z-20 -mx-4 -mt-6 flex flex-col bg-background px-4 pt-6'>
-            <RecordingDetailV2Header
-              recording={recording}
-              isLive={isLive}
-              backTo={backTo}
-              titleState={titleState}
-              onTitleUpdated={handleTitleUpdated}
-              onLabelsUpdated={handleLabelsUpdated}
-              onTicketLinkUpdated={handleTicketLinkUpdated}
-              onAskAI={handleAskAI}
-              {...(ownsLiveSession ? { onMinimize: handleMinimize } : {})}
-            />
-            <motion.div layoutRoot className='flex flex-col pt-2'>
-              <LiveRecordingControlBar
-                recording={recording}
-                isLive={isLive}
-                onStopped={() => void loadRecording(recording.externalId)}
-                isAudioPreparing={!showAudioPlayer && !audioPollExhausted}
-                isAudioUnavailable={audioUnavailable}
-                {...(showAudioPlayer
-                  ? {
-                      onLoadAudio: (signal: AbortSignal) =>
-                        recordingService.downloadRecordingBlob(recording.externalId, signal),
-                    }
-                  : {})}
-                {...(transcriptText
-                  ? { onMarkerSelect: handleMarkerSelect, onOpenTranscript: openTranscriptPanel }
-                  : {})}
-              />
+          {/* The only pinned row — the rest of the page scrolls under it. */}
+          <div className='sticky top-0 z-20 -mx-4 -mt-6 flex items-center justify-between gap-3 bg-background px-4 pb-3 pt-6'>
+            <nav aria-label='Breadcrumb' className='min-w-0'>
+              <ol className='flex items-center gap-1.5 text-sm'>
+                <li>
+                  <button
+                    type='button'
+                    onClick={() => void navigate(backTo)}
+                    className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
+                    data-track-category='RecordingDetailV2'
+                    data-track-name='breadcrumb_recordings'
+                  >
+                    Recordings
+                  </button>
+                </li>
+                <li aria-hidden='true' className='text-muted-foreground'>
+                  /
+                </li>
+                {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
+                <li className='truncate text-foreground'>
+                  {isGeneratingTitle ? 'Generating title…' : breadcrumbTitle}
+                </li>
+              </ol>
+            </nav>
 
-              <div className='mb-4 flex items-center justify-between border-b border-border/70 pb-2'>
-                {/* Templates are only offered once the recording has ended — while live
-                    the second segment is the transcript and there is nothing to
-                    regenerate from yet. */}
-                <RecordingContentTabs
-                  visibleTab={visibleTab}
-                  secondTab={secondTab}
-                  onSelect={handleTabSelect}
-                  hasSummary={hasDetailedSummary}
-                  selectedTemplate={selectedSummaryTemplate}
-                  {...(isLive || !isOwner
-                    ? {}
-                    : {
-                        isRegenerating: isRegeneratingSummary || awaitingSummary,
-                        templates: summaryTemplateOptions,
-                        templatesLoading: summaryTemplatesLoading,
-                        onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
-                        onTemplateSelect: summaryTemplateId =>
-                          void handleRegenerateSummary(summaryTemplateId),
-                        onRegenerate: () =>
-                          void handleRegenerateSummary(selectedSummaryTemplate.id),
-                        onOpenTemplates: handleOpenSummaryTemplates,
-                        onNewTemplate: handleNewSummaryTemplate,
-                      })}
-                />
-
-                {/* The right slot belongs to whichever action the state allows: flag a
-                    moment while capturing, share the finished recording once ended. */}
-                {isLive ? (
+            <div className='flex shrink-0 items-center gap-1'>
+              {canShare && (
+                <Tooltip content='Share' side='bottom'>
                   <Button
                     type='button'
-                    variant='outline'
-                    size='sm'
-                    onClick={markMoment}
-                    disabled={!ownsLiveSession}
-                    className='h-8 gap-2 rounded-full px-5 text-sm font-medium'
-                    title={
-                      ownsLiveSession
-                        ? 'Mark this moment'
-                        : 'Only the session running this recording can mark moments'
-                    }
+                    variant='ghost'
+                    size='iconSm'
+                    onClick={() => setShowShareModal(true)}
+                    className='size-8 rounded-lg text-muted-foreground hover:text-foreground'
+                    aria-label='Share recording'
                     data-track-category='RecordingDetailV2'
-                    data-track-name='mark_moment'
+                    data-track-name='share_recording'
                   >
-                    <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
-                    Mark this moment
+                    <Share02 className='size-4' />
                   </Button>
-                ) : isOwner && hasDetailedSummary ? (
-                  <DropdownMenu>
-                    <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                </Tooltip>
+              )}
+              {!isLive && (
+                <Tooltip content='Ask AI about this recording' side='bottom'>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='iconSm'
+                    onClick={handleAskAI}
+                    className='size-8 rounded-lg text-muted-foreground hover:text-foreground'
+                    aria-label='Ask AI about this recording'
+                    data-track-category='RecordingDetailV2'
+                    data-track-name='ask_ai_recording'
+                  >
+                    <XyneAIStar />
+                  </Button>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+          <RecordingDetailV2Header
+            recording={recording}
+            isLive={isLive}
+            titleState={titleState}
+            onTitleUpdated={handleTitleUpdated}
+            onLabelsUpdated={handleLabelsUpdated}
+            onTicketLinkUpdated={handleTicketLinkUpdated}
+            onOpenShare={() => setShowShareModal(true)}
+            {...(ownsLiveSession ? { onMinimize: handleMinimize } : {})}
+          />
+          <motion.div layoutRoot className='flex flex-col pt-2'>
+            <LiveRecordingControlBar
+              recording={recording}
+              isLive={isLive}
+              onStopped={() => void loadRecording(recording.externalId)}
+              isAudioPreparing={!showAudioPlayer && !audioPollExhausted}
+              isAudioUnavailable={audioUnavailable}
+              {...(showAudioPlayer
+                ? {
+                    onLoadAudio: (signal: AbortSignal) =>
+                      recordingService.downloadRecordingBlob(recording.externalId, signal),
+                  }
+                : {})}
+              {...(transcriptText
+                ? { onMarkerSelect: handleMarkerSelect, onOpenTranscript: openTranscriptPanel }
+                : {})}
+            />
+
+            <div className='mb-4 flex items-center justify-between border-b border-border/70 pb-2'>
+              {/* Templates are only offered once the recording has ended — while live
+                  the second segment is the transcript and there is nothing to
+                  regenerate from yet. */}
+              <RecordingContentTabs
+                visibleTab={visibleTab}
+                secondTab={secondTab}
+                onSelect={handleTabSelect}
+                hasSummary={hasDetailedSummary}
+                selectedTemplate={selectedSummaryTemplate}
+                {...(isLive || !isOwner
+                  ? {}
+                  : {
+                      isRegenerating: isRegeneratingSummary || awaitingSummary,
+                      templates: summaryTemplateOptions,
+                      templatesLoading: summaryTemplatesLoading,
+                      onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
+                      onTemplateSelect: summaryTemplateId =>
+                        void handleRegenerateSummary(summaryTemplateId),
+                      onRegenerate: () => void handleRegenerateSummary(selectedSummaryTemplate.id),
+                      onOpenTemplates: handleOpenSummaryTemplates,
+                      onNewTemplate: handleNewSummaryTemplate,
+                    })}
+              />
+
+              {/* The right slot belongs to whichever action the state allows: flag a
+                  moment while capturing, share the finished recording once ended. */}
+              {isLive ? (
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  onClick={markMoment}
+                  disabled={!ownsLiveSession}
+                  className='h-8 gap-2 rounded-full px-5 text-sm font-medium'
+                  title={
+                    ownsLiveSession
+                      ? 'Mark this moment'
+                      : 'Only the session running this recording can mark moments'
+                  }
+                  data-track-category='RecordingDetailV2'
+                  data-track-name='mark_moment'
+                >
+                  <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
+                  Mark this moment
+                </Button>
+              ) : isOwner && hasDetailedSummary ? (
+                <DropdownMenu>
+                  <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setShowPostToChannelModal(true)}
+                      className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold !rounded-2xl`}
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='open_post_to_channel_modal'
+                    >
+                      <Hashtag className='size-3.5' />
+                      Post to channel
+                    </Button>
+                    <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
+                    <DropdownMenuTrigger asChild>
                       <Button
                         type='button'
                         variant='ghost'
-                        size='sm'
-                        onClick={() => setShowPostToChannelModal(true)}
-                        className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold !rounded-2xl`}
+                        size='iconSm'
+                        aria-label='More actions'
+                        className={POST_SPLIT_BUTTON_CLASS}
                         data-track-category='RecordingDetailV2'
-                        data-track-name='open_post_to_channel_modal'
+                        data-track-name='open_recording_share_menu'
                       >
-                        <Hashtag className='size-3.5' />
-                        Post to channel
+                        <ChevronDown className='size-3.5' />
                       </Button>
-                      <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type='button'
-                          variant='ghost'
-                          size='iconSm'
-                          aria-label='More actions'
-                          className={POST_SPLIT_BUTTON_CLASS}
-                          data-track-category='RecordingDetailV2'
-                          data-track-name='open_recording_share_menu'
-                        >
-                          <ChevronDown className='size-3.5' />
-                        </Button>
-                      </DropdownMenuTrigger>
-                    </div>
-                    <DropdownMenuContent
-                      align='end'
-                      sideOffset={6}
-                      className='w-60 rounded-xl p-1.5 shadow-xl'
+                    </DropdownMenuTrigger>
+                  </div>
+                  <DropdownMenuContent
+                    align='end'
+                    sideOffset={6}
+                    className='w-60 rounded-xl p-1.5 shadow-xl'
+                  >
+                    <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                      Send this summary to
+                    </p>
+                    <DropdownMenuItem
+                      onSelect={() => setShowPostToChannelModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='open_post_to_channel_from_menu'
                     >
-                      <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
-                        Send this summary to
-                      </p>
-                      <DropdownMenuItem
-                        onSelect={() => setShowPostToChannelModal(true)}
-                        className='rounded-lg px-2.5 py-2'
-                        data-track-category='RecordingDetailV2'
-                        data-track-name='open_post_to_channel_from_menu'
-                      >
-                        <Hashtag className='size-4 text-muted-foreground' />
-                        Post to channel
-                        <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-                          Default
-                        </span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => setShowPostToEmailModal(true)}
-                        className='rounded-lg px-2.5 py-2'
-                        data-track-category='RecordingDetailV2'
-                        data-track-name='open_post_to_email_modal'
-                      >
-                        <EnvelopeDefault className='size-4 text-muted-foreground' />
-                        Draft follow-up email
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => setShowGoogleDocPreviewModal(true)}
-                        disabled={isExportingGoogleDoc}
-                        className='rounded-lg px-2.5 py-2'
-                        data-track-category='RecordingDetailV2'
-                        data-track-name='export_recording_google_doc'
-                      >
-                        <File02Text className='size-4 text-muted-foreground' />
-                        {isExportingGoogleDoc ? 'Creating Google Doc…' : 'Export to Google Docs'}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : null}
-              </div>
-            </motion.div>
-          </div>
+                      <Hashtag className='size-4 text-muted-foreground' />
+                      Post to channel
+                      <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                        Default
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowPostToEmailModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='open_post_to_email_modal'
+                    >
+                      <EnvelopeDefault className='size-4 text-muted-foreground' />
+                      Draft follow-up email
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowGoogleDocPreviewModal(true)}
+                      disabled={isExportingGoogleDoc}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='export_recording_google_doc'
+                    >
+                      <File02Text className='size-4 text-muted-foreground' />
+                      {isExportingGoogleDoc ? 'Creating Google Doc…' : 'Export to Google Docs'}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+            </div>
+          </motion.div>
 
           {visibleTab === 'notes' ? (
             /* flex-1 rather than a height: fills the pane on a short note without
@@ -1163,6 +1304,21 @@ export default function RecordingDetailV2Screen(): ReactElement {
           />
         )}
       </AnimatePresence>
+
+      {canShare && showShareModal && (
+        <Dialog
+          open={showShareModal}
+          onOpenChange={open => !open && setShowShareModal(false)}
+          title='Share recording'
+          data-testid='recording-share-modal'
+        >
+          <RecordingShareModal
+            recording={recording}
+            onClose={() => setShowShareModal(false)}
+            onTicketLinkUpdated={handleTicketLinkUpdated}
+          />
+        </Dialog>
+      )}
 
       {isOwner && showPostToChannelModal && hasDetailedSummary && (
         <Dialog
@@ -1299,7 +1455,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       editable={true}
       placeholder='Detailed summary'
       autoFocus={false}
-      className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
+      className={`w-full ${CANVAS_POPOVER_LAYER_CLASS}
         detailed-summary-canvas-editor
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-0
