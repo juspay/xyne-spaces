@@ -437,6 +437,21 @@ export function setupIpcHandlers(): void {
     return { saved: true, filePath: result.filePath };
   });
 
+  ipcMain.handle('canvas:export-docx', async (_event, { fileName, data }: { fileName: string; data: ArrayBuffer }) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: fileName,
+      filters: [
+        { name: 'Word Document', extensions: ['docx'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) return { saved: false };
+
+    await fs.writeFile(result.filePath, Buffer.from(new Uint8Array(data)));
+    return { saved: true, filePath: result.filePath };
+  });
+
   ipcMain.on('clear-all-cookies', (event) => {
     if (!isMainWindowSender(event)) return;
     void clearAllCookies();

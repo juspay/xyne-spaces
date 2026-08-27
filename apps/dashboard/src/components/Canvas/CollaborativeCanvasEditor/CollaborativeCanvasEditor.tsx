@@ -50,6 +50,7 @@ import {
   scrollToHeading,
 } from '../../../utils/canvasUtils';
 import {
+  exportCanvasAsDocx,
   exportCanvasAsMarkdown,
   exportCanvasAsPDF,
   type CanvasExportEditor,
@@ -577,6 +578,8 @@ export const CollaborativeCanvasEditor = forwardRef<
           ),
         exportPDF: (title: string) =>
           exportCanvasAsPDF(editor as unknown as CanvasExportEditor, title, containerRef.current),
+        exportDocx: (title: string) =>
+          exportCanvasAsDocx(editor as unknown as CanvasExportEditor, title, containerRef.current),
         toggleComments: () => setIsCommentsOpen(open => !open),
         selectedTheme,
       }),
