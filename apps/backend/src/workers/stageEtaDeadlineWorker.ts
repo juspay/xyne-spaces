@@ -76,54 +76,24 @@ class StageEtaDeadlineWorker {
   }
 
   private async getOverdueTicketIds(now: Date): Promise<string[]> {
-    const allOverdueTicketIds: string[] = [];
-    const QUERY_BATCH_SIZE = 10000;
-    let cursor: string | undefined;
-
-    while (true) {
-      const overdueEntries = await db.ticketStageEta.findMany({
-        where: {
-          stageLeftAt: null,
-          stageEta: { lte: now },
-          // Ensure stage exists (filters out orphaned records with deleted stages)
-          // ticket is implicitly checked via the statusV2 filter (JOIN filters out missing tickets)
-          stage: { isNot: null } as any,
-          ticket: {
-            statusV2: { in: OPEN_STATUSES },
-            // Only fetch tickets not already marked as overdue
-            OR: [
-              { isStageOverdue: false },
-              { isStageOverdue: null },
-            ],
-          } as any,
+    const overdueEntries = await db.ticketStageEta.findMany({
+      where: {
+        stageLeftAt: null,
+        stageEta: { lte: now },
+        ticket: {
+          statusV2: { in: OPEN_STATUSES },
         },
-        select: {
-          id: true,
-          ticketId: true,
-          stage: { select: { name: true } },
-          ticket: { select: { stageName: true } },
-        },
-        take: QUERY_BATCH_SIZE,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-        orderBy: { id: 'asc' },
-      });
+      },
+      select: {
+        ticketId: true,
+        stage: { select: { name: true } },
+        ticket: { select: { stageName: true } },
+      },
+    });
 
-      if (overdueEntries.length === 0) break;
-
-      // Filter to only tickets still in the overdue stage (stage name matches current stage)
-      // Also skip entries with missing relations (orphaned records)
-      const filteredIds = (overdueEntries as any[])
-        .filter(entry => entry.stage?.name && entry.ticket?.stageName && entry.stage.name === entry.ticket.stageName)
-        .map(entry => entry.ticketId);
-
-      allOverdueTicketIds.push(...filteredIds);
-
-      if (overdueEntries.length < QUERY_BATCH_SIZE) break;
-
-      cursor = overdueEntries[overdueEntries.length - 1].id;
-    }
-
-    return allOverdueTicketIds;
+    return overdueEntries
+      .filter(entry => entry.stage.name === entry.ticket.stageName)
+      .map(entry => entry.ticketId);
   }
 
   async shutdown(): Promise<void> {
