@@ -31,7 +31,6 @@ import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDua
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 import { dispatchCommittedTicketStatusChange } from '@/services/flowStatusChangeDispatcher';
 import { updateWhileFlowRunActive } from '@/services/flowActiveRunGuard';
-import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -54,7 +53,6 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: string;
   userGroupId: string | null;
   ticketType: string | null;
-  isStageOverdue?: boolean | null;
   eta: Date | null;
   createdAt: Date;
 }) => ({
@@ -69,7 +67,6 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: ticket.createdBy,
   userGroupId: ticket.userGroupId,
   ticketType: ticket.ticketType,
-  isStageOverdue: ticket.isStageOverdue ?? false,
   eta: ticket.eta?.getTime() ?? null,
   createdAt: ticket.createdAt.getTime(),
   prReviewers: [],
@@ -518,8 +515,6 @@ export class TicketRepository {
           updatedAt: new Date()
         }
       }));
-
-    await syncStageOverdueFlag(prisma, ticketId, now);
 
     if (statusChanged && options.cascadeFlow !== false) {
       await dispatchCommittedTicketStatusChange({

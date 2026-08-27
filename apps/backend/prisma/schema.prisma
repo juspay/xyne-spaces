@@ -141,7 +141,6 @@ model Ticket {
   userGroupId      String?            // User group to which the ticket belongs
   boardId          String            // Board to which the ticket belongs
   stageName        String            // Current stage of the ticket
-  isStageOverdue   Boolean?          // Derived from the active ticket_stage_eta row for the current stage
   ticketType       String?
   isArchived       Boolean           @default(false)
   kanbanPosition   String?

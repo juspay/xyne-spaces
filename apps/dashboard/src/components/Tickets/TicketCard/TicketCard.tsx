@@ -8,7 +8,7 @@ import {
   TicketStatusV2,
   addSlaHours,
 } from '@xyne/shared';
-import { getPriorityIcon, formatEta, isEtaUrgent, isStageOverdue } from './TicketCard.utils';
+import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers, useSelf } from '../../../hooks/useUsers';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
@@ -243,7 +243,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     !!userReadRow &&
     userReadRow.lastReadEmailAt >= lastEmailAt;
 
-  const hasStageOverdue = isStageOverdue(ticket);
+  const isStageOverdue = isStageEtaOverdue(ticket);
   const hasDueDate = !!ticket.eta;
   const hasTags = tags && tags.length > 0;
 
@@ -720,7 +720,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   </div>
                 )}
                 {/* Stage Overdue Badge */}
-                {hasStageOverdue && (
+                {isStageOverdue && (
                   <div className='flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 border border-red-200'>
                     <svg
                       width='12'
