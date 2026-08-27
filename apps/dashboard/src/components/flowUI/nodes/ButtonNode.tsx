@@ -86,6 +86,8 @@ export const ButtonNode: React.FC<ButtonNodeProps> = ({ node }) => {
     <div className='pt-2'>
       <Button
         onClick={handleClick}
+        data-track-category='flowUI'
+        data-track-name='CLICK_FLOW_BUTTON'
         disabled={isDisabled()}
         variant={getVariant()}
         size={getSize()}

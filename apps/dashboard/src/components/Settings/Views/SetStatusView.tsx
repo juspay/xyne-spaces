@@ -139,6 +139,8 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
           variant='ghost'
           size='sm'
           onClick={() => setView('default')}
+          data-track-category='STATUS'
+          data-track-name='BACK_TO_STATUS_DEFAULT'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
           <ChevronLeft className='size-4' />
@@ -419,6 +421,8 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           variant='ghost'
           size='sm'
           onClick={() => setView('default')}
+          data-track-category='STATUS'
+          data-track-name='BACK_TO_STATUS_DEFAULT'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
           <X className='size-4' />
@@ -561,6 +565,8 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
         <Button
           variant='ghost'
           onClick={() => setView('default')}
+          data-track-category='STATUS'
+          data-track-name='CANCEL_SET_STATUS'
           className='text-foreground hover:bg-muted'
         >
           Cancel
@@ -569,6 +575,8 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           onClick={() => {
             void handleSave();
           }}
+          data-track-category='STATUS'
+          data-track-name='SAVE_STATUS'
           disabled={!selectedEmoji && !statusText.trim()}
           className='ml-auto px-6 text-white disabled:opacity-50 disabled:cursor-not-allowed'
           style={{ backgroundColor: '#6276BE' }}

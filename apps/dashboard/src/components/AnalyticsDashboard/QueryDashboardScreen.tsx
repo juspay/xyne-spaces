@@ -548,6 +548,8 @@ export const QueryDashboardScreen: React.FC = () => {
               <div className='flex items-center gap-3'>
                 <Button
                   onClick={handleCloseModal}
+                  data-track-category='ANALYTICS'
+                  data-track-name='CLOSE_QUERY_MODAL'
                   variant='ghost'
                   size='iconSm'
                   className='text-foreground hover:bg-muted/60 rounded-lg transition-colors'
@@ -562,6 +564,8 @@ export const QueryDashboardScreen: React.FC = () => {
                 <Button
                   variant='secondary'
                   onClick={handleCloseModal}
+                  data-track-category='ANALYTICS'
+                  data-track-name='CLOSE_QUERY_MODAL'
                   className='hover:bg-muted/70 border-border/50 transition-all'
                 >
                   Cancel

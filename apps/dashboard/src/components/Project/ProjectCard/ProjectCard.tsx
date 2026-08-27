@@ -94,6 +94,8 @@ export const ProjectCard = ({
               size='iconSm'
               className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
               onClick={handleCopyId}
+              data-track-category='Projects'
+              data-track-name='COPY_PROJECT_ID'
               title='Copy project ID'
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}
