@@ -63,13 +63,18 @@ describe('pinnedAgentsFor', () => {
     await expect(get(`http://rebind.invalid:${port}/`, httpAgent, 1500)).rejects.toThrow();
   });
 
-  it('offers every pinned address when the resolver asks for all of them', async () => {
+  /**
+   * Node requests options.all on the happy-eyeballs path and will try each address
+   * it is given, so every pinned address has to be one that passed validation —
+   * which is what resolveExternalHostPinned returns. This pins two such addresses
+   * and shows the connection stays within them rather than falling back to real
+   * DNS, where this hostname resolves to nothing at all.
+   */
+  it('stays within the pinned set when the resolver asks for all addresses', async () => {
     const { httpAgent } = pinnedAgentsFor('multi.invalid', {
       family: 4,
-      addresses: ['192.0.2.1', '127.0.0.1'],
+      addresses: ['192.0.2.1', '198.51.100.1'], // TEST-NET-1 and TEST-NET-2, both unroutable
     });
-    // autoSelectFamily and happy-eyeballs paths request options.all; the first
-    // address is still the one connected to, so this remains unroutable.
     await expect(get(`http://multi.invalid:${port}/`, httpAgent, 1500)).rejects.toThrow();
   });
 });
