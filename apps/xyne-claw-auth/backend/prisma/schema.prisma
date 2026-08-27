@@ -1099,6 +1099,13 @@ model ChatMessage {
   /// The UI projects one selected path; siblings are reachable via the pager.
   parentId       String?
 
+  /// The context the user attached to THIS turn (channels, tickets, canvases,
+  /// calls, collections, files) as a normalized AttachedContextRef[] — the same
+  /// list that drove the run. Persisted so the pills can be shown read-only
+  /// above the message when a chat is reloaded. Null on assistant rows and on
+  /// legacy rows written before this column existed.
+  attachedContext Json?
+
   attachments ChatAttachment[]
   orgId       String
 

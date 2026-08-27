@@ -421,6 +421,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "complete",
         createdAt: new Date().toISOString(),
         parentId: parentAssistantMessageId ?? null,
+        // Show the attached-context pills on the just-sent turn immediately
+        // (matches what a later reload renders from the persisted column).
+        ...(opts?.attachedContext && opts.attachedContext.length > 0
+          ? { contextItems: opts.attachedContext }
+          : {}),
       };
 
       const assistantId = crypto.randomUUID();
@@ -897,6 +902,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         status: "complete",
         createdAt: new Date().toISOString(),
         parentId: originalUser.parentId ?? null,
+        // Editing keeps the same attached context — carry it onto the new turn.
+        ...(originalUser.contextItems && originalUser.contextItems.length > 0
+          ? { contextItems: originalUser.contextItems }
+          : {}),
       };
       const assistantPlaceholder: ChatMsg = {
         id: assistantId,
