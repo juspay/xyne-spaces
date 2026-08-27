@@ -5,7 +5,6 @@ import { PrismaClient } from '@prisma/client';
 import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
 import axios from 'axios';
 import FormData from 'form-data';
@@ -33,6 +32,25 @@ import { v4 as uuidv4 } from 'uuid';
  *
  * Handles business logic for user groups, users, resources, and access control
  */
+/**
+ * Label for a guest grant whose target the *viewing admin* cannot read.
+ *
+ * Both lookups behind this screen run through the ACL'd client, so a grant on a channel the
+ * admin is not a participant of (ChannelsACL: PUBLIC or participant) or on a canvas they
+ * cannot reach (CanvasesACL) resolves to nothing. Naming the kind is deliberate: the admin
+ * may revoke without being shown a private name, and 'Unknown entity' read like a data bug.
+ */
+function unresolvedEntityName(entityType: string): string {
+  switch (entityType) {
+    case GuestEntity.CHANNEL:
+      return 'Private channel'
+    case GuestEntity.CANVAS:
+      return 'Private canvas'
+    default:
+      return 'Unknown entity'
+  }
+}
+
 export class UserManagementService {
   private static instance: UserManagementService;
   private prisma: PrismaClient;
@@ -443,12 +461,10 @@ export class UserManagementService {
           })
         : [],
       canvasIds.length
-        // Ids come from guest access grants, so the admin is auditing access an outsider
-        // already has — the grant must render with its title, not 'Unknown entity'.
-        ? withWorkspaceScope(async () => await this.prisma.canvas.findMany({
+        ? this.prisma.canvas.findMany({
             where: { id: { in: [...new Set(canvasIds)] } },
             select: { id: true, title: true },
-          }))
+          })
         : [],
     ]);
 
@@ -475,7 +491,7 @@ export class UserManagementService {
         id: mapping.id,
         accessibleEntityId: mapping.accessibleEntityId,
         accessibleEntityType: mapping.accessibleEntityType,
-        entityName: entityName ?? 'Unknown entity',
+        entityName: entityName ?? unresolvedEntityName(mapping.accessibleEntityType),
         createdAt: mapping.createdAt,
         invitedBy: mapping.invitedBy,
         invitedByName: userMap.get(mapping.invitedBy)?.name ?? null,
