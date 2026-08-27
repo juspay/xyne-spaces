@@ -237,6 +237,7 @@ import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
 import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
 import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
+import ArtifactAppScreen from './AIScreen/library/apps/ArtifactAppScreen';
 import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
 import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
 import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
@@ -1106,6 +1107,7 @@ export const router = createBrowserRouter(
                     { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
                     { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                     { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+                    { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
                     {
                       path: 'knowledge',
                       element: <AIKnowledgeScreen />,

@@ -64,7 +64,7 @@ model User {
   /// cron enqueues a brief-generation job for this user; when false the cron
   /// simply skips them (no per-user scheduler to tear down). Mirrors the
   /// digitalTwinEnabled opt-in pattern.
-  dailyBriefEnabled   Boolean   @default(false)
+  dailyBriefEnabled   Boolean                @default(false)
   dailyBriefEnabledAt DateTime?
   dailyBriefActivity  DailyBriefActivity[]
   /// Per-user, per-agent custom instructions (injected into every agent run for
@@ -180,31 +180,31 @@ model TwinBehaviorSignal {
 /// `learnedAt` so the twin's memory learns what got accepted vs edited vs
 /// declined vs ignored — the feedback loop, moved OFF the immediate accept path.
 model TwinResponseFeedback {
-  id               String   @id @default(cuid())
-  userId           String
-  conversationId   String
-  channelId        String?
-  channelName      String?
+  id              String    @id @default(cuid())
+  userId          String
+  conversationId  String
+  channelId       String?
+  channelName     String?
   /// The inbound message that triggered the twin (dedup + link key).
-  sourceMessageId  String?
+  sourceMessageId String?
   /// The incoming message text the twin was responding to.
-  incomingTask     String?
+  incomingTask    String?
   /// The twin's proposed delivery. "react" | "reply" | "react_and_reply".
-  deliveryAction   String   @default("reply")
-  deliveryEmoji    String?
+  deliveryAction  String    @default("reply")
+  deliveryEmoji   String?
   /// "origin_thread" | "origin_channel" | "channel" | "thread".
-  destinationKind  String?
+  destinationKind String?
   /// The twin's proposed reply text (the draft shown for approval).
-  draftMessage     String?
+  draftMessage    String?
   /// What the user actually approved (may be edited); null on decline/ignore.
-  finalMessage     String?
+  finalMessage    String?
   /// "pending" | "accepted" | "accepted_edited" | "declined" | "ignored".
-  status           String   @default("pending")
-  proposedAt       DateTime @default(now())
-  decidedAt        DateTime?
+  status          String    @default("pending")
+  proposedAt      DateTime  @default(now())
+  decidedAt       DateTime?
   /// Set once the daily learning loop has consumed this row.
-  learnedAt        DateTime?
-  createdAt        DateTime @default(now())
+  learnedAt       DateTime?
+  createdAt       DateTime  @default(now())
 
   @@unique([userId, sourceMessageId])
   @@index([userId, status])
@@ -239,18 +239,18 @@ enum SurfaceStatus {
 }
 
 model Organization {
-  id          String    @id @default(cuid())
-  name        String    @unique
-  description String?
-  createdBy   String
-  status      OrgStatus @default(ACTIVE)
-  metadata    Json?
+  id                  String    @id @default(cuid())
+  name                String    @unique
+  description         String?
+  createdBy           String
+  status              OrgStatus @default(ACTIVE)
+  metadata            Json?
   /// Which agent (by slug) executes this org's Daily Brief. NULL ⇒ fall back to
   /// the deployment default (CONFIG.dailyBriefAgentSlug / env, default "ask-ai").
   /// Changed at runtime via the daily-brief settings API (org-admin only).
   dailyBriefAgentSlug String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   members             OrgMember[]
   users               User[]
@@ -320,39 +320,39 @@ model UserSurfaceIdentity {
 }
 
 model SurfaceAgent {
-  id               String   @id @default(cuid())
-  agentId          String
-  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  surfaceId        String
-  surface          Surface  @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
-  surfaceTenantId  String   @default("")
-  surfaceChannelId String?
+  id                        String                @id @default(cuid())
+  agentId                   String
+  agent                     Agent                 @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  surfaceId                 String
+  surface                   Surface               @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
+  surfaceTenantId           String                @default("")
+  surfaceChannelId          String?
   /// The surface-side application identity (Slack app id, Teams bot id).
   /// Events arrive tagged with this; unique per surface so the reverse
   /// lookup (app -> agent) is guaranteed single-owner.
-  externalAppId    String?
+  externalAppId             String?
   /// Non-secret OAuth client identifier of the surface app.
-  clientId         String?
+  clientId                  String?
   /// AES-GCM `ciphertext:iv:authTag` — never stored plaintext.
-  encryptedClientSecret String? @db.Text
-  signingSecret    String?  @db.Text
+  encryptedClientSecret     String?               @db.Text
+  signingSecret             String?               @db.Text
   /// Slash-command name bound to this agent (e.g. "/euler-doctor").
-  commandName      String?
+  commandName               String?
   /// ConnectedSurface row whose bot token answers this agent's slash
   /// commands (the umbrella app's team connection). Read at dispatch time.
   commandConnectedSurfaceId String?
   /// Registration lifecycle: "created" (app minted) | "installed".
-  status           String?
+  status                    String?
   /// sha256 of the manifest template last pushed to the surface app —
   /// compared against the current template to detect drift.
-  manifestHash     String?
-  manifestSyncedAt DateTime?
+  manifestHash              String?
+  manifestSyncedAt          DateTime?
   /// Surface-idiosyncratic residue ONLY (validated by the surface's schema);
   /// anything the core queries must be a real column above.
-  config           Json?
-  installs         SurfaceAgentInstall[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  config                    Json?
+  installs                  SurfaceAgentInstall[]
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
 
   @@unique([agentId, surfaceId, surfaceTenantId])
   @@unique([surfaceId, externalAppId])
@@ -1160,6 +1160,127 @@ model ChatAttachment {
   @@index([chatMessageId])
   @@index([uploaderUserId, createdAt])
   @@map("chat_attachments")
+}
+
+/// A chat artifact the user chose to keep: a generated React project promoted out
+/// of a throwaway `ChatAttachment` into something with its own id, title and URL.
+/// Lives here rather than in the Spaces DB because the attachment it derives from
+/// and the GCS bucket holding its bytes are both owned by this service, and
+/// claw-auth's Spaces connection is read-only by Postgres grant.
+model ArtifactApp {
+  id                 String    @id @default(cuid())
+  /// Spaces workspace, resolved from the owner at save time. Scopes who may see
+  /// this once published — claw-auth's own tenant key (orgId) is a different
+  /// identifier space and is not interchangeable with it.
+  workspaceId        String
+  ownerUserId        String
+  title              String
+  description        String?
+  /// "PRIVATE" | "WORKSPACE". Follows the Spaces `Canvas.visibility` convention
+  /// of a plain string column rather than a Postgres enum.
+  visibility         String    @default("PRIVATE")
+  /// The single version served to everyone else. Null means unpublished; the
+  /// pin is what stops a published app changing under its viewers when the
+  /// author saves a new build.
+  publishedVersionId String?
+  publishedAt        DateTime?
+  isArchived         Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  versions  ArtifactAppVersion[]
+  agentRuns ArtifactAppAgentRun[]
+
+  @@index([workspaceId, visibility])
+  @@index([ownerUserId])
+  @@map("artifact_apps")
+}
+
+/// One saved build of an ArtifactApp. Only the small manifest lives in the row;
+/// the project files ride GCS at `storagePath`, mirroring how the chat attachment
+/// splits manifest from bytes.
+model ArtifactAppVersion {
+  id            String   @id @default(cuid())
+  /// Denormalized tenant key, stamped from the parent app on insert. Scope is
+  /// already implied by appId, but every table carries its own key here (see
+  /// CanvasVersion in the Spaces schema) so a query that forgets to join the
+  /// parent still cannot cross tenants.
+  workspaceId   String
+  appId         String
+  versionNumber Int
+  /// Small descriptor — title, entry, file paths, dependency names. Enough to
+  /// render a gallery card without fetching the project.
+  manifest      Json
+  /// GCS object path (bucket-relative), copied at save so deleting the
+  /// originating conversation cannot break a published app.
+  storagePath   String
+  contentHash   String
+  sizeBytes     Int
+  createdBy     String
+  createdAt     DateTime @default(now())
+
+  app ArtifactApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  /// Re-saving a byte-identical build reuses the existing version instead of
+  /// piling up duplicates — the agent regenerates the same app readily.
+  @@unique([appId, contentHash])
+  @@unique([appId, versionNumber])
+  @@index([appId, createdAt])
+  @@index([workspaceId])
+  @@map("artifact_app_versions")
+}
+
+/// One agent run triggered from inside an artifact app.
+///
+/// This is an INDEX, not a second source of truth. The answer, tool calls and
+/// token counts live on `AgentRun` (keyed by the same `sessionId`) and on the
+/// assistant `ChatMessage`, which are already the durable writers on the
+/// callback path. What this table adds is the app-shaped lookup those tables
+/// cannot serve: "which run belongs to this app, for this viewer, under this
+/// key" — the query a reopened app makes to resync work it started earlier.
+model ArtifactAppAgentRun {
+  id             String   @id @default(cuid())
+  /// Denormalized tenant key, stamped at dispatch. Every table carries its own
+  /// (see ArtifactAppVersion) so a query that forgets to join cannot cross
+  /// tenants.
+  workspaceId    String
+  /// claw-auth's own tenant key. Not interchangeable with workspaceId — it is
+  /// what scopes the agent lookup.
+  orgId          String
+  /// Null while the app is still an unsaved chat artifact; `attachmentId` then
+  /// identifies it. Set once the app has been saved.
+  appId          String?
+  attachmentId   String?
+  /// The viewer who triggered the run. Runs are never shared between viewers of
+  /// a published app.
+  userId         String
+  /// App-chosen thread name, "default" when the app does not pass one. The
+  /// (appId, userId, runKey) triple is what makes a run findable on reopen.
+  runKey         String   @default("default")
+  /// Stable per (app, viewer, runKey), so repeat runs continue one thread and
+  /// /live + /messages both attach to it.
+  conversationId String
+  agentSlug      String
+  /// claw's run id. Null only in the window between row creation and a
+  /// successful dispatch.
+  sessionId      String?  @unique
+  prompt         String   @db.Text
+  /// "pending" | "running" | "completed" | "failed" | "cancelled". Mirrors
+  /// AgentRun.status; kept here so the in-flight check for a key is one indexed
+  /// read rather than a join.
+  status         String   @default("pending")
+  /// Set only for dispatch-time failures. Run-time errors live on AgentRun.
+  error          String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  app ArtifactApp? @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, userId, runKey])
+  @@index([userId, status])
+  @@index([conversationId])
+  @@index([workspaceId])
+  @@map("artifact_app_agent_runs")
 }
 
 /// A stable, revocable public link to the latest published HTML attachment in
@@ -2224,37 +2345,37 @@ model SearchEvalQuery {
 /// creation time (fixed there, not chosen per run) — kept denormalized here so
 /// each run's historical display is accurate even if read long after.
 model SearchEvalRun {
-  id             String             @id @default(cuid())
-  sheetId        String
-  sheet          SearchEvalSheet    @relation(fields: [sheetId], references: [id], onDelete: Cascade)
-  queryType      String[] /// entity types searched; empty = all types
-  rankProfile    String? /// null = let the backend auto-pick (default_native for scored text)
+  id                String             @id @default(cuid())
+  sheetId           String
+  sheet             SearchEvalSheet    @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  queryType         String[] /// entity types searched; empty = all types
+  rankProfile       String? /// null = let the backend auto-pick (default_native for scored text)
   /// Overrides for the active rank profile's `input.query(<name>)` params —
   /// only meaningful when rankProfile is a real per-schema "tunable" profile
   /// (see TUNABLE_INPUTS_BY_AREA in SearchEvalsPageV3.tsx / the tunable
   /// rank-profile inputs {} block per Vespa schema); null otherwise.
   rankProfileInputs Json?
-  permissionMode String /// "with" | "without" — copied from the sheet at run creation
-  asOfTimestamp  DateTime?
-  status         String             @default("running") /// "running" | "completed" | "failed"
-  createdBy      String?
-  orgId          String
-  startedAt      DateTime           @default(now())
-  completedAt    DateTime?
+  permissionMode    String /// "with" | "without" — copied from the sheet at run creation
+  asOfTimestamp     DateTime?
+  status            String             @default("running") /// "running" | "completed" | "failed"
+  createdBy         String?
+  orgId             String
+  startedAt         DateTime           @default(now())
+  completedAt       DateTime?
   /// Top1/Top3/Top10 count+% and Mean Reciprocal Rank — written by the worker
   /// alongside completedAt when the run finishes (null while "running", or for
   /// runs from before this existed — the API falls back to live computation
   /// from `results` in that case). `completedAt` is the "with timestamp" this
   /// was asked to be stored with.
-  queriesScored  Int?
-  top1Count      Int?
-  top1Pct        Float?
-  top3Count      Int?
-  top3Pct        Float?
-  top10Count     Int?
-  top10Pct       Float?
-  mrr            Float?
-  results        SearchEvalResult[]
+  queriesScored     Int?
+  top1Count         Int?
+  top1Pct           Float?
+  top3Count         Int?
+  top3Pct           Float?
+  top10Count        Int?
+  top10Pct          Float?
+  mrr               Float?
+  results           SearchEvalResult[]
 
   @@index([sheetId, startedAt])
   @@index([orgId])
