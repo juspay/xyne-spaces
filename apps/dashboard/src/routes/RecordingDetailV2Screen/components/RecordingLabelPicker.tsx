@@ -29,7 +29,7 @@ const CHIP_BASE_CLASS_NAME =
 
 const SUGGESTION_CHIP_CLASS_NAME = cn(
   CHIP_BASE_CLASS_NAME,
-  'border border-dashed border-muted-foreground/40 hover:bg-border',
+  'border border-dashed border-muted-foreground/40',
 );
 
 const LIST_INHERITS_POPOVER_CLASS_NAME =

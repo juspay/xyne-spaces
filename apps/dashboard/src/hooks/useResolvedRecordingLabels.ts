@@ -41,20 +41,19 @@ export async function confirmRecordingLabelSuggestion(
   }
 }
 
-/** Persists a labels change and only applies it locally once the write succeeds. */
-export async function applyRecordingLabelsChange(
-  externalId: string,
-  nextLabels: string[],
+/** Persists a labels change, applying it locally only once the write succeeds. */
+export function useApplyRecordingLabelsChange(
   applyLocally: (labels: string[]) => void,
-  errorContext: string,
-): Promise<void> {
-  try {
-    await recordingService.updateRecording(externalId, { labels: nextLabels });
-    applyLocally(nextLabels);
-  } catch (err) {
-    logRecordingError(errorContext, err);
-    toast.error('Failed to update labels');
-  }
+): (externalId: string, nextLabels: string[], errorContext: string) => Promise<void> {
+  return async (externalId, nextLabels, errorContext) => {
+    try {
+      await recordingService.updateRecording(externalId, { labels: nextLabels });
+      applyLocally(nextLabels);
+    } catch (err) {
+      logRecordingError(errorContext, err);
+      toast.error('Failed to update labels');
+    }
+  };
 }
 
 /** Never rejects: a failed batch leaves its ids uncached so a later render retries them. */

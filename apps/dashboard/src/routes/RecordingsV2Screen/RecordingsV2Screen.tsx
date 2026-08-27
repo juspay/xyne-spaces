@@ -611,6 +611,9 @@ const RecordingsV2Screen = (): ReactElement => {
                           label =>
                             isResolved(label) && resolveMethod(label) === TagMethod.AUTOMATED,
                         )}
+                        pendingLabelCount={
+                          row.recording.labels.filter(label => !isResolved(label)).length
+                        }
                         resolveLabel={resolveLabel}
                         currentUserId={currentUser?.id}
                         onOpen={handleOpenRecording}

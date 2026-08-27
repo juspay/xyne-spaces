@@ -31,8 +31,8 @@ import {
   type RecordingDetail,
 } from '../../../services/Recording/recordingService';
 import {
-  applyRecordingLabelsChange,
   confirmRecordingLabelSuggestion,
+  useApplyRecordingLabelsChange,
 } from '../../../hooks/useResolvedRecordingLabels';
 import {
   calculateRecordingElapsedMs,
@@ -69,6 +69,7 @@ export interface RecordingsV2PillProps {
   tags?: string[];
   /** Still-pending suggestions (LLM or on-demand AUTOMATED) — rendered with inline confirm/reject. */
   suggestedTags?: string[];
+  pendingLabelCount?: number;
   /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
   currentUserId?: string | undefined;
@@ -163,6 +164,7 @@ const RecordingsV2Pill = ({
   participantsLabel,
   tags = [],
   suggestedTags = [],
+  pendingLabelCount = 0,
   resolveLabel = (label: string) => label,
   currentUserId,
   onOpen,
@@ -173,10 +175,11 @@ const RecordingsV2Pill = ({
   const durationMs = recording.endedAt
     ? Math.max(0, recording.endedAt - recording.startedAt)
     : null;
-  const visibleTags = normalizeRecordingTags(tags);
-  const visibleSuggestedTags = normalizeRecordingTags(suggestedTags);
   const isOwner = currentUserId !== undefined && currentUserId === recording.createdByUserId;
-  const showGenerateLabels = recording.labels.length === 0 && Boolean(recording.transcript?.trim());
+  const visibleTags = normalizeRecordingTags(tags);
+  const visibleSuggestedTags = isOwner ? normalizeRecordingTags(suggestedTags) : [];
+  const showGenerateLabels =
+    isOwner && recording.labels.length === 0 && Boolean(recording.transcript?.trim());
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Populated on menu open — `hasRecording` isn't in the synced list data (it's
@@ -284,14 +287,13 @@ const RecordingsV2Pill = ({
     }
   };
 
+  const applyLabelsChange = useApplyRecordingLabelsChange(labels =>
+    patchOatsRecordingLabels(recording.id, labels),
+  );
+
   const handleRejectSuggestion = async (labelId: string): Promise<void> => {
     const nextLabels = recording.labels.filter(id => id !== labelId);
-    await applyRecordingLabelsChange(
-      recording.externalId,
-      nextLabels,
-      labels => patchOatsRecordingLabels(recording.id, labels),
-      'RecordingsV2Pill.rejectSuggestion',
-    );
+    await applyLabelsChange(recording.externalId, nextLabels, 'RecordingsV2Pill.rejectSuggestion');
   };
 
   return (
@@ -428,6 +430,12 @@ const RecordingsV2Pill = ({
               />
             ))}
           </span>
+        ) : pendingLabelCount > 0 ? (
+          <span className='flex flex-wrap items-center gap-1.5'>
+            {Array.from({ length: pendingLabelCount }, (_, index) => (
+              <span key={index} className='h-6 w-14 animate-pulse rounded-lg bg-muted' />
+            ))}
+          </span>
         ) : (
           showGenerateLabels && (
             <Button
@@ -436,7 +444,7 @@ const RecordingsV2Pill = ({
               size='sm'
               loading={isGeneratingLabels}
               onClick={event => void handleGenerateLabels(event)}
-              className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground hover:bg-border'
+              className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground'
               data-track-category='RecordingsV2'
               data-track-name='generate_recording_labels'
             >
