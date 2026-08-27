@@ -82,7 +82,7 @@ export function AgentProgressIndicator({
           <span key={a.agentUserId ?? a.agentSlug ?? 'agent'} style={rowStyle}>
             <AgentSpinner variant={a.variant} size={12} />
             <span className='truncate max-w-[320px]'>
-              {a.agentSlug ? <strong className='mr-1'>{a.agentSlug}</strong> : null}
+              {a.agentName ? <strong className='mr-1'>{a.agentName}</strong> : null}
               {a.toolLabel ?? 'working…'}
             </span>
           </span>
