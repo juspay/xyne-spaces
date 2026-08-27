@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { BarChart4Icon, ChevronDown, Circle, User } from 'lucide-react';
+import { BarchartDefault, ChevronDown, Circle, UserDefault } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { cn } from '../../utils/classNames';
 
@@ -10,8 +10,8 @@ export const COLLAPSIBLE_FILTER_META: Record<
   CollapsibleFilterId,
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
-  assignee: { label: 'Assignee', icon: User },
-  priority: { label: 'Priority', icon: BarChart4Icon },
+  assignee: { label: 'Assignee', icon: UserDefault },
+  priority: { label: 'Priority', icon: BarchartDefault },
   stages: { label: 'Status', icon: Circle },
 };
 

@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import type { TicketStatusV2 } from '@xyne/shared';
 import Input from '../../../../ui/Input/Input';
 import { KanbanIcon } from '../../../KanbanColumns/KanbanColumns';

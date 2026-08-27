@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ClipboardCheck, Maximize2, Minimize2 } from 'lucide-react';
+import {
+  ClipboardCheck,
+  MaximizeTwoArrow as Maximize2,
+  MinimizeTwoArrow as Minimize2,
+} from '@xyne/icons';
 import { RCAStatus } from '@xyne/shared';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button';

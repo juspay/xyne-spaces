@@ -1,5 +1,9 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, X, Users } from 'lucide-react';
+import {
+  SearchDefault as Search,
+  MultipleCrossCancelDefault as X,
+  UserTwo as Users,
+} from '@xyne/icons';
 import { Button } from '../../../../ui/Button';
 import Input from '../../../../ui/Input/Input';
 import { useUserGroups } from '../../../../../hooks/useUserGroup';

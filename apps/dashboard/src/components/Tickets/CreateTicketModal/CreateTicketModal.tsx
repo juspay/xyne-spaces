@@ -22,27 +22,25 @@ import {
   toSelectOptions,
   type User as UserType,
 } from '@xyne/shared';
+import { KanbanBoard as SquareKanban, TicketToken as Ticket, PauseCircle } from '@xyne/icons';
 import {
-  CircleCheck,
+  CheckTickCircle as CircleCheck,
   CircleDashed,
   CircleDot,
-  CircleX,
-  Copy,
-  Ellipsis,
-  Hash,
-  Link as LinkIcon,
-  Loader2,
-  Paperclip,
-  Signature,
-  SquareArrowOutUpRight,
-  SquareKanban,
+  MultipleCrossCancelCircle as CircleX,
+  CopyDefault as Copy,
+  ThreeDotsMenuHorizontal as Ellipsis,
+  Hashtag as Hash,
+  LinkChainHorizontal as LinkIcon,
+  Spinner as Loader2,
+  PaperclipSlant as Paperclip,
+  ExternalLink as SquareArrowOutUpRight,
   Tag,
-  Ticket,
-  Trash2,
-  User,
-  Users,
-  X,
-} from 'lucide-react';
+  DeleteDustbin01 as Trash2,
+  UserDefault as User,
+  UserTwo as Users,
+  MultipleCrossCancelDefault as X,
+} from '@xyne/icons';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -1613,7 +1611,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     {
       label: 'Paused',
       value: 'PAUSED',
-      icon: <Signature strokeWidth={2.5} className='size-3.5 text-teal-500' />,
+      icon: <PauseCircle strokeWidth={2.5} className='size-3.5 text-teal-500' />,
     },
     {
       label: 'Cancelled',

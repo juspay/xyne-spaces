@@ -9,7 +9,13 @@ import {
   type FlowPlan,
 } from '@xyne/shared';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Edit2, GitBranch, LayoutGrid, Rocket } from 'lucide-react';
+import {
+  ArrowLeft,
+  PencilEdit as Edit2,
+  GitBranch,
+  Grid01 as LayoutGrid,
+  RocketShip as Rocket,
+} from '@xyne/icons';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
