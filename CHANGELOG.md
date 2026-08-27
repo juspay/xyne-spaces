@@ -1,3 +1,10 @@
+## [1.240.1](https://github.com/juspay/xyne-spaces/compare/v1.240.0...v1.240.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* prevent call header navigator overlap ([#1146](https://github.com/juspay/xyne-spaces/issues/1146)) ([ccfd685](https://github.com/juspay/xyne-spaces/commit/ccfd6852a6f3c9f8326e11545f6a2c82017cb83c))
+
 ## [1.240.0](https://github.com/juspay/xyne-spaces/compare/v1.239.0...v1.240.0) (2026-08-27)
 
 
