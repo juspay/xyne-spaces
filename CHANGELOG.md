@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.15](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.14...v1.219.0-release-20260825.15) (2026-08-27)
+
+
+### Bug Fixes
+
+* raise PR [#855](https://github.com/juspay/xyne-spaces/issues/855) to release-20260825 ([#1139](https://github.com/juspay/xyne-spaces/issues/1139)) ([323a5c8](https://github.com/juspay/xyne-spaces/commit/323a5c843e55e7154da37078d8c76bc0c7394102))
+
 ## [1.219.0-release-20260825.14](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.13...v1.219.0-release-20260825.14) (2026-08-27)
 
 
