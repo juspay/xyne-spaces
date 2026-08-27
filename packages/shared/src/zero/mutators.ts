@@ -75,7 +75,11 @@ import {
   serializeInitialMessageMd,
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
-import { THREAD_TYPE_NAMES } from '../tags/vocabularies.js';
+import {
+  parseAppliedTags,
+  serializeAppliedTags,
+  type AppliedTag,
+} from '../tags/appliedTags.js';
 import { assertCanvasDestinationAccess } from '../utils/canvasDestinationAccess.js';
 import {
   getCanvasFolderNameConflictMessage,
@@ -9243,32 +9247,58 @@ export const mutators = defineMutators({
     setTypes: defineMutator(
       z.object({
         conversationId: z.string(),
-        // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
-        // add their own. Length-capped so a tag stays a label rather than a paragraph.
+        // Free-form, not z.enum: the workspace vocabulary is a starting point, and people
+        // type their own. Length-capped so a tag stays a label rather than a paragraph.
         types: z.array(z.string().trim().min(1).max(40)),
+        /**
+         * What a newly invented tag means. Stored on the vocabulary candidate as its
+         * description — backend side only, since the vocabulary is not a Zero table — so it
+         * is written once per tag rather than copied onto every thread carrying it.
+         */
+        note: z.string().trim().max(280).optional(),
+        timestamp: z.number(),
       }),
-      async ({ tx, args: { conversationId, types } }) => {
+      // `note` is accepted but deliberately unread here. It describes the TAG, not the
+      // thread, so it is stored on the vocabulary candidate — a non-Zero table this client
+      // copy cannot reach. The backend copy picks it up; see recordVocabularyCandidate.
+      async ({ tx, ctx, args: { conversationId, types, timestamp } }) => {
         const conversation = await tx.run(
           zql.conversations.where('conversationId', conversationId).one(),
         );
         if (!conversation) throw new Error('Conversation not found');
 
-        // Built-in types first in vocabulary order, then custom ones alphabetically, so
-        // chips render in a stable order regardless of the order they were picked.
-        const rank = (name: string): number => {
-          const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
-          return i === -1 ? THREAD_TYPE_NAMES.length : i;
-        };
-        const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
-          (a, b) => rank(a) - rank(b) || a.localeCompare(b),
-        );
+        const desired = [...new Set(types.map(t => t.trim()).filter(Boolean))];
+        const existing = parseAppliedTags(conversation.threadType);
+        const byName = new Map(existing.map(tag => [tag.name, tag]));
 
+        // A merge, never a replace. The caller sends the full desired set, but each tag
+        // already there keeps its own provenance — who applied it and when. Rewriting them all
+        // as freshly hand-applied would erase exactly the trail the tooltip exists to show.
+        const next: AppliedTag[] = [];
+        for (const name of desired) {
+          const prior = byName.get(name);
+          if (prior && !prior.removed) {
+            next.push(prior);
+            continue;
+          }
+          // New, or being re-applied after removal: this is the caller's doing either way.
+          next.push({ name, at: timestamp, by: ctx.userID });
+        }
 
-        // '[]' rather than null when cleared: null means "never classified" and the
-        // classifier would re-derive it on its next pass.
+        // Dropped tags are tombstoned, not deleted: removal has to stay auditable, and a
+        // deleted tag would look unclassified to the classifier and come straight back.
+        const kept = new Set(desired);
+        for (const tag of existing) {
+          if (kept.has(tag.name)) continue;
+          next.push(
+            tag.removed ? tag : { ...tag, removed: true, at: timestamp, by: ctx.userID },
+          );
+        }
+
         await tx.mutate.conversations.update({
           conversationId,
-          threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+          // Never null: null means "never classified" and the classifier would re-derive it.
+          threadType: serializeAppliedTags(next),
         });
       },
     ),

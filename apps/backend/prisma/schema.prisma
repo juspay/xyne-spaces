@@ -4523,6 +4523,28 @@ model TagsConfig {
   @@schema("non_zero")
 }
 
+model ThreadTypeVocabulary {
+  id          String   @id @default(cuid())
+  scope       String
+  scopeId     String
+  workspaceId String
+  name        String
+  label       String
+  color       String
+  description String
+  status      String   @default("APPROVED")
+  isDeleted   Boolean  @default(false)
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scope, scopeId, name])
+  @@index([workspaceId, scope, status])
+  @@map("thread_type_vocabulary")
+  @@schema("non_zero")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Async OCR (Docling/LightOn) scheduler state machine
 // Ported from xyne-search. Two tables drive the splitter→submitter→result→

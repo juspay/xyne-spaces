@@ -208,6 +208,7 @@ import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationMo
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
+import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
@@ -1841,6 +1842,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='ROLES'>
                       <RoleManagementScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'tag-review',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKSPACE'>
+                      <TagReviewView />
                     </ResourceProtectedRoute>
                   ),
                 },
