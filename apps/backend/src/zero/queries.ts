@@ -43,6 +43,7 @@ import {
   TicketReferenceRelation,
   DelayedMessageStatus,
   RecapEntityType,
+  UserType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -2930,8 +2931,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       types: z.array(z.string()),
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
       isRead: z.boolean().optional(),
+      actorTypes: z.array(z.nativeEnum(UserType)).optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead } }) => {
+    ({ args: { limit, start, types, classification, isRead, actorTypes } }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -2948,6 +2950,16 @@ export const queries: AnyQueryRegistry = defineQueries({
 
       if (isRead !== undefined) {
         query = query.where('isRead', isRead);
+      }
+
+      // Actor kind lives on users.userType, not on the activity row, so this has to
+      // reach through the `actor` relationship. Must stay in step with the client
+      // definition in packages/shared/src/zero/queries.ts — this is the copy the
+      // server actually executes via handleQueryRequest.
+      if (actorTypes && actorTypes.length > 0) {
+        query = query.whereExists('actor', (actor: any) =>
+          actor.where('userType', 'IN', actorTypes)
+        );
       }
 
       query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
