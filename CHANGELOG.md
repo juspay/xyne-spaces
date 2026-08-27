@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.11](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.10...v1.219.0-release-20260825.11) (2026-08-27)
+
+
+### Features
+
+* add limit in worker ([#1121](https://github.com/juspay/xyne-spaces/issues/1121)) ([5306900](https://github.com/juspay/xyne-spaces/commit/53069000d8990c835255e1cb8ea660039fecc5b9))
+
 ## [1.219.0-release-20260825.10](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.9...v1.219.0-release-20260825.10) (2026-08-26)
 
 
