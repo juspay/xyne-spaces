@@ -3,6 +3,7 @@
  * through here so provider resolution, session ctx and the result callback
  * can never drift apart per entry point (the phase-4 parity lesson).
  */
+import { isAgentInvocableBy } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
 import { setSession } from "../../lib/session-context.js";
@@ -71,6 +72,13 @@ export async function dispatchSlackRun(input: {
   slackUserId: string;
   sourceMessageId?: string;
 }): Promise<string> {
+  // Invocation whitelist — Slack surface. The /internal/run backstop also
+  // enforces this, but gating here fails fast with a clear reason before the
+  // dispatch round-trip. The linked Spaces userId is the caller identity.
+  if (!isAgentInvocableBy(input.agent.config as Record<string, unknown> | null, input.userId)) {
+    throw new Error(`agent "${input.agent.slug}" is restricted — you don't have access to it`);
+  }
+
   const slackDelivery = {
     surfaceAgentId: input.surfaceAgentId,
     ...(input.connectedSurfaceId ? { connectedSurfaceId: input.connectedSurfaceId } : {}),
@@ -140,6 +148,7 @@ export async function dispatchSlackRun(input: {
     spacesAppId: "",
     spacesAppUserId: "",
     rootAgentSlug: input.agent.slug,
+    triggerSource: "slack",
     slackDelivery,
   });
   return body.sessionId;

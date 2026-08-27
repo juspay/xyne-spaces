@@ -283,6 +283,30 @@ export const CONFIG = {
    */
   searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
   /**
+   * EnterpriseRAG-Bench (Onyx) eval harness — targets a SEPARATE Vespa cluster
+   * holding the benchmark corpus, never the prod-connected one above.
+   *
+   *   ONYX_EVAL_VESPA_ENDPOINT  benchmark Vespa query endpoint — used ONLY by
+   *                             the harness's gold-material fetch by id
+   *                             (§5.3 search); the agent-under-test NEVER
+   *                             touches this — retrieval runs via spaces-search
+   *                             (the prod code path).
+   *   ONYX_EVAL_WORKSPACE_ID    workspaceId stamped on every benchmark doc —
+   *                             used verbatim as the YQL `workspaceId contains`
+   *                             filter for the gold fetch (Vespa only, is a
+   *                             string literal there; no DB validates it).
+   *   ONYX_EVAL_CLAW_TIMEOUT_MS the claw run timeout applied to the S2S call.
+   *
+   * The dispatch fires the SEEDED "onyx-ask-ai" agent row — slug hardcoded in
+   * the worker; bench tool narrowing (onyx-bench-search only) is also
+   * programmatic. Retrieval reaches the benchmark Vespa DIRECTLY
+   * (CONFIG.onyxVespaEndpoint) from the tool child — no spaces backend in the
+   * path.
+   */
+  onyxVespaEndpoint: (process.env["ONYX_EVAL_VESPA_ENDPOINT"] ?? "").replace(/\/+$/, ""),
+  onyxWorkspaceId: process.env["ONYX_EVAL_WORKSPACE_ID"] ?? "",
+  onyxEvalClawTimeoutMs: Number(process.env["ONYX_EVAL_CLAW_TIMEOUT_MS"] ?? 300_000),
+  /**
    * Entity extraction — reads a channel's threads/tickets out of Vespa and
    * discovers the entity types the org talks about. The completions run on
    * xyne-claw (see services/entityExtraction/entityLlmClient.ts), so the model

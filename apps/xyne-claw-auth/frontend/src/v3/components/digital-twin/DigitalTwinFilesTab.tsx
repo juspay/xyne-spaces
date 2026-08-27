@@ -31,7 +31,7 @@ interface Props {
 export function DigitalTwinFilesTab({ userId, onBack }: Props) {
   const [files, setFiles] = useState<DigitalTwinMemoryFile[]>([]);
   const [maxLoaded, setMaxLoaded] = useState(3);
-  const [maxChars, setMaxChars] = useState(10_000);
+  const [maxChars, setMaxChars] = useState(20_000);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);

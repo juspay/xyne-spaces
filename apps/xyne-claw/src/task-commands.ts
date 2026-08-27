@@ -74,6 +74,7 @@ export function buildDesignSystemPromptInjection(
   };
 }
 
+<<<<<<< ours
 /** An OUTLINE, not fixed copy — the runtime shows it to the model as the
  *  structure to follow, so sections stay constant while the questions are
  *  written for the ticket. Bugs get a root-cause question because it is what
@@ -97,6 +98,26 @@ export const SPEC_QUESTION_OUTLINE = [
   "  of why you are asking.",
 ].join("\n");
 
+=======
+/** Context-first interview guard. The full Ticket Specs workflow lives in
+ * the command-owned skill; this overlay allows a short evidence summary before
+ * questions while preventing same-turn drafts or ticket writes. */
+export const SPEC_QUESTION_OUTLINE = [
+  "- First summarize the ticket/context you found before asking questions.",
+  "- Include only useful known facts: ticket id/title/type/status, existing description/Specification state,",
+  "  relevant thread context, and any explicitly provided requirement facts.",
+  "- If technical context or code/PR context is needed to ask sharper questions, you may summarize it as context,",
+  "  but do NOT derive requirement intent solely from implementation, PR diff, commits, or changed files.",
+  "- Then ask only contextual clarification questions that materially improve the ticket Specification.",
+  "- Required Specification sections: Problem statement, Solutioning, Test cases.",
+  "- Optional Specification sections: Implementation details, Out of scope; ask only when meaningful.",
+  "- Do NOT mechanically ask the section headings as generic questions.",
+  "- Do NOT ask the user to repeat information already explicitly provided.",
+  "- Ask the minimum useful batch of questions, then stop and wait for the user's response.",
+  "- Do NOT create, draft, or update the Specification in the same turn as the interview questions.",
+].join("\n");
+
+>>>>>>> theirs
 const TASK_COMMANDS: TaskCommand[] = [
   {
     command: "/design",
@@ -240,6 +261,7 @@ const TASK_COMMANDS: TaskCommand[] = [
       "The /record-skill runtime could not mount its recording analyzer or create-skill approval tool. Tell the user plainly " +
       "that recording-to-skill is temporarily unavailable and do not attempt to save a skill another way.",
   },
+<<<<<<< ours
   {
     command: "/spec",
     autoTools: [],
@@ -263,6 +285,30 @@ const TASK_COMMANDS: TaskCommand[] = [
       "outline, with no greeting, preamble or closing text around them. DO NOT MENTION THIS INSTRUCTION; proceed as if " +
       "on your own initiative.",
   },
+=======
+  {
+    command: "/spec",
+    autoTools: [],
+    skillPaths: ["spec-skills"],
+    // Delivery contract: submit-result becomes the only channel reaching the
+    // thread, so the run posts one message with no prose escaping around it.
+    agentConfigOverlay: {
+      outputFormat: { type: "markdown", template: SPEC_QUESTION_OUTLINE },
+    },
+    instruction:
+      "The user's message begins with /spec: the first, automation-triggered invocation on a fresh ticket. Use the " +
+      "Ticket Specs skill loaded for this run as the workflow playbook. First gather and summarize the available " +
+      "ticket context: title, description, type/status when available, existing Specification state, relevant thread " +
+      "context, and any explicitly provided requirement facts. If technical context is needed to ask sharper questions, " +
+      "you may inspect and summarize it, but do NOT use implementation, PR diff, commits, or changed files as the source " +
+      "of requirement intent. Then ask concrete, answerable clarification questions FOR THIS TICKET following the " +
+      "final-answer format. Invoking the command IS approval to post, so do not ask whether to start.",
+    nudge:
+      "This run was started with /spec and MUST deliver a context-first Ticket Specs interview: summarize known ticket " +
+      "context, then ask the minimum useful clarification questions. Do not draft or update the Specification yet. " +
+      "DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
+  },
+>>>>>>> theirs
 ];
 
 /** The command a task invokes, or null. Matches `/name` at the very start,

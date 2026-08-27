@@ -13,6 +13,7 @@
  */
 
 import { Router } from "express";
+import { errMsg } from "../lib/errors.js";
 import type { Request, Response } from "express";
 import { gcsService } from "../services/storageService.js";
 import { redisService } from "../redis.js";
@@ -131,7 +132,7 @@ sessionsArchiveRouter.post("/archive", async (req: Request, res: Response) => {
     log.info(`[sessions-archive] archived conversationId=${conversationId} files=${uploaded}`);
     res.json({ success: true, uploaded });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.error(`[sessions-archive] archive failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }
@@ -174,7 +175,7 @@ sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: 
     log.info(`[sessions-archive] restored conversationId=${conversationId} files=${files.length}`);
     res.json({ success: true, files });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.error(`[sessions-archive] restore failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }

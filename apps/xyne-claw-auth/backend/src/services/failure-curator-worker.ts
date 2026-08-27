@@ -17,6 +17,7 @@
  */
 
 import { Prisma } from "@prisma/client";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { selectNegativeSessions, type NegativeSession } from "./failure-curator-detection.js";
@@ -87,7 +88,7 @@ async function tickOnce(): Promise<void> {
         if (n >= 0) processed++;
         totalCandidates += Math.max(0, n);
       } catch (err) {
-        log.warn(`[failure-curator-worker] orgId=${orgId} agent=${agentSlug} failed:`, err instanceof Error ? err.message : String(err));
+        log.warn(`[failure-curator-worker] orgId=${orgId} agent=${agentSlug} failed:`, errMsg(err));
       }
     }
     log.info(`[failure-curator-worker] tick done: ${processed}/${active.length} agents processed, ${totalCandidates} candidates in ${Date.now() - tStart}ms`);
@@ -202,7 +203,7 @@ export async function processAgentRange(
     const json = await res.json() as { success?: boolean; candidates?: CuratorCandidate[] };
     candidates = json.candidates ?? [];
   } catch (err) {
-    log.warn(`[failure-curator-worker] claw call failed for orgId=${orgId} agent=${agentSlug}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[failure-curator-worker] claw call failed for orgId=${orgId} agent=${agentSlug}:`, errMsg(err));
     return { emitted: -1, advanceTo: null };
   }
 
@@ -242,7 +243,7 @@ export async function processAgentRange(
           },
         });
       } catch (err) {
-        log.error(`[failure-curator-worker] state create failed orgId=${agentRow.orgId} agent=${agentSlug}; schema lacks orgId_agentSlug unique key`, err instanceof Error ? err.message : String(err));
+        log.error(`[failure-curator-worker] state create failed orgId=${agentRow.orgId} agent=${agentSlug}; schema lacks orgId_agentSlug unique key`, errMsg(err));
       }
     }
   }
@@ -311,7 +312,7 @@ export async function backfillFailureCurator(opts: {
         const { emitted } = await processAgentRange(orgId, slug, since, now, /*advanceWatermark=*/false);
         return { orgId, slug, emitted, skippedReason: undefined as string | undefined };
       } catch (err) {
-        return { orgId, slug, emitted: -1, skippedReason: err instanceof Error ? err.message : String(err) };
+        return { orgId, slug, emitted: -1, skippedReason: errMsg(err) };
       }
     }));
     for (const r of results) {
