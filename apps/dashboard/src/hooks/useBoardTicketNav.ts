@@ -61,19 +61,16 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
   const fetchPage = useCallback(
     async (start: Cursor, dir: 'forward' | 'backward', limit: number): Promise<NavRow[]> => {
       if (!baseArgs) return [];
-      const queryArgs = {
-        ...baseArgs,
-        overdueReferenceTime: baseArgs.overdueReferenceTime ?? undefined,
-        columnType,
-        stageName: '',
-        start: { createdAt: start.createdAt, id: start.id },
-        dir,
-        limit,
-      };
       const rows = (await zero.run(
-        queries.kanbanTicketsPageV3({
-          ...queryArgs,
-        } as Parameters<typeof queries.kanbanTicketsPageV3>[0]),
+        queries.kanbanTicketsPageV2({
+          ...baseArgs,
+          overdueReferenceTime: baseArgs.overdueReferenceTime ?? undefined,
+          columnType,
+          stageName: '',
+          start: { createdAt: start.createdAt, id: start.id },
+          dir,
+          limit,
+        }),
         { type: 'complete' },
       )) as KanbanTicketsPageRow[];
       return rows.map(r => ({
