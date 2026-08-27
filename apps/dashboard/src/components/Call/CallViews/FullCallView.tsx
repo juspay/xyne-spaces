@@ -455,7 +455,7 @@ export function FullCallView({
       <div
         className={cn(
           'flex justify-between items-center pr-4 py-3',
-          isElectron && isMac ? 'pl-20' : 'pl-4',
+          isElectron && isMac ? 'pl-24' : 'pl-4',
         )}
       >
         <div className='flex items-center gap-2'>
