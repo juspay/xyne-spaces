@@ -9,6 +9,8 @@ import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { roomActor } from '../../../machines/roomMachine';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -48,14 +50,33 @@ export const CallCard: React.FC<CallCardProps> = ({
   const participantCount = getCallParticipantCount(call);
   const conversationId = call.metadata?.conversationId;
 
+  // Same ticketId lookup and route shape as ChatListV2/V3/V4's handleOpenThread
+  // (.../{conversationId}/{ticketId}?selectedTab=thread for ticket-linked threads,
+  // plain .../{conversationId} otherwise), so this title lands on the same route.
+  const [conversationDetails] = useCachedQuery(
+    queries.getConversationById({ conversationId: conversationId || '' }),
+    { enabled: !!conversationId },
+  );
+  const conversationMetadata = conversationDetails?.metadata as { ticketId?: string } | null;
+  const messageMetadata = conversationDetails?.initialMessage?.metadata as {
+    ticketId?: string;
+  } | null;
+  const ticketId = conversationMetadata?.ticketId || messageMetadata?.ticketId;
+
   const handleOpenThread = (e?: React.MouseEvent): void => {
     if (!conversationId || !call.channelId) return;
     onActionClick?.();
-    standaloneNavigate(
-      navigate,
-      `${baseRoute}/${call.channelId}/${conversationId}#origin=${encodeURIComponent(conversationId)}`,
-      { event: e },
-    );
+    if (ticketId) {
+      standaloneNavigate(
+        navigate,
+        `${baseRoute}/${call.channelId}/${conversationId}/${ticketId}?selectedTab=thread`,
+        { event: e },
+      );
+    } else {
+      standaloneNavigate(navigate, `${baseRoute}/${call.channelId}/${conversationId}`, {
+        event: e,
+      });
+    }
   };
 
   // ── Confirmation modal for switching calls ──
