@@ -1,12 +1,12 @@
 import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { errMsg } from "../lib/errors.js";
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file";
-// 'collection' / 'file' are not user-searchable via this service (they're
-// picked through the dashboard's KB picker, not via the generic search), so
-// they're intentionally excluded from the search-type enum.
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file" | "folder";
+// 'collection' / 'file' / 'folder' are not user-searchable via this service
+// (they're picked through the dashboard's KB picker, not via the generic
+// search), so they're intentionally excluded from the search-type enum.
 export type ContextItemType = ContextType | "repository";
-export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file"> | "repository" | "all";
+export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file" | "folder"> | "repository" | "all";
 
 export interface ContextItem {
   id: string;
@@ -135,6 +135,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     call: 0,
     collection: 0,
     file: 0,
+    folder: 0,
   };
 
   for (const raw of input) {
@@ -143,7 +144,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     const type = obj["type"];
     const id = obj["id"];
     const title = obj["title"];
-    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity|collection|file" };
+    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity|collection|file|folder" };
     if (typeof id !== "string" || id.trim().length === 0) return { items: [], error: "attachedContext.id must be a non-empty string" };
     if (typeof title !== "string" || title.trim().length === 0) return { items: [], error: "attachedContext.title must be a non-empty string" };
     const threadId = obj["threadId"];
@@ -529,6 +530,7 @@ async function resolveSection(item: AttachedContextRef, auth?: SpacesAuthContext
   if (item.type === "activity") return resolveActivitySection(item);
   if (item.type === "collection") return resolveCollectionSection(item);
   if (item.type === "file") return resolveFileSection(item);
+  if (item.type === "folder") return resolveFolderSection(item);
   return resolveCallSection(item, auth);
 }
 
@@ -553,6 +555,23 @@ async function resolveFileSection(item: AttachedContextRef): Promise<ResolvedCon
   const lines = [
     `File: ${item.title} (fileId=${item.id})`,
     `Fetch: read its full content with \`kb-read-file\` (fileId=${item.id}).`,
+  ];
+  return { header, inlineText: lines.join("\n") };
+}
+
+/** Knowledge Base folder (a non-root collection node) attached from the
+ *  ask-ai v2 picker. Same shape as resolveCollectionSection — the `id` works
+ *  as a `collectionId` arg to kb-list-files/kb-search/kb-read-file exactly
+ *  like a root collection id does, since folders are collection-tree nodes
+ *  too. buildVespaScope (kb-handlers.ts) is what actually handles the
+ *  root-vs-folder distinction when kb-search turns this into a Vespa filter
+ *  — Vespa's collectionId filter only ever matches a doc's ROOT collection,
+ *  so a folder id there expands to explicit docIds instead. */
+async function resolveFolderSection(item: AttachedContextRef): Promise<ResolvedContextSection> {
+  const header = `Folder "${item.title}" (id=${item.id})`;
+  const lines = [
+    `Folder: ${item.title} (collectionId=${item.id})`,
+    `Fetch: enumerate files with \`kb-list-files\` (collectionId=${item.id}); find one with \`kb-search\` (collectionId=${item.id} + query); read a file with \`kb-read-file\` (fileId from kb-list-files).`,
   ];
   return { header, inlineText: lines.join("\n") };
 }
@@ -847,7 +866,8 @@ function isContextType(value: unknown): value is ContextType {
     value === "call" ||
     value === "activity" ||
     value === "collection" ||
-    value === "file"
+    value === "file" ||
+    value === "folder"
   );
 }
 
@@ -858,5 +878,6 @@ function labelForType(type: ContextType): string {
   if (type === "activity") return "Activity";
   if (type === "collection") return "Collection";
   if (type === "file") return "File";
+  if (type === "folder") return "Folder";
   return "Call";
 }

@@ -585,7 +585,22 @@ function buildVespaScope(
   ctx: KbResolution,
   explicitCollectionId: string | undefined,
 ): VespaScopeFilter | { error: string } {
-  if (explicitCollectionId) return { kind: "collection", ids: [explicitCollectionId] };
+  if (explicitCollectionId) {
+    const meta = ctx.collectionsById.get(explicitCollectionId);
+    // A non-root folder: Vespa's collectionId filter only ever matches a
+    // doc's ROOT collection, so this has to expand to explicit docIds
+    // instead (see collectAllowedVespaDocIds). Applies equally to a
+    // folder-picked attachedContext item and to the model passing a
+    // sub-folder id as kb-search's collectionId arg directly.
+    if (meta && meta.rootCollectionId !== explicitCollectionId) {
+      const docIds = collectAllowedVespaDocIds(ctx, explicitCollectionId);
+      if (docIds.length === 0) {
+        return { error: `Folder \`${explicitCollectionId}\` has no accessible files.` };
+      }
+      return { kind: "file", docIds };
+    }
+    return { kind: "collection", ids: [explicitCollectionId] };
+  }
   if (ctx.scope === "USER") return { kind: "none" };
 
   const hasWholeCollectionGrant = ctx.grants.some(g => g.fileId === null);
@@ -848,6 +863,29 @@ function countAllowedChildFolders(ctx: KbResolution, n: KbCollectionNode): numbe
   let total = 0;
   for (const c of n.children ?? []) if (collectionAllowed(ctx, c.id)) total++;
   return total;
+}
+
+/**
+ * Every allowed file's Vespa docId under `folderId`, recursively — used to
+ * scope a kb-search call to a non-root folder. Vespa's `collectionId` filter
+ * only ever matches a doc's ROOT collection (see buildVespaScope), so a
+ * folder id can't be filtered on directly; this expands it to explicit
+ * docIds instead, walking the tree already fetched for ACL checks (no extra
+ * network call). Re-applies fileAllowed() per file so a COLLECTIONS-scoped
+ * agent whose grant only covers part of this subtree doesn't leak the rest.
+ */
+function collectAllowedVespaDocIds(ctx: KbResolution, folderId: string): string[] {
+  const start = ctx.nodesById.get(folderId);
+  if (!start) return [];
+  const docIds: string[] = [];
+  const walk = (n: KbCollectionNode): void => {
+    for (const f of n.items ?? []) {
+      if (f.fileId && fileAllowed(ctx, f.id)) docIds.push(f.fileId);
+    }
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(start);
+  return docIds;
 }
 
 /**
