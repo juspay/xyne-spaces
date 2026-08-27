@@ -42,6 +42,7 @@ export interface LiveConversationStreamOptions {
    */
   isClosed: () => boolean;
   onEvent: (event: string, data: Record<string, unknown>) => void;
+  allRuns?: boolean;
 }
 
 /**
@@ -55,16 +56,18 @@ export interface LiveConversationStreamOptions {
 export async function consumeConversationLiveStream(
   options: LiveConversationStreamOptions,
 ): Promise<void> {
-  const { conversationId, agentSlug, signal, isClosed, onEvent } = options;
+  const { conversationId, agentSlug, signal, isClosed, onEvent, allRuns } = options;
   let reconnects = 0;
 
   while (!isClosed() && !signal.aborted) {
     try {
       // SSE stream: must use fetch for a readable response body
       // (`res.body.getReader()`) — axios can't stream in the browser.
+      const params = new URLSearchParams({ agentSlug });
+      if (allRuns) params.set('allRuns', '1');
       // eslint-disable-next-line local-rules/no-fetch-use-axios
       const res = await fetch(
-        `${BASE_URL}/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/live?agentSlug=${encodeURIComponent(agentSlug)}`,
+        `${BASE_URL}/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/live?${params.toString()}`,
         {
           credentials: 'include',
           headers: { Accept: 'text/event-stream' },
