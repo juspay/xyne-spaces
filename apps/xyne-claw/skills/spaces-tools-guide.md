@@ -626,9 +626,7 @@ The caller's **own** personal items — always scoped to you, read-only. One `ty
 
 ## memory-search (shared knowledge bank)
 
-Search the shared knowledge bank for verified facts, decisions, and SOPs captured across past sessions. **Best first stop** for "how do we…?", "why do we…?", "what's the policy on…?". A short authoritative hit here beats a long crawl through messages.
-
-You'll see a "Shared Knowledge Bank" injection at the top of your context listing the available subsystem clusters (e.g. `spaces (12 memories)`, `ticket-creation (4 memories)`). Use those names with the `subsystem` filter when relevant.
+Search the shared memory for business knowledge, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions captured across past sessions. Use it when that context helps, but treat memory as supporting context only: it can be stale or incomplete, so verify current facts against code, logs, databases, metrics, live tools, or the current conversation.
 
 **Required:** `query`.
 

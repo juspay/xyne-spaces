@@ -2216,13 +2216,12 @@ async function processTask(
     let twinPersonaBlock = "";
 
     // Memory — opt-in per agent via agentConfig.memoryEnabled=true.
-    // No more inject-all-recalled-facts. Instead: inject a tiny taxonomy hint
-    // and let the agent search on demand via the memory-search tool.
-    //
-    // The Digital Twin (slug=digital-twin) is per-user: scope the taxonomy
-    // to memories tagged `user:<userId>` so the injected hint doesn't leak
-    // other users' subsystem counts. Other memory-enabled agents see the
-    // full shared taxonomy.
+    // No more inject-all-recalled-facts. Shared memory-enabled agents get the
+    // memory-search tool only; we intentionally do not inject a per-turn system
+    // reminder because that biases source-of-truth-first workflows (RCA,
+    // metrics, reports, code review) toward stale memory. Digital Twin remains
+    // separate: it receives a personal-memory hint because its product contract
+    // is to answer as the user.
     const memoryEnabled =
       agentConfig?.["memoryEnabled"] === true ||
       agentConfig?.["memoryEnabled"] === "true";
@@ -2234,7 +2233,7 @@ async function processTask(
         isDigitalTwin ? { userTag: `user:${userId}` } : undefined,
         memoryBankId,
       ).catch(() => []);
-      if (taxonomy.length > 0) {
+      if (isDigitalTwin && taxonomy.length > 0) {
         const lines = taxonomy
           .slice(0, 12)
           .map(
@@ -2244,37 +2243,18 @@ async function processTask(
           .join("\n");
         activeInjections.push({
           id: "__memory-taxonomy",
-          label: isDigitalTwin
-            ? "Your Personal Memory"
-            : "Shared Knowledge Bank",
-          content: isDigitalTwin
-            ? [
-                "You have a personal memory bank — facts about THIS user that they",
-                "themselves approved. Currently you have memories under these clusters:",
-                "",
-                lines,
-                "",
-                "When you need to know how the user works, who they collaborate with,",
-                "what they prefer, or what they own, call `memory-search` FIRST with a",
-                "specific natural-language query. Never invent facts about the user —",
-                "only use what the tool returns.",
-              ].join("\n")
-            : [
-                "You have access to a shared knowledge bank for this agent. It contains",
-                "facts learned across past sessions, grouped by subsystem:",
-                "",
-                lines,
-                "",
-                "RULE: before starting any non-trivial task, make ONE `memory-search`",
-                "call — pick the closest subsystem above (unscoped only if none fits).",
-                "This bank holds hard-won specifics from past sessions: root causes,",
-                "gotchas, exact configs, decisions that never made it into code or",
-                "docs. Skipping the search repeats old mistakes; one call is cheap.",
-                "",
-                "Apply what comes back (you may say it came from memory). If it is",
-                "empty or irrelevant, proceed — do not retry the same query. Do not",
-                "invent facts from memory — only use what the tool returns.",
-              ].join("\n"),
+          label: "Your Personal Memory",
+          content: [
+            "You have a personal memory bank — facts about THIS user that they",
+            "themselves approved. Currently you have memories under these clusters:",
+            "",
+            lines,
+            "",
+            "When you need to know how the user works, who they collaborate with,",
+            "what they prefer, or what they own, call `memory-search` FIRST with a",
+            "specific natural-language query. Never invent facts about the user —",
+            "only use what the tool returns.",
+          ].join("\n"),
         });
       }
 

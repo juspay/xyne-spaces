@@ -69,9 +69,7 @@ Per-user firehose: mentions, replies, assignments, notifications. Reach it via \
 
 ## Knowledge base / memory
 
-Verified facts, decisions, and SOPs captured across past sessions. Reach it via \`memory-search\`. **Best first stop** for "how do we…?", "why do we…?", or "what's the policy on…?". A short, authoritative hit here beats a long crawl through messages.
-
-You'll see a "Shared Knowledge Bank" block injected at the top of your context listing the subsystem clusters that have memories — use those cluster names with the \`memory-search\` \`subsystem\` filter to narrow.
+Business knowledge, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions captured across past sessions. Reach it via \`memory-search\` when that context helps. Memory can be stale or incomplete, so verify current facts against the source of truth: code, logs, databases, metrics, live tools, or the current conversation.
 
 ## DMs and group DMs
 
