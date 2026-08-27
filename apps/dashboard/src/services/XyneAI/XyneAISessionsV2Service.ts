@@ -11,6 +11,7 @@ import type {
   ToolInvocation,
   DebugArtifactBundle,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import { registerClawIcons } from '../../components/Chat/XyneAISidebar/utils/clawCitationUrl';
 import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPendingActionStore';
 
@@ -53,6 +54,9 @@ interface ClawChatMessage {
     width: number | null;
     height: number | null;
   }>;
+  /** Context the user attached to this turn, persisted by claw-auth on the user
+   *  message. Rendered read-only in the transcript. Absent on assistant/legacy rows. */
+  attachedContext?: AttachedContextItem[];
 }
 
 interface ClawMessagesResponse {
@@ -265,6 +269,8 @@ export async function fetchV2ConversationMessages(
             ratingComment: ratingByMsgId[msg.id]!.comment,
           }
         : {}),
+      // Read-only context pills for a user turn (persisted per message in claw-auth).
+      ...(isUser && msg.attachedContext?.length ? { attachedContext: msg.attachedContext } : {}),
     };
 
     // Map attachments from claw format to frontend format
