@@ -24,29 +24,17 @@ export interface SdlcDiscussionContext {
 export function resolveCanvasDiscussionOwner(
   canvasId: string,
   canvases: readonly CanvasSummary[],
-  links: readonly LinkSummary[],
 ): SdlcDiscussionContext['owner'] | null {
   const canvas = canvases.find(item => item.id === canvasId);
-  if (!canvas) return null;
-  if (canvas.sdlcArtifact?.artifactType === 'PRD') {
-    return { canvasId: canvas.id, title: canvas.title, kind: 'PIPELINE' };
-  }
-  if (isBaselineCanvasType(canvas.sdlcArtifact?.artifactType)) {
+  if (!canvas?.sdlcArtifact) return null;
+  const artifactType = canvas.sdlcArtifact.artifactType;
+  if (isBaselineCanvasType(artifactType)) {
     return { canvasId: canvas.id, title: canvas.title, kind: 'REPO_KNOWLEDGE' };
   }
-  if (canvas.sdlcArtifact?.artifactType === 'WIKI') {
+  if (artifactType === 'WIKI') {
     return { canvasId: canvas.id, title: canvas.title, kind: 'WIKI' };
   }
-  if (canvas.sdlcArtifact?.artifactType !== 'TECH_DOC') return null;
-  const parentLink = links.find(
-    link =>
-      link.relationType === 'TECH_DOC' &&
-      link.targetType === 'CANVAS' &&
-      link.targetId === canvas.id,
-  );
-  return parentLink
-    ? resolveCanvasDiscussionOwner(parentLink.sourceId, canvases, links)
-    : { canvasId: canvas.id, title: canvas.title, kind: 'PIPELINE' };
+  return { canvasId: canvas.id, title: canvas.title, kind: 'PIPELINE' };
 }
 
 export function resolveSdlcDiscussionContext(input: {
@@ -69,7 +57,7 @@ export function resolveSdlcDiscussionContext(input: {
     };
   }
   if (input.selectedCanvasId) {
-    const owner = resolveCanvasDiscussionOwner(input.selectedCanvasId, input.canvases, input.links);
+    const owner = resolveCanvasDiscussionOwner(input.selectedCanvasId, input.canvases);
     return owner ? { owner, surface: { type: 'CANVAS', id: input.selectedCanvasId } } : null;
   }
   if (input.selectedTicketId) {
@@ -78,7 +66,7 @@ export function resolveSdlcDiscussionContext(input: {
       link => link.relationType === 'TICKET' && link.targetId === input.selectedTicketId,
     );
     const owner = sourceLink
-      ? resolveCanvasDiscussionOwner(sourceLink.sourceId, input.canvases, input.links)
+      ? resolveCanvasDiscussionOwner(sourceLink.sourceId, input.canvases)
       : null;
     return owner ? { owner, surface: { type: 'TICKET', id: input.selectedTicketId } } : null;
   }
@@ -91,7 +79,7 @@ export function resolveSdlcDiscussionContext(input: {
       link.relationType === 'DISCUSSION',
   );
   const owner = discussionLink
-    ? resolveCanvasDiscussionOwner(discussionLink.sourceId, input.canvases, input.links)
+    ? resolveCanvasDiscussionOwner(discussionLink.sourceId, input.canvases)
     : null;
   return owner ? { owner, surface: { type: 'CANVAS', id: owner.canvasId } } : null;
 }

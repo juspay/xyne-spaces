@@ -15,16 +15,11 @@ export const SDLC_BASELINE_COUNT = SDLC_BASELINE_KINDS.length;
 export const sdlcBaselineKindSchema = z.enum(SDLC_BASELINE_KINDS);
 export type SdlcBaselineKind = z.infer<typeof sdlcBaselineKindSchema>;
 
-export const SDLC_ARTIFACT_KINDS = ["BASELINE", "PRD", "TECH_DOC"] as const;
+export const SDLC_ARTIFACT_KINDS = ["BASELINE"] as const;
 export const sdlcArtifactKindSchema = z.enum(SDLC_ARTIFACT_KINDS);
 export type SdlcArtifactKind = z.infer<typeof sdlcArtifactKindSchema>;
 
-export const SDLC_CANVAS_TYPES = [
-  "PRD",
-  "TECH_DOC",
-  "WIKI",
-  ...SDLC_BASELINE_KINDS,
-] as const;
+export const SDLC_CANVAS_TYPES = ["WIKI", ...SDLC_BASELINE_KINDS] as const;
 export type SdlcCanvasType = (typeof SDLC_CANVAS_TYPES)[number];
 
 export const BASELINE_CANVAS_TYPES: ReadonlySet<string> = new Set(
@@ -38,16 +33,12 @@ export function isBaselineCanvasType(
 }
 
 export function canvasTypeForSdlcArtifact(
-  kind: SdlcArtifactKind,
   baselineKind?: SdlcBaselineKind | null,
 ): SdlcCanvasType {
-  if (kind === "BASELINE") {
-    if (!baselineKind) {
-      throw new Error("Baseline artifacts require a baselineKind");
-    }
-    return baselineKind;
+  if (!baselineKind) {
+    throw new Error("Baseline artifacts require a baselineKind");
   }
-  return kind;
+  return baselineKind;
 }
 
 export const CANVAS_STATUS_ACTIVE = "ACTIVE";
@@ -132,7 +123,6 @@ export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
 export type SdlcEntityType = z.infer<typeof sdlcEntityTypeSchema>;
 
 export const SDLC_RELATION_TYPES = [
-  "TECH_DOC",
   "TICKET",
   "CONTEXT",
   "PULL_REQUEST",
@@ -598,13 +588,14 @@ export type BootstrapSdlcRuntimeCredentialInput = z.infer<
 export const createSdlcClawArtifactSchema = z
   .object({
     repoId: z.string().min(1),
-    kind: sdlcArtifactKindSchema,
+    kind: sdlcArtifactKindSchema.optional(),
+    folderId: z.string().min(1).optional(),
     title: z.string().trim().min(1).max(255),
     markdown: z.string().min(1).max(5_000_000),
     baselineKind: sdlcBaselineKindSchema.optional(),
     setupExecutionId: z.string().min(1).optional(),
     workflowExecutionId: z.string().min(1).optional(),
-    parentCanvasId: z.string().min(1).optional(),
+    relatedCanvasIds: z.array(z.string().min(1)).optional(),
     trackId: z.string().min(1).optional(),
     generationCommit: z.string().trim().max(255).optional(),
     sourceReferences: sdlcSourceReferencesSchema,
@@ -622,17 +613,20 @@ export const createSdlcClawArtifactSchema = z
           "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
       });
     }
-    if ((value.kind === "PRD" || value.kind === "TECH_DOC") && !value.trackId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "PRD and Tech Doc artifacts require a track",
-      });
-    }
-    if (value.trackId && value.kind !== "PRD" && value.kind !== "TECH_DOC") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "trackId is only supported for PRD and Tech Doc artifacts",
-      });
+    const isArtifact = value.kind !== "BASELINE";
+    if (isArtifact) {
+      if (!value.folderId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Artifact creation requires a folderId (the artifact type)",
+        });
+      }
+      if (!value.trackId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Artifacts require a track",
+        });
+      }
     }
   });
 export type CreateSdlcClawArtifactInput = z.infer<
@@ -641,7 +635,6 @@ export type CreateSdlcClawArtifactInput = z.infer<
 
 export const updateSdlcClawArtifactSchema = z.object({
   repoId: z.string().min(1),
-  kind: z.enum(["PRD", "TECH_DOC"]),
   canvasId: z.string().min(1),
   title: z.string().trim().min(1).max(255).optional(),
   markdown: z.string().min(1).max(5_000_000),
@@ -695,6 +688,19 @@ export const createSdlcTrackSchema = z.object({
   description: z.string().trim().max(2000).optional(),
 });
 export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
+
+export const createSdlcArtifactTypeSchema = z.object({
+  repoId: z.string().min(1),
+  name: z.string().trim().min(1).max(80),
+});
+export type CreateSdlcArtifactTypeInput = z.infer<typeof createSdlcArtifactTypeSchema>;
+
+export const renameSdlcArtifactTypeSchema = z.object({
+  repoId: z.string().min(1),
+  folderId: z.string().min(1),
+  name: z.string().trim().min(1).max(80),
+});
+export type RenameSdlcArtifactTypeInput = z.infer<typeof renameSdlcArtifactTypeSchema>;
 
 export function inferRepositoryNameFromUrl(raw: string): string | null {
   const value = raw.trim().replace(/^git@([^:]+):/, "https://$1/");
