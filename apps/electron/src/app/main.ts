@@ -26,6 +26,7 @@ import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 import { setupWebviewShortcuts } from '../services/webview-shortcuts';
+import { callInvitePath } from '../utils/validation';
 import Store from 'electron-store';
 
 const store = new Store();
@@ -279,7 +280,14 @@ app.on('web-contents-created', (_event, webContents) => {
         if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
           const mainWindow = getMainWindow();
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('open-in-browser-panel', url);
+            // A call invite followed inside the browser panel still belongs to
+            // the app, not to another panel tab.
+            const invitePath = callInvitePath(url);
+            if (invitePath) {
+              mainWindow.webContents.send('navigate-to', invitePath);
+            } else {
+              mainWindow.webContents.send('open-in-browser-panel', url);
+            }
           }
         }
       } catch (e) {
