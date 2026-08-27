@@ -104,6 +104,7 @@ export async function emitAgentWorkingSignal(opts: {
   conversationId?: string | undefined;
   channelId?: string | undefined;
   agentSlug?: string | undefined;
+  agentName?: string | undefined;
   spacesAppUserId?: string | undefined;
   appToken?: string | undefined;
   toolLabel?: string;
@@ -116,6 +117,7 @@ export async function emitAgentWorkingSignal(opts: {
         conversationId: opts.conversationId,
         channelId: opts.channelId,
         agentSlug: opts.agentSlug,
+        agentName: opts.agentName,
         userId: opts.spacesAppUserId,
         toolLabel: opts.toolLabel ?? "Working on it...",
         status: "working",

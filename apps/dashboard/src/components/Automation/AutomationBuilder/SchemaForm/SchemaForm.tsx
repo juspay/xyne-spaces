@@ -743,7 +743,14 @@ function ArrayField({
           ))}
         </div>
       )}
-      <Button variant='outline' size='sm' onClick={handleAdd} className='self-start'>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={handleAdd}
+        data-track-category='automation-builder'
+        data-track-name='ADD_SCHEMA_FIELD'
+        className='self-start'
+      >
         <Plus className='size-4' />
         Add entry
       </Button>
@@ -822,7 +829,15 @@ function RecordField({
           variableSources={variableSources}
         />
       ))}
-      <Button type='button' variant='outline' size='sm' onClick={handleAdd} className='self-start'>
+      <Button
+        type='button'
+        variant='outline'
+        size='sm'
+        onClick={handleAdd}
+        data-track-category='automation-builder'
+        data-track-name='ADD_SCHEMA_FIELD'
+        className='self-start'
+      >
         <Plus className='mr-1 size-3.5' />
         Add row
       </Button>

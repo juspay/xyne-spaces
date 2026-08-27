@@ -619,6 +619,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                             <DropdownMenuItem
                               key={shortcut.commandName}
                               onClick={() => onRunShortcut?.(shortcut)}
+                              data-track-category='HOVER_ACTIONS_TOOLBAR'
+                              data-track-name='RUN_SHORTCUT'
                             >
                               <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                 <Zap className='w-3.5 h-3.5' />
@@ -634,7 +636,11 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                           {messageShortcuts.length > 3 && (
                             <>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={onShowAllShortcuts}>
+                              <DropdownMenuItem
+                                onClick={onShowAllShortcuts}
+                                data-track-category='HOVER_ACTIONS_TOOLBAR'
+                                data-track-name='SHOW_ALL_SHORTCUTS'
+                              >
                                 <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                   <Zap className='w-4 h-4' />
                                 </span>

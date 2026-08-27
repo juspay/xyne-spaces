@@ -224,6 +224,21 @@ class NoteTakerTranscriptService {
   }
 
   /**
+   * On-demand label generation for a headless recording that has none yet
+   * (list-view "Generate labels" action). 
+   */
+  async regenerateLabels(call: Call): Promise<string[] | null> {
+    const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
+    if (!formattedTranscript) return null;
+
+    const labelIds = await this.generateAndSaveLabels(call, formattedTranscript, TagMethod.AUTOMATED);
+    if (labelIds.length > 0) {
+      await repositories.calls.appendLabels(call.id, labelIds);
+    }
+    return labelIds;
+  }
+
+  /**
    * Fallback for when the agent's transcript-ready webhook never arrives (agent
    * OOM/SIGKILLed mid-call): reconcile whatever was already streamed to GCS.
    * processTranscript's own entryCount gate makes this a safe no-op when
@@ -814,7 +829,11 @@ class NoteTakerTranscriptService {
    * tag ids for Call.labels. Returns [] on any failure — callers treat that
    * as "nothing to add", never clobbering a previously-saved good result.
    */
-  private async generateAndSaveLabels(call: Call, formattedTranscript: string): Promise<string[]> {
+  private async generateAndSaveLabels(
+    call: Call,
+    formattedTranscript: string,
+    method: TagMethod = TagMethod.LLM,
+  ): Promise<string[]> {
     const callId = call.externalId;
     if (!call.workspaceId) {
       logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: 'note_taker' });
@@ -837,7 +856,7 @@ class NoteTakerTranscriptService {
       const slug = this.slugifyLabel(rawLabel);
       if (!slug) continue;
       try {
-        const tagId = await this.getOrCreateLabelTag(call, slug, TagMethod.LLM);
+        const tagId = await this.getOrCreateLabelTag(call, slug, method);
         if (tagId && !tagIds.includes(tagId)) tagIds.push(tagId);
       } catch (error) {
         logger.error(`[${callId}] label_tag_failed`, { label: slug, path: 'note_taker', error });
@@ -893,8 +912,8 @@ class NoteTakerTranscriptService {
   ): Promise<string | null> {
     const existing = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
     if (existing) {
-      // Typing a label the LLM only suggested asserts it just as the tick button does.
-      if (method === TagMethod.MANUAL && existing.method === TagMethod.LLM) {
+      // Typing a label an LLM/automated pass only suggested asserts it just as the tick button does.
+      if (method === TagMethod.MANUAL && existing.method !== TagMethod.MANUAL) {
         await tagService.confirmTag(existing.id, call.workspaceId!);
       }
       return existing.id;

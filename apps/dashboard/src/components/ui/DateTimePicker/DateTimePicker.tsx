@@ -162,12 +162,16 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
               onClick={() =>
                 setViewDate(new Date(viewDate.setFullYear(viewDate.getFullYear() - 1)))
               }
+              data-track-category='DATE_TIME_PICKER'
+              data-track-name='PREV_YEAR'
               className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronsLeft className='w-4 h-4' />
             </button>
             <button
               onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))}
+              data-track-category='DATE_TIME_PICKER'
+              data-track-name='PREV_MONTH'
               className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronLeft className='w-4 h-4' />
@@ -179,6 +183,8 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
           <div className='flex gap-0.5'>
             <button
               onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))}
+              data-track-category='DATE_TIME_PICKER'
+              data-track-name='NEXT_MONTH'
               className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronRight className='w-4 h-4' />
@@ -187,6 +193,8 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
               onClick={() =>
                 setViewDate(new Date(viewDate.setFullYear(viewDate.getFullYear() + 1)))
               }
+              data-track-category='DATE_TIME_PICKER'
+              data-track-name='NEXT_YEAR'
               className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronsRight className='w-4 h-4' />
@@ -301,6 +309,8 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
 
         <button
           onClick={handleConfirm}
+          data-track-category='DATE_TIME_PICKER'
+          data-track-name='CONFIRM_DATE_TIME'
           disabled={isConfirmDisabled}
           className={cn(
             'mt-6 w-full py-2.5 text-xs font-bold rounded-lg transition-all',
@@ -386,6 +396,8 @@ const MonthView: React.FC<{
       <button
         key={i}
         onClick={() => onSelect(d)}
+        data-track-category='DATE_TIME_PICKER'
+        data-track-name='SELECT_DAY'
         disabled={isBeforeToday}
         className={cn(
           'aspect-square text-[12px] rounded-lg transition-all flex items-center justify-center',

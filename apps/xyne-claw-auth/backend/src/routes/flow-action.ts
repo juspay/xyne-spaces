@@ -2108,6 +2108,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               conversationId: planConversationId,
               channelId: planChannelId,
               agentSlug: planAgentSlug,
+              agentName: agent.name,
               spacesAppUserId: agent.spacesAppUserId ?? undefined,
               appToken,
               toolLabel: "Starting the plan…",

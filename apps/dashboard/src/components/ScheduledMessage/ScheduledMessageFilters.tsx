@@ -79,6 +79,8 @@ export const ScheduledMessageFilters = ({
         {hasActiveFilters && (
           <Button
             onClick={() => onFiltersChange({ channelIds: [], createdByIds: [] })}
+            data-track-category='scheduled-message'
+            data-track-name='CLEAR_SCHEDULED_MESSAGE_FILTERS'
             variant='ghost'
             size='sm'
             className='ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'

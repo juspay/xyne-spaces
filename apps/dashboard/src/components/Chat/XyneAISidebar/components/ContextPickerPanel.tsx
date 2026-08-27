@@ -67,9 +67,12 @@ export interface ContextSelections {
   recordings: SelectedRecording[];
 }
 
-// Attached context item for v2 API
+// Attached context item for v2 API. The KB types ('collection' | 'folder' |
+// 'file') are not sent by the composer directly — the Spaces backend merges
+// them into attachedContext from collectionIds/folderIds/fileIds (see
+// xyneAIControllerV2.ts) and persists them, so a reloaded message carries them.
 export interface AttachedContextItem {
-  type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity';
+  type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity' | 'collection' | 'folder' | 'file';
   id: string;
   title: string;
   threadId?: string;
@@ -134,6 +137,77 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
   }
 
   return items;
+}
+
+/**
+ * Selections plus the collection/file scopes that live outside {@link
+ * ContextSelections} — the full set a composer needs to re-populate its
+ * editable pills. Produced by {@link attachedContextToSelections}.
+ */
+export interface ReusableContext extends ContextSelections {
+  collections: { id: string; name: string }[];
+  fileScopes: { id: string; name: string }[];
+  folderScopes: { id: string; name: string }[];
+}
+
+/**
+ * Inverse of {@link toAttachedContext}: turn a persisted attachedContext list
+ * (from a past user turn) back into the composer's editable selection buckets,
+ * so "reuse this context" drops the same pills a manual pick would. Calls
+ * (`type: 'call'`) restore as transcripts — the two are indistinguishable once
+ * normalized and behave identically for the query (both become call ids).
+ * `activity` items are runtime-only user-activity context and are skipped.
+ * `collection`/`file` are backend-only types (merged in from KB items) not in
+ * the frontend union, so this switches on the raw string.
+ */
+export function attachedContextToSelections(items: AttachedContextItem[]): ReusableContext {
+  const result: ReusableContext = {
+    channels: [],
+    tickets: [],
+    canvases: [],
+    transcripts: [],
+    recordings: [],
+    collections: [],
+    fileScopes: [],
+    folderScopes: [],
+  };
+  for (const item of items) {
+    switch (item.type as string) {
+      case 'channel':
+        result.channels.push({ id: item.id, name: item.title, isPrivate: false });
+        break;
+      case 'ticket':
+        result.tickets.push({ id: item.id, title: item.title });
+        break;
+      case 'canvas':
+        result.canvases.push({
+          id: item.id,
+          title: item.title,
+          ...(item.canvasRole ? { canvasRole: item.canvasRole } : {}),
+        });
+        break;
+      case 'call':
+        result.transcripts.push({
+          id: item.id,
+          title: item.title,
+          ...(item.threadId ? { conversationId: item.threadId } : {}),
+        });
+        break;
+      case 'collection':
+        result.collections.push({ id: item.id, name: item.title });
+        break;
+      case 'folder':
+        result.folderScopes.push({ id: item.id, name: item.title });
+        break;
+      case 'file':
+        result.fileScopes.push({ id: item.id, name: item.title });
+        break;
+      default:
+        // 'activity' and any future type — nothing to re-attach as a pill.
+        break;
+    }
+  }
+  return result;
 }
 import { saveRecents } from '../../../../utils/contextPickerRecents';
 import { toast } from 'sonner';
