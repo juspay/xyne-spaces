@@ -15,7 +15,10 @@ import {
 } from 'lucide-react';
 
 const utcToIst = (utcString?: string): string => {
-  if (!utcString) return '';
+  // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
+  // treat it as absent — otherwise it parses to an Invalid Date and every card
+  // that doesn't pre-guard renders the string "Invalid Date".
+  if (!utcString || utcString === 'N/A') return '';
   const dateUtc = new Date(`${utcString} UTC`);
   return dateUtc.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -58,6 +61,7 @@ import {
   groupChannelsByScope,
 } from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { formatFileSize } from '../MessageAttachment/utils';
 import {
   TabType,
   MentionType,
@@ -845,6 +849,7 @@ const SearchResults = (): ReactElement => {
             onSelectUser={handleSelectUser}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
+            usersById={usersById}
             compareMode={compareMode}
             isGrouped={isGrouped}
             selectedIds={selectedIds}
@@ -949,6 +954,7 @@ interface ResultsBodyProps {
     category: ChannelCategory;
     searchableNames?: string[];
   }>;
+  usersById: Map<string, Parameters<typeof getUserDisplayName>[0]>;
   compareMode: boolean;
   isGrouped: boolean;
   selectedIds: Set<string>;
@@ -1088,6 +1094,7 @@ function ResultsBody({
   onSelectUser,
   channelData,
   searchableChannels,
+  usersById,
   compareMode,
   isGrouped,
   selectedIds,
@@ -1167,8 +1174,33 @@ function ResultsBody({
     if (result.type === 'attachment') {
       const icon = getAttachmentResultIcon(result);
       const channelId = result.searchContext?.channelId;
-      const channelName = channelId ? channelLabelsById.get(channelId) : undefined;
-      const subtitle = channelName ? `File uploaded in ${channelName}` : result.subtitle;
+      // `formatChannelLabel` renders the shared display form, `#name`. This row
+      // says "in <name>", which supplies its own preposition, so the hash would
+      // just repeat it — strip it here rather than change the shared helper,
+      // which pickers and mentions rely on. DM labels are participant names with
+      // no hash, so they pass through untouched.
+      const channelName = (channelId ? channelLabelsById.get(channelId) : undefined)?.replace(
+        /^#/,
+        '',
+      );
+      const uploaderId = result.avatar;
+      const uploader = uploaderId ? usersById.get(uploaderId) : undefined;
+      const uploaderName = uploader ? getUserDisplayName(uploader) : '';
+      const shouldShowUploader = !!uploader && uploaderName !== 'Unknown';
+      const rawTs = result.metadata.timestamp;
+      const uploadedAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+      const fileSize = result.searchContext?.fileSize;
+      const fileSizeLabel = typeof fileSize === 'number' ? formatFileSize(fileSize) : '';
+      // Same shape as every other card on this screen: metadata left, timestamp
+      // right. Segments are middot-separated, except the channel, which closes
+      // the line as a phrase ("in design") and so takes no separator in front.
+      const metaLine = [shouldShowUploader ? `Uploaded by ${uploaderName}` : '', fileSizeLabel]
+        .filter(Boolean)
+        .join(' · ');
+      const infoLine = [metaLine, channelName ? `in ${channelName}` : '']
+        .filter(Boolean)
+        .join(' ');
+
       return (
         <button
           key={key}
@@ -1181,21 +1213,22 @@ function ResultsBody({
             {icon}
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              {subtitle && (
-                <span className='truncate'>
-                  {channelName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
-                </span>
-              )}
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
+            {/* Timestamp sits on the title row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {uploadedAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {uploadedAt}
                 </span>
               )}
             </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {infoLine ||
+                (result.subtitle ? <RenderMessageWithHTML message={result.subtitle} /> : null)}
+            </span>
           </div>
         </button>
       );
@@ -1204,10 +1237,11 @@ function ResultsBody({
     // Conversation message card (type === 'conversation')
     // DESK mails navigate away; regular messages open in the side panel
     if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
-      // Mirrors cmdK's desk-mail row: subject, then sender + recipient count and
-      // timestamp, then the body snippet.
+      // Mirrors cmdK's desk-mail row: subject and timestamp, then sender +
+      // recipient count, then the body snippet.
       const senderName = result.searchContext?.senderName || result.subtitle || '';
       const recipientCount = result.searchContext?.recipientCount ?? 0;
+      const sentAt = utcToIst(result.metadata.timestamp);
       const deskTicketSubtitle = [
         result.subtitle || result.searchContext.xyneId,
         ...(result.searchContext.formFieldMatches ?? []).map(
@@ -1228,25 +1262,27 @@ function ResultsBody({
             <Mail className='size-4 text-muted-foreground' />
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
+            {/* Timestamp sits on the subject row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {sentAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {sentAt}
+                </span>
+              )}
+            </div>
             {deskTicketSubtitle && (
               <div className='text-xs text-foreground truncate'>
                 <RenderMessageWithHTML message={deskTicketSubtitle} />
               </div>
             )}
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              <span className='min-w-0 truncate'>
-                {senderName}
-                {recipientCount > 0 && ` +${recipientCount} more`}
-              </span>
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
-                </span>
-              )}
-            </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {senderName}
+              {recipientCount > 0 && ` +${recipientCount} more`}
+            </span>
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />
