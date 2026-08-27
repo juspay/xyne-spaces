@@ -865,13 +865,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       form.reset();
-      // Preselected release board (no initialTicketKind) → open in release mode.
-      const preselectedBoard = selectedBoardId
-        ? boardsRef.current?.find(b => b.id === selectedBoardId)
-        : undefined;
-      setTicketKind(
-        preselectedBoard && isReleaseBoard(preselectedBoard.boardType) ? 'release' : initialTicketKind,
-      );
+      setTicketKind(initialTicketKind);
       setHasTitleBeenGenerated(false); // Reset flag when modal opens
       hasPopulatedDeployedCommitId.current = false;
       seedSnapshotRef.current = null;
@@ -894,7 +888,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         form.setFieldValue('status', initialStatus);
       }
       form.setFieldValue('tags', initialTags);
-      if (selectedBoardId) {
+      // Release boards are created only via the Release Manager; don't preselect one here.
+      const preselectedBoard = selectedBoardId
+        ? boardsRef.current?.find(b => b.id === selectedBoardId)
+        : undefined;
+      if (selectedBoardId && !(preselectedBoard && isReleaseBoard(preselectedBoard.boardType))) {
         form.setFieldValue('boardId', selectedBoardId);
       }
       if (enableUrlSync && hasCreateTicketFlag(searchParamsRef.current)) {
@@ -1802,17 +1800,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   };
 
-  const handleTicketKindChange = (kind: 'task' | 'release'): void => {
-    if (kind === ticketKind) return;
-    setTicketKind(kind);
-    form.setFieldValue('boardId', '');
-    form.setFieldValue('dynamicFields', {});
-    setSelectedRepoBoardIds([]);
-    setRepoRanges({});
-    hasPopulatedRepoDeployed.current = new Set();
-    hasPopulatedDeployedCommitId.current = false;
-  };
-
   const boardOptions = useMemo(
     () =>
       boards
@@ -2304,37 +2291,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           </div>
         )}
 
-        {releaseBoardOptions.length > 0 && !releaseOnly && (
-          <div className={cn('pb-2', subTickets.length > 0 && 'pt-4')}>
-            <div className='inline-flex rounded-lg border border-border p-0.5'>
-              {(['task', 'release'] as const).map(kind => (
-                <button
-                  key={kind}
-                  type='button'
-                  onClick={() => handleTicketKindChange(kind)}
-                  aria-pressed={ticketKind === kind}
-                  className={cn(
-                    'h-7 rounded-md px-3 text-sm font-medium capitalize transition-colors',
-                    ticketKind === kind
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  data-track-category='TICKETS'
-                  data-track-name='SelectTicketKind'
-                  data-track-metadata={JSON.stringify({ kind })}
-                >
-                  {kind}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Channel and Board Selection */}
         <div
           className={cn(
             'flex items-center gap-2.5 pb-2',
-            subTickets.length > 0 && releaseBoardOptions.length === 0 && 'pt-4',
+            subTickets.length > 0 && 'pt-4',
           )}
         >
           {/* Channel Selection */}

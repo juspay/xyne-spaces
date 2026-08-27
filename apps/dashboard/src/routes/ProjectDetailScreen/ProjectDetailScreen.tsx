@@ -1,6 +1,7 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
+  AccessType,
   BoardType,
   deserializeFlowPlan,
   inferRepositoryNameFromUrl,
@@ -8,6 +9,8 @@ import {
   validateChannelName,
   type FlowPlan,
 } from '@xyne/shared';
+import { useAuth } from '../../hooks/useAuth';
+import { usePermissions } from '../../hooks/usePermissions';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -98,6 +101,19 @@ const ProjectDetailScreen = (): ReactElement => {
   // Entry point gates the tab set: Release Manager shows release-repo config,
   // List Projects shows the SDLC repositories view.
   const fromReleaseManager = navState?.from === 'releaseManager';
+  // Gate Create Release like the backend: admin/owner role, or a RELEASE-MANAGER WRITE grant.
+  const { user } = useAuth();
+  const permissions = usePermissions();
+  const canCreateRelease =
+    user?.role === 'ADMIN' ||
+    user?.role === 'OWNER' ||
+    user?.orgRole === 'ADMIN' ||
+    user?.orgRole === 'OWNER' ||
+    permissions.some(
+      p =>
+        p.resourceName === 'RELEASE-MANAGER' &&
+        (p.accessType === AccessType.WRITE || p.accessType === AccessType.ADMIN),
+    );
   const backTo = fromReleaseManager
     ? { path: '/releaseManager', label: 'Back to Release Manager' }
     : { path: '/listProjects', label: 'Back to Projects' };
@@ -551,7 +567,7 @@ const ProjectDetailScreen = (): ReactElement => {
                     Connect Repository
                   </Button>
                 )}
-                {fromReleaseManager && activeTab === 'releases' && (
+                {fromReleaseManager && activeTab === 'releases' && canCreateRelease && (
                   <Button
                     variant='default'
                     disabled={!releaseChannelId}

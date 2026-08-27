@@ -1127,7 +1127,13 @@ export class TicketController {
 
       const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;
       if (ticketChannelId) {
-        await this.channelRepository.updateLastActivity(ticketChannelId);
+        try {
+          await this.channelRepository.updateLastActivity(ticketChannelId);
+        } catch (err) {
+          logger.warn(
+            `[createTicket] Skipped last-activity update for channel ${String(ticketChannelId).replace(/[\r\n]/g, '')}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
 
       // Create TicketTag records for each tag
