@@ -1,3 +1,10 @@
+## [1.237.0](https://github.com/juspay/xyne-spaces/compare/v1.236.0...v1.237.0) (2026-08-27)
+
+
+### Features
+
+* make active call pill in channel open the call's thread on click ([#1072](https://github.com/juspay/xyne-spaces/issues/1072)) ([980155e](https://github.com/juspay/xyne-spaces/commit/980155eead8a03d8b2c8a0f18618c45a08b8ae59))
+
 ## [1.236.0](https://github.com/juspay/xyne-spaces/compare/v1.235.0...v1.236.0) (2026-08-27)
 
 
