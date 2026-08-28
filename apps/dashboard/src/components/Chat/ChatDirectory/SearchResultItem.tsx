@@ -190,6 +190,7 @@ const TicketAssigneeSegment = ({
 const AttachmentSearchResultItem = ({
   result,
   channelTag,
+  itemLabel,
   onSelect,
   onPreview,
   isSelected,
@@ -197,6 +198,8 @@ const AttachmentSearchResultItem = ({
 }: {
   result: DisplaySearchResult;
   channelTag?: { name: string; icon?: ReactElement | undefined } | undefined;
+  /** Title with highlight markup stripped, computed once by the parent. */
+  itemLabel: string;
   onSelect: (result: DisplaySearchResult) => Promise<void> | void;
   onPreview?: ((result: DisplaySearchResult) => void) | undefined;
   isSelected: boolean;
@@ -232,7 +235,7 @@ const AttachmentSearchResultItem = ({
       value={`backend-${result.type}-${result.id}`}
       data-result-id={result.id}
       data-result-type={result.type}
-      data-item-label={(result.title || '').replace(/<[^>]*>/g, '')}
+      data-item-label={itemLabel}
       onSelect={() => void onSelect(result)}
       onMouseDownCapture={handleMouseDown}
       className='flex w-full items-stretch gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
@@ -580,6 +583,7 @@ const SearchResultItem = ({
         <AttachmentSearchResultItem
           result={result}
           channelTag={channelTag}
+          itemLabel={itemLabel}
           onSelect={onSelect}
           onPreview={onPreview}
           isSelected={isSelected}
