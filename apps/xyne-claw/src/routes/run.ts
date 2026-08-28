@@ -1718,7 +1718,14 @@ async function processTask(
   // and shipped as `dailyBrief` on the callback.
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
-  let callbackModel: string | undefined = LITELLM.model;
+  // Seed from THIS run's provider, not the litellm default. These are the
+  // values reported when a run dies before the completed-attempt block below
+  // sets them, so a hardcoded LITELLM.model made every early failure report
+  // "<real provider>/private-large-spaces" — the shape behind the 740
+  // codex/… , 461 claude/… rows in agent_runs (measured 2026-08-29). Only a
+  // spaces/unset run legitimately defaults to the platform model.
+  let callbackModel: string | undefined =
+    provider && provider !== "spaces" ? providerConfigs?.[provider]?.model : LITELLM.model;
   let requiresStructuredDelivery = false;
   const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
   const followUpsEnabled = followUpsEnabledByFlag;
