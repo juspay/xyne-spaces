@@ -77,6 +77,7 @@ import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { RecordingBubble } from './RecordingBubble';
+import { CallShareBubble } from './CallShareBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
 import { TicketSuggestions } from './TicketSuggestions';
@@ -571,6 +572,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // picks up call-only behavior (transcript dimming, forwarding-as-call, PRD
   // buttons, etc).
   const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+  // A regular call shared into a channel (recordingSharingService). Separate from
+  // isCallMessage, which is the live call anchor in the call's own channel.
+  const isCallShareMessage = metadata?.['isCallShareMessage'] === true;
   // Only live recording anchors use the system-style sender.
   const isHeadlessRecordingAnchor =
     isRecordingMessage && metadata?.['isHeadlessRecording'] === true;
@@ -1194,7 +1198,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isRecordingMessage && metadata?.callId && !isForwardedMessage && !message.isDeleted ? (
+          {isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
+            <CallShareBubble message={{ content: message.content, metadata }} />
+          ) : isRecordingMessage &&
+            metadata?.callId &&
+            !isForwardedMessage &&
+            !message.isDeleted ? (
             <RecordingBubble
               message={{
                 messageId: message.messageId,
