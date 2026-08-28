@@ -58,3 +58,51 @@ export function callInvitePath(candidate: string): string | null {
     return null;
   }
 }
+// ---------------------------------------------------------------------------
+// Deep-link ask-ai parameter validation (PY-JP-019)
+//
+// A xyne-spaces://ask-ai deep link is externally triggerable (any web page can
+// set location.href). Its text/url/domain/title query params are forwarded
+// verbatim to the privileged renderer via the open-xyne-ai-with-context IPC and
+// end up in an AI prompt / DOM. Validate and sanitize each param at the main
+// process boundary before forwarding; callers should drop values that fail.
+// ---------------------------------------------------------------------------
+
+// Free-text params (ask-ai text/title). Strip control chars (including the
+// prompt-structure-breaking ones), collapse runs of whitespace, and cap length.
+// Never throws — returns a safe string ('' if input is unusable).
+export function sanitizeAskAiText(value: unknown, maxLen: number): string {
+  if (typeof value !== 'string') return '';
+  const cleaned = value
+    .replace(/[\u0000-\u001F\u007F]/g, " ") // control chars
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
+}
+
+// URL param: parse with URL() and accept only http(s). Rejects javascript:,
+// data:, file:, protocol-relative, and malformed input. Returns the normalized
+// href, or '' when invalid.
+export function normalizeAskAiUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) return '';
+  try {
+    const parsed = new URL(value.trim());
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== 'https:' && protocol !== 'http:') return '';
+    return parsed.href;
+  } catch {
+    return '';
+  }
+}
+
+// Hostname pattern (RFC-1123 labels, max 253 chars). Returns the lowercased
+// domain, or '' when it does not look like a hostname.
+const HOSTNAME_LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const HOSTNAME_RE = new RegExp(`^${HOSTNAME_LABEL}(?:\\.${HOSTNAME_LABEL})*$`, 'i');
+
+export function normalizeAskAiDomain(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed.length === 0 || trimmed.length > 253) return '';
+  return HOSTNAME_RE.test(trimmed) ? trimmed : '';
+}

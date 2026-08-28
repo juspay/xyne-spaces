@@ -7,6 +7,8 @@ import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolvePeerProcess, describePeer, PeerProcess } from './peer-process';
+import { showAgentConsentWindow } from './agent-consent-window';
 
 const DEFAULT_PORT = 49231;
 
@@ -22,6 +24,11 @@ interface AuthSession {
   description: string;
   expiresAt: number;
   createdAt: number;
+  // Absolute exe path of the process that was granted this token, resolved from
+  // the OS TCP table at grant time. Tokens are bound to this path: every
+  // token-gated request re-resolves the caller and must match. null = the peer
+  // could not be resolved at grant time, so path binding cannot be enforced.
+  agentPath: string | null;
 }
 
 interface AuthResponse {
@@ -34,12 +41,40 @@ interface AuthResponse {
 
 type DurationOption = '5min' | '1hour' | 'session';
 
+// Cool-down after a user Deny so a malicious process cannot hammer the consent
+// dialog. Keyed by requester exe path (or 'unknown' when unresolved).
+const DENY_COOLDOWN_MS = 30 * 1000;
+
+// Registry of executables recognised as first-party agents. Anything not on the
+// list is shown in the consent dialog as an "Unregistered agent" alongside its
+// real path, so the user is not tricked by an attacker-controlled agentName.
+// Populate with the absolute paths / basenames the team ships and trusts.
+const KNOWN_AGENT_EXECUTABLES: ReadonlySet<string> = new Set<string>([
+  // e.g. '/Applications/Xyne.app/Contents/MacOS/xyne-agent',
+]);
+
+// What an approved agent can do through this loopback server (all proxied to the
+// backend with the logged-in user's credentials). Shown in the consent modal so
+// the user understands the scope they are granting. Keep in step with the routes
+// handled in handleRequest().
+const AGENT_CAPABILITIES: readonly string[] = [
+  'Search your workspace data and memory',
+  'Read your conversations and messages',
+  'Download message attachments to your Desktop',
+  'Post messages in your chats',
+  'Create tickets and schedule calls',
+  'Read and write agent memory (facts & SOPs)',
+  'Send AI queries on your behalf',
+];
+
 class AgentAuthService {
   private server: ReturnType<typeof createServer> | null = null;
   private port: number = DEFAULT_PORT;
   private sessions: Map<string, AuthSession> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
   private consentDialogOpen = false;
+  // requester exe path (or 'unknown') -> epoch ms until which new requests are refused
+  private denyCooldowns: Map<string, number> = new Map();
 
   private getMcpBackendBaseUrl(): string {
     return config.BACKEND_URL.replace(/\/+$/, '');
@@ -132,11 +167,13 @@ class AgentAuthService {
 
     try {
       if (req.method === 'POST' && url.pathname === '/auth/request') {
-        // Real local agents are non-browser clients and send no Origin / Sec-Fetch-Site
-        // header; reject cross-site browser requests to the consent dialog.
-        if (this.isCrossSiteBrowserRequest(req)) {
-          log.warn('[AgentAuth] Rejected cross-site /auth/request (browser consent-dialog spam)');
-          this.sendJson(res, 403, { error: 'Forbidden', message: 'Cross-site request rejected' });
+        // Real local agents are non-browser clients and send NO Origin / Sec-Fetch-Site
+        // header. A browser always attaches Origin on a cross-origin POST, so the presence
+        // of an Origin header on the consent endpoint means the caller is a web page — kill
+        // the browser dialog-spam vector outright by rejecting any request that carries one.
+        if (req.headers['origin'] !== undefined || this.isCrossSiteBrowserRequest(req)) {
+          log.warn('[AgentAuth] Rejected /auth/request carrying Origin/fetch-metadata (browser consent-dialog spam)');
+          this.sendJson(res, 403, { error: 'Forbidden', message: 'Browser-originated request rejected' });
           return;
         }
         await this.handleAuthRequest(req, res);
@@ -197,16 +234,22 @@ class AgentAuthService {
   /**
    * Handle authorization request
    *
-   * ACCEPTED RISK (secops #367, MED): this loopback endpoint (127.0.0.1:49231) has no
-   * requesting-process binding and no out-of-band pairing, so ANY local process can POST an auth
-   * request and spawn a native consent dialog with attacker-controlled agentName/description text
-   * (and, on user approval, proxy authenticated backend calls). The declared pairing-code flow was
-   * never implemented; the team accepted this under a local-only (already-compromised-host) threat
-   * model. Implement the pairing-code echo before relying on this endpoint for anything sensitive.
+   * Hardening (Payatu #1/#2/#3): the loopback endpoint (127.0.0.1:49231) is reachable by any
+   * local process, so agentName/description in the body are attacker-controlled and cannot be
+   * trusted on their own. We now:
+   *   1. Resolve the REAL requesting process from the OS TCP table (client port -> PID -> exe
+   *      path) and surface it in the consent dialog, so the user sees the true binary rather
+   *      than only a self-declared name.
+   *   2. Bind the issued token to that exe path; every token-gated route re-resolves the caller
+   *      and rejects a path mismatch (see validateTokenAndPeer).
+   *   3. Apply a per-requester cool-down after a Deny so a rejected process cannot hammer the
+   *      dialog.
+   * This does not fully defend an already-compromised host (PID reuse / TOCTOU are inherent to
+   * a local IPC channel), but removes the trivial impersonation and dialog-spam vectors.
    */
   private async handleAuthRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await this.parseBody(req);
-    
+
     if (!body || typeof body !== 'object') {
       this.sendJson(res, 400, { error: 'Invalid request body' });
       return;
@@ -216,9 +259,21 @@ class AgentAuthService {
 
     // Validate required fields
     if (!authRequest.agentName || !authRequest.description) {
-      this.sendJson(res, 400, { 
-        error: 'Missing required fields: agentName, description' 
+      this.sendJson(res, 400, {
+        error: 'Missing required fields: agentName, description'
       });
+      return;
+    }
+
+    // Resolve the actual requesting process from the OS TCP table.
+    const peer = await resolvePeerProcess(req.socket.remotePort, process.pid);
+    const peerKey = peer?.execPath ?? 'unknown';
+
+    // Deny cool-down: refuse without re-prompting if this requester was recently denied.
+    const cooldownUntil = this.denyCooldowns.get(peerKey);
+    if (cooldownUntil && Date.now() < cooldownUntil) {
+      Logger.warn(ElectronEvent.AGENT_AUTH_COOLDOWN_BLOCKED, { agentName: authRequest.agentName, peer: peerKey }, 'AgentAuth');
+      this.sendJson(res, 429, { error: 'Request temporarily blocked', message: 'This process was recently denied' });
       return;
     }
 
@@ -228,20 +283,25 @@ class AgentAuthService {
     }
     this.consentDialogOpen = true;
     try {
-      Logger.info(ElectronEvent.AGENT_AUTH_REQUEST, { agentName: authRequest.agentName, agentType: authRequest.agentType }, 'AgentAuth');
+      Logger.info(ElectronEvent.AGENT_AUTH_REQUEST, { agentName: authRequest.agentName, agentType: authRequest.agentType, peer: peerKey }, 'AgentAuth');
 
-      // Show consent dialog to user
-      const approval = await this.showConsentDialog(authRequest);
+      // Show consent dialog to user, naming the real requesting process.
+      const approval = await this.showConsentDialog(authRequest, peer);
 
       if (!approval.approved) {
+        // Arm the cool-down so repeated prompts cannot be hammered after a Deny.
+        this.denyCooldowns.set(peerKey, Date.now() + DENY_COOLDOWN_MS);
         const response: AuthResponse = {
           status: 'denied',
           reason: 'User rejected the request'
         };
-        Logger.info(ElectronEvent.AGENT_AUTH_DENIED, { agentName: authRequest.agentName }, 'AgentAuth');
+        Logger.info(ElectronEvent.AGENT_AUTH_DENIED, { agentName: authRequest.agentName, peer: peerKey }, 'AgentAuth');
         this.sendJson(res, 403, response);
         return;
       }
+
+      // Clear any prior cool-down for this requester on approval.
+      this.denyCooldowns.delete(peerKey);
 
       // Generate access token
       const token = this.generateToken();
@@ -252,7 +312,8 @@ class AgentAuthService {
         agentName: authRequest.agentName,
         description: authRequest.description,
         expiresAt,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        agentPath: peer?.execPath ?? null,
       };
 
       this.sessions.set(token, session);
@@ -263,7 +324,7 @@ class AgentAuthService {
         expiresAt
       };
 
-      Logger.info(ElectronEvent.AGENT_AUTH_GRANTED, { agentName: authRequest.agentName, expiresAt, duration: approval.duration }, 'AgentAuth');
+      Logger.info(ElectronEvent.AGENT_AUTH_GRANTED, { agentName: authRequest.agentName, expiresAt, duration: approval.duration, peer: peerKey }, 'AgentAuth');
       this.sendJson(res, 200, response);
     } finally {
       this.consentDialogOpen = false;
@@ -297,7 +358,7 @@ class AgentAuthService {
   private async handleInteract(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Validate agent authorization token
     const agentToken = this.extractToken(req);
-    if (!agentToken || !this.validateToken(agentToken)) {
+    if (!agentToken || !(await this.validateTokenAndPeer(agentToken, req))) {
       this.sendJson(res, 401, { 
         error: 'Unauthorized',
         message: 'Invalid or missing agent authorization token' 
@@ -385,7 +446,7 @@ class AgentAuthService {
   private async handleSearch(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     // Validate agent authorization token
     const agentToken = this.extractToken(req);
-    if (!agentToken || !this.validateToken(agentToken)) {
+    if (!agentToken || !(await this.validateTokenAndPeer(agentToken, req))) {
       this.sendJson(res, 401, { 
         error: 'Unauthorized',
         message: 'Invalid or missing agent authorization token' 
@@ -437,7 +498,7 @@ class AgentAuthService {
    */
   private async handleMcpSearch(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const agentToken = this.extractToken(req);
-    if (!agentToken || !this.validateToken(agentToken)) {
+    if (!agentToken || !(await this.validateTokenAndPeer(agentToken, req))) {
       this.sendJson(res, 401, {
         error: 'Unauthorized',
         message: 'Invalid or missing agent authorization token',
@@ -507,7 +568,7 @@ class AgentAuthService {
    */
   private async handleMcpIngestTurn(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const agentToken = this.extractToken(req);
-    if (!agentToken || !this.validateToken(agentToken)) {
+    if (!agentToken || !(await this.validateTokenAndPeer(agentToken, req))) {
       this.sendJson(res, 401, {
         error: 'Unauthorized',
         message: 'Invalid or missing agent authorization token',
@@ -577,7 +638,7 @@ class AgentAuthService {
    */
   private async handleMcpConversationIngestUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const agentToken = this.extractToken(req);
-    if (!agentToken || !this.validateToken(agentToken)) {
+    if (!agentToken || !(await this.validateTokenAndPeer(agentToken, req))) {
       this.sendJson(res, 401, {
         error: 'Unauthorized',
         message: 'Invalid or missing agent authorization token',
@@ -650,7 +711,7 @@ class AgentAuthService {
    * Handle POST /memory/search - Search documents
    */
   private async handleMemorySearch(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!this.guardProxyRequest(req, res)) return;
+    if (!(await this.guardProxyRequest(req, res))) return;
 
     const body = await this.parseBody(req);
     log.info(`[AgentAuth] Memory search request: ${JSON.stringify(body)}`);
@@ -699,7 +760,7 @@ class AgentAuthService {
     * }
    */
   private async handleMemoryUpload(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!this.guardProxyRequest(req, res)) return;
+    if (!(await this.guardProxyRequest(req, res))) return;
 
     const body = await this.parseBody(req);
     if (!body || typeof body !== 'object') {
@@ -744,7 +805,7 @@ class AgentAuthService {
    * }
    */
   private async handleSessionHistory(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    if (!this.guardProxyRequest(req, res)) return;
+    if (!(await this.guardProxyRequest(req, res))) return;
 
     const sessionId = url.searchParams.get('sessionId');
     if (!sessionId) {
@@ -792,7 +853,7 @@ class AgentAuthService {
    * }
    */
   private async handleMemoryUpdate(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    if (!this.guardProxyRequest(req, res)) return;
+    if (!(await this.guardProxyRequest(req, res))) return;
 
     const docId = url.pathname.replace('/memory/', '');
     if (!docId) {
@@ -848,7 +909,7 @@ class AgentAuthService {
    * }
    */
   private async handleMemoryReplaceSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!this.guardProxyRequest(req, res)) return;
+    if (!(await this.guardProxyRequest(req, res))) return;
 
     const body = await this.parseBody(req);
     if (!body || typeof body !== 'object') {
@@ -900,7 +961,7 @@ class AgentAuthService {
   ): Promise<void> {
     // 1. Validate agent token
     const token = this.extractToken(req);
-    if (!token || !this.validateToken(token)) {
+    if (!token || !(await this.validateTokenAndPeer(token, req))) {
       this.sendJson(res, 401, { error: 'Unauthorized: invalid or missing agent token' });
       return;
     }
@@ -1039,7 +1100,7 @@ class AgentAuthService {
   ): Promise<void> {
     // 1. Validate agent token
     const token = this.extractToken(req);
-    if (!token || !this.validateToken(token)) {
+    if (!token || !(await this.validateTokenAndPeer(token, req))) {
       this.sendJson(res, 401, { error: 'Unauthorized: invalid or missing agent token' });
       return;
     }
@@ -1134,7 +1195,7 @@ class AgentAuthService {
   ): Promise<void> {
     // 1. Validate agent token
     const token = this.extractToken(req);
-    if (!token || !this.validateToken(token)) {
+    if (!token || !(await this.validateTokenAndPeer(token, req))) {
       this.sendJson(res, 401, { error: 'Unauthorized: invalid or missing agent token' });
       return;
     }
@@ -1436,6 +1497,48 @@ class AgentAuthService {
     return true;
   }
 
+  /** True when the resolved peer executable is a registered first-party agent. */
+  private isKnownAgent(peer: PeerProcess | null): boolean {
+    if (!peer?.execPath) return false;
+    if (KNOWN_AGENT_EXECUTABLES.has(peer.execPath)) return true;
+    const base = peer.execPath.split(/[/\\]/).pop() ?? '';
+    return base.length > 0 && KNOWN_AGENT_EXECUTABLES.has(base);
+  }
+
+  /**
+   * Validate a token AND enforce that the current caller is the same process the token was
+   * issued to (Payatu #2). Re-resolves the peer from the OS TCP table on every call and
+   * rejects a path mismatch, so a token leaked to another local process is unusable.
+   *
+   * Note: when the peer cannot be resolved right now (currentPath === null) but a path was
+   * bound at grant time, we log and allow rather than break a legitimate agent on a transient
+   * lookup failure — the null case is "unknown", not a proven mismatch.
+   */
+  private async validateTokenAndPeer(token: string, req: IncomingMessage): Promise<boolean> {
+    if (!this.validateToken(token)) return false;
+
+    const session = this.sessions.get(token);
+    if (!session) return false;
+    if (!session.agentPath) return true; // nothing bound at grant time; cannot enforce
+
+    const peer = await resolvePeerProcess(req.socket.remotePort, process.pid);
+    const currentPath = peer?.execPath ?? null;
+
+    if (currentPath === null) {
+      log.warn('[AgentAuth] Could not re-resolve peer for token-gated request; allowing bound session');
+      return true;
+    }
+
+    if (currentPath === session.agentPath) return true;
+
+    Logger.warn(ElectronEvent.AGENT_AUTH_PEER_MISMATCH, {
+      agentName: session.agentName,
+      expected: session.agentPath,
+      actual: currentPath,
+    }, 'AgentAuth');
+    return false;
+  }
+
   private sanitizeDialogText(value: string | undefined, maxLen: number): string {
     if (typeof value !== 'string') return '';
     const cleaned = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1443,9 +1546,17 @@ class AgentAuthService {
   }
 
   /**
-   * Show consent dialog to user
+   * Show consent dialog to user.
+   *
+   * The dialog uses a fixed template driven by the RESOLVED requesting process, not just the
+   * self-declared agentName. An agent whose executable is not in KNOWN_AGENT_EXECUTABLES is
+   * labelled "Unregistered agent" and its real exe path (and code-signing status) are shown, so
+   * an attacker cannot masquerade as a trusted agent purely via the name field.
    */
-  private async showConsentDialog(authRequest: AuthRequest): Promise<{ approved: boolean; duration: DurationOption }> {
+  private async showConsentDialog(
+    authRequest: AuthRequest,
+    peer: PeerProcess | null,
+  ): Promise<{ approved: boolean; duration: DurationOption }> {
     const mainWindow = BrowserWindow.getAllWindows()[0];
 
     if (!mainWindow) {
@@ -1457,6 +1568,31 @@ class AgentAuthService {
     const type = this.sanitizeDialogText(authRequest.agentType, 32);
     const description = this.sanitizeDialogText(authRequest.description, 256);
 
+    const isKnown = this.isKnownAgent(peer);
+    const requestedBy = this.sanitizeDialogText(describePeer(peer), 256);
+    const requestedByPath = peer?.execPath ? this.sanitizeDialogText(peer.execPath, 256) : 'unknown process';
+
+    // Preferred UX: rich HTML consent modal showing requester, signing status, and the
+    // capabilities being granted. Fall back to the native message box if the modal fails.
+    try {
+      const modalResult = await showAgentConsentWindow(mainWindow, {
+        agentName: name,
+        agentType: type,
+        description,
+        requestedBy: requestedByPath,
+        signed: peer?.signed ?? null,
+        isKnown,
+        capabilities: [...AGENT_CAPABILITIES],
+      });
+      return {
+        approved: modalResult.approved,
+        duration: modalResult.duration === 'none' ? '5min' : modalResult.duration,
+      };
+    } catch (error) {
+      log.error('[AgentAuth] Consent modal failed, falling back to native dialog:', error);
+    }
+
+    const displayName = isKnown ? name : `${name || 'Unnamed'} — Unregistered agent`;
     const result = await dialog.showMessageBox(mainWindow, {
       type: 'question',
       buttons: ['Deny', 'Allow (5 min)', 'Allow (1 hour)', 'Allow (Session)'],
@@ -1464,9 +1600,13 @@ class AgentAuthService {
       cancelId: 0,
       title: 'Agent Authorization Request',
       message: `A local agent wants to connect`,
-      detail: `Name: ${name}\n` +
+      detail: `Name: ${displayName}\n` +
               `${type ? `Type: ${type}\n` : ''}` +
+              `Requested by: ${requestedBy}\n` +
               `Description: ${description}\n\n` +
+              `This agent will be able to:\n` +
+              AGENT_CAPABILITIES.map((c) => `  • ${c}`).join('\n') + '\n\n' +
+              `${isKnown ? '' : '⚠ This process is not a recognised Xyne agent. Only allow it if you trust it.\n\n'}` +
               `Do you want to allow this agent to access your application?`,
       normalizeAccessKeys: true
     });
@@ -1475,7 +1615,7 @@ class AgentAuthService {
       return { approved: false, duration: '5min' };
     }
 
-    const duration: DurationOption = result.response === 1 ? '5min' : 
+    const duration: DurationOption = result.response === 1 ? '5min' :
                                       result.response === 2 ? '1hour' : 'session';
 
     return { approved: true, duration };
@@ -1537,14 +1677,14 @@ class AgentAuthService {
     return false;
   }
 
-  private guardProxyRequest(req: IncomingMessage, res: ServerResponse): boolean {
+  private async guardProxyRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     if (this.isCrossSiteBrowserRequest(req)) {
       log.warn('[AgentAuth] Rejected cross-site request to credential-forwarding endpoint');
       this.sendJson(res, 403, { error: 'Forbidden', message: 'Cross-site request rejected' });
       return false;
     }
     const agentToken = this.extractToken(req);
-    if (!agentToken || !this.validateToken(agentToken)) {
+    if (!agentToken || !(await this.validateTokenAndPeer(agentToken, req))) {
       this.sendJson(res, 401, {
         error: 'Unauthorized',
         message: 'Invalid or missing agent authorization token',

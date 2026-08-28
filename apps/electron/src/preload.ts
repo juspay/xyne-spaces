@@ -290,6 +290,7 @@ const electronAPI = {
       'app:theme-changed',
       'call:state-changed',
       'meeting-popup:content-height',
+      'agent-consent:content-height',
       'recording-pill:recording-stopped',
       'recording:renderer-ready',
       'recording:set-minimized',
@@ -334,6 +335,27 @@ const electronAPI = {
     },
     dismiss: () => ipcRenderer.send('meeting-popup:dismiss'),
     startRecording: () => ipcRenderer.send('meeting-popup:start-recording'),
+  },
+
+  // Agent authorization consent modal (used by the consent window itself)
+  agentConsent: {
+    onShow: (
+      callback: (data: {
+        agentName: string;
+        agentType: string;
+        description: string;
+        requestedBy: string;
+        signed: boolean | null;
+        isKnown: boolean;
+        capabilities: string[];
+      }) => void,
+    ) => {
+      const listener = (_event: unknown, data: any) => callback(data);
+      ipcRenderer.on('agent-consent:show', listener);
+      return () => ipcRenderer.removeListener('agent-consent:show', listener);
+    },
+    respond: (result: { approved: boolean; duration: 'none' | '5min' | '1hour' | 'session' }) =>
+      ipcRenderer.send('agent-consent:respond', result),
   },
 
   // Screen Picker — in-app overlay instead of macOS native picker
