@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from '@xyne/icons';
+import { ArrowLeft, ArrowRight } from '@xyne/icons';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
@@ -794,6 +794,20 @@ const SearchResults = (): ReactElement => {
             data-track-name='GO_BACK'
           >
             <ArrowLeft size={16} />
+          </button>
+          {/* Paired with Back so a step backwards is undoable — refining a query pushes
+              history entries, and without this the only way forward is retyping. Mirrors
+              Back exactly, including staying enabled: forward past the end of the stack
+              is a harmless no-op. */}
+          <button
+            type='button'
+            aria-label='Forward'
+            onClick={() => void navigate(1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_FORWARD'
+          >
+            <ArrowRight size={16} />
           </button>
           <div className='flex-1 min-w-0'>
             <SearchQueryInput query={query} onSubmit={handleQuerySubmit} isSearching={isLoading} />
