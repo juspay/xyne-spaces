@@ -64,14 +64,19 @@ your bundle, and there are no transitive supply-chain surprises.
 
 ## Authentication
 
-The SDK authenticates with an API key:
+The SDK accepts two credentials, both as `Authorization: Bearer …`:
 
-```http
-Authorization: Bearer xyne_sk_…
-```
+| | For | |
+|---|---|---|
+| **API key** `xyne_sk_…` | Unattended work — servers, CI, cron, bots | Documented below |
+| **SSO token** `xyne_sso_…` | Interactive tools where a human is present at start-up | See **[SSO.md](./SSO.md)** |
 
-Create one from **Apps → API Keys** in the Spaces dashboard. You will see the key
-once; store it in your secret manager and pass it in:
+They are interchangeable everywhere `apiKey` is accepted. The rest of this section
+describes API keys; SSO trades revocability and lifetime for never making a user
+handle a secret, and [SSO.md](./SSO.md) opens with the comparison.
+
+Create an API key from **Apps → API Keys** in the Spaces dashboard. You will see the
+key once; store it in your secret manager and pass it in:
 
 ```typescript
 const sdk = createClient({
