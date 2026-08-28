@@ -5,7 +5,10 @@ import { config } from '../app/config';
 import { getIsQuitting } from '../app/main';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
-import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
+import {
+  registerAppOwnedWindow,
+  setMainWindow as setInterceptorMainWindow,
+} from '../services/request-interceptor';
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
@@ -110,6 +113,21 @@ export async function loadApp(window: BrowserWindow) {
   }
 }
 
+const namedChildWindows = new Map<string, BrowserWindow>();
+
+const STANDALONE_WINDOW_PREFIX = 'xyne-window:';
+
+function standaloneWindowKey(frameName: string | undefined): string | null {
+  if (!frameName || !frameName.startsWith(STANDALONE_WINDOW_PREFIX)) return null;
+  return frameName.slice(STANDALONE_WINDOW_PREFIX.length).split('#')[0] || null;
+}
+
+function focusWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 /**
  * Creates the main application window
  */
@@ -189,6 +207,16 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       }
       
       // Internal URLs - allow new window
+      const windowKey = standaloneWindowKey(details.frameName);
+      if (windowKey) {
+        const existing = namedChildWindows.get(windowKey);
+        if (existing && !existing.isDestroyed()) {
+          focusWindow(existing);
+          return { action: 'deny' };
+        }
+        namedChildWindows.delete(windowKey);
+      }
+
       if (urlObj.pathname.startsWith('/newWindow/create-ticket')) {
         return {
           action: 'allow',
@@ -207,6 +235,19 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       return { action: 'deny' };
     }
 });
+
+  mainWindow.webContents.on('did-create-window', (childWindow, details) => {
+    registerAppOwnedWindow(childWindow);
+
+    const windowKey = standaloneWindowKey(details.frameName);
+    if (!windowKey) return;
+    namedChildWindows.set(windowKey, childWindow);
+    childWindow.on('closed', () => {
+      if (namedChildWindows.get(windowKey) === childWindow) {
+        namedChildWindows.delete(windowKey);
+      }
+    });
+  });
 
   // Plain <a href> clicks bypass setWindowOpenHandler; intercept here to keep the app from being replaced.
   mainWindow.webContents.on('will-navigate', (event, navUrl) => {
