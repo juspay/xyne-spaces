@@ -1,3 +1,10 @@
+## [1.242.2](https://github.com/juspay/xyne-spaces/compare/v1.242.1...v1.242.2) (2026-08-28)
+
+
+### Bug Fixes
+
+* reuse ServerBlockNoteEditor to stop jsdom memory leak ([#1174](https://github.com/juspay/xyne-spaces/issues/1174)) ([056566d](https://github.com/juspay/xyne-spaces/commit/056566da73fa9f6aed5e4b60610f973b37b76c9e))
+
 ## [1.242.1](https://github.com/juspay/xyne-spaces/compare/v1.242.0...v1.242.1) (2026-08-28)
 
 
