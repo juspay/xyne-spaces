@@ -1,3 +1,10 @@
+## [1.242.6](https://github.com/juspay/xyne-spaces/compare/v1.242.5...v1.242.6) (2026-08-28)
+
+
+### Bug Fixes
+
+* external dashboard docker build fix ([#1193](https://github.com/juspay/xyne-spaces/issues/1193)) ([e526844](https://github.com/juspay/xyne-spaces/commit/e52684411ccc44df958e00566277fb00e517fc28))
+
 ## [1.242.5](https://github.com/juspay/xyne-spaces/compare/v1.242.4...v1.242.5) (2026-08-28)
 
 
