@@ -1718,7 +1718,7 @@ async function processTask(
   // and shipped as `dailyBrief` on the callback.
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
-  let callbackModel = LITELLM.model;
+  let callbackModel: string | undefined = LITELLM.model;
   let requiresStructuredDelivery = false;
   const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
   const followUpsEnabled = followUpsEnabledByFlag;
@@ -4281,7 +4281,18 @@ async function processTask(
     const pendingResponses = getPendingResponses();
     const completedProvider =
       completedAttempt?.provider ?? runtimeProvider ?? "spaces";
-    const completedModel = completedAttempt?.config?.model ?? effectiveModel;
+    // Report the model that the COMPLETED attempt actually used. The old
+    // `?? effectiveModel` leaked one provider's model onto another: the
+    // "spaces" attempt carries config: undefined by design, so a run that fell
+    // back to spaces reported the parent's model (spaces/gpt-5.5), and a codex
+    // run whose config had no model reported LITELLM.model
+    // (codex/private-large-spaces). Both shapes are visible in agent_runs and
+    // sent two prod diagnoses down the wrong path (2026-08-27/28). Only spaces
+    // may default to the platform model; anything else reports undefined
+    // (column left unset) rather than a model that never ran.
+    const completedModel =
+      completedAttempt?.config?.model ??
+      (completedProvider === "spaces" ? LITELLM.model : undefined);
     callbackProvider = completedProvider;
     callbackModel = completedModel;
 

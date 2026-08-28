@@ -707,6 +707,8 @@ export const sandboxRun: ToolDefinition = {
     "**PREFERRED** for SHORT commands: run shell commands in an isolated Kata/QEMU microVM sandbox. " +
     "Use this instead of bash for better isolation, safety, and clean environment. " +
     "Ideal for greps, file reads/edits, git status/log/diff, and any command that finishes in well under 60s. " +
+    "BATCH related steps into ONE call (chain with && or ;) — each call costs a full model round-trip, so " +
+    "many single-line calls are the dominant cost of a long sandbox session. " +
     "DO NOT use it for long work — installs (pnpm/npm/yarn add|install), builds, tsc typechecks, and test " +
     "suites routinely exceed the timeout (default 60000ms). This call is SYNCHRONOUS: when the timeout is " +
     "hit the call returns an error, the work is abandoned, and re-running the same command just burns the " +
@@ -723,7 +725,13 @@ export const sandboxRun: ToolDefinition = {
       },
       cmd: {
         type: "string",
-        description: "Shell command to execute",
+        description:
+          "Shell command to execute. BATCH related steps into ONE call — every invocation costs a full " +
+          "model round-trip (~5-10s), so 20 one-line calls waste minutes versus a single chained command. " +
+          "Chain with && (stop on first failure) or ; (always continue), use a heredoc for multi-line " +
+          "scripts, and echo section markers so you can read one combined output, e.g. " +
+          "`cd /workspace/repo && echo '== branch ==' && git branch --show-current && echo '== status ==' && git status --short`. " +
+          "Only split into separate calls when a later step genuinely depends on reading the earlier output first.",
       },
       timeoutMs: {
         type: "number",
