@@ -1847,6 +1847,19 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // this once services-up is present AND the backend dev log shows a fatal
         // startup error — a crash, not slow progress.
         const CRASH_GRACE_MS = 8 * 60_000;
+        // DETERMINISTIC failures get a much shorter grace. A config-schema
+        // rejection can never resolve by waiting — the backend re-reads the
+        // same .env.local and fails identically every time — so holding the
+        // agent for the full CRASH_GRACE_MS buys nothing. Measured 2026-08-29:
+        // a claim whose mounted Secret still carried
+        //     LIVEKIT_API_KEY=devkey
+        // ("must not be the published development key") burned ~12 min before
+        // reporting anything, 8 of which was this grace, and then handed the
+        // agent a sandbox with no backend/dashboard. Slow-but-progressing
+        // templates (hyperswitch cargo cold build, 25-35 min) never emit these
+        // patterns, so they keep the long grace below.
+        const FATAL_GRACE_MS = 90_000;
+        const FATAL_PATTERNS = "Config validation error|must not be the published|is required";
         const startedWaitAt = Date.now();
         while (Date.now() < prebakeDeadline) {
           try {
@@ -1857,6 +1870,19 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             if ((probe.stdout ?? "").trim() === "done") {
               prebakeDone = true;
               break;
+            }
+            // Deterministic config rejections: check from ~90s. These cannot
+            // clear by waiting, so there is nothing to be gained by the long
+            // grace — and the agent gets an actionable message instead of a
+            // silent "Executing tools…".
+            const waited = Date.now() - startedWaitAt;
+            if (waited > FATAL_GRACE_MS && waited <= CRASH_GRACE_MS) {
+              const fatal = await session.commands.run(
+                `grep -iE "${FATAL_PATTERNS}" /tmp/prebake-backend-dev.log 2>/dev/null | tail -4`,
+                8_000,
+              ).catch(() => ({ stdout: "" }) as { stdout: string });
+              const f = (fatal.stdout ?? "").trim();
+              if (f) { backendCrash = f; break; }
             }
             // Fast-fail on a DEFINITIVE backend crash so a bad golden bake (e.g.
             // env-schema drift: "DATABASE_URL is required") surfaces in ~8 min,
