@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.2](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.1...v1.239.0-release-20260827.2) (2026-08-28)
+
+
+### Bug Fixes
+
+* reuse ServerBlockNoteEditor to stop jsdom memory leak ([#1182](https://github.com/juspay/xyne-spaces/issues/1182)) ([0ea3da4](https://github.com/juspay/xyne-spaces/commit/0ea3da40bbd4d40c95225631308b51933afae0d2))
+
 ## [1.239.0-release-20260827.1](https://github.com/juspay/xyne-spaces/compare/v1.238.0...v1.239.0-release-20260827.1) (2026-08-27)
 
 
