@@ -9,7 +9,10 @@ export interface StageEtaDeadlineJobData {
   type: StageEtaDeadlineJobType;
 }
 
-const ONE_HOUR_CRON = '0 * * * *';
+// Cron schedule for stage ETA deadline check (default: every hour at minute 0)
+// Format: "minute hour day-of-month month day-of-week"
+// Examples: "0 * * * *" = every hour, "*/5 * * * *" = every 5 minutes, "0 9 * * *" = daily at 9am
+const STAGE_ETA_DEADLINE_CRON = process.env.STAGE_ETA_DEADLINE_CRON || '0 * * * *';
 
 
 class StageEtaDeadlineQueue {
@@ -62,11 +65,11 @@ class StageEtaDeadlineQueue {
       'check-stage-eta-deadlines',
       { type: 'check-stage-eta-deadlines' },
       {
-        repeat: { cron: ONE_HOUR_CRON },
+        repeat: { cron: STAGE_ETA_DEADLINE_CRON },
         jobId: 'stage-eta-deadline-check-repeatable',
       }
     );
-    logger.info('[STAGE-ETA-DEADLINE] Scheduled repeatable job: check-stage-eta-deadlines (every hour)');
+    logger.info(`[STAGE-ETA-DEADLINE] Scheduled repeatable job: check-stage-eta-deadlines (cron: ${STAGE_ETA_DEADLINE_CRON})`);
   }
 
   private setupEventListeners(): void {
