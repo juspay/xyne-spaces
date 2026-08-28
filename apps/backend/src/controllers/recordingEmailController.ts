@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { ChannelType, RecordingType } from '@xyne/shared';
+import { CallType, ChannelType, RecordingType } from '@xyne/shared';
 import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -27,6 +27,10 @@ const RECORDING_EMAIL_ATTACHMENT_KINDS = [
 
 type RecordingEmailAttachmentKind = (typeof RECORDING_EMAIL_ATTACHMENT_KINDS)[number];
 type RecordingCall = NonNullable<Awaited<ReturnType<typeof repositories.calls.findByExternalId>>>;
+
+/** Recordings and regular calls share these endpoints, so copy names whichever it is. */
+const subjectFor = (call: Pick<RecordingCall, 'callType'>): string =>
+  call.callType === CallType.HEADLESS ? 'recording' : 'call';
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -596,8 +600,9 @@ export class RecordingEmailController {
         ...(sender ? { channelId: sender.channelId } : { channelId: null }),
         ...(!sender
           ? {
-              unavailableReason:
-                'Connect an email account matching your Xyne account before sending recording recaps.',
+              unavailableReason: `Connect an email account matching your Xyne account before sending ${subjectFor(
+                call,
+              )} recaps.`,
             }
           : {}),
         attachments,
