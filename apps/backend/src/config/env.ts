@@ -226,7 +226,6 @@ const envSchema = Joi.object({
   // Y-Sweet Configuration
   Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
   Y_SWEET_SERVER_TOKEN: Joi.string().allow('').default(''),
-  YSWEET_READ_PATH_REPLICA: Joi.boolean().default(true),
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -842,7 +841,6 @@ export const config = {
   ysweet: {
     url: envVars.Y_SWEET_URL,
     serverToken: envVars.Y_SWEET_SERVER_TOKEN,
-    readPathReplica: envVars.YSWEET_READ_PATH_REPLICA,
   },
   entityExtraction: {
     enabled: envVars.ENABLE_ENTITY_EXTRACTION,

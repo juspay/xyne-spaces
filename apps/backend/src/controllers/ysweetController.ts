@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
 import { ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
 import { DatabaseClient, readReplicaDb } from '@/database/client';
+import { superpositionClient } from '@/services/superpositionClient';
 
 /**
  * y-sweet polls this every ~10s per open connection, so it's read-heavy and
@@ -12,8 +13,13 @@ import { DatabaseClient, readReplicaDb } from '@/database/client';
  * route it to the read replica when available so it can't add load to the
  * primary as connection count scales, same pattern as analyticsRepository.
  */
-function getValidateDbInstance() {
-  if (!config.ysweet.readPathReplica) {
+async function getValidateDbInstance() {
+  const useReadReplica = await superpositionClient.getBooleanValue(
+    'YSWEET_USE_READ_REPLICA',
+    false,
+    {}
+  );
+  if (!useReadReplica) {
     return DatabaseClient.getInstance();
   }
   if (readReplicaDb) {
@@ -258,7 +264,7 @@ export class YSweetController {
         return;
       }
 
-      const authResult = await canvasAuthService.checkCanvasAccess(docId, userId, getValidateDbInstance());
+      const authResult = await canvasAuthService.checkCanvasAccess(docId, userId, await getValidateDbInstance());
 
       if (!authResult.canvas || !authResult.hasAccess) {
         logger.warn(`[YSweet] validateAccess denied for user ${userId} on canvas ${docId}`, {
