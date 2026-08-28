@@ -1559,12 +1559,13 @@ export class AnalyticsRepository {
         distinct: ['updatedBy'],
       }),
 
-      // Users who created canvas
-      this.prisma.canvas.findMany({
+      // Users who created canvas. Workspace-wide metric: CanvasesACL is now a per-user
+      // clause and this query carries no workspaceId of its own. Same as the sibling below.
+      withWorkspaceScope(async () => await this.prisma.canvas.findMany({
         where: { createdAt: dateCondition, createdBy: { in: userIds } },
         select: { createdBy: true},
         distinct: ['createdBy'],
-      }),
+      })),
 
       // Users who edited canvas
       withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
@@ -1863,11 +1864,11 @@ export class AnalyticsRepository {
         select: { updatedBy: true, timestamp: true },
       }),
 
-      // Users who created canvas
-      this.prisma.canvas.findMany({
+      // Users who created canvas. withWorkspaceScope for the same reason as getActiveUsers.
+      withWorkspaceScope(async () => await this.prisma.canvas.findMany({
         where: { createdAt: dateCondition, createdBy: { in: userIds } },
         select: { createdBy: true, createdAt: true },
-      }),
+      })),
 
       // Users who edited canvas
       withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
@@ -2317,12 +2318,13 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Count canvases edited in the selected time period by real users only
-    const canvasesCount = await this.prisma.canvas.count({
+    // withWorkspaceScope: a workspace-wide metric, not "canvases the caller can reach".
+    const canvasesCount = await withWorkspaceScope(async () => await this.prisma.canvas.count({
       where: {
         lastEditedAt: dateCondition,
         createdBy: { in: userIds }
       }
-    });
+    }));
 
     return canvasesCount;
   }
@@ -2346,13 +2348,14 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Get canvases created by real users only
-    const canvases = await this.prisma.canvas.findMany({
+    // withWorkspaceScope: workspace-wide metric, as in getNumberOfCanvases.
+    const canvases = await withWorkspaceScope(async () => await this.prisma.canvas.findMany({
       where: {
         lastEditedAt: dateCondition,
         createdBy: { in: userIds }
       },
       select: { lastEditedAt: true },
-    });
+    }));
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
