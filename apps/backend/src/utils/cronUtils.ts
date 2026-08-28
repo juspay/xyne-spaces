@@ -1,22 +1,46 @@
 import { logger } from '@/utils/logger';
-/**
- * Build a cron pattern from user-provided scheduling options.
- *
- * @param scheduledTime  "HH:mm" 24h string (in UTC)
- * @param daysOfWeek     "0,1,2,3,4,5,6" string where 0=Sunday, 1=Monday ... 6=Saturday
- *                       "0,1,2,3,4,5,6" = every day
- *                       "1,2,3,4,5" = weekdays (Mon-Fri)
- * @returns cron pattern "MM HH * * D,D,D"
- */
-export function buildCronPattern(
-  scheduledTime: string,
-  daysOfWeek: string,
-): string {
-  const [hh, mm] = scheduledTime.split(':');
 
-  logger.info(`[CRON-UTILS] Building cron from UTC time ${scheduledTime}, days=${daysOfWeek}`);
+export type ScheduleFrequency = 'WEEKLY' | 'MONTHLY';
+export type MonthlyMode = 'DAY_OF_MONTH' | 'NTH_WEEKDAY' | 'LAST_DAY';
 
-  const pattern = `${mm} ${hh} * * ${daysOfWeek}`;
+export interface ScheduleOptions {
+  scheduledTime: string; // "HH:mm" in UTC
+  frequency: ScheduleFrequency;
+  daysOfWeek?: string; // WEEKLY: e.g. "1,2,3,4,5" (0=Sun...6=Sat)
+  monthlyMode?: MonthlyMode;
+  dayOfMonth?: number; // DAY_OF_MONTH: 1..28
+  weekOrdinal?: string; // NTH_WEEKDAY: "1".."4" | "LAST"
+  weekday?: number; // NTH_WEEKDAY: 0=Sun...6=Sat
+}
+
+// Builds a 5-field cron ("min hour day-of-month month day-of-week"), interpreted as
+// UTC. The `L` (last day/weekday) and `#` (nth weekday) extensions are supported by
+// cron-parser, Bull's scheduler dependency.
+export function buildCronPattern(opts: ScheduleOptions): string {
+  const [hh, mm] = opts.scheduledTime.split(':');
+  let pattern: string;
+
+  if (opts.frequency === 'MONTHLY') {
+    switch (opts.monthlyMode) {
+      case 'DAY_OF_MONTH':
+        pattern = `${mm} ${hh} ${opts.dayOfMonth} * *`;
+        break;
+      case 'LAST_DAY':
+        pattern = `${mm} ${hh} L * *`;
+        break;
+      case 'NTH_WEEKDAY':
+        pattern =
+          opts.weekOrdinal === 'LAST'
+            ? `${mm} ${hh} * * ${opts.weekday}L`
+            : `${mm} ${hh} * * ${opts.weekday}#${opts.weekOrdinal}`;
+        break;
+      default:
+        throw new Error(`[CRON-UTILS] Unknown monthlyMode: ${opts.monthlyMode}`);
+    }
+  } else {
+    pattern = `${mm} ${hh} * * ${opts.daysOfWeek}`;
+  }
+
   logger.info(`[CRON-UTILS] Generated cron: ${pattern}`);
   return pattern;
 }
