@@ -196,6 +196,7 @@ export class YSweetController {
 
       const clientToken = await ysweetGetOrCreateDocAndToken(canonicalDocId, {
         authorization,
+        userId,
         validForSeconds: TOKEN_VALID_SECONDS,
       });
 
@@ -219,6 +220,42 @@ export class YSweetController {
       res.status(500).json({
         error: 'Failed to get client token'
       });
+    }
+  }
+
+  /**
+   * Called by the y-sweet server (not the browser) to re-validate that a
+   * userId still has access to a docId before serving/mutating content or
+   * upgrading a WebSocket connection. No session cookie is available here.
+   */
+  async validateAccess(req: Request, res: Response): Promise<void> {
+    try {
+      const { docId, userId } = req.body;
+
+      if (!docId || typeof docId !== 'string' || !userId || typeof userId !== 'string') {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'docId and userId are required and must be strings',
+        });
+        return;
+      }
+
+      const authResult = await canvasAuthService.checkCanvasAccess(docId, userId);
+
+      if (!authResult.canvas || !authResult.hasAccess) {
+        logger.warn(`[YSweet] validateAccess denied for user ${userId} on canvas ${docId}`, {
+          canEdit: authResult.canEdit,
+          canView: authResult.canView,
+          hasAccess: authResult.hasAccess,
+        });
+        res.status(403).json({ allowed: false });
+        return;
+      }
+
+      res.status(200).json({ allowed: true });
+    } catch (error) {
+      logger.error('Error in validateAccess:', error);
+      res.status(500).json({ error: 'Failed to validate access' });
     }
   }
 }

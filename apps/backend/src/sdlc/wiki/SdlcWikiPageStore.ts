@@ -54,8 +54,8 @@ import { auditWikiContent, type WikiAuditFinding } from './wikiContentAudit';
 import { validateWikiMermaid } from './wikiMermaidValidation';
 
 interface WikiPageStoreDependencies {
-  readCanvas(canvasId: string): Promise<BlockNoteBlock[]>;
-  syncCanvas(canvasId: string, content: BlockNoteBlock[]): Promise<boolean>;
+  readCanvas(canvasId: string, userId: string): Promise<BlockNoteBlock[]>;
+  syncCanvas(canvasId: string, content: BlockNoteBlock[], userId: string): Promise<boolean>;
   indexCanvas(input: { canvasId: string; userId: string; workspaceId: string }): Promise<void>;
   verifySourcePaths(repoId: string, commitSha: string, sourcePaths: string[]): Promise<void>;
   verifySourceRanges(
@@ -197,7 +197,7 @@ export class SdlcWikiPageStore {
         }
         return [
           (async () => {
-            const markdown = await this.readLiveMarkdown(page);
+            const markdown = await this.readLiveMarkdown(page, input.userId);
             return {
               path: metadata.wikiRelativePath as string,
               title: page.title,
@@ -287,7 +287,7 @@ export class SdlcWikiPageStore {
     const archived = isWikiArchiveFolder(page.folder?.name);
     if (archived && !input.includeArchived) throw new AppError('Wiki page not found', 404);
     const entity = await this.entityRow(page.id);
-    const markdown = await this.readLiveMarkdown(page);
+    const markdown = await this.readLiveMarkdown(page, input.userId);
     return {
       path,
       title: page.title,
@@ -426,6 +426,7 @@ export class SdlcWikiPageStore {
     const action = await this.resolveSectionAction({
       repo: { channelId, id: repo.id },
       action: pageAction,
+      userId: execution.createdBy,
     });
     if (action.action !== 'archive') validateWikiMermaid(action.markdown);
     const revision = await this.applyPageAction({
@@ -556,7 +557,7 @@ export class SdlcWikiPageStore {
     if (source && destination) throw new AppError(`Wiki page already exists: ${destinationPath}`, 409);
     if (!source && !destination) throw new AppError(`Wiki page does not exist: ${sourcePath}`, 409);
     const page = source ?? destination!;
-    const markdown = await this.readLiveMarkdown(page);
+    const markdown = await this.readLiveMarkdown(page, execution.createdBy);
     const contentHash = markdownHash(markdown);
     if (contentHash !== input.request.expectedContentHash) {
       throw new AppError(`[CONTENT_CONFLICT] Wiki page changed concurrently: ${sourcePath}`, 409);
@@ -764,6 +765,7 @@ export class SdlcWikiPageStore {
   private async resolveSectionAction(input: {
     repo: { channelId: string; id: string };
     action: SdlcWikiPageAction;
+    userId: string;
   }): Promise<WholeWikiPageAction> {
     if (!['replace_section', 'insert_section', 'remove_section'].includes(input.action.action)) {
       return input.action as WholeWikiPageAction;
@@ -778,7 +780,7 @@ export class SdlcWikiPageStore {
     };
     const page = await this.findPage(input.repo.channelId, input.repo.id, sectionAction.path);
     if (!page) throw new AppError(`Wiki page does not exist: ${sectionAction.path}`, 409);
-    const markdown = await this.readLiveMarkdown(page);
+    const markdown = await this.readLiveMarkdown(page, input.userId);
     if (markdownHash(markdown) !== sectionAction.expectedContentHash) {
       throw new AppError(
         `[CONTENT_CONFLICT] Wiki page changed concurrently: ${sectionAction.path}`,
@@ -828,7 +830,7 @@ export class SdlcWikiPageStore {
       currentSourcePaths: parseSdlcSourcePaths(existingEntity?.sourcePaths),
     });
 
-    const currentContent = existing ? await this.readLiveContent(existing) : [];
+    const currentContent = existing ? await this.readLiveContent(existing, input.actorId) : [];
     const currentMarkdown = await convertBlockNoteToMarkdown(currentContent);
     const currentHash = markdownHash(currentMarkdown);
     const markdown = input.action.action === 'archive' ? currentMarkdown : input.action.markdown;
@@ -852,7 +854,8 @@ export class SdlcWikiPageStore {
         if (input.action.action !== 'archive') {
           const repaired = await this.dependencies.syncCanvas(
             existing.id,
-            existing.content as unknown as BlockNoteBlock[]
+            existing.content as unknown as BlockNoteBlock[],
+            input.actorId
           );
           if (!repaired) throw new AppError(`Y-Sweet sync failed for Wiki page: ${path}`, 503);
         }
@@ -1034,7 +1037,7 @@ export class SdlcWikiPageStore {
     }
 
     if (input.action.action !== 'archive') {
-      const synced = await this.dependencies.syncCanvas(canvas.id, content);
+      const synced = await this.dependencies.syncCanvas(canvas.id, content, input.actorId);
       if (!synced) throw new AppError(`Y-Sweet sync failed for Wiki page: ${path}`, 503);
     }
     await this.dependencies.indexCanvas({
@@ -1074,12 +1077,12 @@ export class SdlcWikiPageStore {
     throw error;
   }
 
-  private async readLiveMarkdown(page: WikiPageRecord): Promise<string> {
-    return convertBlockNoteToMarkdown(await this.readLiveContent(page));
+  private async readLiveMarkdown(page: WikiPageRecord, userId: string): Promise<string> {
+    return convertBlockNoteToMarkdown(await this.readLiveContent(page, userId));
   }
 
-  private async readLiveContent(page: WikiPageRecord): Promise<BlockNoteBlock[]> {
-    const live = await this.dependencies.readCanvas(page.id);
+  private async readLiveContent(page: WikiPageRecord, userId: string): Promise<BlockNoteBlock[]> {
+    const live = await this.dependencies.readCanvas(page.id, userId);
     return live.length > 0 ? live : (page.content as unknown as BlockNoteBlock[]);
   }
 

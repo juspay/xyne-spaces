@@ -111,7 +111,7 @@ import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
-import ysweetRoutes from '@/routes/ysweet';
+import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
@@ -610,6 +610,7 @@ export class App {
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
 
+    this.app.use('/api/ysweet', ysweetValidateRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
@@ -644,10 +645,7 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes. Auth already runs for every /api request via
-    // the /api attachment mounts above; applying it here again cost two more DB
-    // round-trips per canvas open.
-    this.app.use('/api/ysweet', ysweetRoutes);
+    this.app.use('/api/ysweet', authMiddleware.authenticate, ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
 

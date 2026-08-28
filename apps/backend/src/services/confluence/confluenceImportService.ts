@@ -1295,7 +1295,7 @@ export class ConfluenceImportService {
       }),
     ]);
 
-    await initializeYSweetDoc(canvasId, safeContent as unknown as BlockNoteBlock[]);
+    await initializeYSweetDoc(canvasId, safeContent as unknown as BlockNoteBlock[], actorUserId);
   }
 
   private async updateCanvasRecord(
@@ -1338,7 +1338,7 @@ export class ConfluenceImportService {
       throw new Error('workspaceId required: Confluence import config missing workspaceId');
     }
     await this.ensureCanvasOwners(canvasId, [creatorUserId, lastEditorUserId, actorUserId], ownersWorkspaceId);
-    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[]);
+    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[], actorUserId);
   }
 
   private async ensureCanvasOwners(canvasId: string, userIds: string[], workspaceId: string): Promise<void> {
@@ -1421,7 +1421,7 @@ export class ConfluenceImportService {
       },
     });
 
-    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[]);
+    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[], lastEditorUserId);
   }
 
   private markPageResultPartial(
