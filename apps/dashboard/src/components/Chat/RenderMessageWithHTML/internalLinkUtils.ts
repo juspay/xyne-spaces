@@ -40,6 +40,9 @@ const INTERNAL_XYNE_HOSTS = new Set([
 /** Paths that should be treated as external (no internal router handling) */
 const EXTERNAL_PATH_PREFIXES = ['/claw', '/claw-preview', '/changelog'];
 
+const isExternalPath = (pathname: string): boolean =>
+  EXTERNAL_PATH_PREFIXES.some(prefix => pathname.startsWith(prefix));
+
 export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | null => {
   try {
     const url = new URL(href, window.location.origin);
@@ -50,7 +53,7 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     }
 
     // Treat certain paths as external - no internal routing exists
-    if (EXTERNAL_PATH_PREFIXES.some(prefix => url.pathname.startsWith(prefix))) {
+    if (isExternalPath(url.pathname)) {
       return null;
     }
 
@@ -144,7 +147,8 @@ const normalizeUrlForComparison = (value: string): string => value.trim().replac
 
 export const isExternalUrl = (url: string): boolean => {
   try {
-    return new URL(url, window.location.origin).origin !== window.location.origin;
+    const parsedUrl = new URL(url, window.location.origin);
+    return parsedUrl.origin !== window.location.origin || isExternalPath(parsedUrl.pathname);
   } catch {
     return true;
   }
