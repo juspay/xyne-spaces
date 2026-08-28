@@ -1,3 +1,10 @@
+## [1.242.4](https://github.com/juspay/xyne-spaces/compare/v1.242.3...v1.242.4) (2026-08-28)
+
+
+### Bug Fixes
+
+* show loaders while Zero queries load on data-backed surfaces ([#585](https://github.com/juspay/xyne-spaces/issues/585)) ([7d60005](https://github.com/juspay/xyne-spaces/commit/7d600054c2f1c44dc5f19b74a7a0547574d18df9))
+
 ## [1.242.3](https://github.com/juspay/xyne-spaces/compare/v1.242.2...v1.242.3) (2026-08-28)
 
 
