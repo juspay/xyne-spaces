@@ -92,15 +92,23 @@ export class MigrationWorkers {
     await this.store.update(job.id, { status: MigrationStatus.COLLECTING });
     logger.info('[SlackMigration] collection started', { id: job.id, type: job.type });
 
-    const directory = await this.engine.collectDirectory(token, job.gcsPrefix);
-    await this.store.markProgress(job.id).catch(() => undefined);
-    await this.engine.collectUsergroups(token, job.gcsPrefix);
-    await this.engine.collectChannels(token, job.gcsPrefix);
-    const conversations = await this.engine.listConversations(token, job.type, job.channelInput);
-    await this.engine.writeManifest(job.gcsPrefix, conversations);
-    await this.store.markProgress(job.id).catch(() => undefined);
-    await this.store.update(job.id, { checkpoint: { ...job.checkpoint, totalConversations: conversations.length } });
-    logger.info('[SlackMigration] collection plan ready', { id: job.id, users: Object.keys(directory).length, conversations: conversations.length });
+    let conversations;
+    if (await this.engine.manifestExists(job.gcsPrefix)) {
+      conversations = await this.engine.readManifest(job.gcsPrefix);
+      await this.store.markProgress(job.id).catch(() => undefined);
+      await this.store.update(job.id, { checkpoint: { ...job.checkpoint, totalConversations: conversations.length } });
+      logger.info('[SlackMigration] reusing existing collection plan (resume)', { id: job.id, conversations: conversations.length });
+    } else {
+      const directory = await this.engine.collectDirectory(token, job.gcsPrefix);
+      await this.store.markProgress(job.id).catch(() => undefined);
+      await this.engine.collectUsergroups(token, job.gcsPrefix);
+      await this.engine.collectChannels(token, job.gcsPrefix, job.teamId);
+      conversations = await this.engine.listConversations(token, job.type, job.channelInput);
+      await this.engine.writeManifest(job.gcsPrefix, conversations);
+      await this.store.markProgress(job.id).catch(() => undefined);
+      await this.store.update(job.id, { checkpoint: { ...job.checkpoint, totalConversations: conversations.length } });
+      logger.info('[SlackMigration] collection plan ready', { id: job.id, users: Object.keys(directory).length, conversations: conversations.length });
+    }
 
     const done = new Set(job.checkpoint.collectedConversationIds);
     const PROGRESS_EVERY = 25;

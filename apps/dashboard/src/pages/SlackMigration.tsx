@@ -696,6 +696,28 @@ export default function SlackMigration(): React.JSX.Element {
     [refresh],
   );
 
+  const [exporting, setExporting] = useState(false);
+  const onExportHistory = useCallback(async (): Promise<void> => {
+    setExporting(true);
+    setError(null);
+    try {
+      const jobs = await slackMigrationApi.exportHistory();
+      const blob = new Blob([JSON.stringify(jobs, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `slack-migration-history-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
   const activeDm = useMemo(() => mine.find(m => m.type === 'DM'), [mine]);
 
   return (
@@ -920,14 +942,16 @@ export default function SlackMigration(): React.JSX.Element {
                 <section className='space-y-4'>
                   <div className='flex items-center justify-between'>
                     <h2 className='text-sm font-semibold text-foreground'>Admin control panel</h2>
-                    <a
-                      href={slackMigrationApi.exportUrl}
-                      target='_blank'
-                      rel='noreferrer'
-                      className='text-xs font-medium text-primary hover:underline'
+                    <button
+                      type='button'
+                      onClick={() => void onExportHistory()}
+                      disabled={exporting}
+                      data-track-category='SLACK_MIGRATION'
+                      data-track-name='EXPORT_HISTORY'
+                      className='text-xs font-medium text-primary hover:underline disabled:opacity-50'
                     >
-                      Export history
-                    </a>
+                      {exporting ? 'Exporting…' : 'Export history'}
+                    </button>
                   </div>
                   {ingest && <IngestionControl status={ingest} busy={busy} run={run} />}
                   {all.length === 0 ? (
