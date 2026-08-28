@@ -466,94 +466,94 @@ const ScheduledMessageModal = ({
 
           {/* Weekly: Day Selection */}
           {frequency === 'WEEKLY' && (
-          <div>
-            <span className='block text-sm text-foreground font-medium mb-2'>Days</span>
+            <div>
+              <span className='block text-sm text-foreground font-medium mb-2'>Days</span>
 
-            {/* Weekday vs Custom */}
-            <Controller
-              name='dayMode'
-              control={control}
-              render={({ field }) => (
-                <SegmentedToggle<FormValues['dayMode']>
-                  value={field.value}
-                  onChange={value => {
-                    field.onChange(value);
-                    if (value === 'weekday') {
-                      setValue('daysOfWeek', ['1', '2', '3', '4', '5']);
-                    } else {
-                      // Switching to custom: clear the preset weekday selection so the
-                      // user starts from a blank slate (but keep any custom picks).
-                      const currentDays = watch('daysOfWeek');
-                      if (
-                        currentDays.length === 5 &&
-                        currentDays.every(d => ['1', '2', '3', '4', '5'].includes(d))
-                      ) {
-                        setValue('daysOfWeek', []);
-                      }
-                    }
-                  }}
-                  className={
-                    !canEdit && isEditMode ? 'mb-3 pointer-events-none opacity-50' : 'mb-3'
-                  }
-                  options={[
-                    { value: 'weekday', label: 'Weekdays', title: 'Monday – Friday' },
-                    { value: 'custom', label: 'Custom days', title: 'Pick specific days' },
-                  ]}
-                />
-              )}
-            />
-
-            {/* Custom day pills - only show for custom mode */}
-            {dayMode === 'custom' && (
+              {/* Weekday vs Custom */}
               <Controller
-                name='daysOfWeek'
+                name='dayMode'
                 control={control}
-                rules={{
-                  validate: value =>
-                    dayMode === 'custom' && value.length === 0 ? 'Select at least one day' : true,
-                }}
                 render={({ field }) => (
-                  <div
-                    className={cn(
-                      'flex flex-wrap gap-1.5',
-                      !canEdit && isEditMode && 'pointer-events-none opacity-50',
-                    )}
-                  >
-                    {dayOptions.map(day => {
-                      const isActive = field.value.includes(day.value);
-                      return (
-                        <button
-                          key={day.value}
-                          type='button'
-                          title={day.label}
-                          aria-pressed={isActive}
-                          onClick={() => {
-                            const newValue = isActive
-                              ? field.value.filter(v => v !== day.value)
-                              : [...field.value, day.value];
-                            field.onChange(newValue);
-                          }}
-                          data-track-category='scheduled-message'
-                          data-track-name={`toggle-day-${day.value}`}
-                          className={cn(
-                            'flex h-9 w-9 items-center justify-center rounded-full border text-sm font-medium transition-colors',
-                            isActive
-                              ? 'border-transparent bg-action-primary text-action-primary-foreground'
-                              : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground',
-                          )}
-                        >
-                          {day.short}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <SegmentedToggle<FormValues['dayMode']>
+                    value={field.value}
+                    onChange={value => {
+                      field.onChange(value);
+                      if (value === 'weekday') {
+                        setValue('daysOfWeek', ['1', '2', '3', '4', '5']);
+                      } else {
+                        // Switching to custom: clear the preset weekday selection so the
+                        // user starts from a blank slate (but keep any custom picks).
+                        const currentDays = watch('daysOfWeek');
+                        if (
+                          currentDays.length === 5 &&
+                          currentDays.every(d => ['1', '2', '3', '4', '5'].includes(d))
+                        ) {
+                          setValue('daysOfWeek', []);
+                        }
+                      }
+                    }}
+                    className={
+                      !canEdit && isEditMode ? 'mb-3 pointer-events-none opacity-50' : 'mb-3'
+                    }
+                    options={[
+                      { value: 'weekday', label: 'Weekdays', title: 'Monday – Friday' },
+                      { value: 'custom', label: 'Custom days', title: 'Pick specific days' },
+                    ]}
+                  />
                 )}
               />
-            )}
-            {errors.daysOfWeek && (
-              <p className='text-red-500 text-xs mt-1'>{errors.daysOfWeek.message}</p>
-            )}
-          </div>
+
+              {/* Custom day pills - only show for custom mode */}
+              {dayMode === 'custom' && (
+                <Controller
+                  name='daysOfWeek'
+                  control={control}
+                  rules={{
+                    validate: value =>
+                      dayMode === 'custom' && value.length === 0 ? 'Select at least one day' : true,
+                  }}
+                  render={({ field }) => (
+                    <div
+                      className={cn(
+                        'flex flex-wrap gap-1.5',
+                        !canEdit && isEditMode && 'pointer-events-none opacity-50',
+                      )}
+                    >
+                      {dayOptions.map(day => {
+                        const isActive = field.value.includes(day.value);
+                        return (
+                          <button
+                            key={day.value}
+                            type='button'
+                            title={day.label}
+                            aria-pressed={isActive}
+                            onClick={() => {
+                              const newValue = isActive
+                                ? field.value.filter(v => v !== day.value)
+                                : [...field.value, day.value];
+                              field.onChange(newValue);
+                            }}
+                            data-track-category='scheduled-message'
+                            data-track-name={`toggle-day-${day.value}`}
+                            className={cn(
+                              'flex h-9 w-9 items-center justify-center rounded-full border text-sm font-medium transition-colors',
+                              isActive
+                                ? 'border-transparent bg-action-primary text-action-primary-foreground'
+                                : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+                            )}
+                          >
+                            {day.short}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                />
+              )}
+              {errors.daysOfWeek && (
+                <p className='text-red-500 text-xs mt-1'>{errors.daysOfWeek.message}</p>
+              )}
+            </div>
           )}
 
           {/* Monthly: Mode Selection */}
@@ -572,7 +572,11 @@ const ScheduledMessageModal = ({
                       !canEdit && isEditMode ? 'mb-3 pointer-events-none opacity-50' : 'mb-3'
                     }
                     options={[
-                      { value: 'DAY_OF_MONTH', label: 'Day of month', title: 'A fixed day, e.g. the 15th' },
+                      {
+                        value: 'DAY_OF_MONTH',
+                        label: 'Day of month',
+                        title: 'A fixed day, e.g. the 15th',
+                      },
                       { value: 'NTH_WEEKDAY', label: 'Weekday', title: 'e.g. the 2nd Tuesday' },
                       { value: 'LAST_DAY', label: 'Last day', title: 'Last day of the month' },
                     ]}
