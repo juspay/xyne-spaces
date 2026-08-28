@@ -12,20 +12,14 @@ import { callDocumentService, numberTranscriptSegments, type CitationContext } f
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { callLabelService } from '@/services/callLabelService';
+import { TagMethod, EntityUserAccess } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
 } from '@/services/recordingSummaryMarkedItems';
-
-// Generic Tag framework sourceType/category for note-taker call labels. No
-// configKey is used, so tagService.createTag skips the "category must be
-// configured" check entirely (see assertManualCategoryOrOverride).
-const NOTE_TAKER_TAG_SOURCE_TYPE = 'CALL';
-const NOTE_TAKER_LABEL_CATEGORY = 'topic';
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
@@ -138,7 +132,12 @@ class NoteTakerTranscriptService {
       // for generated decisions/actions and their transcript timestamps.
       const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript, summaryModelType);
       const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript, undefined, summaryModelType);
-      const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
+      const labelsPromise = transcriptService.generateAndSaveLabels(
+        call,
+        formattedTranscript,
+        TagMethod.LLM,
+        'note_taker',
+      );
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -247,7 +246,12 @@ class NoteTakerTranscriptService {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
 
-    const labelIds = await this.generateAndSaveLabels(call, formattedTranscript, TagMethod.AUTOMATED);
+    const labelIds = await transcriptService.generateAndSaveLabels(
+      call,
+      formattedTranscript,
+      TagMethod.AUTOMATED,
+      'note_taker',
+    );
     if (labelIds.length > 0) {
       await repositories.calls.appendLabels(call.id, labelIds);
     }
@@ -879,49 +883,6 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Generate a small set of topical labels and persist each as a generic Tag
-   * row (sourceId = call.id, sourceType = 'CALL'), returning the resulting
-   * tag ids for Call.labels. Returns [] on any failure — callers treat that
-   * as "nothing to add", never clobbering a previously-saved good result.
-   */
-  private async generateAndSaveLabels(
-    call: Call,
-    formattedTranscript: string,
-    method: TagMethod = TagMethod.LLM,
-  ): Promise<string[]> {
-    const callId = call.externalId;
-    if (!call.workspaceId) {
-      logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: 'note_taker' });
-      return [];
-    }
-
-    const labels = await transcriptService.generateCallLabels(formattedTranscript, callId).catch((err) => {
-      logger.error(`[${callId}] generate_labels_threw`, {
-        path: 'note_taker',
-        error: err,
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-      return [] as string[];
-    });
-    if (labels.length === 0) return [];
-
-    const tagIds: string[] = [];
-    for (const rawLabel of labels) {
-      if (tagIds.length >= 4) break;
-      const slug = this.slugifyLabel(rawLabel);
-      if (!slug) continue;
-      try {
-        const tagId = await this.getOrCreateLabelTag(call, slug, method);
-        if (tagId && !tagIds.includes(tagId)) tagIds.push(tagId);
-      } catch (error) {
-        logger.error(`[${callId}] label_tag_failed`, { label: slug, path: 'note_taker', error });
-      }
-    }
-
-    return tagIds;
-  }
-
-  /**
    * Labels arrive as a mix of Tag ids (already applied) and raw text (just typed), and
    * leave as ids only — typed text becomes a real Tag marked `manual`.
    */
@@ -937,61 +898,13 @@ class NoteTakerTranscriptService {
         ids.push(entry);
         continue;
       }
-      const slug = this.slugifyLabel(entry);
+      const slug = callLabelService.slugifyLabel(entry);
       if (!slug) continue;
-      const id = await this.getOrCreateLabelTag(call, slug, TagMethod.MANUAL);
+      const id = await callLabelService.getOrCreateLabelTag(call, slug, TagMethod.MANUAL);
       if (id) ids.push(id);
     }
 
     return [...new Set(ids)];
-  }
-
-  /** Normalize an LLM-generated label into the Tag framework's required format (lowercase, hyphenated). */
-  private slugifyLabel(raw: string): string | null {
-    const slug = normalizeTagName(raw);
-    if (!slug) return null;
-    const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
-    return TAG_FORMAT_REGEX.test(safe) ? safe : null;
-  }
-
-  /**
-   * Reuse an existing label tag for this call if a prior run already created
-   * it, else create it via the generic Tag framework. No configKey is passed,
-   * so tagService.createTag doesn't require a workspace-level TagsConfig for
-   * the "topic" category (see assertManualCategoryOrOverride).
-   */
-  private async getOrCreateLabelTag(
-    call: Call,
-    slug: string,
-    method: TagMethod,
-  ): Promise<string | null> {
-    const existing = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
-    if (existing) {
-      // Typing a label an LLM/automated pass only suggested asserts it just as the tick button does.
-      if (method === TagMethod.MANUAL && existing.method !== TagMethod.MANUAL) {
-        await tagService.confirmTag(existing.id, call.workspaceId!);
-      }
-      return existing.id;
-    }
-
-    try {
-      const created = await tagService.createTag(
-        call.id,
-        NOTE_TAKER_TAG_SOURCE_TYPE,
-        call.workspaceId!,
-        NOTE_TAKER_LABEL_CATEGORY,
-        slug,
-        method,
-      );
-      return created.id;
-    } catch (error) {
-      // 409 = another run/racing worker created the same tag between the find and create above.
-      if (error instanceof TagServiceError && error.status === 409) {
-        const raced = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
-        return raced?.id ?? null;
-      }
-      throw error;
-    }
   }
 
   // Indexing only — not a message post. Uses the Call's own denormalized

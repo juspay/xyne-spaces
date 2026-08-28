@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { Prisma } from '@prisma/client';
+import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
@@ -19,6 +19,8 @@ import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
+import { callLabelService } from '@/services/callLabelService';
+import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -1310,6 +1312,40 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Generate a small set of topical labels and persist each as a generic Tag
+   * row (sourceId = call.id, sourceType = 'CALL'), returning the resulting tag
+   * ids for Call.labels. Returns [] on any failure — callers treat that as
+   * "nothing to add", never clobbering a previously-saved good result.
+   *
+   * Shared by both transcript pipelines; `logPath` tags the logs with whichever
+   * one is calling.
+   */
+  async generateAndSaveLabels(
+    call: Call,
+    formattedTranscript: string,
+    method: TagMethod = TagMethod.LLM,
+    logPath?: string,
+  ): Promise<string[]> {
+    const callId = call.externalId;
+    if (!call.workspaceId) {
+      logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: logPath });
+      return [];
+    }
+
+    const labels = await this.generateCallLabels(formattedTranscript, callId).catch((err) => {
+      logger.error(`[${callId}] generate_labels_threw`, {
+        path: logPath,
+        error: err,
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      return [] as string[];
+    });
+    if (labels.length === 0) return [];
+
+    return callLabelService.persistGeneratedLabels(call, labels, method, logPath);
+  }
+
+  /**
    * Extract the primary merchant/customer name from the transcript using the LLM.
    * Returns null if no merchant is clearly identified.
    */
@@ -1843,8 +1879,15 @@ Output ONLY the processed transcript, nothing else.`;
         logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
         return [];
       });
+      // HEADLESS recordings label themselves on the note-taker path, which owns
+      // their whole post-transcript pipeline — running here too would just spend
+      // a second LLM call to rediscover the same tags.
+      const labelsPromise =
+        call.callType === CallType.HEADLESS
+          ? Promise.resolve([] as string[])
+          : this.generateAndSaveLabels(call, formattedTranscript);
 
-      // Start all four post-call LLM operations immediately. Detailed-summary
+      // Start all five post-call LLM operations immediately. Detailed-summary
       // streaming remains unchanged; title, summary, and tickets persist their
       // own result as soon as it is ready rather than waiting on one another.
       pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
@@ -1941,10 +1984,24 @@ Output ONLY the processed transcript, nothing else.`;
         return ticketSuggestions;
       });
 
+      // appendLabels merges rather than overwrites, so a label the user typed
+      // while the transcript was still processing survives this write.
+      const labelsUiPromise = labelsPromise.then(async (labelIds) => {
+        if (labelIds.length === 0) return labelIds;
+        try {
+          await repositories.calls.appendLabels(call.id, labelIds);
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
+        } catch (error) {
+          logger.error(`[${callId}] labels_save_failed`, { error });
+        }
+        return labelIds;
+      });
+
       const [summary, title, ticketSuggestions] = await Promise.all([
         summaryUiPromise,
         titleUiPromise,
         ticketsUiPromise,
+        labelsUiPromise,
       ]);
 
       const duration = Date.now() - startTime;
