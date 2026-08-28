@@ -245,6 +245,10 @@ const envSchema = Joi.object({
   // LiteLLM config specifically for call features (transcript summary, PRD, detailed summary)
   CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
   CALL_LITELLM_MODEL: Joi.string().default(''),
+  // Per-user "fast" / "thinking" model tiers for recording summary generation.
+  // Same CALL_LITELLM_API_KEY for both; both fall back to CALL_LITELLM_MODEL.
+  CALL_RECORDING_FAST_LITELLM_MODEL: Joi.string().allow('').default(''),
+  CALL_RECORDING_THINKING_LITELLM_MODEL: Joi.string().allow('').default(''),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default('0 2 * * *'),
   PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
@@ -635,6 +639,11 @@ export const config = {
     // Call-specific LiteLLM config (falls back to main litellm if not set)
     callLitellmApiKey: envVars.CALL_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
     callLitellmModel: envVars.CALL_LITELLM_MODEL,
+    // Fast (default) and thinking model tiers; both fall back to CALL_LITELLM_MODEL.
+    callRecordingFastLitellmModel:
+      envVars.CALL_RECORDING_FAST_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
+    callRecordingThinkingLitellmModel:
+      envVars.CALL_RECORDING_THINKING_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
   },
   activityClassification: {
     litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,

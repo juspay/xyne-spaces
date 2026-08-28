@@ -28,12 +28,28 @@ export type StreamingLlmResult =
   | { ok: true; content: string }
   | { ok: false; reason: StreamingLlmFailureReason; error?: string };
 
+// Per-user recording-summary model tier. 'fast' (default) uses
+// config.llm.callRecordingFastLitellmModel; 'thinking' uses callRecordingThinkingLitellmModel.
+export type SummaryModelType = 'fast' | 'thinking';
+
+/** Resolve the litellm model name for a summary model tier. */
+export function resolveSummaryModel(modelType: SummaryModelType | undefined): string {
+  return modelType === 'thinking'
+    ? config.llm.callRecordingThinkingLitellmModel || DEFAULT_MODEL
+    : config.llm.callRecordingFastLitellmModel || DEFAULT_MODEL;
+}
+
 export interface ExecuteStreamingLlmOptions {
   userPrompt: string;
   systemPrompt?: string;
   operation: string;
   callId?: string;
   abortSignal?: AbortSignal;
+  /**
+   * Which model tier to use for this request: 'fast' (default) or 'thinking'.
+   * Overrides the streaming client's default model per request.
+   */
+  modelType?: SummaryModelType;
   /**
    * Invoked as content deltas arrive, with the full text accumulated so far.
    * Lets a caller render partial output live (e.g. stream into a canvas).
@@ -320,6 +336,9 @@ export async function executeStreamingLlmRequest(
       const streamResult = await client.generateStream({
         systemPrompt: options.systemPrompt,
         messages: [createUserMessage(options.userPrompt)],
+        // Override the cached client's default model per request so 'fast' and
+        // 'thinking' both resolve explicitly (never leak the wrong default).
+        model: resolveSummaryModel(options.modelType),
         abortSignal: options.abortSignal,
       });
 
