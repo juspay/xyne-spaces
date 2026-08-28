@@ -506,6 +506,33 @@ router.post('/desk/channel-source/:channelId/disconnect', async (req, res, next)
   }
 });
 
+// Deterministic test control for the per-channel Desk auto-merge preference.
+router.patch('/desk/channel/:channelId/auto-merge', async (req, res, next) => {
+  try {
+    if (!requireMockDeskEnabled(res)) return;
+    if (!(await requireWorkspaceDeskManager(req, res))) return;
+    const workspaceId = req.user?.workspaceId;
+    const channelId = req.params.channelId;
+    const enabled = req.body?.enabled;
+    if (!workspaceId || typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled boolean is required' });
+    }
+    const channel = await db.channel.findFirst({
+      where: { id: channelId, workspaceId },
+      select: { id: true },
+    });
+    if (!channel) return res.status(404).json({ error: 'Desk channel not found in current workspace' });
+    const preference = await db.emailChannelPreference.update({
+      where: { channelId },
+      data: { emailMergeMode: enabled ? 'ENABLED' : 'DISABLED' },
+      select: { channelId: true, emailMergeMode: true },
+    });
+    return res.json({ success: true, ...preference });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 router.post('/desk/slack-workspace', async (req, res, next) => {
   try {
     if (!requireMockDeskEnabled(res)) return;

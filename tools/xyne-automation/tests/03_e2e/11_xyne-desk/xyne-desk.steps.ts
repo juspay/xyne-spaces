@@ -684,6 +684,72 @@ export default class XyneDeskSteps {
     });
   }
 
+  @Step(
+    'generating mock Desk email pair <firstMailAlias> and <secondMailAlias> with the same subject and domain'
+  )
+  public async generateMockDeskEmailPair(
+    firstMailAlias: string,
+    secondMailAlias: string
+  ): Promise<void> {
+    const suffix = buildRandomSuffix();
+    const subject = `Desk auto-merge ${suffix}`;
+    const domain = 'merge.example.test';
+    for (const [alias, index] of [
+      [firstMailAlias, 'one'],
+      [secondMailAlias, 'two'],
+    ] as const) {
+      mockDeskMails.set(alias, {
+        alias,
+        subject,
+        body: `Auto-merge test message ${index} ${suffix}.`,
+        from: `customer@${domain}`,
+        to: config.desk.mockDlEmail,
+        threadId: `mock-auto-merge-thread-${suffix}-${index}`,
+        messageId: `mock-auto-merge-message-${suffix}-${index}`,
+      });
+    }
+  }
+
+  @Step('setting Desk auto-merge <enabled> for channel <channelAlias> user <userAlias>')
+  public async setDeskAutoMerge(
+    enabled: string,
+    channelAlias: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
+    assert.ok(enabled === 'on' || enabled === 'off', 'Auto-merge must be "on" or "off".');
+    const channelId = this.getStoredChannelId(channelAlias, userAlias);
+    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+      apiContext.patch(`/api/test/desk/channel/${channelId}/auto-merge`, {
+        data: { enabled: enabled === 'on' },
+      })
+    );
+    await assertOkResponse(response, 'Desk auto-merge preference update');
+  }
+
+  @Step('verifying mock Desk emails <firstMailAlias> and <secondMailAlias> share one conversation')
+  public async verifyMockDeskEmailsShareConversation(
+    firstMailAlias: string,
+    secondMailAlias: string
+  ): Promise<void> {
+    const first = assertFixture(firstMailAlias);
+    const second = assertFixture(secondMailAlias);
+    assert.ok(first.conversationId && second.conversationId, 'Expected both emails to be ingested.');
+    assert.equal(second.conversationId, first.conversationId);
+  }
+
+  @Step('verifying mock Desk emails <firstMailAlias> and <secondMailAlias> have separate conversations')
+  public async verifyMockDeskEmailsHaveSeparateConversations(
+    firstMailAlias: string,
+    secondMailAlias: string
+  ): Promise<void> {
+    const first = assertFixture(firstMailAlias);
+    const second = assertFixture(secondMailAlias);
+    assert.ok(first.conversationId && second.conversationId, 'Expected both emails to be ingested.');
+    assert.notEqual(second.conversationId, first.conversationId);
+  }
+
   @Step('generating mock incoming Desk email <mailAlias> with reply-all recipients and attachment')
   public async generateMockIncomingEmailWithReplyAllAndAttachment(
     mailAlias: string
@@ -1299,6 +1365,28 @@ export default class XyneDeskSteps {
     );
 
     await assertOkResponse(response, 'Desk ticket unmerge');
+  }
+
+  @Step('unmerging mock Desk ticket <sourceMailAlias> through the UI for user <userAlias>')
+  public async unmergeMockDeskTicketThroughUi(
+    sourceMailAlias: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidUserAlias(userAlias);
+    const source = await this.fetchAndStoreDeskTicketDetails(sourceMailAlias);
+    const user = getStoredUser(userAlias);
+    const ticket = source.ticket;
+    const channelId = ticket?.channelId;
+    assert.ok(ticket?.xyneId && channelId, `Expected ticket details for "${sourceMailAlias}".`);
+    await testContext.activePage.goto(
+      `${config.dashboard.baseUrl}/${user.workspaceId}/support/${channelId}/${ticket.xyneId}`,
+      { waitUntil: 'domcontentloaded', timeout: DESK_UI_TIMEOUT_MS },
+    );
+    await waitForDeskPageToSettle();
+    const unmerge = testContext.activePage.locator("[data-track-name='UnmergeTicket']").first();
+    await unmerge.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await unmerge.click();
+    await testContext.activePage.waitForTimeout(500);
   }
 
   @Step('verifying mock Desk ticket <sourceMailAlias> is unmerged')
