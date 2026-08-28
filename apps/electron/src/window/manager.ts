@@ -5,7 +5,10 @@ import { config } from '../app/config';
 import { getIsQuitting } from '../app/main';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
-import { setMainWindow as setInterceptorMainWindow } from '../services/request-interceptor';
+import {
+  registerAppOwnedWindow,
+  setMainWindow as setInterceptorMainWindow,
+} from '../services/request-interceptor';
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
@@ -55,6 +58,21 @@ function trackAppWindow(win: BrowserWindow): void {
   win.once('closed', () => appWindows.delete(win));
 }
 
+const namedChildWindows = new Map<string, BrowserWindow>();
+
+const STANDALONE_WINDOW_PREFIX = 'xyne-window:';
+
+function standaloneWindowKey(frameName: string | undefined): string | null {
+  if (!frameName || !frameName.startsWith(STANDALONE_WINDOW_PREFIX)) return null;
+  return frameName.slice(STANDALONE_WINDOW_PREFIX.length).split('#')[0] || null;
+}
+
+function focusWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 function applyWindowPolicy(win: BrowserWindow): void {
   // Mirrors 'open-in-browser-panel' so links sent to the external browser are
   // logged too, not just the ones routed into the panel.
@@ -101,6 +119,16 @@ function applyWindowPolicy(win: BrowserWindow): void {
       }
       
       // Internal URLs - allow new window
+      const windowKey = standaloneWindowKey(details.frameName);
+      if (windowKey) {
+        const existing = namedChildWindows.get(windowKey);
+        if (existing && !existing.isDestroyed()) {
+          focusWindow(existing);
+          return { action: 'deny' };
+        }
+        namedChildWindows.delete(windowKey);
+      }
+
       if (isAppWindowUrl(url) && appWindows.size >= MAX_APP_WINDOWS) {
         win.webContents.send('app-window-limit-reached', MAX_APP_WINDOWS);
         log.info(`[WindowManager] app window limit (${MAX_APP_WINDOWS}) reached; denying ${url}`);
@@ -193,6 +221,18 @@ function applyWindowPolicy(win: BrowserWindow): void {
     if (isAppWindowUrl(details.url)) {
       trackAppWindow(childWindow);
     }
+    registerAppOwnedWindow(childWindow);
+
+    const windowKey = standaloneWindowKey(details.frameName);
+    if (windowKey) {
+      namedChildWindows.set(windowKey, childWindow);
+      childWindow.on('closed', () => {
+        if (namedChildWindows.get(windowKey) === childWindow) {
+          namedChildWindows.delete(windowKey);
+        }
+      });
+    }
+
     applyWindowPolicy(childWindow);
   });
 
