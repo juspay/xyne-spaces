@@ -111,6 +111,24 @@ export interface StandaloneNavigateOptions {
   replace?: boolean;
 }
 
+type ModifierEvent = Pick<MouseEvent, 'metaKey' | 'ctrlKey'>;
+
+export const openInAppWindow = (prefixedPath: string, event?: ModifierEvent): boolean => {
+  if (!isElectronApp()) return false;
+  if (!event || !(event.metaKey || event.ctrlKey)) return false;
+
+  const opened = window.open(prefixedPath, '_blank');
+  if (!opened) {
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'app_window_blocked',
+      message: `Failed to open app window for ${prefixedPath}`,
+    });
+    return false;
+  }
+  opened.focus();
+  return true;
+};
+
 export const standaloneNavigate = (
   navigate: NavigateFunction,
   path: string,
