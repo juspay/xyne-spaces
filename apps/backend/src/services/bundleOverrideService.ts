@@ -1,35 +1,52 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 
-// Fixed default bundle folder in the GCS bundle bucket. Users with no enabled
-// override row are served from here.
-const DEFAULT_BUNDLE_FOLDER = 'default';
+/**
+ * What a resolved bundle points at:
+ *   - type "version" -> value is a semantic version (e.g. "1.216.0")
+ *   - type "bundle"  -> value is a named bundle folder (e.g. "beta-v2")
+ * nginx uses (type, value) to pick which bundle to stream from GCS.
+ */
+export type BundleType = 'version' | 'bundle';
+export interface ResolvedBundle {
+  type: BundleType;
+  value: string;
+}
 
 /**
- * Resolves which frontend bundle folder (in the GCS bundle bucket) a given
- * user should be served, and provides CRUD for the per-user override table.
+ * The DEFAULT bundle version, baked into the backend build by semantic-release
+ * (BUNDLE_DEFAULT_VERSION). Falls back to npm_package_version, then "default".
+ * Returned for any user without an enabled override row.
+ */
+function getDefaultVersion(): string {
+  return process.env.BUNDLE_DEFAULT_VERSION || process.env.npm_package_version || 'default';
+}
+
+/**
+ * Resolves which frontend bundle (version or folder) a user should get, and
+ * provides workspace-scoped CRUD for the per-user override table.
  *
- * Resolution rules:
- *  - If a UserBundleOverride row exists for the userId with enabled=true,
- *    serve that row's bundleName.
- *  - Otherwise (no user, no row, or disabled) serve the configured default
- *    (DEFAULT_BUNDLE_NAME, falling back to "default").
+ * Resolution:
+ *  - enabled override row for the userId -> { type, value } from the row.
+ *  - otherwise (no user, no row, disabled, or lookup error) -> the baked
+ *    default version.
  */
 export class BundleOverrideService {
   private static db() {
     return DatabaseClient.getInstance();
   }
 
-  static getDefaultBundleName(): string {
-    return DEFAULT_BUNDLE_FOLDER;
+  /** The default bundle everyone gets without an override. */
+  static getDefault(): ResolvedBundle {
+    return { type: 'version', value: getDefaultVersion() };
   }
 
   /**
-   * Resolve the bundle folder for a user id. Never throws — on any lookup
-   * error it falls back to the default bundle so the app still loads.
+   * Resolve the bundle for a user id. Never throws — on any lookup error it
+   * returns the baked default so serving still works.
    */
-  static async resolveBundleName(userId?: string | null): Promise<string> {
-    const fallback = this.getDefaultBundleName();
+  static async resolveBundle(userId?: string | null): Promise<ResolvedBundle> {
+    const fallback = this.getDefault();
     if (!userId) {
       return fallback;
     }
@@ -40,24 +57,25 @@ export class BundleOverrideService {
       });
 
       if (override && override.enabled) {
-        logger.info('[BundleOverride] Override hit — serving custom bundle', {
+        logger.info('[BundleOverride] Override hit', {
           userId,
-          bundleName: override.bundleName,
+          type: override.type,
+          value: override.value,
         });
-        return override.bundleName;
+        return { type: override.type as BundleType, value: override.value };
       }
 
       if (override && !override.enabled) {
-        logger.info('[BundleOverride] Override row disabled — serving default', {
+        logger.info('[BundleOverride] Override disabled — using default', {
           userId,
-          disabledBundle: override.bundleName,
+          disabledValue: override.value,
         });
       } else {
-        logger.info('[BundleOverride] No override for user — serving default', { userId });
+        logger.info('[BundleOverride] No override — using default', { userId });
       }
     } catch (error) {
-      // DB-layer fallback: never let an override lookup failure break serving.
-      logger.error('[BundleOverride] Lookup failed — falling back to default bundle', {
+      // DB-layer fallback: never let a lookup failure break resolution.
+      logger.error('[BundleOverride] Lookup failed — using default', {
         userId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -80,15 +98,16 @@ export class BundleOverrideService {
   static async upsert(params: {
     userId: string;
     workspaceId: string;
-    bundleName: string;
+    type: BundleType;
+    value: string;
     enabled?: boolean;
     note?: string | null;
   }) {
-    const { userId, workspaceId, bundleName, enabled = true, note = null } = params;
+    const { userId, workspaceId, type, value, enabled = true, note = null } = params;
     return this.db().userBundleOverride.upsert({
       where: { userId },
-      create: { userId, workspaceId, bundleName, enabled, note },
-      update: { bundleName, enabled, note },
+      create: { userId, workspaceId, type, value, enabled, note },
+      update: { type, value, enabled, note },
     });
   }
 

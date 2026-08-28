@@ -876,9 +876,12 @@ model User {
 }
 
 // Per-user frontend bundle override.
-// Routes a specific user to a non-default bundle folder in the GCS bundle
-// bucket. The backend resolves this from the VERIFIED JWT (userId = sub) when
-// serving /api/bundles/me/*; absence of a row (or enabled=false) => "default".
+// The backend resolves this from the VERIFIED JWT (userId = sub) at
+// GET /api/bundles/version. nginx calls that endpoint to decide which bundle to
+// stream from GCS. Absence of a row (or enabled=false) => the baked default
+// version. Each override carries a `type` (what the value means) and a `value`:
+//   - type "version" -> value is a semantic version (e.g. "1.216.0")
+//   - type "bundle"  -> value is a named bundle folder (e.g. "beta-v2")
 //
 // workspaceId scopes the row to a workspace: the tenant ACL/stamp layer
 // auto-stamps it on insert and auto-filters reads/writes to the caller's
@@ -888,7 +891,8 @@ model UserBundleOverride {
   id          String   @id @default(cuid())
   userId      String   @unique                 // users.id (relationMode=prisma, no hard FK)
   workspaceId String                           // tenant scope (stamped from context)
-  bundleName  String                           // GCS folder to serve, e.g. "beta-v2"
+  type        String   @default("version")     // "version" | "bundle"
+  value       String                           // the version string or bundle folder name
   enabled     Boolean  @default(true)
   note        String?                          // optional human note about why this override exists
   createdAt   DateTime @default(now())

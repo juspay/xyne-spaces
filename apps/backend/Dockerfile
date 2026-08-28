@@ -95,4 +95,10 @@ EXPOSE 3001
 
 ENV NODE_ENV=production
 
+# Default frontend bundle version, resolved by semantic-release at build time and
+# passed in by CI (Makefile/Jenkins). The backend returns this from
+# GET /api/bundles/version for any user without an enabled override.
+ARG BUNDLE_DEFAULT_VERSION=""
+ENV BUNDLE_DEFAULT_VERSION=${BUNDLE_DEFAULT_VERSION}
+
 CMD ["pnpm", "run", "start"]

@@ -1,255 +1,46 @@
 import { Request, Response } from 'express';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { getStorageService } from '@/services/storage';
-import { BundleOverrideService } from '@/services/bundleOverrideService';
-import { UserService } from '@/services/userService';
-import path from 'path';
+import { BundleOverrideService, BundleType } from '@/services/bundleOverrideService';
 
-const userService = new UserService();
-
-// Default bundle folder in the GCS bundle bucket. Unmapped users (and any
-// request whose resolved folder is missing a file) fall back to this.
-const DEFAULT_BUNDLE_FOLDER = 'default';
-
-// MIME type mapping for common frontend assets
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'application/javascript',
-  '.mjs': 'application/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.eot': 'application/vnd.ms-fontobject',
-  '.webp': 'image/webp',
-  '.webm': 'video/webm',
-  '.mp4': 'video/mp4',
-  '.txt': 'text/plain',
-  '.xml': 'application/xml',
-  '.map': 'application/json',
-};
+const VALID_TYPES: BundleType[] = ['version', 'bundle'];
 
 /**
- * Controller for serving frontend bundles from GCS.
+ * Bundle version resolution + per-user override administration.
  *
- * nginx proxies every bundle request to the backend; the backend is the only
- * thing that reads GCS. Two entry points:
- *   - serveUserBundle (GET /api/bundles/me/*): resolves the folder from the
- *     VERIFIED JWT (req.user.id, set by optionalAuthenticate) via the
- *     UserBundleOverride table, defaulting to "default". This is the secure,
- *     per-user path — the userId comes from a validated token, not a spoofable
- *     header/cookie.
- *   - serveBundle (GET /api/bundles/:branchName/*): explicit folder (used by the
- *     existing devqa User-Agent path in nginx).
- *
- * Both stream via streamBundleFile with layered fallback:
- *   1. Extensionless path with no matching file -> that folder's index.html (SPA).
- *   2. File missing in the requested folder -> same file in the default folder
- *      (so a stale/typo'd override never breaks the app).
+ * The backend NO LONGER streams bundle files — nginx streams them directly from
+ * GCS. The backend only answers "which bundle does this user get?": nginx calls
+ * getVersion() (forwarding the user's auth cookie) to decide what to serve, and
+ * admins manage the per-user override table via the admin* handlers.
  */
 export class BundleController {
-  private static storage() {
-    return getStorageService(config.gcs.bundleBucketName);
-  }
-
   /**
-   * Get content type based on file extension
-   */
-  private static getContentType(filePath: string): string {
-    const ext = path.extname(filePath).toLowerCase();
-    return MIME_TYPES[ext] || 'application/octet-stream';
-  }
-
-  /**
-   * Serve a file from GCS bundle bucket for an explicit branch/folder.
-   * Route: GET /api/bundles/:branchName/*
-   */
-  public static async serveBundle(req: Request, res: Response): Promise<void> {
-    const { branchName } = req.params;
-    // Capture the rest of the path after /api/bundles/:branchName/
-    const filePath = req.params[0] || 'index.html';
-    await this.streamBundleFile(req, res, branchName, filePath);
-  }
-
-  /**
-   * Serve a file from the bundle folder resolved for the authenticated user.
-   * Route: GET /api/bundles/me/*  (optionalAuthenticate)
+   * Resolve the bundle (version or folder) for the authenticated user.
+   * Route: GET /api/bundles/version  (optionalAuthenticate)
    *
-   * The userId comes from the VERIFIED JWT (req.user.id). If the user has an
-   * enabled override row, that folder is served; otherwise (no/expired token,
-   * no row, or disabled) the default folder is served.
+   * userId comes from the VERIFIED JWT (req.user.id, cookie or bearer). If the
+   * user has an enabled override it is returned; otherwise the baked default
+   * version. Anonymous / invalid token -> default. Always 200 with { type, value }
+   * so nginx has a deterministic answer.
    */
-  public static async serveUserBundle(req: Request, res: Response): Promise<void> {
-    // req.params[0] is the wildcard portion after /api/bundles/me/
-    const filePath = req.params[0] || 'index.html';
+  public static async getVersion(req: Request, res: Response): Promise<void> {
     const userId = req.user?.id;
-    const branchName = await BundleOverrideService.resolveBundleName(userId);
+    const resolved = await BundleOverrideService.resolveBundle(userId);
 
-    logger.info('[BundleServe] Resolved user bundle folder', {
+    logger.info('[BundleVersion] Resolved', {
       userId: userId ?? 'anonymous',
       authenticated: !!userId,
-      resolvedFolder: branchName,
-      isDefault: branchName === DEFAULT_BUNDLE_FOLDER,
-      filePath,
+      type: resolved.type,
+      value: resolved.value,
     });
 
-    await this.streamBundleFile(req, res, branchName, filePath);
-  }
-
-  /**
-   * Validate + stream a single file from {branchName}/{filePath} in the GCS
-   * bundle bucket, with SPA index.html fallback for extensionless routes and a
-   * default-folder fallback when the file is missing in the requested folder.
-   */
-  private static async streamBundleFile(
-    req: Request,
-    res: Response,
-    branchName: string,
-    filePath: string,
-  ): Promise<void> {
-    try {
-      // Validate branch name to prevent directory traversal
-      if (!branchName || branchName.includes('..') || branchName.includes('/')) {
-        res.status(400).json({
-          success: false,
-          error: 'Invalid branch name',
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      }
-
-      // Validate file path to prevent directory traversal
-      if (filePath.includes('..')) {
-        res.status(400).json({
-          success: false,
-          error: 'Invalid file path',
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      }
-
-      logger.info('[BundleServe] Serving bundle file from GCS', {
-        folder: branchName,
-        filePath,
-        userAgent: req.get('user-agent'),
-      });
-
-      // 1. Requested folder, exact file.
-      if (await this.tryStream(res, branchName, filePath)) {
-        logger.info('[BundleServe] Served from requested folder', { folder: branchName, filePath });
-        return;
-      }
-
-      // 2. Extensionless route -> requested folder's index.html (SPA routing).
-      if (!path.extname(filePath) && (await this.tryStream(res, branchName, 'index.html'))) {
-        logger.info('[BundleServe] Served SPA index.html from requested folder', {
-          folder: branchName,
-          filePath,
-        });
-        return;
-      }
-
-      // 3. Default-folder fallback (skip if we're already on the default folder).
-      if (branchName !== DEFAULT_BUNDLE_FOLDER) {
-        logger.warn('[BundleServe] File missing in requested folder, falling back to default', {
-          requestedFolder: branchName,
-          defaultFolder: DEFAULT_BUNDLE_FOLDER,
-          filePath,
-        });
-        if (await this.tryStream(res, DEFAULT_BUNDLE_FOLDER, filePath)) {
-          logger.info('[BundleServe] Served from default folder (fallback)', { filePath });
-          return;
-        }
-        if (
-          !path.extname(filePath) &&
-          (await this.tryStream(res, DEFAULT_BUNDLE_FOLDER, 'index.html'))
-        ) {
-          logger.info('[BundleServe] Served default SPA index.html (fallback)', { filePath });
-          return;
-        }
-      }
-
-      logger.warn('[BundleServe] Bundle file not found in GCS (incl. default)', {
-        folder: branchName,
-        filePath,
-      });
-      res.status(404).json({
-        success: false,
-        error: 'Bundle file not found',
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      // A hard failure here (e.g. GCS unreachable) is logged as an error and
-      // returned as a 5xx BEFORE any bytes are streamed, so the nginx layer can
-      // intercept it and fall back to the image-baked local bundle (prev flow).
-      logger.error('[BundleServe] Bundle serve failed — returning 5xx for nginx fallback', {
-        folder: branchName,
-        filePath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      if (!res.headersSent) {
-        res.status(502).json({
-          success: false,
-          error: 'Bundle backend unavailable',
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-  }
-
-  /**
-   * Stream {folder}/{filePath} from GCS if it exists. Returns true if the file
-   * existed and streaming has started; false if the file was absent (caller
-   * then tries the next fallback). Sets content-type + cache headers.
-   */
-  private static async tryStream(
-    res: Response,
-    folder: string,
-    filePath: string,
-  ): Promise<boolean> {
-    const gcsPath = `${folder}/${filePath}`;
-    const storage = this.storage();
-
-    if (!(await storage.fileExists(gcsPath))) {
-      return false;
-    }
-
-    const contentType = this.getContentType(filePath);
-    res.setHeader('Content-Type', contentType);
-
-    // Never cache HTML (SPA entry) or version.json; cache hashed assets hard.
-    if (path.extname(filePath) === '.html' || filePath.endsWith('version.json')) {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    } else {
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    }
-
-    const stream = await storage.createReadStream(gcsPath);
-    stream
-      .on('error', (error: Error) => {
-        logger.error(`Error streaming bundle file from storage: ${gcsPath}`, error);
-        if (!res.headersSent) {
-          res.status(500).json({
-            success: false,
-            error: 'Failed to stream bundle file',
-            timestamp: new Date().toISOString(),
-          });
-        }
-      })
-      .pipe(res);
-    return true;
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({ success: true, ...resolved, timestamp: new Date().toISOString() });
   }
 
   // ---------------------------------------------------------------------------
-  // Admin CRUD for per-user bundle overrides (authenticate + requireAdmin — see routes)
+  // Admin CRUD for per-user bundle overrides.
+  // Workspace/org ADMIN or OWNER only (see routes); scoped to the caller's
+  // workspace by the tenant ACL layer, with explicit workspace checks below.
   // ---------------------------------------------------------------------------
 
   /** GET /api/bundles/admin/overrides */
@@ -258,7 +49,7 @@ export class BundleController {
       const overrides = await BundleOverrideService.list();
       res.json({
         success: true,
-        data: { overrides, defaultBundleName: BundleOverrideService.getDefaultBundleName() },
+        data: { overrides, default: BundleOverrideService.getDefault() },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -271,34 +62,42 @@ export class BundleController {
     }
   }
 
-  /** POST /api/bundles/admin/overrides  body: { userId, bundleName, enabled?, note? } */
+  /** POST /api/bundles/admin/overrides  body: { userId, type, value, enabled?, note? } */
   public static async upsertOverride(req: Request, res: Response): Promise<void> {
     try {
-      const { userId, bundleName, enabled, note } = req.body ?? {};
+      const { userId, type, value, enabled, note } = req.body ?? {};
 
-      if (!userId || typeof userId !== 'string' || !bundleName || typeof bundleName !== 'string') {
+      if (
+        !userId ||
+        typeof userId !== 'string' ||
+        !value ||
+        typeof value !== 'string' ||
+        typeof type !== 'string' ||
+        !VALID_TYPES.includes(type as BundleType)
+      ) {
         res.status(400).json({
           success: false,
-          error: 'userId and bundleName are required strings',
+          error: `userId and value are required strings, and type must be one of: ${VALID_TYPES.join(', ')}`,
           timestamp: new Date().toISOString(),
         });
         return;
       }
 
-      // Reject folder names that would escape the bucket prefix
-      if (bundleName.includes('..') || bundleName.includes('/')) {
+      // Reject values that would escape a GCS prefix (folder / path traversal).
+      if (value.includes('..') || value.includes('/')) {
         res.status(400).json({
           success: false,
-          error: 'Invalid bundleName',
+          error: 'Invalid value',
           timestamp: new Date().toISOString(),
         });
         return;
       }
 
       // Workspace isolation: the target user must belong to the caller's
-      // workspace. (The ACL layer scopes list/delete automatically, but an
-      // insert names an arbitrary userId, so we check it explicitly here.)
-      const targetUser = await userService.getUserById(userId);
+      // workspace. Resolved via the userService so an arbitrary userId cannot be
+      // attached to another workspace's override.
+      const { UserService } = await import('@/services/userService');
+      const targetUser = await new UserService().getUserById(userId);
       if (!targetUser || targetUser.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({
           success: false,
@@ -311,7 +110,8 @@ export class BundleController {
       const override = await BundleOverrideService.upsert({
         userId,
         workspaceId: targetUser.workspaceId,
-        bundleName,
+        type: type as BundleType,
+        value,
         enabled: typeof enabled === 'boolean' ? enabled : undefined,
         note: typeof note === 'string' ? note : null,
       });
@@ -333,11 +133,7 @@ export class BundleController {
       const { userId } = req.params;
       const existing = await BundleOverrideService.getByUserId(userId);
 
-      // Workspace isolation: 404 both when the row is absent AND when it belongs
-      // to another workspace. The tenant ACL layer already scopes the read, but
-      // we assert workspaceId explicitly here too (defense-in-depth, and mirrors
-      // the explicit check in upsertOverride) so this security boundary does not
-      // silently depend on the ACL extension's behaviour.
+      // 404 when absent OR in another workspace (defense-in-depth over the ACL layer).
       if (!existing || existing.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({
           success: false,
