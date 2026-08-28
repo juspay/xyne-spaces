@@ -739,6 +739,7 @@ export const sandboxRun: ToolDefinition = {
 
     // Try explicit sessionId first
     const explicitSessionId = params["sessionId"] as string | undefined;
+    let replacedDeadSession: string | null = null;
     if (explicitSessionId) {
       const session = SESSION_STORE.get(explicitSessionId);
       if (!session) return `Error: Session ${explicitSessionId} not found.`;
@@ -754,20 +755,21 @@ export const sandboxRun: ToolDefinition = {
       } catch (err) {
         if (isStaleSessionError(err)) {
           evictSession(session);
-          return `Error: Session ${explicitSessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+          replacedDeadSession = explicitSessionId;
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/aborted due to timeout|operation was aborted/i.test(msg)) {
+            return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
+          }
+          return `Error: ${redactSecrets(msg)}`;
         }
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-          return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
-        }
-        return `Error: ${redactSecrets(msg)}`;
       }
     }
 
     // Try auto-resolve from conversation context
     const conversationId = context.meta?.["conversationId"];
     const storeKey = storeKeyFromContext(context);
-    if (conversationId) {
+    if (conversationId && !replacedDeadSession) {
       const session = storeKey ? SESSION_STORE.get(storeKey) : undefined;
       if (session) {
         if (!isSessionOwnedByContext(session, storeKey, context)) {
@@ -781,13 +783,14 @@ export const sandboxRun: ToolDefinition = {
         } catch (err) {
           if (isStaleSessionError(err)) {
             evictSession(session, storeKey);
-            return `Error: Sandbox session for this conversation died (pod replaced). Call sandbox-repo-setup to re-provision.`;
+            replacedDeadSession = session.id;
+          } else {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/aborted due to timeout|operation was aborted/i.test(msg)) {
+              return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
+            }
+            return `Error: ${redactSecrets(msg)}`;
           }
-          const msg = err instanceof Error ? err.message : String(err);
-          if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-            return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
-          }
-          return `Error: ${redactSecrets(msg)}`;
         }
       }
     }
@@ -803,8 +806,20 @@ export const sandboxRun: ToolDefinition = {
       const oneShotTemplate = pinnedTemplate ? rotateTemplate(pinnedTemplate) : pinnedTemplate;
       const client = makeClient(context.config, oneShotTemplate);
       const result = await client.exec(cmd, { timeoutMs });
-      return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
+      return redactAndStringify({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        ...(replacedDeadSession
+          ? {
+              note: `Previous sandbox session ${replacedDeadSession} was dead (pod replaced); this command ran on a fresh one-shot VM from the pinned template. Repo state is the template baseline — if you need a specific branch or the services running, call sandbox-repo-setup once and reuse the session it returns.`,
+            }
+          : {}),
+      });
     } catch (err) {
+      if (replacedDeadSession) {
+        return `Error: Sandbox session ${replacedDeadSession} was dead (pod replaced) and the fallback one-shot VM also failed: ${sandboxErr(err)}`;
+      }
       return sandboxErr(err);
     }
   },

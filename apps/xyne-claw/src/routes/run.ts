@@ -1329,20 +1329,24 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
   }
 
   const callerUserId = req.headers["x-user-id"];
-  if (
-    typeof callerUserId !== "string" ||
-    !callerUserId ||
-    callerUserId !== active.userId
-  ) {
+  if (typeof callerUserId !== "string" || !callerUserId) {
     res
       .status(403)
       .json({ success: false, error: "Not authorized to interrupt this run" });
     return;
   }
+  if (callerUserId !== active.userId) {
+    clog.info(
+      `[run] cross-user interrupt session=${sessionId} owner=${active.userId} by=${callerUserId}`,
+    );
+  }
 
   // This is intentionally NOT userCancelled. /cancel suppresses output; a
-  // same-user follow-up wants the active turn to summarize/post what it has, then
-  // let claw-auth drain the queued follow-up as the next user turn. Prefer a
+  // follow-up in the thread wants the active turn to summarize/post what it has,
+  // then let claw-auth drain the queued follow-up as the next user turn. The
+  // follow-up may come from ANY user in the conversation, not just the run's
+  // owner — claw-auth decides who may interrupt; this endpoint is S2S-only and
+  // just needs a caller identity for the audit line above. Prefer a
   // model-generated summary via steering, but keep a bounded hard-abort fallback
   // so a stuck tool/provider cannot block the new prompt forever.
   active.gracefulInterruptRequested = true;
