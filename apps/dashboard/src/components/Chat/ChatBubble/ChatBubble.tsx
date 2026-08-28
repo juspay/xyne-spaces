@@ -36,7 +36,11 @@ import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
 import { isSlashCommandArtifactMessage } from '../SlashCommandArtifacts';
 import { cn } from '../../../utils/classNames';
-import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
+import {
+  copyHtmlToClipboard,
+  copyMessageContentToClipboard,
+  markdownToHtml,
+} from '../../../utils/clipboardUtils';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
@@ -710,19 +714,26 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           ? parseForwardedMessageXml(message.content)?.content || message.content
           : message.content;
 
+      // FlowJSON messages are stored as `<div data-flow-json=\"...\">Flow JSON</div>`;
+      // copying the raw content would only yield the placeholder "Flow JSON". Detect
+      // and route those through the flow-aware helper before the markdown/plain paths.
+      const isFlowContent = contentToCopy.includes('data-flow-json');
+
       // Convert markdown to HTML if needed, then normalize headings to bold paragraphs
-      const copyPromise = isMarkdownContent
-        ? markdownToHtml(contentToCopy)
-            .then(html => copyHtmlToClipboard(html))
-            .catch(error => {
-              logger.warn(Event.FRONTEND_ERROR, {
-                type: 'migrated_console_warn',
-                message: String('Markdown processing failed, falling back to raw content:'),
-                context: [error],
-              });
-              return copyHtmlToClipboard(contentToCopy);
-            })
-        : copyHtmlToClipboard(contentToCopy);
+      const copyPromise = isFlowContent
+        ? copyMessageContentToClipboard(contentToCopy)
+        : isMarkdownContent
+          ? markdownToHtml(contentToCopy)
+              .then(html => copyHtmlToClipboard(html))
+              .catch(error => {
+                logger.warn(Event.FRONTEND_ERROR, {
+                  type: 'migrated_console_warn',
+                  message: String('Markdown processing failed, falling back to raw content:'),
+                  context: [error],
+                });
+                return copyHtmlToClipboard(contentToCopy);
+              })
+          : copyHtmlToClipboard(contentToCopy);
 
       copyPromise
         .then(() => {
@@ -947,7 +958,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // and resolve this bubble's handlers via the hover-actions registry below.
   const handleCopyContent = (): void => {
     if (message?.content) {
-      copyHtmlToClipboard(message.content)
+      copyMessageContentToClipboard(message.content)
         .then(() => {
           toast.success('Message content copied to clipboard');
         })
