@@ -19,6 +19,7 @@ import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { useDeskTagsConfig } from '../../../hooks/useDeskTagsConfig';
+import { useUsersById } from '../../../hooks/useUsers';
 import { tagsConfigApi } from '../../../api/tagsConfigApi';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import type { TicketStatusV2 } from '@xyne/shared';
@@ -45,6 +46,7 @@ import {
   usefulDimensions,
   type ConversationTag,
   type ConversationTagMap,
+  type DimensionContext,
   type DimensionKey,
   type TopicsTicket,
 } from './TopicsExplorer.utils';
@@ -121,6 +123,7 @@ export const TopicsExplorer = ({
   const [endTime, setEndTime] = useState('23:59');
   const [hovered, setHovered] = useState<string | null>(null);
   const isMember = !!useGetChannelUserStatus(channelId);
+  const usersById = useUsersById();
   const prevPageRef = useRef<HTMLButtonElement | null>(null);
   const nextPageRef = useRef<HTMLButtonElement | null>(null);
 
@@ -159,6 +162,16 @@ export const TopicsExplorer = ({
   const allTickets = useMemo<readonly TopicsTicket[]>(() => deferredRows ?? [], [deferredRows]);
   // A deferred frame counts as loading, so a partial rollup never renders as final.
   const isTicketsReady = details.type === 'complete' && !isSyncingRows;
+
+  const ctx = useMemo<DimensionContext>(
+    () => ({
+      userName: (id): string => {
+        const user = usersById.get(id);
+        return user?.displayName ?? user?.name ?? user?.email ?? 'Unknown user';
+      },
+    }),
+    [usersById],
+  );
 
   // Tag categories are grouping dimensions, so they load with the panel and the
   // date range rather than with the tag filter.
@@ -255,12 +268,12 @@ export const TopicsExplorer = ({
     }
 
     return {
-      allNodes: groupLevel(current, dimensionFor(dimensions, activeDims[dimIndex])),
+      allNodes: groupLevel(current, dimensionFor(dimensions, activeDims[dimIndex]), ctx),
       depth: dimIndex,
       scoped: current,
       validPath: walked,
     };
-  }, [tickets, activeDims, dimensions, path]);
+  }, [tickets, activeDims, dimensions, ctx, path]);
 
   const pageCount = Math.max(Math.ceil(allNodes.length / MAX_BOXES), 1);
   // Clamp rather than reset: paging state can outlive a filter change.
@@ -288,10 +301,13 @@ export const TopicsExplorer = ({
 
   // A leaf can only open the ticket list when every level of its path maps to a
   // filter param. Where it cannot, the tile stays inert rather than opening a
-  // wider list than it counted — `openBlockers` names the fields responsible.
-  const { tiles, openBlockers } = useMemo(() => {
+  // wider list than it counted — the three sets name what is responsible, kept
+  // apart so one inert box cannot speak for its whole dimension.
+  const { tiles, openBlockers, emptyBuckets, conflicting } = useMemo(() => {
     const total = scoped.length || 1;
     const blockers = new Set<string>();
+    const emptyBoxes = new Set<string>();
+    const combined = new Set<string>();
 
     const built = nodes.map((node, i) => {
       const share = Math.round((node.tickets.length / total) * 100);
@@ -303,8 +319,13 @@ export const TopicsExplorer = ({
             key,
           })),
         );
-        canOpen = plan.dropped.length === 0 && plan.conflicting.length === 0;
-        for (const label of [...plan.dropped, ...plan.conflicting]) blockers.add(label);
+        canOpen =
+          plan.dropped.length === 0 &&
+          plan.emptyBuckets.length === 0 &&
+          plan.conflicting.length === 0;
+        for (const label of plan.dropped) blockers.add(label);
+        for (const label of plan.emptyBuckets) emptyBoxes.add(label);
+        for (const label of plan.conflicting) combined.add(label);
       }
       return {
         name: node.label,
@@ -319,7 +340,12 @@ export const TopicsExplorer = ({
       };
     });
 
-    return { tiles: built, openBlockers: [...blockers] };
+    return {
+      tiles: built,
+      openBlockers: [...blockers],
+      emptyBuckets: [...emptyBoxes],
+      conflicting: [...combined],
+    };
   }, [nodes, scoped.length, isOverlapping, isDrillable, validPath, dimensions, activeDims]);
 
   /**
@@ -347,7 +373,7 @@ export const TopicsExplorer = ({
   const crumbs = [
     { label: 'All tickets', to: [] as string[] },
     ...validPath.map((key, i) => ({
-      label: labelFor(dimensionFor(dimensions, activeDims[i]), key),
+      label: labelFor(dimensionFor(dimensions, activeDims[i]), key, ctx),
       to: path.slice(0, i + 1),
     })),
   ];
@@ -364,6 +390,16 @@ export const TopicsExplorer = ({
       tone: 'muted' as const,
       text: `The ticket list has no filter for ${openBlockers.join(' or ')}, so these boxes can be read and charted here but not opened as a ticket list.`,
     },
+    emptyBuckets.length > 0 && {
+      id: 'noEmptyValue',
+      tone: 'muted' as const,
+      text: `The ticket list cannot filter for ${emptyBuckets.map(label => `“${label}”`).join(' or ')}, so only ${emptyBuckets.length > 1 ? 'those boxes' : 'that box'} cannot be opened. The rest open as usual.`,
+    },
+    conflicting.length > 0 && {
+      id: 'conflicting',
+      tone: 'muted' as const,
+      text: `${conflicting.join(' and ')} reuses a filter an earlier level already set, and the ticket list combines repeats with OR, so opening would show more tickets than the box counts.`,
+    },
   ].filter(Boolean) as { id: string; tone: 'muted' | 'warn'; text: string }[];
 
   const openTickets = useCallback(
@@ -377,7 +413,8 @@ export const TopicsExplorer = ({
 
       // Guard, not a user path: the tile is already inert when this holds, since
       // a list that cannot express every level is wider than the box clicked.
-      if (plan.dropped.length > 0 || plan.conflicting.length > 0) return;
+      if (plan.dropped.length > 0 || plan.emptyBuckets.length > 0 || plan.conflicting.length > 0)
+        return;
 
       const params = new URLSearchParams();
 

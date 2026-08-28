@@ -32,12 +32,19 @@ const assigneeKey = (assignedTo: string | null | undefined): string => {
   return bare || UNASSIGNED_FILTER_VALUE;
 };
 
+export interface DimensionContext {
+  /** Resolves assignee ids to display names; raw ids are meaningless as labels. */
+  userName: (id: string) => string;
+}
+
 export interface Dimension {
   label: string;
   values: (ticket: TopicsTicket) => string[];
-  format?: (key: string) => string;
+  format?: (key: string, ctx: DimensionContext) => string;
   /** URL value for the "no value" bucket. `null` means the ticket list cannot express it. */
   emptyParam?: string | null;
+  /** Display name of the "no value" bucket. Absent on dimensions that never produce one. */
+  emptyLabel?: string;
   /** True when a ticket can land in more than one bucket, so groups overlap. */
   multi?: boolean;
   /** Search-param understood by `readFiltersFromUrl`; absent means undrillable. */
@@ -154,14 +161,25 @@ const single = (
   format: key => (key === NONE_KEY ? noneLabel : key),
   ...(param ? { param } : {}),
   emptyParam: null,
+  emptyLabel: noneLabel,
 });
 
-// Both map to a filter the ticket list already applies, so a tile opens the set
-// it counted. Every other grouping is a tag category configured in Desk
+// All four map to a filter the ticket list already applies, so a tile opens the
+// set it counted. Every other grouping is a tag category configured in Desk
 // Settings, added by `buildDimensions` — no category is ever named here.
 const DIMENSION_DEFS = {
   priority: single('Priority', t => t.priority, 'No priority', 'priority'),
   aiCategory: single('AI Category', t => t.aiCategory, 'Unclassified', 'aiCategory'),
+  stageName: single('Stage', t => t.stageName, 'No stage', 'stages'),
+  assignedTo: {
+    label: 'Assignee',
+    values: (t): string[] => [assigneeKey(t.assignedTo)],
+    format: (key, ctx): string =>
+      key === UNASSIGNED_FILTER_VALUE ? 'Unassigned' : ctx.userName(key),
+    // No `emptyParam`: the unassigned bucket uses the sentinel the ticket list
+    // understands, so this dimension never yields NONE_KEY.
+    param: 'assignee',
+  },
 } satisfies Record<string, Dimension>;
 
 export type StaticDimensionKey = keyof typeof DIMENSION_DEFS;
@@ -233,13 +251,15 @@ export const buildDimensions = (
       multi: true,
       param: 'generatedTags',
       emptyParam: null,
+      emptyLabel: 'No tags in this range',
     });
   }
 
   return map;
 };
 
-export const labelFor = (dim: Dimension, key: string): string => dim.format?.(key) ?? key;
+export const labelFor = (dim: Dimension, key: string, ctx: DimensionContext): string =>
+  dim.format?.(key, ctx) ?? key;
 
 export interface DrillLevel {
   dim: Dimension;
@@ -248,8 +268,14 @@ export interface DrillLevel {
 
 export interface DrillPlan {
   assignments: { param: string; value: string }[];
-  /** Levels the ticket list has no filter for, or no value for. */
+  /** Levels the ticket list has no filter for. */
   dropped: string[];
+  /**
+   * Names of the "no value" boxes the list cannot express — it can filter
+   * `aiCategory=Refund` but not "aiCategory is empty". Only that box is blocked;
+   * its siblings open normally, which is why it is not `dropped`.
+   */
+  emptyBuckets: string[];
   /**
    * Levels sharing a param with an earlier level at a different value. The list
    * ORs repeated params, so emitting both opens a strictly wider set than the
@@ -260,19 +286,24 @@ export interface DrillPlan {
 
 /**
  * A drill path as ticket-list search params. Every level must be expressible for
- * the opened list to equal the tile; `dropped` and `conflicting` are the two
- * ways that fails, and the caller stays put on either.
+ * the opened list to equal the tile; the three failure lists are the ways that
+ * fails, and the caller stays put on any of them.
  */
 export const planDrill = (levels: readonly DrillLevel[]): DrillPlan => {
   const assignments: { param: string; value: string }[] = [];
   const dropped: string[] = [];
+  const emptyBuckets: string[] = [];
   const conflicting: string[] = [];
   const claimed = new Map<string, string>();
 
   for (const { dim, key } of levels) {
-    const value = key === NONE_KEY ? dim.emptyParam : key;
-    if (!dim.param || value === null || value === undefined) {
+    if (!dim.param) {
       dropped.push(dim.label);
+      continue;
+    }
+    const value = key === NONE_KEY ? dim.emptyParam : key;
+    if (value === null || value === undefined) {
+      emptyBuckets.push(dim.emptyLabel ?? dim.label);
       continue;
     }
     const existing = claimed.get(dim.param);
@@ -284,7 +315,7 @@ export const planDrill = (levels: readonly DrillLevel[]): DrillPlan => {
     assignments.push({ param: dim.param, value });
   }
 
-  return { assignments, dropped, conflicting };
+  return { assignments, dropped, emptyBuckets, conflicting };
 };
 
 /** Dimensions worth offering: a column where every ticket shares one value splits nothing. */
@@ -353,7 +384,11 @@ export const applyTicketFilters = (
 };
 
 /** Group tickets by one dimension, ranked by volume. Every group is returned; paging trims. */
-export const groupLevel = (tickets: readonly TopicsTicket[], dim: Dimension): TopicNode[] => {
+export const groupLevel = (
+  tickets: readonly TopicsTicket[],
+  dim: Dimension,
+  ctx: DimensionContext,
+): TopicNode[] => {
   const buckets = new Map<string, TopicsTicket[]>();
   for (const ticket of tickets) {
     for (const value of dim.values(ticket)) {
@@ -364,7 +399,7 @@ export const groupLevel = (tickets: readonly TopicsTicket[], dim: Dimension): To
   }
   return [...buckets.entries()]
     .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
-    .map(([key, group]) => ({ key, label: labelFor(dim, key), tickets: group }));
+    .map(([key, group]) => ({ key, label: labelFor(dim, key, ctx), tickets: group }));
 };
 
 export const ticketsForKey = (
