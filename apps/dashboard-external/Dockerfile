@@ -25,7 +25,7 @@ COPY apps/dashboard-external/package.json    apps/dashboard-external/
 # with no sources or tsconfig.json. The explicit build steps after the source
 # COPY below do that work instead.
 RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts \
-      --filter xyne-spaces-dashboard-external... --filter xyne-spaces-dashboard
+      --filter xyne-spaces-dashboard-external... --filter xyne-spaces-dashboard...
 
 COPY packages/shared packages/shared
 RUN pnpm --filter @xyne/shared run build
