@@ -49,7 +49,7 @@
     "node-fetch": "^2.7.0",
     "systeminformation": "^5.31.17",
     "tar": "^7.5.20",
-    "uuid": "^8.3.2"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.0.0",

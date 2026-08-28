@@ -98,7 +98,7 @@
     "@standard-schema/spec": "^1.1.0",
     "fast-xml-parser": "^5.10.1",
     "fuse.js": "^7.1.0",
-    "uuid": "^8.3.2",
+    "uuid": "^14.0.0",
     "xstate": "^5.24.0",
     "zod": "^3.25.76"
   },
