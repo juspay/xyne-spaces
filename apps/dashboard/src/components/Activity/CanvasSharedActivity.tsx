@@ -11,6 +11,7 @@ import { useRouteContext } from '../../hooks/useRouteContext';
  * - canvas_shared: "X shared 'Canvas Name' with you"
  * - canvas_role_changed: "X changed your role on 'Canvas Name'"
  * - canvas_access_revoked: "X revoked your access to 'Canvas Name'"
+ * - canvas_edit_access_requested: "X requested edit access to 'Canvas Name'"
  *
  * Note: The specific role (Editor/Viewer/Owner) is not stored on the Activity record.
  * The push notification (via NotificationService) includes role text in its metadata,
@@ -35,11 +36,14 @@ export const CanvasSharedActivity = ({
 
   const isShare = activity.actorAction === 'canvas_shared';
   const isAccessRevoked = activity.actorAction === 'canvas_access_revoked';
-  const descriptionText = isAccessRevoked
-    ? 'revoked your access to'
-    : isShare
-      ? 'shared a canvas with you'
-      : 'changed your role on';
+  const isEditAccessRequest = activity.actorAction === 'canvas_edit_access_requested';
+  const descriptionText = isEditAccessRequest
+    ? 'requested edit access to'
+    : isAccessRevoked
+      ? 'revoked your access to'
+      : isShare
+        ? 'shared a canvas with you'
+        : 'changed your role on';
 
   return (
     <ActivityItemCard
@@ -56,9 +60,11 @@ export const CanvasSharedActivity = ({
       unresolvedChannelLabel='Private channel'
     >
       <div className='text-muted-foreground text-sm'>
-        {isExpanded
-          ? `Canvas: ${canvas.title ?? 'Untitled'}`
-          : `View canvas: ${canvas.title ?? 'Untitled'}`}
+        {isEditAccessRequest
+          ? `Open share settings for: ${canvas.title ?? 'Untitled'}`
+          : isExpanded
+            ? `Canvas: ${canvas.title ?? 'Untitled'}`
+            : `View canvas: ${canvas.title ?? 'Untitled'}`}
       </div>
     </ActivityItemCard>
   );

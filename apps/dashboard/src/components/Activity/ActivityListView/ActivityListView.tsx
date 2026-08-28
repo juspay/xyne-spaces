@@ -185,6 +185,7 @@ const TABS: TabConfig[] = [
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
       activity.actorAction === 'canvas_access_revoked' ||
+      activity.actorAction === 'canvas_edit_access_requested' ||
       (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
   },
   {
@@ -721,6 +722,12 @@ const ActivityListView = (): ReactElement => {
       void zero.mutate(
         mutators.activities.markAsReadByFilter({ actorAction: 'canvas_access_revoked', timestamp }),
       );
+      void zero.mutate(
+        mutators.activities.markAsReadByFilter({
+          actorAction: 'canvas_edit_access_requested',
+          timestamp,
+        }),
+      );
       return;
     } else if (activeTab === 'calls') {
       const timestamp = Date.now();
@@ -785,6 +792,7 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'canvas_shared' ||
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
+        activity.actorAction === 'canvas_edit_access_requested' ||
         (activity.actorAction === 'mentioned_user' && activity.canvasId)
       ) {
         counts.canvas++;
