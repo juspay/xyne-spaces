@@ -65,6 +65,8 @@ export interface CanvasYjsProviderState {
   connectionStatus: 'offline' | 'connecting' | 'error' | 'handshaking' | 'connected';
   hasLocalChanges: boolean;
   isReadOnly: boolean;
+  connectionFailed: boolean;
+  reconnect: () => void;
 }
 
 export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasYjsProviderState {
@@ -97,6 +99,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   const localChangesTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasLocalChangesRef = useRef(false);
   const errorCountRef = useRef(0);
+  const latestAuthTokenRef = useRef<YSweetAuthToken | undefined>(undefined);
   const permissionReadOnlyRef = useRef(false);
 
   const [collaborators, setCollaborators] = useState<CollaboratorInfo[]>([]);
@@ -105,6 +108,8 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   >('offline');
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
+  const [connectionFailed, setConnectionFailed] = useState(false);
+  const [reconnectNonce, setReconnectNonce] = useState(0);
 
   useEffect(() => {
     hasLocalChangesRef.current = hasLocalChanges;
@@ -201,6 +206,15 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     }
   }, [authTokenData]);
 
+  latestAuthTokenRef.current = authTokenData;
+  const [hasAuthToken, setHasAuthToken] = useState(false);
+  useEffect(() => {
+    if (authTokenData) setHasAuthToken(true);
+  }, [authTokenData]);
+  useEffect(() => {
+    setHasAuthToken(false);
+  }, [canvasId]);
+
   const getAuthToken = useCallback(async (): Promise<YSweetAuthToken> => {
     if (errorCountRef.current >= 5) {
       throw new Error('Authentication retry limit reached');
@@ -248,6 +262,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
             provider.destroy();
             providerRef.current = null;
             setAwareness(null);
+            setConnectionFailed(true);
           }
           if (lastNotificationStatusRef.current !== 'error') {
             lastNotificationStatusRef.current = 'error';
@@ -303,9 +318,13 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       };
     }
 
-    if (!authTokenData) return;
+    if (!hasAuthToken || !latestAuthTokenRef.current) return;
+    const authTokenData = latestAuthTokenRef.current;
 
     const actualDocId = authTokenData.docId || canvasId;
+
+    errorCountRef.current = 0;
+    setConnectionFailed(false);
 
     const provider = createYjsProvider(doc, actualDocId, getAuthToken, {
       offlineSupport: true,
@@ -342,6 +361,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
           provider.destroy();
           providerRef.current = null;
           setAwareness(null);
+          setConnectionFailed(true);
         }
         if (lastNotificationStatusRef.current !== 'error') {
           lastNotificationStatusRef.current = 'error';
@@ -402,7 +422,16 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       setAwareness(null);
       doc.destroy();
     };
-  }, [doc, canvasId, authTokenData, getAuthToken]);
+  }, [doc, canvasId, hasAuthToken, getAuthToken, reconnectNonce]);
+
+  const reconnect = useCallback((): void => {
+    errorCountRef.current = 0;
+    lastNotificationStatusRef.current = '';
+    setConnectionFailed(false);
+    void refetch().then(() => {
+      setReconnectNonce(n => n + 1);
+    });
+  }, [refetch]);
 
   useEffect(() => {
     const handleDynamicHeadersChanged = (): void => {
@@ -426,5 +455,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     connectionStatus,
     hasLocalChanges,
     isReadOnly,
+    connectionFailed,
+    reconnect,
   };
 }

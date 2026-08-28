@@ -4,6 +4,24 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
 import { ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
+import { DatabaseClient, readReplicaDb } from '@/database/client';
+
+/**
+ * y-sweet polls this every ~10s per open connection, so it's read-heavy and
+ * latency-tolerant (it's a revalidation, not a first-time access decision) —
+ * route it to the read replica when available so it can't add load to the
+ * primary as connection count scales, same pattern as analyticsRepository.
+ */
+function getValidateDbInstance() {
+  if (!config.ysweet.readPathReplica) {
+    return DatabaseClient.getInstance();
+  }
+  if (readReplicaDb) {
+    return readReplicaDb;
+  }
+  logger.info('[YSweet] Read replica not available, using main database for validateAccess');
+  return DatabaseClient.getInstance();
+}
 
 const TOKEN_VALID_SECONDS = 3600;
 
@@ -240,7 +258,7 @@ export class YSweetController {
         return;
       }
 
-      const authResult = await canvasAuthService.checkCanvasAccess(docId, userId);
+      const authResult = await canvasAuthService.checkCanvasAccess(docId, userId, getValidateDbInstance());
 
       if (!authResult.canvas || !authResult.hasAccess) {
         logger.warn(`[YSweet] validateAccess denied for user ${userId} on canvas ${docId}`, {
