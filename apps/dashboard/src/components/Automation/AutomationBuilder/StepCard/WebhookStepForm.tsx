@@ -30,6 +30,14 @@ const JSON_BODY_PLACEHOLDER = `{
   "key": "value"
 }`;
 
+const RESPONSE_SCHEMA_EXAMPLE: SchemaTree = {
+  id: 'string',
+  success: 'boolean',
+  data: {
+    status: 'string',
+  },
+};
+
 const AUTH_TYPES = ['none', 'basic', 'bearer'] as const;
 type AuthType = (typeof AUTH_TYPES)[number];
 
@@ -301,8 +309,8 @@ export function WebhookStepForm({
       )}
 
       <FieldGroup
-        label='Expected response body'
-        description='Declare the JSON shape of the response body so downstream steps can drill into it. This shape becomes responseJson inside the full step output: { status, ok, responseBody, responseJson: <your shape> }. Open the Input / output peek above this form to see the complete output. Leaves are type strings ("string" | "number" | "boolean" | "object" | "array"); nest objects for nested fields.'
+        label='Expected response body schema'
+        description='This is not a sample response body. Declare each responseJson variable name and its type, for example { id: "string", success: "boolean" }. The full webhook output remains { status, ok, responseBody, responseJson: <this schema> }.'
       >
         <SchemaJsonEditor
           value={responseSchema}
@@ -313,6 +321,7 @@ export function WebhookStepForm({
             onChange(cleaned);
           }}
           readOnly={readOnly}
+          example={RESPONSE_SCHEMA_EXAMPLE}
           emptyHint='Empty schema — downstream steps see responseJson as an opaque blob.'
         />
       </FieldGroup>
