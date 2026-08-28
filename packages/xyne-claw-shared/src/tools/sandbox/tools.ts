@@ -703,10 +703,14 @@ export const sandboxCreate: ToolDefinition = {
 export const sandboxRun: ToolDefinition = {
   slug: "sandbox-run",
   name: "Sandbox Run Command",
-  description: 
-    "**PREFERRED**: Run shell commands in an isolated Kata/QEMU microVM sandbox. " +
+  description:
+    "**PREFERRED** for SHORT commands: run shell commands in an isolated Kata/QEMU microVM sandbox. " +
     "Use this instead of bash for better isolation, safety, and clean environment. " +
-    "Ideal for git clone, npm install, build processes, file operations, and any command execution. " +
+    "Ideal for greps, file reads/edits, git status/log/diff, and any command that finishes in well under 60s. " +
+    "DO NOT use it for long work — installs (pnpm/npm/yarn add|install), builds, tsc typechecks, and test " +
+    "suites routinely exceed the timeout (default 60000ms). This call is SYNCHRONOUS: when the timeout is " +
+    "hit the call returns an error, the work is abandoned, and re-running the same command just burns the " +
+    "timeout again. For anything that may take more than ~60s use sandbox-run-detached + sandbox-poll-job. " +
     "Auto-detects existing sessions or creates fresh sandboxes as needed.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
@@ -723,7 +727,7 @@ export const sandboxRun: ToolDefinition = {
       },
       timeoutMs: {
         type: "number",
-        description: "Command timeout in milliseconds (default: 60000)",
+        description: "Command timeout in milliseconds (default: 60000). On timeout the call returns an error and the work is abandoned — raise this only for commands you are confident finish sooner; otherwise use sandbox-run-detached.",
       },
     },
     required: ["cmd"],
@@ -759,7 +763,7 @@ export const sandboxRun: ToolDefinition = {
         } else {
           const msg = err instanceof Error ? err.message : String(err);
           if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-            return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
+            return `Error: Command exceeded the ${timeoutMs}ms sandbox-run timeout and was abandoned (the VM is still alive; the command may still be running). Do NOT just retry the same command with sandbox-run — it will time out again. Re-run it with sandbox-run-detached and poll with sandbox-poll-job, or pass a larger timeoutMs if you are sure it finishes sooner. DO NOT attempt to destroy the session.`;
           }
           return `Error: ${redactSecrets(msg)}`;
         }
@@ -787,7 +791,7 @@ export const sandboxRun: ToolDefinition = {
           } else {
             const msg = err instanceof Error ? err.message : String(err);
             if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-              return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
+              return `Error: Command exceeded the ${timeoutMs}ms sandbox-run timeout and was abandoned (the VM is still alive; the command may still be running). Do NOT just retry the same command with sandbox-run — it will time out again. Re-run it with sandbox-run-detached and poll with sandbox-poll-job, or pass a larger timeoutMs if you are sure it finishes sooner. DO NOT attempt to destroy the session.`;
             }
             return `Error: ${redactSecrets(msg)}`;
           }
@@ -832,8 +836,11 @@ export const sandboxRunDetached: ToolDefinition = {
   slug: "sandbox-run-detached",
   name: "Sandbox Run Detached",
   description:
-    "Start a long-running command in the background inside a sandbox session. " +
-    "Returns immediately with a jobId. Use sandbox-poll-job to check completion.",
+    "**USE THIS FOR ANY LONG COMMAND (>~60s).** Starts the command in the background inside a sandbox " +
+    "session and returns immediately with a jobId; poll it with sandbox-poll-job. This is the correct tool " +
+    "for dependency installs (pnpm/npm/yarn add|install), builds, tsc typechecks, lint, and test suites — " +
+    "sandbox-run would time out on these and lose the work, while a detached job keeps running to " +
+    "completion. Prefer starting the job, doing other useful work, then polling.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
