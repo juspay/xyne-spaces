@@ -9,6 +9,7 @@ import { notificationService } from '@/services/notificationService';
 import { slackService } from '@/services/slackService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { radarExecutionQueue } from '@/queues/radarExecutionQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
@@ -356,6 +357,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }
       return;
     }
+
+    // Radar execution engine: fire-and-forget thread signal. enqueueThread
+    // never throws and no-ops unless ENABLE_RADAR_EXECUTION=true, so this can
+    // never block or fail the message path.
+    void radarExecutionQueue.enqueueThread(message.conversationId);
 
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
