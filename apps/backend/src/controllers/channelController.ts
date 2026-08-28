@@ -2573,7 +2573,9 @@ export class ChannelController {
             );
           }
         } catch (error) {
-          logger.error('Failed to post add-people system messages:', error);
+          // Message can carry user-supplied names; strip newlines so it can't forge log lines.
+          const message = (error instanceof Error ? error.message : String(error)).replace(/\n|\r/g, ' ');
+          logger.error('Failed to post add-people system messages', { error: message });
         }
 
         const handler = new ChannelParticipantsSideEffectHandler({
