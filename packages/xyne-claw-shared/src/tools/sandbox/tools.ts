@@ -32,6 +32,39 @@ function isCredentialPath(p: string): boolean {
 }
 
 const SESSION_STORE = new Map<string, Session>();
+
+// Single-flight for sandbox-repo-setup, keyed by (user, conversation).
+//
+// A cold claim takes 5-7 min (warm pool is 2 replicas; past that each claim
+// cold-boots a Kata microVM). The model does not know that, so on "destroy this
+// one and get a new one" it fired three setups 20:42/20:44:55/20:45:37 that ran
+// CONCURRENTLY, exhausted the warm pool and turned one request into ~9 min of
+// churn (measured 2026-08-29). Prompt guidance cannot make this safe — a second
+// call is never what the user wanted, so it is coalesced onto the first here:
+// the later callers await the same provisioning and get the same session back
+// instead of claiming more pods.
+const REPO_SETUP_INFLIGHT = new Map<string, Promise<string>>();
+
+function withRepoSetupSingleFlight(tool: ToolDefinition): ToolDefinition {
+  const run = tool.execute.bind(tool);
+  return {
+    ...tool,
+    async execute(params, context) {
+      const key = context ? storeKeyFromContext(context) : undefined;
+      if (!key) return run(params, context);
+      const inflight = REPO_SETUP_INFLIGHT.get(key);
+      if (inflight) return inflight;
+      const started = (async () => run(params, context))();
+      REPO_SETUP_INFLIGHT.set(key, started);
+      void started
+        .catch(() => undefined)
+        .finally(() => {
+          if (REPO_SETUP_INFLIGHT.get(key) === started) REPO_SETUP_INFLIGHT.delete(key);
+        });
+      return started;
+    },
+  };
+}
 interface SessionOwner {
   userId: string;
   conversationId: string;
@@ -1512,7 +1545,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       additionalProperties: { type: "string" },
     };
   }
-  return {
+  const tool: ToolDefinition = {
     slug: config.slug,
     name: config.name,
     description: config.description,
@@ -1817,14 +1850,45 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // brand-new sandbox whose tree mutations all come from automated
         // boot scripts — never user work. Interactive re-calls hit the
         // reuse path (above) which leaves the tree alone.
-        const branchJobId = await session.commands.runDetached(
+        // ALWAYS FETCH — never skip freshness. But only do the DESTRUCTIVE part
+        // (reset --hard + checkout) when it would actually change something.
+        //
+        // Why: after a PVC clone from a snapshot, git sees stat-dirty index
+        // entries, so `git reset --hard` rewrites the worktree and every file
+        // gets a new mtime — even when content is byte-identical. Build systems
+        // key on mtime, so that silently destroys the golden's most expensive
+        // artifact. Measured 2026-08-29 on hyperswitch: 2113 .rs files restamped
+        // at claim time, the prebuilt 4.85GB `router` (built 20:10) ended up
+        // OLDER than its sources (20:52), and the prebake began a ~24-min
+        // rebuild for a checkout that was literally `main -> main`.
+        //
+        // The trade this AVOIDS: skipping the fetch would keep the cache but
+        // silently pin the agent to whatever commit the golden baked, so a stale
+        // golden would serve stale code under the right branch name. Fetching
+        // first keeps that honest — when the branch really has moved we take the
+        // reset+checkout and the rebuild is legitimate work, not waste.
+        const fetchState = await session.commands.run(
           `cd ${config.workDir} && ` +
-          `git reset --hard HEAD 2>/dev/null; git clean -fd 2>/dev/null; ` +
-          `(if git fetch origin ${branchName} 2>/dev/null; then ` +
-          `git checkout -B ${branchName} FETCH_HEAD; else ` +
-          `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
-        );
-        await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
+          `git fetch origin ${branchName} 2>/dev/null && ` +
+          `test "$(git rev-parse HEAD 2>/dev/null)" = "$(git rev-parse FETCH_HEAD 2>/dev/null)" && ` +
+          `test -z "$(git status --porcelain 2>/dev/null)" && echo current || echo stale`,
+          60_000,
+        ).catch(() => ({ stdout: "stale" }) as { stdout: string });
+        if ((fetchState.stdout ?? "").trim() === "current") {
+          log.push(
+            `${branchName} already at origin tip with a clean tree — skipping reset/checkout ` +
+            `(a reset here restamps every file and forces a full rebuild).`,
+          );
+        } else {
+          const branchJobId = await session.commands.runDetached(
+            `cd ${config.workDir} && ` +
+            `git reset --hard HEAD 2>/dev/null; git clean -fd 2>/dev/null; ` +
+            `(if git fetch origin ${branchName} 2>/dev/null; then ` +
+            `git checkout -B ${branchName} FETCH_HEAD; else ` +
+            `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
+          );
+          await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
+        }
 
         // Prebake (entrypoint runs npm ci × 3 + nix build .#xyne-space-services
         // in the background) drops /tmp/prebake-done when it finishes. Wait
@@ -2080,6 +2144,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       });
     },
   };
+  return withRepoSetupSingleFlight(tool);
 }
 
 // Read-only git for the shared sbx-git sandbox: read ANY branch by ref without
