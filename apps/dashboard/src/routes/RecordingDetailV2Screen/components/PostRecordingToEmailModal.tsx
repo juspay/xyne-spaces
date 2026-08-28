@@ -44,9 +44,24 @@ import {
 } from '../../../services/Recording/recordingEmailService';
 import type { RecordingDetail } from '../../../services/Recording/recordingService';
 
+/** Only the fields the draft is built from — a call has no full RecordingDetail. */
+export type EmailDraftSource = Pick<
+  RecordingDetail,
+  'externalId' | 'title' | 'aiSummary' | 'aiSummaryFormat'
+>;
+
 export interface PostRecordingToEmailModalProps {
-  recording: RecordingDetail;
+  recording: EmailDraftSource;
   onClose: () => void;
+  /**
+   * The word the copy uses for what is being sent: 'recording' or 'call'. Not
+   * `subject` — that name already belongs to the email's own subject line.
+   */
+  entityLabel?: string;
+  /** False routes the request to the regular-call endpoints. */
+  isRecording?: boolean;
+  /** Analytics namespace of the host screen. */
+  trackCategory?: string;
 }
 
 interface RecipientLineProps {
@@ -57,6 +72,7 @@ interface RecipientLineProps {
   contactPool: RecipientSuggestion[];
   users: ReturnType<typeof useUsers>;
   actions?: ReactNode;
+  trackCategory: string;
 }
 
 const escapeHtml = (value: string): string =>
@@ -80,15 +96,18 @@ const attachmentIcon = (kind: RecordingEmailAttachmentKind): ReactElement => {
   }
 };
 
-const summaryHtmlForEmail = async (recording: RecordingDetail): Promise<string> => {
+const summaryHtmlForEmail = async (recording: EmailDraftSource): Promise<string> => {
   const rawSummary = recording.aiSummary?.replace(/\[clf-\d+\]/gi, '').trim();
   if (!rawSummary) return '';
   if (recording.aiSummaryFormat === 'html') return DOMPurify.sanitize(rawSummary);
   return markdownToHtml(rawSummary);
 };
 
-const buildInitialEmailBody = async (recording: RecordingDetail): Promise<string> => {
-  const title = escapeHtml(recording.title?.trim() || 'this recording');
+const buildInitialEmailBody = async (
+  recording: EmailDraftSource,
+  entityLabel: string,
+): Promise<string> => {
+  const title = escapeHtml(recording.title?.trim() || `this ${entityLabel}`);
   const summary = await summaryHtmlForEmail(recording);
   const summarySection = summary
     ? summary
@@ -109,6 +128,7 @@ const RecipientLine = ({
   contactPool,
   users,
   actions,
+  trackCategory,
 }: RecipientLineProps): ReactElement => {
   const rowRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -153,7 +173,7 @@ const RecipientLine = ({
         tabIndex={0}
         className='relative flex min-h-8 flex-wrap items-center gap-1.5 rounded-md py-0.5 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring/70'
         onClick={() => inputRef.current?.focus()}
-        data-track-category='RecordingDetailV2'
+        data-track-category={trackCategory}
         data-track-name={`recording_email_${field}_recipients_focus`}
         onKeyDown={event => {
           if (
@@ -188,7 +208,7 @@ const RecipientLine = ({
           onKeyDown={handleKeyDown}
           className='min-w-[126px] flex-1 bg-transparent py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground'
           aria-label={`${label} recipients`}
-          data-track-category='RecordingDetailV2'
+          data-track-category={trackCategory}
           data-track-name={`recording_email_${field}_input`}
         />
         <RecipientSuggestionsDropdown
@@ -208,6 +228,9 @@ const RecipientLine = ({
 export const PostRecordingToEmailModal = ({
   recording,
   onClose,
+  entityLabel = 'recording',
+  isRecording = true,
+  trackCategory = 'RecordingDetailV2',
 }: PostRecordingToEmailModalProps): ReactElement => {
   const users = useUsers();
   const [context, setContext] = useState<RecordingEmailComposeContext | null>(null);
@@ -216,7 +239,7 @@ export const PostRecordingToEmailModal = ({
   const [ccEmails, setCcEmails] = useState<string[]>([]);
   const [showCc, setShowCc] = useState(false);
   const [subject, setSubject] = useState(
-    `Recap: ${recording.title?.trim() || 'Untitled Recording'}`,
+    `Recap: ${recording.title?.trim() || (isRecording ? 'Untitled Recording' : 'Untitled Call')}`,
   );
   const [body, setBody] = useState('');
   const [selectedAttachments, setSelectedAttachments] = useState<RecordingEmailAttachmentKind[]>(
@@ -244,7 +267,7 @@ export const PostRecordingToEmailModal = ({
     setContext(null);
     setContextError(null);
     void recordingEmailService
-      .getComposeContext(recording.externalId)
+      .getComposeContext(recording.externalId, isRecording)
       .then(next => {
         if (cancelled) return;
         setContext(next);
@@ -263,12 +286,12 @@ export const PostRecordingToEmailModal = ({
     return (): void => {
       cancelled = true;
     };
-  }, [recording.externalId]);
+  }, [recording.externalId, isRecording]);
 
   useEffect(() => {
     if (initializedBodyRef.current) return;
     let cancelled = false;
-    void buildInitialEmailBody(recording).then(nextBody => {
+    void buildInitialEmailBody(recording, entityLabel).then(nextBody => {
       if (cancelled) return;
       initializedBodyRef.current = true;
       setBody(nextBody);
@@ -276,7 +299,7 @@ export const PostRecordingToEmailModal = ({
     return (): void => {
       cancelled = true;
     };
-  }, [recording]);
+  }, [recording, entityLabel]);
 
   const selectedAttachmentDetails = useMemo(
     () =>
@@ -312,13 +335,17 @@ export const PostRecordingToEmailModal = ({
     if (!canSend) return;
     setIsSending(true);
     try {
-      await recordingEmailService.send(recording.externalId, {
-        to: toEmails,
-        cc: ccEmails,
-        subject: subject.trim(),
-        body,
-        attachments: selectedAttachments,
-      });
+      await recordingEmailService.send(
+        recording.externalId,
+        {
+          to: toEmails,
+          cc: ccEmails,
+          subject: subject.trim(),
+          body,
+          attachments: selectedAttachments,
+        },
+        isRecording,
+      );
       toast.success('Email sent');
       onClose();
     } catch (error) {
@@ -376,7 +403,7 @@ export const PostRecordingToEmailModal = ({
           <div className='min-w-0'>
             <h2 className='text-lg font-semibold leading-6 text-foreground'>Review draft email</h2>
             <p className='mt-0.5 text-sm text-muted-foreground'>
-              Recipients and text are pre-filled from this recording. Review before sending.
+              Recipients and text are pre-filled from this {entityLabel}. Review before sending.
             </p>
           </div>
         </div>
@@ -387,7 +414,7 @@ export const PostRecordingToEmailModal = ({
             disabled={isSending}
             className='-mr-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
             aria-label='Close email draft'
-            data-track-category='RecordingDetailV2'
+            data-track-category={trackCategory}
             data-track-name='close_recording_email_draft'
           >
             <X className='size-5' aria-hidden='true' />
@@ -424,13 +451,14 @@ export const PostRecordingToEmailModal = ({
           onEmailsChange={setToEmails}
           contactPool={contactPool}
           users={users}
+          trackCategory={trackCategory}
           actions={
             !showCc ? (
               <button
                 type='button'
                 onClick={() => setShowCc(true)}
                 className='rounded px-1 py-0.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground'
-                data-track-category='RecordingDetailV2'
+                data-track-category={trackCategory}
                 data-track-name='recording_email_open_cc'
               >
                 Cc
@@ -446,6 +474,7 @@ export const PostRecordingToEmailModal = ({
             onEmailsChange={setCcEmails}
             contactPool={contactPool}
             users={users}
+            trackCategory={trackCategory}
             actions={
               <button
                 type='button'
@@ -455,7 +484,7 @@ export const PostRecordingToEmailModal = ({
                 }}
                 className='inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                 aria-label='Remove Cc field'
-                data-track-category='RecordingDetailV2'
+                data-track-category={trackCategory}
                 data-track-name='recording_email_remove_cc'
               >
                 <X className='size-3.5' aria-hidden='true' />
@@ -473,7 +502,7 @@ export const PostRecordingToEmailModal = ({
             className='min-w-0 bg-transparent py-1 text-sm font-medium text-foreground outline-none placeholder:text-muted-foreground'
             placeholder='Add a subject'
             aria-label='Email subject'
-            data-track-category='RecordingDetailV2'
+            data-track-category={trackCategory}
             data-track-name='recording_email_subject_input'
           />
         </label>
@@ -489,7 +518,7 @@ export const PostRecordingToEmailModal = ({
                 onClick={() => void handleConnectGoogle()}
                 disabled={isConnectingGoogle || isSending}
                 loading={isConnectingGoogle}
-                data-track-category='RecordingDetailV2'
+                data-track-category={trackCategory}
                 data-track-name='recording_email_connect_google'
               >
                 Connect Google email
@@ -572,7 +601,7 @@ export const PostRecordingToEmailModal = ({
                     className='inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                     aria-label={`Remove ${attachment.label}`}
                     disabled={isSending}
-                    data-track-category='RecordingDetailV2'
+                    data-track-category={trackCategory}
                     data-track-name='recording_email_remove_attachment'
                   >
                     <X className='size-3.5' aria-hidden='true' />
@@ -599,7 +628,7 @@ export const PostRecordingToEmailModal = ({
             onClick={() => void handleSend()}
             disabled={!canSend}
             className='min-w-[164px] gap-2'
-            data-track-category='RecordingDetailV2'
+            data-track-category={trackCategory}
             data-track-name='send_recording_email'
           >
             {isSending ? <Loader2 className='size-4 animate-spin' /> : <Send className='size-4' />}

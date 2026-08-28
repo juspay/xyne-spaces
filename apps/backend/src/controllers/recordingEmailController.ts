@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { CallType, ChannelType, RecordingType } from '@xyne/shared';
+import { ChannelType, RecordingType } from '@xyne/shared';
 import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -8,7 +8,10 @@ import type { OutgoingAttachment } from '@/integrations/core/baseMailReplySender
 import { callRecordingService } from '@/services/callRecordingService';
 import { callShareService } from '@/services/callShareService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import {
+  convertBlockNoteToMarkdown,
+  resolveDetailedSummaryCanvasId,
+} from '@/services/canvasService';
 import { transcriptService } from '@/services/transcriptService';
 import { normalizeStoragePath } from '@xyne/storage';
 import { extractEmailAddress } from '@/utils/email';
@@ -171,15 +174,13 @@ export class RecordingEmailController {
     }
 
     const call = await repositories.calls.findByExternalId(callId);
-    if (
-      !call ||
-      call.callType !== CallType.HEADLESS ||
-      (call.workspaceId !== null && call.workspaceId !== workspaceId)
-    ) {
+    if (!call || (call.workspaceId !== null && call.workspaceId !== workspaceId)) {
       throw new RecordingEmailError('Recording not found', 404);
     }
 
-    const canView = await callShareService.canView(call, userId, workspaceId);
+    // Recordings and regular calls both come through here; canViewCall applies
+    // whichever visibility rule the call's own type uses.
+    const canView = await callShareService.canViewCall(call, userId, workspaceId);
     if (!canView) {
       throw new RecordingEmailError('Access denied', 403);
     }
@@ -426,6 +427,8 @@ export class RecordingEmailController {
       }
     }
 
+    // Notes are a recordings-only canvas, so a regular call simply offers one
+    // attachment fewer — metadataCanvasId returns null and the descriptor drops out.
     const metadata = call.metadata;
     const [notes, detailedSummary] = await Promise.all([
       this.getCanvasDescriptor(
@@ -435,7 +438,7 @@ export class RecordingEmailController {
         'notes'
       ),
       this.getCanvasDescriptor(
-        metadataCanvasId(metadata, 'detailedSummaryCanvasId'),
+        await resolveDetailedSummaryCanvasId(call),
         workspaceId,
         userId,
         'detailed-summary'
@@ -551,7 +554,7 @@ export class RecordingEmailController {
     if (selected.has('detailed-summary')) {
       attachments.push(
         await this.buildCanvasAttachment(
-          metadataCanvasId(metadata, 'detailedSummaryCanvasId'),
+          await resolveDetailedSummaryCanvasId(call),
           workspaceId,
           userId,
           'detailed-summary'
