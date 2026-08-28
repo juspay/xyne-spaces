@@ -1,3 +1,10 @@
+## [1.242.5](https://github.com/juspay/xyne-spaces/compare/v1.242.4...v1.242.5) (2026-08-28)
+
+
+### Bug Fixes
+
+* scope ticket reads and writes to reachable tickets, across child tables ([#1166](https://github.com/juspay/xyne-spaces/issues/1166)) ([aabba36](https://github.com/juspay/xyne-spaces/commit/aabba36ce0f0495e298e5aa6b448ea351f7f545d))
+
 ## [1.242.4](https://github.com/juspay/xyne-spaces/compare/v1.242.3...v1.242.4) (2026-08-28)
 
 
