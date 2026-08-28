@@ -96,10 +96,18 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
   return (
     <CardShell style={node.style}>
       <div className='flex flex-col gap-4 rounded-b-[11px] border-b border-border bg-card/80 px-3 pb-4 pt-3'>
-        <div className='flex h-6 items-center pl-1'>
+        <div className='flex h-6 items-center gap-2 pl-1'>
           <span className='min-w-0 truncate text-sm font-medium leading-5 tracking-[-0.5px] text-muted-foreground'>
             {props?.title ?? 'Connectors that could help'}
           </span>
+          {props?.browseAll && (
+            <span
+              title='Shows connectors you have connected yourself. Your organization may already provide others.'
+              className='shrink-0 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground'
+            >
+              Personal
+            </span>
+          )}
         </div>
 
         <div className='flex flex-col gap-2'>
