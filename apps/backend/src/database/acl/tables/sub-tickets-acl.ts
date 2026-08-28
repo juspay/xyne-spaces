@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
+import { accessibleTicketWhere, getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
 export class SubTicketsACL extends BaseQueryACL<
   Prisma.SubTicketWhereInput,
@@ -22,8 +22,16 @@ export class SubTicketsACL extends BaseQueryACL<
       }
     }
 
+    // SubTicket holds its own title/description. Reachable through either end; createSubTicket
+    // writes the parent mapping in the same transaction, so every row has one.
+    const accessible = await accessibleTicketWhere(this.prisma, this.ctx)
+
     return {
       workspaceId: this.ctx.workspaceId,
+      OR: [
+        { mappedTicket: accessible },
+        { ticketMappings: { some: { ticket: accessible } } },
+      ],
     }
   }
 
