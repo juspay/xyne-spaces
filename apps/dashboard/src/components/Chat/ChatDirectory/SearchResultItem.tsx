@@ -152,7 +152,6 @@ const ChannelSegment = ({
   </span>
 );
 
-
 const asTicketPriority = (priority?: string): TicketPriority | null => {
   const normalized = priority?.toUpperCase();
   if (!normalized) return null;

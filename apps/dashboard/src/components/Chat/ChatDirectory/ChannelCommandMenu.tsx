@@ -1993,9 +1993,10 @@ const ChannelCommandMenu = ({
         return;
       }
 
+      const { attachmentId, internalUrl } = result.searchContext;
       setPreviewFile({
         fileName: result.title,
-        fileUrl: result.searchContext.internalUrl,
+        fileUrl: attachmentId ? `/attachments/${attachmentId}/download` : internalUrl,
         mimeType: result.searchContext.mimeType || 'application/octet-stream',
         fileSize: result.searchContext.fileSize || 0,
       });

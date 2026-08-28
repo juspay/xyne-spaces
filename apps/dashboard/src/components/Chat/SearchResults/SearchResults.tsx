@@ -1197,9 +1197,7 @@ function ResultsBody({
       const metaLine = [shouldShowUploader ? `Uploaded by ${uploaderName}` : '', fileSizeLabel]
         .filter(Boolean)
         .join(' · ');
-      const infoLine = [metaLine, channelName ? `in ${channelName}` : '']
-        .filter(Boolean)
-        .join(' ');
+      const infoLine = [metaLine, channelName ? `in ${channelName}` : ''].filter(Boolean).join(' ');
 
       return (
         <button
