@@ -125,9 +125,17 @@ export class InvitationController {
       const existingWorkspaceUsers = await DatabaseClient.getInstance().user.count({
         where: { email: normalizedEmail, leftAt: null },
       });
+      const existingOrgMember = await withWorkspaceScope(() =>
+        DatabaseClient.getInstance().orgMember.findUnique({
+          where: { email: normalizedEmail },
+          select: { passwordHash: true, leftAt: true },
+        }),
+      );
 
       let tempPassword: string | null = null;
-      if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
+      if (existingWorkspaceUsers === 0 && role === 'GUEST' && !existingOrgMember?.passwordHash) {
+        tempPassword = await invitationService.generateGuestInvitationTempPassword(invitation);
+      } else if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
         tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
       }
 
@@ -137,6 +145,9 @@ export class InvitationController {
 
       if (config.env === 'development') {
         logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
+        if (tempPassword) {
+          logger.info(`[InvitationController] DEV MODE — temp password for ${email}: ${tempPassword}`);
+        }
       } else {
         // Send invitation email
         const emailResult = await invitationService.sendInvitationEmail({

@@ -1533,7 +1533,10 @@ export class AuthV2Controller {
 
       let sessionId = null;
 
-      if (pendingRefreshToken) {
+      const isEmailProvider = provider === AuthProvider.EMAIL;
+      const sessionRefreshToken = pendingRefreshToken ?? (isEmailProvider ? randomUUID() : undefined);
+
+      if (sessionRefreshToken) {
         try {
           const refreshTokenExpiry = new Date();
           refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
@@ -1548,7 +1551,7 @@ export class AuthV2Controller {
 
           const session = await this.userSessionService.createSession({
             userId: workspaceUser.id,
-            refreshToken: pendingRefreshToken,
+            refreshToken: sessionRefreshToken,
             refreshTokenExpiry,
             accessToken: pendingAccessToken,
             accessTokenExpiry: pendingAccessTokenExpiry,
@@ -1557,7 +1560,7 @@ export class AuthV2Controller {
           });
 
           sessionId = session.id;
-          logger.info(`[LOGIN-WORKSPACE] Session created`);
+          logger.info(`[LOGIN-WORKSPACE] Session created${isEmailProvider ? ' (email provider — generated refresh token)' : ''}`);
         } catch (sessionError) {
           logger.error(`[LOGIN-WORKSPACE] Session creation failed:`, sessionError);
         }
