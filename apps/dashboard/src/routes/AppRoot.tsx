@@ -50,6 +50,7 @@ import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
 import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
+import SdlcWindow from './SdlcScreen/SdlcWindow';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
@@ -1818,6 +1819,24 @@ export const router = createBrowserRouter(
               element: <ThreadMessages />,
             },
           ],
+        },
+        {
+          path: '/newWindow/sdlc/:workspaceId/:repoId/:section',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <ZeroFallbackProvider>
+                  <InitialStateLoader>
+                    <div className='h-full bg-background'>
+                      <SdlcWindow />
+                    </div>
+                    {/* roomActor is a module singleton, so this window needs its own. */}
+                    <GlobalCallOverlay autoJoinOnAccept={false} />
+                  </InitialStateLoader>
+                </ZeroFallbackProvider>
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
         },
         {
           path: '/newWindow/create-ticket',
