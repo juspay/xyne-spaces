@@ -8,7 +8,10 @@ import {
   type TicketChanges,
   type FormFieldChanges,
 } from '../triggers/ticket-updated.trigger';
-import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
+import {
+  MESSAGE_RECEIVED_EVENT,
+  type MessageEventLocation,
+} from './message-received-event';
 import { CALL_EVENT, CALL_STARTED, CALL_ENDED } from '../triggers/call.trigger';
 import { TAG_GENERATED_EVENT } from '../triggers/tag-generated.trigger';
 
@@ -44,6 +47,8 @@ export interface MessageReceivedEventPayload {
   channelId: string;
   authorId: string;
   msgType: MessageType;
+  /** Optional only for executions queued before thread-reply support was deployed. */
+  messageLocation?: MessageEventLocation;
 }
 
 export interface CallEventPayload {
