@@ -93,6 +93,9 @@ export interface QueuedMessage {
   userId: string;
   senderName?: string;
   agentSlug: string;
+  /** Root caller for delegated runs. Preserved across queue drain so a
+   * delegated orchestrator cannot start an unbounded agent-call chain. */
+  rootAgentSlug?: string;
   orgId?: string;
   workspaceId?: string;
   task: string;

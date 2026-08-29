@@ -2,20 +2,19 @@ import type { McpToolInfo } from "../types.js";
 
 export const ORCHESTRATOR_TOOLS: McpToolInfo[] = [
   {
-    name: "propose-agent-call",
+    name: "perform_agent_call",
     description:
-      "Post a signed card in the current Spaces thread proposing that a user run another agent with a specific task. " +
-      "Use this ONCE per user task after selecting the single best agent; the user decides whether to run it.",
+      "Run another visible agent immediately in the current Spaces thread with a self-contained task. " +
+      "Use this once after selecting the single best agent; no user approval card is posted.",
     inputSchema: {
       type: "object",
       properties: {
-        agentSlug: { type: "string", description: "Slug of the target agent to propose running." },
-        task: { type: "string", description: "Self-contained task the target agent should run if the user approves." },
-        why: { type: "string", description: "Brief reason this target agent is appropriate." },
+        agentSlug: { type: "string", description: "Slug of the target agent to run." },
+        task: { type: "string", description: "Self-contained task the target agent should run." },
       },
-      required: ["agentSlug", "task", "why"],
+      required: ["agentSlug", "task"],
     },
-    selectionKey: "propose-agent-call",
+    selectionKey: "perform_agent_call",
   },
 ];
 

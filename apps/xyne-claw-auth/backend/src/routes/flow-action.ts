@@ -1358,7 +1358,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     }
 
     // ── 4. Agent call proposal ───────────────────────────────────────────────
-    // Posted by propose-agent-call. Run dispatches the target agent in this
+    // Legacy proposal cards posted by propose-agent-call dispatch the target agent in this
     // same thread under the CLICKING user's identity; Dismiss just consumes the
     // card. The HMAC binds the target/task/proposer/conversation fields.
     if (actionType === "agent-call") {

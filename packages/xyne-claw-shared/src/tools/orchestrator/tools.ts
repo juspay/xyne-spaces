@@ -1,22 +1,21 @@
 import type { ToolDefinition } from "../types.js";
 
-export const proposeAgentCallTool: ToolDefinition = {
-  slug: "propose-agent-call",
-  name: "Propose agent call",
+export const performAgentCallTool: ToolDefinition = {
+  slug: "perform_agent_call",
+  name: "Perform agent call",
   description:
-    "Post a user-approval card proposing that another agent run a specific task in this same Spaces thread. " +
-    "Call this ONCE per user task after choosing the single best target agent; the user decides whether to run it.",
+    "Run another visible agent immediately with a self-contained task in this same Spaces thread. " +
+    "Call this once after choosing the single best target agent; no user approval card is posted.",
   source: "custom:orchestrator",
   inputSchema: {
     type: "object",
     properties: {
-      agentSlug: { type: "string", description: "Slug of the target agent to propose running." },
-      task: { type: "string", description: "Self-contained task the target agent should run if the user approves." },
-      why: { type: "string", description: "Brief reason this agent is the right one for the task." },
+      agentSlug: { type: "string", description: "Slug of the target agent to run." },
+      task: { type: "string", description: "Self-contained task the target agent should run." },
     },
-    required: ["agentSlug", "task", "why"],
+    required: ["agentSlug", "task"],
   },
   async execute(): Promise<string> {
-    return "propose-agent-call is executed by claw-auth as a System Tool; it is not available in-process.";
+    return "perform_agent_call is executed by claw-auth as a System Tool; it is not available in-process.";
   },
 };

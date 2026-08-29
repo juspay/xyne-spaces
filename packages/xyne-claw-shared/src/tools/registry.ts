@@ -204,9 +204,9 @@ for (const t of agentTools.AGENT_TOOL_DEFS) register(t);
 register(todo.todoWriteTool);
 register(todo.todoReadTool);
 
-// Register claw-auth-executed orchestrator proposal tool. The catalog row
+// Register the claw-auth-executed orchestrator call tool. The catalog row
 // appears under System Tools; runtime execution is handled by routes/mcp.ts.
-register(orchestrator.proposeAgentCallTool);
+register(orchestrator.performAgentCallTool);
 
 // Agent-introspection tools — definitions only; executed claw-auth-side (see
 // xyne-claw-shared/src/tools/agent-introspect/tools.ts header).

@@ -283,15 +283,15 @@ Never claim to have applied a change — you only recommend.
 
 ## Orchestrator
 
-Phase 1 uses the `propose-agent-call` System Tool with `list_agents` / `get_agent_config`: pick one best specialist, call `propose-agent-call` once with `{agentSlug, task, why}`, then stop routing and let the user decide from the signed card.
+The orchestrator uses the `perform_agent_call` System Tool with `list_agents` / `get_agent_config`: pick one best specialist, call `perform_agent_call` once with `{agentSlug, task}`, then summarize that the specialist was started. The target runs immediately in the same thread without an approval card.
 
-The approval card posts in the current thread and runs the target agent as the clicking user, not the proposer. Use it when the orchestrator has no A2A grant or when human consent is desired.
+The target runs under the current user's identity. Claw Auth re-checks that the target is enabled, belongs to the same organization, and is visible to that user before dispatching it.
 
-Phase 2 is A2A auto-call through the admin-controlled `delegationTier = "orchestrator"` flag. An orchestrator-tier agent can call any enabled global agent in its org without pair grants, because the running user could already invoke those global agents directly and the callee runs under that user's identity.
+The existing A2A auto-call path remains available through the admin-controlled `delegationTier = "orchestrator"` flag. An orchestrator-tier agent can call any enabled global agent in its org without pair grants, because the running user could already invoke those global agents directly and the callee runs under that user's identity.
 
-Personal/shared callees still need the existing delegation grant + owner approval flow. At runtime the orchestrator gets one `call-agent` tool; it should use `list_agents` first, choose one best specialist, call `call-agent` with `{agentSlug, task}`, then summarize the result. Keep `propose-agent-call` as fallback only when no callable agent fits or human consent is desired.
+Personal/shared callees still need the existing visibility checks. At runtime the orchestrator should use `list_agents` first, choose one best specialist, call `perform_agent_call` with `{agentSlug, task}`, then tell the user that the specialist is running in the same thread.
 
-The A2A governor already enforces one loop at a time, depth 1, cycle protection, and a small count budget. Keep orchestrator prompts focused on choosing one agent and never batching delegated calls.
+Claw Auth enforces one `perform_agent_call` per root session and a maximum delegation depth of one, including calls that wait in the queue. The existing A2A governor separately enforces its loop, cycle, depth, and count limits. Keep orchestrator prompts focused on choosing one agent and never batching delegated calls.
 
 ---
 

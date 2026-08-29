@@ -3782,7 +3782,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     spacesAppId: agentRow.spacesAppId,
     spacesAppUserId: agentRow.spacesAppUserId ?? "",
     traceId,
-    rootAgentSlug: agentRow.slug,
+    rootAgentSlug: msg.rootAgentSlug ?? agentRow.slug,
     ...(workspaceId ? { workspaceId } : {}),
     ...(msg.resultForwardUrl ? { resultForwardUrl: msg.resultForwardUrl } : {}),
     ...(msg.resolveMentions ? { resolveMentions: msg.resolveMentions } : {}),

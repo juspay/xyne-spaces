@@ -63,9 +63,14 @@ import {
   parseGatewayToolSelectionKey,
 } from "../mcpgateway/key-format.js";
 import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
-import { buildAgentCallProposalFlow, parseToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
+import { parseToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
+import { QUEUE_ENABLED, enqueueMessage, tryAcquireSlot, type QueuedMessage } from "../lib/message-queue.js";
+import { resolveFastMode } from "../lib/fast-mode.js";
+import { registerRunRecovery } from "../queue/run-recovery-worker.js";
+import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
+import { redisService } from "../redis.js";
 import {
   buildSubagentToolRefs,
   filterMcpServerToolsForAgentConfig,
@@ -428,7 +433,7 @@ function isGrafanaFamilyType(serverType: string): boolean {
   return serverType === "grafana" || serverType.startsWith("grafana-");
 }
 
-async function postAgentCallProposal(
+async function performAgentCall(
   params: Record<string, unknown>,
   context: {
     userId: string;
@@ -440,15 +445,14 @@ async function postAgentCallProposal(
 ): Promise<string> {
   const targetSlug = String(params["agentSlug"] ?? "").trim();
   const task = String(params["task"] ?? "").trim();
-  const why = String(params["why"] ?? "").trim();
-  if (!targetSlug || !task || !why) {
-    return "propose-agent-call failed: agentSlug, task, and why are required.";
+  if (!targetSlug || !task) {
+    return "perform_agent_call failed: agentSlug and task are required.";
   }
   if (!context.orgId) {
-    return "propose-agent-call failed: agent org context is unavailable.";
+    return "perform_agent_call failed: agent org context is unavailable.";
   }
 
-  const { getSession } = await import("./webhook.js");
+  const { getSession, setSession } = await import("./webhook.js");
   const runContext = await getSession(context.sessionId);
   const fallbackRun = runContext
     ? null
@@ -456,21 +460,26 @@ async function postAgentCallProposal(
   const conversationId = runContext?.conversationId ?? fallbackRun?.conversationId ?? undefined;
   const channelId = runContext?.channelId ?? fallbackRun?.channelId ?? undefined;
   if (!conversationId || !channelId) {
-    return "propose-agent-call failed: current Spaces conversation/channel context is unavailable.";
+    return "perform_agent_call failed: current Spaces conversation/channel context is unavailable.";
   }
 
-  const proposer = context.spacesAppId
-    ? await prisma.agent.findUnique({ where: { spacesAppId: context.spacesAppId } })
+  const caller = context.spacesAppId
+    ? await prisma.agent.findUnique({ where: { spacesAppId: context.spacesAppId }, select: { slug: true } })
     : context.agentSlug
       ? await prisma.agent.findUnique({
           where: { orgId_slug: { orgId: context.orgId, slug: context.agentSlug } },
+          select: { slug: true },
         })
       : null;
-  if (!proposer?.spacesAppToken || !proposer.spacesAppUserId || !proposer.spacesAppId) {
-    return "propose-agent-call failed: running agent has no Spaces app identity.";
+  if (!caller) {
+    return "perform_agent_call failed: running agent identity is unavailable.";
   }
-  if (proposer.slug === targetSlug) {
-    return "propose-agent-call failed: an agent cannot propose calling itself.";
+  if (caller.slug === targetSlug) {
+    return "perform_agent_call failed: an agent cannot call itself.";
+  }
+  const rootAgentSlug = runContext?.rootAgentSlug ?? caller.slug;
+  if (rootAgentSlug !== caller.slug) {
+    return "perform_agent_call failed: delegated agents cannot delegate again (maximum depth is one).";
   }
 
   const target = await prisma.agent.findFirst({
@@ -480,50 +489,159 @@ async function postAgentCallProposal(
       enabled: true,
       ...visibleAgentWhereForRunningUser(context.userId, await isClawAdmin(context.userId)),
     },
-    select: { slug: true, name: true },
+    select: {
+      id: true,
+      orgId: true,
+      slug: true,
+      name: true,
+      spacesAppId: true,
+      spacesAppToken: true,
+      spacesAppUserId: true,
+      config: true,
+    },
   });
   if (!target) {
-    return `propose-agent-call failed: target agent "${targetSlug}" was not found or is not visible to the running user.`;
+    return `perform_agent_call failed: target agent "${targetSlug}" was not found or is not visible to the running user.`;
+  }
+  if (!target.spacesAppToken || !target.spacesAppId) {
+    return `perform_agent_call failed: target agent "${targetSlug}" has no Spaces app identity.`;
+  }
+  const appToken = decryptStoredToken(target.spacesAppToken);
+
+  // Enforce the orchestrator contract server-side: one specialist per root run.
+  // This replaces the old human approval boundary, so prompt-only enforcement
+  // is not sufficient. Keep the claim after queue/dispatch success; release it
+  // only when the operation never started.
+  const callClaimKey = `orchestrator-call:${context.sessionId}`;
+  try {
+    const claimed = await redisService.getConnection().set(callClaimKey, target.slug, "EX", 86_400, "NX");
+    if (claimed !== "OK") {
+      return "perform_agent_call failed: this agent run already delegated to a specialist.";
+    }
+  } catch (err) {
+    return `perform_agent_call failed: could not enforce the delegation limit (${errMsg(err)}).`;
+  }
+  const releaseCallClaim = async (): Promise<void> => {
+    await redisService.getConnection().del(callClaimKey).catch(() => {});
+  };
+
+  const eventId = `orchestrator_${context.sessionId}_${target.slug}`
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .slice(0, 128);
+  let slotToken: string | null = null;
+  try {
+    if (QUEUE_ENABLED) {
+      slotToken = await tryAcquireSlot(conversationId, target.slug);
+      if (!slotToken) {
+        const queuedMessage: QueuedMessage = {
+          eventId,
+          conversationId,
+          channelId,
+          userId: context.userId,
+          agentSlug: target.slug,
+          orgId: target.orgId,
+          rootAgentSlug,
+          task,
+          eventType: "APP_MENTIONED",
+          ts: Date.now(),
+        };
+        const queued = await enqueueMessage(queuedMessage);
+        if (!queued.enqueued && !queued.deduped) {
+          await releaseCallClaim();
+          return `perform_agent_call failed: ${queued.full ? "agent queue is full" : "could not queue the agent run"}.`;
+        }
+        return `${target.name} was queued and will run in this thread.`;
+      }
+    }
+  } catch (err) {
+    if (QUEUE_ENABLED && slotToken) {
+      const { drainNextQueued } = await import("./webhook.js");
+      await drainNextQueued(conversationId, target.slug, slotToken).catch(() => {});
+    }
+    await releaseCallClaim();
+    return `perform_agent_call failed: queue coordination failed (${errMsg(err)}).`;
   }
 
-  const actionPayload = {
-    actionType: "agent-call",
-    targetAgentSlug: target.slug,
+  const fastMode = await resolveFastMode(conversationId, target.slug, target.config);
+  const dispatchPayload = {
+    userId: context.userId,
     task,
-    proposerAgentSlug: proposer.slug,
     conversationId,
+    agentSlug: target.slug,
+    orgId: target.orgId,
+    eventType: "APP_MENTIONED",
+    traceId: eventId,
+    callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+    progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+    channelId,
+    idempotencyKey: eventId,
+    fastMode,
   };
-  const flow = buildAgentCallProposalFlow({
-    proposerAgentSlug: proposer.slug,
-    proposerAgentName: proposer.name,
-    targetAgentSlug: target.slug,
-    targetAgentName: target.name,
+  let runRes: Awaited<ReturnType<typeof fetch>>;
+  try {
+    runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify(dispatchPayload),
+    });
+  } catch (err) {
+    const { drainNextQueued } = await import("./webhook.js");
+    if (QUEUE_ENABLED) await drainNextQueued(conversationId, target.slug, slotToken).catch(() => {});
+    await releaseCallClaim();
+    return `perform_agent_call failed: dispatch request failed (${errMsg(err)}).`;
+  }
+  const runBody = (await runRes.json().catch(() => null)) as
+    | { success?: boolean; sessionId?: string; error?: string }
+    | null;
+  if (!runRes.ok || !runBody?.success || !runBody.sessionId) {
+    const { drainNextQueued } = await import("./webhook.js");
+    if (QUEUE_ENABLED) await drainNextQueued(conversationId, target.slug, slotToken).catch(() => {});
+    await releaseCallClaim();
+    return `perform_agent_call failed: ${runBody?.error ?? `dispatch failed with HTTP ${runRes.status}`}.`;
+  }
+
+  const sessionContext = {
+    mentionedUserId: target.spacesAppUserId ?? "",
+    senderId: context.userId,
+    senderName: "",
+    channelId,
+    channelName: channelId,
+    conversationId,
     task,
-    why,
+    agentId: target.id,
+    agentOrgId: target.orgId,
+    agentSlug: target.slug,
+    responseMode: "conversation" as const,
+    appToken,
+    spacesAppId: target.spacesAppId,
+    spacesAppUserId: target.spacesAppUserId ?? "",
+    traceId: eventId,
+    rootAgentSlug,
+  };
+  await setSession(runBody.sessionId, sessionContext);
+  await registerRunRecovery({
+    rootSessionId: runBody.sessionId,
+    maxRetries: CONFIG.runRecoveryMaxRetries,
+    timeoutMs: CONFIG.runRecoveryTimeoutMs,
+    retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+    dispatchPayload,
+    sessionContext,
+  }).catch((err) => {
+    log.warn("[mcp/perform-agent-call] registerRunRecovery failed", { error: errMsg(err) });
+  });
+  void emitAgentWorkingSignal({
     conversationId,
     channelId,
-    signature: signAction(actionPayload),
+    agentSlug: target.slug,
+    spacesAppUserId: target.spacesAppUserId ?? undefined,
+    appToken,
+    toolLabel: `Running ${target.name}…`,
   });
-  flow.data = { ...(flow.data ?? {}), spacesAppId: proposer.spacesAppId };
 
-  const appToken = decryptStoredToken(proposer.spacesAppToken);
-  const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/apps/chat/postMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
-    body: JSON.stringify({
-      channelId,
-      conversationId,
-      flow,
-      userId: proposer.spacesAppUserId,
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!postRes.ok) {
-    const body = await postRes.text().catch(() => "");
-    return `propose-agent-call failed: could not post proposal card (${postRes.status}: ${body.slice(0, 200)})`;
-  }
-
-  return `Proposal card posted for ${target.name}. The user decides now; do NOT call propose-agent-call again for the same task.`;
+  return `Started ${target.name} in this thread. Session: ${runBody.sessionId}`;
 }
 
 type EnforcementLogType = "user" | "global" | "virtual";
@@ -1508,7 +1626,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         const content = isIntrospect
           ? await handleAgentIntrospect(tool, params ?? {}, sessionAgentOrgId, userId)
           : isOrchestrator
-            ? await postAgentCallProposal(params ?? {}, {
+            ? await performAgentCall(params ?? {}, {
                 userId,
                 sessionId: req.params.sessionId,
                 ...(agentSlug ? { agentSlug } : {}),

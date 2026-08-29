@@ -6,7 +6,7 @@
  * context that the shared package must not depend on). Registering the
  * definitions here puts them in the single custom-tool source of truth, so
  * bootstrap-tools seeds them into the `tool` catalog and the agent-config
- * Toolbox picker can offer them — same split as `propose-agent-call`
+ * Toolbox picker can offer them — same split as `perform_agent_call`
  * (custom:orchestrator). xyne-claw excludes `custom:agent-introspect` from
  * in-process loading (custom-tools.ts), so the stub execute() never runs.
  */
@@ -19,8 +19,8 @@ export const listAgentsTool: ToolDefinition = {
   slug: "list_agents",
   name: "list_agents",
   description:
-    "List all agents with a summary of their configuration: slug, name, scope, enabled, model, " +
-    "attached tools (subagents/direct/custom/gateway), skills and KB scope. Use this to survey the " +
+    "List all agents with their non-secret metadata, including identity, owner/creator, org, scope, status, model, " +
+    "timestamps, attached tools (subagents/direct/custom/gateway), skills and KB scope. Use this to survey the " +
     "fleet before recommending changes. Read-only.",
   source: "custom:agent-introspect",
   inputSchema: {
