@@ -2127,6 +2127,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "*Autonomy*",
         "- `/goal <condition>` — work autonomously until the condition is met · `/goal status`",
         "- `/experiment <duration> [provider=… model=…] [focus...]` — explore until the deadline",
+        "   ↳ duration is `<number><m|h|d>` — e.g. `/experiment 90m`, `/experiment 8h`, `/experiment 14d`. Omit it for 1h; anything longer than the 30d cap is clamped to 30d.",
         "- `/understanding [duration cap] [focus...]` — explain every path in scope; ends when the frontier is exhausted, not on the clock",
         "- `/experiment status` · `/experiment list` · `/experiment findings [id]` · `/experiment stop`",
         "",
