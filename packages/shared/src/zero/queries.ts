@@ -1064,6 +1064,19 @@ export const queries = defineQueries({
     },
   ),
 
+  ticketsByChannelSheet: defineQuery(
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
+    ({ args: { channelId } }) => {
+      return zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .orderBy('createdAt', 'desc')
+        .related('project')
+        .related('tagMappings')
+        .related('assignments', assignment => assignment.related('role'));
+    },
+  ),
+
   workflowsPaginated: defineQuery(
     z.object({
       limit: z.number(),

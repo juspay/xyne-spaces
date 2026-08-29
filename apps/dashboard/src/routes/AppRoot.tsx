@@ -179,6 +179,7 @@ import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserG
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
 import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
+import XyneSpacesTicketSheetScreen from './XyneSpacesTicketSheetScreen/XyneSpacesTicketSheetScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
@@ -1151,6 +1152,10 @@ export const router = createBrowserRouter(
                       ],
                     },
                   ],
+                },
+                {
+                  path: 'xyne-spaces-ticket-sheet',
+                  element: <XyneSpacesTicketSheetScreen />,
                 },
                 {
                   path: 'onboarding',

@@ -90,6 +90,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/calls', label: 'Calls', icon: PhoneDefault, popout: true },
   { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon, popout: true },
   { path: '/projects', label: 'Tickets', icon: TicketToken, popout: true },
+  { path: '/xyne-spaces-ticket-sheet', label: 'Xyne Sheet', icon: Grid02, popout: true },
   { path: '/sdlc', label: 'SDLC', icon: Atom, popout: true },
   { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
