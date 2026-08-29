@@ -9,7 +9,23 @@ import { db } from '@/database/client';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
 
-export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
+import {
+  MESSAGE_RECEIVED_EVENT,
+  MessageLocation,
+  messageLocationMatches,
+  type MessageEventLocation,
+} from '../types/message-received-event';
+
+export {
+  MESSAGE_RECEIVED_EVENT,
+  MessageLocation,
+  type MessageEventLocation,
+} from '../types/message-received-event';
+
+const MessageEventLocationSchema = z.enum([
+  MessageLocation.NEW_CONVERSATION,
+  MessageLocation.THREAD_REPLY,
+]);
 
 const MessageReceivedConfigSchema = z.object({
   channelIds: z
@@ -20,6 +36,14 @@ const MessageReceivedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Only fire when the sender is one of these users. Empty matches anyone.'),
+  conversationIds: z
+    .array(z.string())
+    .optional()
+    .describe('Limit to messages in these conversations. Empty matches every conversation.'),
+  messageLocation: z
+    .nativeEnum(MessageLocation)
+    .default(MessageLocation.NEW_CONVERSATION)
+    .describe('Choose whether to fire for new channel conversations, replies inside threads, or both.'),
   contentContains: z
     .string()
     .optional()
@@ -58,6 +82,7 @@ export const MessageReceivedOutputSchema = z.object({
   authorId: z.string(),
   channelId: z.string(),
   conversationId: z.string(),
+  messageLocation: MessageEventLocationSchema,
   msgType: z.nativeEnum(MessageType),
   deleted: z.boolean(),
   mentionedUsers: z
@@ -95,10 +120,10 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
   readonly outputSchema = MessageReceivedOutputSchema;
   readonly name = 'When a message is received in a channel';
   readonly description =
-    'Fires when a person starts a new message in a channel (not replies within an existing conversation). Scope by channel or sender; optionally refine by message kind or text.';
+    'Fires when a message starts a channel conversation or is added as a thread reply. Scope by location, channel, conversation, or sender; optionally refine by message kind or text.';
   readonly category = TriggerCategory.EVENT;
   readonly icon = 'MessageSquare';
-  readonly scopeFilterFields = ['channelIds', 'fromUserIds'] as const;
+  readonly scopeFilterFields = ['channelIds', 'conversationIds', 'fromUserIds'] as const;
 
   async hydratePayload(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     return hydrateMessageReceivedPayload(payload as unknown as MessageReceivedEventPayload);
@@ -113,17 +138,27 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
 
     // The message was deleted before we got to run — nothing to act on.
     if (p.deleted) return false;
+
+    // Configurations saved before thread replies were supported retain the old
+    // top-level-only behaviour. The same fallback handles executions queued
+    // before the event payload gained messageLocation during a rolling deploy.
+    if (!messageLocationMatches(cfg.messageLocation, p.messageLocation)) return false;
+
     if (cfg.messageTypes && cfg.messageTypes.length > 0) {
       if (!cfg.messageTypes.includes(p.msgType)) return false;
     }
 
     const channelIds = (cfg.channelIds ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
     const fromUserIds = (cfg.fromUserIds ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
+    const conversationIds = (cfg.conversationIds ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
     if (channelIds.length > 0) {
       if (!channelIds.includes(p.channelId)) return false;
     }
     if (fromUserIds.length > 0) {
       if (!fromUserIds.includes(p.authorId)) return false;
+    }
+    if (conversationIds.length > 0) {
+      if (!conversationIds.includes(p.conversationId)) return false;
     }
     // Match filters: contentContains, user mentions, group mentions.
     // These combine with OR logic when multiple are configured:
@@ -193,6 +228,7 @@ interface ReceivedMessage {
   channelId: string;
   msgType?: MessageType | undefined;
   userId: string;
+  messageLocation: MessageEventLocation;
 }
 
 /**
@@ -217,6 +253,7 @@ export async function emitMessageReceived(message: ReceivedMessage): Promise<voi
           conversationId: message.conversationId,
           channelId: message.channelId,
           authorId: message.userId,
+          messageLocation: message.messageLocation,
           msgType: message.msgType ?? MessageType.USER,
         },
       },
@@ -309,6 +346,7 @@ async function hydrateMessageReceivedPayload(
     authorId,
     channelId,
     conversationId,
+    messageLocation: payload.messageLocation ?? MessageLocation.NEW_CONVERSATION,
     msgType: payload.msgType,
     deleted: !messageRow,
     mentionedUsers: mentionedUsers.length > 0 ? mentionedUsers : undefined,

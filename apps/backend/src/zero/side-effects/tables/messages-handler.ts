@@ -19,7 +19,10 @@ import {
 } from '@/utils/mentionUtils';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
-import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
+import {
+  emitMessageReceived,
+  MessageLocation,
+} from '@/automations/triggers/message-received.trigger';
 import { activityTrackingService } from '@/services/activityTrackingService';
 import { Platform,
   serializeMessagePreviewMd,
@@ -394,15 +397,17 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const { senderId, content, conversationId } = message;
     const { channelId } = conversation;
 
-    if (conversation.initialMessageId === message.messageId) {
-      void emitMessageReceived({
-        messageId: message.messageId,
-        conversationId,
-        channelId,
-        msgType: message.msgType as MessageType,
-        userId: senderId,
-      });
-    }
+    void emitMessageReceived({
+      messageId: message.messageId,
+      conversationId,
+      channelId,
+      msgType: message.msgType as MessageType,
+      userId: senderId,
+      messageLocation:
+        conversation.initialMessageId === message.messageId
+          ? MessageLocation.NEW_CONVERSATION
+          : MessageLocation.THREAD_REPLY,
+    });
 
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
