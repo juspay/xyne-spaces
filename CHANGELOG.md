@@ -1,3 +1,10 @@
+## [1.244.0](https://github.com/juspay/xyne-spaces/compare/v1.243.0...v1.244.0) (2026-08-29)
+
+
+### Features
+
+* open SDLC artifacts in a window of their own ([#1196](https://github.com/juspay/xyne-spaces/issues/1196)) ([7a66745](https://github.com/juspay/xyne-spaces/commit/7a667452aedb532a20854d9b3ec5effb424f02bf))
+
 ## [1.243.0](https://github.com/juspay/xyne-spaces/compare/v1.242.6...v1.243.0) (2026-08-29)
 
 
