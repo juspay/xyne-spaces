@@ -37,6 +37,7 @@ interface PreparedRun {
   startIndex: number;
   label: 'STARTED' | 'RESUMED';
   resumeAtIndex?: number;
+  resumeStepName?: string;
 }
 
 const EXTERNAL_WAIT_STATUS = 'EXTERNAL_WAIT';
@@ -54,6 +55,19 @@ function parseStepIndexFromName(name: string): number | null {
   if (!m) return null;
   const n = Number.parseInt(m[1] as string, 10);
   return Number.isInteger(n) ? n : null;
+}
+
+export function parseNestedStepIndex(
+  pathPrefix: string,
+  resumeStepName: string,
+): number | null {
+  const prefix = `${pathPrefix}__step_`;
+  if (!resumeStepName.startsWith(prefix)) return null;
+  const suffix = resumeStepName.slice(prefix.length);
+  const match = /^(\d+)(?:__|$)/.exec(suffix);
+  if (!match) return null;
+  const index = Number.parseInt(match[1] as string, 10);
+  return Number.isInteger(index) ? index : null;
 }
 
 export class AutomationExecutor {
@@ -131,7 +145,11 @@ export class AutomationExecutor {
     config: ReturnType<typeof parseAutomationConfig>,
     prep: PreparedRun,
   ): Promise<unknown> {
-    prep.ctx.__meta = { error: null, chain: prep.chain };
+    prep.ctx.__meta = {
+      error: null,
+      chain: prep.chain,
+      ...(prep.resumeStepName ? { resumeStepName: prep.resumeStepName } : {}),
+    };
     await this.prisma.workflowExecution.update({
       where: { id: executionId },
       data: { status: AutomationRunStatus.RUNNING },
@@ -147,6 +165,7 @@ export class AutomationExecutor {
       config.steps,
       prep.startIndex,
       prep.resumeAtIndex,
+      prep.resumeStepName,
     );
   }
 
@@ -218,12 +237,14 @@ export class AutomationExecutor {
         }
       }
       const pausedIndex = pauseState.currentStepIndex;
+      const resumeStepName = initialCtx.__meta?.resumeStepName ?? `step_${pausedIndex}`;
       return {
         ctx: initialCtx,
         chain,
         startIndex: pausedIndex,
         label: 'RESUMED',
         resumeAtIndex: pausedIndex,
+        resumeStepName,
       };
     }
 
@@ -281,10 +302,12 @@ export class AutomationExecutor {
       where: { workflowExecutionId_stepName: { workflowExecutionId: runId, stepName } },
       select: { data: true },
     });
-    const rowData: Record<string, unknown> =
-      row?.data && typeof row.data === 'string'
+    const rowData: Record<string, unknown> = {
+      ...(row?.data && typeof row.data === 'string'
         ? (safeParseJson(row.data) as Record<string, unknown> | undefined) ?? {}
-        : {};
+        : {}),
+      stepName,
+    };
 
     if (typeof actionImpl.onResume === 'function') {
       return actionImpl.onResume(rowData, resolvedInput, context);
@@ -338,12 +361,14 @@ export class AutomationExecutor {
     steps: AutomationStepConfig[],
     startIndex: number,
     resumeAtIndex?: number,
+    resumeStepName?: string,
   ): Promise<unknown> {
     const automationId = context.automation.id;
     try {
       const walkResult = await automationContextStorage.run<Promise<WalkResult>>(
         { runId, automationId, chain },
-        () => this.walkSteps(steps, context, runId, startIndex, resumeAtIndex),
+        () =>
+          this.walkSteps(steps, context, runId, startIndex, resumeAtIndex, resumeStepName),
       );
 
       if (walkResult.kind === 'paused') {
@@ -387,6 +412,7 @@ export class AutomationExecutor {
     runId: string,
     startIndex: number = 0,
     resumeAtIndex?: number,
+    resumeStepName?: string,
   ): Promise<WalkResult> {
     for (let i = startIndex; i < steps.length; i++) {
       const step = steps[i] as AutomationStepConfig;
@@ -398,13 +424,31 @@ export class AutomationExecutor {
       }
 
       try {
-        await this.executeStep(step, context, { runId, stepName, isResuming });
+        await this.executeStep(step, context, {
+          runId,
+          stepName,
+          isResuming: isResuming && resumeStepName === stepName,
+          resumeStepName,
+        });
 
         const stepCtxEntry = context.steps[step.id];
         await this.markStepCompleted(runId, stepName, stepCtxEntry);
+        if (isResuming && resumeStepName === stepName && context.__meta) {
+          delete context.__meta.resumeStepName;
+        }
       } catch (err) {
         if (PauseStep.is(err)) {
-          await this.markStepWaiting(runId, stepName, context.steps[step.id], err.statePatch);
+          const pausedStepName = context.__meta?.resumeStepName ?? stepName;
+          context.__meta = {
+            ...context.__meta,
+            resumeStepName: pausedStepName,
+          };
+          await this.markStepWaiting(
+            runId,
+            stepName,
+            context.steps[step.id],
+            pausedStepName === stepName ? err.statePatch : undefined,
+          );
           await persistAutomationPauseState(runId, {
             context: JSON.stringify(context),
             currentStepIndex: i,
@@ -426,19 +470,48 @@ export class AutomationExecutor {
   private async walkNestedBranch(
     steps: AutomationStepConfig[],
     context: AutomationContext,
+    runId: string,
+    pathPrefix: string,
+    resumeStepName?: string,
   ): Promise<void> {
-    for (const step of steps) {
+    const resumeIndex = resumeStepName
+      ? parseNestedStepIndex(pathPrefix, resumeStepName)
+      : null;
+    const startIndex = resumeIndex ?? 0;
+
+    for (let i = startIndex; i < steps.length; i++) {
+      const step = steps[i] as AutomationStepConfig;
+      const stepName = `${pathPrefix}__step_${i}`;
+      const isResumeTarget = resumeStepName === stepName;
+
+      if (!isResumeTarget) {
+        await this.upsertStepRow(runId, stepName, step, 'RUNNING', null);
+      }
+
       try {
         await this.executeStep(step, context, {
-          runId: '',
-          stepName: '',
-          isResuming: false,
+          runId,
+          stepName,
+          isResuming: isResumeTarget,
+          resumeStepName,
         });
+        await this.markStepCompleted(runId, stepName, context.steps[step.id]);
+        if (isResumeTarget && context.__meta) {
+          delete context.__meta.resumeStepName;
+        }
       } catch (err) {
         if (PauseStep.is(err)) {
-          throw new Error(
-            `Step "${step.id}" (${step.type}) tried to pause inside a control-flow branch. Pausing is only supported at the top level — restructure the automation so the waiting step is not nested.`,
+          const pausedStepName = context.__meta?.resumeStepName ?? stepName;
+          context.__meta = { ...context.__meta, resumeStepName: pausedStepName };
+          await this.markStepWaiting(
+            runId,
+            stepName,
+            context.steps[step.id],
+            pausedStepName === stepName ? err.statePatch : undefined,
           );
+        } else {
+          const message = err instanceof Error ? err.message : String(err);
+          await this.markStepFailed(runId, stepName, message, context.steps[step.id]);
         }
         throw err;
       }
@@ -536,7 +609,12 @@ export class AutomationExecutor {
   private async executeStep(
     step: AutomationStepConfig,
     context: AutomationContext,
-    callCtx: { runId: string; stepName: string; isResuming: boolean },
+    callCtx: {
+      runId: string;
+      stepName: string;
+      isResuming: boolean;
+      resumeStepName?: string;
+    },
   ): Promise<void> {
     const stepImpl = this.stepRegistry.get(step.type);
 
@@ -554,7 +632,24 @@ export class AutomationExecutor {
       const t0 = Date.now();
       logger.info(`[automations] step START id=${step.id} type=${step.type}`);
       const output = await controlImpl.execute(safeResult.data, context, {
-        walkBranch: (steps, ctx) => this.walkNestedBranch(steps, ctx),
+        walkBranch: (steps, ctx, branchKey) => {
+          const branchPrefix = `${callCtx.stepName}__${branchKey}`;
+          if (
+            callCtx.resumeStepName?.startsWith(`${callCtx.stepName}__`) &&
+            !callCtx.resumeStepName.startsWith(`${branchPrefix}__`)
+          ) {
+            throw new Error(
+              `Control-flow branch changed while resuming ${callCtx.resumeStepName}; selected ${branchKey}`,
+            );
+          }
+          return this.walkNestedBranch(
+            steps,
+            ctx,
+            callCtx.runId,
+            branchPrefix,
+            callCtx.resumeStepName,
+          );
+        },
       });
       context.steps[step.id] = { type: step.type, output };
       logger.info(
@@ -590,9 +685,17 @@ export class AutomationExecutor {
       `[automations] step ${callCtx.isResuming ? 'RESUME' : 'START'} id=${step.id} type=${step.type}`,
     );
     try {
-      const output = callCtx.isResuming
-        ? await this.invokeResume(actionImpl, callCtx.runId, callCtx.stepName, resolvedInput, context)
-        : await actionImpl.execute(resolvedInput, context);
+      const store = automationContextStorage.getStore();
+      const executeAction = async (): Promise<Record<string, unknown>> =>
+        callCtx.isResuming
+          ? this.invokeResume(actionImpl, callCtx.runId, callCtx.stepName, resolvedInput, context)
+          : actionImpl.execute(resolvedInput, context);
+      const output = store
+        ? await automationContextStorage.run(
+            { ...store, stepName: callCtx.stepName },
+            executeAction,
+          )
+        : await executeAction();
       context.steps[step.id] = { type: step.type, input: persistedInput, output };
       logger.info(
         `[automations] step OK    id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0}`,

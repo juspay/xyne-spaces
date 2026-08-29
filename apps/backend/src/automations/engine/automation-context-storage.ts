@@ -4,6 +4,8 @@ export interface AutomationContextStore {
   runId: string;
   automationId: string;
   chain: readonly string[];
+  /** Current persisted workflowStep key; set while a step executes. */
+  stepName?: string;
 }
 
 export const automationContextStorage = new AsyncLocalStorage<AutomationContextStore>();

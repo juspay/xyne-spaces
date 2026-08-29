@@ -74,5 +74,7 @@ export interface AutomationContext {
   __meta?: {
     error?: string | null;
     chain?: readonly string[];
+    /** Exact workflowStep key to resume, including nested control-flow paths. */
+    resumeStepName?: string;
   };
 }

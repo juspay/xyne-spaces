@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { automationQueue } from '../queue/automation.queue';
+import { AutomationRunStatus } from '../types/status';
 
 export async function handleClawCallback(
   req: Request<{ executionId: string; stepName: string }>,
@@ -18,32 +19,57 @@ export async function handleClawCallback(
       }),
       db.workflowExecution.findUniqueOrThrow({
         where: { id: executionId },
-        select: { workspaceId: true },
+        select: { status: true },
       }),
     ]);
-    if (!existingRow) {
+    if (
+      [
+        AutomationRunStatus.COMPLETED,
+        AutomationRunStatus.FAILED,
+        AutomationRunStatus.CANCELLED,
+        AutomationRunStatus.SKIPPED,
+      ].includes(workflowExecution.status as AutomationRunStatus)
+    ) {
       logger.warn(
-        `[automations] claw-callback: no workflow_step row for execution=${executionId} step=${stepName} — proceeding with empty existing data`,
+        `[automations] claw-callback: ignoring callback for execution=${executionId} status=${workflowExecution.status}`,
       );
+      res.json({ success: true, ignored: 'execution_terminal' });
+      return;
     }
 
-    const existing = parseRowData(existingRow?.data);
-    const merged = { ...existing, agentRawResult: payload };
+    if (!existingRow) {
+      logger.warn(
+        `[automations] claw-callback: ignoring unknown step execution=${executionId} step=${stepName}`,
+      );
+      res.json({ success: true, ignored: 'unknown_step' });
+      return;
+    }
 
-    await db.workflowStep.upsert({
-      where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
-      create: {
+    const existing = parseRowData(existingRow.data);
+    if (existing.agentRawResult !== undefined) {
+      logger.info(
+        `[automations] claw-callback: duplicate ignored execution=${executionId} step=${stepName}`,
+      );
+      res.json({ success: true, duplicate: true });
+      return;
+    }
+
+    const merged = { ...existing, agentRawResult: payload };
+    const updated = await db.workflowStep.updateMany({
+      where: {
         workflowExecutionId: executionId,
         stepName,
-        stepExecutorType: 'RUN_AGENT',
-        status: 'EXTERNAL_WAIT',
-        data: JSON.stringify(merged),
-        workspaceId: workflowExecution.workspaceId,
+        data: existingRow.data,
       },
-      update: {
-        data: JSON.stringify(merged),
-      },
+      data: { data: JSON.stringify(merged) },
     });
+    if (updated.count === 0) {
+      logger.info(
+        `[automations] claw-callback: concurrent duplicate ignored execution=${executionId} step=${stepName}`,
+      );
+      res.json({ success: true, duplicate: true });
+      return;
+    }
 
     await automationQueue.enqueueRun({ executionId });
 

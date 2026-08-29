@@ -96,7 +96,8 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
 
     const stepCount = Object.keys(context.steps).length;
     const currentIndex = Math.max(0, stepCount - 1);
-    const jobId = `${store.runId}:delay:step_${currentIndex}`;
+    const stepName = store.stepName ?? `step_${currentIndex}`;
+    const jobId = `${store.runId}:delay:${stepName}`;
 
     logger.info(
       `[DELAY] scheduling wake-up — executionId=${store.runId} jobId=${jobId} amount=${amount} unit=${unit} delayedUntil=${delayedUntil}`,

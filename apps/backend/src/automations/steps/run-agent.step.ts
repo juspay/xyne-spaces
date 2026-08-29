@@ -66,8 +66,9 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const stepCount = Object.keys(context.steps).length;
     const currentIndex = Math.max(0, stepCount - 1);
 
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const stepName = store.stepName ?? `step_${currentIndex}`;
+    const sessionId = `${store.runId}:${stepName}`;
+    const callbackUrl = buildCallbackUrl(store.runId, stepName);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
@@ -77,7 +78,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
+      `[RUN_AGENT] firing — executionId=${store.runId} step=${stepName} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
     );
 
     try {
