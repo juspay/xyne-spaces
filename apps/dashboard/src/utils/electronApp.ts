@@ -160,6 +160,55 @@ export const standaloneNavigate = (
   void navigate(normalizedPath, navigateOptions);
 };
 
+export const shouldOpenInNewWindow = (event?: { metaKey: boolean; ctrlKey: boolean }): boolean =>
+  Boolean(event && (event.metaKey || event.ctrlKey) && isElectronApp());
+
+const standaloneWindows = new Map<string, Window>();
+
+const STANDALONE_WINDOW_PREFIX = 'xyne-window:';
+
+let standaloneOpenCount = 0;
+
+const standaloneWindowTarget = (key: string): string => {
+  if (!isElectronApp()) {
+    return `${STANDALONE_WINDOW_PREFIX}${key}`;
+  }
+  standaloneOpenCount += 1;
+  return `${STANDALONE_WINDOW_PREFIX}${key}#${standaloneOpenCount}`;
+};
+
+export const openStandaloneWindow = (path: string, key?: string): boolean => {
+  if (typeof window === 'undefined' || !path) {
+    return false;
+  }
+
+  if (key && !isElectronApp()) {
+    const existing = standaloneWindows.get(key);
+    if (existing && !existing.closed) {
+      existing.focus();
+      return true;
+    }
+    standaloneWindows.delete(key);
+  }
+
+  const opened = window.open(toStandalonePath(path), key ? standaloneWindowTarget(key) : '_blank');
+  if (!opened) {
+    if (key && isElectronApp() && standaloneWindows.has(key)) {
+      return true;
+    }
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('Failed to open standalone window; popup may be blocked'),
+    });
+    return false;
+  }
+  if (key) {
+    standaloneWindows.set(key, opened);
+  }
+  opened.focus();
+  return true;
+};
+
 export interface CreateTicketPopoutDraft {
   popoutId: string;
   workspaceId?: string | null | undefined;

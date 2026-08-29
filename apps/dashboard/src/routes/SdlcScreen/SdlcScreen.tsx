@@ -1,4 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+} from 'react';
 import {
   ChannelRole,
   isBaselineCanvasType,
@@ -37,11 +46,16 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  SquareArrowOutUpRight,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
-import { isFramedSdlcSurface, requestSdlcFrameReset } from './useSdlcFrameBridge';
+import {
+  isFramedSdlcSurface,
+  isSdlcDocumentWindow,
+  requestSdlcFrameReset,
+} from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
@@ -77,6 +91,11 @@ import {
 } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import { useExternalDebuggerStore } from '../../store/useExternalDebuggerStore';
 import CanvasScreen from '../../components/Canvas/CanvasScreen';
+import {
+  isElectronApp,
+  openStandaloneWindow,
+  shouldOpenInNewWindow,
+} from '../../utils/electronApp';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { buildSdlcArtifactCreationPrompt } from './artifactCreationPrompt';
@@ -174,7 +193,15 @@ function actionErrorMessage(error: unknown): string {
 }
 
 export default function SdlcScreen(): ReactElement {
-  const { repoId, section: routeSection } = useParams<{ repoId?: string; section?: string }>();
+  const {
+    workspaceId,
+    repoId,
+    section: routeSection,
+  } = useParams<{
+    workspaceId?: string;
+    repoId?: string;
+    section?: string;
+  }>();
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuthContextValues();
@@ -814,12 +841,44 @@ export default function SdlcScreen(): ReactElement {
     [location.search, navigate, ownerHasConversations],
   );
 
-  const openCanvas = (canvasId: string): void => {
+  interface OpenCanvasOptions {
+    event?: ReactMouseEvent | undefined;
+    withDiscussion?: boolean;
+  }
+
+  const canvasSearch = (canvasId: string, withDiscussion: boolean): URLSearchParams => {
+    const search = new URLSearchParams({ canvas: canvasId });
+    if (
+      withDiscussion &&
+      ownerHasConversations(resolveCanvasDiscussionOwner(canvasId, canvases)?.canvasId ?? null)
+    ) {
+      search.set('discussion', '1');
+      search.set('chat', 'conversations');
+    }
+    return search;
+  };
+
+  const openCanvasInWindow = (canvasId: string, withDiscussion: boolean): boolean => {
+    if (!workspaceId || !repoId) return false;
+    return openStandaloneWindow(
+      `/sdlc/${workspaceId}/${repoId}/${section}?${canvasSearch(canvasId, withDiscussion).toString()}`,
+      `sdlc-canvas:${canvasId}`,
+    );
+  };
+
+  const openCanvas = (canvasId: string, options?: OpenCanvasOptions): void => {
     if (!repoId) return;
+
+    const withDiscussion = Boolean(options?.withDiscussion);
+    if (shouldOpenInNewWindow(options?.event) && openCanvasInWindow(canvasId, withDiscussion)) {
+      return;
+    }
+
     setRelatedSourceId(null);
+    const search = canvasSearch(canvasId, withDiscussion);
     navigateWithinSdlc(
       `/sdlc/${repoId}/${section}`,
-      `?canvas=${encodeURIComponent(canvasId)}`,
+      `?${search.toString()}`,
       resolveCanvasDiscussionOwner(canvasId, canvases)?.canvasId ?? null,
     );
   };
@@ -1555,7 +1614,7 @@ export default function SdlcScreen(): ReactElement {
                   title={canvas.title}
                   eyebrow={folder.name}
                   {...(cardMeta.length > 0 && { meta: cardMeta })}
-                  onOpen={() => openCanvas(canvas.id)}
+                  onOpen={event => openCanvas(canvas.id, { event, withDiscussion: true })}
                   actionLabel='Create Artifact'
                   onAction={() => {
                     setDeriveTypeId(null);
@@ -1575,6 +1634,8 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
+  const isDocumentWindow = isSdlcDocumentWindow();
+
   return (
     <div className='flex h-full min-w-0 overflow-hidden bg-transparent'>
       <aside
@@ -1585,6 +1646,7 @@ export default function SdlcScreen(): ReactElement {
             (section === 'tracks' && selectedTrack)
             ? 'w-72'
             : 'w-[260px]',
+          isDocumentWindow && 'hidden',
         )}
         style={{ backdropFilter: 'blur(var(--sidebar-background-blur))' }}
       >
@@ -1996,6 +2058,19 @@ export default function SdlcScreen(): ReactElement {
                 )}
               </div>
               <div className='flex shrink-0 items-center gap-2'>
+                {selectedCanvasId && isElectronApp() && !isDocumentWindow ? (
+                  <Button
+                    size='icon'
+                    variant='ghost'
+                    aria-label='Open in new window'
+                    title='Open in new window'
+                    onClick={() => openCanvasInWindow(selectedCanvasId, chatLayout.panelOpen)}
+                    data-track-category='SdlcHub'
+                    data-track-name='ArtifactOpenedInWindow'
+                  >
+                    <SquareArrowOutUpRight className='size-4' />
+                  </Button>
+                ) : null}
                 {chatPanelAvailable ? (
                   <Button
                     size='icon'
@@ -3049,7 +3124,7 @@ function ArtifactCard({
   title: string;
   eyebrow: string;
   meta?: string[];
-  onOpen: () => void;
+  onOpen: (event?: ReactMouseEvent) => void;
   onAction: () => void;
   onCreateTicket: () => void;
   actionLabel: string;
