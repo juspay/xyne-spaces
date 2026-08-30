@@ -89,6 +89,7 @@ import {
   useProjectTicketSearch,
   VESPA_MAX_BOARD_FILTER_VALUES,
 } from '../../../hooks/useProjectTicketSearch';
+import { getSubTicketLinkErrorMessage, subTicketService } from '../../../services/subTicketService';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
@@ -2035,30 +2036,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       subTicketSearch.reset();
       setIsLinkingSubTicket(true);
 
-      void zero
-        .mutate(
-          mutators.subTicket.linkExisting({
-            mappingId: uuidv4(),
-            timestamp: Date.now(),
-            ticketId: ticket.id,
-            mappedTicketId,
-            // Fallback only — the row renders from the linked ticket itself.
-            subTicketTitle: candidate?.xyneId || candidate?.title || 'Subticket',
-          }),
+      // The row appears once the write replicates back through Zero, not optimistically.
+      void subTicketService
+        .link(
+          ticket.id,
+          mappedTicketId,
+          // Fallback only — the row renders from the linked ticket itself.
+          candidate?.xyneId || candidate?.title || 'Subticket',
         )
-        .server.then(result => {
-          if (result.type === 'error') {
-            toast.error(result.error.message || 'Failed to link sub-ticket');
-          }
-        })
         .catch((error: unknown) => {
-          toast.error(error instanceof Error ? error.message : 'Failed to link sub-ticket');
+          toast.error(getSubTicketLinkErrorMessage(error, 'Failed to link sub-ticket'));
         })
         .finally(() => {
           setIsLinkingSubTicket(false);
         });
     },
-    [isLinkingSubTicket, subTicketSearch, ticket?.id, zero],
+    [isLinkingSubTicket, subTicketSearch, ticket?.id],
   );
 
   const handleUnlinkSubTicket = useCallback(
@@ -2077,19 +2070,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         });
       };
 
-      void zero
-        .mutate(mutators.subTicket.unlink({ mappingId, timestamp: Date.now() }))
-        .server.then(result => {
-          if (result.type === 'error') {
-            toast.error(result.error.message || 'Failed to unlink sub-ticket');
-          }
-        })
+      void subTicketService
+        .unlink(mappingId)
         .catch((error: unknown) => {
-          toast.error(error instanceof Error ? error.message : 'Failed to unlink sub-ticket');
+          toast.error(getSubTicketLinkErrorMessage(error, 'Failed to unlink sub-ticket'));
         })
         .finally(clearInFlight);
     },
-    [unlinkingMappingIds, zero],
+    [unlinkingMappingIds],
   );
 
   // Early return if no ticket data - after all hooks

@@ -93,6 +93,7 @@ import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
+import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
@@ -631,6 +632,7 @@ export class App {
 
     // Board routes (auth and ACL required)
     this.app.use('/api/boards', authMiddleware.authenticate, boardRoutes);
+    this.app.use('/api/sub-tickets', authMiddleware.authenticate, subTicketRoutes);
 
     // Knowledge routes (auth required)
     this.app.use('/api/knowledge', authMiddleware.authenticate, knowledgeRoutes);

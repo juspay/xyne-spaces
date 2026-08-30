@@ -3,39 +3,16 @@ import {
   MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { ChannelVisibility, Schema, WorkspaceRole } from '@xyne/shared';
+import { ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasGuestTicketAccess } from '../core/guest-access';
-import { resolveAccessibleTicket } from '../core/ticket-access';
 
 export class SubTicketsACL extends BaseACL<'sub_tickets'> {
 
-  /**
-   * Pointing a sub-ticket at a ticket exposes its title to everyone who reads the parent.
-   * Applied on insert too — linkExisting sets mappedTicketId at insert time.
-   */
-  private async verifyMappedTicketAccess(
-    mappedTicketId: string,
-    tx: Transaction<Schema>,
-    operation: 'insert' | 'update',
-  ): Promise<void> {
-    const accessibleMapped = await resolveAccessibleTicket(mappedTicketId, this.ctx, tx);
-
-    if (!accessibleMapped) {
-      throw new MutationACLError(
-        `Sub-ticket ${operation} failed: you do not have access to the target mapped ticket's channel`,
-        'sub_tickets',
-      );
-    }
-  }
-
-  async canInsert(args: InsertValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
+  async canInsert(args: InsertValue<TableSchema<'sub_tickets'>>, _tx: Transaction<Schema>): Promise<void> {
     if (args.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Sub-ticket not in this workspace', 'sub_tickets');
-    }
-    if (args.mappedTicketId) {
-      await this.verifyMappedTicketAccess(args.mappedTicketId as string, tx, 'insert');
     }
   }
 
@@ -55,17 +32,19 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
-    if (this.ctx.role === WorkspaceRole.GUEST) {
+    if (this.ctx.role === 'GUEST') {
       await this.verifyGuestScope(args.id, tx);
-      // verifyGuestScope only covers the CURRENT mapping - re-pointing needs the new target too.
+      // verifyGuestScope only covers the CURRENT mapping - re-pointing needs the new target.
       if (args.mappedTicketId) {
-        await this.verifyMappedTicketAccess(args.mappedTicketId as string, tx, 'update');
+        const target = await tx.run(zql.tickets.where('id', args.mappedTicketId as string).one());
+        if (!target || !(await hasGuestTicketAccess(this.ctx, tx, target))) {
+          throw new MutationACLError('Sub-ticket not accessible for guest users', 'sub_tickets');
+        }
       }
       return;
     }
 
-    // subTicket.update has no existence check of its own, and a missing row must not
-    // report success - one message for both cases.
+    // Get existing subTicket to verify workspace
     const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());
     if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
@@ -74,7 +53,40 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
     // When mappedTicketId is being changed, verify the caller can access the new
     // target's channel and that it is in the same workspace.
     if (args.mappedTicketId) {
-      await this.verifyMappedTicketAccess(args.mappedTicketId as string, tx, 'update');
+      const accessibleNewMapped = await tx.run(zql.tickets
+        .where('id', args.mappedTicketId as string)
+        .where('workspaceId', this.ctx.workspaceId)
+        .whereExists('conversation', (conversation) => {
+          return conversation.whereExists('channel', (channel) => {
+            return channel.where(({ cmp, or, exists, and }) => {
+              return or(
+                and(
+                  cmp('visibility', ChannelVisibility.PRIVATE),
+                  exists('participants', (participants) => {
+                    return participants.where('userId', this.ctx.userID);
+                  })
+                ),
+                and(
+                  cmp('visibility', ChannelVisibility.PUBLIC),
+                  exists('project', (project) => {
+                    return project.whereExists('channels', (channelQuery) => {
+                      return channelQuery
+                        .where('visibility', ChannelVisibility.PUBLIC)
+                        .whereExists('participants', (participants) => {
+                          return participants.where('userId', this.ctx.userID);
+                        });
+                    });
+                  })
+                )
+              );
+            });
+          });
+        })
+        .one());
+
+      if (!accessibleNewMapped) {
+        throw new MutationACLError('Sub-ticket update failed: you do not have access to the target mapped ticket\'s channel', 'sub_tickets');
+      }
     }
 
     if (!subTicket.mappedTicketId) {
@@ -86,12 +98,26 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
       .whereExists('mappedTicket', (ticket) => {
         return ticket.whereExists('conversation', (conversation) => {
           return conversation.whereExists('channel', (channel) => {
-            return channel.where(({ cmp, or, exists }) => {
+            return channel.where(({ cmp, or, exists, and }) => {
               return or(
-                cmp('visibility', ChannelVisibility.PUBLIC),
-                exists('participants', (participants) => {
-                  return participants.where('userId', this.ctx.userID);
-                })
+                and(
+                  cmp('visibility', ChannelVisibility.PRIVATE),
+                  exists('participants', (participants) => {
+                    return participants.where('userId', this.ctx.userID);
+                  })
+                ),
+                and(
+                  cmp('visibility', ChannelVisibility.PUBLIC),
+                  exists('project', (project) => {
+                    return project.whereExists('channels', (channelQuery) => {
+                      return channelQuery
+                        .where('visibility', ChannelVisibility.PUBLIC)
+                        .whereExists('participants', (participants) => {
+                          return participants.where('userId', this.ctx.userID);
+                        });
+                    });
+                  })
+                )
               );
             });
           });
@@ -104,41 +130,8 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
     }
   }
 
-  /**
-   * Sub-tickets cannot be deleted to close work — use a status change. The one exception is
-   * `subTicket.unlink` dropping a mapping-less row that only points at an existing ticket.
-   */
-  async canDelete(args: DeleteID<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
-    const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());
-    if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) {
-      throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
-    }
-
-    if (!subTicket.mappedTicketId) {
-      throw new MutationACLError(
-        'Sub-ticket delete failed: sub-tickets cannot be deleted, use status changes instead',
-        'sub_tickets',
-      );
-    }
-
-    const remainingMappings = await tx.run(
-      zql.ticket_sub_ticket_mappings.where('subTicketId', args.id),
-    );
-    if (remainingMappings.length > 0) {
-      throw new MutationACLError(
-        'Sub-ticket delete failed: unlink it from its parent ticket first',
-        'sub_tickets',
-      );
-    }
-
-    if (this.ctx.role === WorkspaceRole.GUEST) {
-      const mappedTicket = await tx.run(
-        zql.tickets.where('id', subTicket.mappedTicketId).one(),
-      );
-      if (!mappedTicket || !(await hasGuestTicketAccess(this.ctx, tx, mappedTicket))) {
-        throw new MutationACLError('Sub-ticket not accessible for guest users', 'sub_tickets');
-      }
-    }
+  async canDelete(_args: DeleteID<TableSchema<'sub_tickets'>>, _tx: Transaction<Schema>): Promise<void> {
+    throw new MutationACLError('Sub-ticket delete failed: sub-tickets cannot be deleted, use status changes instead', 'sub_tickets');
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'sub_tickets'>>, _tx: Transaction<Schema>): Promise<void> {
