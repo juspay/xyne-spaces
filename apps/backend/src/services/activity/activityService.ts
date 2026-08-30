@@ -437,6 +437,7 @@ export class ActivityService {
         data: {
           actorId: actorId,
           isRead: false,
+          updatedAt: new Date(),
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
         },
@@ -572,6 +573,7 @@ export class ActivityService {
             actorId: actorId,
             isRead: false,
             messageId: latestReplyMessageId,
+            updatedAt: new Date(),
             actionSourceId: latestReplyMessageId,
             ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
           },
@@ -656,6 +658,7 @@ export class ActivityService {
         actorId,
         messageId: latestReplyMessageId,
         actionSourceId: latestReplyMessageId,
+        updatedAt: new Date(),
       },
     });
   }
