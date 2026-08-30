@@ -63,11 +63,13 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       );
     }
 
-    const stepCount = Object.keys(context.steps).length;
-    const currentIndex = Math.max(0, stepCount - 1);
+    const stepName = deriveStepNameFromCtx(context);
+    if (!stepName) {
+      throw new Error('[RUN_AGENT] cannot derive stepName for this step');
+    }
 
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const sessionId = `${store.runId}:${stepName}`;
+    const callbackUrl = buildCallbackUrl(store.runId, stepName);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
@@ -77,7 +79,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
+      `[RUN_AGENT] firing — executionId=${store.runId} stepName=${stepName} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
     );
 
     try {
@@ -93,7 +95,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       });
     } catch (err) {
       logger.error(
-        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepIndex=${currentIndex}:`,
+        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepName=${stepName}:`,
         err,
       );
       throw err;
@@ -354,7 +356,10 @@ async function resolveHeadlessIdentityContext(
   };
 }
 
+
 function deriveStepNameFromCtx(context: AutomationContext): string | null {
+  const published = automationContextStorage.getStore()?.currentStepName;
+  if (published) return published;
   const stepCount = Object.keys(context.steps).length;
   if (stepCount === 0) return null;
   return `step_${stepCount - 1}`;
