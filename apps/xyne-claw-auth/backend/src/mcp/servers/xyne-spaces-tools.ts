@@ -7590,21 +7590,37 @@ const onyxBenchSearch: ToolDef = {
     const workspaceId = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
     if (!workspaceId) return err("XYNE_SPACES_WORKSPACE_ID is not set — cannot scope benchmark search.");
 
-    // Build YQL — mirrors the eval retrieval query from enterpriseRagEval.ts:
+    // Build YQL — hybrid retrieval matching spaces-search:
     //   select * from sources chat_message, file, mail, ticket
-    //   where ({grammar:"tokenize"} userInput(@query)) and workspaceId contains "..."
+    //   where (userInput(@query) or nearestNeighbor(text_embeddings, e) or nearestNeighbor(chunk_embeddings, e) or nearestNeighbor(combined_embeddings, e)) and workspaceId contains "..."
+    //
+    // userInput defaults to weakAnd (partial token match — fewer false
+    // negatives than grammar:"tokenize" which required ALL tokens). The
+    // nearestNeighbor ORs add semantic retrieval: queryDirect already sends
+    // input.query(e)=embed(hf-embedder, @query) via defaultNativeInputs, so
+    // the embedding vector is available. Each schema has its own embedding
+    // field name (chat_message→text_embeddings, file/mail→chunk_embeddings,
+    // ticket→combined_embeddings); OR-ing all three ensures the NN clause
+    // fires on whichever schema the relevant doc lives in.
     //
     // sourceType narrowing: each source type gets its own channel container
     // (bench-ch-<workspaceId>-<sourceType>), and channelId is imported from
     // channelRef.docId on all 4 schemas. This is the ONLY reliable way to
     // narrow by source type — docType doesn't distinguish (e.g. gmail→"mail",
     // jira→"ticket", fireflies→"file").
+    const targetHits = Math.max(hits, 50);
+    const nnClauses = [
+      `({targetHits:${targetHits}} nearestNeighbor(text_embeddings, e))`,
+      `({targetHits:${targetHits}} nearestNeighbor(chunk_embeddings, e))`,
+      `({targetHits:${targetHits}} nearestNeighbor(combined_embeddings, e))`,
+    ].join(" or ");
+    const retrieval = `(userInput(@query) or ${nnClauses})`;
     const clauses: string[] = [`workspaceId contains "${esc(workspaceId)}"`];
     if (sourceType) {
       const benchChannelId = `bench-ch-${workspaceId}-${sourceType}`;
       clauses.push(`channelId contains "${esc(benchChannelId)}"`);
     }
-    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ({grammar:"tokenize"} userInput(@query)) and ${clauses.join(" and ")}`;
+    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ${retrieval} and ${clauses.join(" and ")}`;
 
     try {
       const data = await queryDirect(
