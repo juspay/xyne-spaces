@@ -1,0 +1,32 @@
+# claw-auth's own Postgres, read-only from Grafana's point of view.
+#
+# Distinct-user counts cannot come from the metrics store: a user id in a metric
+# label is unbounded cardinality and PII, and a pre-aggregated sketch can only
+# answer the fixed windows it was exported at. Reading the app's own table lets a
+# panel run COUNT(DISTINCT "userId") over whatever range the time picker selects.
+#
+# Credentials come from the environment (same names and defaults as
+# docker/init-db.sh), so a deployment supplies its own rather than inheriting the
+# local bootstrap pair.
+
+apiVersion: 1
+
+datasources:
+  - name: ClawAuthDB
+    uid: claw-auth-postgres
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: $__env{CLAW_DB_USER}
+    isDefault: false
+    editable: true
+    jsonData:
+      database: claw_auth_db
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+    secureJsonData:
+      password: $__env{CLAW_DB_PASSWORD}

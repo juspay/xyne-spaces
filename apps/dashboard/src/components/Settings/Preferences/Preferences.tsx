@@ -47,6 +47,7 @@ import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
+import { DailyBriefToggle } from '../DailyBriefToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -807,18 +808,21 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
 const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
     <SectionHeader title='Launch' subtitle='Configure your startup experience' />
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          Start with the Xyne AI landing page instead of chat
-        </p>
+    <div className='p-3 rounded-lg border border-border bg-muted/30'>
+      <div className='flex items-center justify-between gap-4'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Start with the Xyne AI landing page instead of chat
+          </p>
+        </div>
+        <Switch
+          id='ai-landing-default'
+          checked={state.aiLandingDefault}
+          onCheckedChange={state.setAiLandingDefault}
+        />
       </div>
-      <Switch
-        id='ai-landing-default'
-        checked={state.aiLandingDefault}
-        onCheckedChange={state.setAiLandingDefault}
-      />
+      <DailyBriefToggle available={state.aiLandingDefault} />
     </div>
     <ClawOverlayToggle />
   </div>

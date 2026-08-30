@@ -25,11 +25,24 @@
   "timezone": "",
   "title": "Daily Brief",
   "uid": "xyne-daily-brief",
-  "version": 10,
+  "version": 15,
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Adoption & volume",
+      "type": "row"
+    },
+    {
       "type": "stat",
-      "title": "Users with a brief",
+      "title": "Users with a brief (all time)",
       "description": "Users who have at least one generated brief. Read from generated_content, so it is exact and independent of the time range.",
       "datasource": {
         "type": "prometheus",
@@ -39,7 +52,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "fieldConfig": {
@@ -85,7 +98,7 @@
     },
     {
       "type": "stat",
-      "title": "Users who requested a regen",
+      "title": "Users who requested a regen (all time)",
       "description": "Users who have requested at least one regeneration. Counted by user id in Redis when the request reaches claw-auth, so it is exact and independent of the time range.",
       "datasource": {
         "type": "prometheus",
@@ -95,7 +108,7 @@
         "h": 6,
         "w": 6,
         "x": 6,
-        "y": 0
+        "y": 1
       },
       "id": 2,
       "fieldConfig": {
@@ -151,73 +164,7 @@
     },
     {
       "type": "stat",
-      "title": "Users (devices) who switched briefs",
-      "description": "Distinct devices that picked a different brief from the history menu within the selected time range. Switching is a client-only action, so the only identity available is a per-browser id \u2014 the same person on web and Electron counts twice.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "id": 3,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "0"
-                }
-              },
-              "type": "special"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "none",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "count(count by (instance) (increase(daily_brief_switched_total[$__range]) > 0))"
-        }
-      ]
-    },
-    {
-      "type": "stat",
-      "title": "Briefs generated",
+      "title": "Briefs generated (all time)",
       "description": "Briefs that exist globally (one per user per day; a regeneration overwrites that day's brief rather than adding one). Read from generated_content, so it is exact and independent of the time range.",
       "datasource": {
         "type": "prometheus",
@@ -226,8 +173,8 @@
       "gridPos": {
         "h": 6,
         "w": 6,
-        "x": 18,
-        "y": 0
+        "x": 12,
+        "y": 1
       },
       "id": 4,
       "fieldConfig": {
@@ -273,7 +220,7 @@
     },
     {
       "type": "stat",
-      "title": "Regenerations",
+      "title": "Regenerations (all time)",
       "description": "Regeneration requests ever served, globally. Counted in Redis when the request reaches claw-auth, so it survives restarts and is exact regardless of the time range.",
       "datasource": {
         "type": "prometheus",
@@ -282,8 +229,8 @@
       "gridPos": {
         "h": 6,
         "w": 6,
-        "x": 0,
-        "y": 6
+        "x": 18,
+        "y": 1
       },
       "id": 5,
       "fieldConfig": {
@@ -330,16 +277,16 @@
     {
       "type": "timeseries",
       "title": "Briefs and regenerations over time",
-      "description": "Lifetime totals plotted over the selected range \u2014 the slope is how fast briefs are being produced and regenerated.",
+      "description": "Lifetime totals plotted over the selected range — the slope is how fast briefs are being produced and regenerated.",
       "datasource": {
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
       },
       "gridPos": {
         "h": 6,
-        "w": 18,
-        "x": 6,
-        "y": 6
+        "w": 24,
+        "x": 0,
+        "y": 7
       },
       "id": 6,
       "fieldConfig": {
@@ -388,9 +335,22 @@
       ]
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 104,
+      "panels": [],
+      "title": "Brief switching",
+      "type": "row"
+    },
+    {
       "type": "stat",
-      "title": "Users who rejected the auto brief",
-      "description": "Users who have re-run a brief the cron produced for them \u2014 dissatisfaction with the default. Exact, lifetime.",
+      "title": "Total brief switches (all time)",
+      "description": "Every brief switch ever served, counted server-side (Redis INCR). Events, not people — compare against \"Users who switched briefs\" to see switches-per-person.",
       "datasource": {
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
@@ -399,7 +359,286 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 12
+        "y": 14
+      },
+      "id": 24,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "max(daily_brief_switches_total)",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Users who switched briefs (last 30 days)",
+      "description": "Distinct users who switched to a different brief in the last 30 days, counted server-side by userId (Redis HyperLogLog, ~0.81% error). Replaces an earlier device-based count: the client metric carries a per-device localStorage id, so it counted browsers rather than people — one person on three devices read as three. A beacon can be blocked or lost on a fast page close, so treat this as a tight lower bound. See \"Brief switches by control\" for event volume.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 14
+      },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "max(daily_brief_switch_users_window{window=\"30d\"})",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "piechart",
+      "title": "Switches: list vs calendar (all time)",
+      "description": "Share of switch events by control, server-side. The calendar is the ONLY way to reach a brief older than the 8 most recent, so date_picker volume is the direct read on whether people want older briefs. Events, so one heavy user can dominate — read alongside panel \"Users reaching for older briefs\".",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 25,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "max by (source) (daily_brief_switches_by_source)",
+          "instant": true,
+          "refId": "A",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Users reaching for older briefs (all time)",
+      "description": "Distinct users who have used each control at least once. NOTE: these sets OVERLAP — someone who used both is counted in both, so the bars do not sum to the total user count and must not be drawn as a pie. date_picker here = how many people ever went past the recent window, which is the per-person version of the question.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 26,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "0"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "max by (source) (daily_brief_switch_users_by_source)",
+          "instant": true,
+          "refId": "A",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Regeneration behaviour & outcomes",
+      "type": "row"
+    },
+    {
+      "type": "stat",
+      "title": "Users who rejected the auto brief (all time)",
+      "description": "Users who have re-run a brief the cron produced for them — dissatisfaction with the default. Exact, lifetime.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 27
       },
       "id": 7,
       "fieldConfig": {
@@ -445,8 +684,8 @@
     },
     {
       "type": "stat",
-      "title": "Users who regenerated more than once",
-      "description": "Users who re-ran a brief they had already regenerated \u2014 the regeneration itself did not satisfy them. Exact, lifetime.",
+      "title": "Users who regenerated more than once (all time)",
+      "description": "Users who re-ran a brief they had already regenerated — the regeneration itself did not satisfy them. Exact, lifetime.",
       "datasource": {
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
@@ -455,7 +694,7 @@
         "h": 6,
         "w": 6,
         "x": 6,
-        "y": 12
+        "y": 27
       },
       "id": 8,
       "fieldConfig": {
@@ -500,114 +739,18 @@
       ]
     },
     {
-      "type": "barchart",
-      "title": "Why briefs get regenerated",
-      "description": "replacing_scheduled_brief = rejecting the cron brief \u00b7 replacing_own_regeneration = rejecting their own re-run \u00b7 retry_after_failure = the previous run errored, not a quality signal \u00b7 first_brief_of_day = no brief existed yet.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 12,
-        "y": 12
-      },
-      "id": 9,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "fillOpacity": 80,
-            "lineWidth": 1
-          },
-          "mappings": [],
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (origin) (increase(daily_brief_regeneration_attempts_total[$__range]))",
-          "legendFormat": "{{origin}}"
-        }
-      ]
-    },
-    {
-      "type": "barchart",
-      "title": "How many regenerations it takes",
-      "description": "Attempt depth within a single day per user. A tall 1 with a short 2 means one re-run usually settles it; a long tail means the brief is not converging.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 12,
-        "x": 0,
-        "y": 18
-      },
-      "id": 10,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "fillOpacity": 80,
-            "lineWidth": 1
-          },
-          "mappings": [],
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "orientation": "auto",
-        "xTickLabelRotation": 0
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (attempt) (increase(daily_brief_regeneration_attempts_total{origin!=\"retry_after_failure\"}[$__range]))",
-          "legendFormat": "attempt {{attempt}}"
-        }
-      ]
-    },
-    {
       "type": "stat",
       "title": "Rejection rate of the auto brief",
-      "description": "Share of cron-generated briefs that the user immediately re-ran. The headline quality number for the scheduled brief.",
+      "description": "Share of cron-generated briefs that the user immediately re-ran. The headline quality number for the scheduled brief. Reads as blank rather than 0 when the cron has produced nothing in the window: clamp_min only rescues a denominator of zero, not a denominator that is an empty vector, so an empty panel here means 'no scheduled runs in range', not 'broken'.",
       "datasource": {
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
       },
       "gridPos": {
         "h": 6,
-        "w": 12,
+        "w": 6,
         "x": 12,
-        "y": 18
+        "y": 27
       },
       "id": 11,
       "fieldConfig": {
@@ -620,7 +763,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "\u2014"
+                  "text": "—"
                 }
               },
               "type": "special"
@@ -663,6 +806,295 @@
     },
     {
       "type": "stat",
+      "title": "Regeneration success rate",
+      "description": "Share of on-demand regeneration runs that produced a brief, within the selected range. Reliability of the Regenerate button, as distinct from the quality signals above. CAVEAT: the denominator includes runs cut short by an HTTP connection close (tab close, reload, network drop, proxy timeout), which are currently recorded as 'failed', so this reads LOWER than true pipeline reliability. Treat it as a floor until 'aborted' is split out server-side.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 27
+      },
+      "id": 22,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum(increase(daily_brief_generated_total{trigger=\"regenerate\",status=\"ready\"}[$__range])) / clamp_min(sum(increase(daily_brief_generated_total{trigger=\"regenerate\"}[$__range])), 1)"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Why briefs get regenerated",
+      "description": "replacing_scheduled_brief = rejecting the cron brief · replacing_own_regeneration = rejecting their own re-run · retry_after_failure = the previous run errored, not a quality signal · first_brief_of_day = no brief existed yet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (origin) (increase(daily_brief_regeneration_attempts_total[$__range]))",
+          "legendFormat": "{{origin}}"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Regeneration outcomes",
+      "description": "How on-demand regenerations actually ended, from the server-side completion counter. Recorded when the run finishes, unlike 'Regenerations' which is counted when the request arrives — the difference between the two is runs that started and never completed. CAVEAT: 'failed' currently absorbs runs the server aborted because the HTTP connection closed (tab close, reload, network drop, proxy timeout), so it overstates genuine pipeline failures by an unknown amount; splitting an 'aborted' status out of it is a pending server-side change. This is NOT the same event as 'Regenerations abandoned' below: that histogram fires on component unmount (an in-app route change), and the dashboard passes no AbortSignal, so navigating away inside the app does not abort the run. The two count different things and do not double-count — except on a tab close, which can trigger both.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 21,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (status) (increase(daily_brief_generated_total{trigger=\"regenerate\"}[$__range]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "How far the regeneration ladder goes",
+      "description": "SURVIVAL CURVE, NOT A DISTRIBUTION. Bar N = share of the day's regenerating users who reached at least attempt N, normalised to attempt 1. A user-day that went three deep is counted in bars 1, 2 AND 3, so bar heights do NOT mean 'N users needed N regenerations' — read 'Where people stop' for that. Bars only ever descend. CAVEAT: attempts 1–3 count user-days (the per-user-per-day Redis key increments once per depth), but 4+ aggregates every request at depth ≥4, so the 4+ bar is a REQUEST tally in different units and can exceed 100%. The origin filter was removed deliberately: origin is computed with 'previous run failed' taking precedence over attempt depth, so one failed or connection-dropped run relabels every later attempt that day as retry_after_failure and used to delete the entire tail of this chart. Origin belongs in 'Why briefs get regenerated'.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (attempt) (increase(daily_brief_regeneration_attempts_total[$__range])) / scalar(clamp_min(sum(increase(daily_brief_regeneration_attempts_total{attempt=\"1\"}[$__range])), 1))",
+          "legendFormat": "reached attempt {{attempt}}"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Where people stop",
+      "description": "How many regenerations it actually took, derived by differencing the ladder: users who reached depth N but not N+1. This is the panel that answers 'how many regens does it take' — the ladder panel next to it cannot, because every user-day is counted at every depth it passed through. APPROXIMATE AT BUCKET 3: 'stopped at 3' subtracts the 4+ bar, which counts requests rather than user-days, so it under-reports whenever anyone is deep in the tail; all three are clamped at 0 because that subtraction can otherwise go negative (it does on the current sample data). The 4+ bar is shown separately and in different units on purpose — do not add it to the other three. A short time range can also clip a user-day's attempt 1 outside the window while its attempt 2 falls inside, which biases the first bar down. WILL CHANGE: once client-abort is split out of 'failed' server-side, fewer days will be misclassified and these buckets will shift.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
+      "id": 20,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "orientation": "auto",
+        "xTickLabelRotation": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "clamp_min(sum(increase(daily_brief_regeneration_attempts_total{attempt=\"1\"}[$__range])) - sum(increase(daily_brief_regeneration_attempts_total{attempt=\"2\"}[$__range])), 0)",
+          "legendFormat": "stopped at 1"
+        },
+        {
+          "refId": "B",
+          "instant": true,
+          "expr": "clamp_min(sum(increase(daily_brief_regeneration_attempts_total{attempt=\"2\"}[$__range])) - sum(increase(daily_brief_regeneration_attempts_total{attempt=\"3\"}[$__range])), 0)",
+          "legendFormat": "stopped at 2"
+        },
+        {
+          "refId": "C",
+          "instant": true,
+          "expr": "clamp_min(sum(increase(daily_brief_regeneration_attempts_total{attempt=\"3\"}[$__range])) - sum(increase(daily_brief_regeneration_attempts_total{attempt=\"4+\"}[$__range])), 0)",
+          "legendFormat": "stopped at 3 (approx)"
+        },
+        {
+          "refId": "D",
+          "instant": true,
+          "expr": "sum(increase(daily_brief_regeneration_attempts_total{attempt=\"4+\"}[$__range]))",
+          "legendFormat": "4+ (requests, not user-days)"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "id": 102,
+      "panels": [],
+      "title": "Generation performance",
+      "type": "row"
+    },
+    {
+      "type": "stat",
       "title": "Avg generation time",
       "description": "Mean wall-clock time of a successful brief run. sum/count is the exact mean; the quantile panel next to it is bucket-approximated.",
       "datasource": {
@@ -671,9 +1103,9 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 6,
+        "w": 8,
         "x": 0,
-        "y": 24
+        "y": 46
       },
       "id": 12,
       "fieldConfig": {
@@ -686,7 +1118,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "\u2014"
+                  "text": "—"
                 }
               },
               "type": "special"
@@ -730,16 +1162,16 @@
     {
       "type": "stat",
       "title": "p95 generation time",
-      "description": "95th percentile of successful runs \u2014 what the slowest users actually wait.",
+      "description": "95th percentile of successful runs — what the slowest users actually wait.",
       "datasource": {
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
       },
       "gridPos": {
         "h": 6,
-        "w": 6,
-        "x": 6,
-        "y": 24
+        "w": 8,
+        "x": 8,
+        "y": 46
       },
       "id": 13,
       "fieldConfig": {
@@ -752,7 +1184,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "\u2014"
+                  "text": "—"
                 }
               },
               "type": "special"
@@ -803,9 +1235,9 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 6,
-        "x": 12,
-        "y": 24
+        "w": 8,
+        "x": 16,
+        "y": 46
       },
       "id": 14,
       "fieldConfig": {
@@ -818,7 +1250,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "\u2014"
+                  "text": "—"
                 }
               },
               "type": "special"
@@ -860,72 +1292,6 @@
       ]
     },
     {
-      "type": "stat",
-      "title": "Regenerations abandoned",
-      "description": "Times someone left the screen while a regeneration was still running. Cross with the wait buckets below to see when we lose them.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 6,
-        "x": 18,
-        "y": 24
-      },
-      "id": 15,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "\u2014"
-                }
-              },
-              "type": "special"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "none",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range]))"
-        }
-      ]
-    },
-    {
       "type": "timeseries",
       "title": "Generation time by trigger",
       "description": "p50 and p95 of successful runs, cron versus on-demand.",
@@ -935,9 +1301,9 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 12,
+        "w": 24,
         "x": 0,
-        "y": 30
+        "y": 52
       },
       "id": 16,
       "fieldConfig": {
@@ -985,70 +1351,97 @@
       ]
     },
     {
-      "type": "barchart",
-      "title": "How long people wait before giving up",
-      "description": "Share of abandonments that had already happened by each wait threshold \u2014 read it as a cumulative curve: the bar at 60s is everyone who left within 60s. Where it crosses 50% is median patience. Compare that against p50 generation time: if patience is shorter, the pipeline is losing people mid-run.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "P4169E866C3094E38"
-      },
+      "collapsed": false,
       "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 30
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 59
       },
-      "id": 17,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "continuous-BlPu"
-          },
-          "custom": {
-            "fillOpacity": 85,
-            "lineWidth": 1,
-            "axisPlacement": "auto"
-          },
-          "mappings": [],
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0,
-        "showValue": "auto"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "instant": true,
-          "expr": "sum by (le) (increase(daily_brief_regenerate_abandoned_seconds_bucket{le!=\"+Inf\"}[$__range])) / scalar(clamp_min(sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range])), 1))",
-          "legendFormat": "within {{le}}s"
-        }
-      ]
+      "id": 103,
+      "panels": [],
+      "title": "Abandonment",
+      "type": "row"
     },
     {
       "type": "stat",
-      "title": "Median patience",
-      "description": "The wait at which half of the people who walked away had already gone. Put this next to p50 generation time \u2014 if it is smaller, you are losing people before the brief can possibly arrive.",
+      "title": "Regenerations abandoned",
+      "description": "Times someone left the screen while a regeneration was still running. Cross with the wait buckets below to see when we lose them.",
       "datasource": {
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
       },
       "gridPos": {
         "h": 6,
-        "w": 6,
+        "w": 8,
         "x": 0,
-        "y": 37
+        "y": 60
+      },
+      "id": 15,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Median patience",
+      "description": "The wait at which half of the people who walked away had already gone. Put this next to p50 generation time — if it is smaller, you are losing people before the brief can possibly arrive.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 60
       },
       "id": 18,
       "fieldConfig": {
@@ -1061,7 +1454,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "\u2014"
+                  "text": "—"
                 }
               },
               "type": "special"
@@ -1105,16 +1498,16 @@
     {
       "type": "stat",
       "title": "Abandonment rate",
-      "description": "Share of regenerations where the user left before it finished. Client-measured, so treat it as a lower bound \u2014 a closed tab may never report.",
+      "description": "Share of regenerations where the user left before it finished. Client-measured, so treat it as a lower bound — a closed tab may never report.",
       "datasource": {
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
       },
       "gridPos": {
         "h": 6,
-        "w": 6,
-        "x": 6,
-        "y": 37
+        "w": 8,
+        "x": 16,
+        "y": 60
       },
       "id": 19,
       "fieldConfig": {
@@ -1127,7 +1520,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "\u2014"
+                  "text": "—"
                 }
               },
               "type": "special"
@@ -1165,6 +1558,2251 @@
           "refId": "A",
           "instant": true,
           "expr": "sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range])) / clamp_min(sum(increase(daily_brief_regeneration_attempts_total[$__range])), 1)"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "How long people wait before giving up",
+      "description": "Share of abandonments that had already happened by each wait threshold — read it as a cumulative curve: the bar at 60s is everyone who left within 60s. Where it crosses 50% is median patience. Compare that against p50 generation time: if patience is shorter, the pipeline is losing people mid-run.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      },
+      "id": 17,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 1,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (le) (increase(daily_brief_regenerate_abandoned_seconds_bucket{le!=\"+Inf\"}[$__range])) / scalar(clamp_min(sum(increase(daily_brief_regenerate_abandoned_seconds_count[$__range])), 1))",
+          "legendFormat": "within {{le}}s"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      },
+      "id": 105,
+      "panels": [],
+      "title": "Improved metrics",
+      "type": "row"
+    },
+    {
+      "type": "text",
+      "title": "Read this first",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "id": 200,
+      "options": {
+        "mode": "markdown",
+        "content": "### How to read this group\n\nEvery panel here has a **denominator**, a **time window**, or both, so the value means the same thing this week as it did last week.\n\n#### Everything follows the time picker except two tiles\nDistinct-user panels run `COUNT(DISTINCT \"userId\")` against the application's own Postgres over exactly the days you select. They are **exact counts, not estimates**, with **no fixed window** and **no 35-day ceiling**. Rate and ratio panels use `$__range` against the metrics store.\n\nThe one exception says so in its title and explains why in its description:\n\n| Marker | Panel | Why |\n|---|---|---|\n| **[today]** | Fan-out coverage today | Deliberately same-day: it answers “did this morning's fan-out reach everyone”. For the range-scoped version use *Delivery completeness*. |\n\n#### Two things that will mislead you if nobody says them\n\n**1. Per-user history starts 2026-08-20.** Views, regenerations and history-browsing only began being recorded per-user-per-day when this change shipped. Panels built on that data show **“no data” rather than 0** for earlier ranges — deliberately, because a confident `0` would read as *nobody ever regenerates*, which is false: the metrics store proves regenerations happened. If a tile here is blank, the event-count panels in this group and the all-time tiles at the top of the page still have the full history.\n\nBrief **deliveries** are unaffected — they come from `generated_content` and go back to the very first brief, so *Avg brief-days per user*, *Briefs generated per reader* and *Delivery completeness* are trustworthy over any range.\n\nTwo days of regeneration history were recovered from Redis counters that had not yet expired — real user, real date, real count. Nothing else was back-filled: per-day switch history is unrecoverable (its only store was a HyperLogLog, which cannot be enumerated), and guessing that a generated brief was read would have fabricated the answer to the most important question here.\n\n**2. Per-day counts are people-per-day, not distinct people.** On *Distinct users per day*, somebody active on ten days appears on ten points. **Adding the points together does not give a distinct total** — it gives user-days and counts that person ten times. For a real distinct total, set the range and read *Distinct readers (selected range)*, which de-duplicates properly.\n\n**People vs events.** *People* / *readers* are distinct user counts. *Briefs*, *runs*, *regenerations*, *minutes* are events — one enthusiastic person can move those alone.\n\n**Every average names its denominator.** “Per regenerating user”, “per active reader” and “per subscriber” are three different questions with three different answers.\n\n**Charts on the metrics store are moving aggregates** over a window as long as the range you picked. Gaps are honest: where a window had no events to divide by, the ratio is undefined and the line breaks rather than dropping to a fake zero. Metrics export every 60s and instant queries are held back ~30s, so allow 90 seconds for a fresh number."
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Opt-in rate: subscribers / all accounts (now)",
+      "description": "THE BIG NUMBER IS RIGHT NOW. The share of all accounts that currently have Daily Brief switched on. The sparkline behind it shows how that share moved across the range you picked, so the time picker still does something without the headline lying about which moment it describes.\n\nGOOD: rising, or high and steady.\nBAD: flat while headcount grows - the feature is not spreading, it is being carried by early adopters.\nA VISIBLE STEP DOWN in the sparkline is somebody deliberately switching the feature off; the flow panels below name how many and in which direction.\n\nWHY NOT AN AVERAGE OVER THE RANGE: this tile briefly showed a time-weighted mean of the ratio, which is the wrong statistic twice over. Nobody reads 'opt-in rate' as an average over a window, and averaging a ratio weights every scrape equally regardless of how many accounts existed at that instant - so it would report something like 49% for a population that was at 50% and is now at 0%. The correct range figure is a ratio of aggregates, not an aggregate of ratios; the honest presentation is the current value plus the shape, which is what this is.\n\nBoth gauges are re-read from the database every 60s. History on this pair starts 2026-08-20 21:5x, when contaminated samples from dashboard testing were purged and the series began again clean.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 80
+      },
+      "id": 201,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "noValue": "no scrape data in this range",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "max(daily_brief_enabled_users_total) / clamp_min(max(daily_brief_eligible_users_total), 1)",
+          "legendFormat": "opt-in rate"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Read rate: distinct readers ÷ subscribers (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Exact COUNT(DISTINCT userId) over whatever range you select — not a sketch and not a fixed window.\n\nOf the people who have Daily Brief switched on, the share who actually opened a brief in the selected range. Switching a feature on costs one click and then people forget about it, so opt-in on its own always overstates use.\n\nGOOD: high over a week or a month — most subscribers read most periods.\nBAD: low over a month — we are generating briefs for an audience that has stopped showing up, and every one of those is model spend with no reader.\n\nPick a range at least a few days long: over 3 hours almost nobody has opened anything, which is true but not informative.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so ranges reaching further back show \"no data\" rather than a misleading 0. Reads were never recorded before that date in any form, and were deliberately NOT back-filled from brief deliveries: a generated brief is not evidence of a read, and inferring one would fabricate the answer to the exact question this group exists to ask.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 80
+      },
+      "id": 202,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT CASE WHEN (SELECT min(\"dateBucket\") FROM daily_brief_activity) IS NULL OR (SELECT min(\"dateBucket\") FROM daily_brief_activity) > to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD') THEN NULL ELSE ((SELECT count(DISTINCT \"userId\") FROM daily_brief_activity WHERE kind='view' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD'))::float / NULLIF((SELECT count(*) FROM users WHERE \"dailyBriefEnabled\"),0)) END AS \"read rate\""
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Regeneration reach: regenerating users ÷ users sent a brief (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Both sides are exact distinct-user counts over the selected range.\n\nOf everybody sent a brief in this range, the share who pressed Regenerate at least once.\n\nREPLACES reading “Users with a brief” and “Users who requested a regen” side by side at the top of this page: the second can never exceed the first, so the pair says nothing on its own — the ratio is where the information is.\n\nHIGH (>50%): the automatic brief routinely is not what people wanted.\nLOW (<10%): either the scheduled brief is good enough, or nobody has found the button. Use “Regenerations per 100 scheduled briefs” to tell those apart.\n\nDENOMINATOR MISMATCH WHILE HISTORY BUILDS: the denominator (deliveries) has full history, the numerator does not, so this reads LOW for ranges predating the deploy.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so a range reaching further back shows \"no data\" rather than 0 - an average over an empty set is undefined, and printing 0 would read as \"nobody regenerates\", which is false. Regenerations demonstrably happened before that date.\n\nWHERE THE HISTORY IS: the event counts survive in the metrics store and those panels have full history - see \"Brief runs and regenerations per day\", \"Regeneration mix by origin\" and \"Regenerations per 100 scheduled briefs delivered\" in this group, plus the \"Regenerations (all time)\" and \"Users who requested a regen (all time)\" tiles at the top of the page. What is NOT recoverable is which user regenerated on which day: the Redis set of regenerating users carries no dates, the per-day counters expire after 48h, and a regeneration overwrites its generated_content row in place. Two days were recovered from surviving counters before they expired; the rest is genuinely gone and was not invented.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 80
+      },
+      "id": 203,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT CASE WHEN (SELECT min(\"dateBucket\") FROM daily_brief_activity) IS NULL OR (SELECT min(\"dateBucket\") FROM daily_brief_activity) > to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD') THEN NULL ELSE (NULLIF((SELECT count(DISTINCT \"userId\") FROM daily_brief_activity WHERE kind='regenerate' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')),0)::float / NULLIF((SELECT count(DISTINCT \"userId\") FROM generated_content WHERE kind='DAILY_BRIEF' AND \"generatedAt\" IS NOT NULL AND $__timeFilter(\"generatedAt\")),0)) END AS \"regeneration reach\""
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Fan-out coverage today: briefs delivered ÷ subscribers [today]",
+      "description": "IGNORES THE TIME PICKER — by design, not by limitation.\n\nThis is a live operational tile answering one question: did THIS MORNING's fan-out reach everybody? Both sides are same-day by construction — the numerator counts today's IST date bucket, the denominator is the current subscriber count — and it resets every morning. Widening it to a range would turn it into a different metric, which already exists as “Delivery completeness” below.\n\nGOOD: 1.0 once the morning fan-out has drained — everybody who asked for a brief got one.\nBAD: still below 1.0 later in the day — briefs are failing or the queue never drained. Check “Scheduled-brief failure rate”.\n\nExpect a low reading during the cron run itself; that is the fan-out in progress, not a fault.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 80
+      },
+      "id": 204,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "max(daily_brief_delivered_today) / clamp_min(max(daily_brief_enabled_users_total), 1)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Distinct readers (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Exact number of different people who opened a brief in the selected range — COUNT(DISTINCT userId) straight from the application's own table, so it is not a HyperLogLog estimate and has no fixed window.\n\nSet the range to 7 days for weekly actives, 30 for monthly. Unlike every “all time” tile on this page this number CAN GO DOWN, which is the point — a cumulative total keeps rising even while everybody quietly stops using the feature.\n\nGOOD: growing, or tracking the subscriber count.\nBAD: falling while opt-ins rise.\n\nCounts opening a brief in the app, so somebody who reads their brief elsewhere and never opens the screen is invisible here.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so ranges reaching further back show \"no data\" rather than a misleading 0. Reads were never recorded before that date in any form, and were deliberately NOT back-filled from brief deliveries: a generated brief is not evidence of a read, and inferring one would fabricate the answer to the exact question this group exists to ask.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 86
+      },
+      "id": 205,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT CASE WHEN (SELECT min(\"dateBucket\") FROM daily_brief_activity) IS NULL OR (SELECT min(\"dateBucket\") FROM daily_brief_activity) > to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD') THEN NULL ELSE ((SELECT count(DISTINCT \"userId\") FROM daily_brief_activity WHERE kind='view' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD'))) END AS readers"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Habit strength: share of days in range a reader was active",
+      "description": "FOLLOWS THE TIME PICKER. Replaces the old fixed 7d÷30d stickiness ratio with something that re-scopes properly and is easier to read.\n\nOf the days in the range you picked, what fraction did a typical reader actually show up for. 1.0 = the average reader opened a brief every single day in the range — a genuine daily habit, which is what a *daily* brief should produce. 0.25 = a typical reader turns up about one day in four; the daily cadence is producing briefs nobody opens three days out of four.\n\nGOOD: high and stable, or rising.\nBAD: falling while “Distinct readers” holds up — new arrivals are masking existing people quietly dropping the habit.\n\nARITHMETIC NOTE: the numerator is user-days and the denominator is (distinct readers × days in range), both computed from real rows inside one SQL statement. This is the ONLY safe way to use user-days — as the numerator of an explicit per-user average. Summed daily counts must never be used as a distinct-user total, because somebody active on ten days would be counted ten times.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so ranges reaching further back show \"no data\" rather than a misleading 0. Reads were never recorded before that date in any form, and were deliberately NOT back-filled from brief deliveries: a generated brief is not evidence of a read, and inferring one would fabricate the answer to the exact question this group exists to ask.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 86
+      },
+      "id": 206,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH per_user AS (SELECT \"userId\", count(DISTINCT \"dateBucket\") AS active_days FROM daily_brief_activity WHERE kind='view' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') GROUP BY 1) SELECT (SUM(active_days)::float / NULLIF(count(*),0)) / GREATEST((to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD')::date - to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD')::date) + 1, 1) AS \"habit strength\" FROM per_user"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Subscribers with zero reads in the selected range",
+      "description": "FOLLOWS THE TIME PICKER. How many people have Daily Brief switched on but did not open a single brief in the range you selected.\n\nEvery one of them costs a full agent run every morning and nobody reads the result — this is the feature's waste bill, expressed in people. It is the number to quote when asking for an auto-pause rule.\n\nGOAL: as close to zero as possible over a 30-day range.\nBAD: growing. The fix is a product decision (nudge them, or pause the brief after N unread days), not an engineering one.\n\nSet a sensible range: over 3 hours almost every subscriber looks dormant, which is true and useless. 30 days is the number worth acting on.\n\nDELIBERATELY NOT BACKFILLED: inferring reads from the fact that a brief was generated would make this panel read zero and the read rate read 100%, fabricating the answer to the exact question it exists to ask.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so ranges reaching further back show \"no data\" rather than a misleading 0. Reads were never recorded before that date in any form, and were deliberately NOT back-filled from brief deliveries: a generated brief is not evidence of a read, and inferring one would fabricate the answer to the exact question this group exists to ask.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 86
+      },
+      "id": 207,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT CASE WHEN (SELECT min(\"dateBucket\") FROM daily_brief_activity) IS NULL OR (SELECT min(\"dateBucket\") FROM daily_brief_activity) > to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD') THEN NULL ELSE (GREATEST((SELECT count(*) FROM users WHERE \"dailyBriefEnabled\") - (SELECT count(DISTINCT \"userId\") FROM daily_brief_activity WHERE kind='view' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')), 0)) END AS \"dormant subscribers\""
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Avg brief-days per user (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Read from generated_content, which has full history back to the feature's first brief — no deploy-date floor on this one.\n\nThe average number of days in the range on which a brief-receiving person actually got a brief. Because there is exactly one brief per person per day, this reads as “how many of the selected days the typical user was served”.\n\nGOOD: close to the number of days in your range.\nBAD: much lower — people are being signed up and then not served, a churn/reliability signal hiding inside the two all-time totals at the top of this page, which both keep looking healthy.\n\nAverages hide shape: a few long-tenured users plus a crowd of one-day trials gives the same average as a uniformly middling population. Use “How many days each reader showed up” for the distribution.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 86
+      },
+      "id": 208,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 1,
+          "noValue": "no data for this range - no briefs were generated in the selected window"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*)::float / NULLIF(count(DISTINCT \"userId\"),0) AS \"brief-days per user\" FROM generated_content WHERE kind='DAILY_BRIEF' AND \"generatedAt\" IS NOT NULL AND $__timeFilter(\"generatedAt\")"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Distinct users per day: readers, regenerators, history-browsers",
+      "description": "FOLLOWS THE TIME PICKER. One point per calendar day, each an exact distinct-user count for that day, over exactly the days you selected.\n\nRead the GAP between the lines. Readers is the population; the other two are what people do once they are there.\n\nGOOD: readers rising, with regenerations a small stable fraction beneath.\nBAD: readers flat or falling while regenerations climb — the same shrinking group is working harder to get a usable brief.\n\nThese are PEOPLE PER DAY, not user-days: a person active on ten days appears once on each of those ten points. Do NOT add the points together to get a distinct total — for that, set the range and read “Distinct readers (selected range)”, which de-duplicates properly.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20; earlier days have no points at all rather than points at zero. Regeneration and switch event history before that date survives only as aggregate counts - see the panels named in the tiles below.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 92
+      },
+      "id": 209,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT \"dateBucket\"::date AS time, count(DISTINCT \"userId\") FILTER (WHERE kind='view') AS \"read a brief\", count(DISTINCT \"userId\") FILTER (WHERE kind='regenerate') AS \"regenerated\", count(DISTINCT \"userId\") FILTER (WHERE kind='switch') AS \"browsed history\" FROM daily_brief_activity WHERE \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Brief runs and regenerations per day",
+      "description": "FOLLOWS THE TIME PICKER. Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend. Always a per-DAY rate, so the number means the same thing at every range.\n\nThe daily rate behind the cumulative \"Briefs and regenerations over time\" higher up the page. That panel plots running totals, which only ever slope upward — it looks like healthy growth even on a day the feature was completely dead. This one draws a flat line for a flat feature and a falling line for a dying one.\n\nGOOD: the runs line tracks the subscriber count; the regenerations line stays small and stable beside it.\nBAD: regenerations climbing faster than runs — the same population is re-rolling more often.\n\nCOUNTS RUNS, NOT BRIEF-DAYS. A regeneration is a completed run but does not create a new brief for a new day — it overwrites the existing one. So this line is deliberately higher than \"briefs generated\" and is the right measure of how much work the pipeline did. For per-day delivery coverage use \"Avg briefs delivered per subscriber per day\".\n\nBuilt on true counters rather than the lifetime gauges, because those gauges have historically stepped DOWNWARD (a database reseed took one from 19 to 0), and every rate function reads a downward step as a counter reset and silently adds the pre-dip value back — on this data that inflated the answer threefold.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 92
+      },
+      "id": 210,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(daily_brief_generated_total{status=\"ready\"}[$__range])) * 86400",
+          "legendFormat": "brief runs completed",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(daily_brief_regeneration_attempts_total[$__range])) * 86400",
+          "legendFormat": "regenerations requested",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Avg regenerations per user, per day",
+      "description": "FOLLOWS THE TIME PICKER. Each point divides that day's regenerations by that day's distinct users — numerator and denominator always from the SAME day, so growth in the user base cannot move it.\n\n“Per person who regenerated” is INTENSITY: 1.0 means the typical re-roller pressed the button once and stopped; 3 or 4 means people are fighting the brief to get something usable, which is a quality problem dressed up as engagement.\n\n“Per active reader” is FLEET-WIDE LOAD, the right number for capacity and cost.\n\nGOOD: both flat or falling.\nBAD: intensity rising while load stays flat — a small group is struggling badly, and an average across everybody would have hidden them.\n\nThe GAP between the lines is the concentration measure. Wide gap = regeneration is a minority behaviour done intensively.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so a range reaching further back shows \"no data\" rather than 0 - an average over an empty set is undefined, and printing 0 would read as \"nobody regenerates\", which is false. Regenerations demonstrably happened before that date.\n\nWHERE THE HISTORY IS: the event counts survive in the metrics store and those panels have full history - see \"Brief runs and regenerations per day\", \"Regeneration mix by origin\" and \"Regenerations per 100 scheduled briefs delivered\" in this group, plus the \"Regenerations (all time)\" and \"Users who requested a regen (all time)\" tiles at the top of the page. What is NOT recoverable is which user regenerated on which day: the Redis set of regenerating users carries no dates, the per-day counters expire after 48h, and a regeneration overwrites its generated_content row in place. Two days were recovered from surviving counters before they expired; the rest is genuinely gone and was not invented.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 100
+      },
+      "id": 211,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "decimals": 2,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH d AS (SELECT \"dateBucket\", SUM(count) FILTER (WHERE kind='regenerate') AS regen_events, count(DISTINCT \"userId\") FILTER (WHERE kind='regenerate') AS regen_users, count(DISTINCT \"userId\") FILTER (WHERE kind='view') AS view_users FROM daily_brief_activity WHERE \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') GROUP BY 1) SELECT \"dateBucket\"::date AS time, regen_events::float / NULLIF(regen_users,0) AS \"per person who regenerated\", regen_events::float / NULLIF(view_users,0) AS \"per active reader\" FROM d ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Regenerations per 100 scheduled briefs delivered",
+      "description": "FOLLOWS THE TIME PICKER: Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend.\n\nFor every 100 briefs the schedule delivered, how many extra generations people asked for on top. The cleanest measure of how much work the feature does BEYOND its schedule, normalised so that simply adding users cannot move it.\n\n0 = the automatic brief is accepted as-is.\n100 = one extra generation for every brief delivered — the feature costs roughly double what the schedule alone would.\nAbove 100 = people re-roll more than once per delivered brief.\n\nGOOD: low and flat. BAD: any sustained climb — but read it with “Regeneration mix by origin” beside it, because retries after an error inflate this without anybody being dissatisfied.\n\nGAPS ARE HONEST: where no scheduled brief was delivered in a bucket the ratio is undefined, so the line breaks rather than dropping to a fake zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 100
+      },
+      "id": 212,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * sum(increase(daily_brief_regeneration_attempts_total[$__range])) / (sum(increase(daily_brief_generated_total{trigger=\"scheduled\",status=\"ready\"}[$__range])) > 0)",
+          "legendFormat": "extra generations per 100 scheduled briefs",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Scheduled-brief rejection rate",
+      "description": "FOLLOWS THE TIME PICKER: Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend.\n\nShare of the briefs the cron delivered that their owner immediately threw away and re-ran. The stat tile “Rejection rate of the auto brief” higher up gives one number for the whole range; this is the same measurement as a TREND, so a model change, a prompt change or a data-source regression shows up as a visible step.\n\nGOOD: low, and stepping DOWN after a change you shipped.\nBAD: any sustained rise — the scheduled brief is getting less useful.\n\nOnly the FIRST re-run of a given day's scheduled brief counts here; further re-runs that day are classified “replacing_own_regeneration” and appear in the panel to the right. That is why this cannot exceed 100%. Buckets with no scheduled delivery draw a gap rather than a misleading zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 108
+      },
+      "id": 213,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(daily_brief_regeneration_attempts_total{origin=\"replacing_scheduled_brief\"}[$__range])) / (sum(increase(daily_brief_generated_total{trigger=\"scheduled\",status=\"ready\"}[$__range])) > 0)",
+          "legendFormat": "scheduled brief re-run by its owner",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Regeneration mix by origin (% of regeneration volume)",
+      "description": "FOLLOWS THE TIME PICKER: Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend.\n\nWhat the Regenerate button is actually being used for. This is the panel that stops “regenerations are up” being misreported.\n\n• replacing_scheduled_brief — the morning brief was rejected. A QUALITY problem.\n• replacing_own_regeneration — their own re-run was rejected too. A WORSE quality problem.\n• retry_after_failure — the previous run errored. A RELIABILITY problem; says nothing about quality.\n• first_brief_of_day — no brief existed yet. Not dissatisfaction, just normal use.\n\nGOOD: dominated by first_brief_of_day with a thin retry band.\nBAD: a fat retry_after_failure band. While it is wide, every raw regeneration count on this dashboard is mostly measuring outages, and the volume must NOT be reported as engagement.\n\nBands are shares and sum to 100% within each bucket; use the panel to the left for the absolute level. Buckets with no regenerations at all draw a gap.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 108
+      },
+      "id": 214,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (origin) (increase(daily_brief_regeneration_attempts_total[$__range])) / scalar(sum(increase(daily_brief_regeneration_attempts_total[$__range])) > 0)",
+          "legendFormat": "{{origin}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Scheduled-brief failure rate",
+      "description": "FOLLOWS THE TIME PICKER: Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend.\n\nShare of the cron's brief runs that ended without producing a brief. Nothing else on this dashboard covers this — “Regeneration success rate” only measures the Regenerate button, the path people take when they are already looking at the screen and can see something went wrong. A SCHEDULED failure is the worst outcome the feature has: the user opens the app in the morning and there is simply nothing there, with no error to react to.\n\nGOOD: flat at 0.\nBAD: anything sustained above a few percent — each point is a morning where somebody got nothing.\n\nSpikes that line up with a deploy or a provider incident are the usual cause; cross-check “p95 generation time vs throughput” for the same period, since timeouts show up as both slow runs and failures. Buckets with no scheduled runs at all draw a gap, which is the normal state between cron fan-outs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 116
+      },
+      "id": 215,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(daily_brief_generated_total{trigger=\"scheduled\",status=\"failed\"}[$__range])) / (sum(increase(daily_brief_generated_total{trigger=\"scheduled\"}[$__range])) > 0)",
+          "legendFormat": "scheduled runs that produced no brief",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "On-time delivery rate: scheduled briefs ready ≤ 30 min after target",
+      "description": "FOLLOWS THE TIME PICKER: Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend.\n\nOf the scheduled briefs delivered, the share ready within half an hour of the time the cron was aiming for. This is the promise the feature actually makes — “your brief is there when you start work” — as a service level you can set a target on.\n\nGOOD: close to 1.0.\nBAD: falling — the morning fan-out is queueing behind the shared model-throughput limit and the users at the back of the queue get their brief hours late.\n\n30 minutes is used because it is a real bucket edge in the underlying histogram; a threshold that is not a bucket boundary would silently return a wrong answer.\n\nCounts only runs that SUCCEEDED and whose measured delay passed the sanity check. A brief that never arrived is in the failure panel to the left, not here — read the two together, because a pipeline that fails everything and delivers one brief on time scores 100% here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 116
+      },
+      "id": 216,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(daily_brief_scheduled_delivery_delay_milliseconds_bucket{le=\"1800000\"}[$__range])) / (sum(increase(daily_brief_scheduled_delivery_delay_milliseconds_count[$__range])) > 0)",
+          "legendFormat": "ready within 30 min of target",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 generation time vs throughput (briefs/hour)",
+      "description": "FOLLOWS THE TIME PICKER. Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend. \n\nTwo lines that only mean something together: how long the slowest 5% of runs take (left axis, milliseconds) and how many runs we finish per hour (right axis). It answers the capacity question directly — can this feature take more users without getting worse for the ones it already has?\n\nBAD: p95 rises whenever throughput rises. That is contention — the pipeline is at its limit and every new subscriber makes everybody's brief later.\nGOOD: p95 flat while throughput grows — there is headroom and growth is safe.\nALSO WATCH: p95 rising while throughput is FLAT. That is a regression in the run itself (slower model, slower tools, more data per user), not a load problem, and adding capacity will not fix it.\n\nSuccessful runs only — a failed run's duration is mostly the timeout, which would drag the percentile around for reasons that have nothing to do with speed.\n\nNOTE: this uses $__range rather than $__rate_interval. On this stack $__rate_interval resolves to four times the datasource's minimum interval (1 minute) regardless of the range, which on a feature that runs once per person per day samples a one-minute window every couple of hours and reads as empty. The neighbouring pre-existing panel \"Generation time by trigger\" still has that problem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 124
+      },
+      "id": 217,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "ms",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "briefs completed per hour"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "briefs / hour"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(daily_brief_generation_duration_milliseconds_bucket{status=\"ready\"}[$__range])))",
+          "legendFormat": "p95 generation time",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(daily_brief_generated_total{status=\"ready\"}[$__range])) * 3600",
+          "legendFormat": "briefs completed per hour",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Generation minutes per day by trigger",
+      "description": "FOLLOWS THE TIME PICKER: Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend. Always expressed as minutes per DAY, so the number means the same thing at every range.\n\nModel time consumed per day, split by whether the schedule asked for the run or a person did. Agent runs are the expensive part of this feature, so this is the closest thing on the dashboard to a cost line.\n\nGOOD: the “scheduled” band grows in step with subscribers and the “regenerate” band stays small.\nBAD: “regenerate” approaching or passing “scheduled” — the feature then costs about twice what its schedule alone would, and the extra is spent purely because the automatic brief was not good enough first time.\n\nFAILED runs are included on purpose: a run that burned four minutes and produced nothing still cost four minutes. For a per-person figure use “Avg generation minutes per active reader per day” below.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 124
+      },
+      "id": 218,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 70,
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "mappings": [],
+          "unit": "m",
+          "min": 0,
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (trigger) (rate(daily_brief_generation_duration_milliseconds_sum[$__range])) * 86400 / 60000",
+          "legendFormat": "{{trigger}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "title": "Per-user averages — the denominator is the metric",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 132
+      },
+      "id": 230,
+      "options": {
+        "mode": "markdown",
+        "content": "### Per-user averages — the denominator is the metric\n\nAn average per user is only a fact once you say **which users**. The same numerator over three different denominators answers three different questions, and they can differ by 10x:\n\n| Denominator | Question it answers | Use it for |\n|---|---|---|\n| **people who did the action** | how *intensely* do the people who use this feature use it | product depth, spotting a struggling minority |\n| **active readers** | how much does the *typical Daily Brief user* generate | capacity, cost per user, fleet-wide load |\n| **subscribers** | what do we owe the people who asked for this | delivery coverage, SLO |\n\nEvery tile states its denominator, and **both sides of every ratio are counted over the same range** — so changing the time picker re-scopes the whole average, and growth in the user base cannot move it on its own.\n\n**Means hide skew.** These actions are dominated by a few heavy users, so a mean can rise while most people do nothing. Two panels exist specifically to catch that: **Participation rate** counts people rather than events, so one power user cannot move it; **How many days each reader showed up** gives the whole distribution instead of its midpoint. When an average climbs while those stay flat, a small group is doing more — not the population.\n\n**The user-days trap.** *Habit strength* uses summed user-days as a numerator over an explicit (readers × days) denominator, which is correct. Summed per-day user counts must **never** be used as a distinct-user total — a person active on ten days would count ten times. Every distinct count on this board is a real `COUNT(DISTINCT \"userId\")` computed inside one SQL statement, never a sum of daily figures."
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Avg regenerations per regenerating user (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Both sides come from the same rows over the same range, so the average is internally consistent at every setting.\n\nDENOMINATOR: distinct users who pressed Regenerate at least once in the range. Deliberately NOT all users — including people who never touch the button turns an intensity measure into a participation measure and blurs both.\n\nReads as: “someone who regenerates at all does it N times in this period.”\n\nGOOD: near 1 — people re-roll once and get what they need.\nBAD: 3, 4, 5 and climbing — people are fighting the brief. That is a quality failure which raw regeneration counts report as engagement.\n\nSKEW WARNING: a mean over a heavily skewed population. Read it beside “Participation rate” and “How many days each reader showed up” — if this rises while those stay flat, a small group is struggling badly and the fleet-wide number will not show it.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so a range reaching further back shows \"no data\" rather than 0 - an average over an empty set is undefined, and printing 0 would read as \"nobody regenerates\", which is false. Regenerations demonstrably happened before that date.\n\nWHERE THE HISTORY IS: the event counts survive in the metrics store and those panels have full history - see \"Brief runs and regenerations per day\", \"Regeneration mix by origin\" and \"Regenerations per 100 scheduled briefs delivered\" in this group, plus the \"Regenerations (all time)\" and \"Users who requested a regen (all time)\" tiles at the top of the page. What is NOT recoverable is which user regenerated on which day: the Redis set of regenerating users carries no dates, the per-day counters expire after 48h, and a regeneration overwrites its generated_content row in place. Two days were recovered from surviving counters before they expired; the rest is genuinely gone and was not invented.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 137
+      },
+      "id": 225,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT SUM(count)::float / NULLIF(count(DISTINCT \"userId\"),0) AS \"regenerations per regenerating user\" FROM daily_brief_activity WHERE kind='regenerate' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Avg regenerations per active reader (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. DENOMINATOR: every distinct person who opened a brief in the range, whether or not they ever regenerated. This is the fleet-wide load figure — the one to multiply by a user count when forecasting cost or capacity.\n\nReads as: “each Daily Brief reader costs us N extra generations in this period.”\n\nGOOD: well under 1 per week — most readers accept the scheduled brief.\nBAD: above 1 — the on-demand path, not the schedule, is the main consumer of model time.\n\nAlways lower than the tile to its left, because this denominator includes everybody who never pressed the button. The GAP between the two is the concentration: wide means regeneration is a minority behaviour done intensively.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so a range reaching further back shows \"no data\" rather than 0 - an average over an empty set is undefined, and printing 0 would read as \"nobody regenerates\", which is false. Regenerations demonstrably happened before that date.\n\nWHERE THE HISTORY IS: the event counts survive in the metrics store and those panels have full history - see \"Brief runs and regenerations per day\", \"Regeneration mix by origin\" and \"Regenerations per 100 scheduled briefs delivered\" in this group, plus the \"Regenerations (all time)\" and \"Users who requested a regen (all time)\" tiles at the top of the page. What is NOT recoverable is which user regenerated on which day: the Redis set of regenerating users carries no dates, the per-day counters expire after 48h, and a regeneration overwrites its generated_content row in place. Two days were recovered from surviving counters before they expired; the rest is genuinely gone and was not invented.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 137
+      },
+      "id": 226,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT (SELECT SUM(count) FROM daily_brief_activity WHERE kind='regenerate' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD'))::float / NULLIF((SELECT count(DISTINCT \"userId\") FROM daily_brief_activity WHERE kind='view' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')),0) AS \"regenerations per active reader\""
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Avg brief switches per switching user (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Both sides from the same rows over the same range.\n\nDENOMINATOR: distinct users who switched to a different brief at least once in the range.\n\nReads as: “someone who browses their brief history opens N of them in this period.”\n\nGOOD: comfortably above 1 — people who find the history come back to it, so it is a real tool rather than a one-time curiosity.\nBAD: pinned at ~1 — people open an old brief once and never again, which usually means they did not find what they were looking for.\n\nSKEW WARNING: a mean over a small, self-selected group. Pair it with the participation rate panel.\n\nNOTE: the pre-existing tile “Users who switched briefs (last 30 days)” higher up the page still reads a fixed 30-day Redis sketch and will not agree with this one at other ranges. This panel is the exact count.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20; before that a range shows \"no data\" rather than 0, because an average over an empty set is undefined and 0 would read as \"nobody browses history\", which is false.\n\nWHERE THE HISTORY IS: \"Total brief switches (all time)\", \"Users who switched briefs (last 30 days)\" and \"Switches: list vs calendar (all time)\" at the top of the page all have full history. Per-day switch history is genuinely UNRECOVERABLE: the only per-day structure was a HyperLogLog, whose members cannot be enumerated and which stores no event count. Nothing was inferred to fill the gap.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 137
+      },
+      "id": 227,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 2,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT SUM(count)::float / NULLIF(count(DISTINCT \"userId\"),0) AS \"switches per switching user\" FROM daily_brief_activity WHERE kind='switch' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Delivery completeness: scheduled briefs delivered ÷ perfect delivery (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Perfect delivery = every subscriber gets a brief every day, so the ideal denominator is (subscribers x days). This is the share of that ideal we actually delivered.\n\nGOOD: 100%. Everybody who asked for a brief got one, every morning in the range.\nBAD: 60% means four mornings in ten produced nothing for the average subscriber.\n\nReads generated_content, so it has FULL HISTORY back to the feature's first brief - unlike the reader panels in this group it is not limited by when durable per-user recording started.\n\nThe day count is clamped to days on which the feature actually existed, so selecting a range that reaches back before the first brief ever does not manufacture a shortfall that never happened.\n\nWHY THIS IS NOT \"Briefs generated (all time)\": that tile counts brief-days ever created and is monotonic - it rises whether the feature is healthy or half-broken, and it rises FASTER when you add users, so growth and quality are welded into one number that can only go up. This one divides by the population and by elapsed days, so adding 900 subscribers leaves it unchanged while halving delivery success halves it.\n\nCAVEAT: subscriber count is a live reading while the numerator spans the range, so a burst of recent sign-ups drags this down for a while - those people were not subscribers for the whole range. On short ranges use \"Fan-out coverage today\", where both sides are same-day.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 137
+      },
+      "id": 228,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "decimals": 1,
+          "noValue": "no deliveries in this range"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*)::float / NULLIF((SELECT count(*) FROM users WHERE \"dailyBriefEnabled\") * GREATEST((to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD')::date - GREATEST(to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD')::date, (SELECT min(\"dateBucket\")::date FROM generated_content WHERE kind='DAILY_BRIEF'))) + 1, 1),0) AS \"delivery completeness\" FROM generated_content WHERE kind='DAILY_BRIEF' AND \"generatedAt\" IS NOT NULL AND $__timeFilter(\"generatedAt\")"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Avg brief switches per user, per day",
+      "description": "FOLLOWS THE TIME PICKER. The switching twin of the regeneration panel beside it, on the same same-day numerator/denominator rule.\n\n“Per switching user” is DEPTH — how hard the people who use brief history lean on it. “Per active reader” is REACH — how much the average reader browses at all.\n\nREAD THE GAP: lines close together means browsing history is normal behaviour spread across the user base; a high depth line over a flat reach line means a handful of power users do all the browsing, and any mean quoted without its denominator will mislead whoever hears it.\n\nGOOD: reach rising — history is being discovered.\nBAD: depth rising while reach is flat — the same few people are hunting through old briefs, which usually means today's brief is not answering their question.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20; before that a range shows \"no data\" rather than 0, because an average over an empty set is undefined and 0 would read as \"nobody browses history\", which is false.\n\nWHERE THE HISTORY IS: \"Total brief switches (all time)\", \"Users who switched briefs (last 30 days)\" and \"Switches: list vs calendar (all time)\" at the top of the page all have full history. Per-day switch history is genuinely UNRECOVERABLE: the only per-day structure was a HyperLogLog, whose members cannot be enumerated and which stores no event count. Nothing was inferred to fill the gap.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 143
+      },
+      "id": 219,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "decimals": 2,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH d AS (SELECT \"dateBucket\", SUM(count) FILTER (WHERE kind='switch') AS sw_events, count(DISTINCT \"userId\") FILTER (WHERE kind='switch') AS sw_users, count(DISTINCT \"userId\") FILTER (WHERE kind='view') AS view_users FROM daily_brief_activity WHERE \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') GROUP BY 1) SELECT \"dateBucket\"::date AS time, sw_events::float / NULLIF(sw_users,0) AS \"per switching user (depth)\", sw_events::float / NULLIF(view_users,0) AS \"per active reader (reach)\" FROM d ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Participation rate: share of each day's readers who did each action",
+      "description": "FOLLOWS THE TIME PICKER. The skew-proof companion to every average on this page: it counts PEOPLE, so no amount of activity by one heavy user can move it.\n\nUse it to settle the question an average cannot: “is this behaviour spreading, or are the same few people doing more of it?” If an average rises while its line here stays flat, the answer is the second — and the right response is to look at those users, not to redesign for everybody.\n\nREGENERATED: high is ambiguous alone — either the scheduled brief misses often, or people enjoy pulling a fresh one. Split it with “Regeneration mix by origin” above.\nBROWSED HISTORY: low usually means discoverability, not disinterest — the calendar is the only way to reach a brief older than the most recent handful.\n\nCannot exceed 100%: you have to open a brief to be counted in either numerator.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20. A day with no readers yields no point rather than 0%, since a share of an empty population is undefined.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 143
+      },
+      "id": 220,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH d AS (SELECT \"dateBucket\", count(DISTINCT \"userId\") FILTER (WHERE kind='regenerate') AS regen_users, count(DISTINCT \"userId\") FILTER (WHERE kind='switch') AS sw_users, count(DISTINCT \"userId\") FILTER (WHERE kind='view') AS view_users FROM daily_brief_activity WHERE \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') GROUP BY 1) SELECT \"dateBucket\"::date AS time, regen_users::float / NULLIF(view_users,0) AS \"regenerated that day\", sw_users::float / NULLIF(view_users,0) AS \"browsed history that day\" FROM d ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "How many days each reader showed up (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. The distribution behind every average on this page — bounded buckets, so no user id ever leaves the database and the panel stays readable at any scale.\n\nAn average cannot tell a population where everyone shows up sometimes from one where a handful show up constantly and the rest came once. This can.\n\nGOOD: mass in the right-hand buckets — people who find the brief keep coming back.\nBAD: a tall “1 day” bar — most readers tried it once and never returned, and every per-user average on this dashboard is being propped up by a small committed minority.\n\nBuckets count PEOPLE and sum to the total distinct readers in the range, so this one CAN be read as a share of the whole.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so ranges reaching further back show \"no data\" rather than a misleading 0. Reads were never recorded before that date in any form, and were deliberately NOT back-filled from brief deliveries: a generated brief is not evidence of a read, and inferring one would fabricate the answer to the exact question this group exists to ask.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 151
+      },
+      "id": 224,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "decimals": 0,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH per_user AS ( SELECT \"userId\", count(DISTINCT \"dateBucket\") AS days FROM daily_brief_activity WHERE kind='view' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') GROUP BY 1) SELECT CASE WHEN days = 1 THEN '1 day' WHEN days <= 3 THEN '2-3 days' WHEN days <= 7 THEN '4-7 days' WHEN days <= 20 THEN '8-20 days' ELSE '21+ days' END AS \"days active\", count(*) AS readers FROM per_user GROUP BY 1 ORDER BY min(days)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Briefs generated per reader (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. How many briefs we produced for every person who actually read one.\n\nThis is the waste ratio in its most direct form. If we generate 30 briefs for every reader, 29 of them were produced for somebody who never opened the screen in this range.\n\nGOOD: close to the number of days in the range (one brief per reader per day, all of them read).\nBAD: far above it — the fan-out is serving an audience that is not there. Pair with “Subscribers with zero reads”, which names how many people that is.\n\nFor an absolute cost figure in model time see “Generation minutes per day by trigger”; divide that by “Distinct readers” for minutes per reader.\n\nNumerator has full history (generated_content); the denominator does not, so ranges predating the deploy read HIGH.\n\nHISTORY STARTS AT DEPLOY. This reads daily_brief_activity, which only began recording when this change shipped. A range reaching further back reads low or zero — that is MISSING HISTORY, not a fall in usage. Brief deliveries are unaffected: they come from generated_content and go back to the feature's first brief.\n\nBLANK, NOT ZERO. Durable per-user recording started 2026-08-20, so ranges reaching further back show \"no data\" rather than a misleading 0. Reads were never recorded before that date in any form, and were deliberately NOT back-filled from brief deliveries: a generated brief is not evidence of a read, and inferring one would fabricate the answer to the exact question this group exists to ask.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "claw-auth-postgres"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 151
+      },
+      "id": 223,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "decimals": 1,
+          "noValue": "no data for this range - durable per-user recording started 2026-08-20"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "claw-auth-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH gc AS (SELECT count(*) AS briefs FROM generated_content WHERE kind='DAILY_BRIEF' AND \"generatedAt\" IS NOT NULL AND $__timeFilter(\"generatedAt\")), rd AS (SELECT count(DISTINCT \"userId\") AS readers FROM daily_brief_activity WHERE kind='view' AND \"dateBucket\" >= to_char($__timeFrom() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AND \"dateBucket\" <= to_char($__timeTo() AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')) SELECT gc.briefs::float / NULLIF(rd.readers,0) AS \"briefs generated per reader\" FROM gc, rd"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Avg briefs delivered per subscriber per day",
+      "description": "FOLLOWS THE TIME PICKER (numerator): Each point is a moving aggregate over a window as long as the selected range, ending at that point — so the whole line re-scopes when you change the picker: a narrow range gives a responsive, spiky line, a wide range gives a smooth trend. Expressed per day. The denominator — how many people currently have the feature switched on — is a live reading and has no window of its own.\n\nGOOD: sitting at ~1.0. One brief, per subscriber, per day, which is exactly what the feature promises.\nBAD: dips below 1.0. Each dip is a morning where some subscribers got nothing, and the depth of the dip is roughly the share who missed out. Line them up against “Scheduled-brief failure rate” to see whether the runs failed or were never enqueued — a dip HERE with a clean failure rate means the fan-out never started, which is the more serious of the two.\nABOVE 1.0: should not happen for long — the cron enqueues one job per subscriber per day. A sustained reading above 1.0 means the subscriber count fell while deliveries continued, or the fan-out ran twice.\n\nCAVEAT: a wave of sign-ups pushes this below 1.0 for a day even though nothing failed — those people have not had a morning yet. For the range-scoped version with the same caveat removed, see “Delivery completeness”.\n\nCounts SCHEDULED runs that succeeded, from a true counter — not the lifetime brief-row gauge, which has historically stepped downward on a database reseed and would make every rate built on it read high.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 159
+      },
+      "id": 222,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "min": 0,
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(daily_brief_generated_total{trigger=\"scheduled\",status=\"ready\"}[$__range])) * 86400 / clamp_min(max(daily_brief_enabled_users_total), 1)",
+          "legendFormat": "briefs per subscriber per day",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Subscribers and total accounts over time",
+      "description": "FOLLOWS THE TIME PICKER. The two raw levels behind the opt-in rate: how many people have Daily Brief switched on, and how many accounts exist to switch it on.\n\nRead the GAP. Both lines rising together is healthy growth. The accounts line rising while subscribers stays flat means new joiners are not finding or not wanting the feature - a discovery problem, not a quality one.\n\nThe subscriber line is the only number on this dashboard that a user moves DELIBERATELY: it changes when somebody flips the Morning Brief toggle in Preferences, or uses the enable button on the intro banner or the empty state. A fall is a considered rejection and is worth chasing individually.\n\nThis is a LEVEL, so it shows the net position at each moment and cannot tell you how much traffic went both ways - ten people joining and ten leaving draws a flat line. The flow panel beside it separates those.\n\nThe subscriber and account gauges have been scraped since 2026-08-20 12:50, so ranges reaching further back read blank rather than zero. A two-minute window around 16:09 that day shows 4 subscribers - test accounts that were created and removed while building this dashboard. It ages out as history grows.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 167
+      },
+      "id": 229,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "no scrape data in this range"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(daily_brief_enabled_users_total)",
+          "legendFormat": "subscribers",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          }
+        },
+        {
+          "expr": "max(daily_brief_eligible_users_total)",
+          "legendFormat": "all accounts",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Opt-ins and opt-outs per day",
+      "description": "FOLLOWS THE TIME PICKER. Gross flow in each direction, expressed as a per-day rate so the number means the same thing at every range.\n\nThis is what the subscriber count CANNOT show. Ten people switching on and ten switching off leaves the level perfectly flat, and reads as 'nothing is happening' when in fact the feature is churning its entire audience.\n\nGOOD: opt-ins consistently above opt-outs, with opt-outs near zero.\nBAD: the two lines tracking each other - you are acquiring and losing the same volume, so growth is a treadmill.\nWORST: an opt-out spike the day after a release; line it up against the scheduled-brief failure rate and the rejection rate to see whether quality caused it.\n\nCounts real transitions only. Saving the settings form without changing the toggle does not count, and writing the same value twice counts once - verified against the live route.\n\nOpt-in and opt-out EVENTS are counted from the moment this counter shipped (2026-08-20).\n\nWHILE THE COUNTER IS YOUNG THIS CHART WILL LOOK EMPTY AT WIDE RANGES. A per-day rate needs enough samples inside the lookback window to compute, so with only a few hours of counter history a 7-day or 90-day range returns nothing while a 3-hour range works - the opposite of what you would expect, and measured rather than assumed. It resolves on its own after a day or two of history. Until then the three tiles below give the same information as exact counts at any range. The subscriber gauge above has slightly more history than the flow counters below, so over long ranges the net flow will not fully explain the level change. They agree from here forward.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 167
+      },
+      "id": 221,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto"
+          },
+          "mappings": [],
+          "unit": "short",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "no toggle activity in this range"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(daily_brief_opt_in_changes_total{action=\"opted_in\"}[$__range])) * 86400",
+          "legendFormat": "opted in",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          }
+        },
+        {
+          "expr": "sum(rate(daily_brief_opt_in_changes_total{action=\"opted_out\"}[$__range])) * 86400",
+          "legendFormat": "opted out",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          }
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Net subscriber change (selected range)",
+      "description": "FOLLOWS THE TIME PICKER. Opt-ins minus opt-outs across the selected range - how many net subscribers the feature gained or lost.\n\nGOOD: positive and growing.\nBAD: zero. Read it beside the two gross tiles - a net of zero from 0 in and 0 out means nobody is trying the feature, while a net of zero from 12 in and 12 out means you are losing people as fast as you win them. Those need opposite responses.\n\nNEGATIVE is the one to act on immediately: more people are switching Daily Brief off than on.\n\nOpt-in and opt-out EVENTS are counted from the moment this counter shipped (2026-08-20). The subscriber gauge above has slightly more history than the flow counters below, so over long ranges the net flow will not fully explain the level change. They agree from here forward.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 175
+      },
+      "id": 231,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "-"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "no toggle activity in this range"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "sum(increase(daily_brief_opt_in_changes_total{action=\"opted_in\"}[$__range])) - sum(increase(daily_brief_opt_in_changes_total{action=\"opted_out\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Opt-in rate over time",
+      "id": 234,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 181
+      },
+      "description": "FOLLOWS THE TIME PICKER. The share of accounts with Daily Brief switched on, recomputed at every point across the selected range.\n\nThis is a ratio of aggregates evaluated instant by instant - subscribers at that moment divided by accounts at that moment - which is the mathematically correct way to show a rate over time. It is NOT a running average, so every step you see is a real change in the population rather than a smoothing artefact.\n\nGOOD: a staircase climbing to the right.\nBAD: steps DOWN. Each one is a person who found the toggle and chose to turn the feature off - the clearest rejection signal the feature has. Line the date up against 'Scheduled-brief failure rate' and 'Scheduled-brief rejection rate' to see whether quality caused it.\n\nFLAT AT ZERO is a real reading, not a broken panel: it means nobody currently has the feature on.\n\nHistory starts 2026-08-20 21:5x - the point at which contaminated test samples were purged from these two gauges and the series restarted clean. Ranges reaching further back read blank.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "lineInterpolation": "stepAfter"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "no scrape data in this range"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P4169E866C3094E38"
+          },
+          "expr": "max(daily_brief_enabled_users_total) / clamp_min(max(daily_brief_eligible_users_total), 1)",
+          "legendFormat": "opt-in rate"
         }
       ]
     }
