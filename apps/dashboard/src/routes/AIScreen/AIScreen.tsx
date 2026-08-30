@@ -1,4 +1,4 @@
-import { type ReactElement, useState, useCallback, useEffect, useRef } from 'react';
+import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload } from 'lucide-react';
 import { AIShell } from '../../components/AIScreen/AIShell';
@@ -16,6 +16,8 @@ import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
+import { useSelf } from '../../hooks/useUsers';
+import { buildAskAIComposerDraftKey } from '../../components/AIScreen/askAIComposerDraftStorage';
 
 const AIScreen = (): ReactElement => {
   const [activeSessionId, setActiveSessionId] = useState(
@@ -43,8 +45,20 @@ const AIScreen = (): ReactElement => {
   const lastContextRef = useRef<ComposerContext | undefined>(undefined);
   const navigate = useNavigate();
   const { selectedAgentSlug } = useSelectedAgent();
+  const currentUser = useSelf();
   const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
+  const landingDraftKey = useMemo(
+    () =>
+      buildAskAIComposerDraftKey({
+        workspaceId: currentUser?.workspaceId,
+        userId: currentUser?.id,
+        surface: 'ai-chat',
+        agentSlug: effectiveAgentSlug,
+        targetKey: 'new',
+      }),
+    [currentUser?.workspaceId, currentUser?.id, effectiveAgentSlug],
+  );
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   useEffect(() => {
@@ -271,6 +285,7 @@ const AIScreen = (): ReactElement => {
                   showAgentSelector={isV2}
                   onContextChange={handleContextChange}
                   hideDisclaimer
+                  draftKey={landingDraftKey}
                 />
               </div>
             </div>

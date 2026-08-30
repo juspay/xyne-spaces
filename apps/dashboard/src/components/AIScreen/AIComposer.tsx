@@ -47,6 +47,11 @@ import {
   type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
+import {
+  readAskAIComposerDraft,
+  removeAskAIComposerDraft,
+  writeAskAIComposerDraft,
+} from './askAIComposerDraftStorage';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 
@@ -98,6 +103,8 @@ interface AIComposerProps {
    *  the latest snapshot so selections survive switching to a recent chat,
    *  matching XyneAISidebar (where composer state lives in the parent). */
   onContextChange?: ((context: ComposerContext) => void) | undefined;
+  /** Stable localStorage key for unsent Ask AI text/context drafts. */
+  draftKey?: string | null | undefined;
 }
 
 interface XyneAIConfigResponse {
@@ -221,10 +228,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     showAgentSelector = true,
     initialExtras,
     onContextChange,
+    draftKey,
   },
   ref,
 ): ReactElement {
   const [value, setValue] = useState('');
+  const hydratedDraftKeyRef = useRef<string | null>(null);
+  const skipNextDraftWriteRef = useRef(false);
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -302,6 +312,37 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 
   const modelPinProvider = agentModelsData?.pinProvider ?? 'litellm';
 
+  useEffect((): void => {
+    if (!draftKey) {
+      hydratedDraftKeyRef.current = null;
+      return;
+    }
+
+    hydratedDraftKeyRef.current = draftKey;
+    const draft = readAskAIComposerDraft(draftKey);
+    skipNextDraftWriteRef.current = !!draft?.text;
+    if (draft?.text) {
+      setValue(draft.text);
+    }
+    if (draft?.context) {
+      setSelections({
+        channels: draft.context.channels,
+        tickets: draft.context.tickets,
+        canvases: draft.context.canvases,
+        transcripts: draft.context.transcripts,
+        recordings: draft.context.recordings,
+      });
+      setCollections(draft.context.collections);
+      setFileScopes(draft.context.fileScopes);
+      setFolderScopes(draft.context.folderScopes);
+      setWebSearchEnabled(draft.context.webSearchEnabled);
+      setDeepResearchEnabled(draft.context.deepResearchEnabled);
+      setCreateCanvasEnabled(draft.context.createCanvasEnabled);
+      setSelectedModel(draft.context.model);
+      setThinkingLevel(draft.context.thinkingLevel);
+    }
+  }, [draftKey]);
+
   const buildContext = useCallback(
     (): ComposerContext => ({
       channels: selections.channels,
@@ -337,6 +378,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       deepResearchAccessible,
     ],
   );
+
+  useEffect((): void => {
+    if (!draftKey || hydratedDraftKeyRef.current !== draftKey) return;
+    if (skipNextDraftWriteRef.current) {
+      skipNextDraftWriteRef.current = false;
+      return;
+    }
+    writeAskAIComposerDraft(draftKey, { text: value, context: buildContext() });
+  }, [draftKey, value, buildContext]);
 
   // Report the latest context up to the parent (via a ref so an inline
   // onContextChange doesn't refire this every render). Lets AIScreen preserve
@@ -472,6 +522,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       clearContent: (): void => {
         setValue('');
         setAttachments([]);
+        removeAskAIComposerDraft(draftKey);
       },
       focus: (): void => {
         textareaRef.current?.focus();
@@ -494,7 +545,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setFolderScopes(next.folderScopes);
       },
     }),
-    [handleFilesAdded],
+    [draftKey, handleFilesAdded],
   );
 
   const submit = (): void => {
@@ -502,6 +553,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     const trimmed = value.trim();
     if (!trimmed) return;
     onSubmit?.(trimmed, attachments.length > 0 ? attachments : undefined, buildContext());
+    removeAskAIComposerDraft(draftKey);
     setValue('');
     setAttachments([]);
     // Toggles/context persist across turns (mirrors the sidebar), so they are

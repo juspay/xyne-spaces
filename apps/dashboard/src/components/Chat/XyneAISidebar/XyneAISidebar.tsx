@@ -93,6 +93,12 @@ import {
   buildXyneAIStreamThreadId,
   getChannelIdFromStreamThreadId,
 } from '../../../utils/xyneAIStreamThreadId';
+import {
+  buildAskAIComposerDraftKey,
+  readAskAIComposerDraft,
+  removeAskAIComposerDraft,
+  writeAskAIComposerDraft,
+} from '../../AIScreen/askAIComposerDraftStorage';
 
 function newStreamSlotKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -694,6 +700,57 @@ const XyneAISidebar = ({
   // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
   const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
+  const askAIDraftTargetKey = useMemo(() => {
+    if (conversationId) return `session:${conversationId}`;
+    if (threadInfo?.conversationId) return `thread:${threadInfo.conversationId}`;
+    if (canvasInfo?.canvasId) return `canvas:${canvasInfo.canvasId}`;
+    if (kbDocIdProp) return `kb-file:${kbDocIdProp}`;
+    if (kbFolderIdProp) return `kb-folder:${kbFolderIdProp}`;
+    if (kbCollectionIdProp) return `kb-collection:${kbCollectionIdProp}`;
+    if (channelId) return `channel:${channelId}`;
+    return 'global';
+  }, [
+    conversationId,
+    threadInfo?.conversationId,
+    canvasInfo?.canvasId,
+    kbDocIdProp,
+    kbFolderIdProp,
+    kbCollectionIdProp,
+    channelId,
+  ]);
+  const askAIDraftKey = useMemo(
+    () =>
+      buildAskAIComposerDraftKey({
+        workspaceId: currentUser?.workspaceId,
+        userId: currentUser?.id,
+        surface: 'sidebar',
+        agentSlug: effectiveAgentSlug,
+        targetKey: askAIDraftTargetKey,
+      }),
+    [currentUser?.workspaceId, currentUser?.id, effectiveAgentSlug, askAIDraftTargetKey],
+  );
+  const hydratedDraftKeyRef = useRef<string | null>(null);
+  const skipNextDraftWriteRef = useRef(false);
+  useEffect(() => {
+    if (!askAIDraftKey) {
+      hydratedDraftKeyRef.current = null;
+      return;
+    }
+    hydratedDraftKeyRef.current = askAIDraftKey;
+    const draft = readAskAIComposerDraft(askAIDraftKey);
+    skipNextDraftWriteRef.current = !!draft?.text;
+    if (draft?.text) {
+      setInputValue(draft.text);
+    }
+  }, [askAIDraftKey]);
+  useEffect(() => {
+    if (!askAIDraftKey || hydratedDraftKeyRef.current !== askAIDraftKey) return;
+    if (skipNextDraftWriteRef.current) {
+      skipNextDraftWriteRef.current = false;
+      return;
+    }
+    writeAskAIComposerDraft(askAIDraftKey, { text: inputValue });
+  }, [askAIDraftKey, inputValue]);
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
   // it refetches per agent and the pin resets on agent change — a model from
   // the previous agent's key may not exist on the new one.
@@ -1216,6 +1273,7 @@ const XyneAISidebar = ({
     setDebugEvents([]);
     setDebugArtifactsReadyVersion(0);
     setShowDebugger(false);
+    removeAskAIComposerDraft(askAIDraftKey);
     setInputValue('');
     setAttachments([]);
     setSelectedActivities([]);
@@ -1225,7 +1283,7 @@ const XyneAISidebar = ({
     setShowUserActivityPanel(false);
 
     processedSelectionKeysRef.current.clear();
-  }, []);
+  }, [askAIDraftKey]);
 
   // When user selects a different agent from the global selector,
   // reset to a fresh conversation scoped to that agent.
@@ -1804,6 +1862,7 @@ const XyneAISidebar = ({
       }
     }
 
+    removeAskAIComposerDraft(askAIDraftKey);
     setInputValue('');
     setAttachments([]);
     setSelectedActivities([]);
@@ -1855,6 +1914,7 @@ const XyneAISidebar = ({
     abortCurrentRequest,
     isLegacyConversation,
     kbCollectionIdProp,
+    askAIDraftKey,
   ]);
 
   // Submits once the auto-send seed effect above has landed in inputValue (handleSubmit closes over it).

@@ -31,6 +31,7 @@ import remarkBreaks from 'remark-breaks';
 import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { useSelf } from '../../hooks/useUsers';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
   Message,
@@ -43,6 +44,7 @@ import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { buildAskAIComposerDraftKey } from './askAIComposerDraftStorage';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
@@ -1345,6 +1347,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   ref,
 ): ReactElement {
   const composerRef = useRef<AIComposerHandle | null>(null);
+  const currentUser = useSelf();
+  const { selectedAgentSlug } = useSelectedAgent();
+  const { askAIVersion } = useAskAIVersion();
+  const isV2 = askAIVersion === 'v2';
+  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -1428,6 +1435,17 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const [streamThreadKey, setStreamThreadKey] = useState<string>(
     () => sessionId ?? newStreamSlotKey(),
   );
+  const draftKey = useMemo(
+    () =>
+      buildAskAIComposerDraftKey({
+        workspaceId: currentUser?.workspaceId,
+        userId: currentUser?.id,
+        surface: 'ai-chat',
+        agentSlug: effectiveAgentSlug,
+        targetKey: conversationId || sessionId ? `session:${conversationId || sessionId}` : 'new',
+      }),
+    [currentUser?.workspaceId, currentUser?.id, effectiveAgentSlug, conversationId, sessionId],
+  );
   // True while this thread is on a draft (client-generated) stream slot — i.e. a
   // brand-new chat that hasn't acquired a server session yet. While draft, a
   // normal submit does NOT chain a parentId, so the first turn isn't linked as a
@@ -1496,11 +1514,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   );
 
   void threadId; // Used by stream manager via useXyneAIStream internally
-
-  const { selectedAgentSlug } = useSelectedAgent();
-  const { askAIVersion } = useAskAIVersion();
-  const isV2 = askAIVersion === 'v2';
-  const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
 
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
@@ -2257,6 +2270,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               pending={isAnyMessageStreaming}
               onStop={handleStop}
               placeholder='Write a message...'
+              draftKey={draftKey}
             />
           </div>
         </div>
