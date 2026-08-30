@@ -2,6 +2,7 @@ import { DatabaseClient } from '@/database/client';
 import { NotificationType } from '@xyne/shared';
 import {logger} from '@/utils/logger';
 import { notificationService } from './notificationService';
+import { markChannelActivitiesRead, markThreadActivitiesRead } from './activityReadStateService';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -31,16 +32,7 @@ export class UnreadService {
           lastReadAt: viewedAt,
         }
       });
-      await prisma.activity.updateMany({
-        where: {
-          userId,
-          conversationId,
-          isRead: false,
-        }, data: {
-          isRead: true,
-          updatedAt: new Date().toISOString(),
-        }
-      });
+      await markThreadActivitiesRead(prisma, userId, conversationId);
 
       await notificationService.createNotification(userId, {
         title: 'Silent notification',
@@ -101,16 +93,7 @@ export class UnreadService {
         take: 25,
         select: { createdAt: true },
       });
-      await prisma.activity.updateMany({
-        where: {
-          userId,
-          channelId,
-          isRead: false,
-        }, data: {
-          isRead: true,
-          updatedAt: new Date().toISOString(),
-        }
-      });
+      await markChannelActivitiesRead(prisma, userId, channelId);
       const conversationSeenCutoffAt =
         seenConversations[seenConversations.length - 1]?.createdAt ?? viewedAt;
 
