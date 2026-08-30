@@ -1,5 +1,5 @@
 import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, ExternalLink, GitBranch, Lock, RefreshCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, GitBranch, Lock, RefreshCw } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
@@ -110,7 +110,6 @@ export function ProjectRepositoriesSection(props: {
           repository={repo}
           checking={checking === repo.id}
           onCheck={() => void check(repo.id)}
-          onOpen={() => void navigate(`/sdlc/${repo.id}/overview`)}
           onSettings={() =>
             void navigate(
               workspaceId
@@ -128,7 +127,6 @@ function RepositoryCard(props: {
   repository: ProjectRepository;
   checking: boolean;
   onCheck: () => void;
-  onOpen: () => void;
   onSettings: () => void;
 }): ReactElement {
   const repo = props.repository;
@@ -162,9 +160,6 @@ function RepositoryCard(props: {
         <div className='flex flex-wrap gap-2'>
           <Button variant='outline' loading={props.checking} onClick={props.onCheck}>
             <RefreshCw className='h-4 w-4' /> Refresh now
-          </Button>
-          <Button onClick={props.onOpen}>
-            <ExternalLink className='h-4 w-4' /> Open SDLC
           </Button>
         </div>
       </div>

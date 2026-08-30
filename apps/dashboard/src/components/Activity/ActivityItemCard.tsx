@@ -13,8 +13,6 @@ import { resolveSdlcActivityTarget } from './sdlcActivityNavigation';
 const NofocusRefContext = createContext<React.RefObject<boolean>>({ current: false });
 export const NofocusRefProvider = NofocusRefContext.Provider;
 import { useChannel } from '../../hooks/useChannels';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { useRouteContext } from '../../hooks/useRouteContext';
@@ -81,11 +79,6 @@ export const ActivityItemCard = ({
   const nofocusRef = useContext(NofocusRefContext);
 
   const channel = useChannel(channelId || '');
-  const isSdlcChannel = channel?.type === ChannelType.SDLC;
-  const [sdlcRepo] = useCachedQuery(
-    queries.getSdlcRepoByChannelId({ channelId: channelId || '' }),
-    { enabled: isSdlcChannel && !!channelId },
-  );
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
   const displayedChannelName = channel ? channelDisplayName : unresolvedChannelLabel;
 
@@ -135,7 +128,7 @@ export const ActivityItemCard = ({
     const path = resolveSdlcActivityTarget({
       activity,
       channelType: channel?.type,
-      repoId: sdlcRepo && !(sdlcRepo instanceof Error) ? sdlcRepo.id : null,
+      channelId,
       fallbackPath: defaultPath,
     });
 

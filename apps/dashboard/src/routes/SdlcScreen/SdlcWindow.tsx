@@ -6,14 +6,14 @@ import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
 import { SDLC_WINDOW_FRAME_NAME } from './useSdlcFrameBridge';
 
 /**
- * The SDLC lane as a whole window, at /newWindow/sdlc/:workspaceId/:repoId/:section.
+ * The SDLC lane as a whole window, at /newWindow/sdlc/:workspaceId/:channelId/:section.
  * Hosts the same iframe SdlcFrameHost does, without its viewport and portal: here
  * the frame is the window, so it is never hidden or reparented.
  */
 const SdlcWindow = (): ReactElement => {
-  const { workspaceId, repoId, section } = useParams<{
+  const { workspaceId, channelId, section } = useParams<{
     workspaceId: string;
-    repoId: string;
+    channelId: string;
     section: string;
   }>();
   const location = useLocation();
@@ -25,7 +25,7 @@ const SdlcWindow = (): ReactElement => {
   initiateCallRef.current = initiateCall;
 
   const [src, setSrc] = useState(
-    () => `${SDLC_APP_BASE_PATH}/${workspaceId}/sdlc/${repoId}/${section}${location.search}`,
+    () => `${SDLC_APP_BASE_PATH}/${workspaceId}/sdlc/${channelId}/${section}${location.search}`,
   );
   const [resetCount, setResetCount] = useState(0);
 

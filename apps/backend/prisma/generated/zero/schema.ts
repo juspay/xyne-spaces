@@ -1989,7 +1989,8 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   .columns({
     id: string(),
     workspaceId: string(),
-    repoId: string(),
+    repoId: string().optional(),
+    channelId: string().optional(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
@@ -2004,7 +2005,7 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
     artifactId: string(),
-    repoId: string(),
+    repoId: string().optional(),
     artifactType: string(),
     artifactStatus: string(),
     workflowExecutionId: string().optional(),
@@ -2021,7 +2022,7 @@ export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
     workspaceId: string(),
     id: string(),
-    repoId: string(),
+    repoId: string().optional(),
     name: string(),
     description: string().optional(),
     status: string(),
@@ -4050,6 +4051,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: repoTable,
+  }),
+  sdlcEntityLinks: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: sdlcEntityLinkTable,
   })
 }));
 
@@ -4477,6 +4483,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     sourceField: ["repoId"],
     destField: ["id"],
     destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 

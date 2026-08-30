@@ -24,6 +24,8 @@ import type {
 } from './types';
 import { VcsProviderError } from './types';
 import { verifySdlcInteractiveGrant } from './sdlcInteractiveGrant';
+import { findSdlcMembershipForActor } from '../sdlcChannelMembership';
+import { requireSdlcProjectAccess } from '../sdlcProjectAccess';
 
 const adapters: Record<VcsProvider, VcsProviderAdapter> = {
   GITHUB: new GitHubVcsAdapter(),
@@ -209,7 +211,9 @@ export class SdlcVcsService implements SdlcVcs {
     repoId: string,
     options: { force?: boolean } = {}
   ): Promise<RepositoryAccessCheckResult> {
-    const repo = await this.requireRepositoryMember(actor, repoId);
+    // Project access, not hub membership: a repository is checked from the moment it
+    // is registered, and joins a hub only later.
+    const repo = await this.requireProjectRepository(actor, repoId);
     // Only a proven read short-circuits: failures persist non-empty capabilities, so a
     // length check here would leave a BLOCKED repository stuck forever.
     const current = deriveAccessStatus(repo.accessCapabilities);
@@ -938,25 +942,34 @@ export class SdlcVcsService implements SdlcVcs {
     }
   }
 
-  private async requireRepositoryMember(actor: SdlcActor, repoId: string) {
+  /** Reached through its project. For repo-scoped writes use requireRepositoryMember. */
+  private async requireProjectRepository(actor: SdlcActor, repoId: string) {
     const repo = await this.prisma.repo.findFirst({
-      where: {
-        id: repoId,
-        workspaceId: actor.workspaceId,
-        projectId: { not: null },
-        channelId: { not: null },
-      },
-      include: {
-        channel: {
-          select: {
-            participants: { where: { userId: actor.userId }, select: { id: true, role: true } },
-          },
-        },
-      },
+      where: { id: repoId, workspaceId: actor.workspaceId, projectId: { not: null } },
     });
+    if (!repo?.projectId) throw new AppError('SDLC repository not found', 404);
+    await requireSdlcProjectAccess(
+      this.prisma,
+      actor,
+      repo.projectId,
+      'You must be a project participant to check this repository'
+    );
+    return repo;
+  }
+
+  private async requireRepositoryMember(actor: SdlcActor, repoId: string) {
+    const [repo, membership] = await Promise.all([
+      this.prisma.repo.findFirst({
+        where: { id: repoId, workspaceId: actor.workspaceId, projectId: { not: null } },
+      }),
+      findSdlcMembershipForActor(this.prisma, {
+        workspaceId: actor.workspaceId,
+        repoId,
+        userId: actor.userId,
+      }),
+    ]);
     if (!repo) throw new AppError('SDLC repository not found', 404);
-    if (!repo.channel?.participants[0])
-      throw new AppError('You are not a member of this repository', 403);
+    if (!membership) throw new AppError('You are not a member of this repository', 403);
     return repo;
   }
 
