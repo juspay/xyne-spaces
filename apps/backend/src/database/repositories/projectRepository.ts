@@ -1,3 +1,4 @@
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Project } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
@@ -175,8 +176,14 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
   }
 
   async delete(id: string): Promise<Project> {
-    const attachedSdlcRepository = await this.db.repo.findFirst({
-      where: { projectId: id, channelId: { not: null } },
+    // Only repositories in a hub block deletion: an unattached one has nothing to
+    // detach and no UI to detach it from.
+    const attachedSdlcRepository = await this.db.sdlcEntityLink.findFirst({
+      where: {
+        relationType: SDLC_MEMBERSHIP_RELATION,
+        targetType: 'REPOSITORY',
+        channel: { projectId: id },
+      },
       select: { id: true },
     });
     if (attachedSdlcRepository) {

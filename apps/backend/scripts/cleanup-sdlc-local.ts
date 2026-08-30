@@ -6,6 +6,8 @@ import { getBaseRedisOptions } from '../src/services/redisFactory';
 
 const prisma = new PrismaClient();
 const SDLC_WORKFLOW_TYPES = ['SDLC_SETUP', 'SDLC_WORK', 'SDLC_WIKI'];
+// Mirrors SDLC_MEMBERSHIP_RELATION in packages/shared/src/sdlc.ts.
+const SDLC_MEMBERSHIP_RELATION = 'REPOSITORY';
 const PROTECTED_TABLES = new Set([
   'users',
   'workspaces',
@@ -63,16 +65,16 @@ type RepoRow = {
   name: string;
   url: string;
   canonicalUrl: string | null;
-  channelId: string;
   projectId: string | null;
 };
 
 async function resolveRepos(repoSelector?: string): Promise<RepoRow[]> {
+  // A project is what makes a repository an SDLC one; hub membership is optional
+  // now, and a repository registered into no hub still has to be cleaned up.
   const rows = await prisma.$queryRawUnsafe<RepoRow[]>(
-    `SELECT r.id, r.name, r.url, r."canonicalUrl", r."channelId", r."projectId"
+    `SELECT r.id, r.name, r.url, r."canonicalUrl", r."projectId"
        FROM public.repos r
-       JOIN public.channels c ON c.id = r."channelId"
-      WHERE c.metadata->>'surface' = 'SDLC'
+      WHERE r."projectId" IS NOT NULL
         AND ($1::text IS NULL OR $1 IN (r.id, r.name, r.url, r."canonicalUrl"))`,
     repoSelector ?? null
   );
@@ -83,6 +85,30 @@ async function resolveRepos(repoSelector?: string): Promise<RepoRow[]> {
     throw new Error(`Repository selector is ambiguous; use repo ID: ${repoSelector}`);
   }
   return rows;
+}
+
+/**
+ * Hubs safe to delete outright. Scoped to one repository that shares a hub, the
+ * hub survives: dropping it would take the other repositories' work with it.
+ */
+async function resolveChannels(repoIds: string[], scoped: boolean): Promise<string[]> {
+  if (!scoped) {
+    return textIds(`SELECT id FROM public.channels WHERE "type" = 'SDLC'`);
+  }
+  return textIds(
+    `SELECT c.id
+       FROM public.channels c
+      WHERE c."type" = 'SDLC'
+        AND EXISTS (SELECT 1 FROM public.sdlc_entity_links l
+                     WHERE l."channelId" = c.id
+                       AND l."relationType" = '${SDLC_MEMBERSHIP_RELATION}'
+                       AND l."targetId" = ANY($1::text[]))
+        AND NOT EXISTS (SELECT 1 FROM public.sdlc_entity_links l
+                         WHERE l."channelId" = c.id
+                           AND l."relationType" = '${SDLC_MEMBERSHIP_RELATION}'
+                           AND l."targetId" <> ALL($1::text[]))`,
+    [repoIds]
+  );
 }
 
 async function textIds(query: string, params: unknown[] = []): Promise<string[]> {
@@ -209,7 +235,7 @@ async function main(): Promise<void> {
 
   const repos = await resolveRepos(repoSelector);
   const repoIds = repos.map((repo) => repo.id);
-  const channelIds = repos.map((repo) => repo.channelId);
+  const channelIds = await resolveChannels(repoIds, Boolean(repoSelector));
   const workflowIds = await textIds(
     `SELECT id FROM public.workflows
       WHERE "workflowType" = ANY($1::text[])
@@ -238,11 +264,23 @@ async function main(): Promise<void> {
       JSON.stringify({ executionIds, conversationIds: clawConversationIds })
     );
   }
-  const canvases = channelIds.length
+  const hubCanvases = channelIds.length
     ? await textIds('SELECT id FROM public.canvases WHERE "channelId" = ANY($1::text[])', [
         channelIds,
       ])
     : [];
+  // In a hub that survives, only this repository's artifacts go.
+  const sharedHubCanvases = repoSelector
+    ? await textIds(
+        `SELECT a."artifactId" AS id
+           FROM public.sdlc_artifacts a
+           JOIN public.canvases cv ON cv.id = a."artifactId"
+          WHERE a."repoId" = ANY($1::text[])
+            AND cv."channelId" <> ALL($2::text[])`,
+        [repoIds, channelIds]
+      )
+    : [];
+  const canvases = [...new Set([...hubCanvases, ...sharedHubCanvases])];
   const folders = channelIds.length
     ? await textIds('SELECT id FROM public.canvas_folders WHERE "channelId" = ANY($1::text[])', [
         channelIds,
@@ -252,6 +290,16 @@ async function main(): Promise<void> {
     ? await textIds('SELECT id FROM public.tickets WHERE "channelId" = ANY($1::text[])', [
         channelIds,
       ])
+    : [];
+  // Tracks carry no channelId column, so the CHANNEL -> TRACK edges name them.
+  const tracks = channelIds.length
+    ? await textIds(
+        `SELECT DISTINCT "targetId" AS id FROM public.sdlc_entity_links
+          WHERE "channelId" = ANY($1::text[])
+            AND "targetType" = 'TRACK'
+            AND "relationType" = 'TRACK'`,
+        [channelIds]
+      )
     : [];
   const conversations = channelIds.length
     ? await textIds(
@@ -267,9 +315,23 @@ async function main(): Promise<void> {
     : [];
   const queue = await inspectQueue(repoSelector ? repoIds[0] : undefined);
 
+  const sharedHubs = repoSelector
+    ? (
+        await textIds(
+          `SELECT DISTINCT l."channelId" AS id
+             FROM public.sdlc_entity_links l
+            WHERE l."relationType" = '${SDLC_MEMBERSHIP_RELATION}'
+              AND l."targetId" = ANY($1::text[])
+              AND l."channelId" <> ALL($2::text[])`,
+          [repoIds, channelIds]
+        )
+      ).length
+    : 0;
+
   const summary = {
     repos: repoIds.length,
     channels: channelIds.length,
+    sharedHubsKept: sharedHubs,
     tickets: tickets.length,
     canvases: canvases.length,
     conversations: conversations.length,
@@ -329,11 +391,21 @@ async function main(): Promise<void> {
         repoIds
       );
     }
+    // sdlc_entity_links."repoId" is deprecated and unwritten: the repository is an endpoint.
+    if (repoIds.length > 0) {
+      await tx.$executeRawUnsafe(
+        `DELETE FROM public.sdlc_entity_links
+          WHERE ("targetType" = 'REPOSITORY' AND "targetId" = ANY($1::text[]))
+             OR ("sourceType" = 'REPOSITORY' AND "sourceId" = ANY($1::text[]))`,
+        repoIds
+      );
+    }
     const related = await deleteByKnownColumns(tx, sets);
     const targets: Array<[string, string, string, string[]]> = [
       ['public', 'messages', 'messageId', messages],
       ['public', 'conversations', 'conversationId', conversations],
       ['public', 'tickets', 'id', tickets],
+      ['public', 'sdlc_tracks', 'id', tracks],
       ['public', 'canvases', 'id', canvases],
       ['public', 'canvas_folders', 'id', folders],
       ['public', 'repos', 'id', repoIds],

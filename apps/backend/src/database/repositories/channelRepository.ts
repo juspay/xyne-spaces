@@ -1,3 +1,4 @@
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Channel } from '@prisma/client';
 import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
@@ -190,8 +191,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async delete(id: string): Promise<Channel> {
-    const attachedSdlcRepository = await this.db.repo.findFirst({
-      where: { channelId: id, projectId: { not: null } },
+    const attachedSdlcRepository = await this.db.sdlcEntityLink.findFirst({
+      where: { channelId: id, relationType: SDLC_MEMBERSHIP_RELATION },
       select: { id: true },
     });
     if (attachedSdlcRepository) {

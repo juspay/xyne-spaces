@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 
-const NotFoundScreen = (): ReactElement => {
+interface NotFoundScreenProps {
+  /** Where to return to. Skips history so a dead URL in it is never replayed. */
+  fallbackPath?: string;
+}
+
+const NotFoundScreen = ({ fallbackPath }: NotFoundScreenProps = {}): ReactElement => {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -20,6 +25,10 @@ const NotFoundScreen = (): ReactElement => {
   // tracks its own position at `history.state.idx`; 0 means this is the first entry it
   // owns, so fall through to the default route, which resolves workspace + landing.
   const handleGoBack = (): void => {
+    if (fallbackPath) {
+      void navigate(fallbackPath, { replace: true });
+      return;
+    }
     const idx = (window.history.state as { idx?: number } | null)?.idx;
     if (typeof idx === 'number' && idx > 0) {
       void navigate(-1);
