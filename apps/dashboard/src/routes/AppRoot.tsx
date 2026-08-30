@@ -111,6 +111,7 @@ import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
 import { RecapPanel } from '../components/RecapPanel';
+import { RadarPanel } from '../components/RadarPanel';
 import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
@@ -1226,6 +1227,28 @@ export const router = createBrowserRouter(
                             {
                               path: ':channelId',
                               element: <RecapPanel />,
+                              children: [
+                                {
+                                  path: ':conversationId',
+                                  element: <ThreadMessages />,
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                        // Radar (must come before :channelId). The route stays
+                        // registered because the router is built at module scope;
+                        // the CAC rollout gate lives inside RadarPanel itself.
+                        {
+                          path: 'radar',
+                          children: [
+                            {
+                              index: true,
+                              element: <RadarPanel />,
+                            },
+                            {
+                              path: ':channelId',
+                              element: <RadarPanel />,
                               children: [
                                 {
                                   path: ':conversationId',

@@ -119,6 +119,20 @@ const envSchema = Joi.object({
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
+  // One switch for the whole feature, read by both processes: the API gates
+  // its producer on it, the worker gates its drain loop on it. A separate
+  // worker flag only bought states that are a no-op or actively bad (enqueuing
+  // with nothing draining), and idling the worker alone is a replicas:0
+  // decision, not a config one. Toggling loses nothing — watermarks persist,
+  // so the next enqueue replays everything above them.
+  ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
+  RADAR_PARSER_MODEL: Joi.string().default('open-fast'),
+  RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // Kept as a knob deliberately: this is the hard ceiling on how much text can
+  // enter one parse, so it is the emergency brake on parser spend.
+  RADAR_MAX_WINDOW_MESSAGES: Joi.number().integer().min(1).default(200),
+  RADAR_EXECUTION_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
+  RADAR_RUN_LOG_RETENTION_DAYS: Joi.number().integer().min(1).default(3),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
   TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
@@ -694,6 +708,22 @@ export const config = {
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
+  // Radar execution engine. Two switches: enqueue on message insert, and run
+  // the drain worker. A gated window always goes to the parser and a valid
+  // transition is always applied — there is no separate dry-run mode.
+  radar: {
+    enabled: envVars.ENABLE_RADAR_EXECUTION as boolean,
+    // Required once radar is enabled — a blank model throws at parse time.
+    parserModel: envVars.RADAR_PARSER_MODEL as string,
+    // Blank falls back to the shared LITELLM_API_KEY. A dedicated key keeps
+    // radar's rate limit and spend off the quota other features draw on.
+    litellmApiKey: envVars.RADAR_EXECUTION_LITELLM_API_KEY as string,
+    maxWindowMessages: envVars.RADAR_MAX_WINDOW_MESSAGES as number,
+    workerConcurrency: envVars.RADAR_EXECUTION_WORKER_CONCURRENCY as number,
+    // execution_run_logs is the fastest-growing table here — one row per
+    // drain pass, carrying full LLM payloads. Swept on a timer by the worker.
+    runLogRetentionDays: envVars.RADAR_RUN_LOG_RETENTION_DAYS as number,
+  },
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   teamIntelligence: {
     model: envVars.TEAM_INTELLIGENCE_LLM_MODEL as string,
