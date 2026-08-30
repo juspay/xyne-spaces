@@ -858,13 +858,20 @@ export default function SdlcScreen(): ReactElement {
     return search;
   };
 
-  const openCanvasInWindow = (canvasId: string, withDiscussion: boolean): boolean => {
+  const openWindowForCanvas = (
+    targetSection: string,
+    canvasId: string,
+    search: URLSearchParams,
+  ): boolean => {
     if (!workspaceId || !repoId) return false;
     return openStandaloneWindow(
-      `/sdlc/${workspaceId}/${repoId}/${section}?${canvasSearch(canvasId, withDiscussion).toString()}`,
+      `/sdlc/${workspaceId}/${repoId}/${targetSection}?${search.toString()}`,
       `sdlc-canvas:${canvasId}`,
     );
   };
+
+  const openCanvasInWindow = (canvasId: string, withDiscussion: boolean): boolean =>
+    openWindowForCanvas(section, canvasId, canvasSearch(canvasId, withDiscussion));
 
   const openCanvas = (canvasId: string, options?: OpenCanvasOptions): void => {
     if (!repoId) return;
@@ -883,12 +890,17 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  const openArtifactCanvas = (canvasId: string): void => {
+  const openArtifactCanvas = (canvasId: string, event?: ReactMouseEvent): void => {
     if (!repoId) return;
     const folder = typeFolders.find(item => item.canvases.some(canvas => canvas.id === canvasId));
-    setRelatedSourceId(null);
-    const search = new URLSearchParams({ canvas: canvasId });
+    const search = canvasSearch(canvasId, true);
     if (folder) search.set('type', folder.id);
+
+    if (shouldOpenInNewWindow(event) && openWindowForCanvas('artifacts', canvasId, search)) {
+      return;
+    }
+
+    setRelatedSourceId(null);
     navigateWithinSdlc(
       `/sdlc/${repoId}/artifacts`,
       `?${search.toString()}`,
@@ -1398,7 +1410,7 @@ export default function SdlcScreen(): ReactElement {
                         type='button'
                         key={canvas.id}
                         className='group mb-1.5 flex w-full items-start gap-3 rounded-xl bg-primary/5 px-3 py-3 text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                        onClick={() => openArtifactCanvas(canvas.id)}
+                        onClick={event => openArtifactCanvas(canvas.id, event)}
                         data-track-category='SdlcHub'
                         data-track-name='TrackArtifactOpened'
                         data-track-metadata={JSON.stringify({
@@ -2064,7 +2076,7 @@ export default function SdlcScreen(): ReactElement {
                     variant='ghost'
                     aria-label='Open in new window'
                     title='Open in new window'
-                    onClick={() => openCanvasInWindow(selectedCanvasId, chatLayout.panelOpen)}
+                    onClick={() => openCanvasInWindow(selectedCanvasId, true)}
                     data-track-category='SdlcHub'
                     data-track-name='ArtifactOpenedInWindow'
                   >
