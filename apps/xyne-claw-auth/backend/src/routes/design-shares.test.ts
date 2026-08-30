@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 const state = vi.hoisted(() => ({
   share: null as null | Record<string, any>,
   attachmentId: "attachment-1",
+  orgMembers: [["user-1", "org-1"]] as Array<[string, string]>,
   config: { encryptionKey: Buffer.alloc(32, 9), frontendUrl: "https://spaces.xyne.juspay.net/claw" },
 }));
 
@@ -14,6 +15,10 @@ vi.mock("../logger.js", () => ({
 vi.mock("../middleware/agent-acl.js", () => ({
   getRequesterId: (req: Request) => req.headers["x-user-id"],
   getOrgId: (req: Request) => req.headers["x-org-id"],
+}));
+vi.mock("./organizations.js", () => ({
+  isOrgMember: async (userId: string, orgId: string) =>
+    state.orgMembers.some(([u, o]) => u === userId && o === orgId),
 }));
 vi.mock("../services/storageService.js", () => ({
   gcsService: { createReadStream: vi.fn() },
@@ -86,7 +91,7 @@ async function requestJson(
   routerName: "owner" | "public",
   method: "GET" | "POST" | "DELETE",
   url: string,
-  options: { body?: unknown; token?: string } = {},
+  options: { body?: unknown; token?: string; userId?: string | null } = {},
 ): Promise<{ status: number; body: Record<string, any>; headers: Record<string, string> }> {
   const { designSharesRouter, publicDesignSharesRouter } = await import("./design-shares.js");
   const router = routerName === "owner" ? designSharesRouter : publicDesignSharesRouter;
@@ -98,8 +103,7 @@ async function requestJson(
       url,
       originalUrl: url,
       headers: {
-        "x-user-id": "user-1",
-        "x-org-id": "org-1",
+        ...(options.userId === null ? {} : { "x-user-id": options.userId ?? "user-1", "x-org-id": "org-1" }),
         ...(options.token ? { "x-design-share-token": options.token } : {}),
       },
       body: options.body ?? {},
@@ -121,6 +125,7 @@ describe("design artifact sharing", () => {
   beforeEach(() => {
     state.share = null;
     state.attachmentId = "attachment-1";
+    state.orgMembers = [["user-1", "org-1"]];
     vi.clearAllMocks();
   });
 
@@ -199,6 +204,45 @@ describe("design artifact sharing", () => {
 
     expect((await requestJson("owner", "DELETE", "/share-1")).status).toBe(200);
     expect((await requestJson("public", "GET", "/metadata", { token })).status).toBe(404);
+  });
+
+  it("keeps design shares anonymous while gating review rooms on org membership", async () => {
+    const { upsertDesignShare } = await import("./design-shares.js");
+    const design = await upsertDesignShare({
+      ownerUserId: "user-1",
+      orgId: "org-1",
+      conversationId: "conv-1",
+      attachmentId: "attachment-1",
+      title: "Checkout",
+      expiresAt: null,
+    });
+    const designToken = decodeURIComponent(design.sharePath.split("#")[1]!);
+    expect((await requestJson("public", "GET", "/metadata", { token: designToken, userId: null })).status).toBe(200);
+
+    state.share = null;
+    const room = await upsertDesignShare({
+      ownerUserId: "user-1",
+      orgId: "org-1",
+      conversationId: "conv-2",
+      attachmentId: "attachment-1",
+      title: "Launch review",
+      expiresAt: null,
+      kind: "review_room",
+    });
+    const roomToken = decodeURIComponent(room.sharePath.split("#")[1]!);
+
+    const anonymous = await requestJson("public", "GET", "/metadata", { token: roomToken, userId: null });
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.body["error"]).toBe("auth_required");
+    expect((await requestJson("public", "GET", "/content", { token: roomToken, userId: null })).status).toBe(404);
+
+    const outsider = await requestJson("public", "GET", "/metadata", { token: roomToken, userId: "user-9" });
+    expect(outsider.status).toBe(404);
+    expect(outsider.body["error"]).toBe("Shared design not found or no longer available");
+
+    const member = await requestJson("public", "GET", "/metadata", { token: roomToken, userId: "user-1" });
+    expect(member.status).toBe(200);
+    expect(member.body["data"]).toMatchObject({ title: "Launch review" });
   });
 
   it("does not publish an attachment outside the signed-in user's conversation", async () => {

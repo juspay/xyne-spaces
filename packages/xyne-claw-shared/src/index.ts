@@ -9,7 +9,7 @@ export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForS
 export { PLATFORM_ONLY_CONFIG_KEYS, stripPlatformConfigKeys } from "./tools/platform-config-keys.js";
 export { parseAgentPrivacy, isAgentInvocableBy, normalizeAgentPrivacy, DEFAULT_AGENT_PRIVACY, type AgentPrivacy, type AgentPrivacyMode } from "./agent-privacy.js";
 export { PRESENTATION_TOOL_SOURCES, PRESENTATION_CATALOG_SOURCE, isPresentationToolSource } from "./tools/presentation.js";
-export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
+export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { TwinDelivery, TwinDeliveryAction, TwinReplyDestination, TwinDestinationCandidate } from "./types/twin-delivery.js";

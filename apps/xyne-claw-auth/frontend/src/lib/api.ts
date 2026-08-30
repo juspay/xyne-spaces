@@ -67,6 +67,7 @@ export async function revokeDesignArtifactShare(shareId: string): Promise<void> 
 
 export async function getPublicDesignArtifact(token: string): Promise<PublicDesignArtifact> {
   const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/metadata`, {
+    credentials: "include",
     headers: { "x-design-share-token": token },
   });
   if (!response.ok) {
@@ -79,6 +80,7 @@ export async function getPublicDesignArtifact(token: string): Promise<PublicDesi
 
 export async function getPublicDesignArtifactHtml(token: string): Promise<Blob> {
   const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/content`, {
+    credentials: "include",
     headers: { "x-design-share-token": token },
   });
   if (!response.ok) {

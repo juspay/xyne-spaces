@@ -17,6 +17,7 @@
 import { cp, mkdir, readdir, readFile, rename, stat, statfs, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PATHS, SERVER } from "./config.js";
 import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsDeleteSession, gcsSessionUpdatedAt, type SessionDiskFile } from "./storage.js";
@@ -783,6 +784,151 @@ export async function flushAllActiveSessions(budgetMs: number): Promise<void> {
  *  per-user thread, where the run's final assistant turn (e.g. the RCA the
  *  user is reading) must stay in context. */
 export type BranchSessionMode = "lastUser" | "beforeLastUser" | "full";
+
+export interface LiveSessionHandle {
+  conversationId: string | undefined;
+  getCwd(): string;
+  getHeader(): unknown;
+  getLeafId(): string | null;
+  getBranch(fromId?: string): unknown[];
+  getEntries(): unknown[];
+  isPersisted(): boolean;
+}
+
+const liveSessions = new Map<string, LiveSessionHandle>();
+
+export function registerLiveSession(keys: Array<string | undefined>, handle: LiveSessionHandle): void {
+  for (const k of keys) {
+    if (k) liveSessions.set(k, handle);
+  }
+}
+
+export function unregisterLiveSession(keys: Array<string | undefined>): void {
+  for (const k of keys) {
+    if (k) liveSessions.delete(k);
+  }
+}
+
+export function getLiveSession(key: string): LiveSessionHandle | undefined {
+  return liveSessions.get(key);
+}
+
+export interface SnapshotLiveSessionResult {
+  ok: boolean;
+  targetDir?: string;
+  sessionFile?: string;
+  entryCount?: number;
+  reason?: string;
+}
+
+export async function snapshotLiveSession(
+  sourceKey: string,
+  targetConversationId: string,
+  opts?: { overwrite?: boolean | undefined },
+): Promise<SnapshotLiveSessionResult> {
+  const handle = liveSessions.get(sourceKey);
+  if (!handle) {
+    log.warn(`[session-store] snapshot: no live session registered for ${sourceKey}`);
+    return { ok: false, reason: "no_live_session" };
+  }
+  return snapshotLiveSessionHandle(handle, targetConversationId, sourceKey, opts);
+}
+
+/** Snapshot from a handle the caller already holds.
+ *
+ *  Callers that must survive the source run finishing take the handle
+ *  SYNCHRONOUSLY (getLiveSession) before their first await and pass it here.
+ *  Looking it up later races runTask's `finally`, which calls
+ *  unregisterLiveSession — and for a PR-creation trigger, which fires near the
+ *  end of a run, the handle is routinely already gone. */
+export async function snapshotLiveSessionHandle(
+  handle: LiveSessionHandle,
+  targetConversationId: string,
+  sourceKey: string,
+  opts?: { overwrite?: boolean | undefined },
+): Promise<SnapshotLiveSessionResult> {
+  if (!handle.isPersisted()) {
+    log.warn(`[session-store] snapshot: live session ${sourceKey} is in-memory only — nothing to snapshot`);
+    return { ok: false, reason: "in_memory_session" };
+  }
+
+  let header: unknown;
+  let entries: unknown[];
+  try {
+    header = handle.getHeader();
+    const leafId = handle.getLeafId();
+    entries = leafId ? handle.getBranch(leafId) : handle.getEntries();
+  } catch (err) {
+    log.warn(
+      `[session-store] snapshot: reading live entries failed for ${sourceKey}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { ok: false, reason: "read_failed" };
+  }
+  if (!header || !Array.isArray(entries) || entries.length === 0) {
+    log.warn(`[session-store] snapshot: live session ${sourceKey} had no usable entries`);
+    return { ok: false, reason: "empty_session" };
+  }
+
+  const overwrite = opts?.overwrite !== false;
+  const targetDir = sessionDir(targetConversationId);
+  if (existsSync(targetDir)) {
+    if (!overwrite) {
+      log.info(`[session-store] snapshot: target exists and overwrite=false ${targetConversationId}`);
+      return { ok: false, reason: "target_exists" };
+    }
+    try {
+      await rm(targetDir, { recursive: true, force: true });
+    } catch (err) {
+      log.warn(
+        `[session-store] snapshot: could not clear target ${targetConversationId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { ok: false, reason: "clear_failed" };
+    }
+  }
+
+  const timestamp = new Date().toISOString();
+  const newSessionId = randomUUID();
+  const snapshotHeader = {
+    ...(header as Record<string, unknown>),
+    id: newSessionId,
+    timestamp,
+    cwd: handle.getCwd(),
+    parentSession: undefined,
+  };
+
+  const lines: string[] = [];
+  try {
+    lines.push(JSON.stringify(snapshotHeader));
+    for (const e of entries) {
+      if (!e || typeof e !== "object") continue;
+      if ((e as { type?: string }).type === "session") continue;
+      lines.push(JSON.stringify(e));
+    }
+  } catch (err) {
+    log.warn(
+      `[session-store] snapshot: serialize failed for ${sourceKey}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { ok: false, reason: "serialize_failed" };
+  }
+
+  try {
+    await mkdir(targetDir, { recursive: true });
+    const fileName = `${timestamp.replace(/[:.]/g, "-")}_${newSessionId}.jsonl`;
+    const sessionFile = path.join(targetDir, fileName);
+    const tmpFile = `${sessionFile}.partial`;
+    await writeFile(tmpFile, `${lines.join("\n")}\n`, "utf8");
+    await rename(tmpFile, sessionFile);
+    log.info(
+      `[session-store] snapshot ${sourceKey} → ${targetConversationId} entries=${lines.length - 1} file=${sessionFile}`,
+    );
+    return { ok: true, targetDir, sessionFile, entryCount: lines.length - 1 };
+  } catch (err) {
+    log.warn(
+      `[session-store] snapshot: write failed ${sourceKey} → ${targetConversationId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { ok: false, reason: "write_failed" };
+  }
+}
 
 export async function branchSession(
   sourceConversationId: string,

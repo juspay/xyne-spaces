@@ -4654,6 +4654,98 @@ async function publishThreadArtifactShare(
   }
 }
 
+const REVIEW_ROOM_MAX_HTML_BYTES = 10 * 1024 * 1024;
+
+router.post("/review-room", requireStrictS2S, async (req: Request, res: Response) => {
+  const body = req.body as {
+    sessionId?: string;
+    roomConversationId?: string;
+    fileName?: string;
+    html?: string;
+    pr?: { title?: string; url?: string; number?: string; repo?: string };
+  };
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+  const roomConversationId = typeof body.roomConversationId === "string" ? body.roomConversationId.trim() : "";
+  const html = typeof body.html === "string" ? body.html : "";
+  if (!sessionId || !roomConversationId || !html) {
+    res.status(400).json({ success: false, error: "sessionId, roomConversationId and html are required" });
+    return;
+  }
+
+  const buffer = Buffer.from(html, "base64");
+  if (buffer.length === 0 || buffer.length > REVIEW_ROOM_MAX_HTML_BYTES) {
+    res.status(413).json({ success: false, error: "Review room HTML is empty or too large" });
+    return;
+  }
+
+  try {
+    const ctx = await getSession(sessionId);
+    if (!ctx || !ctx.conversationId || !ctx.agentSlug || !ctx.agentOrgId) {
+      res.status(404).json({ success: false, error: "No deliverable session context for this run" });
+      return;
+    }
+    const runOwnerId = ctx.targetUserId ?? (ctx.responseMode === "approval" ? ctx.mentionedUserId : ctx.senderId);
+    if (!runOwnerId) {
+      res.status(404).json({ success: false, error: "Run owner is unknown" });
+      return;
+    }
+
+    const prNumber = body.pr?.number ? `#${body.pr.number}` : "";
+    const title = `Review room ${prNumber}`.trim();
+    const fileName = (body.fileName ?? `review-room-${roomConversationId}.html`).replace(/[^A-Za-z0-9._-]/g, "-");
+
+    const parentId = await chatMessageRepository.latestMessageId(ctx.conversationId, ctx.agentSlug).catch(() => null);
+    const message = await chatMessageRepository.create({
+      conversationId: ctx.conversationId,
+      agentSlug: ctx.agentSlug,
+      userId: runOwnerId,
+      orgId: ctx.agentOrgId,
+      ...(parentId ? { parentId } : {}),
+      role: "assistant",
+      content: `${title} — generated from the pull request diff.`,
+      status: "completed",
+    });
+
+    const created = await persistBase64ChatAttachments(message.id, runOwnerId, [
+      { fileName, mimeType: "text/html", data: buffer.toString("base64") },
+    ]);
+    const attachment = created[0];
+    if (!attachment) {
+      res.status(500).json({ success: false, error: "Failed to persist review room artifact" });
+      return;
+    }
+
+    const share = await upsertDesignShare({
+      ownerUserId: runOwnerId,
+      orgId: ctx.agentOrgId,
+      conversationId: roomConversationId,
+      attachmentId: attachment.id,
+      title,
+      expiresAt: null,
+      kind: "review_room",
+    });
+    const link = designShareUrl(share.sharePath);
+
+    if (ctx.responseMode === "conversation") {
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        markdownText:
+          `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
+          `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`,
+        userId: ctx.spacesAppUserId,
+        metadata: { contentFormat: "markdown" },
+      }, ctx.appToken);
+    }
+
+    clog.info(`[webhook/review-room] published shareId=${share.id} room=${roomConversationId} session=${sessionId}`);
+    res.json({ success: true, url: link });
+  } catch (err) {
+    clog.warn(`[webhook/review-room] failed: ${errMsg(err)}`);
+    res.status(500).json({ success: false, error: "Failed to publish review room" });
+  }
+});
+
 router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body as { sessionId?: string })?.sessionId), async (req: Request, res: Response) => {
   const payload = req.body as {
     sessionId?: string;

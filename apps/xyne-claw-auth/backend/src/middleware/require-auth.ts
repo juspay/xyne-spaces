@@ -201,6 +201,30 @@ export async function requireAuth(
   res.status(401).json({ success: false, error: "Authentication required" });
 }
 
+export async function optionalAuth(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
+  stripClientOrgHeaders(req);
+  try {
+    const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
+    if (userId) {
+      await ensureUserExists(userId, "require-auth").catch((err) => {
+        log.warn(`[optional-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
+      });
+      req.headers["x-user-id"] = userId;
+      await attachOrgContext(req, userId);
+    } else {
+      const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
+      if (pinnedUserId) await attachOrgContext(req, pinnedUserId);
+    }
+  } catch (err) {
+    log.warn("[optional-auth] identity resolution failed:", err instanceof Error ? err.message : err);
+  }
+  next();
+}
+
 /**
  * Lightweight middleware that checks x-s2s-key for internal service callbacks.
  * Also allows valid Spaces user cookie for admin testing from browser.

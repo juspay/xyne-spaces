@@ -40,8 +40,11 @@ import {
   flushSessionNow,
   markSessionActive,
   markSessionIdle,
+  registerLiveSession,
+  unregisterLiveSession,
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, SessionLockedError } from "./session-lock.js";
+import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
 import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
@@ -1338,6 +1341,23 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
       ...(repo ? { repo } : {}),
     };
 
+    if (status === "created") {
+      try {
+        kickOffPrReviewRoom(sessionId, {
+          provider,
+          status,
+          title,
+          url,
+          desc,
+          ticketId,
+          number,
+          repo,
+        });
+      } catch (err) {
+        log.warn(`[pr-card] review room kickoff threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // Dispatch on the progress channel type. SSE/streaming runs (spaces threads
     // go through claw-auth's SSE bridge, and the dashboard chat) carry an
     // EMITTER: hand the fact to `emitter.pr()`, which frames a `pr` SSE event
@@ -1979,6 +1999,26 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   } else {
     sessionManager = SessionManager.inMemory(workingDir);
   }
+
+  registerLiveSession([sessionId, conversationId], {
+    conversationId,
+    getCwd: () => sessionManager.getCwd(),
+    getHeader: () => sessionManager.getHeader(),
+    getLeafId: () => sessionManager.getLeafId(),
+    getBranch: (fromId?: string) => sessionManager.getBranch(fromId),
+    getEntries: () => sessionManager.getEntries(),
+    isPersisted: () => sessionManager.isPersisted(),
+  });
+  registerLivePrRunContext(sessionId, {
+    userId,
+    conversationId,
+    cwd: workingDir,
+    provider,
+    providerConfig: effectiveProviderConfig,
+    progressMeta: opts.progressMeta,
+    modelSettings,
+    automationRun: opts.automationRun,
+  });
 
   // NOTE: regenerate is now handled entirely by claw-auth's /clone-session
   // call with mode="beforeLastUser" BEFORE this run dispatches. The cloned
@@ -3913,6 +3953,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       markSessionIdle(conversationId);
       await releaseSessionLock(conversationId);
     }
+    unregisterLiveSession([sessionId, conversationId]);
+    unregisterLivePrRunContext(sessionId);
     // Skills are materialized under session-skills/<sessionId> at the top of
     // each run and re-written on resume — delete them so they don't accumulate
     // on disk forever. (Re-created next turn; safe to remove here.)

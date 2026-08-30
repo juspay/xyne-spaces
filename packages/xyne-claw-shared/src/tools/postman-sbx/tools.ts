@@ -31,7 +31,7 @@
  */
 
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
-import { getSandboxSession, buildSandboxStoreKey } from "../sandbox/index.js";
+import { getSandboxSession, buildSandboxStoreKey, sandboxConversationIdFromMeta } from "../sandbox/index.js";
 import { redactSecrets } from "../sandbox/redact.js";
 
 // Cap the collection/environment payloads we write into the VM. A Postman
@@ -146,7 +146,7 @@ export const postmanSbxRunCollection: ToolDefinition = {
     // access, no explicit sessionId to smuggle in.
     const storeKey = buildSandboxStoreKey(
       context.meta?.["userId"],
-      context.meta?.["conversationId"],
+      sandboxConversationIdFromMeta(context.meta),
       context.meta?.["agentSlug"],
     );
     if (!storeKey) {

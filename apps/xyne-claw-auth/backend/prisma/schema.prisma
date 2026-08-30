@@ -1306,6 +1306,7 @@ model DesignArtifactShare {
   conversationId  String
   attachmentId    String
   title           String
+  kind            String    @default("design") // "design" | "review_room"
   expiresAt       DateTime?
   revokedAt       DateTime?
   viewCount       Int       @default(0)

@@ -111,7 +111,7 @@ import {
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from "./otel/telemetry.js";
 import { registerDailyBriefGauges } from "./otel/daily-brief-metrics.js";
 
-import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, s2sKeyMatches } from "./middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireS2S, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "./middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "./middleware/agent-acl.js";
 import { redisService } from "./redis.js";
 import { connectDb } from "./db.js";
@@ -176,7 +176,10 @@ const BASE = "/claw/api/v1";
 // Public bearer-link viewer. The secret arrives in x-design-share-token, not
 // the URL, so request/access logs never capture it. Every route verifies the
 // token hash and serves HTML under a CSP sandbox.
-app.use(`${BASE}/public/design-shares`, publicDesignSharesRouter);
+// optionalAuth resolves the Spaces session cookie when one is present and
+// stamps x-user-id/x-org-id, but never rejects: `design` shares stay anonymous
+// while `review_room` shares additionally require org membership in-router.
+app.use(`${BASE}/public/design-shares`, optionalAuth, publicDesignSharesRouter);
 
 // MCP connector CRUD. requireUserAuth verifies a real Spaces session cookie and
 // sets x-user-id from it — so a client-supplied x-user-id header is ignored and

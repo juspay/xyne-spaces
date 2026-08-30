@@ -18,6 +18,7 @@ export {
   probeSession,
   cleanupSdlcSandboxCredentialsForContext,
   buildSandboxStoreKey,
+  sandboxConversationIdFromMeta,
   resolveDynamicSdlcRepositoryConfig,
   type RepoSetupConfig,
   type SetupStep,

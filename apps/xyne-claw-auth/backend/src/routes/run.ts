@@ -533,8 +533,12 @@ router.post("/clone-session", requireStrictS2S, async (req: Request, res: Respon
   const { sourceConversationId, targetConversationId, branchMode } = req.body as {
     sourceConversationId?: string;
     targetConversationId?: string;
-    branchMode?: "lastUser" | "beforeLastUser";
+    branchMode?: "lastUser" | "beforeLastUser" | "full";
   };
+  if (branchMode !== undefined && branchMode !== "lastUser" && branchMode !== "beforeLastUser" && branchMode !== "full") {
+    res.status(400).json({ success: false, error: "branchMode must be lastUser, beforeLastUser or full" });
+    return;
+  }
   if (!sourceConversationId || typeof sourceConversationId !== "string") {
     res.status(400).json({ success: false, error: "sourceConversationId is required" });
     return;

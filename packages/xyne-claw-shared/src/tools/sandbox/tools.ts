@@ -234,13 +234,32 @@ export function isStaleSessionError(err: unknown): boolean {
   return STALE_PATTERNS.some((re) => re.test(msg));
 }
 
+/**
+ * The conversation identity the SANDBOX is keyed by — which is NOT always the
+ * conversation the SESSION lives under. Two overrides fold in here, and this is
+ * the single chokepoint both `storeKeyFromContext` and `ownerFromContext` read,
+ * so the store key and the ownership check can never disagree:
+ *
+ *   meta.sandboxConversationId — generic explicit override. A run whose session
+ *     lives under a synthetic conversation (the PR review room's
+ *     `review-room_<sha>`) but which must REUSE the parent run's already-warm
+ *     sandbox passes the parent's raw conversationId here. Without it the room
+ *     run keys a different, empty sandbox and pays a cold repo setup.
+ *   meta.sdlcWikiRun — the original special case, kept verbatim.
+ */
+export function sandboxConversationIdFromMeta(
+  meta: Record<string, string> | undefined,
+): string | undefined {
+  const override = meta?.["sandboxConversationId"]?.trim();
+  if (override) return override;
+  const executionId = meta?.["sdlcExecutionId"]?.trim();
+  if (meta?.["sdlcWikiRun"] === "true" && executionId) return `chat-sdlc-wiki-${executionId}`;
+  return meta?.["conversationId"]?.trim();
+}
+
 function ownerFromContext(context: { meta?: Record<string, string> } | undefined): SessionOwner | undefined {
   const userId = context?.meta?.["userId"]?.trim();
-  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
-  const conversationId =
-    context?.meta?.["sdlcWikiRun"] === "true" && executionId
-      ? `chat-sdlc-wiki-${executionId}`
-      : context?.meta?.["conversationId"]?.trim();
+  const conversationId = sandboxConversationIdFromMeta(context?.meta);
   if (!userId || !conversationId) return undefined;
   return {
     userId,
@@ -250,14 +269,9 @@ function ownerFromContext(context: { meta?: Record<string, string> } | undefined
 }
 
 function storeKeyFromContext(context: { meta?: Record<string, string> } | undefined): string | undefined {
-  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
-  const conversationId =
-    context?.meta?.["sdlcWikiRun"] === "true" && executionId
-      ? `chat-sdlc-wiki-${executionId}`
-      : context?.meta?.["conversationId"];
   return buildSandboxStoreKey(
     context?.meta?.["userId"],
-    conversationId,
+    sandboxConversationIdFromMeta(context?.meta),
     context?.meta?.["agentSlug"],
   );
 }
