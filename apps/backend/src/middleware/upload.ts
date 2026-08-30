@@ -208,6 +208,14 @@ export const versionUpload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
+// In-memory (not GCS-streamed): the file is transient input to a conversion,
+// never stored.
+export const officeConversionUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: uploadFileFilter,
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
+});
+
 const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>
   multer({
     storage: streamingStorage,

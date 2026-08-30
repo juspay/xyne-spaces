@@ -7,6 +7,7 @@ import PdfViewer from './PdfViewer';
 import VideoViewer from './VideoViewer';
 import CodeViewer from './CodeViewer';
 import HtmlViewer from './HtmlViewer';
+import PptxFileViewer from './PptxFileViewer';
 
 export interface ZoomState {
   scale: number;
@@ -87,6 +88,16 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     component: DocxViewer,
     wrapperClass: 'h-full w-full overflow-auto',
     displayName: 'Word Document',
+  },
+  pptx: {
+    mimeTypes: [
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ],
+    extensions: ['.pptx', '.ppt'],
+    component: PptxFileViewer,
+    wrapperClass: 'h-full w-full overflow-auto',
+    displayName: 'PowerPoint Presentation',
   },
   code: {
     mimeTypes: [
