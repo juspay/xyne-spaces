@@ -1256,6 +1256,27 @@ function extractPrUrl(obj: Record<string, unknown> | undefined, text: string): s
   return text.match(/https?:\/\/[^\s"')\]]+/i)?.[0];
 }
 
+function prBranchFrom(obj: Record<string, unknown> | undefined, key: "base" | "head"): string | undefined {
+  if (!obj) return undefined;
+  const gh = obj[key];
+  if (gh && typeof gh === "object") {
+    const ref = firstPrStr((gh as Record<string, unknown>)["ref"]);
+    if (ref) return ref;
+  }
+  const bbKey = key === "base" ? "destination" : "source";
+  const bb = obj[bbKey];
+  if (bb && typeof bb === "object") {
+    const branch = (bb as Record<string, unknown>)["branch"];
+    if (branch && typeof branch === "object") {
+      const name = firstPrStr((branch as Record<string, unknown>)["name"]);
+      if (name) return name;
+    }
+    const name = firstPrStr((bb as Record<string, unknown>)["name"]);
+    if (name) return name;
+  }
+  return undefined;
+}
+
 function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
   try {
     const inv = (invocation ?? {}) as {
@@ -1330,6 +1351,25 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
       a["repo"],
     );
 
+    const targetBranch = firstPrStr(
+      prBranchFrom(payload, "base"),
+      a["base"],
+      a["baseBranch"],
+      a["base_branch"],
+      a["destination_branch"],
+      a["destinationBranch"],
+      a["targetBranch"],
+      a["target_branch"],
+    );
+    const sourceBranch = firstPrStr(
+      prBranchFrom(payload, "head"),
+      a["head"],
+      a["headBranch"],
+      a["source_branch"],
+      a["sourceBranch"],
+      a["branch"],
+    );
+
     const pr: Record<string, unknown> = {
       provider,
       status,
@@ -1339,6 +1379,8 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
       ...(ticketId ? { ticketId } : {}),
       ...(number ? { number } : {}),
       ...(repo ? { repo } : {}),
+      ...(targetBranch ? { targetBranch } : {}),
+      ...(sourceBranch ? { sourceBranch } : {}),
     };
 
     if (status === "created") {
@@ -1352,6 +1394,8 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
           ticketId,
           number,
           repo,
+          targetBranch,
+          sourceBranch,
         });
       } catch (err) {
         log.warn(`[pr-card] review room kickoff threw: ${err instanceof Error ? err.message : String(err)}`);

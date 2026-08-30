@@ -46,6 +46,7 @@ export interface PrEvidence {
   editedFileLines: number;
   newFiles: PrFileEvidence[];
   editedFiles: PrFileEvidence[];
+  diffFailure?: string | undefined;
 }
 
 /** Result of one git invocation. `stdout` is only meaningful when `ok`. */
@@ -223,7 +224,21 @@ export async function collectPrEvidence(opts: CollectPrEvidenceOptions): Promise
   const baseSha = mergeBase || (await gitOrThrow(git, ["rev-parse", baseRef])).trim();
 
   const range = `${baseSha}...${headSha}`;
-  const statuses = parseNameStatus(await gitOrEmpty(git, ["diff", "--name-status", "-M", range]));
+  let diffFailure: string | undefined;
+  let nameStatusRaw = "";
+  try {
+    const out = await git(["diff", "--name-status", "-M", range]);
+    if (out.ok) {
+      nameStatusRaw = out.stdout;
+    } else {
+      diffFailure = `git diff --name-status exited ${out.exitCode}: ${out.stderr.trim().slice(0, 300)}`;
+      log.warn(`[pr-evidence] ${diffFailure}`);
+    }
+  } catch (err) {
+    diffFailure = `git diff --name-status threw: ${err instanceof Error ? err.message : String(err)}`;
+    log.warn(`[pr-evidence] ${diffFailure}`);
+  }
+  const statuses = parseNameStatus(nameStatusRaw);
   const stats = parseNumstat(await gitOrEmpty(git, ["diff", "--numstat", "-M", range]));
 
   const allTestFiles = (await gitOrEmpty(git, ["ls-files"]))
@@ -271,6 +286,7 @@ export async function collectPrEvidence(opts: CollectPrEvidenceOptions): Promise
     editedFileLines: sum(editedFiles, (f) => f.insertions + f.deletions),
     newFiles,
     editedFiles,
+    ...(diffFailure ? { diffFailure } : {}),
   };
 }
 

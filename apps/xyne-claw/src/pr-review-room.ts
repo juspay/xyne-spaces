@@ -62,6 +62,8 @@ export interface PrRoomFact {
   ticketId?: string | undefined;
   number?: string | undefined;
   repo?: string | undefined;
+  targetBranch?: string | undefined;
+  sourceBranch?: string | undefined;
 }
 
 // ── Sandbox-side git ─────────────────────────────────────────────────────────
@@ -348,14 +350,40 @@ async function discoverRepoRoot(session: SandboxSession, pr: PrRoomFact): Promis
   return roots[0];
 }
 
-async function resolveBaseRef(git: GitRunner): Promise<string | undefined> {
+async function refExists(git: GitRunner, ref: string): Promise<boolean> {
+  const resolved = await git(["rev-parse", "--verify", "--quiet", ref]);
+  return resolved.ok && resolved.stdout.trim().length > 0;
+}
+
+function normalizeBranchName(raw: string): string | undefined {
+  const trimmed = raw.trim().replace(/^refs\/heads\//, "").replace(/^origin\//, "");
+  if (!trimmed || trimmed === "HEAD" || /[\s~^:?*\[\\]/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+export async function resolveBaseRef(git: GitRunner, targetBranch?: string | undefined): Promise<string | undefined> {
+  const branch = targetBranch ? normalizeBranchName(targetBranch) : undefined;
+  if (branch) {
+    if (await refExists(git, `origin/${branch}`)) return `origin/${branch}`;
+    const fetched = await git([
+      "fetch",
+      "--no-tags",
+      "origin",
+      `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+    ]);
+    if (fetched.ok && (await refExists(git, `origin/${branch}`))) return `origin/${branch}`;
+    if (!fetched.ok) {
+      log.info(`[pr-room] fetch origin ${branch} failed: ${fetched.stderr.slice(0, 200)}`);
+    }
+    if (await refExists(git, branch)) return branch;
+  }
+
   const symbolic = await git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
   if (symbolic.ok && symbolic.stdout.trim()) {
     return symbolic.stdout.trim().replace("refs/remotes/", "");
   }
-  for (const candidate of ["origin/main", "origin/master", "main", "master"]) {
-    const resolved = await git(["rev-parse", "--verify", "--quiet", candidate]);
-    if (resolved.ok && resolved.stdout.trim()) return candidate;
+  for (const candidate of ["origin/main", "origin/master", "main", "master", "origin/develop", "develop"]) {
+    if (await refExists(git, candidate)) return candidate;
   }
   // No fallback to HEAD~1. That silently produces evidence describing only the
   // last commit while the room presents it as the whole PR — a wrong room is
@@ -632,7 +660,7 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
     }
     snapshotWritten = true;
 
-    const baseRef = await resolveBaseRef(git);
+    const baseRef = await resolveBaseRef(git, pr.targetBranch);
     if (!baseRef) {
       log.warn(
         `[pr-room] could not resolve a base ref in ${repoRoot} — room ${roomConversationId} aborted rather than described against HEAD~1`,
@@ -641,6 +669,10 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
     }
 
     const evidence = await collectPrEvidence({ git, repoRoot, baseRef, headRef: headSha });
+    if (evidence.diffFailure) {
+      log.warn(`[pr-room] evidence diff failed (${evidence.diffFailure}) — room ${roomConversationId} aborted`);
+      return;
+    }
     if (evidence.filesChanged === 0) {
       log.info(`[pr-room] no changed files between ${baseRef} and ${headSha.slice(0, 10)} — skipping room`);
       return;
