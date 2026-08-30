@@ -31,7 +31,3 @@ const LINKED_SUB_TICKET_NAMESPACE = 'edffd0e4-129b-4f8a-9f73-c1a077f74433';
  */
 export const linkedSubTicketId = (ticketId: string, mappedTicketId: string): string =>
   uuidv5(`linked-subticket:${ticketId}:${mappedTicketId}`, LINKED_SUB_TICKET_NAMESPACE);
-
-// Runaway backstop for linkExisting's ancestor walk, not a product limit: one query per
-// node, so ~1s of lock hold even at 5ms/query - well inside its 5s lock_timeout.
-export const MAX_SUB_TICKET_ANCESTOR_WALK = 200;

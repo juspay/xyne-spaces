@@ -53,7 +53,6 @@ import {
   isReleaseTicket,
   isManualSubTicketBoard,
   linkedSubTicketId,
-  MAX_SUB_TICKET_ANCESTOR_WALK,
   getNudgeActionBehavior,
   LinkVisibility,
   CollectionRole,
@@ -7041,24 +7040,6 @@ export function createMutators(
             throw new Error('Sub-tickets on that ticket\'s board are managed automatically');
           }
 
-          // Read-then-write guards under READ COMMITTED. Lock the whole workspace, not the
-          // endpoints: links with disjoint endpoints can still close a cycle deeper up.
-          if (tx.location === 'server') {
-            // SET LOCAL, so it dies with the transaction and never leaks back to the pool.
-            await tx.dbTransaction.query("SET LOCAL lock_timeout = '5s'", []);
-            try {
-              await tx.dbTransaction.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-                `link-subticket:ws:${authData.workspaceId}`,
-              ]);
-            } catch (error) {
-              // 55P03 lock_not_available: another link in this workspace is mid-flight.
-              if ((error as { code?: string }).code === '55P03') {
-                throw new Error('Another sub-ticket link is in progress, try again');
-              }
-              throw error;
-            }
-          }
-
           // Trees may nest deep but must stay TREES: walk up over EVERY in-edge (a row can
           // have several parents) and reject a loop — the one-parent rule below can't.
           const seenAncestors = new Set<string>();
@@ -7076,10 +7057,6 @@ export function createMutators(
               continue;
             }
             seenAncestors.add(currentTicketId);
-            // Fail closed: an unbounded walk holds the workspace lock for unbounded time.
-            if (seenAncestors.size > MAX_SUB_TICKET_ANCESTOR_WALK) {
-              throw new Error('This link cannot be verified: the parent has too many ancestors');
-            }
 
             const asSubTicket = await tx.run(
               zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),

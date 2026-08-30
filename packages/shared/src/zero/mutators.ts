@@ -76,11 +76,7 @@ import {
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
 import { THREAD_TYPE_NAMES } from '../tags/vocabularies.js';
-import {
-  isManualSubTicketBoard,
-  linkedSubTicketId,
-  MAX_SUB_TICKET_ANCESTOR_WALK,
-} from '../tickets/utils.js';
+import { isManualSubTicketBoard, linkedSubTicketId } from '../tickets/utils.js';
 import { assertCanvasDestinationAccess } from '../utils/canvasDestinationAccess.js';
 import {
   getCanvasFolderNameConflictMessage,
@@ -4443,10 +4439,6 @@ export const mutators = defineMutators({
             continue;
           }
           seenAncestors.add(currentTicketId);
-          // Same cap as the server twin, so the optimistic pass cannot outrun it.
-          if (seenAncestors.size > MAX_SUB_TICKET_ANCESTOR_WALK) {
-            throw new Error('This link cannot be verified: the parent has too many ancestors');
-          }
 
           const asSubTicket = await tx.run(
             zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),
