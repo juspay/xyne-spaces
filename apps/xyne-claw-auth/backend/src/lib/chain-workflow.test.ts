@@ -6,6 +6,7 @@ import {
   evaluateChainToolConditions,
   evaluateChainCommandConditions,
   summarizeChainToolInvocations,
+  resolveChainResultText,
   chainCommandPatternMatches,
   CHAIN_COMMAND_PATTERN_MAX_LENGTH,
   type ChainWorkflowDefinition,
@@ -228,5 +229,26 @@ describe("judge invocation summary", () => {
   it("tolerates junk", () => {
     expect(summarizeChainToolInvocations(undefined)).toEqual([]);
     expect(summarizeChainToolInvocations([null, 3, {}])).toEqual([]);
+  });
+});
+
+describe("chain result text", () => {
+  it("prefers the normal result when it is non-empty", () => {
+    expect(resolveChainResultText("normal result", [{ message: "pending result" }])).toBe("normal result");
+  });
+
+  it("uses pending responses when respond-to-user leaves result empty", () => {
+    const resultText = resolveChainResultText("", [
+      { responseId: "first", message: "Implemented the fix." },
+      { responseId: "second", message: "Opened the PR." },
+    ]);
+
+    expect(resultText).toBe("Implemented the fix.\n\nOpened the PR.");
+    expect(evaluateChainCommandConditions({ commandsMustMatch: ["git commit"] }, [commit])).toBe(true);
+  });
+
+  it("ignores malformed pending responses", () => {
+    expect(resolveChainResultText(undefined, [null, { message: 42 }, { message: "valid" }])).toBe("valid");
+    expect(resolveChainResultText(undefined, undefined)).toBe("");
   });
 });

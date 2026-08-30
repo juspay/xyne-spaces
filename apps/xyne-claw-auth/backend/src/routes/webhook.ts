@@ -90,6 +90,7 @@ import {
   resolveChainEdgeMode,
   evaluateChainToolConditions,
   evaluateChainCommandConditions,
+  resolveChainResultText,
   summarizeChainToolInvocations,
   type ChainWorkflowDefinition,
   type ChainWorkflowEdge,
@@ -6690,6 +6691,172 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       return meta;
     };
 
+    const dispatchAgentChain = async (): Promise<void> => {
+      // ── Agent chaining: channel-level workflow keyed by (channelId, rootAgentSlug) ──
+      // Experiment/understanding epochs are exempt: they fire dozens of times per
+      // run and their result is a proof artifact, not a user turn to hand off. A
+      // chain here just makes the next agent (e.g. euler-reviewer) reject every
+      // epoch, once per epoch. The user drives the loop; the loop does not chain.
+      if (ctx.isExperiment) {
+        log.info(`Chain: skipped for experiment epoch (conversation=${ctx.conversationId})`);
+      } else if (ctx.agentSlug && ctx.agentOrgId) {
+        try {
+          const rootAgentSlug = ctx.rootAgentSlug ?? ctx.agentSlug;
+          const binding = await agentChainWorkflowRepository.findActiveWorkflowForChannel(ctx.channelId, rootAgentSlug, ctx.senderId);
+          if (!binding) {
+            log.info(`Chain: no active workflow bound for channel=${ctx.channelId} root=${rootAgentSlug}`);
+            return;
+          }
+
+          const workflow = parseWorkflowDefinition(binding.workflow.definition);
+          if (!workflow) {
+            log.warn(`Chain: workflow ${binding.workflowId} has invalid definition`);
+            return;
+          }
+
+          const currentDepth = ctx.chainDepth ?? 0;
+          const isCycleWorkflow = hasWorkflowCycle(workflow);
+          const maxDepth = isCycleWorkflow
+            ? 3
+            : Math.max(1, Math.min(workflow.maxDepth ?? 6, 12));
+          if (currentDepth >= maxDepth) {
+            await spacesAppFetch("/chat/postMessage", {
+              channelId: ctx.channelId,
+              conversationId: ctx.conversationId,
+              text: isCycleWorkflow
+                ? `<span data-mention="" data-mention-type="user" data-user-id="${ctx.senderId}" data-username="${ctx.senderName}" class="chat-input-mention">@${ctx.senderName}</span> Agent workflow cycle limit is breached (3 turns).`
+                : `<span data-mention="" data-mention-type="user" data-user-id="${ctx.senderId}" data-username="${ctx.senderName}" class="chat-input-mention">@${ctx.senderName}</span> Agent workflow reached max depth (${maxDepth}).`,
+              userId: ctx.spacesAppUserId,
+            }, token).catch(() => {});
+            log.info(`Chain: max depth ${maxDepth} reached for workflow ${binding.workflowId} (cycle=${isCycleWorkflow})`);
+            return;
+          }
+
+          const toolsUsed = (payload as { toolsUsed?: string[] }).toolsUsed ?? [];
+          const resultText = resolveChainResultText(payload.result, payload.pendingResponses);
+          // Feed the judge the REAL original user request, not the interpolated
+          // hand-off prompt (which `ctx.task` becomes after hop 1). On the first
+          // hop ctx.rootTask is unset and ctx.task IS the original request.
+          const originalTask = ctx.rootTask ?? ctx.task;
+          const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask, payload.toolInvocations);
+
+          if (!selected) {
+            log.info(`Chain: no matching edge from ${ctx.agentSlug} in workflow ${binding.workflowId}`);
+            return;
+          }
+
+          const taskTemplate = selected.edge.taskTemplate ?? selected.nextNode.taskTemplate ?? "{{result}}";
+          const interpolatedTask = interpolateChainTask(taskTemplate, {
+            result: resultText.slice(0, 4000),
+            agentSlug: ctx.agentSlug,
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            rootAgentSlug,
+          });
+
+          const targetAgentSlug = selected.nextNode.agentSlug;
+          const targetAgentRow = await agentRepository.findBySlug(targetAgentSlug, ctx.agentOrgId);
+          if (!targetAgentRow?.spacesAppToken || !targetAgentRow.spacesAppId) {
+            log.error(`Chain: target agent "${targetAgentSlug}" not found or not configured`);
+            return;
+          }
+
+          // Hand the next agent the previous agent's FINAL output verbatim (via
+          // `context`, independent of whether the task template used {{result}}),
+          // plus any attachments the previous agent produced — so artifacts (CSV,
+          // PDF, screenshots, …) carry across the hop instead of being dropped.
+          const handoffContext =
+            `--- Final output from the previous agent ("${ctx.agentSlug}") ---\n` +
+            resultText.slice(0, 8000);
+          const forwardedAttachments = payload.attachments ?? [];
+
+          const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+            },
+            body: JSON.stringify({
+              userId: ctx.senderId,
+              task: interpolatedTask,
+              context: handoffContext,
+              agentSlug: targetAgentSlug,
+              orgId: targetAgentRow.orgId,
+              channelId: ctx.channelId,
+              ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
+              callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+              progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+            }),
+          });
+
+          if (!runRes.ok) { log.error(`Chain trigger HTTP ${runRes.status}`); return; }
+          const runBody = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
+
+          if (runBody.success && runBody.sessionId && targetAgentRow.spacesAppToken && targetAgentRow.spacesAppId) {
+            const targetAppToken = decryptStoredField(targetAgentRow.spacesAppToken);
+            const targetContext: SessionContext = {
+              mentionedUserId: targetAgentRow.spacesAppUserId ?? "",
+              senderId: ctx.senderId,
+              senderName: ctx.senderName,
+              channelId: ctx.channelId,
+              channelName: ctx.channelName,
+              conversationId: ctx.conversationId,
+              task: interpolatedTask,
+              rootTask: originalTask,
+              agentId: targetAgentRow.id,
+              agentOrgId: targetAgentRow.orgId ?? null,
+              agentSlug: targetAgentSlug,
+              responseMode: "conversation",
+              appToken: targetAppToken,
+              spacesAppId: targetAgentRow.spacesAppId,
+              spacesAppUserId: targetAgentRow.spacesAppUserId ?? "",
+              chainDepth: currentDepth + 1,
+              rootAgentSlug,
+              workflowId: binding.workflowId,
+              triggerSource: "spaces",
+              ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
+            };
+            await setSession(runBody.sessionId, targetContext);
+            const targetDispatchPayload = {
+              userId: ctx.senderId,
+              task: interpolatedTask,
+              context: handoffContext,
+              conversationId: ctx.conversationId,
+              agentSlug: targetAgentSlug,
+              orgId: targetAgentRow.orgId,
+              eventType: "APP_MENTIONED",
+              traceId: ctx.traceId ?? runBody.sessionId,
+              ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
+              callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+              progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+              channelId: ctx.channelId,
+            };
+            await registerRunRecovery({
+              rootSessionId: runBody.sessionId,
+              maxRetries: CONFIG.runRecoveryMaxRetries,
+              timeoutMs: CONFIG.runRecoveryTimeoutMs,
+              retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+              dispatchPayload: targetDispatchPayload,
+              sessionContext: targetContext,
+            });
+
+            log.info(`Chain: ${ctx.agentSlug} → ${targetAgentSlug} (step ${currentDepth + 1}/${maxDepth}, workflow ${binding.workflowId})`);
+            await spacesAppFetch("/chat/postMessage", {
+              channelId: ctx.channelId,
+              conversationId: ctx.conversationId,
+              markdownText: `⛓️ **Agent workflow**: \`${ctx.agentSlug}\` → \`${targetAgentSlug}\` (step ${currentDepth + 1}/${maxDepth})`,
+              userId: ctx.spacesAppUserId,
+              metadata: { contentFormat: "markdown" },
+            }, token).catch(() => {});
+          } else if (!runBody.success) {
+            log.error(`Chain: failed to trigger ${targetAgentSlug}: ${runBody.error ?? "unknown"}`);
+          }
+        } catch (chainErr) {
+          log.error("Chain trigger failed (non-fatal):", { error: errMsg(chainErr) });
+        }
+      }
+    };
+
     // ── Copilot mode: post pendingResponses instead of result.text ──
     if (payload.pendingResponses?.length) {
       if (ctx.responseMode === "approval") {
@@ -6841,6 +7008,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
       }
+
+      // Pending-response delivery must not bypass workflow chaining. Keep this
+      // before the persistent-copilot return so command/tool conditions observe
+      // the completed run, while the normal post-processing path stays skipped.
+      await dispatchAgentChain();
 
       // Don't delete session — copilot sessions persist for multi-turn
       return;
@@ -7262,169 +7434,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       log.info(`Sent ${approvalCardsSent}/${pendingActionsPayload.length} write action approval(s) to ${ctx.senderId}`);
     }
 
-    // ── Agent chaining: channel-level workflow keyed by (channelId, rootAgentSlug) ──
-    // Experiment/understanding epochs are exempt: they fire dozens of times per
-    // run and their result is a proof artifact, not a user turn to hand off. A
-    // chain here just makes the next agent (e.g. euler-reviewer) reject every
-    // epoch, once per epoch. The user drives the loop; the loop does not chain.
-    if (ctx.isExperiment) {
-      log.info(`Chain: skipped for experiment epoch (conversation=${ctx.conversationId})`);
-    } else if (ctx.agentSlug && ctx.agentOrgId) {
-      try {
-        const rootAgentSlug = ctx.rootAgentSlug ?? ctx.agentSlug;
-        const binding = await agentChainWorkflowRepository.findActiveWorkflowForChannel(ctx.channelId, rootAgentSlug, ctx.senderId);
-        if (!binding) {
-          log.info(`Chain: no active workflow bound for channel=${ctx.channelId} root=${rootAgentSlug}`);
-          return;
-        }
-
-        const workflow = parseWorkflowDefinition(binding.workflow.definition);
-        if (!workflow) {
-          log.warn(`Chain: workflow ${binding.workflowId} has invalid definition`);
-          return;
-        }
-
-        const currentDepth = ctx.chainDepth ?? 0;
-        const isCycleWorkflow = hasWorkflowCycle(workflow);
-        const maxDepth = isCycleWorkflow
-          ? 3
-          : Math.max(1, Math.min(workflow.maxDepth ?? 6, 12));
-        if (currentDepth >= maxDepth) {
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            text: isCycleWorkflow
-              ? `<span data-mention="" data-mention-type="user" data-user-id="${ctx.senderId}" data-username="${ctx.senderName}" class="chat-input-mention">@${ctx.senderName}</span> Agent workflow cycle limit is breached (3 turns).`
-              : `<span data-mention="" data-mention-type="user" data-user-id="${ctx.senderId}" data-username="${ctx.senderName}" class="chat-input-mention">@${ctx.senderName}</span> Agent workflow reached max depth (${maxDepth}).`,
-            userId: ctx.spacesAppUserId,
-          }, token).catch(() => {});
-          log.info(`Chain: max depth ${maxDepth} reached for workflow ${binding.workflowId} (cycle=${isCycleWorkflow})`);
-          return;
-        }
-
-        const toolsUsed = (payload as { toolsUsed?: string[] }).toolsUsed ?? [];
-        const resultText = payload.result ?? "";
-        // Feed the judge the REAL original user request, not the interpolated
-        // hand-off prompt (which `ctx.task` becomes after hop 1). On the first
-        // hop ctx.rootTask is unset and ctx.task IS the original request.
-        const originalTask = ctx.rootTask ?? ctx.task;
-        const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask, payload.toolInvocations);
-
-        if (!selected) {
-          log.info(`Chain: no matching edge from ${ctx.agentSlug} in workflow ${binding.workflowId}`);
-          return;
-        }
-
-        const taskTemplate = selected.edge.taskTemplate ?? selected.nextNode.taskTemplate ?? "{{result}}";
-        const interpolatedTask = interpolateChainTask(taskTemplate, {
-          result: resultText.slice(0, 4000),
-          agentSlug: ctx.agentSlug,
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          rootAgentSlug,
-        });
-
-        const targetAgentSlug = selected.nextNode.agentSlug;
-        const targetAgentRow = await agentRepository.findBySlug(targetAgentSlug, ctx.agentOrgId);
-        if (!targetAgentRow?.spacesAppToken || !targetAgentRow.spacesAppId) {
-          log.error(`Chain: target agent "${targetAgentSlug}" not found or not configured`);
-          return;
-        }
-
-        // Hand the next agent the previous agent's FINAL output verbatim (via
-        // `context`, independent of whether the task template used {{result}}),
-        // plus any attachments the previous agent produced — so artifacts (CSV,
-        // PDF, screenshots, …) carry across the hop instead of being dropped.
-        const handoffContext =
-          `--- Final output from the previous agent ("${ctx.agentSlug}") ---\n` +
-          resultText.slice(0, 8000);
-        const forwardedAttachments = payload.attachments ?? [];
-
-        const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-          },
-          body: JSON.stringify({
-            userId: ctx.senderId,
-            task: interpolatedTask,
-            context: handoffContext,
-            agentSlug: targetAgentSlug,
-            orgId: targetAgentRow.orgId,
-            channelId: ctx.channelId,
-            ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
-            callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-            progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-          }),
-        });
-
-        if (!runRes.ok) { log.error(`Chain trigger HTTP ${runRes.status}`); return; }
-        const runBody = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
-
-        if (runBody.success && runBody.sessionId && targetAgentRow.spacesAppToken && targetAgentRow.spacesAppId) {
-          const targetAppToken = decryptStoredField(targetAgentRow.spacesAppToken);
-          const targetContext: SessionContext = {
-            mentionedUserId: targetAgentRow.spacesAppUserId ?? "",
-            senderId: ctx.senderId,
-            senderName: ctx.senderName,
-            channelId: ctx.channelId,
-            channelName: ctx.channelName,
-            conversationId: ctx.conversationId,
-            task: interpolatedTask,
-            rootTask: originalTask,
-            agentId: targetAgentRow.id,
-            agentOrgId: targetAgentRow.orgId ?? null,
-            agentSlug: targetAgentSlug,
-            responseMode: "conversation",
-            appToken: targetAppToken,
-            spacesAppId: targetAgentRow.spacesAppId,
-            spacesAppUserId: targetAgentRow.spacesAppUserId ?? "",
-            chainDepth: currentDepth + 1,
-            rootAgentSlug,
-            workflowId: binding.workflowId,
-            triggerSource: "spaces",
-            ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
-          };
-          await setSession(runBody.sessionId, targetContext);
-          const targetDispatchPayload = {
-            userId: ctx.senderId,
-            task: interpolatedTask,
-            context: handoffContext,
-            conversationId: ctx.conversationId,
-            agentSlug: targetAgentSlug,
-            orgId: targetAgentRow.orgId,
-            eventType: "APP_MENTIONED",
-            traceId: ctx.traceId ?? runBody.sessionId,
-            ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
-            callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-            progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-            channelId: ctx.channelId,
-          };
-          await registerRunRecovery({
-            rootSessionId: runBody.sessionId,
-            maxRetries: CONFIG.runRecoveryMaxRetries,
-            timeoutMs: CONFIG.runRecoveryTimeoutMs,
-            retryBackoffMs: CONFIG.runRecoveryBackoffMs,
-            dispatchPayload: targetDispatchPayload,
-            sessionContext: targetContext,
-          });
-
-          log.info(`Chain: ${ctx.agentSlug} → ${targetAgentSlug} (step ${currentDepth + 1}/${maxDepth}, workflow ${binding.workflowId})`);
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: `⛓️ **Agent workflow**: \`${ctx.agentSlug}\` → \`${targetAgentSlug}\` (step ${currentDepth + 1}/${maxDepth})`,
-            userId: ctx.spacesAppUserId,
-            metadata: { contentFormat: "markdown" },
-          }, token).catch(() => {});
-        } else if (!runBody.success) {
-          log.error(`Chain: failed to trigger ${targetAgentSlug}: ${runBody.error ?? "unknown"}`);
-        }
-      } catch (chainErr) {
-        log.error("Chain trigger failed (non-fatal):", { error: errMsg(chainErr) });
-      }
-    }
+    await dispatchAgentChain();
   } catch (err) {
     // Include enough context to diagnose env-mismatch / token / channel
     // issues from logs alone. Earlier the catch only surfaced `err.message`,

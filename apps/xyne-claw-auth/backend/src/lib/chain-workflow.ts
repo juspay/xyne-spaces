@@ -168,6 +168,23 @@ export function validateChainWorkflowDefinition(definition: ChainWorkflowDefinit
   return null;
 }
 
+export function resolveChainResultText(
+  result: unknown,
+  pendingResponses: unknown,
+): string {
+  if (typeof result === "string" && result.trim()) return result;
+  if (!Array.isArray(pendingResponses)) return "";
+
+  return pendingResponses
+    .map((response) => {
+      if (!response || typeof response !== "object") return "";
+      const message = (response as Record<string, unknown>)["message"];
+      return typeof message === "string" ? message : "";
+    })
+    .filter((message) => message.trim())
+    .join("\n\n");
+}
+
 export function evaluateChainToolConditions(
   conditions: { toolsMustInclude?: string[] | undefined; toolsMustExclude?: string[] | undefined } | undefined,
   toolsUsed: string[],
