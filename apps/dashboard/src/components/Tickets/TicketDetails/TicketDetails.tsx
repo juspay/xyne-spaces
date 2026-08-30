@@ -85,7 +85,10 @@ import { getReachableStageIds, findMatchingTransition } from '../../../utils/sta
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
-import { useProjectTicketSearch } from '../../../hooks/useProjectTicketSearch';
+import {
+  useProjectTicketSearch,
+  VESPA_MAX_BOARD_FILTER_VALUES,
+} from '../../../hooks/useProjectTicketSearch';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
@@ -1239,7 +1242,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
-      enabled: !!ticket?.projectId && hasBoardDropdownOpened,
+      // Also needed by the sub-ticket picker, which must know each board's type.
+      enabled:
+        !!ticket?.projectId &&
+        (hasBoardDropdownOpened || isManualSubTicketBoard(boardData?.boardType)),
     },
   );
 
@@ -1371,10 +1377,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
-  // Gates the Create Sub-Ticket button, and mirrors subTicket.create's own guard
-  // (row existence, not mappings) so the button and the mutator agree.
-  // NOTE: linkExisting has no equivalent depth limit — linked sub-tickets may nest
-  // arbitrarily deep, so the picker below is deliberately NOT gated on this.
+  // Gates the Create Sub-Ticket button only, mirroring subTicket.create's row-existence
+  // guard. linkExisting has no depth limit, so the picker below is deliberately not gated.
   const canCreateNestedSubTicket =
     (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
@@ -1946,12 +1950,27 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
 
+  // FLOW/RELEASE boards own their mappings, so their tickets are never linkable by hand.
+  const manualBoardIds = useMemo(
+    () => (boards ?? []).filter(board => isManualSubTicketBoard(board.boardType)).map(b => b.id),
+    [boards],
+  );
+  // Past the API's cap the filter is dropped; subTicketPickerOptions filters instead.
+  const manualBoardIdsFilter = useMemo(
+    () =>
+      manualBoardIds.length > 0 && manualBoardIds.length <= VESPA_MAX_BOARD_FILTER_VALUES
+        ? manualBoardIds.join(',')
+        : '',
+    [manualBoardIds],
+  );
+
   // Own search state — the Related Tickets picker below keeps its own.
   const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
   const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
   const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
   const subTicketSearch = useProjectTicketSearch({
     projectId: ticket?.projectId ?? undefined,
+    boardIds: manualBoardIdsFilter,
     isActive: isAddSubTicketMenuOpen,
   });
 
@@ -1979,12 +1998,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     // Direct parents only — deeper ancestors aren't loaded here, and the server's
     // ancestor walk rejects those with a toast rather than silently linking a loop.
     const parentIds = new Set(parentTicketIds);
+    // Backstop for the Vespa board filter, which is dropped past its value cap.
+    const manualBoardIdSet = new Set(manualBoardIds);
     return (subTicketSearch.tickets ?? [])
       .filter(
         candidate =>
           candidate.id !== ticketId &&
           !linkedSubTicketMappedIds.has(candidate.id) &&
-          !parentIds.has(candidate.id),
+          !parentIds.has(candidate.id) &&
+          (manualBoardIdSet.size === 0 ||
+            !candidate.boardId ||
+            manualBoardIdSet.has(candidate.boardId)),
       )
       .map(candidate => ({
         value: candidate.id,
@@ -1992,7 +2016,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         subtitle: candidate.xyneId || candidate.id,
         icon: null,
       }));
-  }, [subTicketSearch.tickets, ticketId, linkedSubTicketMappedIds, parentTicketIds]);
+  }, [
+    subTicketSearch.tickets,
+    ticketId,
+    linkedSubTicketMappedIds,
+    parentTicketIds,
+    manualBoardIds,
+  ]);
 
   const handleLinkSubTicket = useCallback(
     (mappedTicketId: string | null): void => {
@@ -3030,10 +3060,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
-    // Mirrors subTicket.unlink: only a row this feature created is unlinkable, matched
-    // on its derived id rather than on the board, so moving the parent's board later
-    // cannot strand the link. Depth-independent — `node.parentTicketId` is the parent at
-    // THIS level, so a nested row is checked against, and unlinked from, its own parent.
+    // Mirrors subTicket.unlink: only rows carrying the derived id are unlinkable. Keyed on
+    // `node.parentTicketId`, so a nested row is checked against its own parent.
     const canUnlink =
       Boolean(mappedTicketId) &&
       subTicket.id === linkedSubTicketId(node.parentTicketId, mappedTicketId ?? '');
@@ -3186,9 +3214,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
-  // Hidden only on machine-owned boards. A ticket that is itself a sub-ticket can still
-  // take sub-tickets of its own — trees nest; the server rejects anything that would
-  // close a loop.
+  // Hidden only on machine-owned boards. A sub-ticket can take sub-tickets of its own —
+  // trees nest, and the server rejects anything that would close a loop.
   const addSubTicketPicker = !canManageSubTicketLinks ? null : (
     <div
       className={cn(

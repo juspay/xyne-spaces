@@ -53,6 +53,7 @@ import {
   isReleaseTicket,
   isManualSubTicketBoard,
   linkedSubTicketId,
+  MAX_SUB_TICKET_ANCESTOR_WALK,
   getNudgeActionBehavior,
   LinkVisibility,
   CollectionRole,
@@ -169,7 +170,7 @@ import {
 import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
-import { accessibleTicketQuery } from './acl/core/ticket-access';
+import { resolveAccessibleTicket } from './acl/core/ticket-access';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
 import { hasProjectAdminAccess } from './acl/core/admin-access';
 import vespaClient from '@/vespa/client';
@@ -6997,9 +6998,8 @@ export function createMutators(
           }
         },
       ),
-      // Link an EXISTING ticket as a sub-ticket, and unlink it again. Writes only
-      // sub_tickets + ticket_sub_ticket_mappings, so links never show under Related
-      // Tickets. FLOW/RELEASE boards are refused — their mappings are machine-owned.
+      // Link an EXISTING ticket as a sub-ticket — writes sub_tickets + mappings, never
+      // ticket_references. FLOW/RELEASE refused: their mappings are machine-owned.
       linkExisting: defineMutator(
         z.object({
           // Random per click, unlike subTicketId — see linkedSubTicketId.
@@ -7010,18 +7010,9 @@ export function createMutators(
           // Display fallback for the row; passed in so both twins write the same value.
           subTicketTitle: z.string(),
         }),
-        async ({ tx, args: { mappingId, timestamp, ticketId, mappedTicketId, subTicketTitle } }) => {
+        async ({ tx, ctx, args: { mappingId, timestamp, ticketId, mappedTicketId, subTicketTitle } }) => {
           if (mappedTicketId === ticketId) {
             throw new Error('A ticket cannot be linked as its own sub-ticket');
-          }
-
-          // The guards below are read-then-writes under READ COMMITTED. Lock the whole
-          // workspace, not the two endpoints: the ancestor walk reads edges at arbitrary
-          // depth, so two links with disjoint endpoints could still close a cycle.
-          if (tx.location === 'server') {
-            await tx.dbTransaction.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-              `link-subticket:ws:${authData.workspaceId}`,
-            ]);
           }
 
           const subTicketId = linkedSubTicketId(ticketId, mappedTicketId);
@@ -7040,7 +7031,7 @@ export function createMutators(
 
           // Reads here are NOT filtered by the read ACLs, so apply access explicitly —
           // otherwise linking leaks a private ticket's title into the parent's timeline.
-          const mappedTicket = await tx.run(accessibleTicketQuery(mappedTicketId, authData).one());
+          const mappedTicket = await resolveAccessibleTicket(mappedTicketId, ctx, tx);
           if (!mappedTicket) {
             throw new Error('Ticket to link not found');
           }
@@ -7050,11 +7041,26 @@ export function createMutators(
             throw new Error('Sub-tickets on that ticket\'s board are managed automatically');
           }
 
-          // Sub-ticket trees may nest arbitrarily deep, but they must stay TREES. Walk up
-          // from the parent over EVERY in-edge — a row can have several parents (jira
-          // import, FLOW) — and reject a link that would close a loop. The one-parent rule
-          // below does not prevent that: a cycle is precisely the case where every node
-          // has exactly one parent.
+          // Read-then-write guards under READ COMMITTED. Lock the whole workspace, not the
+          // endpoints: links with disjoint endpoints can still close a cycle deeper up.
+          if (tx.location === 'server') {
+            // SET LOCAL, so it dies with the transaction and never leaks back to the pool.
+            await tx.dbTransaction.query("SET LOCAL lock_timeout = '5s'", []);
+            try {
+              await tx.dbTransaction.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+                `link-subticket:ws:${authData.workspaceId}`,
+              ]);
+            } catch (error) {
+              // 55P03 lock_not_available: another link in this workspace is mid-flight.
+              if ((error as { code?: string }).code === '55P03') {
+                throw new Error('Another sub-ticket link is in progress, try again');
+              }
+              throw error;
+            }
+          }
+
+          // Trees may nest deep but must stay TREES: walk up over EVERY in-edge (a row can
+          // have several parents) and reject a loop — the one-parent rule below can't.
           const seenAncestors = new Set<string>();
           const ancestorQueue: string[] = [ticketId];
           while (ancestorQueue.length > 0) {
@@ -7070,6 +7076,10 @@ export function createMutators(
               continue;
             }
             seenAncestors.add(currentTicketId);
+            // Fail closed: an unbounded walk holds the workspace lock for unbounded time.
+            if (seenAncestors.size > MAX_SUB_TICKET_ANCESTOR_WALK) {
+              throw new Error('This link cannot be verified: the parent has too many ancestors');
+            }
 
             const asSubTicket = await tx.run(
               zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),
@@ -7132,7 +7142,7 @@ export function createMutators(
             workspaceId: authData.workspaceId,
             id: uuidv4(),
             ticketId,
-            activityType: ActivityType.SUBTICKET_CREATED,
+            activityType: ActivityType.SUBTICKET_LINKED,
             updatedBy: authData.sub,
             timestamp,
             value: {
@@ -7162,7 +7172,7 @@ export function createMutators(
               showInChannel: false,
               createdAt: timestamp,
               metadata: {
-                activityType: ActivityType.SUBTICKET_CREATED,
+                activityType: ActivityType.SUBTICKET_LINKED,
                 isTicketActivity: true,
               },
             });
@@ -7201,10 +7211,8 @@ export function createMutators(
             throw new Error('Only linked sub-tickets can be unlinked');
           }
 
-          // Gate on what the ROW is, not on the parent's current board: moving the
-          // parent onto a RELEASE board later would otherwise strand the link with no
-          // way to remove it. A row this mutator's twin created carries the derived id;
-          // flow- and release-made rows do not, so they stay protected.
+          // Gate on the ROW (only linkExisting mints the derived id), not the parent's
+          // current board — moving it to a RELEASE board would otherwise strand the link.
           if (subTicket.id !== linkedSubTicketId(mapping.ticketId, subTicket.mappedTicketId)) {
             throw new Error('This sub-ticket is managed automatically');
           }
@@ -7227,7 +7235,7 @@ export function createMutators(
             workspaceId: authData.workspaceId,
             id: uuidv4(),
             ticketId: mapping.ticketId,
-            activityType: ActivityType.SUBTICKET_CREATED,
+            activityType: ActivityType.SUBTICKET_UNLINKED,
             updatedBy: authData.sub,
             timestamp,
             value: {
@@ -7258,7 +7266,7 @@ export function createMutators(
               showInChannel: false,
               createdAt: timestamp,
               metadata: {
-                activityType: ActivityType.SUBTICKET_CREATED,
+                activityType: ActivityType.SUBTICKET_UNLINKED,
                 isTicketActivity: true,
               },
             });

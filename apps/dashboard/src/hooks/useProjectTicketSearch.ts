@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { searchService } from '../services/searchService';
 import { useDebouncedValue } from './useDebouncedValue';
 import { stripHighlightMarkup } from './useVespaTicketSearch';
@@ -8,16 +9,21 @@ export type ProjectTicketSearchResult = {
   id: string;
   title?: string;
   xyneId?: string | null;
+  boardId?: string | null;
 };
 
 // Vespa never pages past this offset, so stop asking.
 const VESPA_PROJECT_TICKET_MAX_OFFSET = 1000;
 const VESPA_PROJECT_TICKET_PAGE_SIZE = 200;
+// The search API rejects any filter carrying more values than this.
+export const VESPA_MAX_BOARD_FILTER_VALUES = 50;
 // EntitySelector fires onSearchChange on every keystroke.
 const PROJECT_TICKET_SEARCH_DEBOUNCE_MS = 300;
 
 interface UseProjectTicketSearchParams {
   projectId?: string | undefined;
+  /** Comma-separated board ids to confine the search to; empty means every board. */
+  boardIds?: string | undefined;
   /** Only fetch while the dropdown that owns this search is open. */
   isActive: boolean;
 }
@@ -33,6 +39,7 @@ interface UseProjectTicketSearchResult {
 
 const fetchPage = async (
   projectId: string,
+  boardIds: string,
   query: string,
   offset: number,
 ): Promise<{
@@ -46,6 +53,7 @@ const fetchPage = async (
     type: 'tickets',
     apps: 'ticket',
     projectId,
+    ...(boardIds ? { board: boardIds } : {}),
     limit: VESPA_PROJECT_TICKET_PAGE_SIZE,
     offset,
   });
@@ -57,6 +65,9 @@ const fetchPage = async (
       ...(result.searchContext?.xyneId !== undefined
         ? { xyneId: result.searchContext.xyneId ?? null }
         : {}),
+      ...(result.searchContext?.boardId !== undefined
+        ? { boardId: result.searchContext.boardId ?? null }
+        : {}),
     })),
     totalCount: response.totalCount,
     offset: response.offset,
@@ -67,6 +78,7 @@ const fetchPage = async (
 /** Paged Vespa search over a project's tickets, scoped to one dropdown. */
 export const useProjectTicketSearch = ({
   projectId,
+  boardIds = '',
   isActive,
 }: UseProjectTicketSearchParams): UseProjectTicketSearchResult => {
   const [tickets, setTickets] = useState<ProjectTicketSearchResult[] | null>(null);
@@ -107,7 +119,7 @@ export const useProjectTicketSearch = ({
       }
 
       try {
-        const response = await fetchPage(projectId, normalizedQuery, offset);
+        const response = await fetchPage(projectId, boardIds, normalizedQuery, offset);
 
         if (requestId !== requestIdRef.current) {
           return;
@@ -138,12 +150,17 @@ export const useProjectTicketSearch = ({
           context: [{ projectId, offset, query: normalizedQuery || '*', error }],
         });
 
-        if (replace) {
+        // EntitySelector has no error state - an empty list reads as "No results found".
+        toast.error(isInitialLoad ? 'Failed to load tickets' : 'Failed to load more tickets', {
+          id: 'project-ticket-search-error',
+        });
+
+        // A paging failure keeps hasMore, so the next scroll-end retries this offset.
+        if (isInitialLoad) {
           setTickets([]);
           setNextOffset(0);
+          setHasMore(false);
         }
-
-        setHasMore(false);
       } finally {
         // A superseded response must not clear a newer request's flag.
         if (requestId === requestIdRef.current) {
@@ -152,7 +169,7 @@ export const useProjectTicketSearch = ({
         }
       }
     },
-    [projectId, debouncedSearch],
+    [projectId, boardIds, debouncedSearch],
   );
 
   // Re-query whenever the dropdown opens or the debounced term settles.

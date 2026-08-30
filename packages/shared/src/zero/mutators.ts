@@ -76,7 +76,11 @@ import {
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
 import { THREAD_TYPE_NAMES } from '../tags/vocabularies.js';
-import { isManualSubTicketBoard, linkedSubTicketId } from '../tickets/utils.js';
+import {
+  isManualSubTicketBoard,
+  linkedSubTicketId,
+  MAX_SUB_TICKET_ANCESTOR_WALK,
+} from '../tickets/utils.js';
 import { assertCanvasDestinationAccess } from '../utils/canvasDestinationAccess.js';
 import {
   getCanvasFolderNameConflictMessage,
@@ -4383,10 +4387,8 @@ export const mutators = defineMutators({
         });
       },
     ),
-    // Client-optimistic twin of subTicket.linkExisting. Mirrors the server's structural
-    // guards (as the `create` twin above does) so an illegal link is rejected before it
-    // renders. The server additionally enforces workspace/channel access and writes the
-    // activity and system message.
+    // Client-optimistic twin of subTicket.linkExisting: mirrors the server's structural
+    // guards only — access checks, activity and system message stay server-side.
     linkExisting: defineMutator(
       z.object({
         mappingId: z.string(),
@@ -4418,6 +4420,8 @@ export const mutators = defineMutators({
         const mappedBoard = mappedTicket
           ? await tx.run(zql.boards.where('id', mappedTicket.boardId).one())
           : null;
+        // Deliberately lenient, unlike the server twin: a throw here drops the push
+        // entirely, and the mapped ticket is usually absent from the local replica.
         if (mappedBoard && !isManualSubTicketBoard(mappedBoard.boardType)) {
           throw new Error('Sub-tickets on that ticket\'s board are managed automatically');
         }
@@ -4439,6 +4443,10 @@ export const mutators = defineMutators({
             continue;
           }
           seenAncestors.add(currentTicketId);
+          // Same cap as the server twin, so the optimistic pass cannot outrun it.
+          if (seenAncestors.size > MAX_SUB_TICKET_ANCESTOR_WALK) {
+            throw new Error('This link cannot be verified: the parent has too many ancestors');
+          }
 
           const asSubTicket = await tx.run(
             zql.sub_tickets.where('mappedTicketId', currentTicketId).related('ticketMappings'),
