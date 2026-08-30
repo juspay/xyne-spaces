@@ -6,6 +6,7 @@ import { checkResultCallbackToken } from "../lib/session-tokens.js";
 import { verify as verifyCliToken } from "../lib/cli-tokens.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { prisma } from "../db.js";
+import { API_ERROR_CODES, sendApiError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("require-auth");
@@ -198,7 +199,7 @@ export async function requireAuth(
   }
 
   // 4. No valid auth
-  res.status(401).json({ success: false, error: "Authentication required" });
+  sendApiError(res, 401, API_ERROR_CODES.AUTHENTICATION_REQUIRED, "Authentication required");
 }
 
 export async function optionalAuth(
@@ -256,7 +257,7 @@ export async function requireS2S(
     return;
   }
 
-  res.status(401).json({ success: false, error: "s2s key required" });
+  sendApiError(res, 401, API_ERROR_CODES.SERVICE_AUTHENTICATION_REQUIRED, "s2s key required");
 }
 
 /**
@@ -281,7 +282,7 @@ export function requireStrictS2S(
     next();
     return;
   }
-  res.status(401).json({ success: false, error: "s2s key required" });
+  sendApiError(res, 401, API_ERROR_CODES.SERVICE_AUTHENTICATION_REQUIRED, "s2s key required");
 }
 
 /**
@@ -306,7 +307,7 @@ export function requireInternalS2S(
       return;
     }
   }
-  res.status(401).json({ success: false, error: "s2s key required" });
+  sendApiError(res, 401, API_ERROR_CODES.SERVICE_AUTHENTICATION_REQUIRED, "s2s key required");
 }
 
 /**
@@ -323,7 +324,7 @@ export function requireResultToken(getSessionId: (req: Request) => string | stri
     const check = checkResultCallbackToken(req.headers["x-session-token"] as string | undefined, sid);
     if (!check.ok) {
       log.warn(`[result-token] rejecting result (session=${sid || "?"}): ${check.reason}`);
-      res.status(401).json({ success: false, error: `session token ${check.reason}` });
+      sendApiError(res, 401, API_ERROR_CODES.INVALID_SESSION_TOKEN, `session token ${check.reason}`);
       return;
     }
     next();
@@ -353,7 +354,7 @@ export async function requireUserAuth(
   stripClientOrgHeaders(req);
   const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
   if (!userId) {
-    res.status(401).json({ success: false, error: "User session required" });
+    sendApiError(res, 401, API_ERROR_CODES.USER_SESSION_REQUIRED, "User session required");
     return;
   }
   // `ensureUserExists` keys its caller arg off SpacesAuthCaller for query
@@ -385,13 +386,13 @@ export function requireNoAccessToken(_req: Request, res: Response, next: NextFun
     log.warn(
       `[require-auth] access-token (${token.client ?? "unknown"}) rejected on non-/run route userId=${token.userId}`,
     );
-    res.status(403).json({
-      success: false,
-      error:
-        "This endpoint does not accept CLI/service access tokens (they carry no scopes here). " +
+    sendApiError(
+      res,
+      403,
+      API_ERROR_CODES.ACCESS_TOKEN_NOT_ALLOWED,
+      "This endpoint does not accept CLI/service access tokens (they carry no scopes here). " +
         "Use the /run API with a service token, or call this endpoint with a signed-in browser session.",
-      code: "ACCESS_TOKEN_NOT_ALLOWED",
-    });
+    );
     return;
   }
   next();
@@ -430,12 +431,13 @@ export function allowReadAccessToken(scope: string) {
       `[require-auth] access-token (${token.client ?? "unknown"}) rejected: ` +
         `${req.method} needs ${isRead ? `scope ${scope}` : "a browser session (writes are session-only)"} userId=${token.userId}`,
     );
-    res.status(403).json({
-      success: false,
-      error: isRead
+    sendApiError(
+      res,
+      403,
+      API_ERROR_CODES.ACCESS_TOKEN_NOT_ALLOWED,
+      isRead
         ? `This token does not have the ${scope} scope.`
         : "CLI/service access tokens are read-only here; sign in with a browser session for writes.",
-      code: "ACCESS_TOKEN_NOT_ALLOWED",
-    });
+    );
   };
 }
