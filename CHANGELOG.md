@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.19](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.18...v1.219.0-release-20260825.19) (2026-08-30)
+
+
+### Bug Fixes
+
+* enable jemalloc heap profiling to trace native memory leak ([#1217](https://github.com/juspay/xyne-spaces/issues/1217)) ([9c0435e](https://github.com/juspay/xyne-spaces/commit/9c0435e6d8556adb3225ae0b125c678e9b0590fd))
+
 ## [1.219.0-release-20260825.18](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.17...v1.219.0-release-20260825.18) (2026-08-30)
 
 
