@@ -412,7 +412,21 @@ const UserTagComponent = React.memo(({ userTag }: { userTag: UserTag }) => {
 UserTagComponent.displayName = 'UserTagComponent';
 
 /** Resolves a candidate "@name" to a real workspace user, or null otherwise. */
-type MentionResolver = (rawName: string) => UserTag | null;
+export type MentionResolver = (rawName: string) => UserTag | null;
+
+export const ASK_AI_USER_MESSAGE_CLASS_NAME =
+  'flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit';
+
+export const ASK_AI_USER_EDIT_CLASS_NAME = 'rounded-2xl bg-accent p-3';
+
+export const ASK_AI_USER_TEXT_CLASS_NAME =
+  "text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed";
+
+export const ASK_AI_USER_EDIT_TEXTAREA_CLASS_NAME =
+  "w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed";
+
+export const ASK_AI_ANSWER_MARKDOWN_CLASS_NAME =
+  "bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal";
 
 const MENTION_AMBIGUOUS: unique symbol = Symbol('mention-ambiguous');
 
@@ -584,6 +598,74 @@ export const processNodeForUserTags = (
 
   return node;
 };
+
+export const UserMessageMarkdown = ({
+  content,
+  resolveMention,
+}: {
+  content: string;
+  resolveMention: MentionResolver;
+}): ReactElement => (
+  <div className={ASK_AI_USER_TEXT_CLASS_NAME}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => <span>{processNodeForUserTags(children, resolveMention)}</span>,
+        a: ({ href, children, ...props }) => {
+          const isExternal = ((): boolean => {
+            if (!href) return false;
+            try {
+              return new URL(href, window.location.origin).origin !== window.location.origin;
+            } catch {
+              return true;
+            }
+          })();
+          const isApiPath = href?.startsWith('/api/');
+
+          if (isExternal) {
+            return (
+              <a
+                href={href}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='text-blue-500 hover:text-blue-600 underline'
+                {...props}
+              >
+                {children}
+              </a>
+            );
+          }
+
+          if (isApiPath) {
+            return (
+              <a
+                href={href}
+                className='text-blue-500 hover:text-blue-600 underline'
+                data-track-category='xyne-ai'
+                data-track-name='api-download'
+                onClick={event => {
+                  event.preventDefault();
+                  window.location.href = href!;
+                }}
+                {...props}
+              >
+                {children}
+              </a>
+            );
+          }
+
+          return (
+            <a href={href} className='text-blue-500 hover:text-blue-600 underline' {...props}>
+              {children}
+            </a>
+          );
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  </div>
+);
 
 /**
  * Process a string to replace user tags with actual user names for copying
@@ -1228,8 +1310,8 @@ export const MessageItem = React.memo(
             className={`${
               message.type === 'user'
                 ? isEditing
-                  ? 'rounded-2xl bg-accent p-3'
-                  : 'flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
+                  ? ASK_AI_USER_EDIT_CLASS_NAME
+                  : ASK_AI_USER_MESSAGE_CLASS_NAME
                 : 'bg-transparent text-foreground max-w-full'
             }`}
           >
@@ -1252,7 +1334,7 @@ export const MessageItem = React.memo(
                       setIsEditing(false);
                     }
                   }}
-                  className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed"
+                  className={ASK_AI_USER_EDIT_TEXTAREA_CLASS_NAME}
                   rows={Math.max(2, editText.split('\n').length)}
                   data-track-category='XyneAI'
                   data-track-name='EDIT_TEXTAREA'
@@ -1304,76 +1386,7 @@ export const MessageItem = React.memo(
                     ))}
                   </div>
                 )}
-                <div className="text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      p: ({ children }) => {
-                        const processed = processNodeForUserTags(children, resolveMention);
-                        return <span>{processed}</span>;
-                      },
-                      a: ({ href, children, ...props }) => {
-                        // Check if URL is external
-                        const isExternal = (() => {
-                          if (!href) return false;
-                          try {
-                            const urlObj = new URL(href, window.location.origin);
-                            return urlObj.origin !== window.location.origin;
-                          } catch {
-                            return true;
-                          }
-                        })();
-
-                        // API paths (e.g. /api/attachments/.../download) should bypass React Router
-                        const isApiPath = href?.startsWith('/api/');
-
-                        if (isExternal) {
-                          return (
-                            <a
-                              href={href}
-                              target='_blank'
-                              rel='noopener noreferrer'
-                              className='text-blue-500 hover:text-blue-600 underline'
-                              {...props}
-                            >
-                              {children}
-                            </a>
-                          );
-                        }
-
-                        if (isApiPath) {
-                          return (
-                            <a
-                              href={href}
-                              className='text-blue-500 hover:text-blue-600 underline'
-                              data-track-category='xyne-ai'
-                              data-track-name='api-download'
-                              onClick={e => {
-                                e.preventDefault();
-                                window.location.href = href!;
-                              }}
-                              {...props}
-                            >
-                              {children}
-                            </a>
-                          );
-                        }
-
-                        return (
-                          <a
-                            href={href}
-                            className='text-blue-500 hover:text-blue-600 underline'
-                            {...props}
-                          >
-                            {children}
-                          </a>
-                        );
-                      },
-                    }}
-                  >
-                    {displayContent}
-                  </ReactMarkdown>
-                </div>
+                <UserMessageMarkdown content={displayContent} resolveMention={resolveMention} />
               </>
             ) : (
               <MessageContent
@@ -1844,7 +1857,7 @@ const MessageContent = ({
       {/* Genius: Summary text */}
       {(!message.agentType || message.agentType === 'genius') && displayContent && (
         <div
-          className={`bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal${
+          className={`${ASK_AI_ANSWER_MARKDOWN_CLASS_NAME}${
             // Keyed off everStreamed (not isStreaming) so content that lands
             // AT completion — the final tail words, finalized citation chips —
             // still fades in instead of popping the instant isStreaming flips

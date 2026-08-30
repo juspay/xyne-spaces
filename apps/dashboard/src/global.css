@@ -4153,11 +4153,6 @@ img.inline-emoji,
   border-bottom-color: #2a2a2a;
 }
 
-[data-theme="midnight"] .ai-user-bubble {
-  background-color: #2a2a2a;
-  color: hsl(var(--foreground));
-}
-
 /* AI agent selector dropdown — soft neutral for light themes, near-black for midnight */
 [data-theme="classic"] .ai-agent-selector,
 [data-theme="summer_breeze"] .ai-agent-selector {

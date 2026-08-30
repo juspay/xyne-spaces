@@ -76,6 +76,11 @@ import {
   AttachmentPreview,
   useMentionResolver,
   processNodeForUserTags,
+  UserMessageMarkdown,
+  ASK_AI_USER_MESSAGE_CLASS_NAME,
+  ASK_AI_USER_EDIT_CLASS_NAME,
+  ASK_AI_USER_EDIT_TEXTAREA_CLASS_NAME,
+  ASK_AI_ANSWER_MARKDOWN_CLASS_NAME,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
 import {
@@ -1033,7 +1038,7 @@ function ChatMessageBubble({
         <div
           className={cn(
             'flex flex-col items-end gap-1',
-            isEditing ? 'w-full max-w-[90%]' : 'max-w-[78%]',
+            isEditing ? 'w-full max-w-[90%]' : 'max-w-[80%]',
           )}
         >
           <div className='flex w-full items-start justify-end gap-1'>
@@ -1056,10 +1061,9 @@ function ChatMessageBubble({
               </button>
             )}
             <div
-              className={cn(
-                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-[14.5px] leading-relaxed text-gray-900',
-                isEditing ? 'w-full' : 'max-w-full',
-              )}
+              className={
+                isEditing ? `${ASK_AI_USER_EDIT_CLASS_NAME} w-full` : ASK_AI_USER_MESSAGE_CLASS_NAME
+              }
             >
               {isEditing ? (
                 <div className='flex flex-col gap-2'>
@@ -1079,7 +1083,7 @@ function ChatMessageBubble({
                         setIsEditing(false);
                       }
                     }}
-                    className='min-h-[60px] w-full resize-none bg-transparent text-[14.5px] leading-relaxed text-gray-900 outline-none'
+                    className={ASK_AI_USER_EDIT_TEXTAREA_CLASS_NAME}
                     rows={Math.max(2, editText.split('\n').length)}
                     data-track-category='XyneAI'
                     data-track-name='EDIT_TEXTAREA'
@@ -1121,15 +1125,13 @@ function ChatMessageBubble({
                     </div>
                   )}
                   {hasUserContent && (
-                    <div className='whitespace-pre-wrap'>
-                      {processNodeForUserTags(
-                        stripUnknownCiteLinks(
-                          stripNonClfCitationTokens(stripCitationMarks(message.content)),
-                          validCitationKeys,
-                        ),
-                        resolveMention,
+                    <UserMessageMarkdown
+                      content={stripUnknownCiteLinks(
+                        stripNonClfCitationTokens(stripCitationMarks(message.content)),
+                        validCitationKeys,
                       )}
-                    </div>
+                      resolveMention={resolveMention}
+                    />
                   )}
                 </>
               )}
@@ -1167,7 +1169,7 @@ function ChatMessageBubble({
 
           {displayContent && displayContent.length > 0 && (
             <div
-              className={`bot-markdown-content xyne-ai-markdown text-[15px] font-normal leading-7 text-foreground${
+              className={`${ASK_AI_ANSWER_MARKDOWN_CLASS_NAME}${
                 // Keyed off everStreamed (not isStreaming) so content that
                 // lands AT completion — the final tail words, finalized
                 // citation chips — still fades in instead of popping the
