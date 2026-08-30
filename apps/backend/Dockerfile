@@ -65,6 +65,8 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     libssl-dev \
     ca-certificates \
+    libjemalloc2 \
+    && ln -sf "$(find /usr/lib -name 'libjemalloc.so.2' | head -1)" /usr/local/lib/libjemalloc.so.2 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
@@ -94,5 +96,8 @@ USER backend
 EXPOSE 3001
 
 ENV NODE_ENV=production
+
+ENV LD_PRELOAD=/usr/local/lib/libjemalloc.so.2
+ENV MALLOC_CONF=prof:true,prof_active:true,prof_prefix:/tmp/jeprof,lg_prof_sample:19,lg_prof_interval:30
 
 CMD ["pnpm", "run", "start"]
