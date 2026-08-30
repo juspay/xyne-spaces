@@ -16,6 +16,7 @@
  * whole run aborting.
  */
 import { extractText } from "unpdf";
+import { matchesAttachmentType } from "./attachment-matcher.js";
 
 const MAX_PAGES = 100;
 const MAX_CHARS_PER_PAGE = 10_000;
@@ -24,11 +25,8 @@ const MAX_TOTAL_CHARS = 200_000;
 export const PDF_MIME_TYPES = new Set(["application/pdf"]);
 export const PDF_EXTENSIONS = new Set([".pdf"]);
 
-export function isPdfAttachment(fileName: string, mimeType: string): boolean {
-  if (PDF_MIME_TYPES.has(mimeType.toLowerCase())) return true;
-  const dot = fileName.lastIndexOf(".");
-  if (dot < 0) return false;
-  return PDF_EXTENSIONS.has(fileName.slice(dot).toLowerCase());
+export function isPdfAttachment(fileName: string, mimeType?: string | null): boolean {
+  return matchesAttachmentType(fileName, mimeType, PDF_MIME_TYPES, PDF_EXTENSIONS);
 }
 
 function clampText(s: string, cap: number): { out: string; truncated: boolean } {

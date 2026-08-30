@@ -21,6 +21,7 @@
  * namespaces them under the archive's own filename via `<zipName>/<path>`.
  */
 import JSZip from "jszip";
+import { matchesAttachmentType } from "./attachment-matcher.js";
 import { isPdfAttachment, pdfBufferToMarkdown } from "./pdf-attachment.js";
 import { isXlsxAttachment, xlsxBufferToMarkdown } from "./xlsx-attachment.js";
 import { isDocxAttachment, docxBufferToMarkdown } from "./docx-attachment.js";
@@ -34,11 +35,8 @@ const ZIP_MIMES = new Set([
 ]);
 export const ZIP_EXTENSIONS = new Set([".zip"]);
 
-export function isZipAttachment(fileName: string, mimeType: string): boolean {
-  if (ZIP_MIMES.has((mimeType ?? "").toLowerCase())) return true;
-  const dot = fileName.lastIndexOf(".");
-  if (dot < 0) return false;
-  return ZIP_EXTENSIONS.has(fileName.slice(dot).toLowerCase());
+export function isZipAttachment(fileName: string, mimeType?: string | null): boolean {
+  return matchesAttachmentType(fileName, mimeType, ZIP_MIMES, ZIP_EXTENSIONS);
 }
 
 const MAX_ENTRIES = 200;
