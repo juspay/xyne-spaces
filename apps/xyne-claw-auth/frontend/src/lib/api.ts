@@ -1027,9 +1027,11 @@ export interface ChainWorkflowEdge {
   id: string;
   fromNodeId: string;
   toNodeId: string;
-  mode?: "always" | "tools" | "judge";
+  mode?: "always" | "tools" | "judge" | "commands";
   toolsMustInclude?: string[];
   toolsMustExclude?: string[];
+  commandsMustMatch?: string[];
+  commandsMustNotMatch?: string[];
   judgeContext?: string;
   taskTemplate?: string;
 }

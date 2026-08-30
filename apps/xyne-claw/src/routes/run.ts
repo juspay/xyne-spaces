@@ -5190,6 +5190,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    toolInvocations,
   } = req.body as {
     agentResult?: string;
     sourceAgent?: string;
@@ -5197,6 +5198,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate?: string;
     userQuery?: string;
     judgeContext?: string;
+    toolInvocations?: Array<{ toolName?: string; command?: string; isError?: boolean }>;
   };
 
   if (!agentResult || !sourceAgent || !targetAgent) {
@@ -5216,6 +5218,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    Array.isArray(toolInvocations) ? toolInvocations : undefined,
   );
   res.json({ success: true, data: decision });
 });

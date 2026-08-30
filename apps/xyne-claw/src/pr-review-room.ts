@@ -6,7 +6,7 @@ import { buildSandboxStoreKey, getSandboxSession } from "xyne-claw-shared";
 
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
-import { getLiveSession, snapshotLiveSessionHandle, type LiveSessionHandle } from "./session-store.js";
+import { deleteSession, getLiveSession, snapshotLiveSessionHandle, type LiveSessionHandle } from "./session-store.js";
 import {
   buildSubmitResultInstruction,
   buildSubmitResultTool,
@@ -622,12 +622,15 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
     return;
   }
   inFlight.add(roomConversationId);
+  let snapshotWritten = false;
+  let roomDelivered = false;
   try {
     const snapshot = await snapshotLiveSessionHandle(handle, roomConversationId, sessionId, { overwrite: true });
     if (!snapshot.ok) {
       log.warn(`[pr-room] snapshot failed (${snapshot.reason}) — room for ${roomConversationId} aborted`);
       return;
     }
+    snapshotWritten = true;
 
     const baseRef = await resolveBaseRef(git);
     if (!baseRef) {
@@ -663,8 +666,16 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
       findings,
     });
     await deliverRoom(sessionId, roomConversationId, pr, html);
+    roomDelivered = true;
   } finally {
     inFlight.delete(roomConversationId);
+    if (snapshotWritten && !roomDelivered) {
+      await deleteSession(roomConversationId).catch((err) =>
+        log.warn(
+          `[pr-room] cleanup of aborted room session ${roomConversationId} failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }
   }
 }
 

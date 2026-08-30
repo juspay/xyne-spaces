@@ -85,6 +85,16 @@ import {
 } from "../queue/run-recovery-worker.js";
 import { appendCitations, buildThreadCitationMeta } from "../lib/citations.js";
 import { htmlToPlainText } from "../lib/html-to-text.js";
+import {
+  parseChainWorkflowDefinition,
+  resolveChainEdgeMode,
+  evaluateChainToolConditions,
+  evaluateChainCommandConditions,
+  summarizeChainToolInvocations,
+  type ChainWorkflowDefinition,
+  type ChainWorkflowEdge,
+  type ChainWorkflowNode,
+} from "../lib/chain-workflow.js";
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -319,33 +329,47 @@ async function judgeChainContinuation(
   taskTemplate?: string,
   userQuery?: string,
   judgeContext?: string,
+  toolInvocations?: unknown,
 ): Promise<"continue" | "stop"> {
   try {
+    const invocationSummary = summarizeChainToolInvocations(toolInvocations);
     const res = await fetch(`${CONFIG.xyneClawUrl}/chain-judge`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({ agentResult, sourceAgent, targetAgent, taskTemplate, userQuery, judgeContext }),
-      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({
+        agentResult,
+        sourceAgent,
+        targetAgent,
+        taskTemplate,
+        userQuery,
+        judgeContext,
+        ...(invocationSummary.length > 0 ? { toolInvocations: invocationSummary } : {}),
+      }),
+      signal: AbortSignal.timeout(45_000),
     });
 
     if (!res.ok) {
-      clog.warn(`[chain-judge] xyne-claw returned ${res.status}, defaulting to continue`);
-      return "continue";
+      clog.warn(`[chain-judge] FAIL-CLOSED: xyne-claw returned ${res.status} for ${sourceAgent} → ${targetAgent}, not traversing edge`);
+      return "stop";
     }
 
     const data = (await res.json()) as { success: boolean; data?: { action: string; reason: string } };
     if (data.success && data.data) {
       clog.info(`[chain-judge] ${sourceAgent} → ${targetAgent}: ${data.data.action} (${data.data.reason})`);
-      return data.data.action === "stop" ? "stop" : "continue";
+      return data.data.action === "continue" ? "continue" : "stop";
     }
 
-    return "continue";
+    clog.warn(`[chain-judge] FAIL-CLOSED: malformed response body for ${sourceAgent} → ${targetAgent}, not traversing edge`);
+    return "stop";
   } catch (err) {
-    clog.warn(`[chain-judge] Failed, defaulting to continue:`, err instanceof Error ? err.message : err);
-    return "continue";
+    clog.warn(
+      `[chain-judge] FAIL-CLOSED: transport failure for ${sourceAgent} → ${targetAgent}, not traversing edge:`,
+      err instanceof Error ? err.message : err,
+    );
+    return "stop";
   }
 }
 
@@ -355,86 +379,7 @@ function parseChainConfig(agentConfig: Record<string, unknown> | null): ChainCon
   return chain as ChainConfig;
 }
 
-function evaluateChainConditions(conditions: ChainConditions | undefined, toolsUsed: string[]): boolean {
-  if (!conditions) return true;
-
-  if (conditions.toolsMustInclude?.length) {
-    const allPresent = conditions.toolsMustInclude.every((t) => toolsUsed.includes(t));
-    if (!allPresent) return false;
-  }
-
-  if (conditions.toolsMustExclude?.length) {
-    const anyExcluded = conditions.toolsMustExclude.some((t) => toolsUsed.includes(t));
-    if (anyExcluded) return false;
-  }
-
-  return true;
-}
-
-interface ChainWorkflowNode {
-  id: string;
-  agentSlug: string;
-  taskTemplate?: string;
-}
-
-interface ChainWorkflowEdge {
-  id: string;
-  fromNodeId: string;
-  toNodeId: string;
-  mode?: "always" | "tools" | "judge";
-  toolsMustInclude?: string[];
-  toolsMustExclude?: string[];
-  judgeContext?: string;
-  taskTemplate?: string;
-}
-
-interface ChainWorkflowDefinition {
-  version?: number;
-  maxDepth?: number;
-  nodes: ChainWorkflowNode[];
-  edges: ChainWorkflowEdge[];
-}
-
-function parseWorkflowDefinition(definition: unknown): ChainWorkflowDefinition | null {
-  if (!definition || typeof definition !== "object") return null;
-  const raw = definition as Record<string, unknown>;
-  if (!Array.isArray(raw["nodes"]) || !Array.isArray(raw["edges"])) return null;
-
-  const nodes = raw["nodes"].filter((n): n is ChainWorkflowNode => (
-    typeof n === "object" && n !== null &&
-    typeof (n as Record<string, unknown>)["id"] === "string" &&
-    typeof (n as Record<string, unknown>)["agentSlug"] === "string"
-  )).map((n) => ({
-    id: n.id,
-    agentSlug: n.agentSlug,
-    ...(typeof n.taskTemplate === "string" ? { taskTemplate: n.taskTemplate } : {}),
-  }));
-
-  const edges = raw["edges"].filter((e): e is ChainWorkflowEdge => (
-    typeof e === "object" && e !== null &&
-    typeof (e as Record<string, unknown>)["id"] === "string" &&
-    typeof (e as Record<string, unknown>)["fromNodeId"] === "string" &&
-    typeof (e as Record<string, unknown>)["toNodeId"] === "string"
-  )).map((e) => ({
-    id: e.id,
-    fromNodeId: e.fromNodeId,
-    toNodeId: e.toNodeId,
-    ...(e.mode === "always" || e.mode === "tools" || e.mode === "judge" ? { mode: e.mode } : {}),
-    ...(Array.isArray(e.toolsMustInclude) ? { toolsMustInclude: e.toolsMustInclude.filter((t): t is string => typeof t === "string") } : {}),
-    ...(Array.isArray(e.toolsMustExclude) ? { toolsMustExclude: e.toolsMustExclude.filter((t): t is string => typeof t === "string") } : {}),
-    ...(typeof e.judgeContext === "string" ? { judgeContext: e.judgeContext } : {}),
-    ...(typeof e.taskTemplate === "string" ? { taskTemplate: e.taskTemplate } : {}),
-  }));
-
-  if (nodes.length === 0) return null;
-
-  return {
-    nodes,
-    edges,
-    ...(typeof raw["version"] === "number" ? { version: raw["version"] } : {}),
-    ...(typeof raw["maxDepth"] === "number" ? { maxDepth: raw["maxDepth"] } : {}),
-  };
-}
+const parseWorkflowDefinition = parseChainWorkflowDefinition;
 
 function hasWorkflowCycle(workflow: ChainWorkflowDefinition): boolean {
   const nodeIds = workflow.nodes.map((node) => node.id);
@@ -472,6 +417,7 @@ async function selectNextWorkflowEdge(
   toolsUsed: string[],
   resultText: string,
   sourceTask: string,
+  toolInvocations?: unknown,
 ): Promise<{ edge: ChainWorkflowEdge; nextNode: ChainWorkflowNode } | null> {
   const currentNode = workflow.nodes.find((node) => node.agentSlug === currentAgentSlug);
   if (!currentNode) return null;
@@ -481,16 +427,25 @@ async function selectNextWorkflowEdge(
     const nextNode = workflow.nodes.find((node) => node.id === edge.toNodeId);
     if (!nextNode) continue;
 
-    const mode = edge.mode ?? (edge.toolsMustInclude?.length || edge.toolsMustExclude?.length ? "tools" : "always");
+    const mode = resolveChainEdgeMode(edge);
     if (mode === "always") {
       return { edge, nextNode };
     }
 
     if (mode === "tools") {
-      const matched = evaluateChainConditions({
+      const matched = evaluateChainToolConditions({
         ...(edge.toolsMustInclude?.length ? { toolsMustInclude: edge.toolsMustInclude } : {}),
         ...(edge.toolsMustExclude?.length ? { toolsMustExclude: edge.toolsMustExclude } : {}),
       }, toolsUsed);
+      if (matched) return { edge, nextNode };
+      continue;
+    }
+
+    if (mode === "commands") {
+      const matched = evaluateChainCommandConditions({
+        ...(edge.commandsMustMatch?.length ? { commandsMustMatch: edge.commandsMustMatch } : {}),
+        ...(edge.commandsMustNotMatch?.length ? { commandsMustNotMatch: edge.commandsMustNotMatch } : {}),
+      }, toolInvocations);
       if (matched) return { edge, nextNode };
       continue;
     }
@@ -502,6 +457,7 @@ async function selectNextWorkflowEdge(
       edge.taskTemplate ?? nextNode.taskTemplate,
       sourceTask,
       edge.judgeContext,
+      toolInvocations,
     );
     if (decision === "continue") return { edge, nextNode };
   }
@@ -4672,6 +4628,10 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
     return;
   }
 
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(html) || html.length % 4 !== 0) {
+    res.status(400).json({ success: false, error: "html must be valid base64" });
+    return;
+  }
   const buffer = Buffer.from(html, "base64");
   if (buffer.length === 0 || buffer.length > REVIEW_ROOM_MAX_HTML_BYTES) {
     res.status(413).json({ success: false, error: "Review room HTML is empty or too large" });
@@ -7348,7 +7308,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // hand-off prompt (which `ctx.task` becomes after hop 1). On the first
         // hop ctx.rootTask is unset and ctx.task IS the original request.
         const originalTask = ctx.rootTask ?? ctx.task;
-        const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask);
+        const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask, payload.toolInvocations);
 
         if (!selected) {
           log.info(`Chain: no matching edge from ${ctx.agentSlug} in workflow ${binding.workflowId}`);
