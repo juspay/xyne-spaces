@@ -1,3 +1,10 @@
+## [1.246.0](https://github.com/juspay/xyne-spaces/compare/v1.245.0...v1.246.0) (2026-08-30)
+
+
+### Features
+
+* pop out artifacts from tracks, and expand with the discussion ([#1212](https://github.com/juspay/xyne-spaces/issues/1212)) ([fa02c15](https://github.com/juspay/xyne-spaces/commit/fa02c15618dd2735e5d89dc7daf3e0d2e000faf9))
+
 ## [1.245.0](https://github.com/juspay/xyne-spaces/compare/v1.244.0...v1.245.0) (2026-08-30)
 
 
