@@ -20,7 +20,21 @@ export class CollectionPermissionsACL extends BaseQueryACL<'collection_permissio
           c.where(({ or: innerOr, cmp: innerCmp, exists: innerExists }) =>
             innerOr(
               innerCmp('ownerId', '=', this.ctx.userID),
-              innerExists('permissions', (p) => p.where('userId', this.ctx.userID))
+              innerExists('permissions', (p) => p.where('userId', this.ctx.userID)),
+              // Group grants — mirrors CollectionsACL's own group check, so a
+              // group-granted user can see the Share modal's "Who has access"
+              // list instead of it silently resolving empty.
+              innerExists('permissions', (p) =>
+                p.whereExists('userGroup', (ug) =>
+                  ug.whereExists('userGroupMappings', (m) => m.where('userId', this.ctx.userID)),
+                ),
+              ),
+              // Channel grants — same reasoning as the group check above.
+              innerExists('permissions', (p) =>
+                p.whereExists('channel', (ch) =>
+                  ch.whereExists('participants', (cp) => cp.where('userId', this.ctx.userID)),
+                ),
+              ),
             )
           )
         )
