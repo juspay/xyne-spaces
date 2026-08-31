@@ -21,10 +21,10 @@ import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, UserUser02 } from '@xyne/icons';
 import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
 import {
-  mixpanelService,
+  posthogService,
   EVENTS,
   EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+} from '../../../services/Analytics/posthogService';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
 import { useShortcut } from '../../../shortcuts';
@@ -65,6 +65,7 @@ import {
   NotificationBellOn,
 } from '@xyne/icons';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { Button } from '../../ui/Button/Button';
 
 type ActivityTab =
   | 'all'
@@ -293,7 +294,7 @@ const ActivityListView = (): ReactElement => {
 
   const handleTabChange = useCallback(
     (value: string): void => {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+      posthogService.capture(EVENTS.INITIATE_ACTION, {
         type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_TAB_CHANGED,
         tab: value as ActivityTab,
         showUnreadOnly: showUnreadOnly,
@@ -304,7 +305,7 @@ const ActivityListView = (): ReactElement => {
   );
 
   const handleUnreadToggle = useCallback((checked: boolean): void => {
-    mixpanelService.track(EVENTS.INITIATE_ACTION, {
+    posthogService.capture(EVENTS.INITIATE_ACTION, {
       type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_UNREAD_TOGGLED,
     });
     setShowUnreadOnly(checked);
@@ -1009,12 +1010,15 @@ const ActivityListView = (): ReactElement => {
               {showMobileMenu && (
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                   {/* Mark as Read */}
-                  <button
+                  <Button
+                    variant='ghost'
+                    trackId='mark_tab_as_read'
+                    trackProps={{ tab: activeTab }}
                     onClick={() => {
                       markActiveTabUnread();
                       setShowMobileMenu(false);
                     }}
-                    className='w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
+                    className='w-full px-4 py-2 flex items-center justify-start gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors h-auto'
                     data-track-category='ACTIVITY'
                     data-track-name={`MARK_TAB_READ`}
                     data-track-metadata={JSON.stringify({
@@ -1025,7 +1029,7 @@ const ActivityListView = (): ReactElement => {
                   >
                     <MarkAsRead size={16} />
                     <span>Mark as read</span>
-                  </button>
+                  </Button>
 
                   {/* Divider */}
                   <div className='border-t border-border my-1'></div>

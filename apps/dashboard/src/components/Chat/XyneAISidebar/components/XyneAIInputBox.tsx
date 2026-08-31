@@ -79,6 +79,7 @@ import type { Channel } from '@xyne/shared';
 import { ChannelVisibility } from '@xyne/shared';
 import type { DisplaySearchResult } from '../../../../types/search';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
+import { Button } from '../../../ui/Button/Button';
 
 // Browser context interface
 export interface BrowserContext {
@@ -1944,8 +1945,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
-                  <button
+                  <Button
+                    variant='ghost'
                     onClick={isStreaming ? onAbort : onSubmit}
+                    trackId={isStreaming ? 'abort_message' : 'submit_message'}
                     disabled={!isStreaming && !inputValue.trim()}
                     className={`rounded-full transition-colors shrink-0 p-2 ${
                       isStreaming
@@ -1962,7 +1965,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     ) : (
                       <ArrowUp className='w-4 h-4' />
                     )}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

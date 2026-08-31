@@ -11,8 +11,8 @@ import {
 import { setupElectronAuthListeners } from '../utils/electronAuth';
 import { usePlatform } from '../hooks/usePlatform';
 import { apiInstance } from '../services/clients/apiClient';
-import { mixpanelService } from '../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
+import { posthogService } from '../services/Analytics/posthogService';
+import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/events';
 import {
   registerNativePushToken,
   unregisterNativePushToken,
@@ -249,7 +249,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (user?.id) {
           authActor.send({ type: 'SESSION_VALIDATED', user });
 
-          mixpanelService.track(EVENTS.APP_REFRESH, {
+          posthogService.capture(EVENTS.APP_REFRESH, {
             trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.AUTH_SUCCESS_REDIRECT,
             url: window.location.href,
           });

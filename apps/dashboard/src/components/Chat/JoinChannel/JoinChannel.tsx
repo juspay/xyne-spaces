@@ -4,10 +4,10 @@ import { UserPlus } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import {
-  mixpanelService,
+  posthogService,
   EVENTS,
   EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+} from '../../../services/Analytics/posthogService';
 import { v4 as uuidv4 } from 'uuid';
 
 interface JoinChannelProps {
@@ -32,7 +32,7 @@ const JoinChannel = ({ channelId, channelTitle }: JoinChannelProps): ReactElemen
         timestamp: Date.now(),
       }),
     );
-    mixpanelService.track(EVENTS.INITIATE_ACTION, {
+    posthogService.capture(EVENTS.INITIATE_ACTION, {
       type: EVENT_PROPERTIES.ACTION_TYPES.JOIN_CHANNEL,
     });
   };

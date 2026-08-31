@@ -20,6 +20,8 @@ import {
 } from '../../services/DynamicDashboard/dataSourcesAdminService';
 import Input from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
+import { Button } from '../ui/Button/Button';
+import { posthogService } from '../../services/Analytics/posthogService';
 import { CaCertificateField } from './CaCertificateField';
 import { SOURCE_TYPES, type SourceType } from './dataSources.constants';
 import {
@@ -189,12 +191,14 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
     setSaving(true);
     try {
       await createDataSource({ ...apiInput, includedTables });
+      posthogService.captureActionOutcome('create_data_source', 'success');
       toast.success(
         `Data source created — ingesting ${includedTables.length} ${includedTables.length === 1 ? 'table' : 'tables'}`,
       );
       invalidateList();
       onClose();
     } catch (err) {
+      posthogService.captureActionOutcome('create_data_source', 'failure');
       toast.error(extractApiErrorMessage(err, 'Failed to create data source'));
     } finally {
       setSaving(false);
@@ -576,10 +580,12 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
         >
           Previous
         </button>
-        <button
+        <Button
+          variant='default'
           type='button'
           onClick={() => void handleSave()}
           disabled={!canSave}
+          trackId='create_data_source'
           data-track-category='DATA_SOURCE'
           data-track-name='Wizard_Save_Ingest'
           className={`inline-flex items-center gap-1.5 h-9 px-5 rounded-lg text-[13px] leading-[18px] font-medium text-white transition-colors ${
@@ -596,7 +602,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
           ) : (
             'Save & Ingest'
           )}
-        </button>
+        </Button>
       </div>
     </div>
   );

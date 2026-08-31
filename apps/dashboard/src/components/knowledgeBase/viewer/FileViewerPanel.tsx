@@ -6,6 +6,7 @@ import { XyneAIStar } from '../../icons/xyne-ai';
 import { detectFileType, FILE_TYPE_CONFIG } from '../../FileViewer/utils';
 import { fetchFile, downloadFile } from '../../../services/clients/fileFetchService';
 import { apiInstance } from '../../../services/clients/apiClient';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { useProjectCollections } from '../hooks/useProjectCollections';
 import { KbCodeViewer } from './KbCodeViewer';
 import { KbTxtViewer } from './KbTxtViewer';
@@ -314,7 +315,9 @@ export const FileViewerPanel: React.FC<{
     try {
       if (!fileId || !file) return;
       await downloadFile(`/collections/items/${fileId}/download`, file.name);
+      posthogService.captureActionOutcome('download_document', 'success');
     } catch {
+      posthogService.captureActionOutcome('download_document', 'failure');
       setError('Failed to download file. Please try again.');
     }
   };
@@ -373,11 +376,13 @@ export const FileViewerPanel: React.FC<{
           </button>
         </Tooltip>
 
-        <button
+        <Button
+          variant='ghost'
           type='button'
           onClick={() => {
             void handleDownload();
           }}
+          trackId='download_document'
           aria-label='Download'
           title='Download'
           className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
@@ -385,7 +390,7 @@ export const FileViewerPanel: React.FC<{
           data-track-name='file-viewer-download'
         >
           <Download className='h-4 w-4' strokeWidth={1.75} />
-        </button>
+        </Button>
       </div>
 
       <div className='flex min-w-0 items-center gap-2 px-5 py-2.5'>

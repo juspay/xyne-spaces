@@ -6,6 +6,8 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { callSummaryApi } from '../../../api/callSummaryApi';
 import { Dialog } from '../../ui/Dialog/Dialog';
+import { Button } from '../../ui/Button/Button';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { SummaryCanvasPreview } from './SummaryCanvasPreview';
 
 const AI_WORDS = [
@@ -100,12 +102,15 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
       );
       const serverRes = await mutation.server;
       if (serverRes.type === 'error') {
+        posthogService.captureActionOutcome('save_call_summary_prompt', 'failure');
         toast.error(serverRes.error.message || 'Failed to save call summary settings');
         return;
       }
+      posthogService.captureActionOutcome('save_call_summary_prompt', 'success');
       toast.success('Call summary settings saved');
       setExpanded(false);
     } catch {
+      posthogService.captureActionOutcome('save_call_summary_prompt', 'failure');
       toast.error('Failed to save call summary settings');
     } finally {
       setSaving(false);
@@ -124,8 +129,10 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
       const updated = await callSummaryApi.editPromptWithAI(channelId, draft, instruction);
       setDraft(updated);
       setAiInstruction('');
+      posthogService.captureActionOutcome('edit_call_summary_with_ai', 'success');
       toast.success('Template updated with AI');
     } catch (error) {
+      posthogService.captureActionOutcome('edit_call_summary_with_ai', 'failure');
       toast.error(error instanceof Error ? error.message : 'AI edit failed. Try again.');
     } finally {
       setAiLoading(false);
@@ -271,12 +278,14 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                     data-track-category='CallSummary'
                     data-track-name='EditWithAIInput'
                   />
-                  <button
+                  <Button
+                    variant='ghost'
                     type='button'
                     onClick={() => void handleEditWithAI()}
                     disabled={!aiInstruction.trim() || aiLoading}
                     aria-label='Edit with AI'
                     className='absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-primary hover:bg-muted/60 disabled:pointer-events-none disabled:opacity-40'
+                    trackId='edit_call_summary_with_ai'
                     data-track-category='CallSummary'
                     data-track-name='EditWithAI'
                   >
@@ -285,7 +294,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                     ) : (
                       <SendHorizontal size={16} />
                     )}
-                  </button>
+                  </Button>
                 </div>
               </div>
               <div className='flex flex-1 items-center justify-center gap-4'>
@@ -299,16 +308,18 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                 >
                   Reset to default
                 </button>
-                <button
+                <Button
+                  variant='default'
                   type='button'
                   onClick={() => void handleSave()}
                   disabled={!dirty || saving}
                   className='inline-flex items-center rounded-[10px] bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50'
+                  trackId='save_call_summary_prompt'
                   data-track-category='CallSummary'
                   data-track-name='SaveCallSummary'
                 >
                   {saving ? 'Saving…' : 'Save'}
-                </button>
+                </Button>
               </div>
             </div>
           )}

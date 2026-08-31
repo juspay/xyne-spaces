@@ -79,8 +79,10 @@ export function VersionHistory({
         {isError ? (
           <div className='py-16 text-center text-sm text-red-600'>
             Failed to load version history.
-            <button
+            <Button
+              variant='ghost'
               type='button'
+              trackId='automation_version_history_retry'
               data-track-category='automation-versions'
               data-track-name='version-history-retry'
               onClick={() => {
@@ -89,7 +91,7 @@ export function VersionHistory({
               className='ml-2 underline hover:no-underline'
             >
               Retry
-            </button>
+            </Button>
           </div>
         ) : isLoading ? (
           <div className='flex flex-col'>

@@ -21,8 +21,8 @@ import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
-import { mixpanelService } from '../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
+import { posthogService } from '../services/Analytics/posthogService';
+import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/events';
 import { dropZeroDatabases } from '../zero/dropZeroDatabases';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
@@ -206,7 +206,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
       });
 
       // Track app refresh before reload
-      mixpanelService.track(EVENTS.APP_REFRESH, {
+      posthogService.capture(EVENTS.APP_REFRESH, {
         trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.ZERO_SYNC_AUTH_INVALIDATED,
         errorMessage: 'ReAuth triggered',
         url: window.location.href,

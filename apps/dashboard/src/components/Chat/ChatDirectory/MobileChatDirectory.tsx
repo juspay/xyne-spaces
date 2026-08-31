@@ -31,10 +31,10 @@ import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Dialog from '../../ui/Dialog';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import {
-  mixpanelService,
+  posthogService,
   EVENTS,
   EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+} from '../../../services/Analytics/posthogService';
 import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu';
 
 import { useZero } from '../../../hooks/useZero';
@@ -68,7 +68,7 @@ const MobileChatDirectory = ({
   const createChannelMutation = useMutation({
     mutationFn: (data: CreateChannelFormData) => channelService.createChannel(data),
     onSuccess: response => {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+      posthogService.capture(EVENTS.INITIATE_ACTION, {
         type: EVENT_PROPERTIES.ACTION_TYPES.NEW_CHANNEL,
       });
       setShowAddChannelForm(false);
@@ -84,7 +84,7 @@ const MobileChatDirectory = ({
     onSuccess: (response, variables) => {
       const isGroupDm = variables.participantIds.length > 1;
 
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+      posthogService.capture(EVENTS.INITIATE_ACTION, {
         type: isGroupDm
           ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
           : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,

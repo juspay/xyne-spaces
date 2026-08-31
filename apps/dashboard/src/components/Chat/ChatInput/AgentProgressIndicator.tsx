@@ -6,6 +6,8 @@ import { useAgentProgress } from '../../../hooks/useAgentProgress';
 import { useAuth } from '../../../hooks/useAuth';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { AgentSpinner } from '../../ui/AgentSpinner';
+import { Button } from '../../ui/Button/Button';
+import { posthogService } from '../../../services/Analytics/posthogService';
 
 const rowStyle: CSSProperties = {
   display: 'inline-flex',
@@ -61,7 +63,9 @@ export function AgentProgressIndicator({
       window.dispatchEvent(
         new CustomEvent('agent-progress-cleared', { detail: { conversationId } }),
       );
+      posthogService.captureActionOutcome('stop_agent', 'success');
     } catch (err) {
+      posthogService.captureActionOutcome('stop_agent', 'failure');
       logger.error(LogEvent.FRONTEND_ERROR, {
         type: 'migrated_console_error',
         message: String('[AgentProgressIndicator] cancel failed:'),
@@ -89,16 +93,18 @@ export function AgentProgressIndicator({
         ))}
       </div>
       {myAgent && (
-        <button
+        <Button
+          variant='ghost'
           type='button'
           onClick={() => void handleAbortAgent()}
           className='p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors shrink-0'
           aria-label='Stop agent'
+          trackId='stop_agent'
           data-track-category='CHAT_INPUT'
           data-track-name='STOP_AGENT'
         >
           <Square className='h-3 w-3 fill-current' />
-        </button>
+        </Button>
       )}
     </div>
   );

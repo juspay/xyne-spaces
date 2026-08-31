@@ -87,10 +87,10 @@ import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import {
-  mixpanelService,
+  posthogService,
   EVENTS,
   EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+} from '../../../services/Analytics/posthogService';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
@@ -1750,7 +1750,7 @@ const ChannelCommandMenu = ({
     if (!searchText.trim() && activeTab !== TabType.CHANNELS) return;
 
     const timer = setTimeout((): void => {
-      mixpanelService.track(EVENTS.SEARCH_PERFORMED, {
+      posthogService.capture(EVENTS.SEARCH_PERFORMED, {
         searchType: EVENT_PROPERTIES.SEARCH_TYPES.COMMAND_MENU,
         searchCategory: activeTab,
         resultsCount: filteredLocalChannels.length,

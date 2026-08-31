@@ -6,6 +6,8 @@ import {
   getStoredPendingActionResolution,
   subscribeToPendingActionResolutions,
 } from '../../../../services/XyneAI/XyneAIPendingActionStore';
+import { Button } from '../../../ui/Button/Button';
+import { posthogService } from '../../../../services/Analytics/posthogService';
 
 interface PendingActionBlockProps {
   actions: PendingAction[];
@@ -82,9 +84,11 @@ function PendingActionItem({
     try {
       await onApprove(action, index);
       setState('approved');
+      posthogService.captureActionOutcome('approve_pending_action', 'success');
     } catch (err) {
       setState('error');
       setError(err instanceof Error ? err.message : String(err));
+      posthogService.captureActionOutcome('approve_pending_action', 'failure');
     }
   };
 
@@ -95,9 +99,11 @@ function PendingActionItem({
     try {
       await onDecline(action, index);
       setState('declined');
+      posthogService.captureActionOutcome('decline_pending_action', 'success');
     } catch (err) {
       setState('error');
       setError(err instanceof Error ? err.message : String(err));
+      posthogService.captureActionOutcome('decline_pending_action', 'failure');
     }
   };
 
@@ -142,8 +148,10 @@ function PendingActionItem({
 
       {/* Action buttons */}
       <div className='flex items-center gap-2'>
-        <button
+        <Button
+          variant='ghost'
           onClick={() => void handleApprove()}
+          trackId='approve_pending_action'
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50'
           type='button'
@@ -156,9 +164,11 @@ function PendingActionItem({
             <Check size={10} />
           )}
           Approve
-        </button>
-        <button
+        </Button>
+        <Button
+          variant='ghost'
           onClick={() => void handleDecline()}
+          trackId='decline_pending_action'
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-secondary px-2.5 py-1 text-[10px] text-secondary-foreground transition hover:bg-secondary/80 disabled:opacity-50'
           type='button'
@@ -167,7 +177,7 @@ function PendingActionItem({
         >
           <X size={10} />
           Decline
-        </button>
+        </Button>
       </div>
     </div>
   );

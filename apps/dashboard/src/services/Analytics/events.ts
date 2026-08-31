@@ -1,31 +1,23 @@
 /**
- * Mixpanel Event Constants
+ * PostHog Event Constants
  *
- * This file provides optional constants for common event names and properties
+ * Optional constants for common event names and property values.
  *
  * USAGE GUIDE:
  *
- * 1. For constant/predefined values - Define them in EVENT_PROPERTIES:
- *    mixpanelService.track(EVENTS.NAVIGATION, {
- *      item: EVENT_PROPERTIES.NAVIGATION_ITEMS.CHAT  // ← Constant value
+ * 1. For constant/predefined values - use EVENT_PROPERTIES:
+ *    posthogService.capture(EVENTS.NAVIGATION, {
+ *      item: EVENT_PROPERTIES.NAVIGATION_ITEMS.CHAT,
  *    });
  *
- * 2. For dynamic/runtime values - Send them as plain objects:
- *    mixpanelService.track('ButtonClicked', {
- *      buttonId: 'submit',           // ← Dynamic value
- *      timestamp: Date.now(),        // ← Dynamic value
- *      userId: user.id               // ← Dynamic value (auto-added)
+ * 2. For dynamic/runtime values - send plain objects:
+ *    posthogService.capture('button_click', {
+ *      buttonId: 'submit',
+ *      userId: user.id,
  *    });
  *
- * 3. Mix both approaches:
- *    mixpanelService.track(EVENTS.INITIATE_ACTION, {
- *      type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,  // ← Constant
- *      messageId: message.id,                               // ← Dynamic
- *      channelName: channel.name                            // ← Dynamic
- *    });
- *
- * TIP: Add constants to EVENT_PROPERTIES only for values that repeat across the app.
- *      For one-time or unique values, use plain strings/numbers directly.
+ * TIP: Add constants to EVENT_PROPERTIES only for values that repeat across the
+ *      app. For one-off values, use plain strings/numbers directly.
  */
 
 // Common event names (optional - you can use plain strings)
@@ -50,9 +42,6 @@ export const EVENTS = {
 
   // WebSocket events
   WS_CONNECTION_CLOSED: 'ws_connection_closed',
-
-  // Unified Performance Event
-  PERFORMANCE_METRIC: 'performance_metric',
 
   // Settings/Preferences events
   PREFERENCE_CHANGED: 'preference_changed',
@@ -80,27 +69,12 @@ export const EVENT_PROPERTIES = {
     ACTIVITY_UNREAD_TOGGLED: 'ActivityUnreadToggled',
     FILE_UPLOADED: 'FileUploaded',
     PROJECT_CREATED: 'ProjectCreated',
-  },
-
-  PERFORMANCE_METRIC_TYPES: {
-    // Message Performance
-    MESSAGES_LOADED: 'messages_loaded',
-    MESSAGES_LOAD_FAILED: 'message_load_failed',
-
-    // Call Performance
-    CALL_JOIN: 'call_join',
-    CALL_CONNECTION_FAILED: 'call_connection_failed',
-
-    // WebSocket connection event
-    WS_CONNECTION_RECONNECT_ATTEMPT: 'ws_connection_reconnect_attempt',
-
-    // Zero Connection Performance
-    ZERO_CONNECTION_ERROR: 'zero_connection_error',
-    ZERO_CONNECTION_MAX_RETRIES_REACHED: 'zero_connection_max_retries_reached',
-    ZERO_CONNECTION_STABLE: 'zero_connection_stable',
-
-    // API Performance
-    API_LATENCY: 'api_latency',
+    SCHEDULE_MESSAGE: 'scheduleMessage',
+    COPY_MESSAGE: 'copyMessage',
+    ATTACH_FILES: 'attachFiles',
+    AI_QUERY_SUBMITTED: 'aiQuerySubmitted',
+    AI_GENERATION_STOPPED: 'aiGenerationStopped',
+    AGENT_SWITCHED: 'agentSwitched',
   },
 
   // Authentication types

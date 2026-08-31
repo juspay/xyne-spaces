@@ -6,6 +6,7 @@ import { DashboardVisibility } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useDashboardList, useDashboardMutations } from '../../hooks/useDashboards';
 import { getApiErrorMessage } from '../../utils/apiError';
+import { posthogService } from '../../services/Analytics/posthogService';
 import { Button } from '../ui/Button';
 import Input from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
@@ -47,10 +48,12 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
         description: description.trim() || undefined,
         visibility,
       });
+      posthogService.captureActionOutcome('create_dashboard', 'success');
       toast.success('Dashboard created');
       void navigate(`/${user.workspaceId}/dashboards/${dashboard.id}`);
       onClose();
     } catch (err) {
+      posthogService.captureActionOutcome('create_dashboard', 'failure');
       toast.error('Failed to create dashboard', { description: getApiErrorMessage(err) });
     } finally {
       setIsCreating(false);
@@ -170,6 +173,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
         </Button>
         <Button
           onClick={handleCreateClick}
+          trackId='create_dashboard'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CREATE_DASHBOARD'
           disabled={!name.trim() || isCreating}

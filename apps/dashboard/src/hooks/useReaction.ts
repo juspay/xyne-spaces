@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { mutators } from '../zero/mutators';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
+import { posthogService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/posthogService';
 import { v4 as uuidv4 } from 'uuid';
 import { useZero } from './useZero';
 
@@ -34,7 +34,7 @@ export const useReactions = (): UseReactionsReturn => {
             countId: hasReacted ? undefined : uuidv4(),
           }),
         );
-        mixpanelService.track(EVENTS.INITIATE_ACTION, {
+        posthogService.capture(EVENTS.INITIATE_ACTION, {
           type: hasReacted
             ? EVENT_PROPERTIES.ACTION_TYPES.REACTION_REMOVED
             : EVENT_PROPERTIES.ACTION_TYPES.REACTION_ADDED,

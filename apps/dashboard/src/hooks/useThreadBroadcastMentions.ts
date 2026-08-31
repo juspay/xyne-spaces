@@ -2,7 +2,7 @@ import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
-import { mixpanelService, EVENTS } from '../services/Analytics/mixpanelService';
+import { posthogService, EVENTS } from '../services/Analytics/posthogService';
 
 export const useThreadBroadcastMentions = (): {
   allowThreadBroadcastMentions: boolean;
@@ -21,7 +21,7 @@ export const useThreadBroadcastMentions = (): {
         timestamp: Date.now(),
       }),
     );
-    mixpanelService.track(EVENTS.PREFERENCE_CHANGED, {
+    posthogService.capture(EVENTS.PREFERENCE_CHANGED, {
       preference: 'allowThreadBroadcastMentions',
       enabled: value,
     });

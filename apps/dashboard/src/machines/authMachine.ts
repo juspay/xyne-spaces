@@ -3,7 +3,7 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
+import { posthogService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
@@ -727,7 +727,7 @@ export const authMachine = createMachine(
       authenticated: {
         entry: ({ context }) => {
           if (context.user?.id) {
-            mixpanelService.identify(context.user);
+            posthogService.identify(context.user);
           }
         },
         on: {
@@ -1324,17 +1324,17 @@ export const authMachine = createMachine(
       }),
       trackLoginSuccess: ({ context }) => {
         if (context.user?.id) {
-          mixpanelService.identify(context.user);
-          mixpanelService.track(EVENTS.AUTHENTICATION, {
+          posthogService.identify(context.user);
+          posthogService.capture(EVENTS.AUTHENTICATION, {
             type: EVENT_PROPERTIES.AUTH_TYPES.LOGIN,
           });
         }
       },
       trackLogoutSuccess: () => {
-        mixpanelService.track(EVENTS.AUTHENTICATION, {
+        posthogService.capture(EVENTS.AUTHENTICATION, {
           type: EVENT_PROPERTIES.AUTH_TYPES.LOGOUT,
         });
-        mixpanelService.reset();
+        posthogService.reset();
       },
     },
     actors: {

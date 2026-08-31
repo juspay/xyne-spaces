@@ -54,10 +54,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import {
-  mixpanelService,
+  posthogService,
   EVENTS,
   EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+} from '../../../services/Analytics/posthogService';
 import {
   extractOriginFromHash,
   extractMessageIdFromHash,
@@ -455,7 +455,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         channelId,
         conversationId: message['conversationId'],
       });
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+      posthogService.capture(EVENTS.INITIATE_ACTION, {
         type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,
       });
       toast.success('Message deleted', {
@@ -533,7 +533,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         })
         .catch(() => undefined);
 
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+      posthogService.capture(EVENTS.INITIATE_ACTION, {
         type: 'addBookmark',
       });
     } catch {
@@ -555,7 +555,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             markAsDone: false,
           }),
         );
-        mixpanelService.track(EVENTS.INITIATE_ACTION, {
+        posthogService.capture(EVENTS.INITIATE_ACTION, {
           type: 'removeBookmark',
         });
       } catch {
@@ -703,6 +703,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleCopyMessage = (): void => {
     if (message?.content) {
+      posthogService.capture(EVENTS.INITIATE_ACTION, {
+        type: EVENT_PROPERTIES.ACTION_TYPES.COPY_MESSAGE,
+        msgType: message.msgType,
+      });
       // Check if this is markdown content (e.g., call summaries)
       const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
 

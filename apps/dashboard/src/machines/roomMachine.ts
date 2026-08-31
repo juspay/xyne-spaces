@@ -32,8 +32,8 @@ import {
 import { callService } from '../services/Call/callService';
 import { openLink } from '../utils/openLink';
 import { CallType } from '@xyne/shared';
-import { mixpanelService } from '../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
+import { posthogService } from '../services/Analytics/posthogService';
+import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/events';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 import { isCallUrlApiAllowed, type CallUrlOverrides } from '../utils/callUrlOverrides';
 import { toast } from 'sonner';
@@ -1865,41 +1865,10 @@ export const roomMachine = setup({
         }),
         onDone: {
           target: 'connected',
-          actions: [
-            ({ context }): void => {
-              // Track successful call join
-              if (context.callStartTime) {
-                const timeTakenMs = Date.now() - context.callStartTime;
-                const participantCount = context.participants.length;
-
-                mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-                  type: EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.CALL_JOIN,
-                  timeTakenMs,
-                  participantCount,
-                  callType: context.callType,
-                  isInitiator: context.isInitiator,
-                });
-              }
-            },
-          ],
         },
         onError: {
           target: 'idle',
           actions: [
-            ({ context, event }): void => {
-              // Track failed call join
-              const errorMessage =
-                event.error instanceof Error ? event.error.message : 'Failed to connect';
-              const timeTakenMs = context.callStartTime ? Date.now() - context.callStartTime : 0;
-
-              mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-                type: EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.CALL_CONNECTION_FAILED,
-                timeTakenMs,
-                errorMessage: errorMessage,
-                callType: context.callType,
-                isInitiator: context.isInitiator,
-              });
-            },
             'cleanupRoom',
             'clearContext',
             assign({
@@ -2515,7 +2484,7 @@ export const roomMachine = setup({
             ({ event, context }): void => {
               if (event.type !== 'NATIVE_CALL_ENDED') return;
               const durationSeconds = Math.floor(event.durationMs / 1000);
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              posthogService.capture(EVENTS.INITIATE_ACTION, {
                 type: EVENT_PROPERTIES.ACTION_TYPES.END_CALL,
                 callType: event.callType,
                 durationSeconds,
@@ -2541,7 +2510,7 @@ export const roomMachine = setup({
         ({ context }): void => {
           // Track call ended (no sensitive data - only metadata)
           const duration = context.callStartTime ? Date.now() - context.callStartTime : 0;
-          mixpanelService.track(EVENTS.INITIATE_ACTION, {
+          posthogService.capture(EVENTS.INITIATE_ACTION, {
             type: EVENT_PROPERTIES.ACTION_TYPES.END_CALL,
             callType: context.callType,
             durationSeconds: Math.floor(duration / 1000),

@@ -2,8 +2,8 @@ import { ReactElement, useState } from 'react';
 import { Button } from '../../ui/Button';
 import { Input } from '../../ui/Input';
 import { Textarea } from '../../ui/Textarea';
-import { mixpanelService } from '../../../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../../../services/Analytics/mixpanel.types';
+import { posthogService } from '../../../services/Analytics/posthogService';
+import { EVENTS, EVENT_PROPERTIES } from '../../../services/Analytics/events';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
 import { usePlatform } from '../../../hooks/usePlatform';
 
@@ -75,7 +75,7 @@ export const ProjectForm = ({
           await onSubmit(data);
 
           // Track project creation (no sensitive data - only metadata)
-          mixpanelService.track(EVENTS.INITIATE_ACTION, {
+          posthogService.capture(EVENTS.INITIATE_ACTION, {
             type: EVENT_PROPERTIES.ACTION_TYPES.PROJECT_CREATED,
           });
         }

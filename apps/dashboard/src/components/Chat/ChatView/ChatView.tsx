@@ -19,10 +19,10 @@ import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import {
-  mixpanelService,
+  posthogService,
   EVENTS,
   EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+} from '../../../services/Analytics/posthogService';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
 import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
@@ -109,7 +109,7 @@ const ChatView = (): ReactElement => {
           ? EVENT_PROPERTIES.CONVERSATION_TYPES.GROUP_DM
           : EVENT_PROPERTIES.CONVERSATION_TYPES.CHANNEL;
 
-    mixpanelService.track(EVENTS.CONVERSATION_OPENED, {
+    posthogService.capture(EVENTS.CONVERSATION_OPENED, {
       type: conversationType,
     });
   }, [channel, channelId, context.userID, zero]);

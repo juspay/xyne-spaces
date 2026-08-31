@@ -20,8 +20,8 @@ import { cn } from '../../../utils/classNames';
 import {
   EVENT_PROPERTIES,
   EVENTS,
-  mixpanelService,
-} from '../../../services/Analytics/mixpanelService';
+  posthogService,
+} from '../../../services/Analytics/posthogService';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
@@ -131,7 +131,7 @@ export const ComposeDmPanel: React.FC = () => {
 
           // Track group creation if more than 1 participant (excluding current user)
           const isGroupDm = selectedUsers.length > 1;
-          mixpanelService.track(EVENTS.INITIATE_ACTION, {
+          posthogService.capture(EVENTS.INITIATE_ACTION, {
             type: isGroupDm
               ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
               : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,

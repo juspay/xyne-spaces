@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanelService';
+import { posthogService, EVENTS } from '../Analytics/posthogService';
 import { API_BASE_URL } from '../../config';
 import { logger, Logger, NotificationSocketState } from '../../utils/logger';
 import {
@@ -39,7 +39,6 @@ class WebSocketService {
   private isConnected = false;
   private reconnectAttempts = 0;
   private connectionStartTime: number | null = null;
-  private reconnectionStartTime: number | null = null;
   private connectionPromise: Promise<void> | null = null;
   private connectionAttemptStartTime: number | null = null;
   private sessionStartTime: number | null = null;
@@ -113,14 +112,6 @@ class WebSocketService {
           reconnectAttempts: this.reconnectAttempts,
         });
 
-        if (this.reconnectAttempts > 0 && this.reconnectionStartTime) {
-          mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-            type: EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.WS_CONNECTION_RECONNECT_ATTEMPT,
-            timeTakenMs: Date.now() - this.reconnectionStartTime,
-            reconnectAttempts: this.reconnectAttempts,
-          });
-        }
-
         safeRecordMetric(() => {
           socketConnectionAttemptDuration.record(attemptLatency);
           socketConnectionTotalDuration.record(totalLatency);
@@ -135,7 +126,6 @@ class WebSocketService {
         this.reconnectAttempts = 0;
         this.connectionStartTime = Date.now();
         this.sessionStartTime = Date.now();
-        this.reconnectionStartTime = null;
         this.firstConnectionAttemptTime = null;
         this.connectionPromise = null; // Clear the promise after successful connection
         resolve();
@@ -143,7 +133,6 @@ class WebSocketService {
 
       this.socket.on('disconnect', reason => {
         this.isConnected = false;
-        this.reconnectionStartTime = Date.now();
         this.connectionPromise = null; // Clear the promise on disconnect
 
         logger.setNotificationSocketState(NotificationSocketState.DISCONNECTED);
@@ -158,7 +147,7 @@ class WebSocketService {
           reason: reason,
         });
 
-        mixpanelService.track(EVENTS.WS_CONNECTION_CLOSED, {
+        posthogService.capture(EVENTS.WS_CONNECTION_CLOSED, {
           reason: reason,
           durationMs, // Exact time in milliseconds
           durationFormatted, // Human-readable format (e.g., "1 minute 30 seconds")

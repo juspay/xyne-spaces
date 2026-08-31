@@ -18,10 +18,10 @@ import { useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { channelService } from '../../../services/Chat/channelService';
 import {
-  mixpanelService,
+  posthogService,
   EVENTS,
   EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+} from '../../../services/Analytics/posthogService';
 
 const PAGE_SIZE = 10;
 
@@ -126,7 +126,7 @@ const BrowseChannels = (): ReactElement => {
     if (!searchQuery.trim()) return;
 
     const timer = setTimeout((): void => {
-      mixpanelService.track(EVENTS.SEARCH_PERFORMED, {
+      posthogService.capture(EVENTS.SEARCH_PERFORMED, {
         searchType: EVENT_PROPERTIES.SEARCH_TYPES.CHANNELS,
         resultsCount: filteredChannels.length,
       });

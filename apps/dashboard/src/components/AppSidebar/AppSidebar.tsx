@@ -7,7 +7,7 @@ import { RailQuickNavEntry } from './RailQuickNav';
 import { ShortcutHint } from '../ui/ShortcutHint';
 import { useShortcutById } from '../../shortcuts';
 import { useAuth } from '../../hooks/useAuth';
-import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
+import { posthogService, EVENTS } from '../../services/Analytics/posthogService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
 import {
   GraphTrendLine,
@@ -316,8 +316,8 @@ const AppSidebar = (): ReactElement => {
     );
   }, [visibleChannels, unreadCounts]);
 
-  const handleNavigationClick = (label: string, openedInNewWindow = false): void => {
-    mixpanelService.track(EVENTS.NAVIGATION, { item: label, openedInNewWindow });
+  const handleNavigationClick = (label: string): void => {
+    posthogService.capture(EVENTS.NAVIGATION, { item: label });
   };
 
   const railShortcuts = railShortcutsAvailable();

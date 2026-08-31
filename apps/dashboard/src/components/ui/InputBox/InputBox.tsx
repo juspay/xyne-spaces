@@ -84,6 +84,11 @@ import type { Canvas } from '../../Canvas';
 import { CanvasVisibility, getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
+import {
+  posthogService,
+  EVENTS,
+  EVENT_PROPERTIES,
+} from '../../../services/Analytics/posthogService';
 import { VoiceInput } from './VoiceInput';
 import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
@@ -553,6 +558,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             extensions: filesArray.map(f => getFileExtension(f.name)),
             fileTypes: filesArray.map(f => f.type || 'unknown'),
             totalSizeBytes: filesArray.reduce((sum, f) => sum + f.size, 0),
+          });
+          posthogService.capture(EVENTS.INITIATE_ACTION, {
+            type: EVENT_PROPERTIES.ACTION_TYPES.ATTACH_FILES,
+            fileCount: filesArray.length,
+            validCount: validFiles.length,
+            rejectedCount: rejectedFiles.length,
           });
         }
 

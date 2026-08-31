@@ -1,8 +1,8 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { apiInstance } from '../clients/apiClient';
 import { AxiosError } from 'axios';
-import { mixpanelService } from '../Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanel.types';
+import { posthogService } from '../Analytics/posthogService';
+import { EVENTS, EVENT_PROPERTIES } from '../Analytics/events';
 import { getFilesDimensions } from '../../components/ui/utils/files';
 
 // ============================================================================
@@ -181,7 +181,7 @@ export class ConversationService {
       const totalSize = files.reduce((sum, file) => sum + file.size, 0);
       const fileTypes = files.map(file => file.type);
 
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+      posthogService.capture(EVENTS.INITIATE_ACTION, {
         type: EVENT_PROPERTIES.ACTION_TYPES.FILE_UPLOADED,
         uploadContext,
         fileCount: files.length,

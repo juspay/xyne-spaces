@@ -4,7 +4,8 @@ import { useSelector } from '@xstate/react';
 import { RefreshCw, X } from 'lucide-react';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
-import { mixpanelService } from '../../services/Analytics/mixpanelService';
+import { posthogService } from '../../services/Analytics/posthogService';
+import { Button } from '../ui/Button/Button';
 
 // Kill switch for the Electron auto-update nudge. While false the component is
 // fully inert: no event listener is registered and nothing is rendered.
@@ -182,7 +183,7 @@ function isCallBlockingNow(): boolean {
 }
 
 function trackUpdateEvent(eventName: string, state: PersistedNudgeState, extra = {}): void {
-  mixpanelService.track(eventName, {
+  posthogService.capture(eventName, {
     currentVersion: state.currentVersion,
     latestVersion: state.latestVersion,
     checkCount: state.checkCount,
@@ -253,7 +254,7 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         status: succeeded ? 'success' : 'failed',
         completedAt: new Date().toISOString(),
       });
-      mixpanelService.track('Electron Update Completed', {
+      posthogService.capture('Electron Update Completed', {
         currentVersion: attempt.currentVersion,
         latestVersion: attempt.latestVersion,
         loadedVersion: __APP_VERSION__,
@@ -428,16 +429,18 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
         <p className='shrink-0 text-xs font-semibold text-foreground'>{title}</p>
         <p className='truncate text-xs text-muted-foreground'>{message}</p>
       </div>
-      <button
+      <Button
         type='button'
+        variant='ghost'
         onClick={() => applyUpdate('manual')}
         disabled={activationBlocked}
-        className='shrink-0 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+        className='h-auto shrink-0 rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+        trackId='electron_apply_update'
         data-track-category='ElectronUpdate'
         data-track-name='UpdateNow'
       >
         Update now
-      </button>
+      </Button>
       {!nudge.autoApprovalRequired && (
         <button
           type='button'
