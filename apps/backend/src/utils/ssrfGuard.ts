@@ -71,12 +71,11 @@ function isBlockedV6(addr: string): boolean {
   return blockedV6.check(addr, 'ipv6');
 }
 
-// Internal host suffixes are refused by name, before DNS resolution. IP-range
-// filtering cannot stop an internal service that answers on a routable address;
-// the primary control for that is network egress policy, and this name denylist
-// is defence-in-depth in front of it. Operator-supplied suffixes are configured
-// per environment rather than committed, so no internal topology lives in the
-// source. Matched as a dotted-suffix or exact host, case-insensitively.
+// Internal host suffixes are refused by name, before DNS resolution, as
+// defence-in-depth alongside the network egress policy that is the primary control.
+// Operator-supplied suffixes are configured per environment rather than committed,
+// so no internal topology lives in the source. Matched as a dotted-suffix or exact
+// host, case-insensitively.
 const internalHostSuffixes: string[] = config.ssrf.internalHostSuffixes;
 
 function matchesInternalSuffix(lower: string): boolean {

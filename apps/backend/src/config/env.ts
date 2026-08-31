@@ -566,8 +566,8 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
-  // 'shadow' logs what archive inspection would refuse and stores the file anyway;
-  // 'enforce' refuses it. Start in shadow, flip once the logs show no false positives.
+  // 'shadow' records what archive inspection would refuse without blocking it;
+  // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
   UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
   // Comma-separated internal host suffixes the link-preview / outbound fetch guard
   // refuses by name (e.g. corporate or in-cluster domains). Empty by default; set

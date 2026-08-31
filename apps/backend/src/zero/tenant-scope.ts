@@ -3,13 +3,11 @@ import { asQueryInternals } from '#zero-internal/query-internals';
 import { Context, schema } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
-// A query can be given any shape by the client, and its ZQL runs against the
-// database directly — nothing between it and the rows but its own `where`. So the
-// tenant boundary is applied here, to every query, rather than trusting each
-// definition to remember it: the root table is scoped to the caller's workspace,
-// or to their organisation for the few tables that sit above workspaces.
-// Tables that are neither must be listed as global reference data; an
-// unlisted table is refused rather than served unscoped.
+// The tenant boundary is applied here, to every query, rather than trusting each
+// query definition to include it: the root table is scoped to the caller's
+// workspace, or to their organisation for the few tables that sit above workspaces.
+// Tables that are neither must be listed as global reference data; an unlisted
+// table is refused rather than served unscoped.
 
 type ScopableQuery = {
   where: (...args: unknown[]) => ScopableQuery;

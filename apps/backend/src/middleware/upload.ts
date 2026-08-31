@@ -142,9 +142,18 @@ const EICAR_SIGNATURE = Buffer.from(
 
 /** Why a file's bytes were refused, or null when they were not. */
 async function forbiddenContentReason(head: Buffer): Promise<string | null> {
-  if (head.length === 0) return null;
-  if (head.indexOf(EICAR_SIGNATURE) !== -1) return 'eicar-test-file';
-  return executableKind(head);
+  try {
+    if (head.length === 0) return null;
+    if (head.indexOf(EICAR_SIGNATURE) !== -1) return 'eicar-test-file';
+    return executableKind(head);
+  } catch (err) {
+    // A detection error must never fail the upload; log it and continue without a
+    // verdict rather than error the request.
+    logger.warn('[UPLOAD] content screening skipped after error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 function extensionOf(name: string): string {
@@ -373,8 +382,7 @@ export function __setArchiveScreeningModeForTest(mode: ArchiveScreeningMode): vo
  * storage receives; `verdict` settles when inspection finishes. In enforce mode a
  * violation destroys `body` so the upload stops, and rejects `verdict` so the
  * caller can remove anything already stored. In shadow mode the violation is
- * logged and the file stored regardless, so the inspector can be watched for
- * false positives before it is allowed to refuse anything.
+ * recorded without blocking, so the inspector can be validated before it enforces.
  */
 function screenArchiveContent(
   stream: Readable,

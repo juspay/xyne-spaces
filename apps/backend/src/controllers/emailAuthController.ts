@@ -112,9 +112,8 @@ export class EmailAuthController {
       }
 
       // Every failed attempt — unknown email, no password set, or wrong password —
-      // ends here, so the attempt counter, the lockout and the response are the same
-      // whichever it was. Counting only real accounts would let the 429 that follows
-      // five failures reveal which emails are registered.
+      // ends here, so the attempt counter, the lockout and the response are identical
+      // whichever it was, keeping registered and unregistered emails indistinguishable.
       const rejectLogin = async (): Promise<void> => {
         const redis = redisService.getClient();
         const failedAttempts = await redis.incr(loginAttemptKey);

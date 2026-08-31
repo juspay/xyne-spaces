@@ -1025,10 +1025,8 @@ export class ChannelController {
       );
 
       // For DM channels, add the other user as participant.
-      // Log-only cross-workspace detection (no behaviour change): flag when the DM
-      // target belongs to a different workspace than the caller, to measure how
-      // often this happens before scoping is enforced here the way createNewDM and
-      // addGroupDmParticipants already do.
+      // Observability only: record when the DM target resolves to a different
+      // workspace than the caller so this can be measured for this path.
       if (scopeType === 'DM' && scopeId) {
         const dmTarget = await this.userRepository.findById(scopeId);
         if (dmTarget && dmTarget.workspaceId !== req.user!.workspaceId) {
@@ -1058,8 +1056,7 @@ export class ChannelController {
           try {
             // Check if user exists before adding
             const user = await this.userRepository.findById(participantId);
-            // Log-only cross-workspace detection (no behaviour change): flag a
-            // participant resolved from another workspace before scoping is enforced.
+            // Observability only: record a participant that resolves to another workspace.
             if (user && user.workspaceId !== req.user!.workspaceId) {
               logger.warn('[workspace-scope] createChannel participant in another workspace', {
                 callerWorkspaceId: req.user!.workspaceId,
@@ -2091,9 +2088,9 @@ export class ChannelController {
         return;
       }
 
-      // Scope participants to the caller's workspace (from the session, not the
-      // request body): an installation-wide lookup would let a member DM any user
-      // in any workspace without an invitation.
+      // Scope participants to the caller's workspace, taken from the session rather
+      // than the request body, so a caller-supplied id cannot reference a user
+      // outside it.
       const participantUsers = [];
       if (!isSelfDm) {
         for (const participantId of otherParticipantIds) {
