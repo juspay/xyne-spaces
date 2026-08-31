@@ -92,8 +92,7 @@ const parseMarkers = (lines: string[], sectionNames: Set<string>): SpecMarker[] 
   let fence: { char: string; length: number } | null = null;
 
   lines.forEach((raw, index) => {
-    // Indentation first: an indented line can neither open nor close a fence, so
-    // a ``` inside a code sample must not toggle one.
+    // An indented line can neither open nor close a fence.
     if (!fence && INDENTED_CODE.test(raw)) return;
 
     const line = raw.trim().replace(/^>+\s*/, '');
@@ -136,9 +135,8 @@ export function validateSpecSections(
   const markers = parseMarkers(lines, sectionNames);
   const hasSpecHeading = markers.some(marker => marker.name === SPEC_SECTION);
 
-  // Narrow to the wrapper only when every section marker follows it. A
-  // "Specification" line in the middle or at the end would otherwise discard the
-  // sections written above it.
+  // A wrapper narrows scope only when every section follows it: one written
+  // mid-description would otherwise discard the sections above it.
   const firstSection = markers.findIndex(marker => marker.name !== SPEC_SECTION);
   const wrapper = markers.findIndex(marker => marker.name === SPEC_SECTION);
   const scope =
@@ -492,11 +490,9 @@ export class PullRequestValidationService {
 
     const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
 
-    // Pending, not failed: the spec has not been found wanting, it has not been
-    // looked at. Still blocks a required check, without claiming a spec is missing.
+    // Pending, not failed: the spec has not been looked at, not found wanting.
     if (result.ticketDescription === undefined || !result.xyneId) {
-      // Bitbucket has no terminal state for "not applicable": an INPROGRESS
-      // build would never be finalized, so skip rather than leave one hanging.
+      // Bitbucket would leave an INPROGRESS build nothing ever finalizes.
       if (target.provider === VCSProviderType.BITBUCKET_SERVER) return;
       await this.postBuildStatus(
         target,
@@ -522,7 +518,6 @@ export class PullRequestValidationService {
       return;
     }
 
-    // A spec that exists but has empty sections must not be told to re-run /spec.
     const allMissing = spec.missing.length === sections.length && !spec.hasSpecHeading;
     const errorMessage = allMissing
       ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.MISSING(ticketId)

@@ -309,7 +309,6 @@ Fix it.
     expect(validateSpecSections(renamed).missing).toEqual(ALL_SECTIONS);
   });
 
-  // Review findings: each of these failed a complete spec, or passed an empty one.
   it('does not treat a bulleted section name as a heading', () => {
     const bulleted = `## Specification
 
@@ -454,9 +453,7 @@ C.
     });
   });
 
-  // Sections above a "Specification" wrapper now count. Ignoring them would mean
-  // a wrapper written mid-description discards a real spec above it, and a false
-  // failure blocks a PR where a false pass only fails to catch one.
+  // Deliberate: a false failure blocks a PR, a false pass only misses one.
   it('counts sections written above the Specification wrapper', () => {
     const outside = `### Test cases
 
