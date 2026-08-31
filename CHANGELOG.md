@@ -1,3 +1,12 @@
+## [1.249.4](https://github.com/juspay/xyne-spaces/compare/v1.249.3...v1.249.4) (2026-08-31)
+
+
+### Bug Fixes
+
+* add chat with agent button in draft agent card ([#1274](https://github.com/juspay/xyne-spaces/issues/1274)) ([72d0f43](https://github.com/juspay/xyne-spaces/commit/72d0f4304fd4a75dcb8ec8b0d5497112e802391f))
+* keep the daily-brief regenerate SSE stream alive ([#1243](https://github.com/juspay/xyne-spaces/issues/1243)) ([4c06dec](https://github.com/juspay/xyne-spaces/commit/4c06dec0d5f4b70c52fbdb7f675f6d23b10bde15))
+* summary generation fixes ([#1275](https://github.com/juspay/xyne-spaces/issues/1275)) ([2263110](https://github.com/juspay/xyne-spaces/commit/2263110668e1f778f81ebce1238414b4abd669fe))
+
 ## [1.249.3](https://github.com/juspay/xyne-spaces/compare/v1.249.2...v1.249.3) (2026-08-31)
 
 
