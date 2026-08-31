@@ -1024,8 +1024,20 @@ export class ChannelController {
         ChannelRole.ADMIN
       );
 
-      // For DM channels, add the other user as participant
+      // For DM channels, add the other user as participant.
+      // Log-only cross-workspace detection (no behaviour change): flag when the DM
+      // target belongs to a different workspace than the caller, to measure how
+      // often this happens before scoping is enforced here the way createNewDM and
+      // addGroupDmParticipants already do.
       if (scopeType === 'DM' && scopeId) {
+        const dmTarget = await this.userRepository.findById(scopeId);
+        if (dmTarget && dmTarget.workspaceId !== req.user!.workspaceId) {
+          logger.warn('[workspace-scope] createChannel DM target in another workspace', {
+            callerWorkspaceId: req.user!.workspaceId,
+            targetUserId: scopeId,
+            targetWorkspaceId: dmTarget.workspaceId,
+          });
+        }
         await this.channelParticipantRepository.addParticipant(
           channel.id,
           scopeId,
@@ -1046,6 +1058,15 @@ export class ChannelController {
           try {
             // Check if user exists before adding
             const user = await this.userRepository.findById(participantId);
+            // Log-only cross-workspace detection (no behaviour change): flag a
+            // participant resolved from another workspace before scoping is enforced.
+            if (user && user.workspaceId !== req.user!.workspaceId) {
+              logger.warn('[workspace-scope] createChannel participant in another workspace', {
+                callerWorkspaceId: req.user!.workspaceId,
+                participantUserId: participantId,
+                participantWorkspaceId: user.workspaceId,
+              });
+            }
             if (user && user.status === 'ACTIVE') {
               await this.channelParticipantRepository.addParticipant(
                 channel.id,
