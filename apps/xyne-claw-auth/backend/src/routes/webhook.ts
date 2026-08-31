@@ -155,7 +155,8 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-sha
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
-import { connectorTypesFromText } from "../lib/connector-hints.js";
+import { connectorTypesFromText, connectorTypesUserAskedToConnect } from "../lib/connector-hints.js";
+import { availableServerIds } from "../lib/connector-availability.js";
 
 const clog = createLogger("webhook");
 const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
@@ -6167,7 +6168,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   let inferredTypes: string[] = [];
   if (!payload.pendingConnectorSuggestions) {
     try {
-      inferredTypes = connectorTypesFromText(ctx.task ?? "").slice(0, MCP_SUGGEST_INFERRED_MAX);
+      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "").slice(
+        0,
+        MCP_SUGGEST_INFERRED_MAX,
+      );
     } catch (err) {
       log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -6203,11 +6207,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           });
       const byType = new Map(rows.map((row) => [row.type, row]));
 
-      const existing = await prisma.userMcpConnection.findMany({
-        where: { userId: ctx.senderId, mcpServerId: { in: rows.map((r) => r.id) } },
-        select: { mcpServerId: true },
-      });
-      const connectedIds = new Set(existing.map((c) => c.mcpServerId));
+      const connectedIds = await availableServerIds(
+        ctx.senderId,
+        rows.map((r) => r.id),
+      );
 
       // Roster mode is already ordered by the query; otherwise preserve the
       // model's ordering, since it ranked them by relevance.
@@ -6219,11 +6222,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
       const inferred = pendingConnectorSuggestions.inferred === true;
 
+      // Derived from the user's own words, never from the model's claim: a model
+      // that wants its card shown will assert explicit intent for a plain task
+      // request, which is exactly how an already-usable connector slipped
+      // through. The server owns this fact like every other on the card.
+      const askedToConnect = new Set(
+        connectorTypesUserAskedToConnect(ctx.rootTask ?? ctx.task ?? ""),
+      );
+
       const connectors = ordered
-        // An inferred card is unsolicited, so it only earns its place when it
-        // offers something new. A model-requested card still lists connected
-        // ones, because the user asked to see them.
-        .filter((row) => !inferred || !connectedIds.has(row.id))
+        // An unsolicited suggestion only earns its place when the connector is
+        // not already usable — personally connected or shared org-wide. Two
+        // exceptions, both genuine user intent: roster mode ("what exists?"),
+        // and the user naming a connector they want to connect, where a personal
+        // connection is a legitimate want even under an org credential.
+        .filter((row) => listAll || askedToConnect.has(row.type) || !connectedIds.has(row.id))
         .map((row) => ({
           serverType: row.type,
           name: row.name,
