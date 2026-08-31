@@ -4,6 +4,12 @@ import type { AutomationContext } from '../types/context';
 import type { AutomationStepConfig } from '../types/automation-config';
 import { StepCategory } from '../types/categories';
 
+export interface ActionExecutionContext {
+  runId: string;
+  stepName: string;
+  isResuming: boolean;
+}
+
 export interface ControlFlowExecutionContext {
   walkBranch(steps: AutomationStepConfig[], context: AutomationContext): Promise<void>;
 }
@@ -43,12 +49,17 @@ export abstract class BaseActionStep<
 
   readonly mayEmit?: readonly string[];
 
-  abstract execute(config: z.infer<TConfig>, context: AutomationContext): Promise<TOutput>;
+  abstract execute(
+    config: z.infer<TConfig>,
+    context: AutomationContext,
+    execution: ActionExecutionContext,
+  ): Promise<TOutput>;
 
   onResume?(
     rowData: Record<string, unknown>,
     config: z.infer<TConfig>,
     context: AutomationContext,
+    execution: ActionExecutionContext,
   ): Promise<TOutput>;
 }
 

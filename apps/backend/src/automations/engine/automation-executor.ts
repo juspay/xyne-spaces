@@ -13,7 +13,12 @@ import type { TriggerType } from '../types/trigger-types';
 import type { StepType } from '../types/step-types';
 import { CONTROL_FLOW_STEP_TYPES } from '../types/known-types';
 import type { StepRegistry } from '../steps/step-registry';
-import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
+import {
+  BaseActionStep,
+  BaseControlFlowStep,
+  StepKind,
+  type ActionExecutionContext,
+} from '../steps/base-step';
 import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
 import { automationContextStorage } from './automation-context-storage';
 import { PauseStep } from './pause-step';
@@ -272,13 +277,17 @@ export class AutomationExecutor {
 
   private async invokeResume(
     actionImpl: BaseActionStep<z.ZodSchema, Record<string, unknown>>,
-    runId: string,
-    stepName: string,
+    execution: ActionExecutionContext,
     resolvedInput: Record<string, unknown>,
     context: AutomationContext,
   ): Promise<Record<string, unknown>> {
     const row = await this.prisma.workflowStep.findUnique({
-      where: { workflowExecutionId_stepName: { workflowExecutionId: runId, stepName } },
+      where: {
+        workflowExecutionId_stepName: {
+          workflowExecutionId: execution.runId,
+          stepName: execution.stepName,
+        },
+      },
       select: { data: true },
     });
     const rowData: Record<string, unknown> =
@@ -287,7 +296,7 @@ export class AutomationExecutor {
         : {};
 
     if (typeof actionImpl.onResume === 'function') {
-      return actionImpl.onResume(rowData, resolvedInput, context);
+      return actionImpl.onResume(rowData, resolvedInput, context, execution);
     }
     const fallback = rowData['output'];
     return (fallback && typeof fallback === 'object' && !Array.isArray(fallback)
@@ -536,7 +545,7 @@ export class AutomationExecutor {
   private async executeStep(
     step: AutomationStepConfig,
     context: AutomationContext,
-    callCtx: { runId: string; stepName: string; isResuming: boolean },
+    callCtx: ActionExecutionContext,
   ): Promise<void> {
     const stepImpl = this.stepRegistry.get(step.type);
 
@@ -591,8 +600,8 @@ export class AutomationExecutor {
     );
     try {
       const output = callCtx.isResuming
-        ? await this.invokeResume(actionImpl, callCtx.runId, callCtx.stepName, resolvedInput, context)
-        : await actionImpl.execute(resolvedInput, context);
+        ? await this.invokeResume(actionImpl, callCtx, resolvedInput, context)
+        : await actionImpl.execute(resolvedInput, context, callCtx);
       context.steps[step.id] = { type: step.type, input: persistedInput, output };
       logger.info(
         `[automations] step OK    id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0}`,
