@@ -25,6 +25,7 @@ const MCP_SERVER_NAME = 'xyne';
 class StaleDevicePairingError extends Error {}
 
 const POLL_ERROR_BACKOFF_MS = 5000;
+const RUN_HEARTBEAT_MS = 30000;
 
 const ADAPTERS: Record<LocalHarnessProvider, HarnessAdapter> = {
   'claude-code': new ClaudeCodeAdapter(),
@@ -362,6 +363,12 @@ export class LocalHarnessBridge {
       },
     });
 
+    const heartbeat = setInterval(() => {
+      void fetch(`${this.baseUrl()}/local-harness-bridge/ping`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    }, RUN_HEARTBEAT_MS);
+
     try {
       await facade.start();
 
@@ -400,6 +407,7 @@ export class LocalHarnessBridge {
       log.error(`[LocalHarness] run ${envelope.runId} failed: ${message}`);
       await this.reportResult(envelope.runId, token, { status: 'failed', text: '', error: message });
     } finally {
+      clearInterval(heartbeat);
       await facade.stop().catch(() => {});
       this.activeRun = null;
     }

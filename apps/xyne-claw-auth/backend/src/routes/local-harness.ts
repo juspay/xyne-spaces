@@ -36,6 +36,7 @@ const log = createLogger("local-harness-routes");
 // connection + a DB-polling loop for up to localHarnessPollTimeoutMs; without
 // a cap a single device (or a leaked token) could exhaust the connection pool.
 const MAX_CONCURRENT_POLLS_PER_DEVICE = 2;
+const DEVICE_TOUCH_INTERVAL_MS = 30_000;
 const activePolls = new Map<string, number>();
 
 const RATE_WINDOW_MS = 5 * 60 * 1000;
@@ -256,6 +257,9 @@ async function requireDevice(req: Request, res: Response, next: NextFunction): P
     res.status(401).json({ success: false, error: "Invalid or revoked device token" });
     return;
   }
+  if (!device.lastSeenAt || Date.now() - device.lastSeenAt.getTime() >= DEVICE_TOUCH_INTERVAL_MS) {
+    void localHarnessRepository.touchDevice(device.id).catch(() => {});
+  }
   req.localHarnessDevice = device;
   next();
 }
@@ -263,6 +267,10 @@ async function requireDevice(req: Request, res: Response, next: NextFunction): P
 bridgeRouter.use(bridgeLimiter);
 bridgeRouter.use("/runs/next", pollLimiter);
 bridgeRouter.use(requireDevice);
+
+bridgeRouter.get("/ping", (_req: Request, res: Response) => {
+  res.json({ success: true });
+});
 
 // Per-harness connect/disconnect from the desktop app. Device-token authed on
 // purpose: re-POSTing /devices would rotate the pairing token and 401 the
@@ -291,7 +299,6 @@ bridgeRouter.put("/installations", async (req: Request, res: Response) => {
 
 bridgeRouter.get("/runs/next", async (req: Request, res: Response) => {
   const device = req.localHarnessDevice!;
-  await localHarnessRepository.touchDevice(device.id).catch(() => {});
 
   // Draining for shutdown: don't park a new loop, answer idle immediately so
   // the client re-polls the next (healthy) pod.
