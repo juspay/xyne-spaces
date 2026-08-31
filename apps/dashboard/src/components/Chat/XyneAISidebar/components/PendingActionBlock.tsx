@@ -147,7 +147,7 @@ function PendingActionItem({
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50'
           type='button'
-          data-track-category='xyne-ai'
+          data-track-category='XyneAI'
           data-track-name='approve-action'
         >
           {state === 'running' ? (
@@ -162,7 +162,7 @@ function PendingActionItem({
           disabled={state === 'running'}
           className='inline-flex items-center gap-1 rounded bg-secondary px-2.5 py-1 text-[10px] text-secondary-foreground transition hover:bg-secondary/80 disabled:opacity-50'
           type='button'
-          data-track-category='xyne-ai'
+          data-track-category='XyneAI'
           data-track-name='decline-action'
         >
           <X size={10} />

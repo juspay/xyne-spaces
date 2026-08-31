@@ -174,7 +174,7 @@ const TicketPreviewContent = ({
                 <button
                   onClick={() => setShowAllFields(true)}
                   className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-muted-foreground leading-[1.2] tracking-[-0.1px] hover:text-muted-foreground transition-colors cursor-pointer bg-transparent border-0'
-                  data-track-category='BoardCreate'
+                  data-track-category='BOARD_CREATE'
                   data-track-name='ShowMoreFields'
                 >
                   Show More ({remainingFields.length} more fields)
@@ -184,7 +184,7 @@ const TicketPreviewContent = ({
                 <button
                   onClick={() => setShowAllFields(false)}
                   className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-muted-foreground leading-[1.2] tracking-[-0.1px] hover:text-muted-foreground transition-colors cursor-pointer bg-transparent border-0'
-                  data-track-category='BoardCreate'
+                  data-track-category='BOARD_CREATE'
                   data-track-name='ShowLessFields'
                 >
                   Show Less

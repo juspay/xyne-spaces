@@ -3023,7 +3023,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         disabled={!canCreateNestedSubTicket}
         data-testid='create-sub-ticket-button'
         data-track-event='BUTTON_CLICK'
-        data-track-category='TICKETS'
+        data-track-category='Tickets'
         data-track-name='CREATE_SUB_TICKET'
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
         title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
@@ -3553,7 +3553,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   data-testid='ticket-detail-status-selector'
                   className='flex items-center gap-2'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_STATUS'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
@@ -3619,7 +3619,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   data-testid='ticket-detail-priority-selector'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_PRIORITY'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,

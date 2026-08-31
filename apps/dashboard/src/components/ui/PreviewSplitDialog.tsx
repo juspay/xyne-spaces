@@ -201,7 +201,7 @@ export const PreviewThreadPanel: React.FC<{
       <h3 className='font-semibold text-foreground'>Threads</h3>
       <button
         onClick={onClose}
-        data-track-category='FILE_VIEWER'
+        data-track-category='FileViewer'
         data-track-name='CloseThreadPanel'
         className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
         aria-label='Close'

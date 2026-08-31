@@ -220,7 +220,7 @@ function renderCallItem({
         }
       }}
       data-testid={`${statusText}`}
-      data-track-category='Calls'
+      data-track-category='CALLS'
       data-track-name='OpenCallHistory'
       data-track-metadata={JSON.stringify({ callId: call.id })}
     >
@@ -285,7 +285,7 @@ function renderCallItem({
               e.stopPropagation();
               onParticipantsClick();
             }}
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='ViewParticipants'
             data-track-metadata={JSON.stringify({ callId: call.id })}
             onKeyDown={e => {
@@ -313,7 +313,7 @@ function renderCallItem({
                   handleGotoTranscript?.();
                 }
               }}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='GoToTranscript'
               data-track-metadata={JSON.stringify({ callId: call.id })}
               onKeyDown={e => {

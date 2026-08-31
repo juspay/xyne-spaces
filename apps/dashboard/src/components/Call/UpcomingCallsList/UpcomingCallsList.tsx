@@ -83,7 +83,7 @@ export function UpcomingCallsList({
               variant='outline'
               size='sm'
               onClick={() => onJoinCall(call)}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='JOIN_UPCOMING_CALL'
               tabIndex={0}
               className={cn(

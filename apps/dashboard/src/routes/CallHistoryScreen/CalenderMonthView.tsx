@@ -255,7 +255,7 @@ const CalendarMonthView = ({
                               <PopoverPrimitive.Trigger asChild>
                                 <button
                                   onClick={e => e.stopPropagation()}
-                                  data-track-category='Calls'
+                                  data-track-category='CALLS'
                                   data-track-name='calendar-month-call-pill'
                                   className='relative flex items-center max-sm:items-start gap-1 max-sm:gap-0.5 text-left w-full px-1 max-sm:px-0.5 py-0.5 max-sm:py-px rounded transition-colors cursor-pointer focus:outline-none'
                                   style={{
@@ -381,7 +381,7 @@ const CalendarMonthView = ({
                             <PopoverPrimitive.Trigger asChild>
                               <button
                                 onClick={e => e.stopPropagation()}
-                                data-track-category='Calls'
+                                data-track-category='CALLS'
                                 data-track-name='calendar-month-overflow'
                                 className='text-[11px] max-sm:text-[10px] font-medium max-sm:font-normal px-1 cursor-pointer hover:underline text-left focus:outline-none'
                                 style={{ color: '#6276BE' }}
@@ -412,7 +412,7 @@ const CalendarMonthView = ({
                                       setOpenOverflowDay(null);
                                       setOpenOverflowCallId(null);
                                     }}
-                                    data-track-category='Calls'
+                                    data-track-category='CALLS'
                                     data-track-name='calendar-overflow-close'
                                     className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
                                   >

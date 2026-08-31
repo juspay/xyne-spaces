@@ -114,7 +114,7 @@ export const StagesSubmenu = ({
                     ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
                     focus-visible:ring-2 focus-visible:ring-ring
                   `}
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='ToggleStageFilter'
                   data-track-metadata={JSON.stringify({
                     stageName: stage.name,

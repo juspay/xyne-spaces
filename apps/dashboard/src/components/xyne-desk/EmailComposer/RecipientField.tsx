@@ -78,7 +78,7 @@ export const RecipientField = ({
   handleKeyDown,
   handleBlur,
   focusSuggest,
-  trackCategory = 'SUPPORT',
+  trackCategory = 'Support',
   trackName,
   trackMetadata,
   actions,
@@ -192,7 +192,7 @@ export const RecipientField = ({
                 aria-label={`Expand to see ${hiddenCount} more ${label} recipients`}
                 aria-expanded={false}
                 className='inline-flex items-center gap-1 bg-muted/80 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0'
-                data-track-category='SUPPORT'
+                data-track-category='Support'
                 data-track-name={`Expand${label}Field`}
               >
                 +{hiddenCount} more
@@ -208,7 +208,7 @@ export const RecipientField = ({
                 aria-label={`Collapse ${label} recipient list`}
                 aria-expanded={true}
                 className='inline-flex items-center gap-1 bg-muted/80 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0'
-                data-track-category='SUPPORT'
+                data-track-category='Support'
                 data-track-name={`Collapse${label}Field`}
               >
                 Show less

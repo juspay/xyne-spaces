@@ -48,7 +48,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
           <Button
             onClick={handleClose}
             variant='outline'
-            data-track-category='Profile'
+            data-track-category='PROFILE'
             data-track-name='CloseProfile'
             data-track-metadata={JSON.stringify({ channelId, userId })}
           >
@@ -80,7 +80,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             onClick={handleClose}
             className='!p-2 border border-border rounded-md hover:bg-accent'
             title='Close'
-            data-track-category='Profile'
+            data-track-category='PROFILE'
             data-track-name='CloseProfileSidebar'
             data-track-metadata={JSON.stringify({ channelId, userId })}
           >

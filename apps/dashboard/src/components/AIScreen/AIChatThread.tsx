@@ -515,7 +515,7 @@ function ClawCitationChip({
         className={chipClass}
         aria-label={tooltip}
         onClick={openInPanel}
-        data-track-category='ask-ai'
+        data-track-category='AskAI'
         data-track-name='citation-open-doc-panel'
       >
         {chipInner}

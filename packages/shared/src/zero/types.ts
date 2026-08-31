@@ -1215,6 +1215,7 @@ export enum TriggerType {
   CHANGE = 'SELECTION_CHANGE',
   BLUR = 'INPUT_CHANGE',
   DB_MUTATION = 'DB_MUTATION',
+  PAGE_VIEW = 'PAGE_VIEW',
 }
 
 export enum BaseTicketType {

@@ -48,7 +48,7 @@ export function CallJoinButton({
   variant = 'text',
   joinLabel = 'Join',
   testId,
-  trackCategory = 'CALL',
+  trackCategory = 'CALLS',
   trackJoinName = 'JoinCall',
   trackRequestName = 'RequestToJoinCall',
   trackCancelName = 'CancelJoinRequest',

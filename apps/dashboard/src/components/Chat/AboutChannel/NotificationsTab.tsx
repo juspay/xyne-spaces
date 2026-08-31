@@ -141,7 +141,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 onCheckedChange={checked =>
                   setNotificationLevel('desktop', checked ? null : NotificationLevel.NONE)
                 }
-                data-track-category='notifications'
+                data-track-category='NOTIFICATIONS'
                 data-track-name='toggle_desktop_notifications'
                 className={cn(switchClass, !settingsReady && 'opacity-40 cursor-not-allowed')}
               >
@@ -157,7 +157,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                     key={opt.value}
                     disabled={!settingsReady}
                     onClick={() => setNotificationLevel('desktop', opt.value)}
-                    data-track-category='notifications'
+                    data-track-category='NOTIFICATIONS'
                     data-track-name={`set_desktop_level_${opt.value.toLowerCase()}`}
                     className={cn(
                       'px-2 py-1.5 text-xs rounded-md border transition-colors',
@@ -193,7 +193,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 onCheckedChange={checked =>
                   setNotificationLevel('mobile', checked ? null : NotificationLevel.NONE)
                 }
-                data-track-category='notifications'
+                data-track-category='NOTIFICATIONS'
                 data-track-name='toggle_mobile_notifications'
                 className={cn(switchClass, !settingsReady && 'opacity-40 cursor-not-allowed')}
               >
@@ -209,7 +209,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                     key={opt.value}
                     disabled={!settingsReady}
                     onClick={() => setNotificationLevel('mobile', opt.value)}
-                    data-track-category='notifications'
+                    data-track-category='NOTIFICATIONS'
                     data-track-name={`set_mobile_level_${opt.value.toLowerCase()}`}
                     className={cn(
                       'px-2 py-1.5 text-xs rounded-md border transition-colors',
@@ -255,7 +255,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                       }),
                     );
                   }}
-                  data-track-category='notifications'
+                  data-track-category='NOTIFICATIONS'
                   data-track-name='toggle_channel_thread_reply'
                   className={cn(
                     switchClass,
@@ -294,7 +294,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                       }),
                     );
                   }}
-                  data-track-category='notifications'
+                  data-track-category='NOTIFICATIONS'
                   data-track-name='toggle_channel_wide_mentions'
                   className={cn(
                     switchClass,

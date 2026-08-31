@@ -154,7 +154,7 @@ const ScheduledMessageScreen = (): ReactElement => {
             </div>
             <Button
               onClick={handleCreateClick}
-              data-track-category='ScheduledMessages'
+              data-track-category='scheduled-message'
               data-track-name='CreateScheduledMessage'
             >
               Create Scheduled Message

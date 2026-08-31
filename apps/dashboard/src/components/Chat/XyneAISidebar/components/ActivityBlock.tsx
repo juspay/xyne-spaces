@@ -246,7 +246,7 @@ export function ActivityBlock({
             className={`flex w-full items-center gap-2 text-left transition-colors ${
               canExpand ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
             }`}
-            data-track-category='xyne-ai'
+            data-track-category='XyneAI'
             data-track-name='toggle-activity-block'
             aria-expanded={expanded}
             disabled={!canExpand}

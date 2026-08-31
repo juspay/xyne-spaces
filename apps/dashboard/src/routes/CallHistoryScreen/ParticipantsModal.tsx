@@ -60,7 +60,7 @@ function CallParticipantsContent({
         onClick={onClose}
         variant='secondary'
         className='mt-4 w-full'
-        data-track-category='Calls'
+        data-track-category='CALLS'
         data-track-name='CloseParticipantsModal'
       >
         Close
