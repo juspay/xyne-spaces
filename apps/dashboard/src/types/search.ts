@@ -128,7 +128,7 @@ export interface VespaSearchFilters {
   // Ticket-specific filters
   priority?: string; // HIGH, MEDIUM, LOW, CRITICAL
   board?: string; // Board name/ID
-  tags?: string; // Comma-separated tags
+  tags?: string; // Comma-separated tags — ticket labels and message tags alike
   before?: string; // Created before date (multiple formats)
   after?: string; // Created after date (multiple formats)
   on?: string; // Created on specific date (multiple formats)

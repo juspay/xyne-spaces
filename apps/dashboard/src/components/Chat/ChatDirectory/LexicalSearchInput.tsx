@@ -32,6 +32,9 @@ import {
   UserTriggerType,
   ChannelTriggerType,
   PriorityTriggerType,
+  DateTriggerType,
+  BoardTriggerType,
+  MentionsTriggerType,
 } from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
@@ -49,9 +52,15 @@ interface LexicalSearchInputProps {
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
   onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
   onPrioritySearch?: (query: string | null, trigger?: PriorityTriggerType) => void;
+  onDateSearch?: (query: string | null, trigger?: DateTriggerType) => void;
+  onBoardSearch?: (query: string | null, trigger?: BoardTriggerType) => void;
+  onMentionsSearch?: (query: string | null, trigger?: MentionsTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
   availablePriorities?: Array<{ id: string; name: string }>;
+  availableDates?: Array<{ id: string; name: string }>;
+  availableBoards?: Array<{ id: string; name: string }>;
+  availableMentionTargets?: Array<{ id: string; name: string; type: MentionType }>;
   className?: string;
   open?: boolean;
   mentionSearchType?: MentionType | null;
@@ -59,6 +68,7 @@ interface LexicalSearchInputProps {
   setSelectedMentionIndex?: (index: number | ((prev: number) => number)) => void;
   onNavigate?: () => void;
   hasNavigated?: boolean;
+  onReplaceTriggerChipsReady?: (replaceChips: (chips: MentionData[]) => void) => void;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -285,9 +295,24 @@ function InsertTextPlugin({
       const insertText = (text: string) => {
         editor.update(() => {
           const selection = $getSelection();
-          if (selection !== null) {
-            selection.insertText(text);
+          if (selection === null) return;
+          // A filter keyword only parses on a word boundary — inserting `with: ` with the
+          // caret right after "issue" would produce "issuewith:", which reads as plain
+          // text and silently filters nothing. Add the separating space when the character
+          // to the left isn't already whitespace (and isn't the start of the input).
+          let prefix = '';
+          if ($isRangeSelection(selection) && selection.isCollapsed()) {
+            const anchor = selection.anchor;
+            const node = anchor.getNode();
+            const before =
+              anchor.type === 'text' ? node.getTextContent().slice(0, anchor.offset) : '';
+            // An empty `before` at a text node's start still needs the check: the previous
+            // sibling may be a chip, after which a space is wanted too.
+            const prevSibling = node.getPreviousSibling();
+            const hasContentBefore = before.length > 0 || prevSibling !== null;
+            if (hasContentBefore && !/\s$/.test(before)) prefix = ' ';
           }
+          selection.insertText(`${prefix}${text}`);
         });
       };
       onInsertTextReady(insertText);
@@ -492,9 +517,15 @@ export function LexicalSearchInput({
   onUserSearch,
   onChannelSearch,
   onPrioritySearch,
+  onDateSearch,
+  onBoardSearch,
+  onMentionsSearch,
   availableUsers = [],
   availableChannels = [],
   availablePriorities = [],
+  availableDates = [],
+  availableBoards = [],
+  availableMentionTargets = [],
   enableToTrigger = false,
   className,
   open,
@@ -504,6 +535,7 @@ export function LexicalSearchInput({
   onNavigate,
   hasNavigated,
   onInsertMentionReady,
+  onReplaceTriggerChipsReady,
   onMentionInserted,
   onPasteDetected,
   onManualKeystroke,
@@ -608,15 +640,22 @@ export function LexicalSearchInput({
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}
             {...(onPrioritySearch ? { onPrioritySearch } : {})}
+            {...(onDateSearch ? { onDateSearch } : {})}
+            {...(onBoardSearch ? { onBoardSearch } : {})}
+            {...(onMentionsSearch ? { onMentionsSearch } : {})}
             availableUsers={availableUsers}
             availableChannels={availableChannels}
             availablePriorities={availablePriorities}
+            availableDates={availableDates}
+            availableBoards={availableBoards}
+            availableMentionTargets={availableMentionTargets}
             {...(mentionSearchType !== undefined ? { mentionSearchType } : {})}
             {...(selectedMentionIndex !== undefined ? { selectedMentionIndex } : {})}
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}
             {...(onNavigate ? { onNavigate } : {})}
             {...(hasNavigated !== undefined ? { hasNavigated } : {})}
             {...(onInsertMentionReady ? { onInsertMentionReady } : {})}
+            {...(onReplaceTriggerChipsReady ? { onReplaceTriggerChipsReady } : {})}
             {...(onMentionInserted ? { onMentionInserted } : {})}
             enableToTrigger={enableToTrigger}
             {...(currentUserID ? { currentUserID } : {})}

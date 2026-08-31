@@ -292,6 +292,39 @@ export const getDMParticipantIdsToFetch = (
   return otherIds.slice(0, 4);
 };
 
+/**
+ * A channel's human label. Regular channels are their `name`; a DM's `name` column holds
+ * its participant ids comma-joined, so rendering it raw prints cuids — those resolve to the
+ * other people's names instead.
+ *
+ * Pure (no hooks), so pickers that only have arrays — not a React channel context — can
+ * label DMs the same way `useChannelDisplayName` does.
+ */
+export const resolveChannelLabel = (
+  channel: { name: string; scopeType: ChannelScopeType },
+  currentUserId: string,
+  allUsers: ReadonlyArray<{ id: string; name?: string | null; displayName?: string | null }>,
+): string => {
+  if (!isDMChannel(channel.scopeType)) return channel.name;
+  // A self-DM has no *other* participants, so the id list comes back empty — name it after
+  // the current user, the way useChannelDisplayName does, instead of falling through to the
+  // raw `name` (which is the participant id).
+  const allIds = parseDMParticipantIds(channel);
+  if (allIds.length === 1 && allIds[0] === currentUserId) {
+    const self = allUsers.find(u => u.id === currentUserId);
+    const selfName = self ? self.displayName || self.name : null;
+    return selfName ? `${selfName} (you)` : 'You';
+  }
+  const names = getDMParticipantIdsToFetch(channel, currentUserId)
+    .map(id => {
+      const user = allUsers.find(u => u.id === id);
+      return user ? user.displayName || user.name || null : null;
+    })
+    .filter((name): name is string => Boolean(name));
+  // Still nothing resolvable (users not synced yet) — 'Direct message' beats a raw cuid.
+  return names.length > 0 ? names.join(', ') : 'Direct message';
+};
+
 export const getDMSearchableName = (
   channel: VisibleChannel,
   userMap: Map<string, string>,

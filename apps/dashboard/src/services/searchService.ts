@@ -63,6 +63,8 @@ export class SearchService {
       }
 
       const data = response.data.data;
+      // Whether anything ranked these results — a filter-only search has no query text.
+      const hasQuery = Boolean(sanitizedFilters.query?.trim());
 
       // Handle grouped results - flatten them for backward compatibility
       let vespaResult: VespaSearchResult;
@@ -73,7 +75,11 @@ export class SearchService {
         }
 
         vespaResult = {
-          results: flattenedResults.filter(result => result.relevanceScore > 0),
+          // Zero-score rows are only noise when a query ranked them. A filter-only search
+          // (`q=` empty, filterOnly=true) has nothing to rank against, so Vespa scores every
+          // match 0 — dropping them here threw away the entire result set for a chip-only
+          // search like `from:@someone` or a date range.
+          results: flattenedResults.filter(result => !hasQuery || result.relevanceScore > 0),
           totalCount: data.totalCount,
           offset: data.offset,
           limit: data.limit,

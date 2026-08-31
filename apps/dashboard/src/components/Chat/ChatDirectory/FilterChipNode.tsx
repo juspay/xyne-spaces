@@ -31,7 +31,7 @@ import {
   type SerializedTextNode,
   type Spread,
 } from 'lexical';
-import { SignalHigh } from 'lucide-react';
+import { CalendarDays, LayoutGrid, SignalHigh } from 'lucide-react';
 import { Hashtag, UserTwo, Lock02Close } from '@xyne/icons';
 import { ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
@@ -66,6 +66,16 @@ export function chipLabelText(mentionData: MentionData): string {
   // Chip always reads lowercase (`priority: high`), independent of the dropdown label.
   if (mentionData.type === MentionType.PRIORITY) {
     return mentionData.id.toLowerCase();
+  }
+  // Date chips read as the bare date; the prefix already says which edge it is.
+  if (mentionData.type === MentionType.DATE) {
+    return mentionData.id;
+  }
+  // A mention filter reads the way a mention is written — `mentions: @alice` — because the
+  // `@` is the thing being searched for, not a type marker. The avatar beside it doesn't
+  // duplicate it the way the hash glyph would duplicate a `#`.
+  if (mentionData.prefix === 'mentions:' && mentionData.type === MentionType.USER) {
+    return `@${mentionData.name}`;
   }
   if (mentionData.prefix) {
     return mentionData.name;
@@ -187,21 +197,27 @@ export const PRIORITY_ICON_COLOR: Record<string, string> = {
  * public channel → hash, private → lock; hash while the channel isn't cached yet.
  * Mirrors ChannelIcon's privacy logic but uses a generic person for DMs, not an avatar.
  */
-function ChannelChipIcon({ id }: { id: string }): React.JSX.Element {
+export function ChannelChipIcon({
+  id,
+  size = ICON_SIZE,
+}: {
+  id: string;
+  size?: number;
+}): React.JSX.Element {
   const channel = useChannel(id);
   if (!channel) {
-    return <Hashtag size={ICON_SIZE} />;
+    return <Hashtag size={size} />;
   }
   if (
     channel.scopeType === ChannelScopeType.DM ||
     channel.scopeType === ChannelScopeType.GROUP_DM
   ) {
-    return <UserTwo size={ICON_SIZE} />;
+    return <UserTwo size={size} />;
   }
   return channel.visibility === ChannelVisibility.PUBLIC ? (
-    <Hashtag size={ICON_SIZE} />
+    <Hashtag size={size} />
   ) : (
-    <Lock02Close size={ICON_SIZE} />
+    <Lock02Close size={size} />
   );
 }
 
@@ -210,6 +226,15 @@ function ChipIcon({ mentionData }: { mentionData: MentionData }): React.JSX.Elem
   // calls `useChannel`). Glyph tinted by severity; pill stays blue.
   if (mentionData.type === MentionType.PRIORITY) {
     return <SignalHigh className={`${ICON_CLASS} ${PRIORITY_ICON_COLOR[mentionData.id] ?? ''}`} />;
+  }
+  // Date — like priority, a value filter with a glyph rather than an entity avatar.
+  if (mentionData.type === MentionType.DATE) {
+    return <CalendarDays className={ICON_CLASS} />;
+  }
+  // Board — checked before the channel branch below, which would otherwise claim it and
+  // call useChannel with a board id.
+  if (mentionData.type === MentionType.BOARD) {
+    return <LayoutGrid className={ICON_CLASS} />;
   }
   // User filters show the picked person's photo (the design's 16px avatar, rounded-sm = 4px);
   // `Avatar` resolves the user from the id and falls back to initials, so MentionData stays

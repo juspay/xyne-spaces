@@ -18,6 +18,7 @@ import {
 import { invokeShortcut } from '../../shortcuts';
 import { useSearchMode } from '../../hooks/useSearchMode';
 import { toast } from 'sonner';
+import { hasAnySearchState } from '../../hooks/useSearchResultsScreen';
 import { Tooltip } from '../ui/Tooltip';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 import type { MentionData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -101,7 +102,9 @@ const NavigationAndSearch = (): ReactElement => {
     if (searchMode === 'screen') {
       // Clicking the header bar on the results screen restores the active query;
       // elsewhere the overlay opens empty.
-      setRestoreQuery(isOnSearchScreen && Boolean(searchScreenQuery));
+      // Restore whenever the results URL holds any search — a filters-only search
+      // (`in:#eng status:todo`, no words) has no query text but is still worth restoring.
+      setRestoreQuery(isOnSearchScreen && hasAnySearchState(searchScreenParams));
       setSearchOpen(true);
       return;
     }

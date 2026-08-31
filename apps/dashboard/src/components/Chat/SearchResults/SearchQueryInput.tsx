@@ -7,13 +7,41 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from 'react';
-import { Loader2, Search, X } from 'lucide-react';
+import {
+  CalendarDays,
+  LayoutGrid,
+  Loader2,
+  Search,
+  SignalHigh,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 import { cn } from '../../../utils/classNames';
+import Avatar from '../../ui/Avatar/Avatar';
+import type { TokenIcon } from '../../../search/filterRegistry';
+import { ChannelChipIcon, PRIORITY_ICON_COLOR } from '../../Chat/ChatDirectory/FilterChipNode';
 import { useShortcut } from '../../../shortcuts';
+
+/** An applied filter, shown as a token inside the box the way Slack shows them. */
+export interface QueryToken {
+  key: string;
+  /** The `in:` / `from:` part, drawn before the glyph. See FilterToken in the registry. */
+  prefix?: string;
+  label: string;
+  onRemove: () => void;
+  /** Leading glyph — a person's avatar, or a kind icon. See TokenIcon in the registry. */
+  icon?: TokenIcon;
+}
 
 interface SearchQueryInputProps {
   /** The committed query — the one the results currently on screen were fetched for. */
   query: string;
+  /**
+   * Applied filters, rendered as read-only tokens ahead of the text. They make the box
+   * show the whole search rather than just its free-text half; editing still only ever
+   * touches the text, so a token can't be half-typed into an invalid state.
+   */
+  tokens?: QueryToken[];
   /** Runs a new search. Receives the trimmed text; '' drops the free-text query. */
   onSubmit: (next: string) => void;
   /**
@@ -31,8 +59,40 @@ interface SearchQueryInputProps {
  * static "Results for: <query>" line so the query can be refined in place instead of
  * reopening the cmd+K overlay. Filters stay where they are — this edits free text only.
  */
+/**
+ * A token's leading glyph. Users show their real avatar rather than a generic person icon —
+ * the chip is about a specific person, and the palette's chips already read that way.
+ */
+function TokenGlyph({ icon }: { icon?: TokenIcon | undefined }): ReactElement | null {
+  if (!icon) return null;
+  if (icon.kind === 'user') {
+    return <Avatar userId={icon.userId} size='xs' showActiveStatus={false} />;
+  }
+  // Channels resolve their own glyph from visibility/scope — a private channel reads as a
+  // lock here just as it does in the palette, not as a hash.
+  if (icon.kind === 'channel') {
+    return (
+      <span className='inline-flex shrink-0 items-center text-muted-foreground'>
+        <ChannelChipIcon id={icon.channelId} size={11} />
+      </span>
+    );
+  }
+  if (icon.kind === 'priority') {
+    return (
+      <SignalHigh
+        size={11}
+        className={cn('shrink-0', PRIORITY_ICON_COLOR[icon.value] ?? 'text-muted-foreground')}
+      />
+    );
+  }
+  const Icon =
+    icon.kind === 'date' ? CalendarDays : icon.kind === 'board' ? LayoutGrid : SlidersHorizontal;
+  return <Icon size={11} className='shrink-0 text-muted-foreground' />;
+}
+
 export function SearchQueryInput({
   query,
+  tokens = [],
   onSubmit,
   onLiveChange,
   isSearching,
@@ -73,6 +133,11 @@ export function SearchQueryInput({
         onSubmit(value.trim());
         return;
       }
+      if (event.key === 'Backspace' && value === '' && tokens.length > 0) {
+        event.preventDefault();
+        tokens[tokens.length - 1]?.onRemove();
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         // First Escape discards the edit; the box keeps focus so it can be retyped.
@@ -82,7 +147,7 @@ export function SearchQueryInput({
         onLiveChange(query);
       }
     },
-    [onLiveChange, onSubmit, query, value],
+    [onLiveChange, onSubmit, query, value, tokens],
   );
 
   const handleClear = useCallback((): void => {
@@ -95,7 +160,7 @@ export function SearchQueryInput({
   return (
     <div
       className={cn(
-        'flex items-center gap-2 h-10 px-3 rounded-xl border border-border bg-background',
+        'flex flex-wrap items-center gap-2 min-h-10 px-3 py-1 rounded-xl border border-border bg-background',
         'transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20',
       )}
     >
@@ -104,6 +169,26 @@ export function SearchQueryInput({
       ) : (
         <Search size={16} className='shrink-0 text-muted-foreground' />
       )}
+      {tokens.map(token => (
+        <span
+          key={token.key}
+          className='inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs text-foreground'
+        >
+          {token.prefix && <span className='text-muted-foreground'>{token.prefix}</span>}
+          <TokenGlyph icon={token.icon} />
+          <span className='max-w-[160px] truncate'>{token.label}</span>
+          <button
+            type='button'
+            onClick={token.onRemove}
+            aria-label={`Remove ${token.label}`}
+            className='text-muted-foreground hover:text-foreground'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='REMOVE_QUERY_TOKEN'
+          >
+            <X size={11} />
+          </button>
+        </span>
+      ))}
       <input
         ref={inputRef}
         value={value}

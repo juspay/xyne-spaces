@@ -31,6 +31,7 @@ import {
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
 import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
+import type { StructuredSearchFilters } from './useSearchResultsScreen';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -93,6 +94,9 @@ interface UseSearchMetricsOptions {
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
+  // Initial value for the "Include automations" toggle. Set when reopening the palette
+  // from a search whose scope had it on, so the restored search matches what was run.
+  defaultIncludeBotMessages?: boolean;
   // When true, the ALL-tab Vespa query uses groupBy:'docType' so the backend
   // returns results bucketed by document type (≤10 per category) instead of a
   // flat ranked list — lets the ALL tab show a few of each type at once.
@@ -112,6 +116,48 @@ const MAX_BACKEND_OFFSET = 1000;
  * the user typed it.
  */
 export const CMDK_USER_LIMIT = 25;
+
+/**
+ * Text filters for a query, with UI-picked values layered on top. Typed syntax
+ * (`status:todo`, `board:…`) keeps working; an explicit pick from the results page's
+ * Filters popover wins for that field.
+ */
+function resolveTextFilters(
+  query: string,
+  overrides: StructuredSearchFilters,
+): ReturnType<typeof parseSearchFilters> {
+  const parsed = parseSearchFilters(query);
+  return {
+    ...parsed,
+    board: overrides.board || parsed.board,
+    tags: overrides.tags || parsed.tags,
+    status: overrides.status || parsed.status,
+    before: overrides.before || parsed.before,
+    after: overrides.after || parsed.after,
+    on: overrides.on || parsed.on,
+    range: overrides.range || parsed.range,
+  };
+}
+
+/**
+ * Date bounds carried by chips rather than text. Dates are chips in the palette now, so
+ * they no longer appear in the query for `parseSearchFilters` to find — without this the
+ * date filter would render as a chip and quietly not be applied.
+ */
+function boardFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const boards = mentions.filter(m => m.type === MentionType.BOARD).map(m => m.id);
+  return boards.length > 0 ? { board: boards.join(',') } : {};
+}
+
+function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const dates = mentions.filter(m => m.type === MentionType.DATE);
+  if (dates.length === 0) return {};
+  const on = dates.find(m => m.prefix === 'on:');
+  if (on) return { on: on.id };
+  const after = dates.find(m => m.prefix === 'after:')?.id;
+  const before = dates.find(m => m.prefix === 'before:')?.id;
+  return { ...(after ? { after } : {}), ...(before ? { before } : {}) };
+}
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
@@ -152,12 +198,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
   >([]);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
-  const [includeBotMessages, setIncludeBotMessages] = useState(false);
+  const [includeBotMessages, setIncludeBotMessages] = useState(
+    options.defaultIncludeBotMessages ?? false,
+  );
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
   // other consumers (full-page search) default OFF so their behavior is unchanged.
   const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
   // Vespa rank profile, passed through to the search payload. '' => backend default.
   const [rankProfile, setRankProfile] = useState('');
+  // Structured filters picked from UI (the results page's Filters popover) rather than typed
+  // into the query. Merged over whatever `parseSearchFilters` finds in the text, so typed
+  // syntax keeps working and an explicit pick wins.
+  const [structuredFilters, setStructuredFilters] = useState<StructuredSearchFilters>({});
+  const structuredFiltersKey = JSON.stringify(structuredFilters);
   // Compare mode: request per-result matchfeatures/rankfeatures for ranking debug.
   const [includeDebugInfo, setIncludeDebugInfo] = useState(false);
   // Load More Ref
@@ -738,7 +791,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         stage: stageFilter,
         status: statusFilter,
         type: typeFilter,
-      } = parseSearchFilters(query);
+      } = resolveTextFilters(query, {
+        ...structuredFilters,
+        ...dateFiltersFromChips(selectedMentions),
+        ...boardFilterFromChips(selectedMentions),
+      });
 
       // Priority is chip-only: value comes solely from the chip; raw `priority:` text
       // isn't a filter (falls through to full-text search).
@@ -1175,6 +1232,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rankProfile,
       allDefaultRankProfile,
       includeDebugInfo,
+      structuredFilters,
     ],
   );
 
@@ -1188,6 +1246,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     rankProfile: string;
     allDefaultRankProfile: string;
     includeDebugInfo: boolean;
+    structuredFiltersKey: string;
   }>({
     text: '',
     activeTab: TabType.ALL,
@@ -1197,6 +1256,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     rankProfile: '',
     allDefaultRankProfile,
     includeDebugInfo: false,
+    structuredFiltersKey: '{}',
   });
 
   // Debounced backend search with pagination reset
@@ -1226,6 +1286,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
+      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
       normalizedText !== ''
     ) {
       // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
@@ -1246,6 +1307,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         rankProfile,
         allDefaultRankProfile,
         includeDebugInfo,
+        structuredFiltersKey,
         mentionsKey: currentMentionsKey,
       };
       // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
@@ -1288,6 +1350,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
+    structuredFiltersKey,
   ]);
 
   /**
@@ -1305,7 +1368,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       stage: stageFilter,
       status: statusFilter,
       type: typeFilter,
-    } = parseSearchFilters(text);
+    } = resolveTextFilters(text, {
+      ...structuredFilters,
+      ...dateFiltersFromChips(selectedMentions),
+      ...boardFilterFromChips(selectedMentions),
+    });
 
     // Mirror performSearch: priority is chip-only (value from the chip, not text).
     const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
@@ -1515,6 +1582,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
+    structuredFilters,
     options.isCallSearchPage,
   ]);
 
@@ -1607,6 +1675,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setOnlyMyChannels,
     rankProfile,
     setRankProfile,
+    structuredFilters,
+    setStructuredFilters,
     includeDebugInfo,
     setIncludeDebugInfo,
     loadMore,
