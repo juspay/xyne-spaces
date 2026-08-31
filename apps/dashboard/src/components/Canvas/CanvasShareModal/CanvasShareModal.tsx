@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { CanvasVisibility, CanvasRole, ChannelScopeType } from '@xyne/shared';
 import type { Canvas, CanvasParticipant } from '../Canvas.types';
@@ -37,6 +37,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useUserGroups } from '@/hooks/useUserGroup';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { canvasService, CanvasAccessRequest } from '../../../services/Canvas/canvasService';
 
 export interface CanvasShareModalProps {
   canvas: Canvas;
@@ -86,15 +87,15 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   const [pendingRoles, setPendingRoles] = useState<Record<string, CanvasRole>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const [queriedParticipants] = useCachedQuery(
+  const [queriedParticipants, queriedParticipantsDetails] = useCachedQuery(
     queries.canvasParticipants({ canvasId: canvas.id }),
-    {
-      enabled: !preloadedParticipants?.length,
-    },
   );
-  const participants = queriedParticipants?.length
-    ? queriedParticipants
-    : (preloadedParticipants ?? []);
+  const participants =
+    queriedParticipantsDetails.type === 'complete'
+      ? (queriedParticipants ?? [])
+      : preloadedParticipants?.length
+        ? preloadedParticipants
+        : (queriedParticipants ?? []);
 
   const allVisibleChannels = useAllVisibleChannels();
   const allUserGroups = useUserGroups();
@@ -121,6 +122,46 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   }, [allVisibleChannels]);
 
   const canManage = isOwner || isEditor;
+
+  // Pending edit-access requests, fetched canvas-wide via REST (late-added
+  // owners see them too); the viewer's own Zero-synced request rows only act
+  // as a live refresh signal.
+  const [pendingRequestSignal] = useCachedQuery(
+    queries.canvasPendingAccessRequests({ canvasId: canvas.id }),
+    { enabled: canManage },
+  );
+  const [accessRequests, setAccessRequests] = useState<CanvasAccessRequest[]>([]);
+  const [actingRequesterId, setActingRequesterId] = useState<string | null>(null);
+  const refreshAccessRequests = useCallback(async (): Promise<void> => {
+    if (!canManage) return;
+    try {
+      setAccessRequests(await canvasService.listAccessRequests(canvas.id));
+    } catch {
+      // Non-fatal: the section just keeps its last state.
+    }
+  }, [canManage, canvas.id]);
+  useEffect(() => {
+    void refreshAccessRequests();
+  }, [refreshAccessRequests, pendingRequestSignal?.length]);
+  const resolveAccessRequest = async (requesterId: string, approve: boolean): Promise<void> => {
+    if (actingRequesterId) return;
+    setActingRequesterId(requesterId);
+    try {
+      await canvasService.resolveAccessRequest(
+        canvas.id,
+        requesterId,
+        approve ? 'approve' : 'decline',
+      );
+      if (approve) {
+        toast.success('Edit access granted', { duration: 2000 });
+      }
+      await refreshAccessRequests();
+    } catch {
+      toast.error(approve ? 'Failed to grant access' : 'Failed to reject request');
+    } finally {
+      setActingRequesterId(null);
+    }
+  };
   const canInviteGuests = currentUser?.role === 'ADMIN' || currentUser?.role === 'OWNER';
   const isPublic = localVisibility === CanvasVisibility.PUBLIC;
 
@@ -637,6 +678,55 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 )}
                 {guestInvite.isLoading ? 'Sending...' : 'Invite'}
               </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Pending edit-access requests */}
+        {canManage && accessRequests.length > 0 ? (
+          <div>
+            <div className='text-xs font-semibold text-foreground mb-1.5'>
+              Pending requests ({accessRequests.length})
+            </div>
+            <div className='max-h-40 overflow-y-auto -mx-1 pr-0.5'>
+              {accessRequests.map(request => {
+                const isActing = actingRequesterId === request.requesterId;
+                return (
+                  <div
+                    key={request.requesterId}
+                    className='flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-accent/60'
+                  >
+                    <Avatar userId={request.requesterId} size='md' />
+                    <div className='min-w-0 flex-1'>
+                      <p className='text-sm font-medium truncate'>{request.requesterName}</p>
+                      <p className='text-xs text-muted-foreground truncate'>
+                        Requested edit access
+                      </p>
+                    </div>
+                    <Button
+                      size='sm'
+                      disabled={!!actingRequesterId}
+                      onClick={() => void resolveAccessRequest(request.requesterId, true)}
+                      data-track-category='CANVAS'
+                      data-track-name='Approve_Edit_Access_Request'
+                      data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                    >
+                      {isActing ? 'Approving…' : 'Approve'}
+                    </Button>
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      disabled={!!actingRequesterId}
+                      onClick={() => void resolveAccessRequest(request.requesterId, false)}
+                      data-track-category='CANVAS'
+                      data-track-name='Reject_Edit_Access_Request'
+                      data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ) : null}
