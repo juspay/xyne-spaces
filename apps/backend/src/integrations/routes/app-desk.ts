@@ -7,6 +7,8 @@ import { appDeskService } from '@/services/appDeskService';
 import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
+import { validateZod } from '@/middleware/validation';
+import { z } from 'zod';
 
 const TAG = '[AppDesk]';
 const APPROVED_STATUSES = [AppPermissionStatus.APPROVED, AppPermissionStatus.PENDINGDELETE];
@@ -51,44 +53,22 @@ async function authorizeAppDeskManager(
   return channel;
 }
 
-/**
- * Guards the two whole-channel legacy routes (`/:channelId/disconnect`,
- * `/:channelId/reconnect`), which pick "the" app-desk source with an unordered
- * findFirst. That was unambiguous when a channel could hold exactly one app on
- * an APP-typed channel. Now that any desk channel can hold several, they must
- * refuse anything they cannot resolve deterministically and defer to the
- * per-app `/channels/:channelId/apps/:installedAppId` endpoints.
- */
-async function assertLegacySingleAppDesk(
-  channel: { id: string; type: string },
-  res: Response,
-): Promise<boolean> {
-  if (channel.type !== ChannelType.APP) {
-    res.status(400).json({
-      error: 'This channel is not an App desk. Manage its connected apps per app instead.',
-    });
-    return false;
-  }
-  const appSourceCount = await db.externalSource.count({
-    where: { channelId: channel.id, sourceType: 'app-desk' },
-  });
-  if (appSourceCount > 1) {
-    res.status(409).json({
-      error: 'This desk has multiple connected apps. Disconnect or reconnect a specific app instead.',
-    });
-    return false;
-  }
-  return true;
-}
+type DeskInstall = { id: string; userId: string; app: { name: string } };
+type DeskInstallResult =
+  | { ok: true; installedApp: DeskInstall }
+  | { ok: false; error: { status: number; message: string } };
 
 /** Mirrors channelController's APP-channel validation: workspace-local install + effective desk:WRITE grant. */
-async function findDeskWritableInstall(installedAppId: string, workspaceId: string) {
+async function findDeskWritableInstall(
+  installedAppId: string,
+  workspaceId: string,
+): Promise<DeskInstallResult> {
   const installedApp = await db.installedApps.findUnique({
     where: { id: installedAppId },
     select: { id: true, userId: true, app: { select: { name: true } }, user: { select: { workspaceId: true } } },
   });
   if (!installedApp || installedApp.user.workspaceId !== workspaceId) {
-    return { error: { status: 404, message: 'App is not installed in this workspace' } };
+    return { ok: false, error: { status: 404, message: 'App is not installed in this workspace' } };
   }
   const hasDeskWrite = await db.installedAppPermission.findFirst({
     where: {
@@ -100,10 +80,11 @@ async function findDeskWritableInstall(installedAppId: string, workspaceId: stri
   });
   if (!hasDeskWrite) {
     return {
+      ok: false,
       error: { status: 403, message: 'App must have the desk:write permission to back a desk' },
     };
   }
-  return { installedApp };
+  return { ok: true, installedApp };
 }
 
 router.get('/apps', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
@@ -255,17 +236,18 @@ router.get(
   },
 );
 
+const ConnectAppBodySchema = z.object({
+  installedAppId: z.string().trim().min(1),
+});
+
 router.post(
   '/channels/:channelId/apps',
   authV2Middleware.authenticate,
+  validateZod(ConnectAppBodySchema),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
-      const { installedAppId } = req.body as { installedAppId?: string };
-      if (!installedAppId || typeof installedAppId !== 'string') {
-        res.status(400).json({ success: false, error: 'installedAppId is required' });
-        return;
-      }
+      const { installedAppId } = req.body as z.infer<typeof ConnectAppBodySchema>;
 
       const channel = await authorizeAppDeskManager(
         channelId, req.user!.id, req.user!.workspaceId!, res,
@@ -273,7 +255,7 @@ router.post(
       if (!channel) return;
 
       const validation = await findDeskWritableInstall(installedAppId, req.user!.workspaceId!);
-      if ('error' in validation && validation.error) {
+      if (!validation.ok) {
         res.status(validation.error.status).json({ success: false, error: validation.error.message });
         return;
       }
@@ -358,15 +340,57 @@ router.delete(
   },
 );
 
+/**
+ * @deprecated Superseded by the per-app `/channels/:channelId/apps` endpoints.
+ *
+ * These two address a *channel*, not an (app, channel) pair, so they cannot express
+ * "disconnect app B, keep app A" — they pick a row with an unordered findFirst.
+ *
+ * Current source no longer calls them. They remain for clients still running a
+ * pre-deploy dashboard bundle: a browser tab that has not reloaded, and an Electron
+ * window, which wraps the deployed dashboard (config.useBundledUI is false in every
+ * profile) but can stay open for days — and would serve a frozen bundle outright if
+ * anyone runs USE_BUNDLED_UI=true.
+ *
+ * Do not delete on a release schedule; both handlers log a warn on every call, so
+ * remove them only once that log line has been silent across a full desktop-restart
+ * cycle.
+ *
+ * assertLegacySingleAppDesk keeps them honest in the meantime: they refuse any
+ * channel whose app binding they cannot resolve unambiguously.
+ */
+async function assertLegacySingleAppDesk(
+  channel: { id: string; type: string },
+  res: Response,
+): Promise<boolean> {
+  if (channel.type !== ChannelType.APP) {
+    res.status(400).json({
+      error: 'This channel is not an App desk. Manage its connected apps per app instead.',
+    });
+    return false;
+  }
+  const appSourceCount = await db.externalSource.count({
+    where: { channelId: channel.id, sourceType: 'app-desk' },
+  });
+  if (appSourceCount > 1) {
+    res.status(409).json({
+      error: 'This desk has multiple connected apps. Disconnect or reconnect a specific app instead.',
+    });
+    return false;
+  }
+  return true;
+}
+
+/** @deprecated Use DELETE /channels/:channelId/apps/:installedAppId — see note above. */
 router.post(
   '/:channelId/disconnect',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
-      const userId = req.user!.id;
-
-      const authorized = await authorizeAppDeskManager(channelId, userId, req.user!.workspaceId!, res);
+      const authorized = await authorizeAppDeskManager(
+        channelId, req.user!.id, req.user!.workspaceId!, res,
+      );
       if (!authorized) return;
       if (!(await assertLegacySingleAppDesk(authorized, res))) return;
 
@@ -380,7 +404,9 @@ router.post(
       }
 
       await db.externalSource.update({ where: { id: source.id }, data: { isActive: false } });
-      logger.info(`${TAG} App desk disconnected`, { channelId, sourceId: source.id });
+      logger.warn(`${TAG} App desk disconnected via deprecated whole-channel route`, {
+        channelId, sourceId: source.id,
+      });
       res.json({ message: 'Xyne App desk disconnected' });
     } catch (error) {
       logger.error(`${TAG} Error disconnecting app desk`, { error });
@@ -389,15 +415,16 @@ router.post(
   },
 );
 
+/** @deprecated Use POST /channels/:channelId/apps — see note above. */
 router.post(
   '/:channelId/reconnect',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
-      const userId = req.user!.id;
-
-      const authorized = await authorizeAppDeskManager(channelId, userId, req.user!.workspaceId!, res);
+      const authorized = await authorizeAppDeskManager(
+        channelId, req.user!.id, req.user!.workspaceId!, res,
+      );
       if (!authorized) return;
       if (!(await assertLegacySingleAppDesk(authorized, res))) return;
 
@@ -416,19 +443,8 @@ router.post(
         res.status(400).json({ error: 'App-desk source is missing its backing install' });
         return;
       }
-      const installedApp = await db.installedApps.findFirst({
-        where: {
-          id: installedAppId,
-          installedAppPermissions: {
-            some: {
-              status: { in: APPROVED_STATUSES },
-              permission: { name: 'desk', type: AppPermissionType.WRITE },
-            },
-          },
-        },
-        select: { id: true },
-      });
-      if (!installedApp) {
+      const validation = await findDeskWritableInstall(installedAppId, req.user!.workspaceId!);
+      if (!validation.ok) {
         res.status(400).json({
           error: 'The app backing this desk is no longer installed or has lost desk:write access',
         });
@@ -436,7 +452,9 @@ router.post(
       }
 
       await db.externalSource.update({ where: { id: source.id }, data: { isActive: true } });
-      logger.info(`${TAG} App desk reconnected`, { channelId, sourceId: source.id, installedAppId });
+      logger.warn(`${TAG} App desk reconnected via deprecated whole-channel route`, {
+        channelId, sourceId: source.id, installedAppId,
+      });
       res.json({ message: 'Xyne App desk reconnected' });
     } catch (error) {
       logger.error(`${TAG} Error reconnecting app desk`, { error });

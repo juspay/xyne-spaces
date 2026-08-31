@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertCircle, Plug, Plus } from 'lucide-react';
+import { AlertCircle, Plug, Plus, Unplug } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
 import {
   connectChannelApp,
   disconnectChannelApp,
@@ -23,6 +24,12 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
 }) => {
   const queryClient = useQueryClient();
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState('');
+  // Disconnecting stops ticket intake and reply delivery for that app, so it is
+  // confirmed rather than applied straight from the row button.
+  const [pendingDisconnect, setPendingDisconnect] = useState<{
+    installedAppId: string;
+    appName: string | null;
+  } | null>(null);
 
   const {
     data: connectedApps,
@@ -70,6 +77,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
   const disconnectMutation = useMutation({
     mutationFn: (installedAppId: string) => disconnectChannelApp(channelId, installedAppId),
     onSuccess: () => {
+      setPendingDisconnect(null);
       toast.success('App disconnected. Conversation history is preserved.');
       void refresh();
     },
@@ -137,7 +145,10 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
                     type='button'
                     onClick={() =>
                       app.isActive
-                        ? disconnectMutation.mutate(app.installedAppId)
+                        ? setPendingDisconnect({
+                            installedAppId: app.installedAppId,
+                            appName: app.appName,
+                          })
                         : connectMutation.mutate(app.installedAppId)
                     }
                     disabled={rowPending}
@@ -149,7 +160,14 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
                       app.isActive ? 'DisconnectConnectedApp' : 'ReconnectConnectedApp'
                     }
                   >
-                    {app.isActive ? 'Disconnect' : 'Reconnect'}
+                    <span className='flex items-center gap-1'>
+                      {app.isActive ? (
+                        <Unplug size={14} className='shrink-0' />
+                      ) : (
+                        <Plug size={14} className='shrink-0' />
+                      )}
+                      {app.isActive ? 'Disconnect' : 'Reconnect'}
+                    </span>
                   </button>
                 )}
               </div>
@@ -212,6 +230,24 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
             </button>
           </div>
         ))}
+
+      <DisconnectConfirmDialog
+        open={!!pendingDisconnect}
+        onOpenChange={open => !open && setPendingDisconnect(null)}
+        title='Disconnect app from this desk'
+        prompt={`Disconnect ${pendingDisconnect?.appName ?? 'this app'} from this desk?`}
+        bullets={[
+          'New messages from this app will stop creating tickets immediately.',
+          'Replies on its existing tickets will stop delivering to the app.',
+          'Other apps and email on this desk are unaffected.',
+          'Conversation history is kept, and you can reconnect the same app later.',
+        ]}
+        isPending={disconnectMutation.isPending}
+        onConfirm={() => {
+          if (pendingDisconnect) disconnectMutation.mutate(pendingDisconnect.installedAppId);
+        }}
+        trackCategory='DeskSettings'
+      />
     </div>
   );
 };
