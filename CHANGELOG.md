@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.7](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.6...v1.239.0-release-20260827.7) (2026-08-31)
+
+
+### Features
+
+* add PPTX viewer and search-text extraction ([#1232](https://github.com/juspay/xyne-spaces/issues/1232)) ([cbdabae](https://github.com/juspay/xyne-spaces/commit/cbdabae55781fff01fb84b04ca99b4aae129c629))
+
 ## [1.239.0-release-20260827.6](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.5...v1.239.0-release-20260827.6) (2026-08-31)
 
 
