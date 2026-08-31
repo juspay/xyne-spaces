@@ -315,6 +315,9 @@
       "ws@7": "7.5.13",
       "ws@8": "8.21.1",
       "xlsx": "npm:@e965/xlsx@0.20.3"
+    },
+    "patchedDependencies": {
+      "superposition-provider@0.97.4": "patches/superposition-provider@0.97.4.patch"
     }
   }
 }

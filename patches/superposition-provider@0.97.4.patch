@@ -1,0 +1,156 @@
+diff --git a/dist/index.esm.js b/dist/index.esm.js
+index f48ef46050a4b4897b8913fbef249abd08128ca4..f46e433d59b9968c884152f38d1119e39160e95e 100644
+--- a/dist/index.esm.js
++++ b/dist/index.esm.js
+@@ -16568,17 +16568,6 @@ class NativeResolver {
+         const experimentationJson = experimentation
+             ? JSON.stringify(experimentation)
+             : null;
+-        console.log("🔧 Calling FFI with parameters:");
+-        console.log("  defaultConfigs:", defaultConfigs);
+-        console.log("  contexts length:", contextsJson.length);
+-        console.log("  overrides length:", overridesJson.length);
+-        console.log("  dimensions length:", dimensionsJson.length);
+-        console.log("  queryData :", queryDataJson);
+-        console.log("  mergeStrategy:", mergeStrategy);
+-        console.log("  filterPrefixes:", filterPrefixes);
+-        console.log("  experiment:", experimentation?.experiments?.length);
+-        console.log("  experiment groups:", experimentation?.experiment_groups?.length);
+-        console.log("  targetingKey:", experimentation?.targetingKey);
+         if (!defaultConfigsJson ||
+             defaultConfigsJson === "null" ||
+             defaultConfigsJson === "undefined") {
+@@ -16606,7 +16595,6 @@ class NativeResolver {
+         }
+         const ebuf = Buffer$1.alloc(256);
+         const result = this.lib.core_get_resolved_config(defaultConfigsJson, contextsJson, overridesJson, dimensionsJson, queryDataJson, mergeStrategy, filterPrefixesJson, experimentationJson, ebuf);
+-        console.log("🔧 FFI call completed, result:", result);
+         const err = ebuf.toString('utf8').split('\0')[0];
+         if (err.length !== 0) {
+             this.throwFFIError(err);
+@@ -16672,15 +16660,8 @@ class NativeResolver {
+         const userContextJson = JSON.stringify(userContext);
+         const dimensionsJson = JSON.stringify(dimensions);
+         const filterPrefixesJson = filterPrefixes.length > 0 ? JSON.stringify(filterPrefixes) : null;
+-        console.log("Calling FFI getApplicableVariants with parameters:");
+-        console.log("  experiments:", experiments.length);
+-        console.log("  experimentGroups:", experiment_groups.length);
+-        console.log("  userContext:", userContext);
+-        console.log("  identifier:", identifier);
+-        console.log("  filterPrefixes:", filterPrefixes);
+         const ebuf = Buffer$1.alloc(256);
+         const result = this.lib.core_get_applicable_variants(experimentsJson, experimentGroupsJson, dimensionsJson, userContextJson, identifier, filterPrefixesJson);
+-        console.log("FFI getApplicableVariants call completed, result:", result);
+         const err = ebuf.toString('utf8').split('\0')[0];
+         if (err.length !== 0) {
+             this.throwFFIError(err);
+@@ -16727,31 +16708,26 @@ class NativeResolver {
+         const dirname = path.dirname(fileURLToPath(import.meta.url));
+         const packageRootPath = path.resolve(dirname, "..", filename);
+         if (this.fileExists(packageRootPath)) {
+-            console.log(`Using native library from package root: ${packageRootPath}`);
+             return packageRootPath;
+         }
+         // 1. First try to load from package's native-lib directory (GitHub artifacts)
+         const packageNativeLibPath = path.resolve(dirname, "native-lib", filename);
+         if (this.fileExists(packageNativeLibPath)) {
+-            console.log(`Using native library from package: ${packageNativeLibPath}`);
+             return packageNativeLibPath;
+         }
+         const packageNative2LibPath = path.resolve(dirname, "..", "native-lib", filename);
+         if (this.fileExists(packageNative2LibPath)) {
+-            console.log(`Using native library from package: ${packageNative2LibPath}`);
+             return packageNative2LibPath;
+         }
+         // 2. Try platform-specific subdirectory in native-lib
+         const platformDir = `${platform}-${arch}`;
+         const platformSpecificPath = path.resolve(dirname, "..", "native-lib", platformDir, filename);
+         if (this.fileExists(platformSpecificPath)) {
+-            console.log(`Using platform-specific native library: ${platformSpecificPath}`);
+             return platformSpecificPath;
+         }
+         // 3. Fall back to local build (relative to repository root)
+         const localBuildPath = path.resolve(dirname, "..", "..", "..", "..", "target", "release", filename);
+         if (this.fileExists(localBuildPath)) {
+-            console.log(`Using local build: ${localBuildPath}`);
+             return localBuildPath;
+         }
+         // 4. Final fallback - assume it's in the system path
+diff --git a/dist/index.js b/dist/index.js
+index 7b368fea9d88776f6529da6c36a4bba3b89cb846..29aae72c1890dc6de7e8d2b6ffecf7c59e81c74e 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -16571,17 +16571,6 @@ class NativeResolver {
+         const experimentationJson = experimentation
+             ? JSON.stringify(experimentation)
+             : null;
+-        console.log("🔧 Calling FFI with parameters:");
+-        console.log("  defaultConfigs:", defaultConfigs);
+-        console.log("  contexts length:", contextsJson.length);
+-        console.log("  overrides length:", overridesJson.length);
+-        console.log("  dimensions length:", dimensionsJson.length);
+-        console.log("  queryData :", queryDataJson);
+-        console.log("  mergeStrategy:", mergeStrategy);
+-        console.log("  filterPrefixes:", filterPrefixes);
+-        console.log("  experiment:", experimentation?.experiments?.length);
+-        console.log("  experiment groups:", experimentation?.experiment_groups?.length);
+-        console.log("  targetingKey:", experimentation?.targetingKey);
+         if (!defaultConfigsJson ||
+             defaultConfigsJson === "null" ||
+             defaultConfigsJson === "undefined") {
+@@ -16609,7 +16598,6 @@ class NativeResolver {
+         }
+         const ebuf = buffer.Buffer.alloc(256);
+         const result = this.lib.core_get_resolved_config(defaultConfigsJson, contextsJson, overridesJson, dimensionsJson, queryDataJson, mergeStrategy, filterPrefixesJson, experimentationJson, ebuf);
+-        console.log("🔧 FFI call completed, result:", result);
+         const err = ebuf.toString('utf8').split('\0')[0];
+         if (err.length !== 0) {
+             this.throwFFIError(err);
+@@ -16675,15 +16663,8 @@ class NativeResolver {
+         const userContextJson = JSON.stringify(userContext);
+         const dimensionsJson = JSON.stringify(dimensions);
+         const filterPrefixesJson = filterPrefixes.length > 0 ? JSON.stringify(filterPrefixes) : null;
+-        console.log("Calling FFI getApplicableVariants with parameters:");
+-        console.log("  experiments:", experiments.length);
+-        console.log("  experimentGroups:", experiment_groups.length);
+-        console.log("  userContext:", userContext);
+-        console.log("  identifier:", identifier);
+-        console.log("  filterPrefixes:", filterPrefixes);
+         const ebuf = buffer.Buffer.alloc(256);
+         const result = this.lib.core_get_applicable_variants(experimentsJson, experimentGroupsJson, dimensionsJson, userContextJson, identifier, filterPrefixesJson);
+-        console.log("FFI getApplicableVariants call completed, result:", result);
+         const err = ebuf.toString('utf8').split('\0')[0];
+         if (err.length !== 0) {
+             this.throwFFIError(err);
+@@ -16730,31 +16711,26 @@ class NativeResolver {
+         const dirname = path.dirname(url.fileURLToPath((typeof document === 'undefined' ? require('u' + 'rl').pathToFileURL(__filename).href : (_documentCurrentScript && _documentCurrentScript.tagName.toUpperCase() === 'SCRIPT' && _documentCurrentScript.src || new URL('index.js', document.baseURI).href))));
+         const packageRootPath = path.resolve(dirname, "..", filename);
+         if (this.fileExists(packageRootPath)) {
+-            console.log(`Using native library from package root: ${packageRootPath}`);
+             return packageRootPath;
+         }
+         // 1. First try to load from package's native-lib directory (GitHub artifacts)
+         const packageNativeLibPath = path.resolve(dirname, "native-lib", filename);
+         if (this.fileExists(packageNativeLibPath)) {
+-            console.log(`Using native library from package: ${packageNativeLibPath}`);
+             return packageNativeLibPath;
+         }
+         const packageNative2LibPath = path.resolve(dirname, "..", "native-lib", filename);
+         if (this.fileExists(packageNative2LibPath)) {
+-            console.log(`Using native library from package: ${packageNative2LibPath}`);
+             return packageNative2LibPath;
+         }
+         // 2. Try platform-specific subdirectory in native-lib
+         const platformDir = `${platform}-${arch}`;
+         const platformSpecificPath = path.resolve(dirname, "..", "native-lib", platformDir, filename);
+         if (this.fileExists(platformSpecificPath)) {
+-            console.log(`Using platform-specific native library: ${platformSpecificPath}`);
+             return platformSpecificPath;
+         }
+         // 3. Fall back to local build (relative to repository root)
+         const localBuildPath = path.resolve(dirname, "..", "..", "..", "..", "target", "release", filename);
+         if (this.fileExists(localBuildPath)) {
+-            console.log(`Using local build: ${localBuildPath}`);
+             return localBuildPath;
+         }
+         // 4. Final fallback - assume it's in the system path

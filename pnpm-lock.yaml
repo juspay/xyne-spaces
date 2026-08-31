@@ -118,6 +118,11 @@ overrides:
 
 packageExtensionsChecksum: sha256-kYla/jBKu002rBl6Loamo/+kTzooiIs3F5TZy64LHO8=
 
+patchedDependencies:
+  superposition-provider@0.97.4:
+    hash: 7dbf5602c75be0e9ee2dc5557bf4d8d77d7343fffb981dd9fa158c71c8690507
+    path: patches/superposition-provider@0.97.4.patch
+
 importers:
 
   .:
@@ -461,7 +466,7 @@ importers:
         version: 1.1.1
       superposition-provider:
         specifier: ^0.97.0
-        version: 0.97.4(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))
+        version: 0.97.4(patch_hash=7dbf5602c75be0e9ee2dc5557bf4d8d77d7343fffb981dd9fa158c71c8690507)(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))
       undici:
         specifier: 7.29.0
         version: 7.29.0
@@ -40735,7 +40740,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  superposition-provider@0.97.4(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0)):
+  superposition-provider@0.97.4(patch_hash=7dbf5602c75be0e9ee2dc5557bf4d8d77d7343fffb981dd9fa158c71c8690507)(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0)):
     dependencies:
       '@openfeature/server-sdk': 1.23.0(@openfeature/core@1.12.0)
       koffi: 2.16.3
