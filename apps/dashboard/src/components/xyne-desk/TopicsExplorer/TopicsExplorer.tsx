@@ -62,6 +62,15 @@ const PAGER_BUTTON =
 const PANEL = 'flex min-h-[320px] flex-col overflow-hidden rounded-xl border border-border bg-card';
 const PANEL_HEADER = 'flex items-baseline justify-between border-b border-border px-4 py-2';
 const PANEL_TITLE = 'text-xs font-medium uppercase tracking-wide text-muted-foreground';
+/** The filters this panel applies, keyed by the search-param the list reads. */
+const FILTER_KEYS = [
+  'aiCategory',
+  'priority',
+  'stages',
+  'assignee',
+  'userGroups',
+  'generatedTags',
+] as const satisfies readonly (keyof TicketFilters)[];
 
 /** Combine a calendar date with an HH:mm time into an epoch-ms bound. */
 const dateTimeMs = (date: Date, time: string, isEnd: boolean): number => {
@@ -318,6 +327,7 @@ export const TopicsExplorer = ({
             dim: dimensionFor(dimensions, activeDims[level]),
             key,
           })),
+          filters.generatedTags,
         );
         canOpen =
           plan.dropped.length === 0 &&
@@ -346,7 +356,16 @@ export const TopicsExplorer = ({
       emptyBuckets: [...emptyBoxes],
       conflicting: [...combined],
     };
-  }, [nodes, scoped.length, isOverlapping, isDrillable, validPath, dimensions, activeDims]);
+  }, [
+    nodes,
+    scoped.length,
+    isOverlapping,
+    isDrillable,
+    validPath,
+    dimensions,
+    activeDims,
+    filters,
+  ]);
 
   /**
    * One trend row per tile, so the two panels cannot drift in order or shade.
@@ -398,7 +417,7 @@ export const TopicsExplorer = ({
     conflicting.length > 0 && {
       id: 'conflicting',
       tone: 'muted' as const,
-      text: `${conflicting.join(' and ')} reuses a filter an earlier level already set, and the ticket list combines repeats with OR, so opening would show more tickets than the box counts.`,
+      text: `${conflicting.join(' and ')} reuses a filter an earlier level or the filter bar already set, and the ticket list combines repeats with OR, so opening would show more tickets than the box counts.`,
     },
   ].filter(Boolean) as { id: string; tone: 'muted' | 'warn'; text: string }[];
 
@@ -409,6 +428,7 @@ export const TopicsExplorer = ({
           dim: dimensionFor(dimensions, activeDims[i]),
           key,
         })),
+        filters.generatedTags,
       );
 
       // Guard, not a user path: the tile is already inert when this holds, since
@@ -418,18 +438,10 @@ export const TopicsExplorer = ({
 
       const params = new URLSearchParams();
 
-      // TicketFilters keys are already the search-param names the ticket list
-      // reads. Object-valued ones (roleAssignments, dynamicFields) have no
-      // scalar form, so they are left out rather than stringified.
-      const appendScalar = (key: string, value: unknown): void => {
-        if (typeof value === 'string') params.append(key, value);
-        else if (typeof value === 'number' || typeof value === 'boolean') {
-          params.append(key, String(value));
-        }
-      };
-      for (const [key, value] of Object.entries(filters)) {
-        if (Array.isArray(value)) value.forEach(v => appendScalar(key, v));
-        else appendScalar(key, value);
+      // Only the filters the rollup applies, each already the param name the
+      // list reads it from — `TicketFilters` keys are not all (`boards`/`board`).
+      for (const key of FILTER_KEYS) {
+        for (const value of filters[key] ?? []) params.append(key, value);
       }
 
       // The drill path replaces any filter on the same field: the list ORs
@@ -441,21 +453,10 @@ export const TopicsExplorer = ({
 
       params.set('createdDateStart', String(startMs));
       params.set('createdDateEnd', String(endMs));
-      onClose();
+      // No onClose(): dropping `topics=open` from the URL already closes this.
       void navigate(`${supportBase}/${channelId}?${params.toString()}`);
     },
-    [
-      activeDims,
-      channelId,
-      dimensions,
-      endMs,
-      filters,
-      navigate,
-      onClose,
-      startMs,
-      supportBase,
-      validPath,
-    ],
+    [activeDims, channelId, dimensions, endMs, filters, navigate, startMs, supportBase, validPath],
   );
 
   // Moves focus at either end: the pressed button goes `disabled`, dropping
@@ -471,6 +472,8 @@ export const TopicsExplorer = ({
   const showPath = useCallback((next: string[]): void => {
     setPath(next);
     setPage(0);
+    // The next level reuses group keys, so a stale hover lights up an unrelated group.
+    setHovered(null);
   }, []);
 
   // Keeps the first `keepLevels` drilled steps: the keys above the edited level

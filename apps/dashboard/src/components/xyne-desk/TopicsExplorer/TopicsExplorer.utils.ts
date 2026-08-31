@@ -277,7 +277,7 @@ export interface DrillPlan {
    */
   emptyBuckets: string[];
   /**
-   * Levels sharing a param with an earlier level at a different value. The list
+   * Levels sharing a param with an earlier level or the filter bar. The list
    * ORs repeated params, so emitting both opens a strictly wider set than the
    * tile counted — nested AI-tag levels all share `generatedTags`.
    */
@@ -289,7 +289,10 @@ export interface DrillPlan {
  * the opened list to equal the tile; the three failure lists are the ways that
  * fails, and the caller stays put on any of them.
  */
-export const planDrill = (levels: readonly DrillLevel[]): DrillPlan => {
+export const planDrill = (
+  levels: readonly DrillLevel[],
+  tagFilter: readonly string[] = [],
+): DrillPlan => {
   const assignments: { param: string; value: string }[] = [];
   const dropped: string[] = [];
   const emptyBuckets: string[] = [];
@@ -304,6 +307,13 @@ export const planDrill = (levels: readonly DrillLevel[]): DrillPlan => {
     const value = key === NONE_KEY ? dim.emptyParam : key;
     if (value === null || value === undefined) {
       emptyBuckets.push(dim.emptyLabel ?? dim.label);
+      continue;
+    }
+    // A box outside the AI-tag filter counted "both tags", which the list cannot
+    // express: keeping both ORs them, replacing drops the filter. A box the
+    // filter itself names is already the whole of `param=value`, so it is safe.
+    if (dim.multi && tagFilter.length > 0 && !tagFilter.includes(value)) {
+      conflicting.push(dim.label);
       continue;
     }
     const existing = claimed.get(dim.param);
@@ -329,9 +339,10 @@ export const usefulDimensions = (
     // Always offered: grouping by a tag nothing carries honestly shows one
     // "not tagged" box, where hiding the option makes it look missing.
     if (key.startsWith(AI_TAG_DIMENSION_PREFIX)) return true;
+    const dim = dimensionFor(dimensions, key);
     const seen = new Set<string>();
     for (const ticket of tickets) {
-      for (const value of dimensionFor(dimensions, key).values(ticket)) {
+      for (const value of dim.values(ticket)) {
         seen.add(value);
         if (seen.size > 1) return true;
       }

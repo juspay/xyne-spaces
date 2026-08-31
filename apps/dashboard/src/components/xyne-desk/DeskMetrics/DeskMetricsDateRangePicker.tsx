@@ -17,9 +17,14 @@ const endOfDay = (d: Date): Date => {
   r.setHours(23, 59, 59, 999);
   return r;
 };
-/** Days a range spans, as the custom-range guard has always measured them. */
+/**
+ * Calendar days a range spans, inclusive. Off midnights, not elapsed time: a
+ * fall-back DST day is 25 hours, pushing "Last 30 days" past a 30-day cap.
+ */
 const rangeDays = (r: DateRangeValue): number =>
-  (r.endDate.getTime() - r.startDate.getTime()) / (24 * 60 * 60 * 1000);
+  Math.round(
+    (startOfDay(r.endDate).getTime() - startOfDay(r.startDate).getTime()) / (24 * 60 * 60 * 1000),
+  ) + 1;
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&

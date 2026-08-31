@@ -2882,6 +2882,7 @@ const SupportScreen = (): ReactElement => {
                       {canExploreTopics && (
                         <Tooltip content='Topics explorer' side='bottom'>
                           <button
+                            type='button'
                             onClick={() => {
                               const base = `${supportBase}/${selectedChannelId}`;
                               if (isTopicsOpen) void navigate(base, { replace: true });
