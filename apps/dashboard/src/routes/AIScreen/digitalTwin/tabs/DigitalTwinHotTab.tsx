@@ -1,6 +1,8 @@
 import { ReactElement, useMemo, useState } from 'react';
 import { DeleteDustbin01 } from '@xyne/icons';
 import { AdminSearchField } from '@/routes/AIScreen/library/admin/components/AdminSearchField';
+import { TabMessage } from '@/routes/AIScreen/library/admin/components/TabMessage';
+import { HighlightMatch } from '@/routes/AIScreen/library/admin/components/HighlightMatch';
 import { Button } from '@/components/ui/Button/index';
 import Tooltip from '@/components/ui/Tooltip';
 import { TruncatedTooltip } from '@/components/ui/Tooltip/TruncatedTooltip';
@@ -8,9 +10,9 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import { useClawDigitalTwinStats, useDeleteDigitalTwinMemory } from '@/hooks/useClawDigitalTwin';
-import { CategoryBadge } from '../components/CategoryBadgeV2';
-import { MetaRow } from '../components/MetaRow';
-import { fmtRelative } from '../components/formatV2';
+import { CategoryBadge } from '../components/CategoryBadge';
+import { MetaRow } from '@/routes/AIScreen/library/shared/primitives/MetaRow';
+import { formatRelativeTime } from '@/utils/dateUtils';
 import type { MemoryRange } from '@/services/claw/digitalTwinTypes';
 
 const RANGES: MemoryRange[] = ['7d', '30d', '90d'];
@@ -33,25 +35,27 @@ const DigitalTwinHotTab = (): ReactElement => {
 
   return (
     <div className='flex flex-col gap-2.5'>
-      <AdminSearchField
-        value={search}
-        onChange={setSearch}
-        placeholder='Search hot memories'
-        ariaLabel='Search hot memories'
-        trackCategory='Claw Agents'
-        trackName='Digital Twin: search hot memories'
-        className='w-full'
-      />
-
-      <div className='flex items-center justify-end'>
-        <SegmentedToggle<MemoryRange>
-          options={RANGES.map(r => ({ value: r, label: r }))}
-          value={range}
-          onChange={setRange}
-          tone='primary'
+      <div className='sticky top-0 z-10 -mb-2.5 flex flex-col gap-2.5 bg-background pb-2.5'>
+        <AdminSearchField
+          value={search}
+          onChange={setSearch}
+          placeholder='Search hot memories'
+          ariaLabel='Search hot memories'
           trackCategory='Claw Agents'
-          trackPrefix='Digital Twin hot range'
+          trackName='Digital Twin: search hot memories'
+          className='w-full'
         />
+
+        <div className='flex items-center justify-end'>
+          <SegmentedToggle<MemoryRange>
+            options={RANGES.map(r => ({ value: r, label: r }))}
+            value={range}
+            onChange={setRange}
+            tone='primary'
+            trackCategory='Claw Agents'
+            trackPrefix='Digital Twin hot range'
+          />
+        </div>
       </div>
 
       {isLoading ? (
@@ -61,16 +65,11 @@ const DigitalTwinHotTab = (): ReactElement => {
           ))}
         </div>
       ) : hot.length === 0 && search.trim() ? (
-        <p className='py-4 text-xs text-muted-foreground'>
-          No hot memories match &ldquo;{search}&rdquo;
-        </p>
+        <TabMessage>No hot memories match &ldquo;{search}&rdquo;</TabMessage>
       ) : hot.length === 0 ? (
-        <div className='flex flex-col gap-1 py-4'>
-          <p className='text-xs text-muted-foreground'>No hot memories</p>
-          <p className='text-xs text-muted-foreground'>
-            Memories will appear here once they start getting recalled
-          </p>
-        </div>
+        <TabMessage>
+          No hot memories — they appear here once they start getting recalled.
+        </TabMessage>
       ) : (
         <ul className='flex flex-col'>
           {hot.map(m => {
@@ -82,7 +81,9 @@ const DigitalTwinHotTab = (): ReactElement => {
               >
                 <div className='flex items-center justify-between gap-3'>
                   <TruncatedTooltip content={m.content}>
-                    <p className='min-w-0 flex-1 truncate text-sm text-foreground'>{m.content}</p>
+                    <p className='min-w-0 flex-1 truncate text-sm text-foreground'>
+                      <HighlightMatch text={m.content} query={search} />
+                    </p>
                   </TruncatedTooltip>
                   {!isRejected && (
                     <Tooltip content='Delete memory' side='top'>
@@ -108,7 +109,9 @@ const DigitalTwinHotTab = (): ReactElement => {
                       {m.hits} recall{m.hits !== 1 ? 's' : ''}
                     </span>,
                     m.lastRecalledAt && (
-                      <span key='recalled'>last recalled {fmtRelative(m.lastRecalledAt)}</span>
+                      <span key='recalled'>
+                        last recalled {formatRelativeTime(new Date(m.lastRecalledAt))}
+                      </span>
                     ),
                     isRejected && (
                       <span key='deleted' className='text-destructive'>

@@ -3,8 +3,9 @@ import { Background, Controls, MiniMap, ReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Loader2 } from 'lucide-react';
 import { useClawDigitalTwinGraph } from '@/hooks/useClawDigitalTwin';
-import { layoutSubsystems, makeSubsystemEdges } from '../components/graphLayoutV2';
-import { SubsystemMemoriesPanel } from '../components/SubsystemMemoriesPanelV2';
+import { TabMessage } from '@/routes/AIScreen/library/admin/components/TabMessage';
+import { layoutSubsystems, makeSubsystemEdges } from '../components/graphLayout';
+import { SubsystemMemoriesPanel } from '../components/SubsystemMemoriesPanel';
 
 const DigitalTwinGraphTab = (): ReactElement => {
   const { data, isLoading } = useClawDigitalTwinGraph();
@@ -23,12 +24,9 @@ const DigitalTwinGraphTab = (): ReactElement => {
 
   if (nodes.length === 0) {
     return (
-      <div className='flex flex-col gap-1 py-4'>
-        <p className='text-xs text-muted-foreground'>No graph data</p>
-        <p className='text-xs text-muted-foreground'>
-          The subsystem graph will appear once you have approved memories.
-        </p>
-      </div>
+      <TabMessage>
+        No graph data — the subsystem graph will appear once you have approved memories.
+      </TabMessage>
     );
   }
 

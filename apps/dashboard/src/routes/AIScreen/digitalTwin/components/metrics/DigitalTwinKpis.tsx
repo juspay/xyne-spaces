@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
-import { formatPct } from './formatters';
+import { formatPct } from '@/components/ClawAgents/metrics/formatters';
 import type { DigitalTwinMetrics } from '@/services/claw/digitalTwinTypes';
 
 type Tone = 'good' | 'bad' | 'flat';
@@ -11,7 +11,6 @@ const toneClass = (tone: Tone): string => {
   return 'text-muted-foreground';
 };
 
-/** Signed percentage-point delta. `higherIsBetter` decides the tone direction. */
 const deltaBadge = (
   current: number | null,
   previous: number | null,
@@ -68,8 +67,6 @@ const Tile = ({
 
 export const DigitalTwinKpis = ({ data }: { data: DigitalTwinMetrics }): ReactElement => {
   const approvalDelta = deltaBadge(data.approvalRate, data.previousApprovalRate, true);
-  // A higher edit rate means more of your approvals needed corrections — treat
-  // rising edits as regressions.
   const editDelta = deltaBadge(data.editRate, data.previousEditRate, false);
 
   return (

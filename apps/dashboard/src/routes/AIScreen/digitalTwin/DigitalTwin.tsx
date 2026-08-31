@@ -6,18 +6,18 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Tabs } from '@/components/ui/Tabs';
 import Tooltip from '@/components/ui/Tooltip';
 import { useClawDigitalTwinStatus } from '@/hooks/useClawDigitalTwin';
-import { DigitalTwinBanner } from './components/DigitalTwinBannerV2';
-import { DigitalTwinEnablePanel } from './components/DigitalTwinEnablePanelV2';
-import { EnableModal } from './components/EnableModalV2';
-import { DisableModal } from './components/DisableModalV2';
-import { UploadModal } from './components/UploadModalV2';
+import { DigitalTwinBanner } from './components/DigitalTwinBanner';
+import { DigitalTwinEnablePanel } from './components/DigitalTwinEnablePanel';
+import { EnableModal } from './components/EnableModal';
+import { DisableModal } from './components/DisableModal';
+import { UploadModal } from './components/UploadModal';
 import type { DigitalTwinStatus } from '@/services/claw/digitalTwinTypes';
-import DigitalTwinMemoriesTab from './tabs/DigitalTwinMemoriesTabV2';
-import DigitalTwinHotTab from './tabs/DigitalTwinHotTabV2';
-import DigitalTwinProposalsTab from './tabs/DigitalTwinProposalsTabV2';
-import DigitalTwinRecallTab from './tabs/DigitalTwinRecallTabV2';
-import DigitalTwinGraphTab from './tabs/DigitalTwinGraphTabV2';
-import DigitalTwinSettingsTab from './tabs/DigitalTwinSettingsTabV2';
+import DigitalTwinMemoriesTab from './tabs/DigitalTwinMemoriesTab';
+import DigitalTwinHotTab from './tabs/DigitalTwinHotTab';
+import DigitalTwinProposalsTab from './tabs/DigitalTwinProposalsTab';
+import DigitalTwinRecallTab from './tabs/DigitalTwinRecallTab';
+import DigitalTwinGraphTab from './tabs/DigitalTwinGraphTab';
+import DigitalTwinSettingsTab from './tabs/DigitalTwinSettingsTab';
 import DigitalTwinMetricsTab from './tabs/DigitalTwinMetricsTab';
 import { Pill } from '../library/shared/primitives/Pill';
 import { DIGITAL_TWIN_TABS, resolveDigitalTwinTab, type DigitalTwinTabId } from './digitalTwinTabs';
@@ -42,7 +42,7 @@ const statusDetail = (
   return parts.length ? parts.join(' · ') : 'No memories yet — run a backfill or upload a .md.';
 };
 
-const DigitalTwinV2 = (): ReactElement => {
+const DigitalTwin = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = resolveDigitalTwinTab(searchParams.get('tab'));
 
@@ -188,4 +188,4 @@ const DigitalTwinV2 = (): ReactElement => {
   );
 };
 
-export default DigitalTwinV2;
+export default DigitalTwin;

@@ -10,7 +10,6 @@ import { SettingCardHeader } from '../components/SettingCardHeader';
 import { useClawDigitalTwinStatus, useUpdateDigitalTwinSettings } from '@/hooks/useClawDigitalTwin';
 
 const MAX_SUFFIX_LEN = 500;
-// Mirrors MIN/MAX_AUTO_APPROVE_SCORE in the backend (re-validated server-side).
 const MIN_SCORE = 0.7;
 const MAX_SCORE = 1;
 const SCORE_STEP = 0.05;
@@ -27,7 +26,6 @@ const DigitalTwinSettingsTab = (): ReactElement => {
   const [auto, setAuto] = useState(initialAuto);
   const [score, setScore] = useState(initialScore);
 
-  // Re-seed when the status first loads or changes underneath us.
   useEffect(() => {
     setSuffix(status?.responseSuffix ?? '');
     setAuto(status?.memoryApprovalMode === 'auto');
@@ -59,6 +57,8 @@ const DigitalTwinSettingsTab = (): ReactElement => {
       </div>
     );
   }
+
+  const fillPct = ((score - MIN_SCORE) / (MAX_SCORE - MIN_SCORE)) * 100;
 
   return (
     <div className='flex w-full flex-col gap-3'>
@@ -138,7 +138,10 @@ const DigitalTwinSettingsTab = (): ReactElement => {
                 onChange={e => setScore(Number(e.target.value))}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin auto-approve threshold'
-                className='h-1.5 w-full cursor-pointer appearance-none rounded-full bg-border [&::-moz-range-thumb]:size-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:-mt-1 [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary'
+                style={{
+                  background: `linear-gradient(to right, hsl(var(--primary)) ${fillPct}%, hsl(var(--border)) ${fillPct}%)`,
+                }}
+                className='h-1.5 w-full cursor-pointer appearance-none rounded-full [&::-moz-range-thumb]:size-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:-mt-1 [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary'
               />
               <div className='mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground'>
                 <span>{MIN_SCORE.toFixed(2)} · more memories</span>

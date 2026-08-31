@@ -10,12 +10,13 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button/index';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { TruncatedTooltip } from '@/components/ui/Tooltip/TruncatedTooltip';
+import { HighlightMatch } from '@/routes/AIScreen/library/admin/components/HighlightMatch';
 import { cn } from '@/utils/classNames';
 import { usePatchDigitalTwinCandidate } from '@/hooks/useClawDigitalTwin';
 import type { DigitalTwinCandidate } from '@/services/claw/digitalTwinTypes';
-import { MetaRow } from './MetaRow';
-import { scoreToneClass } from './formatV2';
-import { SUBSYSTEM_ICONS, subsystemLabel } from './subsystemsV2';
+import { MetaRow } from '@/routes/AIScreen/library/shared/primitives/MetaRow';
+import { scoreToneClass } from './format';
+import { SUBSYSTEM_ICONS, subsystemLabel } from './subsystems';
 
 const TONE_CLASS: Record<'default' | 'success' | 'danger', string> = {
   default: 'text-muted-foreground hover:text-foreground',
@@ -59,10 +60,12 @@ export const CandidateRow = ({
   candidate,
   onApproved,
   onRejected,
+  query = '',
 }: {
   candidate: DigitalTwinCandidate;
   onApproved: (id: string) => void;
   onRejected: (id: string) => void;
+  query?: string;
 }): ReactElement => {
   const patch = usePatchDigitalTwinCandidate();
   const [acting, setActing] = useState<'approve' | 'reject' | 'save' | null>(null);
@@ -137,7 +140,9 @@ export const CandidateRow = ({
           />
         ) : (
           <TruncatedTooltip content={committed}>
-            <p className='truncate text-sm leading-relaxed text-foreground'>{committed}</p>
+            <p className='truncate text-sm leading-relaxed text-foreground'>
+              <HighlightMatch text={committed} query={query} />
+            </p>
           </TruncatedTooltip>
         )}
         <MetaRow

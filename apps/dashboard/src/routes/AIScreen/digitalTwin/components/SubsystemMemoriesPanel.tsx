@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { useClawDigitalTwinMemories } from '@/hooks/useClawDigitalTwin';
-import { MemoryCard } from './MemoryCardV2';
+import { MemoryCard } from './MemoryCard';
 
 export const SubsystemMemoriesPanel = ({
   subsystem,

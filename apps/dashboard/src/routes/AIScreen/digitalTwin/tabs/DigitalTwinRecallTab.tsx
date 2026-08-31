@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/classNames';
 import { DetailCard } from '@/routes/AIScreen/library/shared/primitives/DetailPrimitives';
 import { useRecallDigitalTwin } from '@/hooks/useClawDigitalTwin';
-import { MetaRow } from '../components/MetaRow';
+import { MetaRow } from '@/routes/AIScreen/library/shared/primitives/MetaRow';
 import { SettingCardHeader } from '../components/SettingCardHeader';
-import { scoreToneClass } from '../components/formatV2';
+import { scoreToneClass } from '../components/format';
 import type { RecallResult } from '@/services/claw/digitalTwinTypes';
 
 const DigitalTwinRecallTab = (): ReactElement => {

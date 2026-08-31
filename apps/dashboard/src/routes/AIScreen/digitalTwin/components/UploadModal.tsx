@@ -4,9 +4,10 @@ import { MultipleCrossCancelCircle, UploadUp } from '@xyne/icons';
 import { Button } from '@/components/ui/Button';
 import Tooltip from '@/components/ui/Tooltip';
 import { useUploadDigitalTwinMd } from '@/hooks/useClawDigitalTwin';
-import { DigitalTwinModal } from './DigitalTwinModalV2';
+import { V2Dialog } from '@/routes/AIScreen/library/shared/primitives/V2Dialog';
 
 const MAX_FILE_BYTES = 200 * 1024; // 200 KB — matches backend limit
+const DESCRIPTION = 'Memories extracted from it land in Proposals for your review.';
 
 export const UploadModal = ({
   open,
@@ -83,14 +84,24 @@ export const UploadModal = ({
   };
 
   return (
-    <DigitalTwinModal
+    <V2Dialog
       open={open}
-      onClose={close}
+      onOpenChange={next => {
+        if (!next) close();
+      }}
       title='Upload markdown file'
-      description='Memories extracted from it land in Proposals for your review.'
+      description={DESCRIPTION}
+      testId='digital-twin-upload-dialog'
       footer={
         <>
-          <Button variant='ghost' size='sm' onClick={close} disabled={uploadMutation.isPending}>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={close}
+            disabled={uploadMutation.isPending}
+            data-track-category='Claw Agents'
+            data-track-name='Digital Twin: cancel upload'
+          >
             Cancel
           </Button>
           <Button
@@ -98,12 +109,16 @@ export const UploadModal = ({
             onClick={submit}
             loading={uploadMutation.isPending}
             disabled={!filename || !content.trim()}
+            data-track-category='Claw Agents'
+            data-track-name='Digital Twin: confirm upload'
           >
             Upload
           </Button>
         </>
       }
     >
+      <p className='text-sm font-normal leading-5 text-muted-foreground'>{DESCRIPTION}</p>
+
       <input
         ref={fileInputRef}
         type='file'
@@ -173,6 +188,6 @@ export const UploadModal = ({
           {err}
         </div>
       )}
-    </DigitalTwinModal>
+    </V2Dialog>
   );
 };

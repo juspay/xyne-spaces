@@ -2,8 +2,8 @@ import { ReactElement, useState } from 'react';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
 import { useClawDigitalTwinMetrics } from '@/hooks/useClawDigitalTwin';
-import { DigitalTwinKpis } from '../components/metrics/DigitalTwinKpisV2';
-import { DigitalTwinMetricsCharts } from '../components/metrics/DigitalTwinMetricsChartsV2';
+import { DigitalTwinKpis } from '../components/metrics/DigitalTwinKpis';
+import { DigitalTwinMetricsCharts } from '../components/metrics/DigitalTwinMetricsCharts';
 
 const DAY_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: '7d', value: 7 },

@@ -2,6 +2,7 @@ import { ReactElement, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { CheckTickCircle, FilterFunnel } from '@xyne/icons';
 import { AdminSearchField } from '@/routes/AIScreen/library/admin/components/AdminSearchField';
+import { TabMessage } from '@/routes/AIScreen/library/admin/components/TabMessage';
 import { FilterSelect } from '@/routes/AIScreen/library/admin/components/FilterSelect';
 import { Button } from '@/components/ui/Button/index';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -9,16 +10,14 @@ import {
   useApproveDigitalTwinCluster,
   useClawDigitalTwinProposals,
 } from '@/hooks/useClawDigitalTwin';
-import { CandidateRow } from '../components/CandidateRowV2';
-import { SUBSYSTEM_ICONS, SUBSYSTEM_LABELS, subsystemLabel } from '../components/subsystemsV2';
+import { CandidateRow } from '../components/CandidateRow';
+import { SUBSYSTEM_ICONS, SUBSYSTEM_LABELS, subsystemLabel } from '../components/subsystems';
 import type { DigitalTwinCandidate } from '@/services/claw/digitalTwinTypes';
 
 const DigitalTwinProposalsTab = (): ReactElement => {
   const { data: groups, isLoading, isError } = useClawDigitalTwinProposals();
   const approveCluster = useApproveDigitalTwinCluster();
 
-  // Optimistic removal — approved/rejected rows disappear immediately, and the
-  // subsequent proposals refetch (triggered by the mutations) confirms it.
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [bulkActing, setBulkActing] = useState(false);
   const [search, setSearch] = useState('');
@@ -89,10 +88,53 @@ const DigitalTwinProposalsTab = (): ReactElement => {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className='flex flex-col gap-2.5'>
-        <Skeleton className='h-8 w-full rounded-lg' />
+  const narrowed = search.trim().length > 0 || subsystemFilter.length > 0;
+  const emptyMessage = search.trim()
+    ? `No proposals match “${search.trim()}”`
+    : subsystemFilter
+      ? `No proposals in ${subsystemLabel(subsystemFilter)}`
+      : 'No proposals pending';
+
+  return (
+    <div className='flex flex-col gap-2.5'>
+      <div className='sticky top-0 z-10 -mb-2.5 flex flex-col gap-2.5 bg-background pb-2.5'>
+        <AdminSearchField
+          value={search}
+          onChange={setSearch}
+          placeholder='Search proposals'
+          ariaLabel='Search proposals'
+          trackCategory='Claw Agents'
+          trackName='Digital Twin: search proposals'
+          className='w-full'
+        />
+
+        <div className='flex flex-wrap items-center justify-end gap-2'>
+          <FilterSelect
+            ariaLabel='Subsystem filter'
+            icon={<FilterFunnel className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
+            value={subsystemFilter}
+            onChange={setSubsystemFilter}
+            options={subsystemOptions}
+            anchorLabel='All subsystems'
+          />
+          {visible.length > 0 && (
+            <Button
+              type='button'
+              size='sm'
+              onClick={() => void approveVisible()}
+              loading={bulkActing}
+              disabled={bulkActing}
+              data-track-category='Claw Agents'
+              data-track-name='Digital Twin approve all proposals'
+            >
+              {!bulkActing && <CheckTickCircle className='size-4' aria-hidden />}
+              Approve all
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {isLoading ? (
         <ul className='flex flex-col'>
           {[0, 1, 2, 3].map(i => (
             <li key={i} className='flex items-start gap-3 border-b border-border px-1 py-4'>
@@ -105,71 +147,13 @@ const DigitalTwinProposalsTab = (): ReactElement => {
             </li>
           ))}
         </ul>
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className='rounded-lg border border-border p-4 text-center text-xs text-destructive'>
-        Failed to load proposals
-      </div>
-    );
-  }
-
-  const narrowed = search.trim().length > 0 || subsystemFilter.length > 0;
-  const emptyMessage = search.trim()
-    ? `No proposals match “${search.trim()}”`
-    : subsystemFilter
-      ? `No proposals in ${subsystemLabel(subsystemFilter)}`
-      : 'No proposals pending';
-
-  return (
-    <div className='flex flex-col gap-2.5'>
-      <AdminSearchField
-        value={search}
-        onChange={setSearch}
-        placeholder='Search proposals'
-        ariaLabel='Search proposals'
-        trackCategory='Claw Agents'
-        trackName='Digital Twin: search proposals'
-        className='w-full'
-      />
-
-      <div className='flex flex-wrap items-center justify-end gap-2'>
-        <FilterSelect
-          ariaLabel='Subsystem filter'
-          icon={<FilterFunnel className='size-4 shrink-0 text-muted-foreground' aria-hidden />}
-          value={subsystemFilter}
-          onChange={setSubsystemFilter}
-          options={subsystemOptions}
-          anchorLabel='All subsystems'
-        />
-        {visible.length > 0 && (
-          <Button
-            type='button'
-            size='sm'
-            onClick={() => void approveVisible()}
-            loading={bulkActing}
-            disabled={bulkActing}
-            data-track-category='Claw Agents'
-            data-track-name='Digital Twin approve all proposals'
-          >
-            {!bulkActing && <CheckTickCircle className='size-4' aria-hidden />}
-            Approve all
-          </Button>
-        )}
-      </div>
-
-      {visible.length === 0 ? (
-        <div className='flex flex-col gap-1 py-4'>
-          <p className='text-xs text-muted-foreground'>{emptyMessage}</p>
-          {!narrowed && (
-            <p className='text-xs text-muted-foreground'>
-              New candidates are added automatically each night.
-            </p>
-          )}
-        </div>
+      ) : isError ? (
+        <TabMessage>Couldn’t load proposals.</TabMessage>
+      ) : visible.length === 0 ? (
+        <TabMessage>
+          {emptyMessage}
+          {!narrowed && ' — new candidates are added automatically each night.'}
+        </TabMessage>
       ) : (
         <ul className='flex flex-col'>
           {visible.map((candidate: DigitalTwinCandidate) => (
@@ -178,6 +162,7 @@ const DigitalTwinProposalsTab = (): ReactElement => {
               candidate={candidate}
               onApproved={removeCandidate}
               onRejected={removeCandidate}
+              query={search}
             />
           ))}
         </ul>

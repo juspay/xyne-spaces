@@ -12,8 +12,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { MetricsCard } from './MetricsCard';
-import { subsystemLabel, sourceLabel } from '../subsystemsV2';
+import { MetricsCard } from '@/components/ClawAgents/metrics/MetricsCard';
+import { subsystemLabel, sourceLabel } from '../subsystems';
 import type { DigitalTwinMetrics } from '@/services/claw/digitalTwinTypes';
 
 const CHART_HEIGHT = 240;

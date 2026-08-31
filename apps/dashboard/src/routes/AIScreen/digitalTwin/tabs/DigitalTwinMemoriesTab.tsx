@@ -1,12 +1,13 @@
 import { ReactElement, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { AdminSearchField } from '@/routes/AIScreen/library/admin/components/AdminSearchField';
+import { TabMessage } from '@/routes/AIScreen/library/admin/components/TabMessage';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
 import { useClawDigitalTwinMemories, useDeleteDigitalTwinMemory } from '@/hooks/useClawDigitalTwin';
-import { MemoryCard } from '../components/MemoryCardV2';
-import { CategoryBadge } from '../components/CategoryBadgeV2';
-import { CATEGORY_LEGEND, CATEGORY_STYLES } from '../components/subsystemsV2';
+import { MemoryCard } from '../components/MemoryCard';
+import { CategoryBadge } from '../components/CategoryBadge';
+import { CATEGORY_LEGEND, CATEGORY_STYLES } from '../components/subsystems';
 
 const DELETE_COPY =
   'This removes it from Hindsight and marks all related review rows as rejected. Recall-hit history is retained.';
@@ -34,38 +35,19 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
     [memories],
   );
 
-  if (isLoading) {
-    return (
-      <div className='flex flex-col gap-1.5'>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className='h-16 rounded-lg' />
-        ))}
-      </div>
-    );
-  }
-
-  if (memories.length === 0) {
-    return (
-      <div className='flex flex-col gap-1 py-4'>
-        <p className='text-xs text-muted-foreground'>No memories yet</p>
-        <p className='text-xs text-muted-foreground'>
-          Go to Proposals, approve the ones that look right, and they&apos;ll show up here
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className='flex flex-col gap-2.5'>
-      <AdminSearchField
-        value={search}
-        onChange={setSearch}
-        placeholder='Search memories'
-        ariaLabel='Search memories'
-        trackCategory='Claw Agents'
-        trackName='Digital Twin: search memories'
-        className='w-full'
-      />
+      <div className='sticky top-0 z-10 -mb-2.5 bg-background pb-2.5'>
+        <AdminSearchField
+          value={search}
+          onChange={setSearch}
+          placeholder='Search memories'
+          ariaLabel='Search memories'
+          trackCategory='Claw Agents'
+          trackName='Digital Twin: search memories'
+          className='w-full'
+        />
+      </div>
 
       {visibleCategories.size > 0 && (
         <div className='rounded-lg border border-border bg-muted/40'>
@@ -98,17 +80,31 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
         </div>
       )}
 
-      {filtered.length === 0 && search.trim() && (
-        <p className='py-4 text-xs text-muted-foreground'>
-          No memories match &ldquo;{search}&rdquo;
-        </p>
+      {isLoading ? (
+        <div className='flex flex-col gap-1.5'>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className='h-16 rounded-lg' />
+          ))}
+        </div>
+      ) : filtered.length === 0 && search.trim() ? (
+        <TabMessage>No memories match &ldquo;{search}&rdquo;</TabMessage>
+      ) : memories.length === 0 ? (
+        <TabMessage>
+          No memories yet — go to Proposals, approve the ones that look right, and they’ll show up
+          here.
+        </TabMessage>
+      ) : (
+        <ul className='flex flex-col'>
+          {filtered.map(memory => (
+            <MemoryCard
+              key={memory.hindsightMemoryId}
+              memory={memory}
+              onDelete={setPendingDelete}
+              query={search}
+            />
+          ))}
+        </ul>
       )}
-
-      <ul className='flex flex-col'>
-        {filtered.map(memory => (
-          <MemoryCard key={memory.hindsightMemoryId} memory={memory} onDelete={setPendingDelete} />
-        ))}
-      </ul>
 
       <ConfirmDialog
         open={pendingDelete !== null}

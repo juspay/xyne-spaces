@@ -2,19 +2,14 @@ import { ReactElement, useEffect } from 'react';
 import { BarchartDefault, CheckTickSingle, Spinner } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import {
-  isoDate,
   QUICK_DAYS,
   useDigitalTwinRange,
   type DigitalTwinRange,
-} from './useDigitalTwinRangeV2';
+} from '@/components/ClawAgents/digitalTwin/useDigitalTwinRange';
+import { DateRangeInputs } from './DateRangeInputs';
 
-export type { DigitalTwinRange } from './useDigitalTwinRangeV2';
+export type { DigitalTwinRange } from '@/components/ClawAgents/digitalTwin/useDigitalTwinRange';
 
-/**
- * Stacked preset list + custom range + estimate. Used by the backfill dialog;
- * the in-page enable flow renders its own presentation from the same hook.
- * Lifts the resolved range to the parent via `onRangeChange`.
- */
 export const DigitalTwinRangeSelector = ({
   mode,
   active,
@@ -28,7 +23,6 @@ export const DigitalTwinRangeSelector = ({
 
   useEffect(() => {
     onRangeChange(r.range);
-    // onRangeChange is a stable setter from the parent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r.range]);
 
@@ -72,7 +66,6 @@ export const DigitalTwinRangeSelector = ({
             );
           })}
 
-          {/* Custom range */}
           <div
             className={cn(
               'rounded-xl border transition',
@@ -107,33 +100,7 @@ export const DigitalTwinRangeSelector = ({
 
             {r.selection === 'custom' && (
               <div className='border-t border-primary/20 px-3.5 pb-3 pt-2.5'>
-                <div className='flex items-center gap-2'>
-                  <input
-                    type='date'
-                    value={r.customFrom}
-                    max={r.customTo}
-                    onChange={e => r.setCustomFrom(e.target.value)}
-                    data-track-category='Claw Agents'
-                    data-track-name='Digital Twin backfill from date'
-                    className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
-                  />
-                  <span className='shrink-0 text-xs text-muted-foreground'>→</span>
-                  <input
-                    type='date'
-                    value={r.customTo}
-                    min={r.customFrom}
-                    max={isoDate(new Date())}
-                    onChange={e => r.setCustomTo(e.target.value)}
-                    data-track-category='Claw Agents'
-                    data-track-name='Digital Twin backfill to date'
-                    className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
-                  />
-                  {r.customDays > 0 && (
-                    <span className='shrink-0 text-xs tabular-nums text-muted-foreground'>
-                      {r.customDays}d
-                    </span>
-                  )}
-                </div>
+                <DateRangeInputs range={r} trackName='Digital Twin backfill' showDayCount />
                 <div className='mt-2 flex flex-wrap gap-1.5'>
                   {QUICK_DAYS.map(n => (
                     <button

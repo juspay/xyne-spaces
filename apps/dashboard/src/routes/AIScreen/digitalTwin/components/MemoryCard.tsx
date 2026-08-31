@@ -3,17 +3,20 @@ import { DeleteDustbin01 } from '@xyne/icons';
 import { Button } from '@/components/ui/Button/index';
 import Tooltip from '@/components/ui/Tooltip';
 import { TruncatedTooltip } from '@/components/ui/Tooltip/TruncatedTooltip';
+import { HighlightMatch } from '@/routes/AIScreen/library/admin/components/HighlightMatch';
 import type { MemoryBankMemory } from '@/services/claw/digitalTwinTypes';
-import { CategoryBadge } from './CategoryBadgeV2';
-import { MetaRow } from './MetaRow';
-import { fmtRelative } from './formatV2';
+import { CategoryBadge } from './CategoryBadge';
+import { MetaRow } from '@/routes/AIScreen/library/shared/primitives/MetaRow';
+import { formatRelativeTime } from '@/utils/dateUtils';
 
 export const MemoryCard = ({
   memory,
   onDelete,
+  query = '',
 }: {
   memory: MemoryBankMemory;
   onDelete?: (hindsightMemoryId: string) => void;
+  query?: string;
 }): ReactElement => {
   const [showReasoning, setShowReasoning] = useState(false);
 
@@ -21,7 +24,9 @@ export const MemoryCard = ({
     <li className='flex flex-col gap-1 border-b border-border px-1 py-4'>
       <div className='flex items-center justify-between gap-3'>
         <TruncatedTooltip content={memory.content}>
-          <p className='min-w-0 flex-1 truncate text-sm text-foreground'>{memory.content}</p>
+          <p className='min-w-0 flex-1 truncate text-sm text-foreground'>
+            <HighlightMatch text={memory.content} query={query} />
+          </p>
         </TruncatedTooltip>
         {onDelete && (
           <Tooltip content='Delete memory' side='top'>
@@ -49,9 +54,11 @@ export const MemoryCard = ({
               {memory.recallHits7d} recall{memory.recallHits7d !== 1 ? 's' : ''} (7d)
             </span>
           ),
-          <span key='created'>created {fmtRelative(memory.createdAt)}</span>,
+          <span key='created'>created {formatRelativeTime(new Date(memory.createdAt))}</span>,
           memory.lastRecalledAt && (
-            <span key='recalled'>last recalled {fmtRelative(memory.lastRecalledAt)}</span>
+            <span key='recalled'>
+              last recalled {formatRelativeTime(new Date(memory.lastRecalledAt))}
+            </span>
           ),
           memory.curatorReasoning && (
             <button

@@ -1,10 +1,4 @@
-/* @dagrejs/dagre ships loose types, so its graph builder / layout calls read as
-   `any` to the strict TS-ESLint rules. Scoped-disable them for this file only. */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
-// Subsystem graph layout (dagre) — ported from the reference DigitalTwinMemoriesTab.
-// The backend returns { subsystems, edges }; each node is a curated subsystem and
-// each edge connects subsystems that share source sessions. We use dagre for a
-// left-to-right hierarchical layout and scale node saturation by memory count.
 
 import dagre from '@dagrejs/dagre';
 import type { Edge as RFEdge, Node as RFNode } from '@xyflow/react';

@@ -1,7 +1,3 @@
-// Single source of truth for Digital Twin subsystem / source / category display
-// metadata. The reference app duplicated these maps across four components; the
-// port centralizes them here.
-
 import type { ComponentType, SVGProps } from 'react';
 import {
   ContactsBook,
@@ -16,7 +12,6 @@ import {
 
 type SubsystemIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
-/** The 8 curated subsystems the backend groups memories into. */
 export const SUBSYSTEM_LABELS: Record<string, string> = {
   style: 'Communication style',
   expertise: 'Expertise',
@@ -42,7 +37,6 @@ export const SUBSYSTEM_ICONS: Record<string, SubsystemIcon> = {
 export const subsystemLabel = (subsystem: string): string =>
   SUBSYSTEM_LABELS[subsystem] ?? subsystem;
 
-/** Intake sources shown in the metrics "by source" breakdown. */
 export const SOURCE_LABELS: Record<string, string> = {
   daily: 'Daily curator',
   upload: 'Uploaded docs',
@@ -51,14 +45,11 @@ export const SOURCE_LABELS: Record<string, string> = {
 
 export const sourceLabel = (source: string): string => SOURCE_LABELS[source] ?? source;
 
-// ── Memory categories ──────────────────────────────────────────────────────────
-
 export interface CategoryStyle {
   label: string;
   className: string;
 }
 
-/** Semantic-token classes for the four Hindsight memory categories. */
 export const CATEGORY_STYLES: Record<string, CategoryStyle> = {
   world: {
     label: 'WORLD',

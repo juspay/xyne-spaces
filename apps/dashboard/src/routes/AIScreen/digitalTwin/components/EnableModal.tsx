@@ -3,14 +3,9 @@ import { ArrowRight, Brain } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { useEnableDigitalTwin } from '@/hooks/useClawDigitalTwin';
-import { DigitalTwinModal } from './DigitalTwinModalV2';
-import { DigitalTwinRangeSelector, type DigitalTwinRange } from './DigitalTwinRangeSelectorV2';
+import { V2Dialog } from '@/routes/AIScreen/library/shared/primitives/V2Dialog';
+import { DigitalTwinRangeSelector, type DigitalTwinRange } from './DigitalTwinRangeSelector';
 
-/**
- * Dialog for the backfill action (triggered from the header while the Twin is
- * enabled). The first-time enable flow is handled in-page by
- * `DigitalTwinEnablePanel`, not here.
- */
 export const EnableModal = ({
   open,
   mode,
@@ -44,17 +39,39 @@ export const EnableModal = ({
       ? 'Enable & start'
       : 'Start backfill';
 
+  const blurb =
+    mode === 'enable'
+      ? 'Your Twin learns from your public Spaces activity — messages you sent, calls you hosted, canvases you authored. Nothing in DMs or private channels is read.'
+      : 'Run another pass over your Spaces history. Adds candidate memories to your review queue.';
+
   return (
-    <DigitalTwinModal
+    <V2Dialog
       open={open}
-      onClose={onClose}
+      onOpenChange={next => {
+        if (!next) onClose();
+      }}
       title={mode === 'enable' ? 'Enable Digital Twin' : 'Backfill history'}
+      description={blurb}
+      testId='digital-twin-enable-dialog'
       footer={
         <>
-          <Button variant='ghost' size='sm' onClick={onClose} disabled={enabling}>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={onClose}
+            disabled={enabling}
+            data-track-category='Claw Agents'
+            data-track-name={`Digital Twin: cancel ${mode}`}
+          >
             Cancel
           </Button>
-          <Button size='sm' onClick={submit} loading={enabling}>
+          <Button
+            size='sm'
+            onClick={submit}
+            loading={enabling}
+            data-track-category='Claw Agents'
+            data-track-name={`Digital Twin: confirm ${mode}`}
+          >
             {ctaLabel}
             {!enabling && <ArrowRight className='size-3.5' />}
           </Button>
@@ -65,14 +82,10 @@ export const EnableModal = ({
         <div className='flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary'>
           <Brain className='size-5' />
         </div>
-        <p className='text-xs leading-relaxed text-muted-foreground'>
-          {mode === 'enable'
-            ? 'Your Twin learns from your public Spaces activity — messages you sent, calls you hosted, canvases you authored. Nothing in DMs or private channels is read.'
-            : 'Run another pass over your Spaces history. Adds candidate memories to your review queue.'}
-        </p>
+        <p className='text-xs leading-relaxed text-muted-foreground'>{blurb}</p>
       </div>
 
       <DigitalTwinRangeSelector mode={mode} active={open} onRangeChange={setRange} />
-    </DigitalTwinModal>
+    </V2Dialog>
   );
 };

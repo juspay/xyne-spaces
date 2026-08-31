@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
-import { CATEGORY_STYLES } from './subsystemsV2';
+import { CATEGORY_STYLES } from './subsystems';
 
 export const CategoryBadge = ({ category }: { category: string | null }): ReactElement | null => {
   if (!category) return null;

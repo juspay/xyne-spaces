@@ -1,6 +1,6 @@
 import { type ReactElement } from 'react';
 import { AIShell } from '../../../components/AIScreen/AIShell';
-import DigitalTwinV2 from '../digitalTwin/DigitalTwinV2';
+import DigitalTwin from '../digitalTwin/DigitalTwin';
 import { useAIChatHandoff } from '../useAIChatHandoff';
 
 const AIDigitalTwinScreen = (): ReactElement => {
@@ -14,7 +14,7 @@ const AIDigitalTwinScreen = (): ReactElement => {
       >
         <div className='h-[32px] w-full shrink-0' />
         <div className='relative flex min-h-0 flex-1 flex-col overflow-hidden'>
-          <DigitalTwinV2 />
+          <DigitalTwin />
         </div>
       </main>
     </AIShell>

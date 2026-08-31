@@ -16,10 +16,8 @@ const InfoDot = ({ text }: { text: string }): ReactElement => (
 interface DigitalTwinBannerProps {
   status: DigitalTwinStatus | undefined;
   loading: boolean;
-  /** True when the backfill has been polling for ~30s with no cursor movement. */
   backfillStalled?: boolean;
   onEnable: () => void;
-  /** Used only for the stalled-backfill "Disable & retry" CTA. */
   onDisable: () => void;
 }
 
@@ -45,7 +43,6 @@ export const DigitalTwinBanner = ({
     ? Object.values(status.backfillState).some(s => !s.complete)
     : false;
 
-  // ── Off ───────────────────────────────────────────────────────────────────
   if (!status.enabled) {
     return (
       <div className='overflow-hidden rounded-xl border border-status-success/30 bg-card'>
@@ -79,7 +76,6 @@ export const DigitalTwinBanner = ({
     );
   }
 
-  // ── Backfilling ────────────────────────────────────────────────────────────
   if (backfillRunning) {
     const entries = Object.values(status.backfillState!);
     const overallPct = Math.round(
@@ -200,7 +196,6 @@ export const DigitalTwinBanner = ({
     );
   }
 
-  // ── Active ─────────────────────────────────────────────────────────────────
   const hasPending = status.pendingCandidates > 0;
 
   return (
