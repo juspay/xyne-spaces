@@ -1,3 +1,10 @@
+## [1.249.1](https://github.com/juspay/xyne-spaces/compare/v1.249.0...v1.249.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* Allow call participants to admit or decline join requests ([#1254](https://github.com/juspay/xyne-spaces/issues/1254)) ([6a61ed7](https://github.com/juspay/xyne-spaces/commit/6a61ed780328e5824136ec9f1683e7a4714b381c))
+
 ## [1.249.0](https://github.com/juspay/xyne-spaces/compare/v1.248.9...v1.249.0) (2026-08-31)
 
 
