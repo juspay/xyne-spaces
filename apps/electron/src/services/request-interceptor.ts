@@ -267,7 +267,7 @@ function installFrontendCsp(): void {
     `media-src 'self' blob: ${xyneHosts}`,
     `connect-src 'self' ${xyneHosts} ${xyneWs} https://o4507796893925376.ingest.us.sentry.io https://accounts.google.com https://*.googleapis.com ${sandpackBundler}`,
     `font-src 'self' data: ${xyneHosts} ${googleFontsFiles}`,
-    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://accounts.google.com https://docs.google.com ${sandpackBundler}`,
+    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://player.vimeo.com https://www.loom.com https://accounts.google.com https://docs.google.com ${sandpackBundler}`,
     `worker-src 'self' blob:`,
     `object-src 'none'`,
     `base-uri 'none'`,
