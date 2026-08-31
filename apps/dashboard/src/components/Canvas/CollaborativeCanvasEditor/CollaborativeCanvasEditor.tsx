@@ -11,6 +11,8 @@ import {
   useCreateBlockNote,
   SuggestionMenuController,
   FormattingToolbarController,
+  FilePanelController,
+  LinkToolbarController,
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
@@ -58,6 +60,8 @@ import { filterSuggestionItems } from '@blocknote/core/extensions';
 import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
+import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
+import { withHeadingsTogether } from '../canvasSlashMenu';
 import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
@@ -78,6 +82,8 @@ import { AnimatePresence } from 'framer-motion';
 
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
+import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
@@ -307,19 +313,22 @@ export const CollaborativeCanvasEditor = forwardRef<
       return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
-    // Get slash menu items with custom blocks
+    // Every slash item, each already showing the key that reaches it.
+    const allSlashItems = useMemo(() => {
+      if (!editor) return [];
+      const defaultItems = getDefaultReactSlashMenuItems(
+        editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
+      );
+      return withBlockShortcutBadges(withHeadingsTogether([...defaultItems, ...customSlashItems]));
+    }, [editor, customSlashItems]);
+
     const getSlashMenuItems = useCallback(
-      (query: string): Promise<DefaultReactSuggestionItem[]> => {
-        if (!editor) return Promise.resolve([]);
-        const defaultItems = getDefaultReactSlashMenuItems(
-          editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
-        );
-        return Promise.resolve(
-          filterSuggestionItems([...defaultItems, ...customSlashItems], query),
-        );
-      },
-      [editor, customSlashItems],
+      (query: string): Promise<DefaultReactSuggestionItem[]> =>
+        Promise.resolve(filterSuggestionItems(allSlashItems, query)),
+      [allSlashItems],
     );
+
+    useCanvasBlockShortcuts(editor, allSlashItems);
 
     const users = useUsers();
     const allUserGroups = useUserGroups();
@@ -712,9 +721,14 @@ export const CollaborativeCanvasEditor = forwardRef<
                     formattingToolbar={false}
                     tableHandles={editable && !isReadOnly}
                     slashMenu={false}
+                    linkToolbar={false}
+                    filePanel={false}
                     onChange={handleCollaborativeChange}
                   >
                     <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                    <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
+                    <CanvasPastedLinkToolbar />
+                    <FilePanelController filePanel={CanvasFilePanel} />
                     <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
                     <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
                   </BlockNoteView>
