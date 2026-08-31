@@ -16,8 +16,12 @@ type ScopableQuery = {
 
 type OrgScopeRule = (query: ScopableQuery, ctx: Context) => ScopableQuery;
 
-/** Tables without a workspaceId column, scoped through the caller's organisation membership. */
-const ORG_LEVEL_SCOPES: Record<string, OrgScopeRule> = {
+/**
+ * Tables without a workspaceId column that need a bespoke scope rule — either the
+ * caller's organisation membership (org-level tables) or a parent row that does
+ * carry workspaceId (e.g. canvas comments, scoped through their canvas).
+ */
+const CUSTOM_SCOPES: Record<string, OrgScopeRule> = {
   // An organisation is visible to its own members and to the members of a
   // workspace it is linked to.
   organizations: (query, ctx) =>
@@ -39,6 +43,13 @@ const ORG_LEVEL_SCOPES: Record<string, OrgScopeRule> = {
         exists('orgMembers', (m: ScopableQuery) => m.where('memberId', ctx.memberId)),
       ),
     ),
+  // Canvas comment tables carry canvasId, not workspaceId; scope through the canvas.
+  canvas_comment_threads: (query, ctx) =>
+    query.whereExists('canvas', (c: ScopableQuery) => c.where('workspaceId', ctx.workspaceId)),
+  canvas_comments: (query, ctx) =>
+    query.whereExists('thread', (t: ScopableQuery) =>
+      t.whereExists('canvas', (c: ScopableQuery) => c.where('workspaceId', ctx.workspaceId)),
+    ),
 };
 
 /** Reference data that is the same for every tenant. */
@@ -54,9 +65,9 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
   if (zeroTables[table] && 'workspaceId' in zeroTables[table].columns) {
     return scopable.where('workspaceId', ctx.workspaceId) as unknown as T;
   }
-  const orgRule = ORG_LEVEL_SCOPES[table];
-  if (orgRule) {
-    return orgRule(scopable, ctx) as unknown as T;
+  const customRule = CUSTOM_SCOPES[table];
+  if (customRule) {
+    return customRule(scopable, ctx) as unknown as T;
   }
   if (GLOBAL_REFERENCE_TABLES.has(table)) {
     return query;

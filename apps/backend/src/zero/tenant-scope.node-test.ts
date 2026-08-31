@@ -58,6 +58,22 @@ describe('scopeQueryToTenant', () => {
     assert.match(where, /"table":"org_members"/);
   });
 
+  it('scopes canvas comment tables through their canvas workspace', () => {
+    const threads = whereOf(scopeQueryToTenant(zql.canvas_comment_threads.where('canvasId', 'cv'), ctx, 'canvasCommentThreads'));
+    assert.match(threads, /"table":"canvases"/);
+    assert.match(threads, /"name":"workspaceId"/);
+    assert.match(threads, /"value":"ws-1"/);
+    const comments = whereOf(scopeQueryToTenant(zql.canvas_comments.where('threadId', 'th'), ctx, 'canvasThreadComments'));
+    assert.match(comments, /"table":"canvas_comment_threads"/);
+    assert.match(comments, /"table":"canvases"/);
+    assert.match(comments, /"value":"ws-1"/);
+  });
+
+  it('refuses a table with no tenant scope rather than serving it unscoped', () => {
+    // resources IS listed as global; assert the throw path exists for a truly unknown table.
+    assert.throws(() => scopeQueryToTenant({}, ctx, 'bogus'));
+  });
+
   it('leaves global reference data alone', () => {
     const query = zql.merchants.orderBy('mid', 'asc');
     assert.equal(scopeQueryToTenant(query, ctx, 'getAllMerchants'), query);
