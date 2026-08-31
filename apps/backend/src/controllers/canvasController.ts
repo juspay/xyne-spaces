@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { AttachmentEntityType, ActivityClassification, CanvasRole } from '@xyne/shared';
+import { AttachmentEntityType, ActivityClassification, CanvasRole, NotificationType } from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
@@ -518,4 +518,452 @@ export class CanvasController {
       res.status(500).json({ error: 'Failed to update canvas' });
     }
   };
+
+  // POST /api/canvas/:canvasId/request-access — edit-access request. The
+  // request's durable state IS the recipients' activity rows: an open request
+  // is one whose activity is still ACTIONABLE (approve/dismiss flip it to
+  // SKIP), so dedupe checks those rows instead of any in-memory state.
+  requestAccess = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { canvasId } = req.params;
+      const message =
+        typeof req.body?.message === 'string' ? req.body.message.slice(0, 500) : undefined;
+
+      // In-process guard only absorbs rapid double-clicks racing the durable
+      // activity-row dedupe below.
+      const rateKey = `${userId}:${canvasId}`;
+      const lastRequestedAt = accessRequestTimestamps.get(rateKey);
+      if (lastRequestedAt && Date.now() - lastRequestedAt < ACCESS_REQUEST_DEBOUNCE_MS) {
+        res.status(200).json({ success: true, alreadyRequested: true });
+        return;
+      }
+
+      const prisma = DatabaseClient.getInstance();
+      const canvas = await prisma.canvas.findFirst({
+        where: { id: canvasId, workspaceId },
+        select: { id: true, title: true, createdBy: true, visibility: true },
+      });
+      if (!canvas) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
+
+      // Resolve the requester's effective participant rows (direct, group, channel).
+      const [groupMappings, channelMemberships] = await Promise.all([
+        prisma.userGroupMapping.findMany({ where: { userId }, select: { userGroupId: true } }),
+        prisma.channelParticipant.findMany({ where: { userId }, select: { channelId: true } }),
+      ]);
+      const groupIds = groupMappings.map(m => m.userGroupId);
+      const channelIds = channelMemberships.map(c => c.channelId);
+      const effectiveRows = await prisma.canvasParticipant.findMany({
+        where: {
+          canvasId: canvas.id,
+          OR: [
+            { userId },
+            ...(groupIds.length ? [{ userGroupId: { in: groupIds } }] : []),
+            ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+          ],
+        },
+        select: { role: true },
+      });
+
+      const canAlreadyEdit =
+        canvas.createdBy === userId ||
+        effectiveRows.some(r => r.role === CanvasRole.EDITOR || r.role === CanvasRole.OWNER);
+      if (canAlreadyEdit) {
+        res.status(400).json({ error: 'You already have edit access' });
+        return;
+      }
+      // Must at least be able to view — don't let no-access users probe private canvases.
+      if (effectiveRows.length === 0 && canvas.visibility !== 'PUBLIC') {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+
+      // Durable dedupe: while any recipient's request activity is still open
+      // (ACTIONABLE — approve/dismiss flip it to SKIP) AND fresh, don't create
+      // another round of activities/notifications. Survives restarts and
+      // multiple backend instances, unlike the in-memory debounce above.
+      // A stale open request (every recipient ignored it past the refresh
+      // window) does NOT block: it gets superseded below, so the requester is
+      // never permanently locked out by owner inaction.
+      const openRequest = await prisma.activity.findFirst({
+        where: {
+          canvasId: canvas.id,
+          actorId: userId,
+          actorAction: 'canvas_access_requested',
+          classification: ActivityClassification.ACTIONABLE,
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, createdAt: true },
+      });
+      if (
+        openRequest &&
+        Date.now() - openRequest.createdAt.getTime() < ACCESS_REQUEST_REFRESH_MS
+      ) {
+        res.status(200).json({ success: true, alreadyRequested: true });
+        return;
+      }
+      if (openRequest) {
+        // Stale open request: resolve the old rows so the fresh round below
+        // is the single open request (keeps the one-open-request invariant).
+        await prisma.activity.updateMany({
+          where: {
+            canvasId: canvas.id,
+            actorId: userId,
+            actorAction: 'canvas_access_requested',
+            classification: ActivityClassification.ACTIONABLE,
+          },
+          data: { classification: ActivityClassification.SKIP, isRead: true },
+        });
+      }
+
+      // Recipients: anyone who can grant edit access — the creator plus
+      // direct OWNER/EDITOR participants, expanding OWNER/EDITOR user groups.
+      // Channel-role rows are deliberately excluded: a channel audience is
+      // unbounded and its members didn't opt into managing this canvas.
+      const grantorRows = await prisma.canvasParticipant.findMany({
+        where: {
+          canvasId: canvas.id,
+          role: { in: [CanvasRole.OWNER, CanvasRole.EDITOR] },
+          channelId: null,
+        },
+        select: { userId: true, userGroupId: true },
+      });
+      const grantorGroupIds = grantorRows
+        .map(r => r.userGroupId)
+        .filter((id): id is string => !!id);
+      const groupMemberLists = await Promise.all(
+        grantorGroupIds.map(groupId => getGroupMembersForNotification(groupId)),
+      );
+      const recipientIds = [
+        ...new Set([
+          canvas.createdBy,
+          ...grantorRows.map(r => r.userId).filter((id): id is string => !!id),
+          ...groupMemberLists.flat().map(m => m.userId),
+        ]),
+      ].filter(id => id && id !== userId);
+      if (recipientIds.length === 0) {
+        res.status(200).json({ success: true });
+        return;
+      }
+
+      const requester = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true, displayName: true },
+      });
+      const requesterName = requester?.displayName || requester?.name || 'Someone';
+
+      accessRequestTimestamps.set(rateKey, Date.now());
+
+      // Persistent surface: an Activity row per recipient (stays in the
+      // activity feed until acted on, clicks through to the canvas). The push
+      // notification below is just the transient heads-up. ACTIONABLE, not
+      // PENDING: PENDING would enqueue these into the AI classification
+      // worker, which rewrites non-message activities to FYI and can clobber
+      // a concurrent approve/dismiss (classification doubles as this
+      // feature's open/resolved request state).
+      await activityService.createActivities(
+        recipientIds.map(recipientId => ({
+          id: uuidv4(),
+          userId: recipientId,
+          actorId: userId,
+          actorAction: 'canvas_access_requested',
+          actionSource: 'canvas',
+          actionSourceId: canvas.id,
+          canvasId: canvas.id,
+          classification: ActivityClassification.ACTIONABLE,
+        })),
+      );
+
+      await Promise.allSettled(
+        recipientIds.map(recipientId =>
+          notificationService.createNotification(recipientId, {
+            title: `${requesterName} requested edit access`,
+            message: message
+              ? `${requesterName} requested edit access to "${canvas.title}": ${message}`
+              : `${requesterName} requested edit access to "${canvas.title}"`,
+            type: NotificationType.CANVAS_ACCESS_REQUESTED,
+            relatedEntityType: 'canvas',
+            relatedEntityId: canvas.id,
+            actionUrl: `/${workspaceId}/chat/canvas/${canvas.id}`,
+            metadata: { canvasId: canvas.id, requesterId: userId, requesterName },
+          }),
+        ),
+      );
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[CANVAS-REQUEST-ACCESS] Error:', error);
+      res.status(500).json({ error: 'Failed to request access' });
+    }
+  };
+
+  // Whether userId may manage access requests on this canvas: the creator or
+  // a direct OWNER/EDITOR participant (mirrors the canvas mutators' checks).
+  private canManageCanvasAccess = async (
+    prisma: ReturnType<typeof DatabaseClient.getInstance>,
+    canvas: { id: string; createdBy: string },
+    userId: string,
+  ): Promise<boolean> => {
+    if (canvas.createdBy === userId) return true;
+    const row = await prisma.canvasParticipant.findFirst({
+      where: {
+        canvasId: canvas.id,
+        userId,
+        role: { in: [CanvasRole.OWNER, CanvasRole.EDITOR] },
+      },
+      select: { id: true },
+    });
+    return !!row;
+  };
+
+  // GET /api/canvas/:canvasId/access-requests — canvas-wide list of open
+  // edit-access requests for the share dialog. Deliberately canvas-scoped
+  // (any recipient's ACTIONABLE row counts), not per-recipient, so
+  // owners/editors added AFTER a request still see and can resolve it.
+  listAccessRequests = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { canvasId } = req.params;
+      const prisma = DatabaseClient.getInstance();
+      const canvas = await prisma.canvas.findFirst({
+        where: { id: canvasId, workspaceId },
+        select: { id: true, createdBy: true },
+      });
+      if (!canvas) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
+      if (!(await this.canManageCanvasAccess(prisma, canvas, userId))) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+
+      const rows = await prisma.activity.findMany({
+        where: {
+          canvasId: canvas.id,
+          actorAction: 'canvas_access_requested',
+          classification: ActivityClassification.ACTIONABLE,
+        },
+        select: { actorId: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      // One entry per requester (rows are per-recipient copies of the same request).
+      const requestedAtByRequester = new Map<string, number>();
+      for (const row of rows) {
+        if (!requestedAtByRequester.has(row.actorId)) {
+          requestedAtByRequester.set(row.actorId, row.createdAt.getTime());
+        }
+      }
+      const requesterIds = [...requestedAtByRequester.keys()];
+      const requesters = requesterIds.length
+        ? await prisma.user.findMany({
+            where: { id: { in: requesterIds } },
+            select: { id: true, name: true, displayName: true },
+          })
+        : [];
+      const requesterById = new Map(requesters.map(u => [u.id, u]));
+
+      res.status(200).json({
+        requests: requesterIds.map(requesterId => ({
+          requesterId,
+          requesterName:
+            requesterById.get(requesterId)?.displayName ||
+            requesterById.get(requesterId)?.name ||
+            'Unknown user',
+          requestedAt: requestedAtByRequester.get(requesterId),
+        })),
+      });
+    } catch (error) {
+      logger.error('[CANVAS-ACCESS-REQUESTS] List error:', error);
+      res.status(500).json({ error: 'Failed to load access requests' });
+    }
+  };
+
+  // GET /api/canvas/:canvasId/access-requests/mine — whether the caller has
+  // an open edit-access request on this canvas. The requester's "Requested"
+  // button state renders from this server truth instead of a local timer, so
+  // it clears the moment anyone approves or rejects (or the ignore window
+  // lapses) and is consistent across devices.
+  myAccessRequestStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { canvasId } = req.params;
+      const prisma = DatabaseClient.getInstance();
+      const openRequest = await prisma.activity.findFirst({
+        where: {
+          canvasId,
+          actorId: userId,
+          actorAction: 'canvas_access_requested',
+          classification: ActivityClassification.ACTIONABLE,
+        },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      const pending =
+        !!openRequest &&
+        Date.now() - openRequest.createdAt.getTime() < ACCESS_REQUEST_REFRESH_MS;
+      res.status(200).json({ pending });
+    } catch (error) {
+      logger.error('[CANVAS-ACCESS-REQUESTS] Status error:', error);
+      res.status(500).json({ error: 'Failed to load request status' });
+    }
+  };
+
+  // POST /api/canvas/:canvasId/access-requests/:requesterId/resolve
+  // {action: 'approve' | 'decline'} — resolves an open edit-access request for
+  // EVERY recipient in one transaction. Lives in REST (Prisma) rather than a
+  // Zero mutator because the activities mutation ACL correctly forbids one
+  // client from updating other recipients' rows; the server resolving rows it
+  // created itself is the sanctioned path. First resolution wins; a second
+  // call finds nothing open and no-ops with alreadyResolved.
+  resolveAccessRequest = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { canvasId, requesterId } = req.params;
+      const action = req.body?.action;
+      if (action !== 'approve' && action !== 'decline') {
+        res.status(400).json({ error: "action must be 'approve' or 'decline'" });
+        return;
+      }
+      const prisma = DatabaseClient.getInstance();
+      const canvas = await prisma.canvas.findFirst({
+        where: { id: canvasId, workspaceId },
+        select: { id: true, title: true, createdBy: true },
+      });
+      if (!canvas) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
+      if (!(await this.canManageCanvasAccess(prisma, canvas, userId))) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+      const requester = await prisma.user.findFirst({
+        where: { id: requesterId, workspaceId },
+        select: { id: true },
+      });
+      if (!requester) {
+        res.status(404).json({ error: 'Requester not found' });
+        return;
+      }
+
+      let granted = false;
+      let resolvedCount = 0;
+      await prisma.$transaction(async tx => {
+        if (action === 'approve') {
+          const target = await tx.canvasParticipant.findFirst({
+            where: { canvasId: canvas.id, userId: requesterId },
+          });
+          const alreadyHasEdit =
+            requesterId === canvas.createdBy || target?.role === CanvasRole.OWNER;
+          if (!alreadyHasEdit) {
+            if (target) {
+              if (target.role !== CanvasRole.EDITOR) {
+                await tx.canvasParticipant.update({
+                  where: { id: target.id },
+                  data: { role: CanvasRole.EDITOR },
+                });
+                granted = true;
+              }
+            } else {
+              await tx.canvasParticipant.create({
+                data: {
+                  workspaceId,
+                  canvasId: canvas.id,
+                  userId: requesterId,
+                  role: CanvasRole.EDITOR,
+                },
+              });
+              granted = true;
+            }
+          }
+        }
+        const resolved = await tx.activity.updateMany({
+          where: {
+            canvasId: canvas.id,
+            actorId: requesterId,
+            actorAction: 'canvas_access_requested',
+            classification: ActivityClassification.ACTIONABLE,
+          },
+          data: { classification: ActivityClassification.SKIP, isRead: true },
+        });
+        resolvedCount = resolved.count;
+      });
+
+      // Raw Prisma writes bypass the zero side-effect handlers, so notify the
+      // requester of the grant here (decline stays deliberately silent).
+      if (granted) {
+        const approver = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { name: true, displayName: true },
+        });
+        await notificationService.createCanvasSharedNotifications(
+          [requesterId],
+          canvas.id,
+          canvas.title ?? 'Untitled',
+          userId,
+          approver?.displayName || approver?.name || 'Someone',
+          CanvasRole.EDITOR,
+          'canvas_shared',
+        );
+        await activityService.createActivities([
+          {
+            id: uuidv4(),
+            userId: requesterId,
+            actorId: userId,
+            actorAction: 'canvas_shared',
+            actionSource: 'canvas',
+            actionSourceId: canvas.id,
+            canvasId: canvas.id,
+            classification: ActivityClassification.ACTIONABLE,
+          },
+        ]);
+      }
+
+      res.status(200).json({
+        success: true,
+        granted,
+        alreadyResolved: resolvedCount === 0 && !granted,
+      });
+    } catch (error) {
+      logger.error('[CANVAS-ACCESS-REQUESTS] Resolve error:', error);
+      res.status(500).json({ error: 'Failed to resolve access request' });
+    }
+  };
 }
+
+// Absorbs rapid double-clicks that could race the durable activity-row dedupe
+// (two concurrent requests both seeing "no open request"). Deliberately short:
+// real repeat-request protection lives in the ACTIONABLE-activity check.
+const ACCESS_REQUEST_DEBOUNCE_MS = 30 * 1000;
+const accessRequestTimestamps = new Map<string, number>();
+
+// How long an unanswered request blocks re-requesting. After this, a new
+// request supersedes the ignored one (fresh activities + notifications), so
+// owner inaction can never permanently lock a requester out. Kept short:
+// rejects free the requester immediately, so this only paces reminders when
+// every owner ignored the request.
+const ACCESS_REQUEST_REFRESH_MS = 10 * 1000;

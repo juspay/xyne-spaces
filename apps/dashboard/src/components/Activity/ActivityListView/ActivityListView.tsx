@@ -185,6 +185,7 @@ const TABS: TabConfig[] = [
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
       activity.actorAction === 'canvas_access_revoked' ||
+      activity.actorAction === 'canvas_access_requested' ||
       (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
   },
   {
@@ -379,7 +380,13 @@ const ActivityListView = (): ReactElement => {
           'stage_approval_rejected',
         ];
       case 'canvas':
-        return ['canvas_shared', 'canvas_role_changed', 'canvas_access_revoked', 'mentioned_user'];
+        return [
+          'canvas_shared',
+          'canvas_role_changed',
+          'canvas_access_revoked',
+          'canvas_access_requested',
+          'mentioned_user',
+        ];
       case 'calls':
         return [...CALL_ACTIVITY_TYPES];
       default:
@@ -785,6 +792,7 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'canvas_shared' ||
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
+        activity.actorAction === 'canvas_access_requested' ||
         (activity.actorAction === 'mentioned_user' && activity.canvasId)
       ) {
         counts.canvas++;
