@@ -35,6 +35,7 @@ import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-con
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
+import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
 
@@ -431,12 +432,37 @@ async function persistAssistantResult(args: {
 
         const inlineMeta = att.metadata && typeof att.metadata === "object" ? att.metadata : undefined;
         const fallbackSlide = fallbackSlides.get(att.fileName);
-        const attachmentMetadata: Record<string, unknown> | undefined =
+        let attachmentMetadata: Record<string, unknown> | undefined =
           inlineMeta && Object.keys(inlineMeta).length > 0
             ? inlineMeta
             : fallbackSlide
               ? { slideJson: fallbackSlide }
               : undefined;
+
+        // A conversation owns ONE app: the first generated artifact creates it,
+        // every later one becomes a version of it. Done here rather than in the
+        // tool because the tool runs in xyne-claw with no database. The ids are
+        // stamped onto the manifest so the chat card can address the app (and
+        // its version history) instead of only the raw attachment.
+        const reactArtifact = attachmentMetadata?.["reactArtifact"];
+        if (reactArtifact && typeof reactArtifact === "object") {
+          const session = await attachArtifactToSessionApp({
+            conversationId: args.conversationId,
+            userId: args.userId,
+            payload: buffer,
+          });
+          if (session) {
+            attachmentMetadata = {
+              ...attachmentMetadata,
+              reactArtifact: {
+                ...(reactArtifact as Record<string, unknown>),
+                appId: session.appId,
+                versionId: session.versionId,
+                versionNumber: session.versionNumber,
+              },
+            };
+          }
+        }
 
         const row = await prisma.chatAttachment.create({
           data: {

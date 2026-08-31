@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type {
   MessageAttachment,
   ReactArtifactManifest,
@@ -36,6 +37,10 @@ export interface ReactArtifactRef {
   inlineData?: string;
   /** Set once the artifact has been saved, so the header can show its state. */
   savedAppId?: string;
+  /** The exact build this turn produced. A thread's app moves on with each
+   *  generation, so a card must pin its own version or scrolling back would
+   *  show history saying one thing and rendering another. */
+  versionId?: string;
 }
 
 /**
@@ -58,6 +63,14 @@ export interface ReactArtifactViewProps {
   onExpand?: (artifact: ReactArtifactRef) => void;
   /** Shows a close affordance; set when rendered inside the full-screen dialog. */
   onClose?: () => void;
+  /**
+   * Replaces the header's title span. Lets a host own that side of the single
+   * header row — the App Creation pane puts the app icon, the app's own title
+   * and the version dropdown here, rather than stacking a second header above
+   * this one. Note the app's title and `payload.title` can legitimately differ:
+   * an app keeps its v1 title while a later build may rename itself.
+   */
+  titleSlot?: ReactNode;
   /** Shows a save affordance. Omitted when already saved or behind the flag. */
   onSave?: (artifact: ReactArtifactRef) => void;
   /** Drives the save button's appearance without the view owning the request. */
@@ -72,5 +85,9 @@ export function toArtifactRef(attachment: MessageAttachment): ReactArtifactRef |
     attachmentId: attachment.id,
     manifest,
     ...(attachment.data ? { inlineData: attachment.data } : {}),
+    // Present for anything generated since session-scoping: the artifact is a
+    // version of the conversation's app, not a standalone attachment.
+    ...(manifest.appId ? { savedAppId: manifest.appId } : {}),
+    ...(manifest.versionId ? { versionId: manifest.versionId } : {}),
   };
 }

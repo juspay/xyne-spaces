@@ -4,6 +4,7 @@ import type { FlowComponent } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { buttonVariants } from '../../ui/Button/Button';
 import { CardShell } from './cardPrimitives';
+import { ChatWithAgentButton } from './agent/ChatWithAgentButton';
 
 /**
  * Agent roster — a sample of the workspace's agents, each opening its own page,
@@ -56,10 +57,18 @@ export const AgentSummaryNode: React.FC<{ node: FlowComponent; children?: React.
         </div>
 
         {agents.length > 0 && (
-          <div className='flex flex-col gap-2'>
+          <div className='flex flex-col'>
             {agents.map(agent => (
-              <div key={agent.slug} className='flex items-start gap-3 rounded-xl py-1.5 pl-1'>
-                <div className='flex min-w-0 flex-1 flex-col'>
+              <div
+                key={agent.slug}
+                className='-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-foreground/[0.04]'
+              >
+                <Link
+                  to={`/ai/library/agent/${encodeURIComponent(agent.slug)}?tab=persona`}
+                  className={cn('flex min-w-0 flex-1 flex-col', LINK_BUTTON)}
+                  data-track-category='Claw Agents'
+                  data-track-name='ViewAgentFromCard'
+                >
                   <span className='truncate text-sm font-medium leading-5 text-foreground'>
                     {agent.name}
                   </span>
@@ -68,19 +77,8 @@ export const AgentSummaryNode: React.FC<{ node: FlowComponent; children?: React.
                       {agent.description}
                     </span>
                   )}
-                </div>
-                <Link
-                  to={`/ai/library/agent/${encodeURIComponent(agent.slug)}?tab=persona`}
-                  className={cn(
-                    buttonVariants({ variant: 'outline', size: 'sm' }),
-                    'h-7 shrink-0 rounded-lg px-2.5 text-sm font-medium',
-                    LINK_BUTTON,
-                  )}
-                  data-track-category='Claw Agents'
-                  data-track-name='ViewAgentFromCard'
-                >
-                  View
                 </Link>
+                <ChatWithAgentButton slug={agent.slug} />
               </div>
             ))}
           </div>

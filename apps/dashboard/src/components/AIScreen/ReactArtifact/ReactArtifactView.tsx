@@ -34,6 +34,10 @@ import type { ReactArtifactPayload, ReactArtifactViewProps } from './ReactArtifa
 import { ArtifactCodeView } from './ArtifactCodeView';
 import { useArtifactDataBridge, type PreviewClientRef } from './useArtifactDataBridge';
 import { useArtifactAgentBridge } from './useArtifactAgentBridge';
+import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
+import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
+import { useAuthContextValues } from '../../../hooks/useAuth';
+import { TOP_BAR_HEIGHT_CLASS } from '../../AppNavigator/topBarHeight';
 import {
   DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
   REACT_ARTIFACT_AGENT_CAC_KEY,
@@ -97,6 +101,7 @@ const ArtifactSandpack = memo(
     refreshRef,
     canWrite,
     canInvokeAgents,
+    currentUserId,
     appId,
     attachmentId,
   }: {
@@ -104,6 +109,8 @@ const ArtifactSandpack = memo(
     theme: 'light' | 'dark';
     canWrite: boolean;
     canInvokeAgents: boolean;
+    /** Resolves DM names and excludes the viewer from participant lists. */
+    currentUserId: string;
     appId?: string;
     /** Identifies an artifact that has not been saved yet, so it can still run
      *  agents from the chat thread it was generated in. */
@@ -132,6 +139,11 @@ const ArtifactSandpack = memo(
       ...(attachmentId ? { attachmentId } : {}),
       previewRef,
     });
+
+    // Ids are opaque and two of the naming rules are not guessable, so the host
+    // resolves them with the app's own helpers rather than letting generated
+    // code join a user table and get it wrong.
+    useArtifactDirectoryBridge({ currentUserId, previewRef });
 
     const files = useMemo(() => toSandpackFiles(payload), [payload]);
     const customSetup = useMemo(
@@ -171,6 +183,7 @@ export const ReactArtifactView = ({
   fill = false,
   onExpand,
   onClose,
+  titleSlot,
   onSave,
   saveState = 'idle',
 }: ReactArtifactViewProps): ReactElement => {
@@ -182,12 +195,13 @@ export const ReactArtifactView = ({
     key: REACT_ARTIFACT_WRITE_CAC_KEY,
     fallbackConfig: DEFAULT_REACT_ARTIFACT_WRITE_CAC_CONFIG,
   });
+  const auth = useAuthContextValues();
   const { config: agentConfig } = useCacConfig<ReactArtifactAgentCacConfig>({
     key: REACT_ARTIFACT_AGENT_CAC_KEY,
     fallbackConfig: DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
   });
   const theme = useMemo(() => sandpackThemeName(), []);
-  const { attachmentId, inlineData, savedAppId } = artifact;
+  const { attachmentId, inlineData, savedAppId, versionId } = artifact;
 
   // Keyed on the ids, NOT on `artifact`: callers rebuild that object each
   // render, and depending on its identity would re-enter `loading` — tearing
@@ -196,11 +210,18 @@ export const ReactArtifactView = ({
     let cancelled = false;
     setState({ status: 'loading' });
 
-    // A saved app is addressed by its own id, which is the only route that works
-    // for someone who was never in the originating chat.
-    const load = savedAppId
-      ? loadSavedArtifactPayload(savedAppId)
-      : loadArtifactPayload({ attachmentId, ...(inlineData ? { inlineData } : {}) });
+    // Inline bytes win when present: the artifact was just generated in this
+    // session, so they are already here and exactly what this turn produced —
+    // fetching would be a needless round trip against a row written moments ago.
+    // Otherwise address the app by id, the only route that works for someone who
+    // was never in the originating chat, pinned to THIS turn's version so a card
+    // keeps rendering what its message described even after later generations
+    // move the app on.
+    const load = inlineData
+      ? loadArtifactPayload({ attachmentId, inlineData })
+      : savedAppId
+        ? loadSavedArtifactPayload(savedAppId, versionId)
+        : loadArtifactPayload({ attachmentId });
 
     load
       .then(payload => {
@@ -217,7 +238,7 @@ export const ReactArtifactView = ({
     return (): void => {
       cancelled = true;
     };
-  }, [attachmentId, inlineData, savedAppId]);
+  }, [attachmentId, inlineData, savedAppId, versionId]);
 
   const shellClass = fill
     ? 'flex h-full min-h-0 flex-1 flex-col'
@@ -251,8 +272,18 @@ export const ReactArtifactView = ({
 
   return (
     <div className={shellClass} data-testid='react-artifact'>
-      <div className='flex items-center justify-between gap-2 border-b border-border px-3 py-2'>
-        <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
+      <div
+        className={`flex items-center justify-between gap-2 border-b px-3 ${
+          // Only when filling a panel does this sit on the same row as the
+          // AppNavigator, so it has to match both its height and its seam
+          // colour. Inline in a transcript it is a card header, not a top bar:
+          // content-sized, with the ordinary card border.
+          fill ? `${TOP_BAR_HEIGHT_CLASS} border-sidebar-border-muted` : 'border-border py-2'
+        }`}
+      >
+        {titleSlot ?? (
+          <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
+        )}
 
         {/* One group, so the bar reads as title | actions. Without it,
             justify-between spreads every control evenly across the header. */}
@@ -302,6 +333,9 @@ export const ReactArtifactView = ({
               <Pencil className='h-3 w-3' aria-hidden='true' />
               Can make changes
             </span>
+          )}
+          {savedAppId && (
+            <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (
             <button
@@ -390,6 +424,7 @@ export const ReactArtifactView = ({
           refreshRef={refreshRef}
           canWrite={writeConfig.enabled}
           canInvokeAgents={agentConfig.enabled}
+          currentUserId={auth.userID ?? ''}
           {...(artifact.savedAppId ? { appId: artifact.savedAppId } : {})}
           {...(!artifact.savedAppId && attachmentId ? { attachmentId } : {})}
         />

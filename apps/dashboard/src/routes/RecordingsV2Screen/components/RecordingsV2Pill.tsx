@@ -63,6 +63,7 @@ export interface RecordingsV2PillProps {
     | 'transcript'
     | 'createdByUserId'
     | 'labels'
+    | 'channelId'
   >;
   creator: User | null;
   participantsLabel: string;
@@ -178,8 +179,13 @@ const RecordingsV2Pill = ({
   const isOwner = currentUserId !== undefined && currentUserId === recording.createdByUserId;
   const visibleTags = normalizeRecordingTags(tags);
   const visibleSuggestedTags = isOwner ? normalizeRecordingTags(suggestedTags) : [];
+
+  // Backfill for pre-Scribe recordings only — a channel anchor is what marks them.
   const showGenerateLabels =
-    isOwner && recording.labels.length === 0 && Boolean(recording.transcript?.trim());
+    Boolean(recording.channelId) &&
+    isOwner &&
+    recording.labels.length === 0 &&
+    Boolean(recording.transcript?.trim());
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Populated on menu open — `hasRecording` isn't in the synced list data (it's

@@ -446,7 +446,13 @@ artifactAppsRouter.get("/:id/payload", async (req: Request<{ id: string }>, res:
   }
 
   const requestedVersionId = typeof req.query["versionId"] === "string" ? req.query["versionId"] : null;
-  const versionId = isOwner ? (requestedVersionId ?? app.publishedVersionId) : app.publishedVersionId;
+  // Owner default is HEAD — the version they and the agent are working on —
+  // falling back to the pin for apps that predate head tracking. A non-owner is
+  // still served the pinned version and only that: honouring a caller-supplied
+  // versionId, or serving head, would expose drafts the owner has not published.
+  const versionId = isOwner
+    ? (requestedVersionId ?? app.headVersionId ?? app.publishedVersionId)
+    : app.publishedVersionId;
 
   const version = versionId
     ? await prisma.artifactAppVersion.findUnique({ where: { id: versionId } })
