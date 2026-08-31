@@ -15,6 +15,7 @@ import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMa
 import { InternalXyneLink } from '../components/Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import {
   getAnchorTargetProps,
+  isExternalUrl,
   parseInternalXyneLink,
 } from '../components/Chat/RenderMessageWithHTML/internalLinkUtils';
 import type { ToolInvocation } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -315,15 +316,7 @@ export const createMarkdownComponents = (
       );
     }
 
-    const isExternal = ((): boolean => {
-      if (!href) return false;
-      try {
-        const urlObj = new URL(href, window.location.origin);
-        return urlObj.origin !== window.location.origin;
-      } catch {
-        return true;
-      }
-    })();
+    const isExternal = href ? isExternalUrl(href) : false;
 
     if (isExternal) {
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
