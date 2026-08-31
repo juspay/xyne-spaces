@@ -19,6 +19,7 @@ import {
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
 import { redisService } from "../redis.js";
@@ -286,7 +287,33 @@ export async function persistRunStreamResult(args: {
         // the attachment rather than the tool-result text, which pi truncates.
         // Without persisting it here the artifact would survive a reload only
         // via the /agents/:convId/messages path and be missing from this run.
-        const hasMetadata = att.metadata && Object.keys(att.metadata).length > 0;
+        let attachmentMetadata = att.metadata as Record<string, unknown> | undefined;
+
+        // A conversation owns ONE app. This mirrors the identical hook in
+        // agent-chat.ts's persistAssistantResult: the dashboard's AI screen
+        // streams through THIS path, not /agent-chat, so scoping only that one
+        // left every AI-screen artifact unversioned and unowned.
+        const sessionArtifact = attachmentMetadata?.["reactArtifact"];
+        if (sessionArtifact && typeof sessionArtifact === "object") {
+          const session = await attachArtifactToSessionApp({
+            conversationId: args.conversationId,
+            userId: args.userId,
+            payload: buffer,
+          });
+          if (session) {
+            attachmentMetadata = {
+              ...attachmentMetadata,
+              reactArtifact: {
+                ...(sessionArtifact as Record<string, unknown>),
+                appId: session.appId,
+                versionId: session.versionId,
+                versionNumber: session.versionNumber,
+              },
+            };
+          }
+        }
+
+        const hasMetadata = attachmentMetadata && Object.keys(attachmentMetadata).length > 0;
         const row = await prisma.chatAttachment.create({
           data: {
             chatMessageId: assistantMsg.id,
@@ -296,12 +323,14 @@ export async function persistRunStreamResult(args: {
             originalFilename: att.fileName,
             mimeType: att.mimeType,
             size: buffer.length,
-            ...(hasMetadata ? { metadata: att.metadata as import("@prisma/client").Prisma.InputJsonValue } : {}),
+            ...(hasMetadata ? { metadata: attachmentMetadata as import("@prisma/client").Prisma.InputJsonValue } : {}),
           },
         });
         // Only `reactArtifact` goes back over the wire — the same allowlist the
         // message-history serializer applies, so `url` never reaches a client.
-        const reactArtifact = att.metadata?.["reactArtifact"];
+        // Read the STAMPED metadata, not att.metadata: the session ids were just
+        // added, and the card rendering this stream needs them immediately.
+        const reactArtifact = attachmentMetadata?.["reactArtifact"];
         persistedAttachments.push({
           id: row.id,
           mimeType: row.mimeType,

@@ -50,6 +50,10 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
     setExpanded(null);
   }, []);
 
+  // Anything generated since session-scoping is ALREADY an app — the thread owns
+  // one and each generation versioned it — so Save would create a confusing
+  // duplicate. The button survives only for pre-scoping artifacts and for the
+  // rare case where materialization failed. Publishing stays explicit either way.
   const saveMutation = useMutation({
     mutationFn: (artifact: ReactArtifactRef) =>
       saveArtifactApp({
@@ -93,7 +97,7 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
           key={artifact.attachmentId}
           artifact={artifact}
           onExpand={handleExpand}
-          {...(publishConfig.enabled ? { onSave: handleSave } : {})}
+          {...(publishConfig.enabled && !artifact.savedAppId ? { onSave: handleSave } : {})}
           saveState={saveStates[artifact.attachmentId] ?? 'idle'}
         />
       ))}

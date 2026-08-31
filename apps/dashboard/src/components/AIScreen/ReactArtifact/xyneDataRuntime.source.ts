@@ -63,6 +63,7 @@ window.addEventListener('message', (event: MessageEvent) => {
     source?: string;
     v?: number;
     type?: string;
+    directory?: unknown;
     payloads?: Record<string, Entry>;
     requestId?: string;
     ok?: boolean;
@@ -80,6 +81,11 @@ window.addEventListener('message', (event: MessageEvent) => {
     window.clearTimeout(entry.timer);
     if (message.ok) entry.resolve();
     else entry.reject(new Error(message.error || 'The change could not be saved.'));
+    return;
+  }
+
+  if (message.type === 'directory') {
+    applyDirectory((message as unknown as { directory?: Directory }).directory);
     return;
   }
 
@@ -481,4 +487,94 @@ export function useXyneAgent(options?: { key?: string; agent?: string }): XyneAg
     agents: state.agents,
     available: state.available,
   };
+}
+
+// ── Names ─────────────────────────────────────────────────────────────────────
+//
+// Ids are opaque. Turning one into the name a person recognises has two rules
+// that are impossible to guess from the row alone, so the HOST resolves them
+// with the same helpers the rest of Spaces uses and sends finished strings:
+//
+//   • a user's display name is `displayName || name || email` — and displayName
+//     is null for most real people, so reading it alone renders blanks;
+//   • a DM channel's `name` column is not a name at all. It holds the
+//     participant ids, comma-separated ("id1,id2"), so rendering it prints raw
+//     ids. Group DMs collapse to "Alice, Bob + 3 others", and a DM with
+//     yourself reads "You".
+//
+// Never try to reproduce either rule in app code, and never join against a
+// `user` data source just to show a name — this is already loaded, costs no
+// request, and stays correct.
+
+interface Directory {
+  users: Record<string, string>;
+  channels: Record<string, string>;
+}
+
+let directory: Directory = { users: {}, channels: {} };
+let hasDirectory = false;
+const directoryListeners = new Set<() => void>();
+
+function applyDirectory(next: unknown): void {
+  const value = next as Directory | undefined;
+  directory = {
+    users: value?.users ?? {},
+    channels: value?.channels ?? {},
+  };
+  hasDirectory = true;
+  directoryListeners.forEach(listener => listener());
+}
+
+function subscribeDirectory(onChange: () => void): () => void {
+  directoryListeners.add(onChange);
+  return () => {
+    directoryListeners.delete(onChange);
+  };
+}
+
+export interface XyneDirectory {
+  /** Name for a user id. Falls back to the id itself, never to blank. */
+  displayName: (userId: string | null | undefined) => string;
+  /** Name for a channel id, with DMs and group DMs already resolved. */
+  channelName: (channelId: string | null | undefined) => string;
+  /** False until the first delivery, so you can hold off rendering names. */
+  ready: boolean;
+}
+
+/**
+ * Resolve user and channel ids to the names Spaces shows.
+ *
+ *   const { displayName, channelName } = useXyneDirectory();
+ *   <span>{displayName(message.senderId)}</span>
+ *   <h2>{channelName(dm.id)}</h2>
+ *
+ * Both are plain synchronous functions — safe to call while rendering a list.
+ */
+export function useXyneDirectory(): XyneDirectory {
+  const snapshot = useSyncExternalStore(
+    subscribeDirectory,
+    () => directory,
+    () => directory,
+  );
+
+  const displayName = useCallback(
+    (userId: string | null | undefined): string => {
+      if (!userId) return 'Unknown';
+      // Falling back to the raw id keeps a row identifiable rather than blank
+      // when someone is outside the viewer's directory (deactivated, or a
+      // workspace they cannot see).
+      return snapshot.users[userId] ?? userId;
+    },
+    [snapshot],
+  );
+
+  const channelName = useCallback(
+    (channelId: string | null | undefined): string => {
+      if (!channelId) return '';
+      return snapshot.channels[channelId] ?? channelId;
+    },
+    [snapshot],
+  );
+
+  return { displayName, channelName, ready: hasDirectory };
 }

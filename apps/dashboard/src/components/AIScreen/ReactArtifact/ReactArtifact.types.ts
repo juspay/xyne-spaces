@@ -36,6 +36,10 @@ export interface ReactArtifactRef {
   inlineData?: string;
   /** Set once the artifact has been saved, so the header can show its state. */
   savedAppId?: string;
+  /** The exact build this turn produced. A thread's app moves on with each
+   *  generation, so a card must pin its own version or scrolling back would
+   *  show history saying one thing and rendering another. */
+  versionId?: string;
 }
 
 /**
@@ -72,5 +76,9 @@ export function toArtifactRef(attachment: MessageAttachment): ReactArtifactRef |
     attachmentId: attachment.id,
     manifest,
     ...(attachment.data ? { inlineData: attachment.data } : {}),
+    // Present for anything generated since session-scoping: the artifact is a
+    // version of the conversation's app, not a standalone attachment.
+    ...(manifest.appId ? { savedAppId: manifest.appId } : {}),
+    ...(manifest.versionId ? { versionId: manifest.versionId } : {}),
   };
 }
