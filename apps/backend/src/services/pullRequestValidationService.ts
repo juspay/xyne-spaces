@@ -57,6 +57,7 @@ interface SpecMarker {
 
 const normalizeHeading = (text: string): string =>
   text
+    .replace(/^>+\s*/, '')
     .replace(/^#{1,6}\s*/, '')
     .replace(/[*_`]/g, '')
     .replace(/[:\-–—\s]+$/, '')
@@ -71,9 +72,9 @@ const matchMarker = (
   line: string,
   sectionNames: Set<string>
 ): { name: string; hasInlineBody: boolean } | null => {
-  if (LIST_ITEM.test(line)) return null;
+  if (LIST_ITEM.test(line.replace(/^>+\s*/, ''))) return null;
 
-  const text = line.replace(/^#{1,6}\s*/, '');
+  const text = line.replace(/^>+\s*/, '').replace(/^#{1,6}\s*/, '');
   const whole = normalizeHeading(text);
   if (sectionNames.has(whole)) return { name: whole, hasInlineBody: false };
 
@@ -91,7 +92,11 @@ const parseMarkers = (lines: string[], sectionNames: Set<string>): SpecMarker[] 
   let fence: { char: string; length: number } | null = null;
 
   lines.forEach((raw, index) => {
-    const line = raw.trim();
+    // Indentation first: an indented line can neither open nor close a fence, so
+    // a ``` inside a code sample must not toggle one.
+    if (!fence && INDENTED_CODE.test(raw)) return;
+
+    const line = raw.trim().replace(/^>+\s*/, '');
     const fenceMatch = line.match(FENCE);
     if (fenceMatch) {
       const char = fenceMatch[1]![0]!;
@@ -101,7 +106,7 @@ const parseMarkers = (lines: string[], sectionNames: Set<string>): SpecMarker[] 
       else if (char === fence.char && length >= fence.length && info === '') fence = null;
       return;
     }
-    if (fence || INDENTED_CODE.test(raw)) return;
+    if (fence) return;
 
     const marker = matchMarker(line, sectionNames);
     if (marker) markers.push({ ...marker, line: index });
@@ -131,15 +136,15 @@ export function validateSpecSections(
   const markers = parseMarkers(lines, sectionNames);
   const hasSpecHeading = markers.some(marker => marker.name === SPEC_SECTION);
 
-  let scope = markers;
-  for (const [index, marker] of markers.entries()) {
-    if (marker.name !== SPEC_SECTION) continue;
-    const after = markers.slice(index + 1);
-    if (after.some(other => other.name !== SPEC_SECTION)) {
-      scope = after;
-      break;
-    }
-  }
+  // Narrow to the wrapper only when every section marker follows it. A
+  // "Specification" line in the middle or at the end would otherwise discard the
+  // sections written above it.
+  const firstSection = markers.findIndex(marker => marker.name !== SPEC_SECTION);
+  const wrapper = markers.findIndex(marker => marker.name === SPEC_SECTION);
+  const scope =
+    wrapper !== -1 && (firstSection === -1 || wrapper < firstSection)
+      ? markers.slice(wrapper + 1)
+      : markers;
 
   const missing = required.filter(section => {
     const target = normalizeHeading(section);
@@ -421,8 +426,8 @@ export class PullRequestValidationService {
   }
 
   /**
-   * CAC first, so the check can be enabled per workspace or repo and the section
-   * names changed without a deploy. Any CAC problem falls back to env.
+   * CAC is the only source; there is no env layer. Any CAC problem leaves the
+   * check off rather than guessing.
    */
   private async resolveSpecCheckConfig(
     target: BuildStatusTarget,
@@ -517,7 +522,8 @@ export class PullRequestValidationService {
       return;
     }
 
-    const allMissing = spec.missing.length === sections.length;
+    // A spec that exists but has empty sections must not be told to re-run /spec.
+    const allMissing = spec.missing.length === sections.length && !spec.hasSpecHeading;
     const errorMessage = allMissing
       ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.MISSING(ticketId)
       : PR_VALIDATION_CONFIG.SPEC_MESSAGES.INCOMPLETE(

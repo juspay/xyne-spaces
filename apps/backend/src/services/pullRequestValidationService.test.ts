@@ -398,6 +398,54 @@ B.
     expect(validateSpecSections(indented).missing).toEqual(['Test cases']);
   });
 
+  it('does not open a fence from a backtick line inside indented code', () => {
+    const indentedFence = `## Specification
+
+### Problem statement
+
+Output:
+
+    \`\`\`
+    sample
+
+### Solutioning
+
+B.
+
+### Test cases
+
+C.
+`;
+    expect(validateSpecSections(indentedFence).isValid).toBe(true);
+  });
+
+  it('ignores a Specification line that comes after some sections', () => {
+    const midWrapper = `Problem statement
+A.
+
+Solutioning
+B.
+
+Specification
+
+Test cases
+C.
+`;
+    expect(validateSpecSections(midWrapper).isValid).toBe(true);
+  });
+
+  it('reads a spec pasted as a blockquote', () => {
+    const quoted = `> ## Specification
+> ### Problem statement
+> A.
+> ### Solutioning
+> B.
+> ### Test cases
+> C.
+`;
+    expect(validateSpecSections(quoted).isValid).toBe(true);
+  });
+
   it('fails closed when the required list is empty', () => {
     expect(validateSpecSections('## Specification\n### Anything\nx\n', [])).toEqual({
       isValid: false,
@@ -406,10 +454,13 @@ B.
     });
   });
 
-  it('does not let a same-named heading outside the spec block count', () => {
+  // Sections above a "Specification" wrapper now count. Ignoring them would mean
+  // a wrapper written mid-description discards a real spec above it, and a false
+  // failure blocks a PR where a false pass only fails to catch one.
+  it('counts sections written above the Specification wrapper', () => {
     const outside = `### Test cases
 
-These are not part of the spec.
+C.
 
 ## Specification
 
@@ -420,12 +471,8 @@ Broken.
 ### Solutioning
 
 Fixed.
-
-### Implementation details
-
-Done.
 `;
-    expect(validateSpecSections(outside).missing).toEqual(['Test cases']);
+    expect(validateSpecSections(outside).isValid).toBe(true);
   });
 });
 
@@ -576,6 +623,22 @@ describe('validatePullRequest spec status', () => {
     expect(postedStatuses()).toEqual([
       ['Ticket Validation', 'success', 'PR validation passed'],
       ['Spec Validation', 'failure', 'No specification on XYNE-56567 - run /spec on the ticket'],
+    ]);
+  });
+
+  it('names the empty sections rather than claiming there is no spec', async () => {
+    mockGetTicketByXyneId.mockResolvedValue({
+      id: 'cmt1g1qoa0nqwa3vxas6vs9mm',
+      status: 'TODO',
+      description: '## Specification\n### Problem statement\n### Solutioning\n### Test cases\n',
+    });
+
+    await validate('feat: XYNE-56567 add spec validation check');
+
+    expect(postedStatuses()[1]).toEqual([
+      'Spec Validation',
+      'failure',
+      'XYNE-56567 spec missing: Problem statement, Solutioning, Test cases',
     ]);
   });
 
