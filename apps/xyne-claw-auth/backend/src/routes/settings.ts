@@ -13,7 +13,7 @@ import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
-import { CONFIG } from "../config.js";
+import { CONFIG, CLAUDE_OAUTH, claudeOAuthConfigured } from "../config.js";
 import { redisService } from "../redis.js";
 import { fetchAnthropicModels } from "./agents.js";
 import { createLogger } from "../logger.js";
@@ -623,13 +623,6 @@ function decodeJwtChatgptAccountId(jwt: string): string | undefined {
 // copies the code (or the whole redirect URL) and pastes it into /exchange.
 //
 // Captures a REFRESHABLE token, unlike a pasted `claude setup-token` value.
-const USER_CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const USER_CLAUDE_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
-const USER_CLAUDE_TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
-const USER_CLAUDE_REDIRECT_URI = "http://localhost:53692/callback";
-const USER_CLAUDE_SCOPES =
-  "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
-const USER_CLAUDE_PKCE_PREFIX = "claude-pkce-user:";
 const USER_CLAUDE_PKCE_TTL = 600;
 
 function generateUserClaudePkce(): { verifier: string; challenge: string } {
@@ -640,6 +633,14 @@ function generateUserClaudePkce(): { verifier: string; challenge: string } {
 
 router.post("/provider-credentials/claude/oauth/start", async (req: Request, res: Response) => {
   try {
+    if (!claudeOAuthConfigured()) {
+      res.status(503).json({
+        success: false,
+        error: "Claude sign-in is not configured on this environment.",
+      });
+      return;
+    }
+
     const userId = getRequesterId(req);
     if (!userId) {
       res.status(401).json({ success: false, error: "x-user-id header required" });
@@ -650,14 +651,14 @@ router.post("/provider-credentials/claude/oauth/start", async (req: Request, res
     const state = verifier;
     await redisService
       .getConnection()
-      .set(`${USER_CLAUDE_PKCE_PREFIX}${userId}:${state}`, verifier, "EX", USER_CLAUDE_PKCE_TTL);
+      .set(`${CLAUDE_OAUTH.pkcePrefix}${userId}:${state}`, verifier, "EX", USER_CLAUDE_PKCE_TTL);
 
-    const url = new URL(USER_CLAUDE_AUTHORIZE_URL);
+    const url = new URL(CLAUDE_OAUTH.authorizeUrl);
     url.searchParams.set("code", "true");
-    url.searchParams.set("client_id", USER_CLAUDE_CLIENT_ID);
+    url.searchParams.set("client_id", CLAUDE_OAUTH.clientId);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("redirect_uri", USER_CLAUDE_REDIRECT_URI);
-    url.searchParams.set("scope", USER_CLAUDE_SCOPES);
+    url.searchParams.set("redirect_uri", CLAUDE_OAUTH.redirectUri);
+    url.searchParams.set("scope", CLAUDE_OAUTH.scopes);
     url.searchParams.set("code_challenge", challenge);
     url.searchParams.set("code_challenge_method", "S256");
     url.searchParams.set("state", state);
@@ -674,6 +675,14 @@ router.post("/provider-credentials/claude/oauth/start", async (req: Request, res
 
 router.post("/provider-credentials/claude/oauth/exchange", async (req: Request, res: Response) => {
   try {
+    if (!claudeOAuthConfigured()) {
+      res.status(503).json({
+        success: false,
+        error: "Claude sign-in is not configured on this environment.",
+      });
+      return;
+    }
+
     const userId = getRequesterId(req);
     if (!userId) {
       res.status(401).json({ success: false, error: "x-user-id header required" });
@@ -707,7 +716,7 @@ router.post("/provider-credentials/claude/oauth/exchange", async (req: Request, 
     }
 
     const redis = redisService.getConnection();
-    const key = `${USER_CLAUDE_PKCE_PREFIX}${userId}:${state}`;
+    const key = `${CLAUDE_OAUTH.pkcePrefix}${userId}:${state}`;
     const verifier = await redis.get(key);
     if (!verifier) {
       res.status(400).json({ success: false, error: "Sign-in expired — start again" });
@@ -715,15 +724,15 @@ router.post("/provider-credentials/claude/oauth/exchange", async (req: Request, 
     }
     await redis.del(key);
 
-    const tokRes = await fetch(USER_CLAUDE_TOKEN_URL, {
+    const tokRes = await fetch(CLAUDE_OAUTH.tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
         grant_type: "authorization_code",
-        client_id: USER_CLAUDE_CLIENT_ID,
+        client_id: CLAUDE_OAUTH.clientId,
         code,
         state,
-        redirect_uri: USER_CLAUDE_REDIRECT_URI,
+        redirect_uri: CLAUDE_OAUTH.redirectUri,
         code_verifier: verifier,
       }),
     });
