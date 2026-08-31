@@ -2252,7 +2252,6 @@ export const collectionPermissionTable = table("collection_permissions")
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
-    channelId: string().optional(),
     role: string(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -4051,11 +4050,6 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: repoTable,
-  }),
-  collectionPermissions: many({
-    sourceField: ["id"],
-    destField: ["channelId"],
-    destSchema: collectionPermissionTable,
   })
 }));
 
@@ -4587,11 +4581,6 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ["userGroupId"],
     destField: ["id"],
     destSchema: userGroupTable,
-  }),
-  channel: one({
-    sourceField: ["channelId"],
-    destField: ["id"],
-    destSchema: channelTable,
   })
 }));
 

@@ -30,13 +30,9 @@ function extOf(name: string): string | undefined {
 
 interface StatusBadgeV2Props {
   name: string;
-  /** 'sm' shrinks the badge to sit inline next to a plain 16px icon (e.g. a
-   *  dropdown filter row alongside the Folders option) instead of the
-   *  default card/list glyph size. */
-  size?: 'sm' | 'md';
 }
 
-export const StatusBadgeV2: React.FC<StatusBadgeV2Props> = ({ name, size = 'md' }) => {
+export const StatusBadgeV2: React.FC<StatusBadgeV2Props> = ({ name }) => {
   const ext = extOf(name) || 'file';
   const tone = TONE_FOR_EXT[ext] ?? 'bg-zinc-500 text-white';
   const label = ext.toUpperCase().slice(0, 4);
@@ -45,8 +41,7 @@ export const StatusBadgeV2: React.FC<StatusBadgeV2Props> = ({ name, size = 'md' 
     <span
       aria-hidden
       className={cn(
-        'grid flex-shrink-0 place-items-center font-semibold uppercase tracking-wide',
-        size === 'sm' ? 'h-4 w-4 rounded text-[5px]' : 'h-7 w-7 rounded-md text-[8.5px]',
+        'grid h-7 w-7 flex-shrink-0 place-items-center rounded-md text-[8.5px] font-semibold uppercase tracking-wide',
         tone,
       )}
     >

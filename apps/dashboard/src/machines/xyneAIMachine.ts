@@ -123,11 +123,6 @@ export interface XyneAIContext {
   // Single-file scope when Ask AI is opened from a file viewer
   kbDocId: string | null;
   kbDocName: string | null;
-  // Single-folder scope when Ask AI is opened while browsing inside a
-  // sub-folder (not the collection root) — narrower than kbCollectionId,
-  // mutually exclusive with it (see the OPEN handler below).
-  kbFolderId: string | null;
-  kbFolderName: string | null;
   // Bumped on every OPEN dispatched with a kbCollectionId. Lets the input box
   // re-attach the KB collection chip when the user clicks the Ask AI button
   // again from /knowledge-base after manually removing the chip.
@@ -158,8 +153,6 @@ export type XyneAIEvent =
       kbChannelId?: string | null;
       kbDocId?: string | null;
       kbDocName?: string | null;
-      kbFolderId?: string | null;
-      kbFolderName?: string | null;
       initialContextSelections?: AskAIInitialContextSelections | null;
       researchContext?: XyneAIResearchContext | null;
       initialQuery?: string | null;
@@ -527,20 +520,16 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId ?? null,
           kbDocId: event.kbDocId ?? null,
           kbDocName: event.kbDocName ?? null,
-          kbFolderId: event.kbFolderId ?? null,
-          kbFolderName: event.kbFolderName ?? null,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
-          // Bump the nonce on every KB-scoped OPEN (collection, file, OR
-          // folder) so the sidebar re-attaches the right chip even if the
-          // user previously removed it.
+          // Bump the nonce on every KB-scoped OPEN (collection OR file) so the
+          // sidebar re-attaches the collection chip and/or file scope even if
+          // the user previously removed them.
           kbOpenNonce:
-            event.kbCollectionId || event.kbDocId || event.kbFolderId
-              ? context.kbOpenNonce + 1
-              : context.kbOpenNonce,
+            event.kbCollectionId || event.kbDocId ? context.kbOpenNonce + 1 : context.kbOpenNonce,
         };
 
         // Persist to IndexedDB
@@ -611,19 +600,14 @@ export const xyneAIMachine = setup({
           kbChannelId: event.kbChannelId !== undefined ? event.kbChannelId : context.kbChannelId,
           kbDocId: event.kbDocId !== undefined ? event.kbDocId : context.kbDocId,
           kbDocName: event.kbDocName !== undefined ? event.kbDocName : context.kbDocName,
-          kbFolderId: event.kbFolderId !== undefined ? event.kbFolderId : context.kbFolderId,
-          kbFolderName:
-            event.kbFolderName !== undefined ? event.kbFolderName : context.kbFolderName,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
-          // Re-bump on every KB-scoped OPEN (collection, file, OR folder).
+          // Re-bump on every KB-scoped OPEN (collection OR file).
           kbOpenNonce:
-            event.kbCollectionId || event.kbDocId || event.kbFolderId
-              ? context.kbOpenNonce + 1
-              : context.kbOpenNonce,
+            event.kbCollectionId || event.kbDocId ? context.kbOpenNonce + 1 : context.kbOpenNonce,
         };
 
         // Persist to IndexedDB
@@ -639,8 +623,6 @@ export const xyneAIMachine = setup({
         kbChannelId: null,
         kbDocId: null,
         kbDocName: null,
-        kbFolderId: null,
-        kbFolderName: null,
       };
       void saveContextToIndexedDB(newContext);
       return newContext;
@@ -674,8 +656,6 @@ export const xyneAIMachine = setup({
         kbChannelId: null,
         kbDocId: null,
         kbDocName: null,
-        kbFolderId: null,
-        kbFolderName: null,
         kbOpenNonce: context.kbOpenNonce,
         researchContext: null,
         initialQuery: null,
@@ -824,8 +804,6 @@ export const xyneAIMachine = setup({
     kbChannelId: null,
     kbDocId: null,
     kbDocName: null,
-    kbFolderId: null,
-    kbFolderName: null,
     kbOpenNonce: 0,
     researchContext: null,
     initialQuery: null,

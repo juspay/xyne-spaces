@@ -125,9 +125,6 @@ export default {
           failure: 'var(--status-failure)',
           paused: 'var(--status-paused)',
         },
-        'claw-ai': {
-          fg: 'var(--claw-ai-fg)',
-        },
         sidebar: {
           DEFAULT: 'var(--sidebar)',
           foreground: 'var(--sidebar-foreground)',

@@ -1,5 +1,4 @@
 import { useRef, type ReactElement, type ReactNode, type RefObject } from 'react';
-import { cn } from '../../utils/classNames';
 import { AISidebar } from './AISidebar';
 import {
   ResizableGroup,
@@ -22,10 +21,6 @@ interface AIShellProps {
   mobileOpen?: boolean | undefined;
   onMobileOpenChange?: ((open: boolean) => void) | undefined;
   mainRef?: RefObject<HTMLDivElement | null> | undefined;
-  /** Overrides the main panel's background token (defaults to
-   *  `bg-background`) — e.g. `ai-page-bg` for screens (like /ai/knowledge)
-   *  that need to match a different surface elsewhere in the app. */
-  mainClassName?: string | undefined;
   children: ReactNode;
 }
 
@@ -37,7 +32,6 @@ export function AIShell({
   mobileOpen,
   onMobileOpenChange,
   mainRef,
-  mainClassName,
   children,
 }: AIShellProps): ReactElement {
   const sidebarPanelRef = useRef<PanelImperativeHandle>(null);
@@ -81,10 +75,7 @@ export function AIShell({
       <Panel id='ai-main' minSize='30%'>
         <div
           ref={mainRef}
-          className={cn(
-            'relative flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl',
-            mainClassName ?? 'bg-background',
-          )}
+          className='bg-background relative flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl'
         >
           {children}
         </div>

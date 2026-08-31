@@ -7,7 +7,6 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { detectFileType } from '../FileViewer/utils';
 
 /**
  * A KB document opened in the /ai page's right-side citation panel. Mirrors
@@ -19,16 +18,10 @@ import { detectFileType } from '../FileViewer/utils';
 export interface CitationDoc {
   fileId: string;
   name: string;
-  /** Which viewer the panel renders — pdf gets the pdf.js viewer + chunk
-   *  highlight; markdown gets a Raw/Preview toggle (no highlight support);
-   *  everything else the KB file viewer already knows how to render (docx,
-   *  csv, excel, images, video, non-md code, html, txt) gets that same
-   *  viewer with just a filename header. */
-  kind: 'pdf' | 'markdown' | 'other';
   mimeType?: string;
-  /** 1-based page to open on. PDF only. */
+  /** 1-based page to open on. */
   page?: number;
-  /** 0-based chunk index → resolves the highlight snippet. PDF only. */
+  /** 0-based chunk index → resolves the highlight snippet. */
   chunkIndex?: number;
   navSeq: number;
 }
@@ -45,13 +38,9 @@ interface PanelCitationInput {
 }
 
 /**
- * Returns the `openDoc` payload for a citation IF it's a KB file kind the
- * panel knows how to render, else `null` so the caller falls back to normal
- * navigation. Renderability is decided the same way the KB file viewer
- * decides it (`detectFileType`, extension-only here since citations don't
- * carry a mime type) — anything with no matching viewer (e.g. a zip) still
- * falls back to navigation. `page` is lifted off the citation's deep-link
- * `?page=`.
+ * Returns the `openDoc` payload for a citation IF it's a KB PDF file (the only
+ * thing the panel can render), else `null` so the caller falls back to normal
+ * navigation. `page` is lifted off the citation's deep-link `?page=`.
  */
 export function panelDocFromCitation(
   citation: PanelCitationInput | null | undefined,
@@ -60,16 +49,11 @@ export function panelDocFromCitation(
   if (!citation || citation.kind !== 'collection-item') return null;
   const fileId = citation.collectionItemId;
   const name = citation.fileName;
-  if (!fileId || !name) return null;
-  const fileType = detectFileType('', name);
-  if (!fileType) return null;
-  const kind: CitationDoc['kind'] =
-    fileType.type === 'pdf' ? 'pdf' : /\.(md|markdown)$/i.test(name) ? 'markdown' : 'other';
+  if (!fileId || !name || !/\.pdf$/i.test(name)) return null;
   const pageMatch = url ? /[?&]page=(\d+)/.exec(url) : null;
   return {
     fileId,
     name,
-    kind,
     ...(pageMatch ? { page: Number(pageMatch[1]) } : {}),
     ...(typeof citation.chunkIndex === 'number' ? { chunkIndex: citation.chunkIndex } : {}),
   };
@@ -83,10 +67,6 @@ interface CitationDocsContextValue {
   setActive: (fileId: string) => void;
   closeDoc: (fileId: string) => void;
   closeAll: () => void;
-  /** Panel shrunk to a re-open rail without losing the open docs — distinct
-   *  from closeAll, which drops them. */
-  collapsed: boolean;
-  setCollapsed: (collapsed: boolean) => void;
 }
 
 const CitationDocsContext = createContext<CitationDocsContextValue | null>(null);
@@ -106,11 +86,9 @@ export function useCitationDocs(): CitationDocsContextValue | null {
 export function CitationDocsProvider({ children }: { children: ReactNode }): ReactElement {
   const [docs, setDocs] = useState<CitationDoc[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
 
   const openDoc = useCallback((doc: OpenDocInput): void => {
     setActiveFileId(doc.fileId); // opening/clicking a citation focuses that doc
-    setCollapsed(false); // ...and always re-expands a collapsed panel
     setDocs(prev => {
       const existing = prev.find(d => d.fileId === doc.fileId);
       if (existing) {
@@ -143,21 +121,11 @@ export function CitationDocsProvider({ children }: { children: ReactNode }): Rea
   const closeAll = useCallback((): void => {
     setDocs([]);
     setActiveFileId(null);
-    setCollapsed(false);
   }, []);
 
   const value = useMemo(
-    () => ({
-      docs,
-      activeFileId,
-      openDoc,
-      setActive,
-      closeDoc,
-      closeAll,
-      collapsed,
-      setCollapsed,
-    }),
-    [docs, activeFileId, openDoc, setActive, closeDoc, closeAll, collapsed],
+    () => ({ docs, activeFileId, openDoc, setActive, closeDoc, closeAll }),
+    [docs, activeFileId, openDoc, setActive, closeDoc, closeAll],
   );
 
   return <CitationDocsContext.Provider value={value}>{children}</CitationDocsContext.Provider>;

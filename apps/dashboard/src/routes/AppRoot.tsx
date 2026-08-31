@@ -208,7 +208,6 @@ import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScree
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
-import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
@@ -463,8 +462,6 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
-  const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
-  const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
@@ -501,12 +498,6 @@ const AppRoot = (): ReactElement => {
   // like "/<workspaceId>/ai" or "/<workspaceId>/ai/<sub>". Match that
   // structure rather than a leading "/ai" prefix (which never matches).
   const isOnAIPage = /^\/[^/]+\/ai(\/|$)/.test(location.pathname);
-  // /ai/knowledge is a KB browser (AIKnowledgeScreen), not the full-screen
-  // chat experience the isOnAIPage suppression below exists for — it has no
-  // embedded chat pane of its own, so "Ask AI" there needs the same global
-  // XyneAISidebar drawer /knowledge-base uses, or clicking it does nothing.
-  const isOnAIKnowledgePage = /^\/[^/]+\/ai\/knowledge(\/|$)/.test(location.pathname);
-  const isOnAIChatExperiencePage = isOnAIPage && !isOnAIKnowledgePage;
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -545,11 +536,7 @@ const AppRoot = (): ReactElement => {
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
   // so the host must not also show one (covers both /sdlc and /sdlc/<repoId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen &&
-    !isMobile &&
-    !isOnAIChatExperiencePage &&
-    !isSdlcRoute &&
-    !showSdlcDebuggerPanel;
+    isXyneAIDrawerOpen && !isMobile && !isOnAIPage && !isSdlcRoute && !showSdlcDebuggerPanel;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -575,13 +562,12 @@ const AppRoot = (): ReactElement => {
   // global XyneAISidebar must never be open there. Close it on any pathname
   // change that lands inside /ai — this covers both opening it elsewhere and
   // then navigating in, and any code path that tries to open it while here.
-  // /ai/knowledge is exempt — see isOnAIKnowledgePage above.
   useEffect(() => {
-    if (!isOnAIChatExperiencePage) return;
+    if (!isOnAIPage) return;
     if (xyneAIActor.getSnapshot().matches('open')) {
       xyneAIActor.send({ type: 'CLOSE' });
     }
-  }, [isOnAIChatExperiencePage, isXyneAIDrawerOpen]);
+  }, [isOnAIPage, isXyneAIDrawerOpen]);
 
   // Monitor for pathname changes to update XyneAI context when navigating
   useEffect(() => {
@@ -723,8 +709,6 @@ const AppRoot = (): ReactElement => {
                                     kbChannelId={xyneAIKbChannelId ?? ''}
                                     kbDocId={xyneAIKbDocId ?? ''}
                                     kbDocName={xyneAIKbDocName ?? ''}
-                                    kbFolderId={xyneAIKbFolderId ?? ''}
-                                    kbFolderName={xyneAIKbFolderName ?? ''}
                                     kbOpenNonce={xyneAIKbOpenNonce}
                                     researchContext={xyneAIResearchContext}
                                     initialQuery={xyneAIInitialQuery ?? undefined}
@@ -839,8 +823,6 @@ const AppRoot = (): ReactElement => {
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
                                       kbDocName={xyneAIKbDocName ?? ''}
-                                      kbFolderId={xyneAIKbFolderId ?? ''}
-                                      kbFolderName={xyneAIKbFolderName ?? ''}
                                       kbOpenNonce={xyneAIKbOpenNonce}
                                       researchContext={xyneAIResearchContext}
                                       initialQuery={xyneAIInitialQuery ?? undefined}
@@ -967,8 +949,6 @@ const AppRoot = (): ReactElement => {
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
                             kbDocName={xyneAIKbDocName ?? ''}
-                            kbFolderId={xyneAIKbFolderId ?? ''}
-                            kbFolderName={xyneAIKbFolderName ?? ''}
                             kbOpenNonce={xyneAIKbOpenNonce}
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}
@@ -979,7 +959,7 @@ const AppRoot = (): ReactElement => {
                         </div>
                       )}
                       {/* XyneAI Mobile Drawer */}
-                      {isMobile && !isInPanelWebview && !isOnAIChatExperiencePage && (
+                      {isMobile && !isInPanelWebview && !isOnAIPage && (
                         <Drawer
                           open={isXyneAIDrawerOpen}
                           onOpenChange={open => {
@@ -1001,8 +981,6 @@ const AppRoot = (): ReactElement => {
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
                             kbDocName={xyneAIKbDocName ?? ''}
-                            kbFolderId={xyneAIKbFolderId ?? ''}
-                            kbFolderName={xyneAIKbFolderName ?? ''}
                             kbOpenNonce={xyneAIKbOpenNonce}
                             researchContext={xyneAIResearchContext}
                             initialQuery={xyneAIInitialQuery ?? undefined}
@@ -1079,11 +1057,6 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'ai',
-                  element: (
-                    <ToolbarProtectedRoute path='/ai'>
-                      <Outlet />
-                    </ToolbarProtectedRoute>
-                  ),
                   children: [
                     { index: true, element: <Navigate to='chat/new' replace /> },
                     { path: 'chat/new', element: <AIScreen /> },
@@ -1171,11 +1144,6 @@ export const router = createBrowserRouter(
                     // Directory routes (nested under dir)
                     {
                       path: 'dir',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/dir'>
-                          <Outlet />
-                        </ToolbarProtectedRoute>
-                      ),
                       children: [
                         {
                           index: true,
@@ -1284,11 +1252,7 @@ export const router = createBrowserRouter(
                     // DM routes (full screen with DM list sidebar)
                     {
                       path: 'dm',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/dm'>
-                          <DmsPage />
-                        </ToolbarProtectedRoute>
-                      ),
+                      element: <DmsPage />,
                       children: [
                         { index: true, element: null },
                         { path: 'compose', element: <KeyedComposeDmPanel /> },
@@ -1328,11 +1292,7 @@ export const router = createBrowserRouter(
                     // Canvas (full screen with 2-panel layout on desktop)
                     {
                       path: 'canvas',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/canvas'>
-                          <CanvasPanel />
-                        </ToolbarProtectedRoute>
-                      ),
+                      element: <CanvasPanel />,
                       children: [
                         {
                           index: true,
@@ -1347,11 +1307,7 @@ export const router = createBrowserRouter(
                     // Activity (full screen with activity list sidebar)
                     {
                       path: 'activity',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/activity'>
-                          <ActivityListView />
-                        </ToolbarProtectedRoute>
-                      ),
+                      element: <ActivityListView />,
                       children: [
                         { index: true, element: null },
                         // Desk/Support tickets opened from the Activity list render
@@ -1406,11 +1362,9 @@ export const router = createBrowserRouter(
                 {
                   path: 'claw-agents',
                   element: (
-                    <ToolbarProtectedRoute path='/claw-agents'>
-                      <GuestBlockedRoute>
-                        <ClawAgentsScreen />
-                      </GuestBlockedRoute>
-                    </ToolbarProtectedRoute>
+                    <GuestBlockedRoute>
+                      <ClawAgentsScreen />
+                    </GuestBlockedRoute>
                   ),
                   children: [
                     { index: true, element: <AgentsTab /> },
@@ -1444,11 +1398,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'knowledge-base',
-                  element: (
-                    <ToolbarProtectedRoute path='/knowledge-base'>
-                      <KnowledgeBaseV2Layout />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <KnowledgeBaseV2Layout />,
                   children: [
                     {
                       index: true,
@@ -1477,11 +1427,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'memory',
-                  element: (
-                    <ToolbarProtectedRoute path='/memory'>
-                      <MemoryScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <MemoryScreen />,
                 },
                 {
                   path: 'analytics',
@@ -1597,11 +1543,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'releaseManager',
-                  element: (
-                    <ToolbarProtectedRoute path='/releaseManager'>
-                      <ReleaseManagerView />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <ReleaseManagerView />,
                 },
                 {
                   path: 'listProjects/:projectId',
@@ -1613,11 +1555,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'calls',
-                  element: (
-                    <ToolbarProtectedRoute path='/calls'>
-                      <CallHistoryScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <CallHistoryScreen />,
                   children: [
                     {
                       path: ':callId/detail',
@@ -1635,11 +1573,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'recordings',
-                  element: (
-                    <ToolbarProtectedRoute path='/recordings'>
-                      <RecordingsRoute />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <RecordingsRoute />,
                 },
                 {
                   path: 'recordings/:recordingId',
@@ -1725,11 +1659,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'browser',
-                  element: (
-                    <ToolbarProtectedRoute path='/browser'>
-                      <BrowserTabsScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <BrowserTabsScreen />,
                 },
                 {
                   path: 'workspace-management',
@@ -1757,19 +1687,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'scheduled-messages',
-                  element: (
-                    <ToolbarProtectedRoute path='/scheduled-messages'>
-                      <ScheduledMessageScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <ScheduledMessageScreen />,
                 },
                 {
                   path: 'automations',
-                  element: (
-                    <ToolbarProtectedRoute path='/automations'>
-                      <AutomationsScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <AutomationsScreen />,
                   children: [
                     { index: true, element: <AutomationsListScreen /> },
                     { path: 'approvals', element: <AutomationApprovalsScreen /> },
@@ -1781,11 +1703,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'apps',
-                  element: (
-                    <ToolbarProtectedRoute path='/apps'>
-                      <AppsScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <AppsScreen />,
                 },
                 {
                   path: 'resource-access',
@@ -1829,11 +1747,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'guide',
-                  element: (
-                    <ToolbarProtectedRoute path='/guide'>
-                      <UserGuideScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <UserGuideScreen />,
                 },
               ],
             },
