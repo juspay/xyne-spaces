@@ -37,6 +37,12 @@ export const Switch: React.FC<SwitchProps> = ({
         aria-label={ariaLabel}
         onClick={() => !disabled && onCheckedChange(!checked)}
         disabled={disabled}
+        // Tagged here rather than at each call site so every Switch in the app
+        // is captured. `id` is the stable per-switch identifier; aria-label and
+        // label are fallbacks for the callers that omit it.
+        data-track-category='SWITCH'
+        data-track-name={id ?? ariaLabel ?? label ?? 'TOGGLE'}
+        data-track-metadata={JSON.stringify({ toChecked: !checked })}
         className={cn(
           'relative inline-flex shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           isDesk ? 'focus-visible:ring-desk-accent/40' : 'focus-visible:ring-primary/40',

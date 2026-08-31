@@ -173,12 +173,19 @@ const BoardCreateScreen = ({
 
           {/* Right Section */}
           <div className='flex items-center gap-3'>
-            <Button variant='secondary' onClick={onClose}>
+            <Button
+              variant='secondary'
+              onClick={onClose}
+              data-track-category='BOARD_CREATE'
+              data-track-name='CLOSE_BOARD_CREATE'
+            >
               Cancel
             </Button>
             <Button
               className='bg-[#6276BE] hover:bg-[#5060A0] text-white'
               onClick={handleCreateNew}
+              data-track-category='BOARD_CREATE'
+              data-track-name='CREATE_BOARD'
             >
               <Plus size={14} />
               Create Board

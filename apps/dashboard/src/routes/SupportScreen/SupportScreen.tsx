@@ -44,6 +44,7 @@ import {
   BarChart4Icon,
   CalendarDays,
   BarChart3,
+  FileText,
   Circle,
   UserPlus,
   Info as InfoIcon,
@@ -196,6 +197,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
+import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -1159,6 +1161,7 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1426,6 +1429,10 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     setIsMetricsOpen(searchParams.get('metrics') === 'open');
+  }, [searchParams]);
+
+  useEffect(() => {
+    setIsReportOpen(searchParams.get('report') === 'open');
   }, [searchParams]);
 
   useEffect(() => {
@@ -2628,7 +2635,11 @@ const SupportScreen = (): ReactElement => {
                               </span>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
-                              <DropdownMenuItem onClick={() => setShowRefetchDialog(true)}>
+                              <DropdownMenuItem
+                                onClick={() => setShowRefetchDialog(true)}
+                                data-track-category='Support'
+                                data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
+                              >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
                                   <span className='truncate'>Fetch latest emails</span>
@@ -2649,6 +2660,8 @@ const SupportScreen = (): ReactElement => {
                                 onClick={() => {
                                   if (!isDlMemberSyncing) setShowDlMemberSyncDialog(true);
                                 }}
+                                data-track-category='Support'
+                                data-track-name='OPEN_DL_MEMBER_SYNC_DIALOG'
                                 disabled={isDlMemberSyncing}
                               >
                                 <UserPlus size={14} className='mr-2 shrink-0' />
@@ -2746,6 +2759,35 @@ const SupportScreen = (): ReactElement => {
                               data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                             >
                               <BarChart3 size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
+                      {isSelectedChannelJoined &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
+                        channelPreference?.deskReportEnabled && (
+                          <Tooltip content='Desk report' side='bottom'>
+                            <button
+                              onClick={() => {
+                                const base = selectedChannelId
+                                  ? `${supportBase}/${selectedChannelId}`
+                                  : supportBase;
+                                if (isReportOpen) {
+                                  void navigate(base, { replace: true });
+                                } else {
+                                  void navigate(`${base}?report=open`);
+                                }
+                              }}
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isReportOpen
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='OpenDeskReport'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <FileText size={16} />
                             </button>
                           </Tooltip>
                         )}
@@ -3089,6 +3131,8 @@ const SupportScreen = (): ReactElement => {
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
                               onClick={() => setFilters({})}
+                              data-track-category='Support'
+                              data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
@@ -3393,6 +3437,19 @@ const SupportScreen = (): ReactElement => {
                       state: { ticketId: ticket.ticketId },
                     });
                   }}
+                />
+              )}
+              {isReportOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                <DeskReportPanel
+                  open
+                  onClose={() => {
+                    const base = selectedChannelId
+                      ? `${supportBase}/${selectedChannelId}`
+                      : supportBase;
+                    void navigate(base, { replace: true });
+                  }}
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -5183,11 +5240,15 @@ export const SupportTicketDetail = ({
                         <Button
                           variant='secondary'
                           onClick={() => setShowArchiveConfirmDialog(false)}
+                          data-track-category='Support'
+                          data-track-name='CANCEL_ARCHIVE_TICKET'
                         >
                           Cancel
                         </Button>
                         <Button
                           onClick={() => handleArchiveTicket()}
+                          data-track-category='Support'
+                          data-track-name='CONFIRM_ARCHIVE_TICKET'
                           disabled={!ticket || !!ticket.isArchived || isArchivingTicket}
                           loading={isArchivingTicket}
                           className='bg-destructive text-destructive-foreground hover:bg-destructive/90'

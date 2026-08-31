@@ -13,7 +13,7 @@ import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisi
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
-import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -68,7 +68,7 @@ interface CanvasSideEffectContext {
   workspaceId: string;
 }
 
-import { executeStreamingLlmRequest } from './callLlmRetry';
+import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -651,8 +651,7 @@ async function convertMarkdownToBlockNote(
   citationCtx?: CitationContext,
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   try {
-    const editor = ServerBlockNoteEditor.create();
-    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+    const parsed = await withServerEditor((editor) => editor.tryParseMarkdownToBlocks(markdown));
 
     // Collect mentioned IDs during the mention-processing pass
     const mentionedIds = new Set<string>();
@@ -1013,6 +1012,7 @@ export class CallDocumentService {
     templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     citationSegments?: CitationContext['segments'],
+    modelType?: SummaryModelType,
   ): Promise<{
     summary: string;
     template: SummaryTemplate;
@@ -1066,6 +1066,7 @@ export class CallDocumentService {
             ),
           )
         : undefined,
+      modelType,
     );
 
     if (!rawSummary) return null;
@@ -1091,6 +1092,7 @@ export class CallDocumentService {
     promptTemplate = DETAILED_SUMMARY_PROMPT,
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
     // Use people who actually spoke in the transcript. A channel roster can contain
     // members who never joined or contributed to this particular call.
@@ -1150,6 +1152,7 @@ MANDATORY OUTPUT CONTRACT:
       operation: 'detailed_summary_generation',
       callId,
       ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
+      ...(modelType ? { modelType } : {}),
       onDelta,
     });
 
@@ -1350,7 +1353,10 @@ MANDATORY OUTPUT CONTRACT:
     callTitle?: string | null,
     citationCtx?: CitationContext,
     workspaceIdOverride?: string,
-    options: { deferInsertSideEffects?: boolean } = {},
+    options: {
+      deferInsertSideEffects?: boolean;
+      summaryModelPreference?: 'fast' | 'thinking';
+    } = {},
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1411,6 +1417,12 @@ MANDATORY OUTPUT CONTRACT:
               generatedAt: now.toISOString(),
               mentionedUserIds, // Store mentioned users for side effect handler
               version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+              // Recording summary LLM tier the client carried from its
+              // localStorage at recording start; read back on the headless
+              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
+              ...(options.summaryModelPreference
+                ? { summaryModelPreference: options.summaryModelPreference }
+                : {}),
             },
           },
         });

@@ -1784,8 +1784,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   font-weight: 600;
 }
 
-.jp-message-html .search-result-highlight {
+.jp-message-html .search-result-highlight,
+mark.chat-text-highlight,
+:is(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) mark {
   background-color: var(--search-result-highlight-bg);
+  color: inherit;
   padding-left: 0;
   padding-right: 0;
   border-radius: 0.125rem;

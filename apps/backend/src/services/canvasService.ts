@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
-import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -21,8 +21,7 @@ export const YSWEET_XML_FRAGMENT = 'document-store';
  */
 export async function convertMarkdownToBlockNote(markdown: string): Promise<BlockNoteBlock[]> {
   try {
-    const editor = ServerBlockNoteEditor.create();
-    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+    const parsed = await withServerEditor((editor) => editor.tryParseMarkdownToBlocks(markdown));
     return toJsonSafeValue(parsed) as BlockNoteBlock[];
   } catch (error) {
     logger.error('[CanvasService] Error converting markdown to BlockNote:', error);
@@ -382,13 +381,12 @@ function normalizeBlocksForMarkdown(blocks: LooseBlock[]): LooseBlock[] {
  */
 export async function convertBlockNoteToMarkdown(blocks: unknown[]): Promise<string> {
   try {
-    const editor = ServerBlockNoteEditor.create();
     // Strip custom inline nodes (e.g. mentions) the default server schema does
     // not know about, otherwise blocksToMarkdownLossy throws
     // "node type <x> not found in schema".
     const normalized = normalizeBlocksForMarkdown((blocks as LooseBlock[]) || []);
     // blocksToMarkdownLossy accepts the blocks array directly
-    const markdown = await editor.blocksToMarkdownLossy(normalized as any);
+    const markdown = await withServerEditor((editor) => editor.blocksToMarkdownLossy(normalized as any));
     return markdown;
   } catch (error) {
     logger.error('[CanvasService] Failed to convert BlockNote to Markdown:', error);

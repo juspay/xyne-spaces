@@ -9,6 +9,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
@@ -36,6 +37,8 @@ import { designShareUrl } from "./design-shares.js";
 // though the .d.ts file claims the export exists. Default-import the
 // module object and pull the static method off it.
 import cronParser from "cron-parser";
+
+import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("scheduled-jobs");
@@ -77,7 +80,7 @@ function validateCronExpression(
   } catch (err) {
     return {
       ok: false,
-      error: `Invalid cronExpression: ${err instanceof Error ? err.message : String(err)}`,
+      error: `Invalid cronExpression: ${errMsg(err)}`,
     };
   }
 
@@ -230,300 +233,260 @@ async function postScheduledFailureNotice(row: {
 
 // ── POST / — create a scheduled job ─────────────────────────────────
 
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const {
-      userId: bodyUserId, agentSlug, task, context,
-      channelId, conversationId,
-      type, delayMs, cronExpression,
-      label, maxRuns, replyMode,
-      workspaceId: bodyWorkspaceId,
-    } = req.body as {
-      userId?: string;
-      agentSlug?: string;
-      task?: string;
-      context?: string;
-      channelId?: string;
-      conversationId?: string;
-      type?: string;
-      delayMs?: number;
-      cronExpression?: string;
-      label?: string;
-      maxRuns?: number;
-      replyMode?: string;
-      workspaceId?: string;
-    };
+router.post("/", asyncHandler(async (req: Request, res: Response) => {
+  const {
+    userId: bodyUserId, agentSlug, task, context,
+    channelId, conversationId,
+    type, delayMs, cronExpression,
+    label, maxRuns, replyMode,
+    workspaceId: bodyWorkspaceId,
+  } = req.body as {
+    userId?: string;
+    agentSlug?: string;
+    task?: string;
+    context?: string;
+    channelId?: string;
+    conversationId?: string;
+    type?: string;
+    delayMs?: number;
+    cronExpression?: string;
+    label?: string;
+    maxRuns?: number;
+    replyMode?: string;
+    workspaceId?: string;
+  };
 
-    // Spaces' app API requires workspaceId on postMessage / openDm. Capture
-    // it now so the result handler can pass it through later. Priority:
-    //   1. Body (S2S callers may pass explicitly)
-    //   2. `xyne_last_workspace` cookie (browser flow)
-    //   3. Spaces DB live read (works even when neither of the above is set —
-    //      common for non-browser triggers or when the cookie can't cross
-    //      the claw / spaces domain boundary)
-    let workspaceId: string | undefined = bodyWorkspaceId?.trim() || readWorkspaceCookie(req);
+  // Spaces' app API requires workspaceId on postMessage / openDm. Capture
+  // it now so the result handler can pass it through later. Priority:
+  //   1. Body (S2S callers may pass explicitly)
+  //   2. `xyne_last_workspace` cookie (browser flow)
+  //   3. Spaces DB live read (works even when neither of the above is set —
+  //      common for non-browser triggers or when the cookie can't cross
+  //      the claw / spaces domain boundary)
+  let workspaceId: string | undefined = bodyWorkspaceId?.trim() || readWorkspaceCookie(req);
 
-    // Force userId from the authed requester; only S2S (no requesterId) or admins
-    // can create jobs owned by someone else.
-    const requesterId = getRequesterId(req);
-    const userId = requesterId
-      ? (bodyUserId && bodyUserId !== requesterId && (await isClawAdmin(requesterId))
-          ? bodyUserId
-          : requesterId)
-      : bodyUserId;
+  // Force userId from the authed requester; only S2S (no requesterId) or admins
+  // can create jobs owned by someone else.
+  const requesterId = getRequesterId(req);
+  const userId = requesterId
+    ? (bodyUserId && bodyUserId !== requesterId && (await isClawAdmin(requesterId))
+        ? bodyUserId
+        : requesterId)
+    : bodyUserId;
 
-    if (!userId || !agentSlug || !task || !type) {
-      res.status(400).json({ success: false, error: "userId, agentSlug, task, and type are required" });
-      return;
+  if (!userId || !agentSlug || !task || !type) {
+    throw badRequest("userId, agentSlug, task, and type are required");
+  }
+
+  // S2S callers (the runtime's schedule-task tool) send only the S2S key +
+  // body userId — no x-user-id header, so requireAuth attaches no org
+  // context. Derive the org from the job owner instead (User.orgId is
+  // required and 1:1), same pattern as the other S2S entry points.
+  let requestOrgId = getOrgId(req);
+  if (!requestOrgId) {
+    const owner = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }).catch(() => null);
+    requestOrgId = owner?.orgId ?? undefined;
+  }
+  if (!requestOrgId) {
+    log.error(`[scheduled-jobs/create] orgId is required userId=${userId} requesterId=${requesterId ?? "none"} bodyUserId=${bodyUserId ?? "none"} agentSlug=${agentSlug} channelId=${channelId ?? "none"} conversationId=${conversationId ?? "none"} workspaceId=${workspaceId ?? "none"} type=${type}`);
+    throw badRequest("orgId is required");
+  }
+  const agent = await prisma.agent.findFirst({
+    where: { slug: agentSlug, orgId: requestOrgId },
+    select: { orgId: true },
+  });
+  if (!agent) {
+    log.warn(`[scheduled-jobs/create] agent org-scoped miss slug=${agentSlug} orgId=${requestOrgId ?? "none"} userId=${userId}`);
+    throw notFound("Agent not found");
+  }
+
+  // Fallback: pull workspaceId from the user's active Spaces session row.
+  // Most browser callers don't currently send it in the body, and the
+  // `xyne_last_workspace` cookie can be absent in non-browser triggers.
+  // Without this fallback the row gets workspaceId=NULL and Spaces rejects
+  // the result-delivery call when the job fires.
+  if (!workspaceId) {
+    const live = await getSpacesAuthForUser(userId, "scheduled-job");
+    if (live?.workspaceId) {
+      workspaceId = live.workspaceId;
+      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${userId}`);
     }
+  }
 
-    // S2S callers (the runtime's schedule-task tool) send only the S2S key +
-    // body userId — no x-user-id header, so requireAuth attaches no org
-    // context. Derive the org from the job owner instead (User.orgId is
-    // required and 1:1), same pattern as the other S2S entry points.
-    let requestOrgId = getOrgId(req);
-    if (!requestOrgId) {
-      const owner = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }).catch(() => null);
-      requestOrgId = owner?.orgId ?? undefined;
+  // Final fallback: read workspaceId straight off the user row (no live
+  // session required). getSpacesAuthForUser only resolves for currently
+  // logged-in users, so reminders typed hours earlier / S2S / automation
+  // triggers previously fell through to a NULL workspaceId — and Spaces then
+  // silently rejected result delivery when the job fired ("missing
+  // workspaceId on row"). The user row always carries the workspaceId.
+  if (!workspaceId) {
+    const wsId = await getWorkspaceIdForUser(userId, "scheduled-job");
+    if (wsId) {
+      workspaceId = wsId;
+      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from users row for userId=${userId}`);
+    } else {
+      log.warn(`[scheduled-jobs] no workspaceId from body/cookie/session/usersRow for userId=${userId} — row will be created with NULL and result delivery will fail`);
     }
-    if (!requestOrgId) {
-      log.error(`[scheduled-jobs/create] orgId is required userId=${userId} requesterId=${requesterId ?? "none"} bodyUserId=${bodyUserId ?? "none"} agentSlug=${agentSlug} channelId=${channelId ?? "none"} conversationId=${conversationId ?? "none"} workspaceId=${workspaceId ?? "none"} type=${type}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
-      return;
+  }
+
+  if (type !== "once" && type !== "cron") {
+    throw badRequest("type must be 'once' or 'cron'");
+  }
+
+  if (type === "once" && (delayMs == null || delayMs <= 0)) {
+    throw badRequest("delayMs is required and must be > 0 for type='once'");
+  }
+
+  if (type === "cron" && !cronExpression) {
+    throw badRequest("cronExpression is required for type='cron'");
+  }
+
+  // Validate parseability + min-interval policy. Shared with PATCH.
+  let normalizedCron: string | undefined;
+  if (type === "cron" && cronExpression) {
+    const v = validateCronExpression(cronExpression);
+    if (!v.ok) {
+      throw badRequest(v.error);
     }
-    const agent = await prisma.agent.findFirst({
-      where: { slug: agentSlug, orgId: requestOrgId },
-      select: { orgId: true },
-    });
-    if (!agent) {
-      log.warn(`[scheduled-jobs/create] agent org-scoped miss slug=${agentSlug} orgId=${requestOrgId ?? "none"} userId=${userId}`);
-      res.status(404).json({ success: false, error: "Agent not found" });
-      return;
-    }
+    normalizedCron = v.cron;
+  }
 
-    // Fallback: pull workspaceId from the user's active Spaces session row.
-    // Most browser callers don't currently send it in the body, and the
-    // `xyne_last_workspace` cookie can be absent in non-browser triggers.
-    // Without this fallback the row gets workspaceId=NULL and Spaces rejects
-    // the result-delivery call when the job fires.
-    if (!workspaceId) {
-      const live = await getSpacesAuthForUser(userId, "scheduled-job");
-      if (live?.workspaceId) {
-        workspaceId = live.workspaceId;
-        log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${userId}`);
-      }
-    }
+  const nextRunAt = type === "once" ? new Date(Date.now() + delayMs!) : null;
 
-    // Final fallback: read workspaceId straight off the user row (no live
-    // session required). getSpacesAuthForUser only resolves for currently
-    // logged-in users, so reminders typed hours earlier / S2S / automation
-    // triggers previously fell through to a NULL workspaceId — and Spaces then
-    // silently rejected result delivery when the job fired ("missing
-    // workspaceId on row"). The user row always carries the workspaceId.
-    if (!workspaceId) {
-      const wsId = await getWorkspaceIdForUser(userId, "scheduled-job");
-      if (wsId) {
-        workspaceId = wsId;
-        log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from users row for userId=${userId}`);
-      } else {
-        log.warn(`[scheduled-jobs] no workspaceId from body/cookie/session/usersRow for userId=${userId} — row will be created with NULL and result delivery will fail`);
-      }
-    }
-
-    if (type !== "once" && type !== "cron") {
-      res.status(400).json({ success: false, error: "type must be 'once' or 'cron'" });
-      return;
-    }
-
-    if (type === "once" && (delayMs == null || delayMs <= 0)) {
-      res.status(400).json({ success: false, error: "delayMs is required and must be > 0 for type='once'" });
-      return;
-    }
-
-    if (type === "cron" && !cronExpression) {
-      res.status(400).json({ success: false, error: "cronExpression is required for type='cron'" });
-      return;
-    }
-
-    // Validate parseability + min-interval policy. Shared with PATCH.
-    let normalizedCron: string | undefined;
-    if (type === "cron" && cronExpression) {
-      const v = validateCronExpression(cronExpression);
-      if (!v.ok) {
-        res.status(400).json({ success: false, error: v.error });
-        return;
-      }
-      normalizedCron = v.cron;
-    }
-
-    const nextRunAt = type === "once" ? new Date(Date.now() + delayMs!) : null;
-
-    // Create Prisma row
-    const row = await prisma.scheduledJob.create({
-      data: {
-        userId,
-        agentSlug,
-        task,
-        context: context ?? null,
-        channelId: channelId ?? null,
-        conversationId: conversationId ?? null,
-        type,
-        delayMs: type === "once" ? BigInt(delayMs!) : null,
-        cronExpression: type === "cron" ? (normalizedCron ?? null) : null,
-        maxRuns: maxRuns ?? (type === "once" ? 1 : null),
-        nextRunAt,
-        label: label ?? null,
-        workspaceId: workspaceId ?? null,
-        replyMode: replyMode ?? "thread",
-        orgId: agent.orgId,
-      },
-    });
-
-    const data: ScheduledJobData = {
-      scheduledJobId: row.id,
+  // Create Prisma row
+  const row = await prisma.scheduledJob.create({
+    data: {
       userId,
       agentSlug,
       task,
-      context: context ?? undefined,
-      channelId: channelId ?? undefined,
-      conversationId: conversationId ?? undefined,
-    };
+      context: context ?? null,
+      channelId: channelId ?? null,
+      conversationId: conversationId ?? null,
+      type,
+      delayMs: type === "once" ? BigInt(delayMs!) : null,
+      cronExpression: type === "cron" ? (normalizedCron ?? null) : null,
+      maxRuns: maxRuns ?? (type === "once" ? 1 : null),
+      nextRunAt,
+      label: label ?? null,
+      workspaceId: workspaceId ?? null,
+      replyMode: replyMode ?? "thread",
+      orgId: agent.orgId,
+    },
+  });
 
-    // Enqueue in BullMQ
-    if (type === "once") {
-      const bullJobId = await enqueueDelayedJob(data, delayMs!);
-      await prisma.scheduledJob.update({
-        where: { id: row.id },
-        data: { bullJobId },
-      });
-    } else {
-      const schedulerId = `cron-${row.id}`;
-      await enqueueCronJob(schedulerId, data, normalizedCron!);
-      await prisma.scheduledJob.update({
-        where: { id: row.id },
-        data: { bullSchedulerId: schedulerId },
-      });
-    }
+  const data: ScheduledJobData = {
+    scheduledJobId: row.id,
+    userId,
+    agentSlug,
+    task,
+    context: context ?? undefined,
+    channelId: channelId ?? undefined,
+    conversationId: conversationId ?? undefined,
+  };
 
-    log.info(`[scheduled-jobs] Created ${type} job ${row.id} for agent ${agentSlug}`);
-
-    res.json({
-      success: true,
-      data: {
-        id: row.id,
-        type: row.type,
-        status: row.status,
-        nextRunAt: nextRunAt?.toISOString(),
-        cronExpression: row.cronExpression,
-        label: row.label,
-      },
+  // Enqueue in BullMQ
+  if (type === "once") {
+    const bullJobId = await enqueueDelayedJob(data, delayMs!);
+    await prisma.scheduledJob.update({
+      where: { id: row.id },
+      data: { bullJobId },
     });
-  } catch (err) {
-    log.error("[scheduled-jobs] Create error:", err);
-    res.status(500).json({ success: false, error: "Failed to create scheduled job" });
+  } else {
+    const schedulerId = `cron-${row.id}`;
+    await enqueueCronJob(schedulerId, data, normalizedCron!);
+    await prisma.scheduledJob.update({
+      where: { id: row.id },
+      data: { bullSchedulerId: schedulerId },
+    });
   }
-});
+
+  log.info(`[scheduled-jobs] Created ${type} job ${row.id} for agent ${agentSlug}`);
+
+  ok(res, {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    nextRunAt: nextRunAt?.toISOString(),
+    cronExpression: row.cronExpression,
+    label: row.label,
+  });
+}));
 
 // ── GET / — list jobs ───────────────────────────────────────────────
 
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const { userId: qUserId, status, agentSlug } = req.query as { userId?: string; status?: string; agentSlug?: string };
-    const userId = await resolveScopedUserId(req, qUserId);
-    const where: Record<string, unknown> = {};
-    if (userId) where["userId"] = userId;
-    if (status) where["status"] = status;
-    if (agentSlug) where["agentSlug"] = agentSlug;
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  const { userId: qUserId, status, agentSlug } = req.query as { userId?: string; status?: string; agentSlug?: string };
+  const userId = await resolveScopedUserId(req, qUserId);
+  const where: Record<string, unknown> = {};
+  if (userId) where["userId"] = userId;
+  if (status) where["status"] = status;
+  if (agentSlug) where["agentSlug"] = agentSlug;
 
-    const rows = await prisma.scheduledJob.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
+  const rows = await prisma.scheduledJob.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
 
-    res.json({
-      success: true,
-      data: rows.map((r) => ({
-        ...r,
-        delayMs: r.delayMs != null ? Number(r.delayMs) : null,
-      })),
-    });
-  } catch (err) {
-    log.error("[scheduled-jobs] List error:", err);
-    res.status(500).json({ success: false, error: "Failed to list scheduled jobs" });
-  }
-});
+  ok(res, rows.map((r) => ({
+    ...r,
+    delayMs: r.delayMs != null ? Number(r.delayMs) : null,
+  })));
+}));
 
 // ── GET /runs — list runs across jobs (filter by agentSlug) ─────────
 
-router.get("/runs", async (req: Request, res: Response) => {
-  try {
-    const { agentSlug, userId: qUserId } = req.query as { agentSlug?: string; userId?: string };
-    if (!agentSlug) {
-      res.status(400).json({ success: false, error: "agentSlug is required" });
-      return;
-    }
-
-    const userId = await resolveScopedUserId(req, qUserId);
-    const jobWhere: Record<string, unknown> = { agentSlug };
-    if (userId) jobWhere["userId"] = userId;
-
-    const jobIds = await prisma.scheduledJob.findMany({
-      where: jobWhere,
-      select: { id: true },
-    });
-
-    const runs = await prisma.scheduledJobRun.findMany({
-      where: { scheduledJobId: { in: jobIds.map((j) => j.id) } },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-      include: {
-        scheduledJob: {
-          select: { label: true, task: true, cronExpression: true },
-        },
-      },
-    });
-
-    res.json({ success: true, data: runs });
-  } catch (err) {
-    log.error("[scheduled-jobs] List runs error:", err);
-    res.status(500).json({ success: false, error: "Failed to list runs" });
+router.get("/runs", asyncHandler(async (req: Request, res: Response) => {
+  const { agentSlug, userId: qUserId } = req.query as { agentSlug?: string; userId?: string };
+  if (!agentSlug) {
+    throw badRequest("agentSlug is required");
   }
-});
+
+  const userId = await resolveScopedUserId(req, qUserId);
+  const jobWhere: Record<string, unknown> = { agentSlug };
+  if (userId) jobWhere["userId"] = userId;
+
+  const jobIds = await prisma.scheduledJob.findMany({
+    where: jobWhere,
+    select: { id: true },
+  });
+
+  const runs = await prisma.scheduledJobRun.findMany({
+    where: { scheduledJobId: { in: jobIds.map((j) => j.id) } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: {
+      scheduledJob: {
+        select: { label: true, task: true, cronExpression: true },
+      },
+    },
+  });
+
+  ok(res, runs);
+}));
 
 // ── GET /:id — get single job ───────────────────────────────────────
 
-router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
-    if (!row) {
-      res.status(404).json({ success: false, error: "Not found" });
-      return;
-    }
-    // Require a resolved requester identity. On the browser path requireAuth
-    // overwrites x-user-id with the verified Spaces session id, so this is the
-    // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
-    // ownership check whenever x-user-id was absent, letting an identity-less
-    // caller read/reschedule ANY job. Match DELETE: no requester => 401;
-    // non-owner (and non-admin) => 404.
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      res.status(401).json({ success: false, error: "Authentication required" });
-      return;
-    }
-    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
-      res.status(404).json({ success: false, error: "Not found" });
-      return;
-    }
-    res.json({
-      success: true,
-      data: { ...row, delayMs: row.delayMs != null ? Number(row.delayMs) : null },
-    });
-  } catch (err) {
-    log.error("[scheduled-jobs] Get error:", err);
-    res.status(500).json({ success: false, error: "Failed to get scheduled job" });
+router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
+  if (!row) {
+    throw notFound("Not found");
   }
-});
+  // Require a resolved requester identity. On the browser path requireAuth
+  // overwrites x-user-id with the verified Spaces session id, so this is the
+  // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
+  // ownership check whenever x-user-id was absent, letting an identity-less
+  // caller read/reschedule ANY job. Match DELETE: no requester => 401;
+  // non-owner (and non-admin) => 404.
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("Authentication required");
+  }
+  if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    throw notFound("Not found");
+  }
+  ok(res, { ...row, delayMs: row.delayMs != null ? Number(row.delayMs) : null });
+}));
 
 // ── PATCH /:id — update editable fields on a job ────────────────────
 //
@@ -533,223 +496,194 @@ router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
 // per scheduled-jobs-queue.ts). delayMs / agentSlug / type remain
 // non-editable — those should go through delete + recreate.
 
-router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
-    if (!row) {
-      res.status(404).json({ success: false, error: "Not found" });
-      return;
-    }
-    // Require a resolved requester identity. On the browser path requireAuth
-    // overwrites x-user-id with the verified Spaces session id, so this is the
-    // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
-    // ownership check whenever x-user-id was absent, letting an identity-less
-    // caller read/reschedule ANY job. Match DELETE: no requester => 401;
-    // non-owner (and non-admin) => 404.
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      res.status(401).json({ success: false, error: "Authentication required" });
-      return;
-    }
-    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
-      res.status(404).json({ success: false, error: "Not found" });
-      return;
-    }
+router.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
+  if (!row) {
+    throw notFound("Not found");
+  }
+  // Require a resolved requester identity. On the browser path requireAuth
+  // overwrites x-user-id with the verified Spaces session id, so this is the
+  // authenticated caller. A bare `if (requesterId && ...)` guard SKIPPED the
+  // ownership check whenever x-user-id was absent, letting an identity-less
+  // caller read/reschedule ANY job. Match DELETE: no requester => 401;
+  // non-owner (and non-admin) => 404.
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("Authentication required");
+  }
+  if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    throw notFound("Not found");
+  }
 
-    const { replyMode, label, targetChannelId, cronExpression, nextRunAt, task, context } = req.body as {
-      replyMode?: string;
-      label?: string | null;
-      targetChannelId?: string | null;
-      cronExpression?: string;
-      nextRunAt?: string;
-      task?: string;
-      context?: string | null;
+  const { replyMode, label, targetChannelId, cronExpression, nextRunAt, task, context } = req.body as {
+    replyMode?: string;
+    label?: string | null;
+    targetChannelId?: string | null;
+    cronExpression?: string;
+    nextRunAt?: string;
+    task?: string;
+    context?: string | null;
+  };
+
+  const data: {
+    replyMode?: string;
+    label?: string | null;
+    targetChannelId?: string | null;
+    cronExpression?: string;
+    delayMs?: bigint;
+    nextRunAt?: Date;
+    task?: string;
+    context?: string | null;
+  } = {};
+  if (replyMode !== undefined) {
+    if (replyMode !== "thread" && replyMode !== "channel") {
+      throw badRequest("replyMode must be 'thread' or 'channel'");
+    }
+    data.replyMode = replyMode;
+  }
+  if (label !== undefined) {
+    data.label = label === null ? null : String(label);
+  }
+  if (targetChannelId !== undefined) {
+    // Empty string / null clears the override (revert to originating channel).
+    const trimmed = targetChannelId == null ? null : String(targetChannelId).trim();
+    data.targetChannelId = trimmed && trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (task !== undefined) {
+    // task is the agent instruction executed on every fire (NOT NULL column).
+    // The worker reads it live from the row, so an edit takes effect on the
+    // next run with no Redis re-bind. Reject empty/whitespace so a job can't
+    // be silently turned into a no-op.
+    const trimmed = String(task).trim();
+    if (trimmed.length === 0) {
+      throw badRequest("task cannot be empty");
+    }
+    data.task = trimmed;
+  }
+  if (context !== undefined) {
+    // Empty string / null clears the additional context.
+    const trimmed = context == null ? null : String(context).trim();
+    data.context = trimmed && trimmed.length > 0 ? trimmed : null;
+  }
+
+  let cronChanged = false;
+  if (cronExpression !== undefined) {
+    if (row.type !== "cron") {
+      throw badRequest("cronExpression can only be changed on type='cron' jobs");
+    }
+    if (row.status !== "active") {
+      throw badRequest("Only active jobs can be rescheduled");
+    }
+    // Same parseability + min-interval policy as POST. validateCronExpression
+    // returns the trimmed value on success.
+    const v = validateCronExpression(String(cronExpression));
+    if (!v.ok) {
+      throw badRequest(v.error);
+    }
+    if (v.cron !== row.cronExpression) {
+      data.cronExpression = v.cron;
+      cronChanged = true;
+    }
+  }
+
+  let onceRescheduled = false;
+  let newDelayMsForRescheduledOnce = 0;
+  if (nextRunAt !== undefined) {
+    if (row.type !== "once") {
+      throw badRequest("nextRunAt can only be changed on type='once' jobs");
+    }
+    if (row.status !== "active") {
+      throw badRequest("Only active jobs can be rescheduled");
+    }
+    const newDate = new Date(String(nextRunAt));
+    if (isNaN(newDate.getTime())) {
+      throw badRequest("nextRunAt must be a valid ISO datetime (e.g. '2026-05-26T19:30:00Z')");
+    }
+    const newDelayMs = newDate.getTime() - Date.now();
+    // 5s floor so a clock-skew race between client/server doesn't push
+    // the new schedule into the past on submit.
+    if (newDelayMs < 5_000) {
+      throw badRequest("nextRunAt must be at least 5 seconds in the future");
+    }
+    data.nextRunAt = newDate;
+    data.delayMs = BigInt(newDelayMs);
+    onceRescheduled = true;
+    newDelayMsForRescheduledOnce = newDelayMs;
+  }
+
+  if (Object.keys(data).length === 0) {
+    throw badRequest("No editable fields supplied");
+  }
+
+  const updated = await prisma.scheduledJob.update({ where: { id: row.id }, data });
+
+  // Re-bind the BullMQ scheduler so the new pattern actually takes effect
+  // in Redis. upsertJobScheduler is idempotent — re-registering the same
+  // schedulerId with a new pattern atomically replaces it.
+  if (cronChanged) {
+    const schedulerId = updated.bullSchedulerId ?? `cron-${updated.id}`;
+    const jobData: ScheduledJobData = {
+      scheduledJobId: updated.id,
+      userId: updated.userId,
+      agentSlug: updated.agentSlug,
+      task: updated.task,
+      ...(updated.context ? { context: updated.context } : {}),
+      ...(updated.channelId ? { channelId: updated.channelId } : {}),
+      ...(updated.conversationId ? { conversationId: updated.conversationId } : {}),
     };
-
-    const data: {
-      replyMode?: string;
-      label?: string | null;
-      targetChannelId?: string | null;
-      cronExpression?: string;
-      delayMs?: bigint;
-      nextRunAt?: Date;
-      task?: string;
-      context?: string | null;
-    } = {};
-    if (replyMode !== undefined) {
-      if (replyMode !== "thread" && replyMode !== "channel") {
-        res.status(400).json({ success: false, error: "replyMode must be 'thread' or 'channel'" });
-        return;
-      }
-      data.replyMode = replyMode;
-    }
-    if (label !== undefined) {
-      data.label = label === null ? null : String(label);
-    }
-    if (targetChannelId !== undefined) {
-      // Empty string / null clears the override (revert to originating channel).
-      const trimmed = targetChannelId == null ? null : String(targetChannelId).trim();
-      data.targetChannelId = trimmed && trimmed.length > 0 ? trimmed : null;
-    }
-
-    if (task !== undefined) {
-      // task is the agent instruction executed on every fire (NOT NULL column).
-      // The worker reads it live from the row, so an edit takes effect on the
-      // next run with no Redis re-bind. Reject empty/whitespace so a job can't
-      // be silently turned into a no-op.
-      const trimmed = String(task).trim();
-      if (trimmed.length === 0) {
-        res.status(400).json({ success: false, error: "task cannot be empty" });
-        return;
-      }
-      data.task = trimmed;
-    }
-    if (context !== undefined) {
-      // Empty string / null clears the additional context.
-      const trimmed = context == null ? null : String(context).trim();
-      data.context = trimmed && trimmed.length > 0 ? trimmed : null;
-    }
-
-    let cronChanged = false;
-    if (cronExpression !== undefined) {
-      if (row.type !== "cron") {
-        res.status(400).json({ success: false, error: "cronExpression can only be changed on type='cron' jobs" });
-        return;
-      }
-      if (row.status !== "active") {
-        res.status(400).json({ success: false, error: "Only active jobs can be rescheduled" });
-        return;
-      }
-      // Same parseability + min-interval policy as POST. validateCronExpression
-      // returns the trimmed value on success.
-      const v = validateCronExpression(String(cronExpression));
-      if (!v.ok) {
-        res.status(400).json({ success: false, error: v.error });
-        return;
-      }
-      if (v.cron !== row.cronExpression) {
-        data.cronExpression = v.cron;
-        cronChanged = true;
-      }
-    }
-
-    let onceRescheduled = false;
-    let newDelayMsForRescheduledOnce = 0;
-    if (nextRunAt !== undefined) {
-      if (row.type !== "once") {
-        res.status(400).json({ success: false, error: "nextRunAt can only be changed on type='once' jobs" });
-        return;
-      }
-      if (row.status !== "active") {
-        res.status(400).json({ success: false, error: "Only active jobs can be rescheduled" });
-        return;
-      }
-      const newDate = new Date(String(nextRunAt));
-      if (isNaN(newDate.getTime())) {
-        res.status(400).json({ success: false, error: "nextRunAt must be a valid ISO datetime (e.g. '2026-05-26T19:30:00Z')" });
-        return;
-      }
-      const newDelayMs = newDate.getTime() - Date.now();
-      // 5s floor so a clock-skew race between client/server doesn't push
-      // the new schedule into the past on submit.
-      if (newDelayMs < 5_000) {
-        res.status(400).json({ success: false, error: "nextRunAt must be at least 5 seconds in the future" });
-        return;
-      }
-      data.nextRunAt = newDate;
-      data.delayMs = BigInt(newDelayMs);
-      onceRescheduled = true;
-      newDelayMsForRescheduledOnce = newDelayMs;
-    }
-
-    if (Object.keys(data).length === 0) {
-      res.status(400).json({ success: false, error: "No editable fields supplied" });
-      return;
-    }
-
-    const updated = await prisma.scheduledJob.update({ where: { id: row.id }, data });
-
-    // Re-bind the BullMQ scheduler so the new pattern actually takes effect
-    // in Redis. upsertJobScheduler is idempotent — re-registering the same
-    // schedulerId with a new pattern atomically replaces it.
-    if (cronChanged) {
-      const schedulerId = updated.bullSchedulerId ?? `cron-${updated.id}`;
-      const jobData: ScheduledJobData = {
-        scheduledJobId: updated.id,
-        userId: updated.userId,
-        agentSlug: updated.agentSlug,
-        task: updated.task,
-        ...(updated.context ? { context: updated.context } : {}),
-        ...(updated.channelId ? { channelId: updated.channelId } : {}),
-        ...(updated.conversationId ? { conversationId: updated.conversationId } : {}),
-      };
-      try {
-        await enqueueCronJob(schedulerId, jobData, updated.cronExpression!);
-        if (!updated.bullSchedulerId) {
-          await prisma.scheduledJob.update({
-            where: { id: updated.id },
-            data: { bullSchedulerId: schedulerId },
-          });
-        }
-        log.info(`[scheduled-jobs] Rescheduled ${updated.id} → '${updated.cronExpression}'`);
-      } catch (err) {
-        log.error(`[scheduled-jobs] Failed to re-bind scheduler ${schedulerId}:`, err);
-        // DB is already updated — surface the Redis failure so the caller
-        // knows the binding may be stale and can retry.
-        res.status(500).json({
-          success: false,
-          error: `Saved cron in DB but failed to update Redis scheduler: ${err instanceof Error ? err.message : String(err)}`,
-        });
-        return;
-      }
-    }
-
-    // Once-job reschedule: cancel the prior BullMQ delayed job (if still
-    // pending) and re-enqueue with the new delay. Cancel is best-effort —
-    // if the old job already fired or was already cleaned up, ignore.
-    if (onceRescheduled) {
-      if (updated.bullJobId) {
-        await cancelJob(updated.bullJobId).catch((err) => {
-          log.warn(`[scheduled-jobs] Failed to cancel old bullJob ${updated.bullJobId} for ${updated.id}:`, err instanceof Error ? err.message : err);
-        });
-      }
-      const jobData: ScheduledJobData = {
-        scheduledJobId: updated.id,
-        userId: updated.userId,
-        agentSlug: updated.agentSlug,
-        task: updated.task,
-        ...(updated.context ? { context: updated.context } : {}),
-        ...(updated.channelId ? { channelId: updated.channelId } : {}),
-        ...(updated.conversationId ? { conversationId: updated.conversationId } : {}),
-      };
-      try {
-        const newBullJobId = await enqueueDelayedJob(jobData, newDelayMsForRescheduledOnce);
+    try {
+      await enqueueCronJob(schedulerId, jobData, updated.cronExpression!);
+      if (!updated.bullSchedulerId) {
         await prisma.scheduledJob.update({
           where: { id: updated.id },
-          data: { bullJobId: newBullJobId },
+          data: { bullSchedulerId: schedulerId },
         });
-        log.info(`[scheduled-jobs] Rescheduled once-job ${updated.id} → fires at ${updated.nextRunAt?.toISOString()} (delay ${newDelayMsForRescheduledOnce}ms)`);
-      } catch (err) {
-        log.error(`[scheduled-jobs] Failed to re-enqueue once-job ${updated.id}:`, err);
-        // DB is ahead of Redis. The next fire won't happen until the user
-        // retries the reschedule. Surface this so the caller knows.
-        res.status(500).json({
-          success: false,
-          error: `Saved nextRunAt in DB but failed to enqueue the new delayed job: ${err instanceof Error ? err.message : String(err)}`,
-        });
-        return;
       }
+      log.info(`[scheduled-jobs] Rescheduled ${updated.id} → '${updated.cronExpression}'`);
+    } catch (err) {
+      log.error(`[scheduled-jobs] Failed to re-bind scheduler ${schedulerId}:`, err);
+      // DB is already updated — surface the Redis failure so the caller
+      // knows the binding may be stale and can retry.
+      throw new HttpError(500, `Saved cron in DB but failed to update Redis scheduler: ${errMsg(err)}`);
     }
-
-    res.json({
-      success: true,
-      data: { ...updated, delayMs: updated.delayMs != null ? Number(updated.delayMs) : null },
-    });
-  } catch (err) {
-    log.error("[scheduled-jobs] Patch error:", err);
-    res.status(500).json({ success: false, error: "Failed to update scheduled job" });
   }
-});
+
+  // Once-job reschedule: cancel the prior BullMQ delayed job (if still
+  // pending) and re-enqueue with the new delay. Cancel is best-effort —
+  // if the old job already fired or was already cleaned up, ignore.
+  if (onceRescheduled) {
+    if (updated.bullJobId) {
+      await cancelJob(updated.bullJobId).catch((err) => {
+        log.warn(`[scheduled-jobs] Failed to cancel old bullJob ${updated.bullJobId} for ${updated.id}:`, err instanceof Error ? err.message : err);
+      });
+    }
+    const jobData: ScheduledJobData = {
+      scheduledJobId: updated.id,
+      userId: updated.userId,
+      agentSlug: updated.agentSlug,
+      task: updated.task,
+      ...(updated.context ? { context: updated.context } : {}),
+      ...(updated.channelId ? { channelId: updated.channelId } : {}),
+      ...(updated.conversationId ? { conversationId: updated.conversationId } : {}),
+    };
+    try {
+      const newBullJobId = await enqueueDelayedJob(jobData, newDelayMsForRescheduledOnce);
+      await prisma.scheduledJob.update({
+        where: { id: updated.id },
+        data: { bullJobId: newBullJobId },
+      });
+      log.info(`[scheduled-jobs] Rescheduled once-job ${updated.id} → fires at ${updated.nextRunAt?.toISOString()} (delay ${newDelayMsForRescheduledOnce}ms)`);
+    } catch (err) {
+      log.error(`[scheduled-jobs] Failed to re-enqueue once-job ${updated.id}:`, err);
+      // DB is ahead of Redis. The next fire won't happen until the user
+      // retries the reschedule. Surface this so the caller knows.
+      throw new HttpError(500, `Saved nextRunAt in DB but failed to enqueue the new delayed job: ${errMsg(err)}`);
+    }
+  }
+
+  ok(res, { ...updated, delayMs: updated.delayMs != null ? Number(updated.delayMs) : null });
+}));
 
 // ── DELETE /:id — cancel a job ──────────────────────────────────────
 
@@ -757,232 +691,176 @@ router.patch("/:id", async (req: Request<{ id: string }>, res: Response) => {
 
 router.post(
   "/:id/pause",
-  async (req: Request<{ id: string }>, res: Response) => {
-    try {
-      const row = await prisma.scheduledJob.findUnique({
-        where: { id: req.params.id },
-      });
-      if (!row) {
-        res.status(404).json({ success: false, error: "Not found" });
-        return;
-      }
-
-      const auth = await assertCanControlScheduledJob(req, row);
-      if (auth.ok === false) {
-        res.status(auth.status).json({ success: false, error: auth.error });
-        return;
-      }
-
-      if (row.status === "paused") {
-        res.json({ success: true, data: { id: row.id, status: row.status } });
-        return;
-      }
-      if (row.status !== "active") {
-        res.status(400).json({
-          success: false,
-          error: `Only active jobs can be paused (current status: ${row.status})`,
-        });
-        return;
-      }
-
-      if (row.type === "once" && row.bullJobId) {
-        await cancelJob(row.bullJobId).catch((err) => {
-          log.warn(
-            `[scheduled-jobs] Failed to remove delayed job ${row.bullJobId} while pausing ${row.id}:`,
-            err instanceof Error ? err.message : err,
-          );
-        });
-      }
-      if (row.type === "cron" && row.bullSchedulerId) {
-        await cancelCronJob(row.bullSchedulerId).catch((err) => {
-          log.warn(
-            `[scheduled-jobs] Failed to remove scheduler ${row.bullSchedulerId} while pausing ${row.id}:`,
-            err instanceof Error ? err.message : err,
-          );
-        });
-      }
-
-      const updated = await prisma.scheduledJob.update({
-        where: { id: row.id },
-        data: { status: "paused" },
-      });
-
-      log.info(`[scheduled-jobs] Paused job ${row.id} by ${auth.actorUserId}`);
-      res.json({
-        success: true,
-        data: { id: updated.id, status: updated.status },
-      });
-    } catch (err) {
-      log.error("[scheduled-jobs] Pause error:", err);
-      res
-        .status(500)
-        .json({ success: false, error: "Failed to pause scheduled job" });
+  asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+    const row = await prisma.scheduledJob.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!row) {
+      throw notFound("Not found");
     }
-  },
+
+    const auth = await assertCanControlScheduledJob(req, row);
+    if (auth.ok === false) {
+      throw new HttpError(auth.status, auth.error);
+    }
+
+    if (row.status === "paused") {
+      ok(res, { id: row.id, status: row.status });
+      return;
+    }
+    if (row.status !== "active") {
+      throw badRequest(`Only active jobs can be paused (current status: ${row.status})`);
+    }
+
+    if (row.type === "once" && row.bullJobId) {
+      await cancelJob(row.bullJobId).catch((err) => {
+        log.warn(
+          `[scheduled-jobs] Failed to remove delayed job ${row.bullJobId} while pausing ${row.id}:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    }
+    if (row.type === "cron" && row.bullSchedulerId) {
+      await cancelCronJob(row.bullSchedulerId).catch((err) => {
+        log.warn(
+          `[scheduled-jobs] Failed to remove scheduler ${row.bullSchedulerId} while pausing ${row.id}:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    }
+
+    const updated = await prisma.scheduledJob.update({
+      where: { id: row.id },
+      data: { status: "paused" },
+    });
+
+    log.info(`[scheduled-jobs] Paused job ${row.id} by ${auth.actorUserId}`);
+    ok(res, { id: updated.id, status: updated.status });
+  }),
 );
 
 // ── POST /:id/resume — resume a paused job (re-bind to BullMQ) ────────────
 
 router.post(
   "/:id/resume",
-  async (req: Request<{ id: string }>, res: Response) => {
-    try {
-      const row = await prisma.scheduledJob.findUnique({
-        where: { id: req.params.id },
-      });
-      if (!row) {
-        res.status(404).json({ success: false, error: "Not found" });
-        return;
-      }
-
-      const auth = await assertCanControlScheduledJob(req, row);
-      if (auth.ok === false) {
-        res.status(auth.status).json({ success: false, error: auth.error });
-        return;
-      }
-
-      if (row.status === "active") {
-        res.json({ success: true, data: { id: row.id, status: row.status } });
-        return;
-      }
-      if (row.status !== "paused") {
-        res.status(400).json({
-          success: false,
-          error: `Only paused jobs can be resumed (current status: ${row.status})`,
-        });
-        return;
-      }
-
-      const jobData: ScheduledJobData = {
-        scheduledJobId: row.id,
-        userId: row.userId,
-        agentSlug: row.agentSlug,
-        task: row.task,
-        ...(row.context ? { context: row.context } : {}),
-        ...(row.channelId ? { channelId: row.channelId } : {}),
-        ...(row.conversationId ? { conversationId: row.conversationId } : {}),
-      };
-      let updateData: {
-        status: string;
-        bullJobId?: string;
-        bullSchedulerId?: string;
-        nextRunAt?: Date;
-        delayMs?: bigint;
-      } = { status: "active" };
-
-      if (row.type === "cron") {
-        if (!row.cronExpression) {
-          res.status(400).json({
-            success: false,
-            error: "Cannot resume cron job without cronExpression",
-          });
-          return;
-        }
-        const schedulerId = row.bullSchedulerId ?? `cron-${row.id}`;
-        await enqueueCronJob(schedulerId, jobData, row.cronExpression);
-        updateData = { ...updateData, bullSchedulerId: schedulerId };
-      } else if (row.type === "once") {
-        const targetRunAt =
-          row.nextRunAt && row.nextRunAt.getTime() > Date.now() + 5_000
-            ? row.nextRunAt
-            : new Date(Date.now() + 5_000);
-        const delayMs = targetRunAt.getTime() - Date.now();
-        const bullJobId = await enqueueDelayedJob(jobData, delayMs);
-        updateData = {
-          ...updateData,
-          bullJobId,
-          nextRunAt: targetRunAt,
-          delayMs: BigInt(delayMs),
-        };
-      } else {
-        res.status(400).json({
-          success: false,
-          error: `Unknown scheduled job type: ${row.type}`,
-        });
-        return;
-      }
-
-      const updated = await prisma.scheduledJob.update({
-        where: { id: row.id },
-        data: updateData,
-      });
-
-      log.info(`[scheduled-jobs] Resumed job ${row.id} by ${auth.actorUserId}`);
-      res.json({
-        success: true,
-        data: {
-          id: updated.id,
-          status: updated.status,
-          nextRunAt: updated.nextRunAt?.toISOString(),
-        },
-      });
-    } catch (err) {
-      log.error("[scheduled-jobs] Resume error:", err);
-      res
-        .status(500)
-        .json({ success: false, error: "Failed to resume scheduled job" });
+  asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+    const row = await prisma.scheduledJob.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!row) {
+      throw notFound("Not found");
     }
-  },
+
+    const auth = await assertCanControlScheduledJob(req, row);
+    if (auth.ok === false) {
+      throw new HttpError(auth.status, auth.error);
+    }
+
+    if (row.status === "active") {
+      ok(res, { id: row.id, status: row.status });
+      return;
+    }
+    if (row.status !== "paused") {
+      throw badRequest(`Only paused jobs can be resumed (current status: ${row.status})`);
+    }
+
+    const jobData: ScheduledJobData = {
+      scheduledJobId: row.id,
+      userId: row.userId,
+      agentSlug: row.agentSlug,
+      task: row.task,
+      ...(row.context ? { context: row.context } : {}),
+      ...(row.channelId ? { channelId: row.channelId } : {}),
+      ...(row.conversationId ? { conversationId: row.conversationId } : {}),
+    };
+    let updateData: {
+      status: string;
+      bullJobId?: string;
+      bullSchedulerId?: string;
+      nextRunAt?: Date;
+      delayMs?: bigint;
+    } = { status: "active" };
+
+    if (row.type === "cron") {
+      if (!row.cronExpression) {
+        throw badRequest("Cannot resume cron job without cronExpression");
+      }
+      const schedulerId = row.bullSchedulerId ?? `cron-${row.id}`;
+      await enqueueCronJob(schedulerId, jobData, row.cronExpression);
+      updateData = { ...updateData, bullSchedulerId: schedulerId };
+    } else if (row.type === "once") {
+      const targetRunAt =
+        row.nextRunAt && row.nextRunAt.getTime() > Date.now() + 5_000
+          ? row.nextRunAt
+          : new Date(Date.now() + 5_000);
+      const delayMs = targetRunAt.getTime() - Date.now();
+      const bullJobId = await enqueueDelayedJob(jobData, delayMs);
+      updateData = {
+        ...updateData,
+        bullJobId,
+        nextRunAt: targetRunAt,
+        delayMs: BigInt(delayMs),
+      };
+    } else {
+      throw badRequest(`Unknown scheduled job type: ${row.type}`);
+    }
+
+    const updated = await prisma.scheduledJob.update({
+      where: { id: row.id },
+      data: updateData,
+    });
+
+    log.info(`[scheduled-jobs] Resumed job ${row.id} by ${auth.actorUserId}`);
+    ok(res, {
+      id: updated.id,
+      status: updated.status,
+      nextRunAt: updated.nextRunAt?.toISOString(),
+    });
+  }),
 );
 
 // ── POST /:id/cancel — tool-friendly cancel (mirrors DELETE, keeps row) ───
 
 router.post(
   "/:id/cancel",
-  async (req: Request<{ id: string }>, res: Response) => {
-    try {
-      const row = await prisma.scheduledJob.findUnique({
-        where: { id: req.params.id },
-      });
-      if (!row) {
-        res.status(404).json({ success: false, error: "Not found" });
-        return;
-      }
-
-      const auth = await assertCanControlScheduledJob(req, row);
-      if (auth.ok === false) {
-        res.status(auth.status).json({ success: false, error: auth.error });
-        return;
-      }
-
-      if (row.status === "cancelled") {
-        res.json({ success: true, data: { id: row.id, status: row.status } });
-        return;
-      }
-      if (row.status === "completed") {
-        res.status(400).json({
-          success: false,
-          error: "Completed jobs cannot be cancelled",
-        });
-        return;
-      }
-
-      if (row.type === "once" && row.bullJobId) {
-        await cancelJob(row.bullJobId).catch(() => {});
-      }
-      if (row.type === "cron" && row.bullSchedulerId) {
-        await cancelCronJob(row.bullSchedulerId).catch(() => {});
-      }
-
-      const updated = await prisma.scheduledJob.update({
-        where: { id: row.id },
-        data: { status: "cancelled" },
-      });
-
-      log.info(
-        `[scheduled-jobs] Cancelled job ${row.id} by ${auth.actorUserId}`,
-      );
-      res.json({
-        success: true,
-        data: { id: updated.id, status: updated.status },
-      });
-    } catch (err) {
-      log.error("[scheduled-jobs] Cancel error:", err);
-      res
-        .status(500)
-        .json({ success: false, error: "Failed to cancel scheduled job" });
+  asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+    const row = await prisma.scheduledJob.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!row) {
+      throw notFound("Not found");
     }
-  },
+
+    const auth = await assertCanControlScheduledJob(req, row);
+    if (auth.ok === false) {
+      throw new HttpError(auth.status, auth.error);
+    }
+
+    if (row.status === "cancelled") {
+      ok(res, { id: row.id, status: row.status });
+      return;
+    }
+    if (row.status === "completed") {
+      throw badRequest("Completed jobs cannot be cancelled");
+    }
+
+    if (row.type === "once" && row.bullJobId) {
+      await cancelJob(row.bullJobId).catch(() => {});
+    }
+    if (row.type === "cron" && row.bullSchedulerId) {
+      await cancelCronJob(row.bullSchedulerId).catch(() => {});
+    }
+
+    const updated = await prisma.scheduledJob.update({
+      where: { id: row.id },
+      data: { status: "cancelled" },
+    });
+
+    log.info(
+      `[scheduled-jobs] Cancelled job ${row.id} by ${auth.actorUserId}`,
+    );
+    ok(res, { id: updated.id, status: updated.status });
+  }),
 );
 
 // ── POST /:id/update — edit the prompt/task (and label) of a job ──────
@@ -996,113 +874,88 @@ router.post(
 // needed — this is a pure DB write that the next fire picks up.
 router.post(
   "/:id/update",
-  async (req: Request<{ id: string }>, res: Response) => {
-    try {
-      const row = await prisma.scheduledJob.findUnique({
-        where: { id: req.params.id },
-      });
-      if (!row) {
-        res.status(404).json({ success: false, error: "Not found" });
-        return;
-      }
-
-      const auth = await assertCanControlScheduledJob(req, row);
-      if (auth.ok === false) {
-        res.status(auth.status).json({ success: false, error: auth.error });
-        return;
-      }
-
-      const { task, context, label } = req.body as {
-        task?: string;
-        context?: string | null;
-        label?: string | null;
-      };
-
-      const data: { task?: string; context?: string | null; label?: string | null } = {};
-      if (task !== undefined) {
-        const trimmed = String(task).trim();
-        if (trimmed.length === 0) {
-          res.status(400).json({ success: false, error: "task cannot be empty" });
-          return;
-        }
-        data.task = trimmed;
-      }
-      if (context !== undefined) {
-        const trimmed = context == null ? null : String(context).trim();
-        data.context = trimmed && trimmed.length > 0 ? trimmed : null;
-      }
-      if (label !== undefined) {
-        data.label = label === null ? null : String(label);
-      }
-
-      if (Object.keys(data).length === 0) {
-        res.status(400).json({
-          success: false,
-          error: "No editable fields supplied (task, context, label)",
-        });
-        return;
-      }
-
-      const updated = await prisma.scheduledJob.update({
-        where: { id: row.id },
-        data,
-      });
-
-      log.info(
-        `[scheduled-jobs] Updated task/context on job ${row.id} by ${auth.actorUserId}`,
-      );
-      res.json({
-        success: true,
-        data: { id: updated.id, status: updated.status },
-      });
-    } catch (err) {
-      log.error("[scheduled-jobs] Update error:", err);
-      res
-        .status(500)
-        .json({ success: false, error: "Failed to update scheduled job" });
-    }
-  },
-);
-
-router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
+  asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+    const row = await prisma.scheduledJob.findUnique({
+      where: { id: req.params.id },
+    });
     if (!row) {
-      res.status(404).json({ success: false, error: "Not found" });
-      return;
-    }
-    // Delete is restricted to the job owner or a CLAW_ADMIN — S2S callers
-    // can't delete jobs on behalf of users.
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      res.status(401).json({ success: false, error: "Authentication required" });
-      return;
-    }
-    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
-      res.status(404).json({ success: false, error: "Not found" });
-      return;
+      throw notFound("Not found");
     }
 
-    // Remove from BullMQ
-    if (row.type === "once" && row.bullJobId) {
-      await cancelJob(row.bullJobId).catch(() => {});
-    }
-    if (row.type === "cron" && row.bullSchedulerId) {
-      await cancelCronJob(row.bullSchedulerId).catch(() => {});
+    const auth = await assertCanControlScheduledJob(req, row);
+    if (auth.ok === false) {
+      throw new HttpError(auth.status, auth.error);
     }
 
-    await prisma.scheduledJob.update({
+    const { task, context, label } = req.body as {
+      task?: string;
+      context?: string | null;
+      label?: string | null;
+    };
+
+    const data: { task?: string; context?: string | null; label?: string | null } = {};
+    if (task !== undefined) {
+      const trimmed = String(task).trim();
+      if (trimmed.length === 0) {
+        throw badRequest("task cannot be empty");
+      }
+      data.task = trimmed;
+    }
+    if (context !== undefined) {
+      const trimmed = context == null ? null : String(context).trim();
+      data.context = trimmed && trimmed.length > 0 ? trimmed : null;
+    }
+    if (label !== undefined) {
+      data.label = label === null ? null : String(label);
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw badRequest("No editable fields supplied (task, context, label)");
+    }
+
+    const updated = await prisma.scheduledJob.update({
       where: { id: row.id },
-      data: { status: "cancelled" },
+      data,
     });
 
-    log.info(`[scheduled-jobs] Cancelled job ${row.id}`);
-    res.json({ success: true });
-  } catch (err) {
-    log.error("[scheduled-jobs] Cancel error:", err);
-    res.status(500).json({ success: false, error: "Failed to cancel scheduled job" });
+    log.info(
+      `[scheduled-jobs] Updated task/context on job ${row.id} by ${auth.actorUserId}`,
+    );
+    ok(res, { id: updated.id, status: updated.status });
+  }),
+);
+
+router.delete("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
+  if (!row) {
+    throw notFound("Not found");
   }
-});
+  // Delete is restricted to the job owner or a CLAW_ADMIN — S2S callers
+  // can't delete jobs on behalf of users.
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("Authentication required");
+  }
+  if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+    throw notFound("Not found");
+  }
+
+  // Remove from BullMQ
+  if (row.type === "once" && row.bullJobId) {
+    await cancelJob(row.bullJobId).catch(() => {});
+  }
+  if (row.type === "cron" && row.bullSchedulerId) {
+    await cancelCronJob(row.bullSchedulerId).catch(() => {});
+  }
+
+  await prisma.scheduledJob.update({
+    where: { id: row.id },
+    data: { status: "cancelled" },
+  });
+
+  log.info(`[scheduled-jobs] Cancelled job ${row.id}`);
+  ok(res);
+}));
 
 // ── POST /:id/result — callback from xyne-claw after scheduled run ──
 
@@ -1135,7 +988,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     log.info(`[scheduled-jobs/result] Job ${id}: handoff callback session=${payload.sessionId ?? ""} lastTurn=${payload.lastTurn ?? "unknown"}`);
     if (payload.sessionId) {
       const handoff = await handleRunHandoff(payload.sessionId).catch((err) => {
-        log.warn(`[scheduled-jobs/result] handoff re-dispatch failed for ${payload.sessionId}:`, err instanceof Error ? err.message : String(err));
+        log.warn(`[scheduled-jobs/result] handoff re-dispatch failed for ${payload.sessionId}:`, errMsg(err));
         return null;
       });
       if (handoff) {

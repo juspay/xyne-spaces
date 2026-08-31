@@ -180,7 +180,13 @@ const ProviderCard = ({
       )}
 
       <div className='mt-auto flex justify-end'>
-        <Button size='sm' variant={isConnected ? 'secondary' : 'default'} onClick={onOpenDialog}>
+        <Button
+          size='sm'
+          variant={isConnected ? 'secondary' : 'default'}
+          onClick={onOpenDialog}
+          data-track-category='claw-settings'
+          data-track-name='OPEN_SETTINGS_DIALOG'
+        >
           {isConnected ? 'Configure' : 'Connect'}
         </Button>
       </div>
@@ -426,7 +432,12 @@ const CopilotConfigForm = ({
           <p className='text-sm text-muted-foreground'>
             Connect your GitHub account to use Copilot-powered code suggestions across all agents.
           </p>
-          <Button onClick={() => void startLogin()} disabled={starting}>
+          <Button
+            onClick={() => void startLogin()}
+            data-track-category='claw-settings'
+            data-track-name='START_GITHUB_LOGIN'
+            disabled={starting}
+          >
             {starting ? <Loader2 className='size-4 animate-spin' /> : <Plug className='size-4' />}
             {starting ? 'Starting...' : 'Log in with GitHub'}
           </Button>
@@ -455,12 +466,20 @@ const CopilotConfigForm = ({
             <Button
               variant='secondary'
               onClick={() => void startLogin()}
+              data-track-category='claw-settings'
+              data-track-name='RESTART_GITHUB_LOGIN'
               disabled={starting || saving}
             >
               <Github className='size-4' />
               Reconnect
             </Button>
-            <Button variant='destructive' onClick={() => void handleDisconnect()} disabled={saving}>
+            <Button
+              variant='destructive'
+              onClick={() => void handleDisconnect()}
+              data-track-category='claw-settings'
+              data-track-name='DISCONNECT_GITHUB'
+              disabled={saving}
+            >
               <Trash2 className='size-4' />
               Disconnect
             </Button>
@@ -480,6 +499,8 @@ const CopilotConfigForm = ({
               variant='ghost'
               aria-label='Copy GitHub authorization code'
               onClick={() => void navigator.clipboard.writeText(device.userCode)}
+              data-track-category='claw-settings'
+              data-track-name='COPY_GITHUB_DEVICE_CODE'
             >
               <Copy className='size-4' />
             </Button>
@@ -693,7 +714,13 @@ const GenericProviderConfigForm = ({
         {isOauth && isCodex && (
           <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
             {!codexFlow ? (
-              <Button size='sm' onClick={() => void startCodexOAuth()} disabled={codexBusy}>
+              <Button
+                size='sm'
+                onClick={() => void startCodexOAuth()}
+                data-track-category='claw-settings'
+                data-track-name='START_CODEX_OAUTH'
+                disabled={codexBusy}
+              >
                 {codexBusy ? (
                   <Loader2 className='size-4 animate-spin' />
                 ) : (
@@ -723,6 +750,8 @@ const GenericProviderConfigForm = ({
                   <Button
                     size='sm'
                     onClick={() => void completeCodexOAuth()}
+                    data-track-category='claw-settings'
+                    data-track-name='COMPLETE_CODEX_OAUTH'
                     disabled={codexBusy || !codexCode.trim()}
                   >
                     {codexBusy ? 'Verifying...' : 'Complete sign-in'}
@@ -734,6 +763,8 @@ const GenericProviderConfigForm = ({
                       setCodexFlow(null);
                       setCodexCode('');
                     }}
+                    data-track-category='claw-settings'
+                    data-track-name='CANCEL_CODEX_OAUTH'
                   >
                     Cancel
                   </Button>
@@ -802,11 +833,23 @@ const GenericProviderConfigForm = ({
 
       <div className='flex items-center justify-end gap-2 pt-2'>
         {hasKey && (
-          <Button variant='ghost' onClick={() => void handleDelete()} disabled={deleting || saving}>
+          <Button
+            variant='ghost'
+            onClick={() => void handleDelete()}
+            data-track-category='claw-settings'
+            data-track-name='DELETE_MODEL_PROVIDER'
+            disabled={deleting || saving}
+          >
             {deleting ? 'Removing...' : 'Remove'}
           </Button>
         )}
-        <Button onClick={() => void handleSave()} loading={saving} disabled={!apiKey && !hasKey}>
+        <Button
+          onClick={() => void handleSave()}
+          data-track-category='claw-settings'
+          data-track-name='SAVE_MODEL_PROVIDER'
+          loading={saving}
+          disabled={!apiKey && !hasKey}
+        >
           {hasKey ? 'Save changes' : 'Connect'}
         </Button>
       </div>

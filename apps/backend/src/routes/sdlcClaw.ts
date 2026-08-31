@@ -4,6 +4,8 @@ import {
   createSdlcLinkSchema,
   createSdlcClawArtifactSchema,
   createSdlcTrackSchema,
+  createSdlcArtifactTypeSchema,
+  renameSdlcArtifactTypeSchema,
   updateSdlcBaselineDraftSchema,
   updateSdlcClawArtifactSchema,
 } from '@xyne/shared';
@@ -78,6 +80,46 @@ router.post(
     const input = createSdlcTrackSchema.parse(req.body);
     const track = await sdlcHub.createTrack(await actorFromRequest(req), input);
     res.status(201).json({ success: true, track });
+  }),
+);
+
+router.post(
+  '/artifact-types/list',
+  route(async (req, res) => {
+    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
+    if (!repoId) throw new AppError('repoId is required', 400);
+    const artifactTypes = await sdlcHub.listArtifactTypes(await actorFromRequest(req), repoId);
+    res.status(200).json({ success: true, artifactTypes });
+  }),
+);
+
+router.post(
+  '/artifact-types',
+  route(async (req, res) => {
+    const input = createSdlcArtifactTypeSchema.parse(req.body);
+    const artifactType = await sdlcHub.createArtifactType(
+      await actorFromRequest(req),
+      input.repoId,
+      input.name
+    );
+    res.status(201).json({ success: true, artifactType });
+  }),
+);
+
+router.patch(
+  '/artifact-types/:folderId',
+  route(async (req, res) => {
+    const input = renameSdlcArtifactTypeSchema.parse({
+      ...req.body,
+      folderId: req.params.folderId,
+    });
+    const artifactType = await sdlcHub.renameArtifactType(
+      await actorFromRequest(req),
+      input.repoId,
+      input.folderId,
+      input.name
+    );
+    res.status(200).json({ success: true, artifactType });
   }),
 );
 

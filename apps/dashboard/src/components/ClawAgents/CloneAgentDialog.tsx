@@ -69,6 +69,8 @@ export const CloneAgentDialog = ({
             variant='outline'
             size='sm'
             onClick={() => onOpenChange(false)}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_CLONE_AGENT'
             disabled={submitting}
           >
             Cancel

@@ -405,7 +405,7 @@ export class CallRepository {
 
       for (const id of call.labels) {
         const { slug, method } = resolve(id);
-        if (method === TagMethod.LLM) continue;
+        if (method !== TagMethod.MANUAL) continue;
         bySlug.set(slug, id);
       }
 

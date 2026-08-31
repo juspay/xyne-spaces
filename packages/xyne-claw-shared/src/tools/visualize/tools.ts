@@ -166,11 +166,20 @@ export const visualizeTool: ToolDefinition = {
   async execute(params) {
     const title = (params["title"] as string | undefined)?.trim();
     const visualType = params["visualType"] as string | undefined;
-    const data = params["data"];
+    let data = params["data"];
 
     if (!title) return "Error: title is required.";
     if (!visualType) return "Error: visualType is required.";
     if (data === undefined) return "Error: data is required.";
+
+    // Handle stringified data.
+    if (typeof data === "string") {
+      try {
+        data = JSON.parse(data);
+      } catch {
+        // leave as-is; validator below reports it
+      }
+    }
 
     const validate = VALIDATOR_BY_VISUAL_TYPE[visualType];
     if (!validate) {

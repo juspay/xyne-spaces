@@ -1,5 +1,6 @@
 import { createLogger } from "../logger.js";
-import { interact, spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { errMsg } from "../lib/errors.js";
+import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 const log = createLogger("validators");
 
@@ -46,6 +47,46 @@ function targetChannelId(params: Record<string, unknown>): string | undefined {
   return stringField(params["channelId"]);
 }
 
+/**
+ * App-MEMBERSHIP check for a write target channel, AT QUEUE TIME. Existence
+ * (`interact` findMany) is not enough: a real channel the agent's Spaces app is
+ * not a member of passes existence but 403s at card-post time in webhook.ts
+ * (`pendingActionTargetValidation` → `/channel/info`), so the action queued,
+ * the model said "queued, approve it", and the approval card was silently
+ * dropped (prod 2026-08-24, Arya Doctor spaces-create-ticket into a HyperCredit
+ * channel). Hitting the SAME `/api/apps/channel/info` endpoint here — with the
+ * same app token that will later try to post the card — makes tool-time and
+ * card-time agree, so the model narrates the failure instead of a false queue.
+ *
+ * Fails OPEN on anything other than a definitive 403/404: the authoritative
+ * Spaces API stays the final judge, matching the delivery-boundary semantics.
+ */
+async function validateChannelAppAccess(
+  channelId: string,
+  auth: SpacesAuthContext,
+): Promise<string | null> {
+  try {
+    await appFetch("/channel/info", { method: "POST", body: JSON.stringify({ channelId }) }, auth);
+    return null;
+  } catch (err) {
+    // Branch on the typed HTTP status, not the message text. Only a definitive
+    // 403 (app not a member) or 404 (gone) rejects; anything else fails open so
+    // the authoritative Spaces API stays the final judge.
+    const status = err instanceof SpacesApiError ? err.status : undefined;
+    if (status === 403) {
+      return `channel ${channelId} is not accessible — add the app to the channel or choose a channel it can access`;
+    }
+    if (status === 404) {
+      return `channel ${channelId} not found — use a real Spaces channel id`;
+    }
+    log.warn(
+      `[validator] channel access check failed open channelId=${channelId} status=${status ?? "n/a"}:`,
+      errMsg(err),
+    );
+    return null;
+  }
+}
+
 async function validateTargetConversationId(
   serverType: string,
   tool: string,
@@ -81,7 +122,7 @@ async function validateTargetConversationId(
       );
       return null;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errMsg(err);
       if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
         return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
       }
@@ -142,9 +183,13 @@ async function validateTargetConversationId(
       }
       return `channel ${channelId} not found — use a real Spaces channel id (resolve it with the spaces-channels tool by exact name, or from the triggering thread).${suggestion}`;
     }
-    return null;
+    // The channel exists — now confirm the agent's app can actually reach it, so
+    // a write into a channel the app isn't a member of fails HERE (model can
+    // retry a reachable channel) instead of queuing and then losing its approval
+    // card at delivery time. Same app token, same endpoint as the card path.
+    return await validateChannelAppAccess(channelId, auth);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.warn(`[validator] ${serverType}/${tool} channel lookup failed open channelId=${channelId}:`, msg);
     return null;
   }
@@ -274,8 +319,23 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
 register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
   const artifactType = String(params["artifactType"] ?? "");
   const action = String(params["action"] ?? "");
-  if (!["WIKI", "BASELINE", "PRD", "TECH_DOC"].includes(artifactType)) {
-    return "artifactType must be WIKI, BASELINE, PRD, or TECH_DOC";
+  const folderId = String(params["folderId"] ?? "").trim();
+  if (folderId && action === "create") {
+    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+    for (const key of ["title", "markdown", "trackId"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
+    }
+    return null;
+  }
+  if (!artifactType && action === "update") {
+    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+    for (const key of ["canvasId", "markdown"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
+    }
+    return null;
+  }
+  if (!["WIKI", "BASELINE"].includes(artifactType)) {
+    return "artifactType must be WIKI or BASELINE (artifact creates use folderId; updates use canvasId)";
   }
   if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
   if (artifactType === "BASELINE") {
@@ -288,22 +348,6 @@ register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
     if (action === "upsert_section") {
       for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
         if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
-      }
-    }
-    return null;
-  }
-  if (artifactType === "PRD" || artifactType === "TECH_DOC") {
-    if (!["create", "update"].includes(action)) return `${artifactType} action must be create or update`;
-    if (action === "create") {
-      for (const key of ["title", "markdown"]) {
-        if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
-      }
-      if (artifactType === "TECH_DOC" && !String(params["parentCanvasId"] ?? "").trim()) {
-        return "parentCanvasId is required for TECH_DOC create";
-      }
-    } else {
-      for (const key of ["canvasId", "markdown"]) {
-        if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
       }
     }
     return null;
