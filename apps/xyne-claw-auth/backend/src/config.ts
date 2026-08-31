@@ -1,7 +1,4 @@
-import {
-  createLazySpacesEncryptionKeyRing,
-  parseSpacesEncryptionKeyRing,
-} from "./spaces-encryption-key-ring.js";
+import { createLazySpacesEncryptionKeyRing } from "./spaces-encryption-key-ring.js";
 import { createHmac } from "node:crypto";
 import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
 
