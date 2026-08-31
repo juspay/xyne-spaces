@@ -87,7 +87,7 @@ class StageEtaDeadlineWorker {
           stageEta: { lte: now },
           // Ensure stage exists (filters out orphaned records with deleted stages)
           // ticket is implicitly checked via the statusV2 filter (JOIN filters out missing tickets)
-          stage: { isNot: null } as any,
+          stage: { id: { not: '' } },
           ticket: {
             statusV2: { in: OPEN_STATUSES },
             // Only fetch tickets not already marked as overdue
