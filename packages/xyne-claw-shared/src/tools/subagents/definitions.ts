@@ -1632,6 +1632,29 @@ export interface AgentToolsConfig {
   gateway?: string[];
 }
 
+function normalizeToolServerName(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+/**
+ * Whether an agent explicitly selected any direct tool from the Spaces MCP.
+ *
+ * Current dashboard selections are persisted as `<serverType>__<tool>` (for
+ * example `xyne-spaces__spaces-search`). Keep the legacy bare `spaces-*`
+ * format too because older configs and seeded agents still use it.
+ */
+export function hasDirectSpacesTool(config: { direct?: unknown } | undefined): boolean {
+  const direct = Array.isArray(config?.direct) ? config.direct : [];
+  return direct.some((selection) => {
+    if (typeof selection !== "string") return false;
+    const separator = selection.indexOf("__");
+    if (separator >= 0) {
+      return normalizeToolServerName(selection.slice(0, separator)) === "xyne-spaces";
+    }
+    return normalizeToolServerName(selection).startsWith("spaces-");
+  });
+}
+
 /** Parse tools config from agent.config */
 export function parseToolsConfig(agentConfig: Record<string, unknown> | null | undefined): AgentToolsConfig | undefined {
   const tools = (agentConfig as Record<string, unknown> | null | undefined)?.["tools"];

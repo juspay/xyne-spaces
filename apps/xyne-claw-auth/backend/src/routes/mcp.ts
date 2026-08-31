@@ -63,7 +63,7 @@ import {
   parseGatewayToolSelectionKey,
 } from "../mcpgateway/key-format.js";
 import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
-import { buildAgentCallProposalFlow, parseToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
+import { buildAgentCallProposalFlow, hasDirectSpacesTool, parseToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import {
@@ -755,7 +755,8 @@ export async function withSurfaceDefaultToolsConfig(
   // Spaces-originated runs already carry the agent's Spaces app/user context in
   // the session and credential fallback. Give those runs the Spaces subagent by
   // default, matching Slack's surface-default injection, without mutating the
-  // stored agent config or granting Spaces tools to API/chat runs. Scheduled
+  // stored agent config or granting Spaces tools to API/chat runs. A selected
+  // direct Spaces tool suppresses this fallback. Scheduled
   // jobs post their result into a Spaces channel, so a scheduled run that
   // carries Spaces app context counts as a Spaces surface too and gets the same
   // default (a non-Spaces scheduled run, lacking that context, does not).
@@ -781,7 +782,7 @@ export async function withSurfaceDefaultToolsConfig(
     (runCtx?.triggerSource === "scheduled" && hasSpacesContext) ||
     (runCtx?.triggerSource == null && hasSpacesContext) ||
     sessionIsSpacesApp;
-  if (isSpacesSurface) {
+  if (isSpacesSurface && !hasDirectSpacesTool(effective)) {
     if (!hasSpacesContext && sessionIsSpacesApp && runCtx?.triggerSource == null) {
       log.info(`[mcp/tools] spaces default injected from session spacesAppId (run-context absent) app=${sessionSpacesAppId}`);
     }

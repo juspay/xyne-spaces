@@ -3,6 +3,7 @@ export {
   getSubagentDefinition,
   findSubagentDefinitionForServer,
   parseToolsConfig,
+  hasDirectSpacesTool,
   type SubagentDefinition,
   type AgentToolsConfig,
 } from "./definitions.js";

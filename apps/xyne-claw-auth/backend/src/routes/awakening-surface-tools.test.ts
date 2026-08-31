@@ -56,3 +56,21 @@ describe("withSurfaceDefaultToolsConfig — awakened runs", () => {
     expect(cfg.direct).toEqual(["spaces-search"]);
   });
 });
+
+describe("withSurfaceDefaultToolsConfig — Spaces surface defaults", () => {
+  it.each([
+    "spaces-search",
+    "xyne-spaces__spaces-search",
+    "Xyne_Spaces__spaces-create-ticket",
+  ])("does not inject the Spaces subagent when a direct Spaces tool is selected: %s", async (selection) => {
+    getSessionMock.mockResolvedValue({ triggerSource: "spaces", spacesAppId: "a", spacesAppUserId: "u" });
+    const out = await withSurfaceDefaultToolsConfig({ direct: [selection], subagents: [] }, "sess", "app");
+    expect(out?.subagents).not.toContain("spaces");
+  });
+
+  it("still injects the Spaces subagent when only a non-Spaces direct tool is selected", async () => {
+    getSessionMock.mockResolvedValue({ triggerSource: "spaces", spacesAppId: "a", spacesAppUserId: "u" });
+    const out = await withSurfaceDefaultToolsConfig({ direct: ["github__search-code"], subagents: [] }, "sess", "app");
+    expect(out?.subagents).toContain("spaces");
+  });
+});

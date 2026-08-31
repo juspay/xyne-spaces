@@ -96,6 +96,7 @@ import {
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   parseToolsConfig,
+  hasDirectSpacesTool,
   COPILOT_SYSTEM_INSTRUCTION,
   REPO_CONFIGS,
   getSandboxSession,
@@ -2089,8 +2090,10 @@ async function processTask(
     // the Spaces webhook and need the same default here so mention/automation/
     // scheduled runs can read the room without mutating the stored agent config.
     // Scheduled jobs post into a Spaces channel too, so they get the same spaces
-    // default as an interactive mention. A missing tools object means the agent
-    // is unrestricted, so do not create one.
+    // default as an interactive mention. If the saved config already selects
+    // any direct Spaces MCP tool, that explicit choice is sufficient and the
+    // Spaces subagent is not injected. A missing tools object means the agent is
+    // unrestricted, so do not create one.
     const effectiveTools = effectiveConfig["tools"];
     const isSpacesSurfaceEvent =
       eventType === "APP_MENTIONED" ||
@@ -2110,7 +2113,7 @@ async function processTask(
       const subagents = Array.isArray(toolsObj["subagents"])
         ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
         : [];
-      if (!subagents.includes("spaces")) {
+      if (!subagents.includes("spaces") && !hasDirectSpacesTool(toolsObj)) {
         effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
       }
     }
