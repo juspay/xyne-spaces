@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.11](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.10...v1.239.0-release-20260827.11) (2026-08-31)
+
+
+### Bug Fixes
+
+* update superposition with fix for memory leak ([#1290](https://github.com/juspay/xyne-spaces/issues/1290)) ([c093381](https://github.com/juspay/xyne-spaces/commit/c0933815eda42e35c14ece86cd1b854a9929e6fd))
+
 ## [1.239.0-release-20260827.10](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.9...v1.239.0-release-20260827.10) (2026-08-31)
 
 
