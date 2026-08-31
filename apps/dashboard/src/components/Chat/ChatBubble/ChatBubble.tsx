@@ -29,6 +29,8 @@ import {
   parseForwardedMessageXml,
   parsePreviewMd,
   isDeskChannelType,
+  resolveConversationAnchorType,
+  type ConversationAnchorType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
@@ -131,6 +133,7 @@ interface ChatBubbleProps {
   disableAskAI?: boolean;
   searchItemView?: boolean;
   onUserClick?: (userId: string) => void;
+  spawnedTicketMessageIds?: ReadonlySet<string> | undefined;
   isPrevActivity?: boolean;
   isNextActivity?: boolean;
   linkedConversationId?: string | null;
@@ -161,6 +164,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   disableAskAI = false,
   searchItemView = false,
   onUserClick,
+  spawnedTicketMessageIds,
   isPrevActivity = false,
   isNextActivity = false,
   linkedConversationId,
@@ -918,8 +922,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ?.parentMessage)
     : undefined;
 
-  const threadPreviewText =
-    isShowInChannel && parentMessage?.content ? createMessagePreview(parentMessage.content) : null;
+  const threadPreviewText = parentMessage?.content
+    ? createMessagePreview(parentMessage.content)
+    : null;
 
   // For showInChannel messages, check if there are newer replies in the original thread
   // by checking if replyCount meets the minimum threshold
@@ -1037,7 +1042,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isMessageDeleted &&
         isTicketThread &&
         canNestSubTicket &&
-        !isFirstInThread && {
+        !isFirstInThread &&
+        !spawnedTicketMessageIds?.has(message.messageId) && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
       ...((!isSystemMessage || isTicketCreationMessage) &&
@@ -1303,13 +1309,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,
             })}
-            {...(isShowInChannel &&
+            {...((isShowInChannel || conversation?.initialMessageId === message.messageId) &&
               parentMessage &&
               threadPreviewText &&
               parentMessage.conversationId && {
                 threadInfo: {
                   preview: threadPreviewText,
                   conversationId: parentMessage.conversationId,
+                  ...((parentMessage as { channelId?: string }).channelId && {
+                    channelId: (parentMessage as { channelId?: string }).channelId,
+                  }),
+                  anchorType: resolveConversationAnchorType(
+                    parentMessage as { anchorType?: ConversationAnchorType },
+                  ),
                 },
               })}
           />
@@ -1499,6 +1511,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             onClose={() => setIsSubTicketModalOpen(false)}
             ticketId={threadTicketId}
             conversationId={conversation.conversationId}
+            sourceMessageId={message.messageId}
           />
         )}
 

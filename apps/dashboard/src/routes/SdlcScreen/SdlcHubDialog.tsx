@@ -96,6 +96,8 @@ export function SdlcHubDialog({
       return response.data.repositories;
     },
     enabled: open && Boolean(activeProjectId),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const options = useMemo(() => repositories ?? [], [repositories]);

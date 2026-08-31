@@ -4046,6 +4046,9 @@ const spacesCreateTicket: ToolDef = {
       if (args["assignedTo"]) body["assignedTo"] = args["assignedTo"];
       if (args["eta"]) body["eta"] = args["eta"];
       if (args["tags"]) body["tags"] = args["tags"];
+      if (sdlcRepoId && sourceCanvasId) {
+        body["entityLinkContext"] = { sourceType: "CANVAS", sourceId: sourceCanvasId };
+      }
 
       // WORKAROUND for xyne-backend bug (ticketController.ts:500): when the
       // body omits createdBy, the conversationParticipant.upsert in the

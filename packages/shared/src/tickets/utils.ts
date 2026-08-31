@@ -1,7 +1,10 @@
 import { BaseTicketType } from "../zero/types.js";
 
 export const ClassifiableTicketTypes = Object.values(BaseTicketType).filter(
-    (type) => type !== BaseTicketType.Release
+    (type) =>
+        type !== BaseTicketType.Release &&
+        type !== BaseTicketType.Support &&
+        type !== BaseTicketType.DESK
 )
 
 export type ClassifiableTicketType = typeof ClassifiableTicketTypes[number];

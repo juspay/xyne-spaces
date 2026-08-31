@@ -123,3 +123,20 @@ export async function isTrackInChannel(
   });
   return Boolean(edge);
 }
+
+export async function isCanvasInChannel(
+  db: Db,
+  canvasId: string,
+  channelId: string
+): Promise<boolean> {
+  const canvas = await db.canvas.findFirst({
+    where: { id: canvasId, channelId },
+    select: { id: true },
+  });
+  if (!canvas) return false;
+  const artifact = await db.sdlcArtifact.findFirst({
+    where: { artifactId: canvasId },
+    select: { artifactId: true },
+  });
+  return Boolean(artifact);
+}

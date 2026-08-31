@@ -62,6 +62,8 @@ import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { TicketToken } from '@xyne/icons';
+import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import Input from '../../components/ui/Input';
 import Textarea from '../../components/ui/Textarea';
@@ -112,10 +114,9 @@ import {
 } from './SdlcWikiSection';
 import { SdlcDebuggerPanel } from './SdlcDebuggerPanel';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
+import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
 import {
   discussionConversationIds as discussionIdsForOwner,
-  ownerHasConversations as sdlcOwnerHasConversations,
-  resolveCanvasDiscussionOwner,
   resolveSdlcDiscussionContext,
 } from './sdlcDiscussionModel';
 import {
@@ -280,6 +281,7 @@ export default function SdlcScreen(): ReactElement {
   const [artifactContextLocked, setArtifactContextLocked] = useState(false);
   const [linkDialog, setLinkDialog] = useState(false);
   const [membersDialog, setMembersDialog] = useState(false);
+  const [createTicketOpen, setCreateTicketOpen] = useState(false);
   const [relatedSourceId, setRelatedSourceId] = useState<string | null>(null);
   const [linkTargetType, setLinkTargetType] = useState('MESSAGE');
   const [linkTargetId, setLinkTargetId] = useState('');
@@ -577,6 +579,11 @@ export default function SdlcScreen(): ReactElement {
       Array.isArray(relatedTickets) ? (relatedTickets as unknown as readonly SdlcTicket[]) : [],
     [relatedTickets],
   );
+  const [channelTicketRows] = useCachedQuery(
+    queries.sdlcTicketsByChannel({ channelId: channel?.id ?? '' }),
+    { enabled: Boolean(channel?.id) },
+  );
+  const channelTicketCount = Array.isArray(channelTicketRows) ? channelTicketRows.length : 0;
   const selectedCanvasConversationLinkIds = useMemo(
     () =>
       selectedCanvas
@@ -618,6 +625,8 @@ export default function SdlcScreen(): ReactElement {
     const search = next.toString();
     void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
   }, [location.pathname, location.search, navigate]);
+  const [chatHeaderActionsEl, setChatHeaderActionsEl] = useState<HTMLElement | null>(null);
+  const [renderedConversationId, setRenderedConversationId] = useState<string | null>(null);
   const chatLayout = sdlcChatLayout({
     chatParam: routeSearchParams.get('chat'),
     discussionParam: routeSearchParams.get('discussion'),
@@ -631,6 +640,14 @@ export default function SdlcScreen(): ReactElement {
   });
   const rightPanelOpen = rightPanelMode !== 'closed';
   const selectedDiscussionConversationId = routeSearchParams.get('conversation');
+  useEffect(() => {
+    if (selectedDiscussionConversationId) {
+      setRenderedConversationId(selectedDiscussionConversationId);
+      return;
+    }
+    const timer = setTimeout(() => setRenderedConversationId(null), 300);
+    return () => clearTimeout(timer);
+  }, [selectedDiscussionConversationId]);
   const discussionContext = useMemo(
     () =>
       resolveSdlcDiscussionContext({
@@ -756,6 +773,7 @@ export default function SdlcScreen(): ReactElement {
     next.delete('discussion');
     next.delete('chat');
     next.delete('conversation');
+    next.delete('selectedTab');
     const search = next.toString();
     void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
   }, [
@@ -776,10 +794,19 @@ export default function SdlcScreen(): ReactElement {
   const chatPanelAvailable =
     Boolean(discussionOwner && discussionSurface) || Boolean(section === 'tracks' && selectedTrack);
   const showRightPanel = rightPanelMode === 'debugger' || (rightPanelOpen && chatPanelAvailable);
+  const chatPanelShowing = rightPanelMode === 'chat' && rightPanelOpen && chatPanelAvailable;
+  const threadOpenInPanel = chatPanelShowing && Boolean(selectedDiscussionConversationId);
   const discussionConversationIds = useMemo(
     () => discussionIdsForOwner(discussionOwner?.canvasId ?? null, links),
     [discussionOwner, links],
   );
+  const entityLinkScope = useMemo<EntityLinkScope | null>(() => {
+    if (discussionOwner) return { sourceType: 'CANVAS', sourceId: discussionOwner.canvasId };
+    if (section === 'tracks' && selectedTrack) {
+      return { sourceType: 'TRACK', sourceId: selectedTrack.id };
+    }
+    return null;
+  }, [discussionOwner, section, selectedTrack]);
   const relatedCanvas = canvases.find(canvas => canvas.id === relatedSourceId);
   const selectedCanvasRelatedLinks = selectedCanvas
     ? links.filter(link => {
@@ -954,21 +981,15 @@ export default function SdlcScreen(): ReactElement {
   const cancelWiki = (): Promise<void> => callWikiExecutionAction('cancel', 'Wiki run cancelled');
   const selectedKnowledgeControl = repoKnowledgeControl(state.phase);
 
-  const ownerHasConversations = useCallback(
-    (ownerCanvasId: string | null): boolean => sdlcOwnerHasConversations(ownerCanvasId, links),
-    [links],
-  );
-
   const navigateWithinSdlc = useCallback(
-    (pathname: string, destinationSearch = '', ownerCanvasId: string | null = null): void => {
+    (pathname: string, destinationSearch = ''): void => {
       const search = sdlcChatNavigationSearch({
         currentSearch: location.search,
         destinationSearch,
-        destinationHasConversations: ownerHasConversations(ownerCanvasId),
       });
       void navigate(`${pathname}${search}`);
     },
-    [location.search, navigate, ownerHasConversations],
+    [location.search, navigate],
   );
 
   interface OpenCanvasOptions {
@@ -978,10 +999,7 @@ export default function SdlcScreen(): ReactElement {
 
   const canvasSearch = (canvasId: string, withDiscussion: boolean): URLSearchParams => {
     const search = new URLSearchParams({ canvas: canvasId });
-    if (
-      withDiscussion &&
-      ownerHasConversations(resolveCanvasDiscussionOwner(canvasId, canvases)?.canvasId ?? null)
-    ) {
+    if (withDiscussion) {
       search.set('discussion', '1');
       search.set('chat', 'conversations');
     }
@@ -1006,11 +1024,7 @@ export default function SdlcScreen(): ReactElement {
 
     setRelatedSourceId(null);
     const search = canvasSearch(canvasId, withDiscussion);
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/${section}`,
-      `?${search.toString()}`,
-      resolveCanvasDiscussionOwner(canvasId, canvases)?.canvasId ?? null,
-    );
+    navigateWithinSdlc(`/sdlc/${channelId}/${section}`, `?${search.toString()}`);
   };
 
   const openArtifactCanvas = (canvasId: string): void => {
@@ -1019,21 +1033,13 @@ export default function SdlcScreen(): ReactElement {
     setRelatedSourceId(null);
     const search = new URLSearchParams({ canvas: canvasId });
     if (folder) search.set('type', folder.id);
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/artifacts`,
-      `?${search.toString()}`,
-      resolveCanvasDiscussionOwner(canvasId, canvases)?.canvasId ?? null,
-    );
+    navigateWithinSdlc(`/sdlc/${channelId}/artifacts`, `?${search.toString()}`);
   };
 
   const openWikiPage = (page: SdlcWikiPage): void => {
     if (!repoId) return;
     setRelatedSourceId(null);
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/wiki`,
-      `?canvas=${encodeURIComponent(page.canvasId)}`,
-      page.canvasId,
-    );
+    navigateWithinSdlc(`/sdlc/${channelId}/wiki`, `?canvas=${encodeURIComponent(page.canvasId)}`);
   };
 
   const closeCanvas = (): void => {
@@ -1051,7 +1057,12 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const setDiscussionUrl = useCallback(
-    (input: { open: boolean; conversationId?: string | null; ticketId?: string | null }): void => {
+    (input: {
+      open: boolean;
+      conversationId?: string | null;
+      ticketId?: string | null;
+      selectedTab?: 'details' | null;
+    }): void => {
       const next = new URLSearchParams(location.search);
       if (input.open) {
         next.set('discussion', '1');
@@ -1062,6 +1073,8 @@ export default function SdlcScreen(): ReactElement {
       }
       if (input.conversationId) next.set('conversation', input.conversationId);
       else next.delete('conversation');
+      if (input.conversationId && input.selectedTab) next.set('selectedTab', input.selectedTab);
+      else next.delete('selectedTab');
       if (input.ticketId) next.set('ticket', input.ticketId);
       const search = next.toString();
       void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
@@ -1083,12 +1096,11 @@ export default function SdlcScreen(): ReactElement {
 
   const closeConversations = useCallback((): void => {
     setDiscussionUrl({ open: false, conversationId: null });
-    if (xyneAIActor.getSnapshot().matches('open')) xyneAIActor.send({ type: 'CLOSE' });
   }, [setDiscussionUrl]);
 
   const selectDiscussionConversation = useCallback(
-    (conversationId: string | null): void => {
-      setDiscussionUrl({ open: true, conversationId });
+    (conversationId: string | null, options?: { selectedTab?: 'details' }): void => {
+      setDiscussionUrl({ open: true, conversationId, selectedTab: options?.selectedTab ?? null });
     },
     [setDiscussionUrl],
   );
@@ -1322,7 +1334,6 @@ export default function SdlcScreen(): ReactElement {
     navigateWithinSdlc(
       `/sdlc/${channelId}/artifacts`,
       `?type=${encodeURIComponent(folder.id)}&canvas=${encodeURIComponent(newCanvasId)}`,
-      null,
     );
   };
 
@@ -1335,11 +1346,7 @@ export default function SdlcScreen(): ReactElement {
     const created = response.data.artifactType;
     setTypeDialogOpen(false);
     setTypeName('');
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/artifacts`,
-      `?type=${encodeURIComponent(created.id)}`,
-      null,
-    );
+    navigateWithinSdlc(`/sdlc/${channelId}/artifacts`, `?type=${encodeURIComponent(created.id)}`);
   };
 
   const renameArtifactType = async (folderId: string, name: string): Promise<void> => {
@@ -1519,73 +1526,76 @@ export default function SdlcScreen(): ReactElement {
           .filter(item => trackItemIds.has(item.id))
           .sort((left, right) => left.createdAt - right.createdAt),
       }));
-      const trackArtifactCount = trackTypeSections.reduce(
-        (total, section) => total + section.canvases.length,
-        0,
-      );
       const trackTickets = tickets.filter(ticket => trackTicketIds.has(ticket.id));
       return (
         <section>
           {selectedTrack.description ? (
             <p className='mb-4 text-sm text-muted-foreground'>{selectedTrack.description}</p>
           ) : null}
-          {trackArtifactCount === 0 ? (
-            <>
+          {trackTypeSections.map((section, index) => (
+            <div key={section.folder.id} className={index > 0 ? 'mt-6' : undefined}>
               <SectionHeader
-                title='Artifacts in this track'
-                description='Artifacts grouped under this workstream.'
+                title={`${section.folder.name} in this track`}
+                description={`${section.folder.name} artifacts grouped under this workstream.`}
+                action={
+                  <Button
+                    onClick={() => {
+                      clearArtifactDialogFields({
+                        track: { id: selectedTrack.id, name: selectedTrack.name },
+                      });
+                      setArtifactDialog({ id: section.folder.id, name: section.folder.name });
+                    }}
+                  >
+                    <Plus />
+                    New {section.folder.name}
+                  </Button>
+                }
               />
-              <EmptyCard text='No artifacts in this track yet. Create one to get started.' />
-            </>
-          ) : (
-            trackTypeSections
-              .filter(section => section.canvases.length > 0)
-              .map((section, index) => (
-                <div key={section.folder.id} className={index > 0 ? 'mt-6' : undefined}>
-                  <SectionHeader
-                    title={`${section.folder.name} in this track`}
-                    description={`${section.folder.name} artifacts grouped under this workstream.`}
-                  />
-                  <div>
-                    {section.canvases.map(canvas => (
-                      <button
-                        type='button'
-                        key={canvas.id}
-                        className='group mb-1.5 flex w-full items-start gap-3 rounded-xl bg-primary/5 px-3 py-3 text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                        onClick={() => openArtifactCanvas(canvas.id)}
-                        data-track-category='SdlcHub'
-                        data-track-name='TrackArtifactOpened'
-                        data-track-metadata={JSON.stringify({
-                          canvasId: canvas.id,
-                          folderId: section.folder.id,
-                        })}
-                      >
-                        <span className='grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary'>
-                          <FileText size={18} />
+              {section.canvases.length === 0 ? (
+                <EmptyCard text={`No ${section.folder.name} in this track yet.`} />
+              ) : (
+                <div>
+                  {section.canvases.map(canvas => (
+                    <button
+                      type='button'
+                      key={canvas.id}
+                      className='group mb-1.5 flex w-full items-start gap-3 rounded-xl bg-primary/5 px-3 py-3 text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                      onClick={() => openArtifactCanvas(canvas.id)}
+                      data-track-category='SdlcHub'
+                      data-track-name='TrackArtifactOpened'
+                      data-track-metadata={JSON.stringify({
+                        canvasId: canvas.id,
+                        folderId: section.folder.id,
+                      })}
+                    >
+                      <span className='grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary'>
+                        <FileText size={18} />
+                      </span>
+                      <span className='min-w-0 flex-1'>
+                        <span className='block truncate text-sm font-semibold'>{canvas.title}</span>
+                        <span className='mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground'>
+                          <span className='font-medium text-primary/80'>{section.folder.name}</span>
+                          <span aria-hidden='true'>·</span>
+                          <span>created {formatRelativeTime(canvas.createdAt)}</span>
                         </span>
-                        <span className='min-w-0 flex-1'>
-                          <span className='block truncate text-sm font-semibold'>
-                            {canvas.title}
-                          </span>
-                          <span className='mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground'>
-                            <span className='font-medium text-primary/80'>
-                              {section.folder.name}
-                            </span>
-                            <span aria-hidden='true'>·</span>
-                            <span>created {formatRelativeTime(canvas.createdAt)}</span>
-                          </span>
-                        </span>
-                        <ChevronRight className='mt-1 size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground' />
-                      </button>
-                    ))}
-                  </div>
+                      </span>
+                      <ChevronRight className='mt-1 size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground' />
+                    </button>
+                  ))}
                 </div>
-              ))
-          )}
+              )}
+            </div>
+          ))}
           <div className='mt-6'>
             <SectionHeader
               title='Tickets in this track'
               description='Implementation tickets created under this workstream.'
+              action={
+                <Button onClick={() => setCreateTicketOpen(true)}>
+                  <Plus />
+                  Create Ticket
+                </Button>
+              }
             />
             <div>
               {trackTickets.length === 0 ? (
@@ -1883,7 +1893,7 @@ export default function SdlcScreen(): ReactElement {
                       : item.id === 'baseline'
                         ? baseline.length
                         : item.id === 'tickets'
-                          ? tickets.length
+                          ? channelTicketCount
                           : item.id === 'tracks'
                             ? tracks.filter(track => track.status === 'ACTIVE').length
                             : ''}
@@ -2079,12 +2089,14 @@ export default function SdlcScreen(): ReactElement {
                 const entityType = selectedIsSource ? link.targetType : link.sourceType;
                 const canvas = canvases.find(item => item.id === entityId);
                 const ticket = tickets.find(item => item.id === entityId);
+                const track = tracks.find(item => item.id === entityId);
                 const pullRequest = tickets
                   .flatMap(item => item.pullRequests ?? [])
                   .find(item => item.id === entityId);
                 const label =
                   canvas?.title ||
                   (ticket ? `${ticket.xyneId} · ${ticket.title}` : undefined) ||
+                  track?.name ||
                   (pullRequest ? `PR #${pullRequest.prId}` : undefined) ||
                   entityId;
                 return (
@@ -2157,88 +2169,100 @@ export default function SdlcScreen(): ReactElement {
         </div>
       </aside>
 
-      <ResizableGroup
-        orientation='horizontal'
-        className='min-w-0 flex-1 overflow-hidden'
-        autoSaveId='sdlc-chat-shell'
-        panelIds={sdlcRightPanelIds(rightPanelMode)}
-      >
-        <Panel id={SDLC_MAIN_PANEL_ID} defaultSize={showRightPanel ? '62%' : '100%'} minSize='45%'>
-          <main className='flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background'>
-            <header className='z-10 flex h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-5 backdrop-blur'>
-              <div className='flex min-w-0 items-center gap-2'>
-                {selectedCanvasId ? (
-                  <>
-                    <button
-                      type='button'
-                      onClick={closeCanvas}
-                      className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
-                      data-track-category='SdlcHub'
-                      data-track-name='CanvasClosedInline'
-                      data-track-metadata={JSON.stringify({ canvasId: selectedCanvasId })}
-                    >
-                      {selectedCanvasTypeFolder?.name ??
-                        (section === 'artifacts'
-                          ? (activeTypeFolder?.name ?? 'Artifacts')
-                          : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview'))}
-                    </button>
-                    <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
-                    <h1 className='truncate font-semibold'>
-                      {selectedCanvas?.title ?? selectedWikiPage?.title ?? 'Canvas'}
-                    </h1>
-                  </>
-                ) : section === 'tracks' && selectedTrack ? (
-                  <>
-                    <button
-                      type='button'
-                      onClick={() => openTrack(null)}
-                      className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
-                      data-track-category='SdlcHub'
-                      data-track-name='TrackDetailBack'
-                    >
-                      Tracks
-                    </button>
-                    <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
-                    <h1 className='truncate font-semibold'>{selectedTrack.name}</h1>
-                  </>
-                ) : (
-                  <h1 className='font-semibold'>
-                    {section === 'artifacts'
+      <div className='flex min-w-0 flex-1 flex-col overflow-hidden'>
+        <header className='z-10 flex h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-5 backdrop-blur'>
+          <div className='flex min-w-0 items-center gap-2'>
+            {selectedCanvasId ? (
+              <>
+                <button
+                  type='button'
+                  onClick={closeCanvas}
+                  className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
+                  data-track-category='SdlcHub'
+                  data-track-name='CanvasClosedInline'
+                  data-track-metadata={JSON.stringify({ canvasId: selectedCanvasId })}
+                >
+                  {selectedCanvasTypeFolder?.name ??
+                    (section === 'artifacts'
                       ? (activeTypeFolder?.name ?? 'Artifacts')
-                      : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview')}
-                  </h1>
-                )}
-              </div>
-              <div className='flex shrink-0 items-center gap-2'>
-                {selectedCanvasId && isElectronApp() && !isDocumentWindow ? (
-                  <Button
-                    size='icon'
-                    variant='ghost'
-                    aria-label='Open in new window'
-                    title='Open in new window'
-                    onClick={() => openCanvasInWindow(selectedCanvasId, chatLayout.panelOpen)}
-                    data-track-category='SdlcHub'
-                    data-track-name='ArtifactOpenedInWindow'
-                  >
-                    <SquareArrowOutUpRight className='size-4' />
-                  </Button>
-                ) : null}
-                {chatPanelAvailable ? (
-                  <Button
-                    size='icon'
-                    variant='ghost'
-                    aria-label='Chat'
-                    title='Chat'
-                    onClick={() => openConversations()}
-                    data-track-category='SdlcHub'
-                    data-track-name='OpenSdlcChat'
-                    data-track-metadata={JSON.stringify({
-                      ownerKind: discussionOwner?.kind ?? null,
-                    })}
-                  >
-                    <MessageCircle className='size-4' />
-                  </Button>
-                ) : null}
+                      : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview'))}
+                </button>
+                <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
+                <h1 className='truncate font-semibold'>
+                  {selectedCanvas?.title ?? selectedWikiPage?.title ?? 'Canvas'}
+                </h1>
+              </>
+            ) : section === 'tracks' && selectedTrack ? (
+              <>
+                <button
+                  type='button'
+                  onClick={() => openTrack(null)}
+                  className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
+                  data-track-category='SdlcHub'
+                  data-track-name='TrackDetailBack'
+                >
+                  Tracks
+                </button>
+                <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
+                <h1 className='truncate font-semibold'>{selectedTrack.name}</h1>
+              </>
+            ) : (
+              <h1 className='font-semibold'>
+                {section === 'artifacts'
+                  ? (activeTypeFolder?.name ?? 'Artifacts')
+                  : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview')}
+              </h1>
+            )}
+          </div>
+          <div className='flex shrink-0 items-center'>
+            {selectedCanvasId && isElectronApp() && !isDocumentWindow ? (
+              <Button
+                size='icon'
+                variant='ghost'
+                className='mr-1.5 size-7 rounded-lg'
+                aria-label='Open in new window'
+                title='Open in new window'
+                onClick={() => openCanvasInWindow(selectedCanvasId, chatLayout.panelOpen)}
+                data-track-category='SdlcHub'
+                data-track-name='ArtifactOpenedInWindow'
+              >
+                <SquareArrowOutUpRight className='size-4' />
+              </Button>
+            ) : null}
+            {chatPanelAvailable && !chatPanelShowing ? (
+              <Button
+                size='icon'
+                variant='ghost'
+                className='size-7 rounded-lg'
+                aria-label='Chat'
+                title='Chat'
+                onClick={() => openConversations()}
+                data-track-category='SdlcHub'
+                data-track-name='OpenSdlcChat'
+                data-track-metadata={JSON.stringify({
+                  ownerKind: discussionOwner?.kind ?? null,
+                })}
+              >
+                <MessageCircle className='size-4' />
+              </Button>
+            ) : null}
+            <Button
+              size='icon'
+              variant='ghost'
+              aria-label='Members'
+              title='Members'
+              className='ml-1.5 size-7 rounded-lg'
+              onClick={() => setMembersDialog(true)}
+            >
+              <Users className='size-4' />
+            </Button>
+            <div
+              className={cn(
+                'grid transition-[grid-template-columns] duration-300 ease-out',
+                threadOpenInPanel ? 'grid-cols-[0fr]' : 'grid-cols-[1fr]',
+              )}
+            >
+              <div className='flex min-w-0 items-center gap-1.5 overflow-hidden pl-1.5 [&_button]:!size-7 [&_button]:!rounded-lg'>
                 {chatPanelAvailable && repo.channelId ? (
                   <CallTriggerModal
                     channelId={repo.channelId}
@@ -2272,15 +2296,19 @@ export default function SdlcScreen(): ReactElement {
                     })()}
                   />
                 ) : null}
-                <Button
-                  size='icon'
-                  variant='ghost'
-                  aria-label='Members'
-                  title='Members'
-                  onClick={() => setMembersDialog(true)}
-                >
-                  <Users className='size-4' />
-                </Button>
+                {chatPanelAvailable && repo.channelId ? (
+                  <Button
+                    size='icon'
+                    variant='ghost'
+                    aria-label='Create ticket'
+                    title='Create ticket'
+                    onClick={() => setCreateTicketOpen(true)}
+                    data-track-category='SdlcHub'
+                    data-track-name='HeaderCreateTicketClicked'
+                  >
+                    <TicketToken size={16} />
+                  </Button>
+                ) : null}
                 <Button
                   size='icon'
                   variant='ghost'
@@ -2293,267 +2321,337 @@ export default function SdlcScreen(): ReactElement {
                   <XyneAIStar />
                 </Button>
               </div>
-            </header>
-
-            {selectedCanvasId ? (
-              <div className='min-h-0 flex-1 overflow-hidden bg-background'>
-                <StableCanvasScreen
-                  key={selectedCanvasId}
-                  canvasId={selectedCanvasId}
-                  showAskAiAction={false}
-                />
-              </div>
-            ) : (
-              <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
-                {section === 'overview' && (
-                  <section>
-                    <h1 className='mb-5 text-2xl font-semibold tracking-tight'>{repo.name}</h1>
-                    {showAccessWarning && (
-                      <div className='mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-foreground'>
-                        <CircleAlert className='mt-0.5 size-4 shrink-0 text-amber-500' />
-                        <div className='min-w-0'>
-                          <h2 className='text-sm font-semibold'>{accessWarning.title}</h2>
-                          <p className='mt-0.5 text-sm leading-5 text-muted-foreground'>
-                            {accessWarning.description}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    <div className='rounded-xl border bg-background p-5'>
-                      <div className='flex items-center justify-between gap-6'>
-                        <div className='min-w-0'>
-                          <h2 className='text-base font-semibold'>Repo Knowledge</h2>
-                          <p className='mt-1 text-sm text-muted-foreground'>
-                            Create and approve repository guides used by SDLC Assistant.
-                          </p>
-                          <p className='mt-2 text-xs text-muted-foreground'>
-                            {state.currentBaselineKind
-                              ? `Current: ${BASELINE_LABELS[state.currentBaselineKind] || state.currentBaselineKind}`
-                              : 'No document currently running'}
-                            {' · '}
-                            {state.completedCount}/{SDLC_BASELINE_COUNT} generated
-                            {' · '}
-                            Updated {setupUpdatedAtLabel(state.updatedAt)}
-                          </p>
-                          {state.error && (
-                            <p className='mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
-                              {state.error}
-                            </p>
-                          )}
-                        </div>
-                        <div className='flex shrink-0 items-center gap-2'>
-                          <StatusPill phase={state.phase} />
-                          {renderRepoKnowledgeControls()}
-                          {!isAdmin && state.phase === 'NOT_STARTED' ? (
-                            <span className='max-w-40 text-right text-xs text-muted-foreground'>
-                              Repository admin must generate Repo Knowledge.
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                    <div className='mt-5 grid grid-cols-2 divide-x overflow-hidden rounded-xl border bg-background'>
-                      <Metric
-                        label='Repo Knowledge ready'
-                        value={`${readyCount}/${SDLC_BASELINE_COUNT}`}
-                        icon={ShieldCheck}
-                      />
-                      <Metric label='Tickets' value={String(tickets.length)} icon={CircleDot} />
-                    </div>
-                    {repo.channelId ? (
-                      <SdlcActivityPreview key={repo.channelId} channelId={repo.channelId} />
-                    ) : null}
-                  </section>
-                )}
-
-                {section === 'baseline' && (
-                  <section>
-                    <SectionHeader
-                      title='Repo Knowledge'
-                      description='Generate or refresh from repository history. Admins edit; members read.'
-                      action={renderRepoKnowledgeControls(true)}
+            </div>
+            <div
+              className={cn(
+                'grid transition-[grid-template-columns] duration-300 ease-out',
+                chatPanelShowing ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]',
+              )}
+            >
+              <div className='flex min-w-0 items-center overflow-hidden'>
+                <div
+                  className={cn(
+                    'grid transition-[grid-template-columns] duration-300 ease-out',
+                    threadOpenInPanel ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]',
+                  )}
+                >
+                  <div className='flex min-w-0 items-center overflow-hidden'>
+                    <div
+                      ref={setChatHeaderActionsEl}
+                      className='ml-1.5 flex items-center [&>div]:animate-in [&>div]:fade-in [&>div]:duration-300 [&>div]:!gap-1.5'
                     />
-                    <div className='grid grid-cols-2 gap-4'>
-                      {baseline.map(canvas => {
-                        const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
-                        return (
-                          <div
-                            key={canvas.id}
-                            role='button'
-                            tabIndex={0}
-                            onClick={() => openCanvas(canvas.id)}
-                            data-track-category='SdlcHub'
-                            data-track-name='BaselineCanvasOpened'
-                            data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                            onKeyDown={event => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault();
-                                openCanvas(canvas.id);
-                              }
-                            }}
-                            className='group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                          >
-                            <div className='flex items-start justify-between'>
-                              <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
-                                <BookOpen size={18} />
-                              </div>
-                              {generating ? (
-                                <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
-                                  Generating
-                                </span>
-                              ) : (
-                                <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
-                                  <Check size={12} />
-                                  Ready
-                                </span>
-                              )}
-                            </div>
-                            <h3 className='mt-4 font-semibold'>
-                              {BASELINE_LABELS[canvas.sdlcArtifact?.artifactType ?? ''] ||
-                                canvas.title}
-                            </h3>
-                            <p className='mt-1 text-xs text-muted-foreground'>
-                              Updated {setupUpdatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
-                              {' · '}
-                              {typeof canvas.sdlcArtifact?.generationCommit === 'string'
-                                ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
-                                : 'repository HEAD'}
+                  </div>
+                </div>
+                <Button
+                  size='icon'
+                  variant='ghost'
+                  aria-label={threadOpenInPanel ? 'Close thread' : 'Close chat'}
+                  title={threadOpenInPanel ? 'Close thread' : 'Close chat'}
+                  className='ml-1.5 size-7 rounded-lg'
+                  tabIndex={chatPanelShowing ? 0 : -1}
+                  onClick={() => {
+                    if (selectedDiscussionConversationId) {
+                      selectDiscussionConversation(null);
+                    } else {
+                      closeConversations();
+                    }
+                  }}
+                >
+                  <X className='size-4' />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </header>
+        <ResizableGroup
+          orientation='horizontal'
+          className='min-h-0 flex-1 overflow-hidden'
+          autoSaveId='sdlc-chat-shell'
+          panelIds={sdlcRightPanelIds(rightPanelMode)}
+        >
+          <Panel
+            id={SDLC_MAIN_PANEL_ID}
+            defaultSize={showRightPanel ? '62%' : '100%'}
+            minSize='45%'
+          >
+            <main className='flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background'>
+              {selectedCanvasId ? (
+                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                  <StableCanvasScreen
+                    key={selectedCanvasId}
+                    canvasId={selectedCanvasId}
+                    showAskAiAction={false}
+                  />
+                </div>
+              ) : (
+                <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
+                  {section === 'overview' && (
+                    <section>
+                      <h1 className='mb-5 text-2xl font-semibold tracking-tight'>{repo.name}</h1>
+                      {showAccessWarning && (
+                        <div className='mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-foreground'>
+                          <CircleAlert className='mt-0.5 size-4 shrink-0 text-amber-500' />
+                          <div className='min-w-0'>
+                            <h2 className='text-sm font-semibold'>{accessWarning.title}</h2>
+                            <p className='mt-0.5 text-sm leading-5 text-muted-foreground'>
+                              {accessWarning.description}
                             </p>
-                            <div className='mt-5 flex items-center justify-between gap-3'>
-                              <span className='text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground'>
-                                Open document
-                              </span>
-                            </div>
                           </div>
-                        );
-                      })}
-                      {baseline.length === 0 && (
-                        <EmptyCard
-                          text={
-                            setupRunning
-                              ? 'Repo Knowledge generation is in progress.'
-                              : 'Generate Repo Knowledge directly from the repository.'
-                          }
+                        </div>
+                      )}
+                      <div className='rounded-xl border bg-background p-5'>
+                        <div className='flex items-center justify-between gap-6'>
+                          <div className='min-w-0'>
+                            <h2 className='text-base font-semibold'>Repo Knowledge</h2>
+                            <p className='mt-1 text-sm text-muted-foreground'>
+                              Create and approve repository guides used by SDLC Assistant.
+                            </p>
+                            <p className='mt-2 text-xs text-muted-foreground'>
+                              {state.currentBaselineKind
+                                ? `Current: ${BASELINE_LABELS[state.currentBaselineKind] || state.currentBaselineKind}`
+                                : 'No document currently running'}
+                              {' · '}
+                              {state.completedCount}/{SDLC_BASELINE_COUNT} generated
+                              {' · '}
+                              Updated {setupUpdatedAtLabel(state.updatedAt)}
+                            </p>
+                            {state.error && (
+                              <p className='mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
+                                {state.error}
+                              </p>
+                            )}
+                          </div>
+                          <div className='flex shrink-0 items-center gap-2'>
+                            <StatusPill phase={state.phase} />
+                            {renderRepoKnowledgeControls()}
+                            {!isAdmin && state.phase === 'NOT_STARTED' ? (
+                              <span className='max-w-40 text-right text-xs text-muted-foreground'>
+                                Repository admin must generate Repo Knowledge.
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                      <div className='mt-5 grid grid-cols-2 divide-x overflow-hidden rounded-xl border bg-background'>
+                        <Metric
+                          label='Repo Knowledge ready'
+                          value={`${readyCount}/${SDLC_BASELINE_COUNT}`}
+                          icon={ShieldCheck}
                         />
+                        <Metric
+                          label='Tickets'
+                          value={String(channelTicketCount)}
+                          icon={CircleDot}
+                        />
+                      </div>
+                      {repo.channelId ? (
+                        <SdlcActivityPreview key={repo.channelId} channelId={repo.channelId} />
+                      ) : null}
+                    </section>
+                  )}
+
+                  {section === 'baseline' && (
+                    <section>
+                      <SectionHeader
+                        title='Repo Knowledge'
+                        description='Generate or refresh from repository history. Admins edit; members read.'
+                        action={renderRepoKnowledgeControls(true)}
+                      />
+                      <div className='grid grid-cols-2 gap-4'>
+                        {baseline.map(canvas => {
+                          const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
+                          return (
+                            <div
+                              key={canvas.id}
+                              role='button'
+                              tabIndex={0}
+                              onClick={() => openCanvas(canvas.id)}
+                              data-track-category='SdlcHub'
+                              data-track-name='BaselineCanvasOpened'
+                              data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                              onKeyDown={event => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  openCanvas(canvas.id);
+                                }
+                              }}
+                              className='group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                            >
+                              <div className='flex items-start justify-between'>
+                                <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
+                                  <BookOpen size={18} />
+                                </div>
+                                {generating ? (
+                                  <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
+                                    Generating
+                                  </span>
+                                ) : (
+                                  <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
+                                    <Check size={12} />
+                                    Ready
+                                  </span>
+                                )}
+                              </div>
+                              <h3 className='mt-4 font-semibold'>
+                                {BASELINE_LABELS[canvas.sdlcArtifact?.artifactType ?? ''] ||
+                                  canvas.title}
+                              </h3>
+                              <p className='mt-1 text-xs text-muted-foreground'>
+                                Updated{' '}
+                                {setupUpdatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
+                                {' · '}
+                                {typeof canvas.sdlcArtifact?.generationCommit === 'string'
+                                  ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
+                                  : 'repository HEAD'}
+                              </p>
+                              <div className='mt-5 flex items-center justify-between gap-3'>
+                                <span className='text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground'>
+                                  Open document
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {baseline.length === 0 && (
+                          <EmptyCard
+                            text={
+                              setupRunning
+                                ? 'Repo Knowledge generation is in progress.'
+                                : 'Generate Repo Knowledge directly from the repository.'
+                            }
+                          />
+                        )}
+                      </div>
+                    </section>
+                  )}
+
+                  {section === 'wiki' && (
+                    <SdlcWikiSection
+                      pages={wikiPages}
+                      loading={wikiQuery.isLoading}
+                      error={wikiQuery.isError}
+                      onRetry={() => void wikiQuery.refetch()}
+                      onOpen={openWikiPage}
+                      run={wikiRunQuery.data ?? null}
+                      isAdmin={isAdmin}
+                      actionPending={
+                        (busy?.startsWith('wiki-') || busy?.startsWith('knowledge-')) ?? false
+                      }
+                      onGenerate={generateWiki}
+                      onRefresh={refreshWiki}
+                      onRetryRun={retryWiki}
+                      onRetryKnowledge={retryKnowledge}
+                      onCancelRun={cancelWiki}
+                      onDebugRun={() => {
+                        const run = wikiRunQuery.data;
+                        if (!run?.conversationId) return;
+                        openSdlcDebugger({
+                          source: 'sdlc',
+                          repoId: repo.id,
+                          executionId: run.executionId,
+                          conversationId: run.conversationId,
+                          sessionId: run.sessionId,
+                          running: [
+                            'QUEUED',
+                            'PREPARING',
+                            'BOOTSTRAPPING',
+                            'PROCESSING',
+                            'VALIDATING',
+                            'CORRECTING',
+                          ].includes(run.phase),
+                        });
+                      }}
+                    />
+                  )}
+
+                  {section === 'artifacts' &&
+                    (activeTypeFolder ? (
+                      renderArtifacts(activeTypeFolder)
+                    ) : (
+                      <EmptyCard text='Select an artifact type from the sidebar.' />
+                    ))}
+                  {section === 'tracks' && renderTracks()}
+                  {section === 'tickets' && repo.channelId && (
+                    <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
+                      <KanbanBoardScreen channelId={repo.channelId} />
+                      {selectedTicketRow?.conversationId && (
+                        <div className='absolute bottom-4 right-4 top-4 z-20 flex w-[480px] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl'>
+                          <ThreadMessages
+                            ticketId={selectedTicketRow.id}
+                            channelId={selectedTicketRow.channelId ?? repo.channelId}
+                            conversationId={selectedTicketRow.conversationId}
+                            skipInputAutoFocus
+                            onClose={closeTicketPanel}
+                          />
+                        </div>
                       )}
                     </div>
-                  </section>
-                )}
+                  )}
+                </div>
+              )}
+            </main>
+          </Panel>
 
-                {section === 'wiki' && (
-                  <SdlcWikiSection
-                    pages={wikiPages}
-                    loading={wikiQuery.isLoading}
-                    error={wikiQuery.isError}
-                    onRetry={() => void wikiQuery.refetch()}
-                    onOpen={openWikiPage}
-                    run={wikiRunQuery.data ?? null}
-                    isAdmin={isAdmin}
-                    actionPending={
-                      (busy?.startsWith('wiki-') || busy?.startsWith('knowledge-')) ?? false
-                    }
-                    onGenerate={generateWiki}
-                    onRefresh={refreshWiki}
-                    onRetryRun={retryWiki}
-                    onRetryKnowledge={retryKnowledge}
-                    onCancelRun={cancelWiki}
-                    onDebugRun={() => {
-                      const run = wikiRunQuery.data;
-                      if (!run?.conversationId) return;
-                      openSdlcDebugger({
-                        source: 'sdlc',
+          {showRightPanel ? (
+            <>
+              <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors hover:bg-primary/20 active:bg-primary/30'>
+                <div className='h-8 w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-primary group-active:bg-primary' />
+              </Separator>
+              <Panel id={SDLC_CHAT_PANEL_ID} defaultSize='38%' minSize='360px' maxSize='55%'>
+                <EntityLinkContext.Provider value={entityLinkScope}>
+                  {rightPanelMode === 'debugger' ? (
+                    <SdlcDebuggerPanel />
+                  ) : discussionOwner && discussionSurface && repo.channelId ? (
+                    <SdlcChatPanel
+                      key={`discussion-${discussionOwner.canvasId}`}
+                      channelId={repo.channelId}
+                      discussion={{
                         repoId: repo.id,
-                        executionId: run.executionId,
-                        conversationId: run.conversationId,
-                        sessionId: run.sessionId,
-                        running: [
-                          'QUEUED',
-                          'PREPARING',
-                          'BOOTSTRAPPING',
-                          'PROCESSING',
-                          'VALIDATING',
-                          'CORRECTING',
-                        ].includes(run.phase),
-                      });
-                    }}
-                  />
-                )}
+                        ownerType: 'CANVAS',
+                        ownerId: discussionOwner.canvasId,
+                        surfaceType: discussionSurface.type,
+                        surfaceId: discussionSurface.id,
+                      }}
+                      conversationIds={discussionConversationIds}
+                      selectedConversationId={renderedConversationId}
+                      onSelectConversation={selectDiscussionConversation}
+                      onAskAI={openSdlcAssistant}
+                      headerActionsContainer={chatHeaderActionsEl}
+                    />
+                  ) : section === 'tracks' && selectedTrack && repo.channelId ? (
+                    <SdlcChatPanel
+                      key={`track-${selectedTrack.id}`}
+                      channelId={repo.channelId}
+                      discussion={{
+                        repoId: repo.id,
+                        ownerType: 'TRACK',
+                        ownerId: selectedTrack.id,
+                      }}
+                      conversationIds={trackConversationIds}
+                      selectedConversationId={renderedConversationId}
+                      onSelectConversation={selectDiscussionConversation}
+                      onAskAI={openSdlcAssistant}
+                      headerActionsContainer={chatHeaderActionsEl}
+                    />
+                  ) : null}
+                </EntityLinkContext.Provider>
+              </Panel>
+            </>
+          ) : null}
+        </ResizableGroup>
+      </div>
 
-                {section === 'artifacts' &&
-                  (activeTypeFolder ? (
-                    renderArtifacts(activeTypeFolder)
-                  ) : (
-                    <EmptyCard text='Select an artifact type from the sidebar.' />
-                  ))}
-                {section === 'tracks' && renderTracks()}
-                {section === 'tickets' && repo.channelId && (
-                  <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
-                    <KanbanBoardScreen channelId={repo.channelId} />
-                    {selectedTicketRow?.conversationId && (
-                      <div className='absolute bottom-4 right-4 top-4 z-20 flex w-[480px] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl'>
-                        <ThreadMessages
-                          ticketId={selectedTicketRow.id}
-                          channelId={selectedTicketRow.channelId ?? repo.channelId}
-                          conversationId={selectedTicketRow.conversationId}
-                          skipInputAutoFocus
-                          onClose={closeTicketPanel}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </main>
-        </Panel>
-
-        {showRightPanel ? (
-          <>
-            <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors hover:bg-primary/20 active:bg-primary/30'>
-              <div className='h-8 w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-primary group-active:bg-primary' />
-            </Separator>
-            <Panel id={SDLC_CHAT_PANEL_ID} defaultSize='38%' minSize='360px' maxSize='55%'>
-              {rightPanelMode === 'debugger' ? (
-                <SdlcDebuggerPanel />
-              ) : discussionOwner && discussionSurface && repo.channelId ? (
-                <SdlcChatPanel
-                  key={`discussion-${discussionOwner.canvasId}`}
-                  channelId={repo.channelId}
-                  title={discussionOwner.title}
-                  discussion={{
-                    repoId: repo.id,
-                    ownerType: 'CANVAS',
-                    ownerId: discussionOwner.canvasId,
-                    surfaceType: discussionSurface.type,
-                    surfaceId: discussionSurface.id,
-                  }}
-                  conversationIds={discussionConversationIds}
-                  selectedConversationId={selectedDiscussionConversationId}
-                  onSelectConversation={selectDiscussionConversation}
-                  onClose={closeConversations}
-                  onAskAI={openSdlcAssistant}
-                />
-              ) : section === 'tracks' && selectedTrack && repo.channelId ? (
-                <SdlcChatPanel
-                  key={`track-${selectedTrack.id}`}
-                  channelId={repo.channelId}
-                  title={selectedTrack.name}
-                  discussion={{
-                    repoId: repo.id,
-                    ownerType: 'TRACK',
-                    ownerId: selectedTrack.id,
-                  }}
-                  conversationIds={trackConversationIds}
-                  selectedConversationId={selectedDiscussionConversationId}
-                  onSelectConversation={selectDiscussionConversation}
-                  onClose={closeConversations}
-                  onAskAI={openSdlcAssistant}
-                />
-              ) : null}
-            </Panel>
-          </>
-        ) : null}
-      </ResizableGroup>
+      {repo.channelId && createTicketOpen ? (
+        <EntityLinkContext.Provider value={entityLinkScope}>
+          <CreateTicketModal
+            isOpen={createTicketOpen}
+            onClose={() => setCreateTicketOpen(false)}
+            channelId={repo.channelId}
+            projectId={repo.project?.id ?? ''}
+            onTicketCreated={() => setCreateTicketOpen(false)}
+          />
+        </EntityLinkContext.Provider>
+      ) : null}
 
       <Dialog
         open={trackDialog}
