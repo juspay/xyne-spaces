@@ -14,6 +14,7 @@ import { encrypt, decrypt } from "../crypto.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { CONFIG, CLAUDE_OAUTH, claudeOAuthConfigured } from "../config.js";
+import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { redisService } from "../redis.js";
 import { fetchAnthropicModels } from "./agents.js";
 import { createLogger } from "../logger.js";
@@ -631,7 +632,7 @@ function generateUserClaudePkce(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
-router.post("/provider-credentials/claude/oauth/start", async (req: Request, res: Response) => {
+router.post("/provider-credentials/claude/oauth/start", oauthLimiter, async (req: Request, res: Response) => {
   try {
     if (!claudeOAuthConfigured()) {
       res.status(503).json({
@@ -673,7 +674,7 @@ router.post("/provider-credentials/claude/oauth/start", async (req: Request, res
   }
 });
 
-router.post("/provider-credentials/claude/oauth/exchange", async (req: Request, res: Response) => {
+router.post("/provider-credentials/claude/oauth/exchange", oauthLimiter, async (req: Request, res: Response) => {
   try {
     if (!claudeOAuthConfigured()) {
       res.status(503).json({
