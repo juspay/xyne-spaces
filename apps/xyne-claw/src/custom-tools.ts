@@ -16,6 +16,49 @@ import { createLogger } from "./logger.js";
 import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
 const log = createLogger("custom-tools");
 
+const ARCHITECTURE_REVIEW_FORBIDDEN_COMMANDS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /(?:^|[;&|]\s*)\s*(?:rm|mv|cp|touch|mkdir|rmdir|truncate|chmod|chown|tee|install)\b/i, label: "filesystem mutation" },
+  { pattern: /(?:^|[;&|]\s*)\s*(?:node|python\d*|ruby|perl|php|bash|sh|zsh|fish)\b/i, label: "interpreter execution" },
+  { pattern: /(?:^|[;&|]\s*)\s*(?:npm|pnpm|yarn|bun|npx|make|cmake|cargo|go|gradle|mvn)\b/i, label: "package, build, or script execution" },
+  { pattern: /(?:^|[;&|]\s*)\s*(?:curl|wget|nc|netcat|ssh|scp|rsync)\b/i, label: "network or copy command" },
+  { pattern: /\bgit\s+(?:checkout|switch|reset|clean|add|commit|push|pull|fetch|merge|rebase|cherry-pick|revert|apply|am|tag|init|clone|gc|prune|worktree)\b/i, label: "Git mutation" },
+  { pattern: /\bgit\s+[^\n]*(?:--output(?:=|\s)|--ext-diff\b|--textconv\b)/i, label: "Git output or external command execution" },
+  { pattern: /\bsed\b[^\n]*\s-i\b/i, label: "in-place edit" },
+  { pattern: /\bfind\b[^\n]*(?:-delete|-exec|-execdir|-ok|-okdir|-fprint|-fprintf|-fls)\b/i, label: "mutating find" },
+  { pattern: /(?:^|[^<])>{1,2}(?!>)/, label: "output redirection" },
+  { pattern: /`|\$|~|[<>]\(/, label: "shell expansion" },
+  { pattern: /(?:^|\s)[^\s]*\.git(?:\/|\s|$)/i, label: "Git metadata access" },
+];
+
+export function validateArchitectureReviewSandboxCommand(command: string): string | undefined {
+  if (!command.trim()) return "Architecture review sandbox commands must not be empty.";
+  for (const { pattern, label } of ARCHITECTURE_REVIEW_FORBIDDEN_COMMANDS) {
+    if (pattern.test(command)) return `Architecture review is read-only: blocked ${label}.`;
+  }
+  const allowedCommands = new Set(["cd", "pwd", "git", "sed", "cat", "grep", "find", "ls"]);
+  const allowedGitCommand = /^git\s+(?:diff|show|log|status|merge-base|rev-parse)\b/i;
+  for (const segment of command.split(/&&|\|\||[;&|\n]/)) {
+    const trimmed = segment.trim();
+    const executable = trimmed.match(/^([A-Za-z0-9_.-]+)/)?.[1];
+    if (executable && !allowedCommands.has(executable)) {
+      return `Architecture review is read-only: command ${executable} is outside the inspection allowlist.`;
+    }
+    if (executable === "cd" && trimmed !== "cd /workspace/xyne-spaces") {
+      return "Architecture review is read-only: cd is limited to /workspace/xyne-spaces.";
+    }
+    if (executable !== "cd" && /(?:^|\s)(?:\/|\.\.(?:\/|\s|$))/.test(trimmed)) {
+      return "Architecture review is read-only: paths must stay inside the repository workspace.";
+    }
+    if (executable === "git" && !allowedGitCommand.test(trimmed)) {
+      return "Architecture review is read-only: Git command is outside the inspection allowlist.";
+    }
+    if (executable === "sed" && !/^sed\s+-n\s+(?:['"]\d+(?:,\d+)?p['"]|\d+(?:,\d+)?p)\s+.+$/.test(trimmed)) {
+      return "Architecture review is read-only: sed is limited to numeric print ranges.";
+    }
+  }
+  return undefined;
+}
+
 interface Attachment {
   fileName: string;
   mimeType: string;
@@ -294,6 +337,25 @@ export function loadCustomTools(
           ...context,
           toolCallId: _toolCallId,
         };
+        if (meta?.["taskCommand"] === "/architecture-review") {
+          const input = params as Record<string, unknown>;
+          if (ct.slug === "sandbox-repo-setup" && input["write"] !== false) {
+            return {
+              content: [{ type: "text" as const, text: "Error: /architecture-review requires sandbox-repo-setup with write=false." }],
+              details: {},
+            };
+          }
+          if (ct.slug === "sandbox-run") {
+            const error = validateArchitectureReviewSandboxCommand(String(input["cmd"] ?? ""));
+            if (error) {
+              return {
+                content: [{ type: "text" as const, text: `Error: ${error}` }],
+                details: {},
+              };
+            }
+          }
+        }
+
         // Write tools require user approval — don't execute, produce pendingAction
         if (ct.isWriteTool) {
           try {

@@ -1733,7 +1733,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // a command missing here ships with the mention un-stripped, so claw never
   // sees it at byte zero and the whole contract silently degrades (bit /design
   // in prod 2026-08-08). Proper fix: shared registry in xyne-claw-shared.
-  const immediateTaskCommand = /^\/(?:explainer|record-skill|design|dashboard|spec)(?:\s|$)/i.test(taskCommandText);
+  const immediateTaskCommand = /^\/(?:explainer|record-skill|design|dashboard|architecture-review|spec)(?:\s|$)/i.test(taskCommandText);
   const recordSkillCommand = /^\/record-skill(?:\s|$)/i.test(taskCommandText);
   if (!agent.orgId) {
     log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
@@ -2094,6 +2094,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         "- `/dashboard <brief>` — live-data dashboard snapshot, refreshable on a schedule",
         "- `/explainer <topic>` — narrated explainer video",
         "- `/record-skill` — turn a recorded walkthrough into a reusable skill",
+        "- `/architecture-review <target>` — independent Hickey and Löwy architecture lenses over one immutable diff",
         "- `/spec <ticket>` — interview you, then write the specification onto the ticket",
         "",
         "*Controlling this thread*",

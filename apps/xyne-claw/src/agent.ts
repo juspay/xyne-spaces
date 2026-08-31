@@ -53,6 +53,7 @@ import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from 
 import { installToolBudget } from "./tool-budget.js";
 import { installAwakeningInbox } from "./awakening-inbox.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
+import { missingRequiredTaskCommandTools } from "./task-commands.js";
 
 const log = createLogger("agent");
 
@@ -69,6 +70,8 @@ export interface ToolInvocation {
   isError: boolean;
   startedAt: string;     // ISO
   durationMs: number;
+  /** Assistant/model turn that initiated this tool call. */
+  turn?: number;
   /** Lifecycle state. Pending rows are emitted on tool_execution_start so the UI
    *  can show "running" indicators before the tool completes; they're replaced
    *  by a "completed" row with the final result on tool_execution_end. */
@@ -1752,6 +1755,13 @@ export interface RunTaskOptions {
   /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
    *  finish until this tool has run — enforced by a post-loop nudge pass. */
   requiredTool?: { name: string; nudge: string } | undefined;
+  /** Multi-tool task contract: every named tool must run before delivery. */
+  requiredTools?: {
+    names: string[];
+    nudge: string;
+    sharedArgument?: string;
+    sameTurn?: boolean;
+  } | undefined;
   /** Digital Twin persona (soul.md, …) folded into the actual system prompt on
    *  both the override and buildSystemPrompt-fallback paths, so it reads as
    *  identity and shows in the debug panel. */
@@ -1930,6 +1940,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     skillTriggers,
     promptInjections,
     requiredTool,
+    requiredTools,
     twinPersona,
     abortSignal,
     debugStartedAt,
@@ -2526,7 +2537,12 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   let currentPromptKind: "fresh" | "resume" = "fresh";
   let currentPromptImagesCount = 0;
   // Track in-flight tool calls so we can pair start → end
-  const inflightCalls = new Map<string, { toolName: string; args: unknown; startedAt: number }>();
+  const inflightCalls = new Map<string, {
+    toolName: string;
+    args: unknown;
+    startedAt: number;
+    turn: number;
+  }>();
 
   // ── Latency instrumentation ──────────────────────────────────────────
   // Why: the only existing log between tool_done and the next tool_call is the
@@ -2857,7 +2873,12 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // slow tool isn't mistaken for a hung model.
       modelActive = false;
       log.info(`[agent] Tool call: ${event.toolName} argCount=${Object.keys(event.args ?? {}).length} argKeys=[${Object.keys(event.args ?? {}).join(",")}]`);
-      inflightCalls.set(event.toolCallId, { toolName: event.toolName, args: event.args, startedAt: Date.now() });
+      inflightCalls.set(event.toolCallId, {
+        toolName: event.toolName,
+        args: event.args,
+        startedAt: Date.now(),
+        turn: llmCallSeq,
+      });
       pushDebugEvent("tool_execution_start", {
         toolName: event.toolName,
         args: cloneForDebug(event.args),
@@ -2932,6 +2953,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           isError: event.isError,
           startedAt: new Date(started.startedAt).toISOString(),
           durationMs: Date.now() - started.startedAt,
+          turn: started.turn,
           status: "completed",
           toolCallId: event.toolCallId,
           ...(citations ? { citations } : {}),
@@ -3525,6 +3547,41 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (!toolsUsed.includes(requiredTool.name)) {
       log.warn(`[agent] Task command: ${requiredTool.name} never ran — delivering without it`);
+    }
+  }
+
+  // Binocular/multi-tool task commands must not silently omit one required
+  // execution, use different evidence, or run the two lenses in different
+  // assistant turns while presenting the result as complete.
+  if (requiredTools?.names.length) {
+    const uniqueRequired = [...new Set(requiredTools.names)];
+    for (let nudge = 0; nudge < 3; nudge++) {
+      const missing = missingRequiredTaskCommandTools(
+        uniqueRequired,
+        toolsUsed,
+        toolInvocations,
+        requiredTools.sharedArgument,
+        requiredTools.sameTurn,
+      );
+      if (missing.length === 0 || abortSignal?.aborted) break;
+      log.info(`[agent] Task command requires [${missing.join(", ")}] — nudge ${nudge + 1}/3`);
+      await promptWithAbort(() => session.prompt(
+        `<system>${requiredTools.nudge}
+
+Still missing: ${missing.join(", ")}.</system>`,
+      ));
+      const rq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (rq._agentEventQueue) await withAbort(rq._agentEventQueue);
+    }
+    const missing = missingRequiredTaskCommandTools(
+      uniqueRequired,
+      toolsUsed,
+      toolInvocations,
+      requiredTools.sharedArgument,
+      requiredTools.sameTurn,
+    );
+    if (missing.length > 0) {
+      log.warn(`[agent] Task command: required tool contract unsatisfied for ${missing.join(", ")} — delivering partial result`);
     }
   }
 

@@ -1,3 +1,6 @@
+import type { CustomSubagentSpec } from "./subagent-tools.js";
+import { ARCHITECTURE_REVIEW_SUBAGENTS } from "./architecture-review.js";
+
 /**
  * Task commands: a leading `/name` in the task text that binds the run to a
  * contract — the named tool MUST run before the run may finish. Parsing
@@ -15,8 +18,18 @@ export interface TaskCommand {
   /** Tool that must appear in toolsUsed before the run may finish. Omit for a
    * delivery contract (agentConfigOverlay.outputFormat). */
   requiredTool?: string;
+  /** Several tools that must all run before delivery. */
+  requiredTools?: string[];
+  /** Optional argument key that every required tool must receive identically. */
+  requiredToolsSharedArgument?: string;
+  /** Require successful calls to originate in one assistant turn. */
+  requiredToolsSameTurn?: boolean;
   /** Custom tools force-mounted for this run, regardless of the agent's saved palette. */
   autoTools: string[];
+  /** Tools removed for this run even if present in the saved palette. */
+  blockedTools?: string[];
+  /** Remove every custom tool classified as a write action for this run. */
+  blockWriteTools?: boolean;
   /** Built-in skill directories loaded only for this command. Paths are
    * resolved from the xyne-claw package working directory. */
   skillPaths?: string[];
@@ -28,6 +41,10 @@ export interface TaskCommand {
   /** agentConfig keys merged over the forwarded config for this run only —
    * never persisted, so the contract stays per-command not per-agent. */
   agentConfigOverlay?: Record<string, unknown>;
+  /** Package-owned subagents mounted only for this invocation. */
+  subagents?: CustomSubagentSpec[];
+  /** Disable fast mode so reviewer sessions remain isolated. */
+  forceSubagentMode?: boolean;
   /** Per-turn injection explaining the contract to the model. */
   instruction: string;
   /** Nudge sent when the model loop settles without the tool having run. */
@@ -236,6 +253,34 @@ const TASK_COMMANDS: TaskCommand[] = [
       "that recording-to-skill is temporarily unavailable and do not attempt to save a skill another way.",
   },
   {
+    command: "/architecture-review",
+    autoTools: ["sandbox-repo-setup", "sandbox-run", "hickey-review", "lowy-review"],
+    blockWriteTools: true,
+    blockedTools: [
+      "sandbox-write-file",
+      "sandbox-run-detached",
+      "sandbox-copy-in",
+      "sandbox-deliver-files",
+      "sandbox-destroy",
+      "spaces-sdlc-create-pull-request",
+    ],
+    skillPaths: ["architecture-review-skills"],
+    subagents: ARCHITECTURE_REVIEW_SUBAGENTS,
+    forceSubagentMode: true,
+    requiredTools: ["hickey-review", "lowy-review"],
+    requiredToolsSharedArgument: "reviewPacket",
+    requiredToolsSameTurn: true,
+    nudge:
+      "This command is incomplete until BOTH hickey-review and lowy-review have run independently in the same assistant turn against the exact same immutable reviewPacket. Call every missing reviewer now. If a reviewer cannot run, preserve the successful raw review and label the result PARTIAL; never present it as a complete binocular review.",
+    instruction: `You are running /architecture-review, a bounded read-only binocular architecture review.
+
+Resolve the user's requested target to immutable full base and head SHAs. Prepare one frozen review packet and call hickey-review and lowy-review independently in the SAME assistant turn with that packet copied verbatim. Neither reviewer may see the other's output. Then verify their citations and synthesize according to the loaded skill.
+
+Do not edit the repository or run code. Do not use a writable sandbox. Allowed inspection is limited to git diff/show/log/status/merge-base/rev-parse plus sed, cat, grep, find, and ls. No package managers, scripts, builds, tests, generators, hooks, formatters, Git mutation, or output redirection.
+
+A complete answer must state reviewer completion, immutable SHAs, and limitations. One failed or missing lens is PARTIAL, not binocular.`,
+  },
+  {
     command: "/spec",
     autoTools: [],
     skillPaths: ["spec-skills"],
@@ -258,6 +303,43 @@ const TASK_COMMANDS: TaskCommand[] = [
       "DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
   },
 ];
+
+export function missingRequiredTaskCommandTools(
+  required: readonly string[],
+  used: readonly string[],
+  invocations: ReadonlyArray<{
+    toolName: string;
+    args: unknown;
+    isError?: boolean;
+    turn?: number;
+  }> = [],
+  sharedArgument?: string,
+  sameTurn = false,
+): string[] {
+  const uniqueRequired = [...new Set(required)];
+  const usedSet = new Set(used);
+  const missing = uniqueRequired.filter((name) => !usedSet.has(name));
+  if (missing.length > 0 || !sharedArgument) return missing;
+
+  let sharedValues: Set<string> | undefined;
+  for (const name of uniqueRequired) {
+    const values = new Set(
+      invocations
+        .filter((invocation) => invocation.toolName === name && !invocation.isError)
+        .map((invocation) => {
+          if (typeof invocation.args !== "object" || invocation.args === null) return undefined;
+          const value = (invocation.args as Record<string, unknown>)[sharedArgument];
+          if (typeof value !== "string") return undefined;
+          return sameTurn ? `${invocation.turn ?? "missing-turn"}\u0000${value}` : value;
+        })
+        .filter((value): value is string => value !== undefined),
+    );
+    sharedValues = sharedValues === undefined
+      ? values
+      : new Set([...sharedValues].filter((value) => values.has(value)));
+  }
+  return sharedValues?.size ? [] : uniqueRequired;
+}
 
 /** The command a task invokes, or null. Matches `/name` at the very start,
  *  followed by whitespace or end-of-string (so "/explainers" never matches). */
