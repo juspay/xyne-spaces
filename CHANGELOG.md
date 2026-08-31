@@ -1,3 +1,15 @@
+## [1.250.0](https://github.com/juspay/xyne-spaces/compare/v1.249.5...v1.250.0) (2026-08-31)
+
+
+### Features
+
+* local CLI harness replayed onto main with prod-readiness hardening ([#942](https://github.com/juspay/xyne-spaces/issues/942)) ([08f674e](https://github.com/juspay/xyne-spaces/commit/08f674e2e59c16bbfced01c7a38d3a66bf149b62)), closes [#184](https://github.com/juspay/xyne-spaces/issues/184) [#1](https://github.com/juspay/xyne-spaces/issues/1) [-#8](https://github.com/juspay/-/issues/8) [#11](https://github.com/juspay/xyne-spaces/issues/11) [#1](https://github.com/juspay/xyne-spaces/issues/1) [#2](https://github.com/juspay/xyne-spaces/issues/2) [#3](https://github.com/juspay/xyne-spaces/issues/3) [#4](https://github.com/juspay/xyne-spaces/issues/4) [#11](https://github.com/juspay/xyne-spaces/issues/11) [#5](https://github.com/juspay/xyne-spaces/issues/5) [#6](https://github.com/juspay/xyne-spaces/issues/6) [#7](https://github.com/juspay/xyne-spaces/issues/7) [#8](https://github.com/juspay/xyne-spaces/issues/8) [pre-#168](https://github.com/juspay/pre-/issues/168)
+
+
+### Bug Fixes
+
+* prevent duplicate agent progress indicator rendering ([#994](https://github.com/juspay/xyne-spaces/issues/994)) ([94a3518](https://github.com/juspay/xyne-spaces/commit/94a351822f93c6a663fafc454cdc2fedb0232b40))
+
 ## [1.249.5](https://github.com/juspay/xyne-spaces/compare/v1.249.4...v1.249.5) (2026-08-31)
 
 
