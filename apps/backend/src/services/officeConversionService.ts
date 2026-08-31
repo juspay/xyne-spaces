@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "crypto"
 import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import path from "path"
+import pLimit from "p-limit"
 import { logger } from "@/utils/logger"
 import { storageService } from "@/services/storage"
 import { isPreconditionFailed } from "@xyne/storage"
@@ -24,6 +25,15 @@ import { isPreconditionFailed } from "@xyne/storage"
 
 const SOFFICE_BINARY = process.env.SOFFICE_PATH || "soffice"
 const CONVERSION_TIMEOUT_MS = 60_000
+
+// Each soffice invocation is a real process with a non-trivial memory
+// footprint; an uncapped flood of requests for files the cache hasn't seen
+// yet (e.g. many first-time opens at once) would spawn one soffice per
+// request and risk OOM-ing the pod. Bounds how many run at once per pod —
+// excess requests queue behind this limiter rather than all spawning
+// immediately.
+const SOFFICE_MAX_CONCURRENCY = Number(process.env.SOFFICE_MAX_CONCURRENCY) || 3
+const conversionLimit = pLimit(SOFFICE_MAX_CONCURRENCY)
 
 // Two-tier cache, both keyed on the content hash (this endpoint is
 // stateless — no file/collection id, just bytes, so content is the only key
@@ -148,7 +158,7 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
     try {
         await writeFile(inputPath, buffer)
 
-        await new Promise<void>((resolve, reject) => {
+        await conversionLimit(() => new Promise<void>((resolve, reject) => {
             const args = [
                 "--headless",
                 "--norestore",
@@ -205,7 +215,7 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
                     )
                 }
             })
-        })
+        }))
 
         const result = await readFile(outputPath)
 
