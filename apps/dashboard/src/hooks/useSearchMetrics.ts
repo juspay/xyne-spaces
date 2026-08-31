@@ -1228,6 +1228,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       normalizedText !== ''
     ) {
+      // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
+      // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
+      setIsSearchPending(pendingSearchCountRef.current > 0);
       return;
     }
 

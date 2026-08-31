@@ -28,6 +28,10 @@ export const ORDER_INSENSITIVE_LIST_PARAMS = [
 export function buildVespaSearchCacheKey(params: Record<string, string>): string {
   const keyParams: Record<string, string> = { ...params, groupBy: params['groupBy'] ?? 'docType' };
   delete keyParams['searchId'];
+  // Highlight-only + derived from the mention ids already in the key; its array order differs
+  // between the popup (click order) and the results screen (URL parse order), so keeping it
+  // would break order-insensitivity and make mention searches always miss the handoff cache.
+  delete keyParams['mentionHighlights'];
   for (const listParam of ORDER_INSENSITIVE_LIST_PARAMS) {
     const value = keyParams[listParam];
     if (value) {
