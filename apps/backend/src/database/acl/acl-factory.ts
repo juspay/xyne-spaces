@@ -70,7 +70,6 @@ import {
   ReleaseChangesACL,
   ReleaseChangeTypesACL,
   ReleaseEventsACL,
-  ReleaseRepositoriesACL,
   ReposACL,
   RolesACL,
   SavedUserConfigurationsACL,
@@ -272,8 +271,6 @@ export class ACLFactory {
       return new ReleaseChangeTypesACL(ctx, prisma)
     case 'releaseEvent':
       return new ReleaseEventsACL(ctx, prisma)
-    case 'releaseRepository':
-      return new ReleaseRepositoriesACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
     case 'sdlcEntityLink':

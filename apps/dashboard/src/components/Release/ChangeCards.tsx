@@ -1,5 +1,6 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useMemo, useState } from 'react';
+import type { VCSProviderType } from '@xyne/shared';
 import { cn } from '../../utils/classNames';
 import { RepoDot, ProviderBadge, repoColor, repoShortName } from './repoVisual';
 
@@ -41,6 +42,7 @@ export type RenderableFileGroup = {
 export interface ChangeSectionsGroup {
   appName: string;
   repoUrl: string | null;
+  vcsProvider?: VCSProviderType | null;
   files: RenderableFileGroup[];
 }
 
@@ -151,7 +153,7 @@ export const ChangeSections = ({
                 <span className='text-sm font-semibold text-foreground'>
                   {repoShortName(repoUrl)}
                 </span>
-                <ProviderBadge repoUrl={repoUrl} showLabel={false} />
+                <ProviderBadge vcsProvider={appGroups[0]?.vcsProvider ?? null} showLabel={false} />
                 <span className='ml-auto rounded-md bg-muted px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
                   repo
                 </span>

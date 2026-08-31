@@ -7,8 +7,6 @@ export { VCSProviderType, ReleaseTrackingMode };
 /** The project's applications, as synced by the parent screen. */
 export type ReleaseConfigApplications = QueryResultType<typeof queries.applicationsByProjectId>;
 
-/** Alias kept for local readability — the three VCS provider string values. */
-export type VCSProvider = `${VCSProviderType}`;
 export type ReleaseTrackingModeValue = `${ReleaseTrackingMode}`;
 
 export type WizardStep = 1 | 2;
@@ -38,7 +36,6 @@ export interface ApplicationConfig {
 export interface ExistingReleaseConfig {
   mainBoardId: string;
   mainBoardName: string;
-  vcsProvider: VCSProvider;
   releaseTrackingMode: ReleaseTrackingMode;
   channelId: string | null;
   applications: ApplicationConfig[];

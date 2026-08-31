@@ -6,7 +6,7 @@ import { AccessType, BaseTicketType, FormEntityType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
-import { inferVcsProvider } from '@/utils/repoUrlParser';
+import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { FormsRepository } from '@/database/repositories/formsRepository';
 import { unifiedBotUserService } from '@/bots/unified/index.js';
 
@@ -140,7 +140,15 @@ router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER',
     res.status(400).json({ ok: false, message: 'repoUrl is required' });
     return;
   }
-  const vcsProvider = inferVcsProvider(repoUrl);
+  const vcsProvider = detectVcsProvider(repoUrl);
+  if (!vcsProvider) {
+    res.status(400).json({
+      ok: false,
+      message:
+        'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
+    });
+    return;
+  }
   try {
     const result = await testRepoConnection({
       repoUrl,

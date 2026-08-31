@@ -546,7 +546,6 @@ function buildExistingConfig(
   return {
     mainBoardId: mainBoard.id,
     mainBoardName: mainBoard.name,
-    vcsProvider: mainBoard.vcsProvider as ExistingReleaseConfig['vcsProvider'],
     releaseTrackingMode:
       mainBoard.releaseTrackingMode as ExistingReleaseConfig['releaseTrackingMode'],
     channelId: applications[0]?.channelId ?? null,

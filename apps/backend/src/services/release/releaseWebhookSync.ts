@@ -160,6 +160,8 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
           conversationId: ticket.conversationId,
           userId: bot?.id || ticket.createdBy,
           channelId: ticket.channelId || undefined,
+          // Scalar range — used only when the release has no release_repositories
+          // rows; hotfixOverride below supplies the per-repo delta otherwise.
           deployedCommitId: newCommitId,
           newCommitId: mergeCommitSha!,
           branch,
@@ -167,6 +169,7 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
           userName: bot?.name || 'System',
           workspaceId: ticket.workspaceId,
           hotfixSync: true,
+          hotfixOverride: { boardIds, mergeCommitSha: mergeCommitSha! },
         });
         if (result.success) {
           logger.info(`[${source}] Synced hotfix (${newCommitId.slice(0, 8)}...${mergeCommitSha!.slice(0, 8)}) for ${ticket.xyneId}`);

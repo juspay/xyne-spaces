@@ -80,7 +80,6 @@ import {
   resolveCanvasHierarchy,
   parseFieldOptions,
   serializeFieldOptions,
-  VCSProviderType,
   ReleaseTrackingMode,
   parseRepliesMd,
   addReplyToData,
@@ -113,7 +112,7 @@ import {
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions } from '@/utils/mentionParser';
-import { inferVcsProvider } from '@/utils/repoUrlParser';
+import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
@@ -6935,7 +6934,6 @@ export function createMutators(
           projectId: z.string(),
           mainBoardId: z.string(),
           mainBoardName: z.string(),
-          vcsProvider: z.nativeEnum(VCSProviderType).optional(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
           applications: z.array(
@@ -7042,7 +7040,12 @@ export function createMutators(
             throw new Error('All applications in a release group must use the same repository URL');
           }
 
-          const vcsProvider = inferVcsProvider([...normalizedRepoUrls][0]);
+          const vcsProvider = detectVcsProvider([...normalizedRepoUrls][0]);
+          if (!vcsProvider) {
+            throw new Error(
+              'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
+            );
+          }
 
           if (!mainBoardName.trim()) {
             throw new Error('Main release board name is required');
@@ -7228,7 +7231,9 @@ export function createMutators(
             await tx.mutate.boards.update({
               id: existingMainBoard.id,
               name: mainBoardName.trim(),
-              vcsProvider,
+              // Keep the provider set at creation; re-inferring on edit would flip
+              // a GitHub-Enterprise-hosted board to BITBUCKET_SERVER.
+              vcsProvider: existingMainBoard.vcsProvider,
               releaseTrackingMode,
               updatedBy: authData.sub,
               updatedAt: Date.now(),
@@ -7727,6 +7732,8 @@ export function createMutators(
           }
 
           if (board.boardType === BoardType.RELEASE) {
+            // Gate release-board edits like board.delete and the config-save mutator.
+            await assertReleaseManageAccess();
             if (projectId !== undefined && projectId !== board.projectId) {
               throw new Error('Release boards cannot be moved to another project');
             }

@@ -8,6 +8,7 @@ import {
   normalizeChannelName,
   validateChannelName,
   type FlowPlan,
+  type VCSProviderType,
 } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -207,6 +208,14 @@ const ProjectDetailScreen = (): ReactElement => {
     () => Object.fromEntries((boards ?? []).map(board => [board.id, board.name])),
     [boards],
   );
+  // Drive the provider badge off the board's stored vcsProvider, not the URL.
+  const boardVcsProviderById = useMemo(
+    () =>
+      Object.fromEntries(
+        (boards ?? []).map(board => [board.id, board.vcsProvider ?? null]),
+      ) as Record<string, VCSProviderType | null>,
+    [boards],
+  );
 
   const repositories = useMemo(() => {
     type RepoService = {
@@ -237,9 +246,10 @@ const ProjectDetailScreen = (): ReactElement => {
       name: boardNamesById[mainBoardId] ?? mainBoardId,
       appCount: services.length,
       repoUrl: repoUrlByBoard.get(mainBoardId) ?? null,
+      vcsProvider: boardVcsProviderById[mainBoardId] ?? null,
       services,
     }));
-  }, [applicationList, boardNamesById]);
+  }, [applicationList, boardNamesById, boardVcsProviderById]);
 
   const releaseChannelIds = useMemo(
     () => [...new Set(applicationList.map(a => a.channelId).filter((c): c is string => !!c))],
@@ -658,7 +668,7 @@ const ProjectDetailScreen = (): ReactElement => {
                                     </div>
                                   )}
                                 </div>
-                                <ProviderBadge repoUrl={repo.repoUrl} />
+                                <ProviderBadge vcsProvider={repo.vcsProvider} />
                                 <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
                                   {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
                                 </span>

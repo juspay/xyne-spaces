@@ -528,8 +528,19 @@ export class TicketController {
         }
       }
 
-      // Extract dynamic fields if present (support both string and string[] for MULTI_SELECT)
-      const dynamicFields = (req.body.dynamicFields as Record<string, string | string[]>) || {};
+      // Extract dynamic fields — multipart sends a JSON string, JSON sends an object.
+      let dynamicFields: Record<string, string | string[]> = {};
+      if (typeof req.body.dynamicFields === 'string') {
+        try {
+          dynamicFields =
+            (JSON.parse(req.body.dynamicFields) as Record<string, string | string[]>) || {};
+        } catch {
+          res.status(400).json({ error: 'dynamicFields is not valid JSON' });
+          return;
+        }
+      } else if (req.body.dynamicFields && typeof req.body.dynamicFields === 'object') {
+        dynamicFields = req.body.dynamicFields as Record<string, string | string[]>;
+      }
       const requiredFields = { title, description, projectId };
       for (const [field, value] of Object.entries(requiredFields)) {
         if (!value) {

@@ -127,7 +127,11 @@ export function buildReleaseDetailDevTicketRows(
   artRows: readonly ArtRowInput[] | null | undefined,
   users: readonly UserInput[] | null | undefined,
   changeCountsByDevTicket: Map<string, ChangeCounts>,
+  // 'ticket' (default) = one row per ticket (flat table/CSV); 'ticketAndBoard' =
+  // one per (ticket, app board) so a cross-repo ticket reaches every repo group.
+  options?: { readonly dedupeBy?: 'ticket' | 'ticketAndBoard' },
 ): ReleaseDetailDevTicketRow[] {
+  const dedupeBy = options?.dedupeBy ?? 'ticket';
   const usersById = new Map(
     (users ?? []).map(user => [user.id, user.name ?? user.email ?? user.id]),
   );
@@ -141,8 +145,12 @@ export function buildReleaseDetailDevTicketRows(
   const rows: ReleaseDetailDevTicketRow[] = [];
 
   for (const artRow of artRows ?? []) {
-    if (seen.has(artRow.ticketId)) continue;
-    seen.add(artRow.ticketId);
+    const dedupeKey =
+      dedupeBy === 'ticketAndBoard'
+        ? `${artRow.ticketId}|${artRow.subTicket?.mappedTicket?.boardId ?? ''}`
+        : artRow.ticketId;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
     const devTicket = artRow.devTicket;
     const ticketId = devTicket?.xyneId ?? artRow.ticketId;
@@ -248,15 +256,31 @@ export function groupDevTicketRowsByRepo(
     }
   }
 
+  // Dedup by ticket within each repo bucket (several apps can map to one repo),
+  // so tested/total counts aren't inflated.
   const rowsByRepo = new Map<string, ReleaseDetailDevTicketRow[]>();
+  const seenByRepo = new Map<string, Set<string>>();
   const unmapped: ReleaseDetailDevTicketRow[] = [];
+  const seenUnmapped = new Set<string>();
   for (const row of rows) {
     const repoId = row.appReleaseBoardId ? boardToRepo.get(row.appReleaseBoardId) : undefined;
     if (repoId) {
-      const bucket = rowsByRepo.get(repoId);
-      if (bucket) bucket.push(row);
-      else rowsByRepo.set(repoId, [row]);
+      let bucket = rowsByRepo.get(repoId);
+      if (!bucket) {
+        bucket = [];
+        rowsByRepo.set(repoId, bucket);
+      }
+      let seenTickets = seenByRepo.get(repoId);
+      if (!seenTickets) {
+        seenTickets = new Set<string>();
+        seenByRepo.set(repoId, seenTickets);
+      }
+      if (seenTickets.has(row.internalTicketId)) continue;
+      seenTickets.add(row.internalTicketId);
+      bucket.push(row);
     } else {
+      if (seenUnmapped.has(row.internalTicketId)) continue;
+      seenUnmapped.add(row.internalTicketId);
       unmapped.push(row);
     }
   }

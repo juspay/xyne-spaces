@@ -1158,6 +1158,7 @@ export class CommitAnalysisService {
     projectKey: string,
     repositorySlug: string,
     releaseId: string,
+    mainReleaseBoardId: string,
   ): Promise<{
     envChangeCount: number;
     migrationChangeCount: number;
@@ -1165,8 +1166,15 @@ export class CommitAnalysisService {
     envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
   }> {
     const db = DatabaseClient.getInstance();
+    // Scope to this repo's applications — release_change_types is releaseId-wide, so
+    // an unscoped read would mis-attribute and double-count sibling repos' rows.
+    const boardApps = await this.applicationRepository!.findByMainReleaseBoardId(mainReleaseBoardId);
+    const applicationIds = boardApps.map(a => a.id);
+    if (applicationIds.length === 0) {
+      return { envChangeCount: 0, migrationChangeCount: 0, migrationLinks: [], envChanges: [] };
+    }
     const changes = await db.releaseChangeType.findMany({
-      where: { releaseId },
+      where: { releaseId, applicationId: { in: applicationIds } },
       orderBy: { createdAt: 'asc' },
     });
 

@@ -63,7 +63,6 @@ import {
   DraftOrigin,
   Schema,
   CollectionRole,
-  VCSProviderType,
   ReleaseTrackingMode,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
@@ -4358,7 +4357,6 @@ export const mutators = defineMutators({
         projectId: z.string(),
         mainBoardId: z.string(),
         mainBoardName: z.string(),
-        vcsProvider: z.nativeEnum(VCSProviderType).optional(),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
         applications: z.array(

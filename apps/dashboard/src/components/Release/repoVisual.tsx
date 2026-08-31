@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { VCSProviderType } from '@xyne/shared';
 
 const REPO_PALETTE = ['#E0503F', '#2B5FC0', '#1B855C', '#A3651F', '#7A6BA8', '#3F7A75'];
 
@@ -20,9 +21,6 @@ export const repoShortName = (repoUrl: string | null | undefined): string => {
 export const repoHostPath = (repoUrl: string | null | undefined): string =>
   repoUrl ? repoWebBase(repoUrl).replace(/^https?:\/\//, '') : '';
 
-const isBitbucket = (repoUrl: string | null | undefined): boolean =>
-  !!repoUrl && /bitbucket/i.test(repoUrl);
-
 export const RepoDot = ({
   color,
   className = '',
@@ -37,13 +35,15 @@ export const RepoDot = ({
 );
 
 export const ProviderBadge = ({
-  repoUrl,
+  vcsProvider,
   showLabel = true,
 }: {
-  repoUrl: string | null | undefined;
+  vcsProvider: VCSProviderType | null | undefined;
   showLabel?: boolean;
 }): ReactElement => {
-  const bb = isBitbucket(repoUrl);
+  const bb =
+    vcsProvider === VCSProviderType.BITBUCKET_SERVER ||
+    vcsProvider === VCSProviderType.BITBUCKET_CLOUD;
   return (
     <span className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'>
       {bb ? (

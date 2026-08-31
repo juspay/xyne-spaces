@@ -1,6 +1,6 @@
 import { ReactElement, useMemo, useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import type { Project } from '@xyne/shared';
+import { type Project, type VCSProviderType } from '@xyne/shared';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { Button } from '../../components/ui/Button';
 import { queries } from '../../zero/queries';
@@ -35,6 +35,14 @@ const ReleaseRepoConfigModal = ({
     () => Object.fromEntries((boards ?? []).map(b => [b.id, b.name])),
     [boards],
   );
+  const boardVcsProviderById = useMemo(
+    () =>
+      Object.fromEntries((boards ?? []).map(b => [b.id, b.vcsProvider ?? null])) as Record<
+        string,
+        VCSProviderType | null
+      >,
+    [boards],
+  );
 
   const repositories = useMemo(() => {
     const list = !applications || applications instanceof Error ? [] : applications;
@@ -51,8 +59,9 @@ const ReleaseRepoConfigModal = ({
       name: boardNamesById[mainBoardId] ?? mainBoardId,
       appCount,
       repoUrl: repoUrlByBoard.get(mainBoardId) ?? null,
+      vcsProvider: boardVcsProviderById[mainBoardId] ?? null,
     }));
-  }, [applications, boardNamesById]);
+  }, [applications, boardNamesById, boardVcsProviderById]);
 
   const appsForWizard = applications instanceof Error ? undefined : applications;
 
@@ -113,7 +122,7 @@ const ReleaseRepoConfigModal = ({
                 )}
               </div>
               <div className='flex shrink-0 items-center gap-2.5 self-center'>
-                <ProviderBadge repoUrl={repo.repoUrl} />
+                <ProviderBadge vcsProvider={repo.vcsProvider} />
                 <span className='rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
                   {repo.appCount} service{repo.appCount === 1 ? '' : 's'}
                 </span>

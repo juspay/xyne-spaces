@@ -859,12 +859,13 @@ export async function createCommitAnalysisCanvas(
   envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
   createdByUserId: string,
-  metadata: CommitAnalysisCanvasMetadata
+  metadata: CommitAnalysisCanvasMetadata,
+  repoSlices?: CommitAnalysisRepoSlice[]
 ): Promise<string | null> {
   try {
     const now = new Date();
     const { blocks: content, mentionedUserIds } = await buildMainAnalysisBlocks(
-      results, affectedApplications, envChanges, migrationLinks, metadata, analysisCanvasTitle(metadata, now),
+      results, affectedApplications, envChanges, migrationLinks, metadata, analysisCanvasTitle(metadata, now), repoSlices,
     );
 
     const canvasId = await persistNewAnalysisCanvas({

@@ -164,6 +164,8 @@ export interface CommitAnalysisParams {
   // per-app sub-tickets are tagged as hotfixes, and the canvas is upserted into
   // the "🔥 Hotfix PRs" section instead of rebuilding the main analysis.
   hotfixSync?: boolean;
+  // Multi-repo hotfix: restrict analysis to the merged repo's board(s) + post-merge head.
+  hotfixOverride?: { boardIds: string[]; mergeCommitSha: string };
 }
 
 interface ReleaseRepoContext {
@@ -220,7 +222,11 @@ export class CommitAnalysisController {
   }
 
   private async deriveBoardContext(
-    boardId: string,
+    board: {
+      id: string;
+      vcsProvider: string | null;
+      releaseTrackingMode: string | null;
+    } | null,
     projectId: string,
     projectCode: string | null,
   ): Promise<{
@@ -231,11 +237,8 @@ export class CommitAnalysisController {
     code: string | null;
     vcsProvider: 'BITBUCKET_SERVER' | 'GITHUB';
   } | null> {
-    const board = await db.board.findUnique({
-      where: { id: boardId },
-      select: { boardType: true, vcsProvider: true, releaseTrackingMode: true },
-    });
     if (!board) return null;
+    const boardId = board.id;
 
     if (board.releaseTrackingMode !== ReleaseTrackingMode.COMMIT_RANGE) {
       logger.warn(
@@ -296,6 +299,7 @@ export class CommitAnalysisController {
   private async deriveReleaseContexts(
     releaseTicketId: string,
     fallback: { deployedCommitId: string; newCommitId: string; branch: string },
+    hotfixOverride?: { boardIds: string[]; mergeCommitSha: string },
   ): Promise<{ contexts: ReleaseRepoContext[]; skipped: string[] }> {
     const ticket = await db.ticket.findUnique({
       where: { id: releaseTicketId },
@@ -308,23 +312,62 @@ export class CommitAnalysisController {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
-    const entries =
-      rows.length === 0
-        ? [{ boardId: ticket.boardId, ...fallback }]
-        : rows.map(r => ({
-            boardId: r.mainReleaseBoardId,
-            deployedCommitId: r.deployedCommit,
-            newCommitId: r.newCommit,
-            branch: r.branch,
-          }));
+    let entries: Array<{
+      boardId: string;
+      deployedCommitId: string;
+      newCommitId: string;
+      branch: string;
+    }>;
+    if (rows.length === 0) {
+      // Legacy scalar path: fallback carries the range (hotfix delta included).
+      entries = [{ boardId: ticket.boardId, ...fallback }];
+    } else if (hotfixOverride) {
+      // Hotfix: only the merged repo(s), over that repo's frozen head → merge head.
+      const matched = new Set(hotfixOverride.boardIds);
+      entries = rows
+        .filter(r => matched.has(r.mainReleaseBoardId))
+        .map(r => ({
+          boardId: r.mainReleaseBoardId,
+          deployedCommitId: r.newCommit,
+          newCommitId: hotfixOverride.mergeCommitSha,
+          branch: r.branch,
+        }));
+    } else {
+      // Plain re-run: every repo at its frozen range (idempotent).
+      entries = rows.map(r => ({
+        boardId: r.mainReleaseBoardId,
+        deployedCommitId: r.deployedCommit,
+        newCommitId: r.newCommit,
+        branch: r.branch,
+      }));
+    }
+
+    // Make the release ticket's own board primary (= contexts[0]) so the canvas
+    // title/metadata and parent-ticket headline describe it, not the last-added repo.
+    const primaryIdx = entries.findIndex(e => e.boardId === ticket.boardId);
+    if (primaryIdx > 0) {
+      const [primaryEntry] = entries.splice(primaryIdx, 1);
+      entries.unshift(primaryEntry);
+    }
+
+    // Batch the board-metadata reads into a single query.
+    const entryBoardIds = [...new Set(entries.map(e => e.boardId))];
+    const boardMetaById = new Map(
+      (
+        await db.board.findMany({
+          where: { id: { in: entryBoardIds } },
+          select: { id: true, name: true, vcsProvider: true, releaseTrackingMode: true },
+        })
+      ).map(b => [b.id, b]),
+    );
 
     const contexts: ReleaseRepoContext[] = [];
     const skipped: string[] = [];
     for (const entry of entries) {
-      const board = await this.deriveBoardContext(entry.boardId, ticket.projectId, ticket.project.code);
+      const boardMeta = boardMetaById.get(entry.boardId) ?? null;
+      const board = await this.deriveBoardContext(boardMeta, ticket.projectId, ticket.project.code);
       if (!board) {
-        const meta = await db.board.findUnique({ where: { id: entry.boardId }, select: { name: true } });
-        skipped.push(meta?.name ?? entry.boardId);
+        skipped.push(boardMeta?.name ?? entry.boardId);
         continue;
       }
       contexts.push({
@@ -417,7 +460,11 @@ export class CommitAnalysisController {
     let loadingMessageId: string | null = null;
 
     try {
-      const { contexts, skipped } = await this.deriveReleaseContexts(currentTicketId, { deployedCommitId, newCommitId, branch });
+      const { contexts, skipped } = await this.deriveReleaseContexts(
+        currentTicketId,
+        { deployedCommitId, newCommitId, branch },
+        params.hotfixOverride,
+      );
 
       if (contexts.length === 0) {
         logger.warn('[ReleaseTrigger] skipped: no workspace/repoSlug available');
@@ -506,6 +553,7 @@ export class CommitAnalysisController {
         await this.postToParentTicket(
           params.parentTicketId, results, primary.projectKey, primary.repoSlug, conversationId, channelId,
           affectedApplications, userId, primary.deployedCommitId, primary.newCommitId, envChanges, migrationLinks,
+          repoSlices,
         );
       }
 
@@ -523,8 +571,17 @@ export class CommitAnalysisController {
       ].filter(Boolean);
       const failuresPreface = warningLines.length > 0 ? warningLines.join('') : undefined;
 
+      // Downgrade the header when some repos failed (all-failed already threw above).
+      const partialFailure = failedRepos.length > 0;
+
       const summaryContent = buildAnalysisSummaryHtml({
-        header: hotfixSync ? '🔥 Hotfix Analysis Complete' : '📦 Release Analysis Complete',
+        header: hotfixSync
+          ? partialFailure
+            ? '🔥 Hotfix Analysis — completed with errors'
+            : '🔥 Hotfix Analysis Complete'
+          : partialFailure
+            ? '📦 Release Analysis — completed with errors'
+            : '📦 Release Analysis Complete',
         ...(failuresPreface && { prefaceHtml: failuresPreface }),
         workspace: primary.projectKey,
         repoSlug: primary.repoSlug,
@@ -579,7 +636,8 @@ export class CommitAnalysisController {
     deployedCommitId: string,
     newCommitId: string,
     envChanges?: Array<{ filePath: string; fileName: string; newValue: string }>,
-    migrationLinks?: Array<{ filePath: string; diffUrl: string }>
+    migrationLinks?: Array<{ filePath: string; diffUrl: string }>,
+    repoSlices?: CommitAnalysisRepoSlice[]
   ): Promise<void> {
     try {
       const parentTicket = await this.ticketRepository!.getTicketById(parentTicketId);
@@ -606,7 +664,8 @@ export class CommitAnalysisController {
             affectedApplicationCount: affectedApplications.length,
             migrationCount: migrationLinks?.length || 0,
             envChangeCount: envChanges?.length || 0,
-          }
+          },
+          repoSlices,
         );
 
         if (canvasId) {
@@ -631,6 +690,9 @@ export class CommitAnalysisController {
         prefaceHtml: subTicketPreface,
         workspace,
         repoSlug,
+        ...(repoSlices && repoSlices.length > 1 && {
+          repoLabel: repoSlices.map(s => `${s.workspace}/${s.repoSlug}`).join(', '),
+        }),
         totalCommits,
         commitsWithPR,
         commitsWithTicket,

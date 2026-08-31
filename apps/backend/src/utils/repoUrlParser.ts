@@ -109,3 +109,11 @@ export function parseGitHubRepoUrl(url: string): { owner: string; repo: string }
 export function inferVcsProvider(repoUrl: string): VCSProviderType {
   return parseGitHubRepoUrl(repoUrl) ? VCSProviderType.GITHUB : VCSProviderType.BITBUCKET_SERVER;
 }
+
+// Like inferVcsProvider but returns null for an unrecognized URL, so callers can
+// reject it instead of defaulting to a misleading Bitbucket-flavored error.
+export function detectVcsProvider(repoUrl: string): VCSProviderType | null {
+  if (parseGitHubRepoUrl(repoUrl)) return VCSProviderType.GITHUB;
+  if (parseBitbucketRepoUrl(repoUrl)) return VCSProviderType.BITBUCKET_SERVER;
+  return null;
+}

@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { FormContextType, FormEntityType } from '@xyne/shared';
+import { FormContextType, FormEntityType, type VCSProviderType } from '@xyne/shared';
 import { toast } from 'sonner';
 import { getApiErrorMessage } from '../../utils/apiError';
 
@@ -366,14 +366,18 @@ const ReleaseDetailScreen = (): ReactElement => {
       setAnalysisCanvasId(null);
       return;
     }
+    // Discard a stale response if the active release changed mid-flight.
+    const requestedReleaseId = releaseTicketId;
     try {
       const response = await apiInstance.get<{
         repos: ReleaseRepositoryRow[];
         analysisCanvasId?: string | null;
       }>(`/commits/analyze/repos/${releaseTicketId}`);
+      if (activeReleaseIdRef.current !== requestedReleaseId) return;
       setReleaseRepositories(response.data?.repos ?? []);
       setAnalysisCanvasId(response.data?.analysisCanvasId ?? null);
     } catch {
+      if (activeReleaseIdRef.current !== requestedReleaseId) return;
       setReleaseRepositories([]);
       setAnalysisCanvasId(null);
       toast.error('Could not load the repository breakdown for this release. Try refreshing.');
@@ -386,6 +390,21 @@ const ReleaseDetailScreen = (): ReactElement => {
     queries.applicationsByProjectId({ projectId: projectId ?? '' }),
     { enabled: !!projectId },
   );
+  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId ?? '' }), {
+    enabled: !!projectId,
+  });
+  // repoUrl → stored vcsProvider (via the app's main release board) for the badge.
+  const vcsProviderByRepoUrl = useMemo(() => {
+    const byBoard = new Map((boards ?? []).map(b => [b.id, b.vcsProvider ?? null]));
+    const map = new Map<string, VCSProviderType | null>();
+    const apps = applications instanceof Error ? [] : (applications ?? []);
+    for (const app of apps) {
+      if (app.repoUrl && app.mainReleaseBoardId && !map.has(app.repoUrl)) {
+        map.set(app.repoUrl, byBoard.get(app.mainReleaseBoardId) ?? null);
+      }
+    }
+    return map;
+  }, [applications, boards]);
   const [releaseChanges] = useCachedQuery(
     queries.releaseChangesByReleaseId({ releaseId: releaseTicketId ?? '' }),
     { enabled: !!releaseTicketId },
@@ -428,8 +447,8 @@ const ReleaseDetailScreen = (): ReactElement => {
   }, [releaseFormValues]);
 
   const groupedByApp = useMemo<ChangeSectionsGroup[]>(
-    () => buildGroupedByApp(releaseChanges),
-    [releaseChanges],
+    () => buildGroupedByApp(releaseChanges, vcsProviderByRepoUrl),
+    [releaseChanges, vcsProviderByRepoUrl],
   );
   const envsByApp = useMemo(() => filterGroupsByKind(groupedByApp, 'ENV'), [groupedByApp]);
   const migrationsByApp = useMemo(
@@ -461,11 +480,21 @@ const ReleaseDetailScreen = (): ReactElement => {
     [artRows, users, changeCountsByDevTicket],
   );
 
+  // Grouping keeps one row per (ticket, app board) so a cross-repo ticket reaches
+  // every repo group; the flat table/CSV use the one-row-per-ticket set above.
+  const groupedDevTicketRows = useMemo(
+    () =>
+      buildReleaseDetailDevTicketRows(artRows, users, changeCountsByDevTicket, {
+        dedupeBy: 'ticketAndBoard',
+      }),
+    [artRows, users, changeCountsByDevTicket],
+  );
+
   const repoCount = releaseRepositories?.length ?? 0;
   const isMultiRepo = repoCount > 1;
   const devTicketRepoGroups = useMemo(
-    () => groupDevTicketRowsByRepo(devTicketRows, releaseRepositories, applications),
-    [devTicketRows, releaseRepositories, applications],
+    () => groupDevTicketRowsByRepo(groupedDevTicketRows, releaseRepositories, applications),
+    [groupedDevTicketRows, releaseRepositories, applications],
   );
 
   // Per-board stage lists for release status controls.
@@ -768,7 +797,8 @@ const ReleaseDetailScreen = (): ReactElement => {
           <button
             onClick={() =>
               void navigate(`/listProjects/${projectId}`, {
-                state: { tab: 'release', from: 'releaseManager' },
+                // 'releases' = the Releases list in release-manager mode ('release' is Repositories).
+                state: { tab: 'releases', from: 'releaseManager' },
               })
             }
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'

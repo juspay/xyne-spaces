@@ -5,7 +5,7 @@
 import { type ChangeSectionsGroup, type RenderableFileGroup } from './ChangeCards';
 import { extractEnvVarsFromBag } from './envVars';
 import type { ReleaseStageOption } from './ReleaseStagePicker';
-import type { TicketStatusV2 } from '@xyne/shared';
+import type { TicketStatusV2, VCSProviderType } from '@xyne/shared';
 
 // ─── Minimal input shapes (structural) ───────────────────────────────────────
 // We use minimal structural types so callers don't need to import Zero generics.
@@ -93,12 +93,15 @@ export function buildValuesByChangeId(
  */
 export function buildGroupedByApp(
   releaseChanges: ReleaseChangeInput[] | null | undefined,
+  // repoUrl → stored vcsProvider, for the repo header badge.
+  vcsProviderByRepoUrl?: Map<string, VCSProviderType | null>,
 ): ChangeSectionsGroup[] {
   const apps = new Map<
     string,
     {
       appName: string;
       repoUrl: string | null;
+      vcsProvider: VCSProviderType | null;
       files: Map<string, RenderableFileGroup>;
       earliestAt: number;
     }
@@ -117,6 +120,7 @@ export function buildGroupedByApp(
       app = {
         appName,
         repoUrl,
+        vcsProvider: vcsProviderByRepoUrl?.get(repoUrl ?? '') ?? null,
         files: new Map(),
         earliestAt: createdAt,
       };
@@ -154,6 +158,7 @@ export function buildGroupedByApp(
     .map(a => ({
       appName: a.appName,
       repoUrl: a.repoUrl,
+      vcsProvider: a.vcsProvider,
       files: Array.from(a.files.values())
         .map(f => ({ ...f, changes: [...f.changes].sort((x, y) => x.createdAt - y.createdAt) }))
         .sort((x, y) => x.earliestAt - y.earliestAt),

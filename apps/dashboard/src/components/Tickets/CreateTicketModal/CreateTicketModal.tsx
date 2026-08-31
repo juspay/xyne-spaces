@@ -1158,6 +1158,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         mandatoryMerchantId,
         mandatoryTicketType,
         isRelease: ticketKind === 'release',
+        releaseOnly,
       }),
     [
       formValues,
@@ -1178,6 +1179,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryLabels,
       mandatoryMerchantId,
       mandatoryTicketType,
+      releaseOnly,
     ],
   );
 
@@ -1187,7 +1189,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const df = formValues?.dynamicFields ?? {};
     const filled = (v: string | string[] | undefined): boolean =>
       Array.isArray(v) ? Boolean(v[0]?.trim()) : Boolean(v?.trim());
-    const primaryComplete = filled(df['deployedCommitId']) && filled(df['newCommitId']);
+    const primaryComplete =
+      filled(df['branch']) && filled(df['deployedCommitId']) && filled(df['newCommitId']);
     const additionalsComplete = selectedRepoBoardIds.every(
       id =>
         Boolean(repoRanges[id]?.branch?.trim()) &&
@@ -1408,6 +1411,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           formDataPayload.append('ticketType', formData.ticketType);
         }
 
+        // Send dynamicFields on the multipart path too, else releaseRepos/commit
+        // range are dropped when a release ticket has an attachment.
+        formDataPayload.append('dynamicFields', JSON.stringify(submitDynamicFields));
+
         // Add draft attachment IDs if creating from conversation
         if (draftAttachmentIds.length > 0) {
           draftAttachmentIds.forEach(id => {
@@ -1468,8 +1475,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           assignedTo: assignedTo || undefined,
           userGroupId: userGroupId || undefined,
           boardId: formData.boardId,
-          // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
-          channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
+          // Use the form channel for subtickets/AI/releaseOnly; else the prop. Matches the multipart branch.
+          channelId: isFromSubTicket || isFromAI || releaseOnly ? formData.channelId : channelId,
           fromTicketsTab: isFromTicketsTab,
           ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
           ticketType: formData.ticketType,
