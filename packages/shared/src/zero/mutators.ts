@@ -87,7 +87,7 @@ import {
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
-  sdlcDiscussionSchema,
+  entityLinkContextSchema,
 } from '../sdlc.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
@@ -187,7 +187,11 @@ import {
   updateInitialMessageMdField,
   updateInitialMessageMdReaction,
 } from './messageMetadata.js';
-import { updateTicketMdFromZero } from '../utils/ticketMetadata.js';
+import {
+  updateTicketMdFromZero,
+  updateSubTicketsMdFromZero,
+  linkSubTicketConversationToParentFromZero,
+} from '../utils/ticketMetadata.js';
 import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
@@ -1647,7 +1651,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         type: z.nativeEnum(MessageType),
         attachmentIds: z.array(z.string()).optional(),
-        sdlcDiscussion: sdlcDiscussionSchema.optional(),
+        entityLinkContext: entityLinkContextSchema.optional(),
       }),
       async ({
         tx,
@@ -1660,7 +1664,7 @@ export const mutators = defineMutators({
           messageId,
           timestamp,
           attachmentIds,
-          sdlcDiscussion,
+          entityLinkContext,
         },
       }) => {
         if (content === '') {
@@ -1753,13 +1757,13 @@ export const mutators = defineMutators({
           }),
         });
 
-        if (sdlcDiscussion) {
+        if (entityLinkContext) {
           await tx.mutate.sdlc_entity_links.insert({
-            id: sdlcDiscussion.linkId,
+            id: entityLinkContext.linkId,
             workspaceId: ctx.workspaceId,
             channelId,
-            sourceType: sdlcDiscussion.ownerType,
-            sourceId: sdlcDiscussion.ownerId,
+            sourceType: entityLinkContext.sourceType,
+            sourceId: entityLinkContext.sourceId,
             targetType: 'CONVERSATION',
             targetId: conversationId,
             relationType: 'DISCUSSION',
@@ -4358,6 +4362,23 @@ export const mutators = defineMutators({
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });
+
+        if (mappedTicketId !== undefined) {
+          const mappings = (await tx.run(
+            zql.ticket_sub_ticket_mappings.where('subTicketId', subTicketId),
+          )) as Array<{ ticketId: string }>;
+          for (const mapping of mappings) {
+            await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
+          }
+          if (mappedTicketId && mappings[0]) {
+            await linkSubTicketConversationToParentFromZero(
+              tx,
+              zql,
+              mappedTicketId,
+              mappings[0].ticketId,
+            );
+          }
+        }
       },
     ),
   },

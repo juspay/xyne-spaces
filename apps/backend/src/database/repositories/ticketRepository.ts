@@ -182,6 +182,7 @@ export class TicketRepository {
         updatedBy: data.updatedBy,
         assignedTo: data.assignedTo,
         conversationId: data.conversationId,
+        ...(data.sourceMessageId && { messageId: data.sourceMessageId }),
         channelId: data.channelId,
         xyneId: data.xyneId,
         projectId: data.projectId,

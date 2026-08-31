@@ -126,6 +126,7 @@ model Ticket {
   statusUpdatedAt  DateTime          @default(now()) // Timestamp when statusV2 was last changed
   merchantId       String?           // Merchant ID to which the ticket is linked
   conversationId   String            // The xyne chat conversation to which the ticket is linked
+  messageId        String?           @unique 
   channelId        String            // The channel to which the ticket is linked
   eta              DateTime?         // Calculated ETA for a ticket based on ETA of task Type
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
@@ -1948,6 +1949,7 @@ model Conversation {
   ticket_md         String?
   initial_message_md String?
   parent_message_md  String?
+  sub_tickets_md     String?
   doNotPostToChannel Boolean?
   createdAt         DateTime @default(now())
   threadType        String?

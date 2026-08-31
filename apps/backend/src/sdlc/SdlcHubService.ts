@@ -50,6 +50,7 @@ import { commitAndSyncCanvasArtifact } from './sdlcBaselineCanvasSync';
 import { requireSdlcProjectAccess } from './sdlcProjectAccess';
 import { isTrackInChannel, trackIdsForChannel } from './sdlcChannelMembership';
 import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
+import { ensureLink } from './entityLinkService';
 import { BASELINE_CAPABILITIES } from './sdlcProgressiveGate';
 import type {
   SdlcActor,
@@ -1524,31 +1525,18 @@ export class SdlcHubService implements SdlcHub {
           select: { sourceId: true },
         });
         if (trackLink) {
-          try {
-            await this.prisma.sdlcEntityLink.create({
-              data: {
-                workspaceId: actor.workspaceId,
-                channelId: repo.channelId,
-                sourceType: 'TRACK',
-                sourceId: trackLink.sourceId,
-                targetType: 'TICKET',
-                targetId: input.targetId,
-                relationType: 'TRACK_ITEM',
-                createdBy: actor.userId,
-              },
-            });
-          } catch (trackError) {
-            // The ticket may already belong to the track; the unique constraint
-            // makes this idempotent. Any other error must not fail the primary link.
-            if (
-              !(
-                trackError instanceof Prisma.PrismaClientKnownRequestError &&
-                trackError.code === 'P2002'
-              )
-            ) {
-              throw trackError;
-            }
-          }
+          await ensureLink(
+            this.prisma,
+            {
+              channelId: repo.channelId!,
+              sourceType: 'TRACK',
+              sourceId: trackLink.sourceId,
+              targetType: 'TICKET',
+              targetId: input.targetId,
+              relationType: 'TRACK_ITEM',
+            },
+            { workspaceId: actor.workspaceId, userId: actor.userId }
+          );
         }
       }
       return link;

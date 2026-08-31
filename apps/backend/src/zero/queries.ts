@@ -3627,8 +3627,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       limit: z.number(),
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
+      conversationIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, limit, start, direction } }) => {
+    ({ ctx, args: { channelId, limit, start, direction, conversationIds } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
         .related('initialMessageAttachments')
@@ -3640,6 +3641,10 @@ export const queries: AnyQueryRegistry = defineQueries({
             ),
           ),
         );
+
+      if (conversationIds) {
+        query = query.where(helpers => helpers.cmp('conversationId', 'IN', conversationIds));
+      }
 
       // Apply ordering based on direction
       const orderDirection = direction === 'forward' ? 'desc' : 'asc';
@@ -3724,10 +3729,14 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV3: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
-    ({ ctx, args: { channelId, limit } }) => {
-      return zql.conversations
-        .where('channelId', channelId)
+    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number(), conversationIds: z.array(z.string()).optional() }),
+    ({ ctx, args: { channelId, limit, conversationIds } }) => {
+      let query = zql.conversations
+        .where('channelId', channelId);
+      if (conversationIds) {
+        query = query.where(helpers => helpers.cmp('conversationId', 'IN', conversationIds));
+      }
+      return query
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
@@ -4226,6 +4235,20 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           ),
         )
         .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc')),
+  ),
+  sdlcTicketsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where('rootId', 'IS', null)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('ticketType', 'IS', null),
+            helpers.cmp('ticketType', '!=', BaseTicketType.Support),
+          ),
+        ),
   ),
   sdlcDiscussionConversations: defineQuery(
     z.object({

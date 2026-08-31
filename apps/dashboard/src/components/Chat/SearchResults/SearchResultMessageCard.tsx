@@ -187,6 +187,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           replies_md: null,
           initial_message_md: null,
           parent_message_md: null,
+          sub_tickets_md: null,
           doNotPostToChannel: null,
         }
       : undefined;
