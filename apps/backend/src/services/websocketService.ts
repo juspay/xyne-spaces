@@ -72,18 +72,20 @@ class WebSocketService {
     this.io = new SocketIOServer(httpServer, {
       path: '/api/socket.io/',
       cors: {
-        origin: config.cors.origin,
+        origin: config.cors.wsOrigins,
         methods: ["GET", "POST"],
         credentials: true
       },
       // The handshake authenticates from cookies, and CORS headers only govern what a
       // page may *read* — they do not stop a browser from opening the socket. A browser
       // always sends Origin on a cross-site WebSocket handshake, so an Origin outside
-      // the same allow-list the HTTP middleware uses is refused before authentication.
-      // Native clients send no Origin and are unaffected.
+      // the allow-list is refused before authentication. The list is the CORS origins
+      // plus the app's own frontend (config.cors.wsOrigins), so a same-origin frontend
+      // is accepted even if it is not a CORS entry. Native clients send no Origin and
+      // are unaffected.
       allowRequest: (req, callback) => {
         const origin = req.headers.origin;
-        if (origin && !config.cors.origin.includes(origin)) {
+        if (origin && !config.cors.wsOrigins.includes(origin)) {
           logger.warn(`WebSocket handshake rejected from disallowed origin: ${origin}`);
           callback('Origin not allowed', false);
           return;

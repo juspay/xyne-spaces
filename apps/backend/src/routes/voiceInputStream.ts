@@ -16,7 +16,7 @@ const AGENT_HANDSHAKE_TIMEOUT_MS = 10_000;
 // same allowlist the HTTP CORS middleware uses.
 function isAllowedOrigin(req: IncomingMessage): boolean {
   const origin = req.headers.origin;
-  return !!origin && config.cors.origin.includes(origin);
+  return !!origin && config.cors.wsOrigins.includes(origin);
 }
 
 async function authenticateUpgrade(req: IncomingMessage): Promise<boolean> {

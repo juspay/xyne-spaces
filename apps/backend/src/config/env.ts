@@ -608,6 +608,20 @@ export const config = {
     origin: envVars.CORS_ORIGIN.split(',')
       .map((origin: string) => origin.trim())
       .filter(Boolean),
+    // Origins allowed to open a WebSocket: the CORS_ORIGIN allow-list plus the
+    // app's own frontend origin. The frontend is always a legitimate socket
+    // client, so it must be accepted even when CORS_ORIGIN does not list it —
+    // e.g. when the frontend and API share a host and never needed a CORS entry.
+    wsOrigins: (() => {
+      const list = envVars.CORS_ORIGIN.split(',')
+        .map((origin: string) => origin.trim())
+        .filter(Boolean);
+      try {
+        const own = new URL(envVars.FRONTEND_URL as string).origin;
+        if (own && !list.includes(own)) list.push(own);
+      } catch { /* FRONTEND_URL unset or not a URL: nothing to add */ }
+      return list;
+    })(),
     allowedMediaOrigins: envVars.ALLOWED_MEDIA_ORIGINS.split(',')
       .map((origin: string) => origin.trim())
       .filter(Boolean),
