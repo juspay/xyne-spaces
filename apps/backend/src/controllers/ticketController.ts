@@ -39,8 +39,8 @@ import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { validateChannelAccess } from '@/utils/channelAccess';
-import { bulkTicketCreationQueue } from '@/queues/bulkTicketCreationQueue';
-import { BulkTicketItemInput, BulkTicketMode } from '@/types/bulkTicket';
+import { bulkTicketCreationQueue, BULK_TICKET_JOB_NAME_SUB, BULK_TICKET_JOB_NAME_BULK } from '@/queues/bulkTicketCreationQueue';
+import { BulkTicketCreationInput, BulkTicketMode, CreateBulkTicketResponse } from '@/types/bulkTicket';
 import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
@@ -383,7 +383,16 @@ export class TicketController {
    * head system message, then reuses createTicketWithConversation so bulk items
    * follow the exact same transactional creation path as single tickets.
    */
-  async createBulkTicketItem(item: BulkTicketItemInput, createdBy: string): Promise<Ticket> {
+  async createBulkTicketItem(item: {
+    title: string;
+    description?: string;
+    channelId: string;
+    projectId: string;
+    boardId: string;
+    assignedTo?: string;
+    priority?: string;
+    statusV2?: string;
+  }, createdBy: string): Promise<Ticket> {
     const initialMessageId = randomUUID();
     const conversation = await this.conversationRepository.create({
       channelId: item.channelId,
@@ -391,7 +400,6 @@ export class TicketController {
       initialMessageId,
     });
 
-    // Seed the conversation head so its initialMessageId is not dangling.
     await this.messageRepository.createWithExecutionId(
       {
         conversationId: conversation.conversationId,
@@ -431,7 +439,6 @@ export class TicketController {
    */
   createBulkTicket = async (req: Request, res: Response): Promise<void> => {
     try {
-      // Not available to app credentials (the claw mount is /api/tickets/claw).
       if (req.originalUrl.includes('/api/tickets/claw')) {
         res.status(403).json({
           error: 'Bulk ticket creation is not available for app credentials',
@@ -449,11 +456,24 @@ export class TicketController {
 
       const body = req.body as {
         mode?: string;
-        parent?: BulkTicketItemInput;
-        tickets?: BulkTicketItemInput[];
-        subTickets?: BulkTicketItemInput[];
+        parent?: {
+          title: string;
+          description?: string;
+          channelId: string;
+          projectId: string;
+          boardId: string;
+          assignedTo?: string;
+          priority?: string;
+          statusV2?: string;
+        };
+        tickets?: Array<Record<string, unknown>>;
+        subTickets?: Array<Record<string, unknown>>;
         existingParentTicketId?: string;
         sourceConversationId?: string;
+        sourceMessageId?: string;
+        projectId?: string;
+        channelId?: string;
+        boardId?: string;
       };
 
       const mode =
@@ -461,41 +481,65 @@ export class TicketController {
           ? BulkTicketMode.ALL_PARENTS
           : BulkTicketMode.PARENT_SUB;
 
-      const children = body.subTickets ?? body.tickets ?? [];
-      if (!Array.isArray(children) || children.length === 0) {
+      const rawChildren = body.subTickets ?? body.tickets ?? [];
+      if (!Array.isArray(rawChildren) || rawChildren.length === 0) {
         res.status(400).json({ error: 'At least one ticket is required in "tickets" or "subTickets"' });
         return;
       }
 
       const MAX_BULK_TICKETS = 100;
-      if (children.length > MAX_BULK_TICKETS) {
+      if (rawChildren.length > MAX_BULK_TICKETS) {
         res.status(400).json({ error: `Cannot create more than ${MAX_BULK_TICKETS} tickets in one request` });
         return;
       }
 
-      const allItems: BulkTicketItemInput[] = [...children];
-      if (body.parent) {
-        allItems.push(body.parent);
-      }
+      const topChannelId = body.channelId;
+      const topProjectId = body.projectId;
+      const topBoardId = body.boardId;
 
-      for (const it of allItems) {
-        if (!it || !it.title || !it.channelId || !it.projectId || !it.boardId) {
-          res.status(400).json({ error: 'Each ticket requires title, channelId, projectId and boardId' });
+      const children: BulkTicketCreationInput[] = rawChildren.map((item) => ({
+        title: String(item.title ?? '').trim(),
+        description: item.description != null ? String(item.description) : '',
+        channelId: String(item.channelId ?? topChannelId ?? ''),
+        projectId: String(item.projectId ?? topProjectId ?? ''),
+        boardId: String(item.boardId ?? topBoardId ?? ''),
+        assignedTo: item.assignedTo != null ? String(item.assignedTo) : undefined,
+        userGroupId: item.userGroupId != null ? String(item.userGroupId) : undefined,
+        priority: item.priority != null ? String(item.priority) : undefined,
+        statusV2: item.statusV2 != null ? String(item.statusV2) : undefined,
+        eta: item.eta != null ? new Date(item.eta as string | number | Date) : undefined,
+        tags: Array.isArray(item.tags) ? item.tags.map(String) : undefined,
+        ticketType: item.ticketType != null ? String(item.ticketType) : undefined,
+        stageName: item.stageName != null ? String(item.stageName) : undefined,
+        dynamicFields: item.dynamicFields as Record<string, string> | undefined,
+        merchantId: item.merchantId != null ? String(item.merchantId) : undefined,
+        clientRowId: item.clientRowId != null ? String(item.clientRowId) : undefined,
+        createdBy: userId,
+        updatedBy: userId,
+      }));
+
+      for (const it of children) {
+        if (!it.title || !it.channelId || !it.projectId) {
+          res.status(400).json({ error: 'Each ticket requires title, channelId, and projectId' });
           return;
         }
       }
 
-      // Per-item access — fail closed if ANY target channel is unreachable.
-      for (const it of allItems) {
-        const access = await validateChannelAccess(it.channelId, userId, workspaceId);
+      const allChannelIds = new Set<string>(children.map((c) => c.channelId));
+      if (body.parent?.channelId) {
+        allChannelIds.add(body.parent.channelId);
+      }
+
+      for (const chId of allChannelIds) {
+        const access = await validateChannelAccess(chId, userId, workspaceId);
         if (!access.hasAccess) {
           res.status(403).json({ error: access.reason ?? 'Access denied', code: 'CHANNEL_ACCESS_DENIED' });
           return;
         }
       }
 
-      // Resolve / create the parent for parent-sub mode.
-      let parentTicketId: string | undefined = body.existingParentTicketId;
+      let parentTicketId: string | null = body.existingParentTicketId ?? null;
+
       if (mode === BulkTicketMode.PARENT_SUB) {
         if (parentTicketId) {
           const parent = await prisma.ticket.findUnique({
@@ -520,23 +564,28 @@ export class TicketController {
         }
       }
 
-      const jobKey = randomUUID();
-      await bulkTicketCreationQueue.enqueue({
+      const jobName = mode === BulkTicketMode.ALL_PARENTS
+        ? BULK_TICKET_JOB_NAME_BULK
+        : BULK_TICKET_JOB_NAME_SUB;
+
+      await bulkTicketCreationQueue.enqueue(jobName, {
         mode,
-        createdBy: userId,
-        workspaceId,
+        userId,
+        parentWorkspaceId: workspaceId,
         parentTicketId,
-        items: children,
-        sourceConversationId: body.sourceConversationId,
-        jobKey,
+        subTickets: children,
+        sourceMessageId: body.sourceMessageId,
+        sourceType: 'MESSAGE',
+        channelId: topChannelId ?? children[0]?.channelId,
+        projectId: topProjectId ?? children[0]?.projectId,
       });
 
-      res.status(202).json({
-        success: true,
-        parentTicketId,
-        queued: children.length,
-        jobKey,
-      });
+      const response: CreateBulkTicketResponse = {
+        parentTicketId: parentTicketId ?? undefined,
+        enqueuedSubTickets: children.length,
+      };
+
+      res.status(202).json(response);
     } catch (error) {
       logger.error('[Bulk Ticket] createBulkTicket failed:', error);
       res.status(500).json({ error: 'Failed to enqueue bulk ticket creation' });

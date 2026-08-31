@@ -1,3 +1,5 @@
+import { BulkTicketMode } from '@xyne/shared';
+
 /**
  * Types for bulk ticket creation.
  *
@@ -8,47 +10,67 @@
  * enqueued job, and the per-item ticket description.
  */
 
-export enum BulkTicketMode {
-  /** Every item becomes a sub-ticket of a single parent ticket. */
-  PARENT_SUB = 'parent-sub',
-  /** Every item becomes an independent (top-level) ticket. */
-  ALL_PARENTS = 'all-parents',
-}
+export { BulkTicketMode };
 
 /**
  * One ticket to create. `channelId`/`projectId`/`boardId` are carried per-item
  * so a batch can (in principle) span boards — every item is therefore
  * access-checked individually before it is created.
  */
-export interface BulkTicketItemInput {
+export interface BulkTicketCreationInput {
   title: string;
   description?: string;
   channelId: string;
   projectId: string;
   boardId: string;
   assignedTo?: string;
+  userGroupId?: string;
   priority?: string;
   statusV2?: string;
-  /**
-   * Stable client-supplied row id. Used as the idempotency key so a re-run of a
-   * stalled/retried job does not create the same ticket twice.
-   */
+  eta?: Date;
+  tags?: string[];
+  ticketType?: string;
+  stageName?: string;
+  dynamicFields?: Record<string, string>;
+  merchantId?: string;
   clientRowId?: string;
+  createdBy: string;
+  updatedBy: string;
 }
 
 /** Payload processed by the bulk-ticket worker. */
 export interface BulkTicketCreationJobData {
   mode: BulkTicketMode;
   /** Authenticated human user id — never taken from the request body. */
-  createdBy: string;
+  userId: string;
   /** Workspace of the authenticated user — the ceiling for per-item access. */
-  workspaceId: string;
+  parentWorkspaceId: string;
   /** Set for parent-sub mode: the parent every item is mapped under. */
-  parentTicketId?: string;
+  parentTicketId: string | null;
   /** Tickets to create asynchronously. */
-  items: BulkTicketItemInput[];
-  /** Optional source thread, for a completion summary. */
-  sourceConversationId?: string;
-  /** Idempotency namespace for this batch. */
-  jobKey: string;
+  subTickets: BulkTicketCreationInput[];
+  /** Optional source message, for failure nudge tracking. */
+  sourceMessageId?: string;
+  /** Source type for nudge persistence. */
+  sourceType?: string;
+  /** Channel context. */
+  channelId?: string;
+  /** Project context. */
+  projectId?: string;
+}
+
+/** Failure record for partial batch failures. */
+export interface BulkTicketCreationFailure {
+  clientRowId: string;
+  title: string;
+  error?: string;
+}
+
+/** Backend → dashboard response for a successfully enqueued batch. */
+export interface CreateBulkTicketResponse {
+  parentTicketId?: string;
+  enqueuedSubTickets: number;
+  failedSubTickets?: number;
+  failedTitles?: string[];
+  failures?: BulkTicketCreationFailure[];
 }

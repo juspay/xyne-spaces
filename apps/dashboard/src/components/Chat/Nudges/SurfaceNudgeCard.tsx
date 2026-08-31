@@ -10,6 +10,7 @@ import { trackNudgeActed, trackNudgeDismissed } from '../../../services/otel/nud
 import { SurfaceNudgeResult } from './SurfaceNudgeResult';
 import { useChannel } from '../../../hooks/useChannels';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
+import { BulkCreateTicketsModal } from '../../Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import type { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
@@ -17,6 +18,8 @@ import { standaloneNavigate } from '../../../utils/electronApp';
 import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
+import { BulkTicketMode } from '@xyne/shared';
+import { parseBulkTicketFailureNudge } from './nudgeActions';
 
 const NUDGE_KIND_LABELS: Record<string, string> = {
   CREATE_TICKET_FROM_MESSAGE: 'Create Ticket',
@@ -134,8 +137,10 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   const isRelatedTicket = nudge.nudgeKind === NudgeKind.FIND_RELATED_TICKET_FROM_MESSAGE;
   const isRelatedMessage = nudge.nudgeKind === NudgeKind.FIND_RELATED_MESSAGE_FROM_MESSAGE;
   const isScheduleCall = nudge.nudgeKind === NudgeKind.SCHEDULE_CALL_FROM_THREAD;
+  const isBulkTicketFailure = nudge.nudgeKind === NudgeKind.BULK_TICKET_CREATION_FAILED;
 
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
+  const [isBulkRetryModalOpen, setIsBulkRetryModalOpen] = useState(false);
 
   // For CREATE_TICKET: build sourceConversation from actions payload (no extra query needed)
   const sourceConversation = useMemo((): ConversationWithTicket | undefined => {
@@ -187,6 +192,17 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   }, [isCreateTicket, actionsPayload]);
 
   const createTicketCount = useMemo(() => initialSubTickets.length, [initialSubTickets.length]);
+
+  const retryData = useMemo(
+    () => parseBulkTicketFailureNudge(nudge, channelId, channel?.projectId),
+    [nudge, channelId, channel],
+  );
+  const retryMode = retryData?.mode ?? BulkTicketMode.PARENT_SUB;
+  const retryParentTitle = retryData?.parentTitle ?? '';
+  const retryFailedInputs = retryData?.failedInputs ?? [];
+  const retryExistingParentTicket = retryData?.existingParentTicket;
+  const retryChannelId = retryData?.channelId;
+  const retryProjectId = retryData?.projectId;
 
   const priorityLabel = useMemo(() => {
     const normalized =
@@ -457,13 +473,30 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
         </div>
       )}
 
+      {/* Action buttons for BULK_TICKET_CREATION_FAILED */}
+      {isBulkTicketFailure && (
+        <div className='mt-3 flex items-center justify-end gap-3'>
+          {isActionable && (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={isActing || retryFailedInputs.length === 0}
+              onClick={() => setIsBulkRetryModalOpen(true)}
+              className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
+            >
+              Retry
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Action result */}
       {localActionResult && (
         <SurfaceNudgeResult actionResult={localActionResult} channelId={channelId} />
       )}
 
-      {/* Dismiss fallback - only for non-schedule call nudges */}
-      {!isScheduleCall && canDismiss && (
+      {/* Dismiss fallback - only for non-schedule call and non-bulk-failure nudges */}
+      {!isScheduleCall && !isBulkTicketFailure && canDismiss && (
         <div className='mt-3 flex items-center justify-end'>
           <Button
             size='sm'
@@ -563,6 +596,50 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
                 timestamp: Date.now(),
               }),
             );
+            onActionCompleted?.();
+          }}
+        />
+      )}
+
+      {/* Bulk ticket retry modal for BULK_TICKET_CREATION_FAILED */}
+      {isBulkTicketFailure && retryChannelId && retryProjectId && (
+        <BulkCreateTicketsModal
+          isOpen={isBulkRetryModalOpen}
+          onClose={() => setIsBulkRetryModalOpen(false)}
+          channelId={retryChannelId}
+          projectId={retryProjectId}
+          mode={retryMode}
+          parentTitle={
+            retryMode === BulkTicketMode.PARENT_SUB && !retryExistingParentTicket
+              ? retryParentTitle
+              : undefined
+          }
+          subTitleTitles={retryFailedInputs.map(f => f.title)}
+          subDescriptions={
+            retryMode === BulkTicketMode.ALL_PARENTS
+              ? retryFailedInputs.map(f => f.description)
+              : retryExistingParentTicket
+                ? ['', ...retryFailedInputs.map(f => f.description)]
+                : [retryParentTitle, ...retryFailedInputs.map(f => f.description)]
+          }
+          clientRowIds={retryFailedInputs.map(f => f.clientRowId ?? '')}
+          existingParentTicket={retryExistingParentTicket}
+          sourceMessageId={retryExistingParentTicket ? nudge.sourceId : undefined}
+          onTicketCreated={() => {
+            setIsBulkRetryModalOpen(false);
+            setIsActing(true);
+            trackNudgeActed(nudge.nudgeKind);
+            void zero.mutate(
+              mutators.nudges.act({
+                nudgeId: nudge.id,
+                actionResult: {
+                  actionType: 'RETRY_BULK_TICKET_CREATION',
+                  result: { retried: true },
+                },
+                timestamp: Date.now(),
+              }),
+            );
+            toast.success('Retry queued');
             onActionCompleted?.();
           }}
         />
