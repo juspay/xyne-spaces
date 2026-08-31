@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import {
   BulkTicketMode,
   type BulkTicketItemInput,
-  type CreateBulkTicketResponse,
+  type ExistingParentTicket,
 } from '@xyne/shared';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -18,8 +18,24 @@ interface BulkCreateTicketsModalProps {
   onClose: () => void;
   channelId: string;
   projectId: string;
-  boardId: string;
+  boardId?: string;
   boardName?: string | undefined;
+  mode?: BulkTicketMode;
+  parentTitle?: string;
+  subTitleTitles?: string[];
+  subDescriptions?: string[];
+  clientRowIds?: string[];
+  existingParentTicket?: ExistingParentTicket;
+  sourceMessageId?: string;
+  sourceConversationId?: string;
+  onTicketCreated?: () => void;
+}
+
+interface BulkTicketResponse {
+  parentTicketId?: string;
+  enqueuedSubTickets: number;
+  failedSubTickets?: number;
+  failedTitles?: string[];
 }
 
 const MAX_BULK_TICKETS = 100;
@@ -31,33 +47,58 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   projectId,
   boardId,
   boardName,
+  mode: initialMode,
+  parentTitle: initialParentTitle,
+  subTitleTitles: initialSubTitles,
+  subDescriptions: initialSubDescriptions,
+  clientRowIds: initialClientRowIds,
+  existingParentTicket,
+  sourceMessageId,
+  sourceConversationId,
+  onTicketCreated,
 }) => {
-  const [mode, setMode] = useState<BulkTicketMode>(BulkTicketMode.ALL_PARENTS);
-  const [parentTitle, setParentTitle] = useState('');
+  const [mode, setMode] = useState<BulkTicketMode>(
+    initialMode ?? (existingParentTicket ? BulkTicketMode.PARENT_SUB : BulkTicketMode.ALL_PARENTS),
+  );
+  const [parentTitle, setParentTitle] = useState(initialParentTitle ?? '');
   const [parentDescription, setParentDescription] = useState('');
-  const [ticketText, setTicketText] = useState('');
+  const [ticketText, setTicketText] = useState(
+    initialSubTitles?.join('\n') ?? '',
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<CreateBulkTicketResponse | null>(null);
+  const [result, setResult] = useState<BulkTicketResponse | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode ?? (existingParentTicket ? BulkTicketMode.PARENT_SUB : BulkTicketMode.ALL_PARENTS));
+      setParentTitle(initialParentTitle ?? '');
+      setTicketText(initialSubTitles?.join('\n') ?? '');
+      setResult(null);
+    }
+  }, [isOpen, initialMode, initialParentTitle, initialSubTitles, existingParentTicket]);
 
   const parsedItems = useMemo<BulkTicketItemInput[]>(() => {
     return ticketText
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0)
-      .map(title => ({
+      .map((title, index) => ({
         title,
         channelId,
         projectId,
-        boardId,
-        clientRowId: uuidv4(),
+        ...(boardId ? { boardId } : {}),
+        clientRowId: initialClientRowIds?.[index] ?? uuidv4(),
+        ...(initialSubDescriptions?.[index]
+          ? { description: initialSubDescriptions[index] }
+          : {}),
       }));
-  }, [ticketText, channelId, projectId, boardId]);
+  }, [ticketText, channelId, projectId, boardId, initialClientRowIds, initialSubDescriptions]);
 
   const canSubmit = useMemo(() => {
     if (parsedItems.length === 0 || parsedItems.length > MAX_BULK_TICKETS) return false;
-    if (mode === BulkTicketMode.PARENT_SUB && !parentTitle.trim()) return false;
+    if (mode === BulkTicketMode.PARENT_SUB && !existingParentTicket && !parentTitle.trim()) return false;
     return true;
-  }, [parsedItems, mode, parentTitle]);
+  }, [parsedItems, mode, parentTitle, existingParentTicket]);
 
   const handleClose = () => {
     if (isSubmitting) return;
@@ -76,33 +117,49 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
     setResult(null);
 
     try {
-      const payload: {
-        mode: BulkTicketMode;
-        subTickets: BulkTicketItemInput[];
-        parent?: BulkTicketItemInput;
-      } = {
+      const payload: Record<string, unknown> = {
         mode,
         subTickets: parsedItems,
+        channelId,
+        projectId,
+        ...(boardId ? { boardId } : {}),
+        ...(sourceConversationId ? { sourceConversationId } : {}),
+        ...(sourceMessageId ? { sourceMessageId } : {}),
       };
 
       if (mode === BulkTicketMode.PARENT_SUB) {
-        payload.parent = {
-          title: parentTitle.trim(),
-          description: parentDescription.trim(),
-          channelId,
-          projectId,
-          boardId,
-          clientRowId: uuidv4(),
-        };
+        if (existingParentTicket) {
+          payload.existingParentTicketId = existingParentTicket.id;
+        } else {
+          payload.parent = {
+            title: parentTitle.trim(),
+            description: parentDescription.trim(),
+            channelId,
+            projectId,
+            ...(boardId ? { boardId } : {}),
+            clientRowId: uuidv4(),
+          };
+        }
       }
 
-      const { data } = await apiInstance.post<CreateBulkTicketResponse>(
+      const { data } = await apiInstance.post<BulkTicketResponse>(
         '/tickets/bulk-from-message',
         payload,
       );
 
       setResult(data);
-      toast.success(`${data.queued} ticket${data.queued === 1 ? '' : 's'} queued for creation.`);
+
+      if (data.failedSubTickets && data.failedSubTickets > 0) {
+        toast.warning('Partial success', {
+          description: `${data.enqueuedSubTickets} queued, ${data.failedSubTickets} failed: ${data.failedTitles?.join(', ')}`,
+        });
+      } else {
+        toast.success(`${data.enqueuedSubTickets} ticket${data.enqueuedSubTickets === 1 ? '' : 's'} queued for creation.`);
+      }
+
+      if (onTicketCreated) {
+        onTicketCreated();
+      }
     } catch (error) {
       const message =
         (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
@@ -112,6 +169,8 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  const showParentSection = mode === BulkTicketMode.PARENT_SUB && !existingParentTicket;
 
   return (
     <Dialog
@@ -129,7 +188,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
             <div className='rounded-lg bg-green-50 dark:bg-green-950/30 p-4 text-green-900 dark:text-green-100'>
               <p className='font-medium'>Batch queued successfully</p>
               <p className='text-sm mt-1'>
-                {result.queued} ticket{result.queued === 1 ? '' : 's'} will be created in the
+                {result.enqueuedSubTickets} ticket{result.enqueuedSubTickets === 1 ? '' : 's'} will be created in the
                 background.
               </p>
               {result.parentTicketId && (
@@ -142,26 +201,38 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           </div>
         ) : (
           <>
-            <RadioGroup
-              label='Creation mode'
-              value={mode}
-              onChange={value => setMode(value as BulkTicketMode)}
-            >
-              <Radio
-                value={BulkTicketMode.ALL_PARENTS}
-                subtext='Every line becomes its own ticket.'
+            {!initialMode && !existingParentTicket && (
+              <RadioGroup
+                label='Creation mode'
+                value={mode}
+                onChange={value => setMode(value as BulkTicketMode)}
               >
-                Independent tickets
-              </Radio>
-              <Radio
-                value={BulkTicketMode.PARENT_SUB}
-                subtext='Every line becomes a sub-ticket of the parent below.'
-              >
-                Sub-tickets under a parent
-              </Radio>
-            </RadioGroup>
+                <Radio
+                  value={BulkTicketMode.ALL_PARENTS}
+                  subtext='Every line becomes its own ticket.'
+                >
+                  Independent tickets
+                </Radio>
+                <Radio
+                  value={BulkTicketMode.PARENT_SUB}
+                  subtext='Every line becomes a sub-ticket of the parent below.'
+                >
+                  Sub-tickets under a parent
+                </Radio>
+              </RadioGroup>
+            )}
 
-            {mode === BulkTicketMode.PARENT_SUB && (
+            {existingParentTicket && (
+              <div className='rounded-lg border p-4 bg-muted/40'>
+                <p className='text-sm font-medium'>Existing parent ticket</p>
+                <p className='text-sm text-muted-foreground mt-1'>
+                  Sub-tickets will be linked to ticket {existingParentTicket.id}
+                  {existingParentTicket.xyneId ? ` (${existingParentTicket.xyneId})` : ''}
+                </p>
+              </div>
+            )}
+
+            {showParentSection && (
               <div className='space-y-3 rounded-lg border p-4 bg-muted/40'>
                 <p className='text-sm font-medium'>Parent ticket</p>
                 <Input
@@ -180,7 +251,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
 
             <div className='space-y-2'>
               <label className='text-sm font-medium' htmlFor='bulk-ticket-text'>
-                Tickets
+                {mode === BulkTicketMode.PARENT_SUB ? 'Sub-tickets' : 'Tickets'}
               </label>
               <Textarea
                 id='bulk-ticket-text'
