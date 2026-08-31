@@ -77,6 +77,7 @@ import {
   registerRunRecovery,
   touchRunRecovery,
   handleRunCompletion,
+  classifyRunRecoveryCallback,
   handleRunHandoff,
   hasActiveRunRecovery,
   getRecoveryContextForSession,
@@ -5112,13 +5113,50 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
-  // Finalize the AgentRun record (fire-and-forget)
+  const recoveryCallbackDisposition = await classifyRunRecoveryCallback(sessionId).catch((err) => {
+    clog.warn(`[webhook/result] Failed to classify recovery callback session=${sessionId}:`, errMsg(err));
+    return "untracked" as const;
+  });
+  if (recoveryCallbackDisposition === "stale") {
+    clog.info(`[webhook/result] Ignoring callback from superseded or settled session=${sessionId}`);
+    return;
+  }
+
+  // A resumed attempt can finish without a deliverable response after its pod
+  // is interrupted again. Defer settlement until the empty-result branch asks
+  // recovery whether another bounded attempt will run; otherwise the generic
+  // apology can be posted before the resumed answer.
+  const emptyCompletedResult =
+    payload.status === "completed" &&
+    !resultWithCitations.trim() &&
+    !payload.attachments?.length &&
+    !payload.pendingResponses?.length &&
+    !payload.pendingGoalSuggestion &&
+    !payload.twinDelivery &&
+    !payload.pendingPlan &&
+    !payload.pendingAgentCard &&
+    !payload.pendingConnectorSuggestions;
+  // Do not replay every ordinary tool-only empty completion: a retry could
+  // duplicate writes. This recovery path is only for an active continuation
+  // created after a watchdog retry or graceful handoff.
+  const deferCompletedRecoveryForEmptyResult =
+    emptyCompletedResult && recoveryCallbackDisposition === "active_continuation";
+
+  // Finalize the physical AgentRun record (fire-and-forget). An empty attempt
+  // that recovery may retry is failed, not completed: marking it completed with
+  // result="" makes anyAttemptDelivered() suppress the eventual terminal notice.
   if (sessionId) {
-    const status = payload.status === "completed" ? "completed" : "failed";
+    const status = payload.status === "completed" && !deferCompletedRecoveryForEmptyResult
+      ? "completed"
+      : "failed";
     agentRunRepository.finalize(sessionId, {
       status,
-      result: payload.result !== undefined ? resultWithCitations : null,
-      error: payload.error ?? null,
+      result: deferCompletedRecoveryForEmptyResult
+        ? null
+        : payload.result !== undefined
+          ? resultWithCitations
+          : null,
+      error: deferCompletedRecoveryForEmptyResult ? "empty_result" : payload.error ?? null,
       ...(payload.provider !== undefined ? { provider: payload.provider } : {}),
       ...(payload.model !== undefined ? { model: payload.model } : {}),
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
@@ -5130,12 +5168,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }).catch(() => {});
   }
 
-  if (payload.status === "completed") {
+  if (payload.status === "completed" && !deferCompletedRecoveryForEmptyResult) {
     const recoveryCompletion = await handleRunCompletion(sessionId, "completed").catch((err) => {
       clog.warn(`[webhook/result] Failed to mark ${sessionId} completed in run recovery:`, err instanceof Error ? err.message : err);
       return null;
     });
     externalCallbackSessionId = recoveryCompletion?.rootSessionId ?? sessionId;
+    if (recoveryCompletion?.stale) {
+      clog.info(`[webhook/result] Ignoring stale completed callback session=${sessionId} root=${externalCallbackSessionId}`);
+      return;
+    }
     if (ctx?.conversationId && ctx.agentSlug) {
       experimentContinues = await continueExperimentAfterResult(ctx, sessionId).catch((err) => {
         clog.warn(`[experiment] continuation hook failed session=${sessionId}:`, errMsg(err));
@@ -5224,6 +5266,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     });
 
     externalCallbackSessionId = recoveryFailure?.rootSessionId ?? sessionId;
+
+    if (recoveryFailure?.stale) {
+      clog.info(`[webhook/result] Ignoring stale failed callback session=${sessionId} root=${externalCallbackSessionId}`);
+      return;
+    }
 
     if (recoveryFailure?.retried) {
       clog.info(`[webhook/result] Session ${sessionId}: retry queued (${recoveryFailure.retriesUsed}/${recoveryFailure.maxRetries})`);
@@ -6532,6 +6579,30 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !payload.pendingResponses?.length &&
     !postedAgentProfileCard
   ) {
+    if (deferCompletedRecoveryForEmptyResult) {
+      const recoveryEmptyResult = await handleRunCompletion(sessionId, "failed", "empty_result").catch((err) => {
+        log.warn(`[webhook/result] Failed to process empty result for ${sessionId} in run recovery`, {
+          error: errMsg(err),
+        });
+        return null;
+      });
+      externalCallbackSessionId = recoveryEmptyResult?.rootSessionId ?? sessionId;
+      if (recoveryEmptyResult?.stale || recoveryEmptyResult?.retried) {
+        log.info(
+          `[webhook/result] Empty result suppressed while recovery continues session=${sessionId} root=${externalCallbackSessionId}`
+        );
+        return;
+      }
+      if (recoveryEmptyResult?.exhausted || recoveryEmptyResult?.terminalDrop) {
+        // Recovery owns the one terminal notice. Do not add the generic empty
+        // result apology underneath the exhaustion/non-retryable failure card.
+        log.info(
+          `[webhook/result] Empty result notice suppressed after terminal recovery outcome session=${sessionId} root=${externalCallbackSessionId}`
+        );
+        return;
+      }
+    }
+
     if (ctx.responseMode === "approval") {
       log.warn("Empty result in approval mode — skipping (no thread message)");
       await deleteSession(sessionId);
