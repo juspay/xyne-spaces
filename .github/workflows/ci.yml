@@ -271,3 +271,26 @@ jobs:
       # step above — no second scan.
       - name: Trivy gate (CRITICAL)
         run: trivy convert --severity CRITICAL --exit-code 1 security-reports/trivy-fs.json
+
+  # ---------------------------------------------------------------------------
+  # Dependency audit (pnpm). Uses npm's advisory DB — the ecosystem the SCR
+  # dependency finding was raised against — and gates at moderate+, stricter than
+  # the Trivy CRITICAL gate above. Advisories with no upstream fix are recorded in
+  # pnpm.auditConfig.ignoreGhsas in the root package.json (with the reason in that
+  # PR); this job stays green today and fails when a NEW advisory appears, so
+  # dependencies cannot silently regress between pentests.
+  # ---------------------------------------------------------------------------
+  dependency-audit:
+    name: Dependency audit (pnpm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: pnpm audit (moderate+, honouring ignoreGhsas)
+        run: pnpm audit --audit-level moderate

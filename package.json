@@ -239,6 +239,11 @@
       "deepmerge-ts": "8.0.0",
       "defu": "6.1.7",
       "diff@8": "8.0.3",
+      "diff@>=6.0.0 <8.0.3": "8.0.3",
+      "esbuild@<0.25.0": "0.25.12",
+      "vite@<6.4.3": "6.4.3",
+      "vitest@<3.2.6": "3.2.6",
+      "@earendil-works/pi-coding-agent": "0.80.7",
       "dompurify@3": "3.4.13",
       "effect": "3.22.0",
       "engine.io@6": "6.6.9",
@@ -315,6 +320,19 @@
       "ws@7": "7.5.13",
       "ws@8": "8.21.1",
       "xlsx": "npm:@e965/xlsx@0.20.3"
+    },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-p8p7-x288-28g6",
+        "GHSA-w5hq-g745-h8pq",
+        "GHSA-866g-f22w-33x8",
+        "GHSA-jfgx-wxx8-mp94",
+        "GHSA-r95r-rj6r-c39x",
+        "GHSA-7v5m-pr3q-6453",
+        "GHSA-w3rx-r6r6-pgpr",
+        "GHSA-5p2g-fcmc-qvqq",
+        "GHSA-jmr9-qjv8-65gv"
+      ]
     }
   }
 }
