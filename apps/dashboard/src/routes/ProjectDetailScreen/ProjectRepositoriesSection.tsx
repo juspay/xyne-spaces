@@ -1,5 +1,12 @@
 import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, ExternalLink, GitBranch, Lock, RefreshCw } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckTickCircle as CheckCircle2,
+  ExternalLink,
+  GitBranch,
+  LockClose as Lock,
+  Refresh as RefreshCw,
+} from '@xyne/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';

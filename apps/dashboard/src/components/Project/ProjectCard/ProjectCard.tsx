@@ -1,7 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
-import { Copy, Check } from 'lucide-react';
+import { CopyDefault as Copy, CheckTickSingle as Check } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
 import type { Project } from '@xyne/shared';
