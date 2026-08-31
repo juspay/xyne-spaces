@@ -279,6 +279,7 @@ export class YqlBuilder {
           rankTerms.add(`userId contains ${me()}`);
           rankTerms.add(`mentions contains ${me()}`);
           rankTerms.add(`threadSenders contains ${me()}`);
+          rankTerms.add(`threadMentions contains ${me()}`);
         }
         if (schemas.includes(ticketSchema)) {
           rankTerms.add(`createdBy contains ${me()}`);
