@@ -49,8 +49,8 @@ overrides:
   fast-xml-builder: 1.3.0
   fast-xml-parser@4: 4.5.7
   fast-xml-parser@5: 5.10.1
-  fastify@4: 5.8.3
-  fastify@5: 5.10.0
+  fastify@4: 5.8.5
+  fastify@5: 5.12.1
   find-my-way: 9.7.0
   flatted: 3.4.2
   form-data@2: 2.5.6
@@ -12946,11 +12946,11 @@ packages:
   fastify-plugin@6.0.0:
     resolution: {integrity: sha512-fZOty7z3O7vOliF6d8bHE3wiEh1KcNnKEQensSgTk9C1DvN6nRLS++XVd86v33Hw/8u9Un8A1zDrQ8ujcQDHEg==}
 
-  fastify@5.10.0:
-    resolution: {integrity: sha512-A9L0ziuWGQHgEEVgF3davQ9vbD93IuX+lo2IsxapQmu5b/Y/ynn9m9K5JHt9dvyJXOFc5iN0Zk5GHEOqnzhWjg==}
+  fastify@5.12.1:
+    resolution: {integrity: sha512-FWi+tQvwxR/PeRX7Z2mhfEF5ozJ3jn9asiiclzKXNSzJRHAYcU924aIOKAdHFJ+YIKieh3cqr1IwCOvTr41B3Q==}
 
-  fastify@5.8.3:
-    resolution: {integrity: sha512-XJXpRQ41+rsJ/GLeP9vyDC+fBXilcTlEXokMSexkdEkla4uf7ZQNaI5xl3el+kW5TZQulqYxLr659ey/KX7XmQ==}
+  fastify@5.8.5:
+    resolution: {integrity: sha512-Yqptv59pQzPgQUSIm87hMqHJmdkb1+GPxdE6vW6FRyVE9G86mt7rOghitiU4JHRaTyDUk9pfeKmDeu70lAwM4Q==}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -17122,6 +17122,9 @@ packages:
 
   process-warning@5.0.0:
     resolution: {integrity: sha512-a39t9ApHNx2L4+HBnQKqxxHNs1r7KF+Intd8Q/g1bUh6q0WIp9voPXJ/x0j+ZL45KF1pJd9+q2jLIRMfvEshkA==}
+
+  process-warning@5.1.0:
+    resolution: {integrity: sha512-jQSaVHsPgtyw60e1rQ/A+/ArPEj/S8pS/vFnyGa/gYFXrKk/6RuDkoqVDQ5NI5MmS01698ltlAk0NoDBNLujRw==}
 
   process@0.11.10:
     resolution: {integrity: sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A==}
@@ -23174,7 +23177,7 @@ snapshots:
       cfb: 1.2.2
       eventsource: 2.0.2
       express: 4.22.2
-      fastify: 5.8.3
+      fastify: 5.8.5
       mammoth: 1.12.0
       mathjs: 15.2.0
       openai: 4.104.0(ws@8.21.1)(zod@3.25.76)
@@ -23321,7 +23324,7 @@ snapshots:
       exceljs: 4.4.0
       express: 5.2.1
       express-rate-limit: 8.5.2(express@5.2.1)
-      fastify: 5.10.0
+      fastify: 5.12.1
       ffmpeg-static: 5.3.0
       fluent-ffmpeg: 2.1.3
       koa: 3.2.1
@@ -27492,7 +27495,7 @@ snapshots:
       compare-utf8: 0.2.0
       defu: 6.1.7
       eventemitter3: 5.0.4
-      fastify: 5.10.0
+      fastify: 5.12.1
       is-in-subnet: 4.0.1
       jose: 5.10.0
       js-xxhash: 4.0.0
@@ -33447,7 +33450,7 @@ snapshots:
 
   fastify-plugin@6.0.0: {}
 
-  fastify@5.10.0:
+  fastify@5.12.1:
     dependencies:
       '@fastify/ajv-compiler': 4.0.5
       '@fastify/error': 4.2.0
@@ -33459,13 +33462,13 @@ snapshots:
       find-my-way: 9.7.0
       light-my-request: 6.6.0
       pino: 10.3.1
-      process-warning: 5.0.0
+      process-warning: 5.1.0
       rfdc: 1.4.1
       secure-json-parse: 4.1.0
       semver: 7.8.5
       toad-cache: 3.7.4
 
-  fastify@5.8.3:
+  fastify@5.8.5:
     dependencies:
       '@fastify/ajv-compiler': 4.0.5
       '@fastify/error': 4.2.0
@@ -38612,6 +38615,8 @@ snapshots:
   process-warning@4.0.1: {}
 
   process-warning@5.0.0: {}
+
+  process-warning@5.1.0: {}
 
   process@0.11.10: {}
 
