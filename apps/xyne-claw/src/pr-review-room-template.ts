@@ -30,7 +30,7 @@ a{color:var(--acc)}
 .pill b{color:var(--fg);font-weight:600}
 
 .bar{display:flex;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line);margin-top:16px}
-.bar div{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+.bar div{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;padding:0 8px}
 .bar .new{background:#1d2b1f;color:#7ee787}
 .bar .int{background:#3a1d1d;color:#ff9c9c}
 
@@ -237,6 +237,20 @@ export function renderReviewRoom(params: {
 
   const newPct = evidence.newFileLines || 1;
   const intPct = evidence.editedFileLines || 1;
+  const barSegments = [
+    evidence.newFileLines > 0
+      ? `<div class="new" style="flex:${newPct}">${evidence.newFileLines} lines · new files · low review risk</div>`
+      : "",
+    evidence.editedFileLines > 0
+      ? `<div class="int" style="flex:${intPct}">${evidence.editedFileLines} lines · integration · the risk</div>`
+      : "",
+  ].join("\n ");
+  const splitTagline =
+    evidence.newFileLines > 0 && evidence.editedFileLines > 0
+      ? `The ${evidence.newFileLines} new-file lines are not the job. <b>${evidence.editedFileLines} lines across ${evidence.editedFileCount} existing files</b> are.`
+      : evidence.editedFileLines > 0
+        ? `Every line touches existing code: <b>${evidence.editedFileLines} lines across ${evidence.editedFileCount} existing files</b>. No new files to skim past.`
+        : `All ${evidence.newFileLines} lines are new, self-contained files. The review is the integration points, and this change has none.`;
 
   const newFileList = evidence.newFiles
     .map((f) => `<code>${escHtml(f.path)}</code> +${f.insertions}<br>`)
@@ -281,10 +295,9 @@ export function renderReviewRoom(params: {
  <span class="pill">head <code>${escHtml(evidence.headSha.slice(0, 10))}</code></span>
 </div>
 <div class="bar">
- <div class="new" style="flex:${newPct}">${evidence.newFileLines} lines · new files · low review risk</div>
- <div class="int" style="flex:${intPct}">${evidence.editedFileLines} lines · integration · the risk</div>
+ ${barSegments}
 </div>
-<p class="sub" style="margin-top:12px">The ${evidence.newFileLines} lines are not the job. <b>${evidence.editedFileLines} lines across ${evidence.editedFileCount} existing files</b> are.</p>
+<p class="sub" style="margin-top:12px">${splitTagline}</p>
 
 <h2>Risk-ranked findings</h2>
 <div class="filter">
