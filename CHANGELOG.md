@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.9](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.8...v1.239.0-release-20260827.9) (2026-08-31)
+
+
+### Bug Fixes
+
+* one app per conversation, not one per generation ([#1277](https://github.com/juspay/xyne-spaces/issues/1277)) ([962cb5d](https://github.com/juspay/xyne-spaces/commit/962cb5d66dd73eba8e800f092e82c15500f1ce71)), closes [#1245](https://github.com/juspay/xyne-spaces/issues/1245)
+
 ## [1.239.0-release-20260827.8](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.7...v1.239.0-release-20260827.8) (2026-08-31)
 
 
