@@ -26,6 +26,19 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "agent-workspace-gvisor-template-b",
     "agent-workspace-gvisor-template-c",
     "agent-workspace-gvisor-template-d",
+    // e/f added 2026-08-30: 4-way was no longer enough. Measured 32 claims in
+    // one hour (18 of them agent-workspace, spread 5/5/4/4 across a-d), and
+    // EVERY variant throttled simultaneously — so the rotation was working and
+    // simply out of headroom, unlike the earlier storms which were config
+    // faults (one snapshot, or a rotation nothing routed to).
+    //
+    // NOTE this is headroom, not a fix. The thing that turns a brief throttle
+    // into a sustained one is that a failed clone retries every 12-30s with no
+    // backoff: 15 stuck claims generated more clone attempts than the live
+    // traffic did. Adding variants divides the per-snapshot rate; it does not
+    // stop a retry loop from re-saturating whatever it is given.
+    "agent-workspace-gvisor-template-e",
+    "agent-workspace-gvisor-template-f",
   ],
   // euler: 2-way (not 4). It storms the most of any pool — 5 times between
   // 2026-08-11 and 2026-08-18, every one a RESOURCE_OPERATION_RATE_EXCEEDED on
@@ -94,6 +107,24 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
   //   BASE_TEMPLATE=hyperswitch-workspace-template BASE_WARMPOOL=hyperswitch-warmpool \
   //   GOLDEN_PVC=hyperswitch-golden-pvc SNAP_PREFIX=hyperswitch-golden-snap-rot \
   //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  // xyne-cli: 2-way. NOT over-provisioning -- the warmpool is replicas:1. On
+  // 2026-08-31 SEVEN concurrent LIVE sessions (pods carrying claim-uid) each
+  // CoW-cloned the single xyne-cli-golden-snap-v7, blew the per-source ceiling
+  // with RESOURCE_OPERATION_RATE_EXCEEDED, and the 12-30s clone retries then
+  // held it there: 6 of 8 pods stuck Pending with unbound PVCs, which reads as
+  // "no node capacity" but is purely the snapshot op-rate.
+  //
+  // Clones are 20Gi -- the SMALLEST golden in the cluster -- so a/b is the
+  // cheapest rotation set we run. Add c/d if concurrent CLI usage keeps growing.
+  //
+  // Infra side is created by:
+  //   BASE_TEMPLATE=xyne-cli-workspace-template BASE_WARMPOOL=xyne-cli-warmpool \
+  //   GOLDEN_PVC=xyne-cli-golden-pvc SNAP_PREFIX=xyne-cli-golden-snap-rot \
+  //   VARIANTS="a b" bash claw-deployments/kata-infra/xyne-spaces/rotation-setup.sh
+  "xyne-cli-workspace-template": [
+    "xyne-cli-workspace-template-a",
+    "xyne-cli-workspace-template-b",
+  ],
   "hyperswitch-workspace-template": [
     "hyperswitch-workspace-template-a",
     "hyperswitch-workspace-template-b",
