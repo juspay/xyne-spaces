@@ -1,12 +1,5 @@
 import { repositories } from '@/database/repositories';
-import {
-  AssignmentStrategy,
-  NEVER_ASSIGNED_RANK,
-  UserResponsibility,
-  comparatorFor,
-  parseAssignmentStrategy,
-  type RankableAssignee,
-} from '@xyne/shared';
+import { AssignmentStrategy, UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { logger } from './logger';
@@ -159,31 +152,18 @@ interface RankingStrategy {
   rank(candidates: AssignmentCandidate[]): void;
   /** Record that these users were assigned. Best-effort — never throws. */
   commit(pickedUserIds: Array<string | undefined>): Promise<void>;
-  /** Why this candidate won, appended to the selection log line. */
-  explain(candidate: AssignmentCandidate): string;
 }
 
-const toRankable = (
-  candidate: AssignmentCandidate,
-  lastAssignedAt: number | null,
-): RankableAssignee => ({
-  userId: candidate.userId,
-  score: candidate.score,
-  weightedActiveTasks: candidate.details?.weightedActiveTasks ?? 0,
-  lastAssignedAt,
-});
-
-const compareByWorkload = comparatorFor(AssignmentStrategy.WORKLOAD);
+/** Never-picked members sort ahead of everyone holding a real timestamp. */
+const NEVER_ASSIGNED = -1;
 
 const WORKLOAD_STRATEGY: RankingStrategy = {
   name: AssignmentStrategy.WORKLOAD,
   rank(candidates) {
-    // The cursor is irrelevant here, so every candidate presents a null one.
-    candidates.sort((a, b) => compareByWorkload(toRankable(a, null), toRankable(b, null)));
+    candidates.sort((a, b) => a.score - b.score);
   },
   // Stateless: the next evaluation re-derives the ranking from live workload.
   async commit() {},
-  explain: candidate => ` with score: ${candidate.score.toFixed(2)}`,
 };
 
 /**
@@ -199,17 +179,24 @@ const WORKLOAD_STRATEGY: RankingStrategy = {
  * site to opt in — so it is not done here.
  */
 function createRoundRobinStrategy(userStates: UserAssignmentState[]): RankingStrategy {
-  const cursorByUserId = new Map<string, number | null>(
-    userStates.map(s => [s.userId, s.lastAssignedAt ? new Date(s.lastAssignedAt).getTime() : null]),
+  const cursorByUserId = new Map<string, number>(
+    userStates.flatMap(s =>
+      s.lastAssignedAt ? [[s.userId, new Date(s.lastAssignedAt).getTime()] as const] : [],
+    ),
   );
-  const cursorOf = (userId: string) => cursorByUserId.get(userId) ?? null;
-  const compare = comparatorFor(AssignmentStrategy.ROUND_ROBIN);
+  const cursorOf = (userId: string) => cursorByUserId.get(userId) ?? NEVER_ASSIGNED;
 
   return {
     name: AssignmentStrategy.ROUND_ROBIN,
     rank(candidates) {
-      candidates.sort((a, b) =>
-        compare(toRankable(a, cursorOf(a.userId)), toRankable(b, cursorOf(b.userId))),
+      // Cursor ties are the common case — everyone never picked, or a batch
+      // sharing a timestamp — so they break on lighter load before a stable id
+      // order. Mirrored by the dashboard preview (AssignmentConfigScreen.utils).
+      candidates.sort(
+        (a, b) =>
+          cursorOf(a.userId) - cursorOf(b.userId) ||
+          (a.details?.weightedActiveTasks ?? 0) - (b.details?.weightedActiveTasks ?? 0) ||
+          a.userId.localeCompare(b.userId),
       );
     },
     async commit(pickedUserIds) {
@@ -237,22 +224,11 @@ function createRoundRobinStrategy(userStates: UserAssignmentState[]): RankingStr
         }),
       );
     },
-    explain: candidate =>
-      ` (lastAssignedAt rank: ${cursorOf(candidate.userId) ?? NEVER_ASSIGNED_RANK})`,
   };
 }
 
-/** Exhaustive: a new AssignmentStrategy fails to compile until built here. */
-const STRATEGY_BUILDERS: Record<
-  AssignmentStrategy,
-  (userStates: UserAssignmentState[]) => RankingStrategy
-> = {
-  [AssignmentStrategy.WORKLOAD]: () => WORKLOAD_STRATEGY,
-  [AssignmentStrategy.ROUND_ROBIN]: createRoundRobinStrategy,
-};
-
 // Strip control characters (incl. CR/LF) so user-derived text can't forge log
-// lines. Same shape as the sanitizer in git-providers/github/apis.ts.
+// lines. Same shape as the sanitizer in src/git-providers/github/apis.ts.
 const sanitizeForLog = (value: string | null | undefined): string =>
   String(value).replace(/\p{Cc}+/gu, ' ').slice(0, 200);
 
@@ -262,7 +238,9 @@ function createRankingStrategy(
   group: { assignmentStrategy?: string | null } | null | undefined,
   userStates: UserAssignmentState[],
 ): RankingStrategy {
-  const strategy = parseAssignmentStrategy(group?.assignmentStrategy);
+  const raw = group?.assignmentStrategy;
+  const strategy =
+    raw === AssignmentStrategy.WORKLOAD || raw === AssignmentStrategy.ROUND_ROBIN ? raw : null;
   if (strategy === null) {
     // Silent-by-design failure: a group set to ROUND_ROBIN would quietly assign
     // by workload — so say so in the log.
@@ -273,7 +251,9 @@ function createRankingStrategy(
         : `[Assignment] User group ${safeGroupId} not readable in this context; falling back to ${AssignmentStrategy.WORKLOAD}`,
     );
   }
-  return STRATEGY_BUILDERS[strategy ?? AssignmentStrategy.WORKLOAD](userStates);
+  return strategy === AssignmentStrategy.ROUND_ROBIN
+    ? createRoundRobinStrategy(userStates)
+    : WORKLOAD_STRATEGY;
 }
 
 async function filterMappingsToChannelParticipants(
@@ -667,7 +647,7 @@ export async function evaluateAssignmentRule(
         },
       });
     }
-
+    
     strategy.rank(fallbackCandidates);
 
     // Pick first fallback candidate who hasn't exceeded maxTickets
@@ -715,10 +695,7 @@ export async function evaluateAssignmentRule(
     }
   }
 
-  logger.info(
-    `[Assignment] Selected userId: ${selectedUser.userId} via ${strategy.name}` +
-      strategy.explain(selectedUser),
-  );
+  logger.info(`[Assignment] Selected userId: ${selectedUser.userId} via ${strategy.name} with score: ${selectedUser.score.toFixed(2)}`);
 
   await strategy.commit([selectedUser.userId]);
 

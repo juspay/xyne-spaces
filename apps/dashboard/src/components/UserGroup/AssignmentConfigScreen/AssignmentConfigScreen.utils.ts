@@ -3,8 +3,8 @@
 // already-synced Zero data — no backend call:
 //   effectiveActiveTasks = weightedActiveTasks + (startOffset ?? 0)
 //   score = effectiveActiveTasks − expertiseBonus − (percentage − currentPct)
-// Rows are then ordered by the same `comparatorFor(strategy)` the engine ranks
-// with, so this preview cannot drift from what the engine will pick.
+// Rows are then ordered the way the group's assignment method ranks them, so the
+// first row is the one the engine would pick next.
 //
 // startOffset is the cold-start fairness offset (see cold-start-fairness-design.md):
 // a one-time, persisted value on user_group_mappings that keeps a brand-new member's
@@ -12,7 +12,10 @@
 // It's a single aggregate per (user, group) — not per board — so it's added
 // unconditionally regardless of which board is selected.
 
-import { AssignmentStrategy, comparatorFor } from '@xyne/shared';
+import { AssignmentStrategy } from '@xyne/shared';
+
+/** Never-picked members sort ahead of everyone holding a real timestamp. */
+const NEVER_ASSIGNED = -1;
 
 export interface AssignmentStateLike {
   userId: string;
@@ -171,7 +174,6 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   const lastAssignedByUser = new Map(
     (assignmentStates ?? []).map(s => [s.userId, s.lastAssignedAt] as const),
   );
-  const compare = comparatorFor(strategy);
 
   const rows = users
     .map(user => {
@@ -213,13 +215,15 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         lastAssignedAt,
       };
     })
-    // `score` is null until a board is selected, so effective load stands in —
-    // exactly what the engine scores on once the board-specific terms are zero.
+    // Mirrors the engine's ranking (assignmentEngine.ts). Round-robin cursor ties
+    // are the common case — everyone never picked, or a batch sharing a timestamp
+    // — so they break on lighter load before falling back to a stable id order.
     .sort((a, b) =>
-      compare(
-        { ...a, userId: a.user.id, score: a.score ?? a.effectiveActiveTasks },
-        { ...b, userId: b.user.id, score: b.score ?? b.effectiveActiveTasks },
-      ),
+      strategy === AssignmentStrategy.ROUND_ROBIN
+        ? (a.lastAssignedAt ?? NEVER_ASSIGNED) - (b.lastAssignedAt ?? NEVER_ASSIGNED) ||
+          a.weightedActiveTasks - b.weightedActiveTasks ||
+          a.user.id.localeCompare(b.user.id)
+        : (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks),
     );
 
   const realScores = rows.map(r => r.score).filter((s): s is number => s !== null);
