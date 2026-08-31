@@ -19,7 +19,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import type { AppPrismaClient } from "../db.js";
-import { parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
+import { isAgentInvocableBy, parseToolsConfig, stripPlatformConfigKeys } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs, type ProviderConfig } from "./agent-provider-config.js";
 import { resolveCustomSubagentsForRun, type CustomSubagentSpec } from "./subagent-resolver.js";
 import { createLogger } from "../logger.js";
@@ -209,6 +209,10 @@ export async function resolveCallableAgentsForRun(
       log.info(`[a2a] callee ${callee.slug} not visible to user ${opts.runningUserId ?? "anonymous"} — dropped`);
       continue;
     }
+    if (!isAgentInvocableBy(callee.config as Record<string, unknown> | null, opts.runningUserId)) {
+      log.info(`[a2a] callee ${callee.slug} restricted for user ${opts.runningUserId ?? "anonymous"} — dropped`);
+      continue;
+    }
     specs.push(await hydrateCallableAgentSpec(prisma, callee, g.identityMode === "callee_app" ? "callee_app" : "user"));
   }
 
@@ -244,7 +248,7 @@ export async function resolveOrchestratorCallableAgentsForRun(
       NOT: { id: callerAgentId },
       ...visibilityBase,
     },
-    select: { id: true, slug: true, name: true, description: true },
+    select: { id: true, slug: true, name: true, description: true, config: true },
     orderBy: { name: "asc" },
   });
 
@@ -264,16 +268,24 @@ export async function resolveOrchestratorCallableAgentsForRun(
           NOT: { id: callerAgentId },
           ...visibilityBase,
         },
-        select: { id: true, slug: true, name: true, description: true },
+        select: { id: true, slug: true, name: true, description: true, config: true },
         orderBy: { name: "asc" },
       })
     : [];
 
   const bySlug = new Map<string, CallableAgentLightSpec>();
   for (const callee of globalCallees) {
+    if (!isAgentInvocableBy(callee.config as Record<string, unknown> | null, opts.runningUserId)) {
+      log.info(`[a2a] orchestrator callee ${callee.slug} restricted for user ${opts.runningUserId ?? "anonymous"} — dropped`);
+      continue;
+    }
     bySlug.set(callee.slug, toLightweightCallableAgentSpec(callee, "user"));
   }
   for (const callee of grantedCallees) {
+    if (!isAgentInvocableBy(callee.config as Record<string, unknown> | null, opts.runningUserId)) {
+      log.info(`[a2a] orchestrator callee ${callee.slug} restricted for user ${opts.runningUserId ?? "anonymous"} — dropped`);
+      continue;
+    }
     const mode = grantByCalleeId.get(callee.id) === "callee_app" ? "callee_app" : "user";
     bySlug.set(callee.slug, toLightweightCallableAgentSpec(callee, mode));
   }
@@ -315,6 +327,9 @@ export async function resolveCallableAgentSpecForOrchestratorCall(
     select: { id: true },
   });
   if (!visible) return { error: "Callee is not visible to the running user", status: 403 };
+  if (!isAgentInvocableBy(callee.config as Record<string, unknown> | null, args.userId)) {
+    return { error: "Callee is restricted for the running user", status: 403 };
+  }
 
   if (callee.scope === "global") {
     return { spec: await hydrateCallableAgentSpec(prisma, callee, "user"), callerOrgId: caller.orgId };
