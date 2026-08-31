@@ -2,6 +2,8 @@
 ALTER TABLE "public"."sdlc_artifacts" ALTER COLUMN "repoId" DROP NOT NULL;
 
 -- AlterTable
+-- Left nullable for the rows written before multi-repo; the backfill stamps them.
+-- Prisma models it as required so no new write can omit the edge's scope.
 ALTER TABLE "public"."sdlc_entity_links" ADD COLUMN     "channelId" TEXT,
 ALTER COLUMN "repoId" DROP NOT NULL;
 
