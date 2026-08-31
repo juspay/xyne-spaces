@@ -9,6 +9,8 @@ import {
   type ComponentType,
 } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { Radar as RadarIcon } from 'lucide-react';
+import { useRadarEnabled } from '../../../hooks/radarCacConfig';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById } from '../../../shortcuts';
@@ -224,6 +226,10 @@ const ChatDirectory = ({
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
+  // Radar rollout is runtime CAC (radar_config), not a build-time flag:
+  // enabling it must not need a dashboard rebuild, and the pilot runs on an
+  // allowedEmails subset first.
+  const radarEnabled = useRadarEnabled(auth.user?.email);
   const { selfDmChannelId, landingChannelId } = auth;
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
@@ -819,6 +825,26 @@ const ChatDirectory = ({
                 </span>
               )}
             </button>
+            {radarEnabled && (
+              <button
+                className={cn(
+                  'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                  location.pathname.includes('/chat/dir/radar')
+                    ? 'text-sidebar-accent-foreground font-semibold bg-sidebar-accent'
+                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+                )}
+                onClick={() => {
+                  void navigate('/chat/dir/radar');
+                }}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_RADAR'
+              >
+                <span className='size-4 flex items-center justify-center shrink-0'>
+                  <RadarIcon className='size-4' />
+                </span>
+                <span className='flex-1 min-w-0 text-left truncate block'>Radar</span>
+              </button>
+            )}
           </div>
 
           <div className='py-3 w-full hidden md:block' />
@@ -1363,6 +1389,8 @@ const ChatDirectory = ({
           <div className='flex items-center justify-between gap-2'>
             <button
               onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT'
               className='h-8 px-4 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30 '
             >
               Chat
@@ -1370,6 +1398,8 @@ const ChatDirectory = ({
             <div className='z-30'>
               <button
                 onClick={() => setIsCommandMenuOpen(true)}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_COMMAND_MENU'
                 className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
               >
                 <SearchDefault size={16} />
@@ -1381,11 +1411,15 @@ const ChatDirectory = ({
         {/* Desktop */}
         {/* <div className=' sticky top-0 z-50 hidden min-[500px]:block pt-4 bg-sidebar-background'>
           <div className='pb-6 flex items-center justify-between'>
-            <button onClick={() => void navigate('/chat')} className='cursor-pointer'>
+            <button onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT' className='cursor-pointer'>
               <h2 className='text-black font-inter text-base font-semibold leading-normal'>Chat</h2>
             </button>
             <button
               onClick={() => setIsCommandMenuOpen(true)}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_COMMAND_MENU'
               className='size-8 items-center justify-center hidden min-[500px]:flex cursor-pointer'
             >
               <SearchDefault size={16} />
@@ -1419,6 +1453,9 @@ const ChatDirectory = ({
             onClick={() => {
               void navigate('/chat/bookmarks');
             }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_BOOKMARKS'
+            data-track-metadata={JSON.stringify({ overdueRemindersCount })}
           />
           <hr className='border-border mt-4' />
         </div> */}

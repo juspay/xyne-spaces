@@ -6,6 +6,7 @@ export type PreferenceSection =
   | 'availability'
   | 'voice'
   | 'calls'
+  | 'recordings'
   | 'messaging'
   | 'launch'
   | 'toolbar'

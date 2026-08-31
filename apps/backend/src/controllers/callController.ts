@@ -69,6 +69,9 @@ const UpdateHeadlessRecordingSchema = z
 
 const RegenerateHeadlessSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
+  // Optional explicit model tier (e.g. the "Try the thinking model" button).
+  // Omitted → the creator's saved preference is used.
+  modelType: z.enum(['fast', 'thinking']).optional(),
 });
 
 export class CallController {
@@ -405,7 +408,14 @@ export class CallController {
         conversationId,
         artifactMessageId,
         sdlcLink,
+        summaryModelPreference,
       } = req.body;
+      // Recording summary LLM tier the client carried from its localStorage;
+      // stamped onto the detailed summary canvas so headless call-end
+      // auto-generation can honour a 'thinking' default. Anything but explicit
+      // 'thinking' is 'fast'.
+      const summaryModelPref: 'fast' | 'thinking' =
+        summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -459,6 +469,7 @@ export class CallController {
           undefined,
           undefined,
           req.user!.workspaceId,
+          { summaryModelPreference: summaryModelPref },
         );
         if (!detailedSummaryCanvasId) {
           throw new Error('Failed to create detailed summary canvas');
@@ -1474,6 +1485,13 @@ export class CallController {
               : null,
           // Google Docs exported from this recording's summary, newest first.
           googleDocs: readRecordingGoogleDocLinks(call.metadata),
+          // Which model tier produced the current summary. `null` for recordings
+          // generated before this feature — the frontend treats null as "offer the
+          // thinking-model upgrade" (only an explicit 'thinking' hides it).
+          summaryModelUsed:
+            callMetadata?.summaryModelUsed === 'fast' || callMetadata?.summaryModelUsed === 'thinking'
+              ? (callMetadata.summaryModelUsed as 'fast' | 'thinking')
+              : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
@@ -1662,6 +1680,7 @@ export class CallController {
       const result = await noteTakerTranscriptService.regenerateSummary(
         call,
         input.summaryTemplateId,
+        input.modelType,
       );
       if (!result) {
         res.status(404).json({
@@ -1679,6 +1698,53 @@ export class CallController {
       }
       logger.error(`[${callId}] Failed to regenerate recording summary`, error);
       res.status(500).json({ success: false, error: 'Failed to regenerate recording summary' });
+    }
+  };
+
+  /**
+   * POST /api/calls/recordings/:callId/generate-labels
+   * Generate topical labels for a headless recording on demand (list-view action),
+   * mirroring the auto-generation that normally runs off the transcript-ready webhook.
+   */
+  regenerateRecordingLabels = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const labelIds = await noteTakerTranscriptService.regenerateLabels(call);
+      if (labelIds === null) {
+        res.status(404).json({
+          success: false,
+          error: 'Transcript is not available',
+        });
+        return;
+      }
+
+      res.json({ success: true, labelIds });
+    } catch (error) {
+      logger.error(`[${callId}] Failed to generate recording labels`, error);
+      res.status(500).json({ success: false, error: 'Failed to generate recording labels' });
     }
   };
 

@@ -3,29 +3,29 @@ import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
+import { Archive } from 'lucide-react';
+import { KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Tag,
-  Plus,
-  X,
-  Check,
+  PlusDefault as Plus,
+  MultipleCrossCancelDefault as X,
+  CheckTickSingle as Check,
   FileText,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  LinkIcon,
-  Minimize2,
-  Sparkles,
-  Calendar,
-  SquareKanban,
-  Clock,
-  Eye,
+  LinkChainHorizontal as LinkIcon,
+  MinimizeTwoArrow as Minimize2,
+  SparkleAi02 as Sparkles,
+  CalendarDefault as Calendar,
+  ClockDefault as Clock,
+  EyeOn as Eye,
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
-  Archive,
   GitBranch,
-  Lock,
-} from 'lucide-react';
+  LockClose as Lock,
+} from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
   SubTicket,
@@ -3061,6 +3061,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={handleCopyTicketViewLink}
+                data-track-category='Tickets'
+                data-track-name='COPY_TICKET_LINK'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 aria-label='Copy Ticket'
               >
                 <LinkIcon size={20} />
@@ -3076,6 +3079,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
                   );
                 }}
+                data-track-category='Tickets'
+                data-track-name='SUMMARIZE_THREAD'
+                data-track-metadata={JSON.stringify({
+                  ticketId: ticket?.id,
+                  channelId: ticket?.channelId,
+                })}
                 title='Summarize thread'
               >
                 <Sparkles size={20} />
@@ -3087,6 +3096,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={() => setShowArchiveConfirmDialog(true)}
+                data-track-category='Tickets'
+                data-track-name='OPEN_ARCHIVE_TICKET_CONFIRM'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 disabled={ticket?.isArchived}
                 aria-label='Archive Ticket'
               >
@@ -3099,6 +3111,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={handleMinimizeExpandedView}
+                data-track-category='Tickets'
+                data-track-name='MINIMIZE_EXPANDED_VIEW'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 aria-label='Copy Ticket'
               >
                 <Minimize2 size={20} />
@@ -4866,11 +4881,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowArchiveConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowArchiveConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_ARCHIVE_TICKET'
+              >
                 Cancel
               </Button>
               <Button
                 onClick={handleArchiveTicket}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_ARCHIVE_TICKET'
                 className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               >
                 Archive Ticket
@@ -4941,11 +4963,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowBoardChangeConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowBoardChangeConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_BOARD_CHANGE'
+              >
                 Cancel
               </Button>
               <Button
                 onClick={confirmBoardChange}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_BOARD_CHANGE'
                 className='bg-primary text-primary-foreground hover:opacity-90'
               >
                 Confirm

@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import Input from '../../../../ui/Input/Input';
 

@@ -57,7 +57,8 @@ import {
 } from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
 import { cn } from '../../utils/classNames';
-import { APP_DRAG_STYLE, isElectronApp } from '../../utils/electronApp';
+import { APP_DRAG_STYLE, isElectronApp, openInAppWindow } from '../../utils/electronApp';
+import { toast } from 'sonner';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
@@ -299,8 +300,8 @@ const AppSidebar = (): ReactElement => {
     );
   }, [visibleChannels, unreadCounts]);
 
-  const handleNavigationClick = (label: string): void => {
-    mixpanelService.track(EVENTS.NAVIGATION, { item: label });
+  const handleNavigationClick = (label: string, openedInNewWindow = false): void => {
+    mixpanelService.track(EVENTS.NAVIGATION, { item: label, openedInNewWindow });
   };
 
   const railShortcuts = railShortcutsAvailable();
@@ -316,15 +317,22 @@ const AppSidebar = (): ReactElement => {
     { enabled: railShortcuts && !isSupportContext },
   );
 
-  const handleMoreNavigate = (label: string): void => {
+  const handleMoreNavigate = (label: string, openedInNewWindow = false): void => {
     setIsMoreOpen(false);
-    handleNavigationClick(label);
+    handleNavigationClick(label, openedInNewWindow);
   };
 
   // Keep focus on the trigger when the menu opens so no item shows a focus ring.
   const handleMorePopoverAutoFocus = (e: Event): void => {
     e.preventDefault();
   };
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onAppWindowLimitReached?.(limit => {
+      toast.info(`You can have up to ${limit} extra windows open. Close one to open another.`);
+    });
+    return (): void => unsubscribe?.();
+  }, []);
 
   useEffect(() => {
     const handleResize = (): void => {
@@ -398,7 +406,14 @@ const AppSidebar = (): ReactElement => {
                       >
                         <Link
                           to={prefixWs(item.path)}
-                          onClick={() => handleNavigationClick(item.label)}
+                          onClick={event => {
+                            const openedInNewWindow =
+                              !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                            handleNavigationClick(item.label, openedInNewWindow);
+                            if (openedInNewWindow) {
+                              event.preventDefault();
+                            }
+                          }}
                           aria-label={showPendingDmDot ? 'DMs unread' : item.label}
                           data-testid={testId}
                           data-track-category='App_Sidebar'
@@ -700,7 +715,7 @@ const SidebarMoreMenu = ({
   items: NavigationItem[];
   activeRoute: string;
   prefixWs: (path: string) => string;
-  onNavigate: (label: string) => void;
+  onNavigate: (label: string, openedInNewWindow?: boolean) => void;
   onCustomize: () => void;
 }): ReactElement => {
   return (
@@ -715,7 +730,14 @@ const SidebarMoreMenu = ({
               <li key={item.path}>
                 <Link
                   to={prefixWs(item.path)}
-                  onClick={() => onNavigate(item.label)}
+                  onClick={event => {
+                    const openedInNewWindow =
+                      !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                    onNavigate(item.label, openedInNewWindow);
+                    if (openedInNewWindow) {
+                      event.preventDefault();
+                    }
+                  }}
                   data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                   data-track-category='App_Sidebar'
                   data-track-name='Sidebar_More_Item'

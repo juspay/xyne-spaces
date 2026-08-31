@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node --max-old-space-size=8192 node_modules/.bin/vite build",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.app.json --pretty",
     "lint": "eslint .",

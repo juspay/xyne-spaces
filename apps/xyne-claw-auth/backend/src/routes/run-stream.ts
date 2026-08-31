@@ -1,13 +1,14 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
-import { getRequesterId } from "../middleware/agent-acl.js";
+import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
@@ -60,6 +61,12 @@ interface PendingStream {
   reject: (error: Error) => void;
   setClosed: () => void;
   cookieHeader: string | undefined;
+  /** Whether this subscriber may receive `debug` frames. Debug frames carry the
+   *  full system prompt / instructions / tool policy (WAPT PY-JP-012), so they
+   *  must only reach the agent's owner/editors or a Claw admin. Resolved once
+   *  when the SSE opens — the internal /progress POST that forwards frames has
+   *  no end-user identity of its own. */
+  allowDebug: boolean;
 }
 
 interface StreamMeta {
@@ -177,7 +184,10 @@ function ensureStreamEventsSubscriber(): void {
     const stream = pendingStreams.get(msg.streamId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
-      for (const e of msg.events) stream.sendEvent(e.event, e.data);
+      for (const e of msg.events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
       return;
     }
     // result
@@ -247,7 +257,7 @@ export async function persistRunStreamResult(args: {
         .update(args.assistantMessageId, { content: args.content, status: args.status })
         .catch(async (err: unknown) => {
           log.warn(
-            `[run-stream] placeholder update failed (${err instanceof Error ? err.message : String(err)}); creating fresh row`,
+            `[run-stream] placeholder update failed (${errMsg(err)}); creating fresh row`,
           );
           return chatMessageRepository.create({
             conversationId: args.conversationId,
@@ -339,7 +349,7 @@ export async function persistRunStreamResult(args: {
           ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
         });
       } catch (attErr) {
-        log.error(`[run-stream] Failed to persist attachment ${att.fileName}:`, attErr instanceof Error ? attErr.message : String(attErr));
+        log.error(`[run-stream] Failed to persist attachment ${att.fileName}:`, errMsg(attErr));
       }
     }
   }
@@ -391,6 +401,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
+      /** Per-message provider fast mode (Spaces composer ⚡ toggle). Overrides
+       *  the agent's modelSettings.speed for THIS run only; absent = agent
+       *  default. Invalid values are ignored rather than 400d — this route is
+       *  a pass-through for several callers. */
+      speed: rawSpeed,
+      /** Per-message thinking level (Spaces composer dropdown). Merged over the
+       *  agent's modelSettings for this run; invalid values are ignored. */
+      thinkingLevel: rawThinkingLevel,
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
@@ -445,6 +463,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     }
     const orgId = agentRow.orgId;
 
+    // Gate for `debug` SSE frames (system prompt / instructions / tool policy).
+    // Same predicate the /agent-chat stream uses: only the agent's editors or a
+    // Claw admin may watch a live debug trace. Resolved here (not in the
+    // /progress forwarder) because that forwarder is an internal S2S POST with
+    // no user identity.
+    const allowDebug = (await isClawAdmin(userId))
+      || Boolean((await getAgentEditAccess(userId, slug, orgId))?.canEdit);
+
     const sdlcResolution = slug === "sdlc-agent"
       ? await resolveSdlcRepositoryForUser(
           userId,
@@ -466,7 +492,13 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // to claw's env LITELLM_MODEL. Agent-level resolution (the same shared
     // resolver the headless + automation paths use). Body-supplied values win
     // only when the agent has no configured creds.
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow).catch(() => null);
+    const speedOverride = rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
+    const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"];
+    const thinkingOverride = typeof rawThinkingLevel === "string" && THINKING_LEVELS.includes(rawThinkingLevel)
+      ? rawThinkingLevel
+      : undefined;
+    const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agentRow.config);
+    const resolvedProviders = await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
     const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
     const resolvedProviderConfigs =
       resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
@@ -588,11 +620,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             content: task.trim(),
             parentId: requestedParent?.id ?? null,
             orgId,
+            ...(Array.isArray(attachedContext) && attachedContext.length > 0
+              ? { attachedContext }
+              : {}),
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
         } catch (msgErr) {
-          log.warn("[run-stream] Failed to persist edit-user message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+          log.warn("[run-stream] Failed to persist edit-user message:", errMsg(msgErr));
         }
       }
     } else {
@@ -621,11 +656,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             content: task.trim(),
             parentId: userParentId,
             orgId,
+            ...(Array.isArray(attachedContext) && attachedContext.length > 0
+              ? { attachedContext }
+              : {}),
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
         } catch (msgErr) {
-          log.warn("[run-stream] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+          log.warn("[run-stream] Failed to persist user message:", errMsg(msgErr));
         }
       }
     }
@@ -646,7 +684,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           orgId,
         });
       } catch (msgErr) {
-        log.warn("[run-stream] Failed to pre-create assistant placeholder:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn("[run-stream] Failed to pre-create assistant placeholder:", errMsg(msgErr));
       }
     }
 
@@ -704,7 +742,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           });
           persistedUserAttachmentIds.push(row.id);
         } catch (attErr) {
-          log.warn(`[run-stream] Failed to persist user attachment ${att.fileName}:`, attErr instanceof Error ? attErr.message : String(attErr));
+          log.warn(`[run-stream] Failed to persist user attachment ${att.fileName}:`, errMsg(attErr));
         }
       }
 
@@ -716,7 +754,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             userId,
           );
         } catch (linkErr) {
-          log.warn("[run-stream] Failed to link user attachments to message:", linkErr instanceof Error ? linkErr.message : String(linkErr));
+          log.warn("[run-stream] Failed to link user attachments to message:", errMsg(linkErr));
         }
       }
     }
@@ -787,7 +825,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           } catch (fetchErr) {
             log.warn(
               `[run-stream] Failed to rehydrate prior attachment ${row.originalFilename} (${row.id}):`,
-              fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+              errMsg(fetchErr),
             );
           }
         }
@@ -799,7 +837,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       } catch (queryErr) {
         log.warn(
           "[run-stream] Failed to query prior conversation attachments:",
-          queryErr instanceof Error ? queryErr.message : String(queryErr),
+          errMsg(queryErr),
         );
       }
     }
@@ -859,6 +897,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           closed = true;
         },
         cookieHeader: req.headers["cookie"] as string | undefined,
+        allowDebug,
       });
 
       setTimeout(() => {
@@ -921,6 +960,49 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: agentRow.description,
       },
     };
+    // Fast mode: forward the agent's model settings (with the effective speed)
+    // and fast-mode profile so claw applies the speed + run-setting overrides.
+    // ONLY when this run is fast — this route otherwise forwards no stored
+    // modelSettings, and standard runs must stay byte-identical to today.
+    if (effectiveSpeed === "fast" || thinkingOverride) {
+      const storedConfig = (agentRow.config as Record<string, unknown> | null) ?? {};
+      const storedModelSettings = storedConfig["modelSettings"];
+      // Fast runs carry the agent's full model settings (this route otherwise
+      // forwards none) so the speed + fast-profile overrides apply in claw. A
+      // standard run with ONLY a thinking override forwards just that field —
+      // anything more would change behavior for settings this path never
+      // honored before. The per-message thinking override wins over both the
+      // stored value and the fast profile's override.
+      enrichedAgentConfig["modelSettings"] = {
+        ...(effectiveSpeed === "fast" && storedModelSettings && typeof storedModelSettings === "object" && !Array.isArray(storedModelSettings)
+          ? storedModelSettings as Record<string, unknown>
+          : {}),
+        ...(effectiveSpeed === "fast" ? { speed: "fast" } : {}),
+        ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
+      };
+      if (effectiveSpeed === "fast") {
+        const profile = parseFastModeProfile(storedConfig);
+        if (storedConfig["fastModeProfile"] !== undefined && storedConfig["fastModeProfile"] !== null) {
+          // Drop the profile's own thinking override when the user picked one
+          // for this message — claw overlays profile.modelSettings over
+          // modelSettings on fast runs, and the per-message choice must win.
+          const rawProfile = storedConfig["fastModeProfile"];
+          enrichedAgentConfig["fastModeProfile"] = thinkingOverride && rawProfile && typeof rawProfile === "object" && !Array.isArray(rawProfile) && (rawProfile as Record<string, unknown>)["modelSettings"]
+            ? {
+                ...(rawProfile as Record<string, unknown>),
+                modelSettings: {
+                  ...((rawProfile as Record<string, unknown>)["modelSettings"] as Record<string, unknown>),
+                  thinkingLevel: thinkingOverride,
+                },
+              }
+            : rawProfile;
+        }
+        log.info(`[run-stream] fast mode for ${slug} (override=${speedOverride ?? "agent-default"}, profile=${profile.providers}${thinkingOverride ? `, thinking=${thinkingOverride}` : ""})`);
+      } else {
+        log.info(`[run-stream] thinking override for ${slug}: ${thinkingOverride}`);
+      }
+    }
+
     const fastModeEnabled = await resolveFastMode(
       convId,
       slug,
@@ -1071,7 +1153,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           await chatMessageRepository.create({ conversationId: convId, agentSlug: slug, userId, role: "assistant", content: errContent, status: "failed", orgId });
         }
       } catch (msgErr) {
-        log.warn("[run-stream] Failed to persist error assistant message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn("[run-stream] Failed to persist error assistant message:", errMsg(msgErr));
       }
 
       res.write(`event: error\ndata: ${JSON.stringify({
@@ -1095,7 +1177,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         task: task.trim(),
         conversationId: convId,
         fastMode: fastModeEnabled,
-      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
+      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", errMsg(e)));
     }
 
     const result = await resultPromise;
@@ -1242,7 +1324,10 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
     if (events.length > 0) {
       const localStream = pendingStreams.get(streamId);
       if (localStream) {
-        for (const e of events) localStream.sendEvent(e.event, e.data);
+        for (const e of events) {
+          if (e.event === "debug" && !localStream.allowDebug) continue;
+          localStream.sendEvent(e.event, e.data);
+        }
       } else {
         publishStreamEvent({ kind: "progress", streamId, events });
       }
@@ -1342,7 +1427,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
             };
           }
         } catch (lookupErr) {
-          log.warn(`[run-stream] agent_run lookup failed for sessionId=${sessionId}:`, lookupErr instanceof Error ? lookupErr.message : String(lookupErr));
+          log.warn(`[run-stream] agent_run lookup failed for sessionId=${sessionId}:`, errMsg(lookupErr));
         }
       }
     }
@@ -1373,7 +1458,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(assistantMessageId ? { assistantMessageId } : {}),
         });
       } catch (msgErr) {
-        log.warn(`[run-stream] Failed to persist assistant message:`, msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn(`[run-stream] Failed to persist assistant message:`, errMsg(msgErr));
       }
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} missing meta (userId/conversationId) — message persistence skipped`);
@@ -1402,7 +1487,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
         });
       } catch (finalizeErr) {
-        log.warn(`[run-stream] Failed to finalize agent run:`, finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr));
+        log.warn(`[run-stream] Failed to finalize agent run:`, errMsg(finalizeErr));
       }
     }
 
@@ -1522,7 +1607,7 @@ internalRouter.post(
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
       res.json({ success: true });
     } catch (err) {
-      log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, err instanceof Error ? err.message : String(err));
+      log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, errMsg(err));
       res.status(500).json({ success: false, error: "Failed to persist follow-up suggestions" });
     }
   },
@@ -1578,7 +1663,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       task: task.trim(),
       conversationId: convId,
       fastMode: runRequestBody["fastMode"] === true,
-    }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
+    }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", errMsg(e)));
   };
 
   const consumeResult = await consumeClawStream({
@@ -1635,6 +1720,13 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onPlan: (_sid, todos) => {
         stream.sendEvent("plan", { todos });
       },
+      onUiWidget: (_sid, widget) => {
+        if (widget.type === "plan") {
+          stream.sendEvent("plan", { todos: widget.payload.todos });
+        } else {
+          stream.sendEvent("ui-widget", { widget });
+        }
+      },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the
         // noVNC link as a Spaces channel message. Replaying that POST keeps
@@ -1647,7 +1739,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           },
           body: JSON.stringify({ sessionId, ...payload }),
           signal: AbortSignal.timeout(5_000),
-        }).catch((err) => log.warn(`[run-stream/sse] sandbox replay failed: ${err instanceof Error ? err.message : String(err)}`));
+        }).catch((err) => log.warn(`[run-stream/sse] sandbox replay failed: ${errMsg(err)}`));
       },
       onProgressLabel: (sessionId, payload) => {
         // Same reasoning as onSandboxPreview — progress labels feed the Spaces
@@ -1666,6 +1758,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         if (CONFIG.liveToolCallsEnabled && toolLabel) publishLiveEvent(convId, { type: "label", conversationId: convId, agentSlug: slug, userId, toolLabel, ts: Date.now() });
       },
       onDebug: (_sid, debugEvent) => {
+        if (!stream.allowDebug) return;
         stream.sendEvent("debug", { debugEvent });
       },
       onCancelled: (_sid, reason) => {
@@ -1733,7 +1826,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         log.warn(`[run-stream/sse] failed-callback returned ${cbRes.status}: ${text.slice(0, 300)}`);
       }
     } catch (err) {
-      log.error(`[run-stream/sse] failed-callback POST threw (stream=${streamId}): ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`[run-stream/sse] failed-callback POST threw (stream=${streamId}): ${errMsg(err)}`);
     }
     return;
   }

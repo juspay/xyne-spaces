@@ -261,10 +261,22 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
             )}
 
             <div className='flex justify-end gap-2 pt-1'>
-              <Button variant='outline' type='button' onClick={() => handleOpenChange(false)}>
+              <Button
+                variant='outline'
+                type='button'
+                onClick={() => handleOpenChange(false)}
+                data-track-category='Support'
+                data-track-name='CLOSE_DL_SYNC_DIALOG'
+              >
                 Cancel
               </Button>
-              <Button type='button' disabled={!isRangeReady} onClick={() => setStep('provider')}>
+              <Button
+                type='button'
+                disabled={!isRangeReady}
+                onClick={() => setStep('provider')}
+                data-track-category='Support'
+                data-track-name='DL_SYNC_BACK_TO_PROVIDER'
+              >
                 Next
               </Button>
             </div>
@@ -285,6 +297,8 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     onClick={() => {
                       void handleProviderSelect('microsoft');
                     }}
+                    data-track-category='Support'
+                    data-track-name='DL_SYNC_SELECT_MICROSOFT'
                     disabled={isRedirecting}
                   >
                     {isRedirecting ? (
@@ -302,6 +316,8 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     onClick={() => {
                       void handleProviderSelect('google');
                     }}
+                    data-track-category='Support'
+                    data-track-name='DL_SYNC_SELECT_GOOGLE'
                     disabled={isRedirecting}
                   >
                     {isRedirecting ? (
@@ -321,7 +337,13 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
             </div>
 
             <div className='flex justify-end gap-2 pt-1'>
-              <Button variant='outline' type='button' onClick={() => setStep('range')}>
+              <Button
+                variant='outline'
+                type='button'
+                onClick={() => setStep('range')}
+                data-track-category='Support'
+                data-track-name='DL_SYNC_BACK_TO_RANGE'
+              >
                 Back
               </Button>
             </div>

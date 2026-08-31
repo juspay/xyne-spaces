@@ -8,7 +8,7 @@
  * calls; any other agent can adopt the same layer by passing its own slug.
  *
  * Invariants (enforced here):
- *   - each file's content is capped at MAX_FILE_CHARS (10k) so injection can't
+ *   - each file's content is capped at MAX_FILE_CHARS (20k) so injection can't
  *     blow the context window;
  *   - at most MAX_LOADED_FILES (3) files per (agent, user) may be loadInPrompt.
  *
@@ -23,9 +23,9 @@ import { createLogger, createTraceId } from "../logger.js";
 
 const logger = createLogger("agent-memory-files", createTraceId());
 
-/** Per-file hard cap. Keeps 3 loaded files ≤ 30k chars ≈ 7.5k tokens of
+/** Per-file hard cap. Keeps 3 loaded files ≤ 60k chars ≈ 15k tokens of
  *  always-on system-prompt budget. */
-export const MAX_FILE_CHARS = 10_000;
+export const MAX_FILE_CHARS = 20_000;
 /** Max files injected into the system prompt per (agent, user). */
 export const MAX_LOADED_FILES = 3;
 

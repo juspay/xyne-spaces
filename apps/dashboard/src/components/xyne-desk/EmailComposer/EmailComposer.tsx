@@ -2921,6 +2921,8 @@ export const EmailComposer = ({
                         const base = channelId ? `${supportBase}/${channelId}` : supportBase;
                         void composerNavigate(`${base}?openSettings=signatures`);
                       }}
+                      data-track-category='Support'
+                      data-track-name='OPEN_SUPPORT_FROM_COMPOSER'
                       className='text-xs text-muted-foreground'
                     >
                       Manage signatures
@@ -2928,6 +2930,8 @@ export const EmailComposer = ({
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => setSelectedSignatureId(null)}
+                      data-track-category='Support'
+                      data-track-name='CLEAR_EMAIL_SIGNATURE'
                       className={!selectedSignatureId ? 'font-medium' : ''}
                     >
                       No signature
@@ -2936,6 +2940,8 @@ export const EmailComposer = ({
                       <DropdownMenuItem
                         key={sig.id}
                         onClick={() => setSelectedSignatureId(sig.id)}
+                        data-track-category='Support'
+                        data-track-name='SELECT_EMAIL_SIGNATURE'
                         className={selectedSignatureId === sig.id ? 'font-medium' : ''}
                       >
                         {sig.name}

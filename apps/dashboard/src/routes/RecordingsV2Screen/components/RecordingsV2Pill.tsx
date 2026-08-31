@@ -1,6 +1,8 @@
-import { useEffect, useState, type KeyboardEvent, type ReactElement } from 'react';
+import { useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react';
 import type { User } from '@xyne/shared/machines';
+import { TagMethod } from '@xyne/shared';
 import {
+  Ai01,
   ChevronRight,
   DeleteDustbin02,
   DownloadBarDown,
@@ -20,11 +22,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../../components/ui/dropdown-menu';
-import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
+import {
+  patchOatsRecordingLabels,
+  type OatsRecordingEntry,
+} from '../../../hooks/usePaginatedOatsRecordings';
 import {
   recordingService,
   type RecordingDetail,
 } from '../../../services/Recording/recordingService';
+import {
+  confirmRecordingLabelSuggestion,
+  useApplyRecordingLabelsChange,
+} from '../../../hooks/useResolvedRecordingLabels';
 import {
   calculateRecordingElapsedMs,
   formatElapsedTime,
@@ -36,7 +45,10 @@ import { cn } from '../../../utils/classNames';
 import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
-import { LabelChip } from '../../RecordingDetailV2Screen/components/RecordingLabelPicker';
+import {
+  LabelChip,
+  SuggestedLabelChip,
+} from '../../RecordingDetailV2Screen/components/RecordingLabelPicker';
 
 export interface RecordingsV2PillProps {
   recording: Pick<
@@ -50,10 +62,14 @@ export interface RecordingsV2PillProps {
     | 'aiSummary'
     | 'transcript'
     | 'createdByUserId'
+    | 'labels'
   >;
   creator: User | null;
   participantsLabel: string;
   tags?: string[];
+  /** Still-pending suggestions (LLM or on-demand AUTOMATED) — rendered with inline confirm/reject. */
+  suggestedTags?: string[];
+  pendingLabelCount?: number;
   /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
   currentUserId?: string | undefined;
@@ -147,6 +163,8 @@ const RecordingsV2Pill = ({
   creator,
   participantsLabel,
   tags = [],
+  suggestedTags = [],
+  pendingLabelCount = 0,
   resolveLabel = (label: string) => label,
   currentUserId,
   onOpen,
@@ -157,8 +175,11 @@ const RecordingsV2Pill = ({
   const durationMs = recording.endedAt
     ? Math.max(0, recording.endedAt - recording.startedAt)
     : null;
-  const visibleTags = normalizeRecordingTags(tags);
   const isOwner = currentUserId !== undefined && currentUserId === recording.createdByUserId;
+  const visibleTags = normalizeRecordingTags(tags);
+  const visibleSuggestedTags = isOwner ? normalizeRecordingTags(suggestedTags) : [];
+  const showGenerateLabels =
+    isOwner && recording.labels.length === 0 && Boolean(recording.transcript?.trim());
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Populated on menu open — `hasRecording` isn't in the synced list data (it's
@@ -236,6 +257,43 @@ const RecordingsV2Pill = ({
     } finally {
       setIsDownloadingRecording(false);
     }
+  };
+
+  const [isGeneratingLabels, setIsGeneratingLabels] = useState(false);
+
+  const handleGenerateLabels = async (event: MouseEvent): Promise<void> => {
+    event.stopPropagation();
+    if (isGeneratingLabels) return;
+    setIsGeneratingLabels(true);
+    try {
+      const labelIds = await recordingService.generateLabels(recording.externalId);
+      patchOatsRecordingLabels(recording.id, [...new Set([...recording.labels, ...labelIds])]);
+    } catch (err) {
+      logRecordingError('RecordingsV2Pill.generateLabels', err);
+      toast.error('Failed to generate labels');
+    } finally {
+      setIsGeneratingLabels(false);
+    }
+  };
+
+  // This list's suggestions are always on-demand generated, so a failed
+  // confirm reverts straight back to AUTOMATED
+  const handleConfirmSuggestion = async (labelId: string): Promise<void> => {
+    try {
+      await confirmRecordingLabelSuggestion(labelId, TagMethod.AUTOMATED);
+    } catch (err) {
+      logRecordingError('RecordingsV2Pill.confirmSuggestion', err);
+      toast.error('Failed to confirm label');
+    }
+  };
+
+  const applyLabelsChange = useApplyRecordingLabelsChange(labels =>
+    patchOatsRecordingLabels(recording.id, labels),
+  );
+
+  const handleRejectSuggestion = async (labelId: string): Promise<void> => {
+    const nextLabels = recording.labels.filter(id => id !== labelId);
+    await applyLabelsChange(recording.externalId, nextLabels, 'RecordingsV2Pill.rejectSuggestion');
   };
 
   return (
@@ -358,12 +416,44 @@ const RecordingsV2Pill = ({
           </span>
         </span>
 
-        {visibleTags.length > 0 && (
+        {visibleTags.length > 0 || visibleSuggestedTags.length > 0 ? (
           <span className='flex flex-wrap items-center gap-1.5'>
             {visibleTags.map(tag => (
               <LabelChip key={tag} label={resolveLabel(tag)} />
             ))}
+            {visibleSuggestedTags.map(tag => (
+              <SuggestedLabelChip
+                key={tag}
+                label={resolveLabel(tag)}
+                onConfirm={() => void handleConfirmSuggestion(tag)}
+                onReject={() => void handleRejectSuggestion(tag)}
+              />
+            ))}
           </span>
+        ) : pendingLabelCount > 0 ? (
+          <span className='flex flex-wrap items-center gap-1.5'>
+            {Array.from({ length: pendingLabelCount }, (_, index) => (
+              <span key={index} className='h-6 w-14 animate-pulse rounded-lg bg-muted' />
+            ))}
+          </span>
+        ) : (
+          showGenerateLabels && (
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              loading={isGeneratingLabels}
+              onClick={event => void handleGenerateLabels(event)}
+              className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground'
+              data-track-category='RecordingsV2'
+              data-track-name='generate_recording_labels'
+            >
+              {!isGeneratingLabels && (
+                <Ai01 size={14} variant='Duo Solid' className='shrink-0 text-primary' />
+              )}
+              {isGeneratingLabels ? 'Generating labels…' : 'Generate labels'}
+            </Button>
+          )
         )}
       </span>
     </div>

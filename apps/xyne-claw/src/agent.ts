@@ -7,6 +7,7 @@ import {
   type CreateAgentSessionOptions,
   type ToolDefinition,
   type SessionEntry,
+  type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
@@ -25,9 +26,9 @@ import type {
   ClawSandboxPreviewPayload,
   ClawStreamMeta,
   Todo,
+  UiWidget,
 } from "xyne-claw-shared";
-import { type ThinkingLevel } from "@earendil-works/pi-ai";
-import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
+import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
 import {
   hasSession,
@@ -45,7 +46,9 @@ import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
 import { installToolBudget } from "./tool-budget.js";
+import { installAwakeningInbox } from "./awakening-inbox.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
 
 const log = createLogger("agent");
@@ -293,6 +296,27 @@ interface StreamRateSample {
   streamsCollected: number;
 }
 
+interface DebugThinkingConfiguration {
+  /** Value selected by agent model settings / provider config / default policy. */
+  requestedLevel: string;
+  /** Pi's final value after capability clamping for the resolved model. */
+  effectiveLevel: string;
+  /** Where the requested setting came from, so precedence is inspectable. */
+  source: "agent_model_settings" | "provider_credential" | "codex_default" | "server_default" | "temperature_override";
+  /** Whether the resolved Pi model was registered as reasoning-capable. */
+  modelSupportsReasoning: boolean;
+  /** The provider request shape that disables/enables thinking for this model. */
+  wireMode: string;
+}
+
+/** Provider fast mode (modelSettings.speed) as it was resolved for this run —
+ *  so a "why wasn't it faster?" report can be answered from the trace. */
+interface DebugSpeedConfiguration {
+  requested: ModelSpeed;
+  applied: boolean;
+  reason: string;
+}
+
 interface DebugSessionSnapshot {
   schemaVersion: 1;
   conversationId?: string;
@@ -302,6 +326,12 @@ interface DebugSessionSnapshot {
   userName?: string;
   userEmail?: string;
   provider?: string;
+  /** The model resolved for this particular run (not merely the agent default). */
+  model?: string;
+  /** Requested/effective thinking selection and its provider wire representation. */
+  thinking?: DebugThinkingConfiguration;
+  /** Requested/applied provider fast mode and the eligibility verdict. */
+  speed?: DebugSpeedConfiguration;
   startedAt: string;
   finishedAt: string;
   task: string;
@@ -439,6 +469,30 @@ export class ProviderStallError extends Error {
 }
 
 /**
+ * Thrown when a provider returns a TERMINAL error turn (stopReason "error" with
+ * no usable content) AFTER the model-SDK's own auto-retries were exhausted — the
+ * upstream is returning e.g. an OpenAI `server_error` 5xx on every attempt. The
+ * SDK surfaces this as an errored-but-non-throwing turn, so without this the run
+ * ends as a "successful" empty completion and dead-ends on the failing provider
+ * instead of advancing to the configured fallback. Classified as a transient
+ * provider error (like a stall) so the fallback chain tries the next provider.
+ * (Prod 2026-08-18: euler-doctor on codex/gpt-5.5 hit repeated OpenAI
+ * server_error 5xx, exhausted its 3 SDK auto-retries per turn, and terminated
+ * empty without ever trying its glm-private-claw fallback.)
+ */
+export class ProviderTerminalError extends Error {
+  constructor(
+    public readonly provider: string,
+    public readonly detail: string,
+  ) {
+    super(
+      `Provider ${provider} returned a terminal error after exhausting auto-retries: ${detail}`,
+    );
+    this.name = "ProviderTerminalError";
+  }
+}
+
+/**
  * Transient provider/network failures that should FALL BACK to the next provider
  * (ultimately "spaces") instead of dropping the run — connection resets, DNS
  * blips, fetch failures, socket hangups, request timeouts/aborts, 5xx gateways,
@@ -452,6 +506,7 @@ export class ProviderStallError extends Error {
  */
 export function isTransientProviderError(err: unknown): boolean {
   if (err instanceof ProviderStallError) return true;
+  if (err instanceof ProviderTerminalError) return true;
   const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
   if (!msg) return false;
   return (
@@ -469,11 +524,15 @@ export function isTransientProviderError(err: unknown): boolean {
     msg.includes("aborted") ||
     msg.includes("timeout") ||
     msg.includes("timed out") ||
-    /\b50[234]\b/.test(msg) ||
+    /\b50[0234]\b/.test(msg) ||
     msg.includes("bad gateway") ||
     msg.includes("service unavailable") ||
     msg.includes("gateway timeout") ||
-    msg.includes("overloaded")
+    msg.includes("overloaded") ||
+    // OpenAI/Codex 5xx: `{"error":{"type":"server_error",...}}` — an upstream
+    // outage that survived the SDK's own retries. Must fall back, not dead-end.
+    msg.includes("server_error") ||
+    msg.includes("internal server error")
   );
 }
 
@@ -581,6 +640,7 @@ const PARENT_PARALLELISM_PREAMBLE = [
   "- If you genuinely need multiple subagent calls, fire them in the SAME assistant turn (per the parallelism rule above) — never one-at-a-time across turns.",
   "- For a narrow, factual lookup, check whether a direct (non-`[Subagent ...]`) tool can answer it before reaching for the subagent.",
   "- **Background.** If a subagent call exposes a `run_in_background` option, set it when the work is slow AND independent of your immediate next step: you get an instant acknowledgement and keep working, and its result is delivered back to you automatically before you finish. Do NOT wait or poll for it. Use blocking (leave it unset) when you need the result to decide your very next move.",
+  "- **Reuse the session for RELATED follow-ups.** When a subagent result ends with a `_Follow-up:_ ... session_id: \"...\"` footer, that handle resumes the SAME child session with its full prior context. If your next question builds on that run (a refinement, a drill-down, \"now check X in the same repo\"), pass that exact `session_id` back instead of re-asking cold — the subagent skips re-deriving context it already has, which cuts redundant internal tool calls and latency on the follow-up. Omit `session_id` (fresh session) for an UNRELATED question, and never pass a `session_id` that a DIFFERENT subagent returned.",
   "",
   "---",
   "",
@@ -721,8 +781,7 @@ export function wrapAutoCitations(tools: ToolDefinition[]): ToolDefinition[] {
 }
 
 // Library-maintained model → contextWindow table (pi-ai ships real values for
-// every known model). Built once from getBuiltinProviders()/getBuiltinModels()
-// (pi-ai's static generated catalog — no auth/network needed) so we don't
+// every known model). Built once from getProviders()/getModels() so we don't
 // hand-maintain windows. Setting a window HIGHER than the model's true limit is
 // what causes empty completions — compaction fires at ~85% of the configured
 // window, so a too-high value lets the synthesis turn overflow and the provider
@@ -731,8 +790,8 @@ export function wrapAutoCitations(tools: ToolDefinition[]): ToolDefinition[] {
 const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
   const map = new Map<string, number>();
   try {
-    for (const provider of getBuiltinProviders()) {
-      for (const model of getBuiltinModels(provider)) {
+    for (const provider of getProviders()) {
+      for (const model of getModels(provider)) {
         const m = model as { id?: string; contextWindow?: number };
         if (m.id && typeof m.contextWindow === "number" && m.contextWindow > 0) {
           map.set(m.id.toLowerCase(), m.contextWindow);
@@ -747,6 +806,50 @@ export function contextWindowFor(modelId: string | undefined): number {
   const id = (modelId ?? "").toLowerCase();
   return MODEL_CONTEXT_WINDOWS.get(id)
     ?? Number(process.env["XYNE_CLAW_DEFAULT_CONTEXT_WINDOW"] ?? 128_000);
+}
+
+/**
+ * Kimi's OpenAI-compatible endpoint does not honor `reasoning_effort: "none"`.
+ * It returns `reasoning_content` unless the request explicitly contains
+ * `thinking: { type: "disabled" }`. In pi-ai's adapter this is the `deepseek`
+ * request shape; its `zai` shape instead emits `enable_thinking: false`, which
+ * Kimi ignores. Keep this narrow: other LiteLLM models such as GLM do honor the
+ * standard `reasoning_effort: "none"` route.
+ */
+function liteLlmThinkingCompat(modelId: string): { thinkingFormat: "deepseek" } | undefined {
+  return /(^|[\/_-])kimi(?:[\/_-]|$)/i.test(modelId)
+    ? { thinkingFormat: "deepseek" }
+    : undefined;
+}
+
+/** Human-readable description of how the thinking level reaches the provider —
+ *  surfaced in the debug snapshot so a "why is it still thinking?" report can be
+ *  answered from the trace instead of by reading adapter source. */
+function describeThinkingWireMode(
+  model: { reasoning: boolean; api: string; compat?: unknown },
+  thinkingLevel: string,
+): string {
+  if (!model.reasoning) return "not sent (model registered without reasoning)";
+  if (model.api !== "openai-completions") return thinkingLevel === "off" ? "provider-native thinking disabled" : "provider-native reasoning";
+
+  const enabled = thinkingLevel !== "off";
+  const thinkingFormat = typeof model.compat === "object" && model.compat !== null
+    && "thinkingFormat" in model.compat
+    && typeof (model.compat as { thinkingFormat?: unknown }).thinkingFormat === "string"
+    ? (model.compat as { thinkingFormat: string }).thinkingFormat
+    : undefined;
+  switch (thinkingFormat) {
+    case "zai":
+      return `thinking: { type: "${enabled ? "enabled" : "disabled"}" }`;
+    case "qwen":
+      return `enable_thinking: ${enabled}`;
+    case "deepseek":
+      return `thinking: { type: "${enabled ? "enabled" : "disabled"}" }`;
+    default:
+      return enabled
+        ? `reasoning_effort: "${thinkingLevel}"`
+        : 'reasoning_effort: "none"';
+  }
 }
 
 export function resolveModel(
@@ -879,6 +982,12 @@ export function resolveModel(
   if (provider === "claude" && providerConfig?.apiKey) {
     const isOauthToken = (providerConfig as ClaudeConfig).authType === "oauth_token";
     const providerName = "anthropic-user";
+    // Claude 4.6+ takes adaptive thinking (`thinking: {type:"adaptive"}` +
+    // output_config.effort); pi-ai only flags that for its built-in catalogue,
+    // and falls back to budget_tokens for custom models — deprecated on 4.6 and
+    // a 400 from 4.7 on. Spell it out so Opus 4.8 / Opus 5 (the only fast-mode
+    // models) actually accept a thinking-enabled request.
+    const adaptiveThinking = isAdaptiveThinkingClaudeModel(providerConfig.model);
     modelRegistry.registerProvider(providerName, {
       baseUrl: providerConfig.baseUrl || "https://api.anthropic.com",
       apiKey: providerConfig.apiKey,
@@ -890,6 +999,7 @@ export function resolveModel(
           id: providerConfig.model,
           name: providerConfig.model,
           reasoning: true,
+          ...(adaptiveThinking ? { compat: { forceAdaptiveThinking: true } } : {}),
           input: ["text", "image"],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: contextWindowFor(providerConfig.model),
@@ -901,7 +1011,7 @@ export function resolveModel(
     if (!model) {
       throw new Error(`Failed to register Claude model "${providerConfig.model}" at ${providerConfig.baseUrl ?? "anthropic"}`);
     }
-    log.info(`[agent] Using Claude model: ${providerConfig.model} (${isOauthToken ? "oauth_token" : "api_key"}, reasoning)`);
+    log.info(`[agent] Using Claude model: ${providerConfig.model} (${isOauthToken ? "oauth_token" : "api_key"}, ${adaptiveThinking ? "adaptive thinking" : "reasoning"})`);
     return model;
   }
 
@@ -942,7 +1052,13 @@ export function resolveModel(
   }
 
   // Default: shared LiteLLM proxy
+  // The Spaces grid's default models (including glm-latest) support the
+  // OpenAI-compatible `reasoning_effort` parameter. Marking this model as
+  // non-reasoning used to make pi silently omit the user-selected thinking
+  // level, leaving long server-default reasoning enabled even when an agent
+  // selected "Off". The grid accepts `none` as the explicit off value.
   const litellmModel = overrides?.model ?? LITELLM.model;
+  const litellmCompat = liteLlmThinkingCompat(litellmModel);
   modelRegistry.registerProvider("litellm", {
     baseUrl: LITELLM.url,
     apiKey: overrides?.litellmApiKey || LITELLM.apiKey,
@@ -952,7 +1068,9 @@ export function resolveModel(
       {
         id: litellmModel,
         name: litellmModel,
-        reasoning: false,
+        reasoning: true,
+        thinkingLevelMap: { off: "none" },
+        ...(litellmCompat ? { compat: litellmCompat } : {}),
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: contextWindowFor(litellmModel),
@@ -1002,11 +1120,13 @@ export interface ProgressEmitter {
   invocation(sessionId: string, invocation: unknown): void;
   attachment(sessionId: string, attachment: ClawAttachmentPayload): void;
   sandboxPreview(sessionId: string, payload: ClawSandboxPreviewPayload, meta?: ClawStreamMeta): void;
+  /** @deprecated Kept for rolling compatibility; new producers use uiWidget. */
   plan(sessionId: string, todos: Todo[]): void;
   /** A create/merge pull-request tool completed — carries the canonical PR fact
    *  for the Spaces PR card (mirrors `plan`; consumer bridges it to a kind:"pr"
    *  progress POST → renderPrCard). */
   pr(sessionId: string, pr: Record<string, unknown>): void;
+  uiWidget(sessionId: string, widget: UiWidget): void;
   streamChunk(sessionId: string, payload: { reasoningDelta?: string; textDelta?: string }): void;
   debugProgress(sessionId: string, event: DebugEventRecord): void;
   progressLabel(sessionId: string, toolLabel: string, meta?: ClawStreamMeta): void;
@@ -1654,9 +1774,56 @@ export interface RunTaskOptions {
     isUserCancelled: () => boolean;
     onTurnBoundary: (lastTurn: number) => void;
   } | undefined;
+  /** Same-user mid-run follow-up: routes/run.ts installs a callback so the
+   *  interrupt endpoint can steer the live session to summarize and finish
+   *  before falling back to a hard abort. */
+  gracefulInterrupt?: {
+    isRequested: () => boolean;
+    registerSummaryRequest: (requestSummary: () => Promise<boolean>) => void;
+  } | undefined;
+  /** Awakened run (heartbeat / reflex). Presence enables live event injection
+   *  and tells the run it was not triggered by a human. */
+  awakening?: {
+    kind: string;
+    writePolicy: string;
+    shadow: boolean;
+    injectEnabled?: boolean;
+  } | undefined;
 }
 
 const FAST_MODE_ACTIVE_TOOLS_CUSTOM_TYPE = "xyne.fastMode.activeToolSet";
+
+/**
+ * Make a mid-run `load-tools` take effect on the NEXT ASSISTANT TURN, which is
+ * what that tool tells the model it does.
+ * We own ONLY the tools refresh. If a future pi ships its own prepareNextTurn,
+ * that one keeps ownership of the context and we just re-pin the tool list.
+ */
+export function keepLoopToolsFresh(agent: PiLoopAgent): void {
+  const priorPrepareNextTurn = agent.prepareNextTurn;
+  agent.prepareNextTurn = async (signal) => {
+    const prior = await priorPrepareNextTurn?.(signal);
+    const base = prior?.context ?? {
+      systemPrompt: agent.state.systemPrompt,
+      messages: agent.state.messages.slice(),
+    };
+    return { ...prior, context: { ...base, tools: agent.state.tools.slice() } };
+  };
+}
+
+/** The slice of pi's `Agent` that {@link keepLoopToolsFresh} touches. */
+export interface PiLoopAgent {
+  prepareNextTurn?: (
+    signal?: AbortSignal,
+  ) =>
+    | import("@earendil-works/pi-agent-core").AgentLoopTurnUpdate
+    | undefined
+    | Promise<import("@earendil-works/pi-agent-core").AgentLoopTurnUpdate | undefined>;
+  readonly state: Pick<
+    import("@earendil-works/pi-agent-core").AgentState,
+    "systemPrompt" | "messages" | "tools"
+  >;
+}
 
 const LOCAL_FILE_TOOL_NAMES = ["read", "write", "grep", "find", "ls"] as const;
 
@@ -1720,6 +1887,8 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     fastMaxActiveTools,
     resumedFromHandoff,
     handoff,
+    gracefulInterrupt,
+    awakening,
   } = opts;
   let lastHandoffTurn = 0;
   const recordHandoffBoundary = (turn: number): void => {
@@ -1902,13 +2071,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
 
   const fastCatalogNameSet = new Set(fastToolCatalogNames ?? []);
   const fastActiveToolBudget = Math.max(0, fastMaxActiveTools ?? fastCatalogNameSet.size);
+  // A non-empty catalog is the trigger — not fast mode. Fast mode always has a
+  // catalog, so its behavior is unchanged; a non-fast run now gets the same
+  // lazy machinery whenever run.ts hands it catalogued tools (presentation
+  // cards today). An agent with no catalogued tools takes neither branch and is
+  // byte-identical to before.
   const restoredFastActiveToolSet =
-    fastMode && fastCatalogNameSet.size > 0
+    fastCatalogNameSet.size > 0
       ? latestFastModeActiveToolSet(sessionManager)
           .filter((name) => fastCatalogNameSet.has(name))
       : [];
-  if (fastMode && restoredFastActiveToolSet.length > fastActiveToolBudget) {
-    log.warn(`[agent] fast mode restored activeToolSet=${restoredFastActiveToolSet.length} exceeds current budget=${fastActiveToolBudget}; grandfathering restored tools and capping only new loads`);
+  if (restoredFastActiveToolSet.length > fastActiveToolBudget) {
+    log.warn(`[agent] tool catalog: restored activeToolSet=${restoredFastActiveToolSet.length} exceeds current budget=${fastActiveToolBudget}; grandfathering restored tools and capping only new loads`);
   }
 
   // When the caller supplies a persona prompt, hand it to pi as `systemPrompt`
@@ -2013,6 +2187,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const credEffort = effectiveProviderConfig?.reasoningEffort;
   const credEffortValid =
     credEffort === "low" || credEffort === "medium" || credEffort === "high";
+  let thinkingSource: DebugThinkingConfiguration["source"] = modelSettings?.thinkingLevel
+    ? "agent_model_settings"
+    : credEffortValid
+      ? "provider_credential"
+      : provider === "codex"
+        ? "codex_default"
+        : "server_default";
   let effectiveThinking: SessionThinkingLevel = modelSettings?.thinkingLevel
     ? (modelSettings.thinkingLevel as SessionThinkingLevel)
     : credEffortValid
@@ -2023,6 +2204,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   if (modelSettings?.temperature !== undefined && effectiveThinking !== "off") {
     log.info(`[agent] modelSettings.temperature=${modelSettings.temperature} set — forcing thinkingLevel off (was ${effectiveThinking})`);
     effectiveThinking = "off";
+    thinkingSource = "temperature_override";
   }
   // SECURITY (cross-session read): pi's built-in read/write/grep/find/ls are
   // NOT confined to cwd. `createReadTool(cwd)` uses cwd only as the default base
@@ -2097,8 +2279,20 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     : allCustomTools;
 
   const { session } = await createAgentSession(options);
+  const debugThinking: DebugThinkingConfiguration = {
+    requestedLevel: effectiveThinking,
+    effectiveLevel: session.thinkingLevel,
+    source: thinkingSource,
+    modelSupportsReasoning: model.reasoning,
+    wireMode: describeThinkingWireMode(model, session.thinkingLevel),
+  };
+  log.info(
+    `[agent] Thinking configuration: requested=${debugThinking.requestedLevel} ` +
+    `effective=${debugThinking.effectiveLevel} source=${debugThinking.source} ` +
+    `wire=${debugThinking.wireMode}`,
+  );
 
-  if (fastMode && fastToolController && fastCatalogNameSet.size > 0) {
+  if (fastToolController && fastCatalogNameSet.size > 0) {
     const activeSet = new Set(restoredFastActiveToolSet);
     const baseActiveToolNames = [
       ...builtinAllow,
@@ -2106,6 +2300,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       ...activeSet,
     ];
     session.setActiveToolsByName([...new Set(baseActiveToolNames)]);
+    keepLoopToolsFresh(session.agent);
     fastToolController.getActiveToolSet = () => [...activeSet];
     fastToolController.loadTools = async (names: string[]) => {
       const maxActiveTools = fastActiveToolBudget;
@@ -2144,7 +2339,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         maxActiveTools,
       };
     };
-    log.info(`[agent] fast mode activeToolSet restored=${activeSet.size} catalog=${fastCatalogNameSet.size}`);
+    log.info(`[agent] tool catalog: activeToolSet restored=${activeSet.size} catalog=${fastCatalogNameSet.size}`);
   }
 
   // Per-agent temperature: CreateAgentSessionOptions has no temperature knob,
@@ -2157,7 +2352,40 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       baseStreamFn(streamModel, streamContext, { ...(streamOptions ?? {}), temperature });
     log.info(`[agent] Applying per-agent temperature: ${temperature}`);
   }
+  // Provider fast mode (modelSettings.speed = "fast"): same credential, same
+  // model, Anthropic's faster tier. Gated to direct-Anthropic Opus 5 / 4.8 —
+  // see model-speed.ts for why it must never reach an ineligible provider.
+  const debugSpeed: DebugSpeedConfiguration | undefined = modelSettings?.speed
+    ? modelSettings.speed === "fast"
+      ? { requested: "fast", ...installFastMode(session.agent, model) }
+      : { requested: "standard", applied: false, reason: "standard speed requested" }
+    : undefined;
   installLlmCallMetrics(session.agent, sessionId ?? conversationId ?? "unknown", { fastMode: fastMode === true });
+
+  if (gracefulInterrupt) {
+    gracefulInterrupt.registerSummaryRequest(async () => {
+      const summaryInstruction = [
+        "[System Interrupt]",
+        "The user has sent a newer prompt while this run is still active.",
+        "Stop starting new work and do not call more tools unless one is already in flight and unavoidable.",
+        "Reply now with a concise summary of the work completed so far, including useful state, tools used, and any important caveats.",
+        "This run will end after that summary, and the newer user prompt will be handled next.",
+      ].join("\n");
+      try {
+        const liveSession = session as AgentSession & { sendUserMessage?: AgentSession["sendUserMessage"] };
+        if (typeof liveSession.sendUserMessage === "function") {
+          await liveSession.sendUserMessage(summaryInstruction, { deliverAs: "steer" });
+        } else {
+          await session.prompt(summaryInstruction, { streamingBehavior: "steer", expandPromptTemplates: false });
+        }
+        log.info(`[agent] Graceful interrupt summary steer queued (session=${sessionId ?? conversationId ?? "unknown"})`);
+        return true;
+      } catch (err) {
+        log.warn(`[agent] Graceful interrupt summary steer failed: ${err instanceof Error ? err.message : String(err)}`);
+        return false;
+      }
+    });
+  }
 
   // Mid-turn compaction: pi compacts AFTER an assistant message but doesn't
   // check the tool_result that just landed and goes into the NEXT prompt. The
@@ -2172,6 +2400,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const toolBudget = installToolBudget(session.agent, {
     sessionId: sessionId ?? conversationId ?? "unknown",
   });
+
+  // Awakened runs pull new events in at turn boundaries so the agent can adapt
+  // mid-task. Installed after the tool budget so both hooks chain (each wraps
+  // the previous beforeToolCall rather than replacing it).
+  if (awakening?.injectEnabled && sessionId) {
+    installAwakeningInbox(session.agent, { sessionId });
+  }
 
   // verifyResponses: wire the submit-response tool's evidence accessor to the
   // live transcript. Set BEFORE any prompt so the tool — which verifies inside
@@ -2202,6 +2437,15 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const tokenUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let streamedText = "";
   let streamedReasoning = "";
+  // Detail of the most recent assistant turn that ended in a provider error
+  // (stopReason "error") with the SDK's own auto-retries already exhausted.
+  // Reset to null whenever a later turn ends cleanly, so a mid-run blip the
+  // model recovered from is ignored. Consulted once, just before the success
+  // return: a run that produced NOTHING usable and ended here is re-surfaced as
+  // a ProviderTerminalError (fallback-eligible) rather than swallowed as a
+  // "successful" empty completion — otherwise it dead-ends on this provider
+  // instead of advancing to the configured fallback. See ProviderTerminalError.
+  let lastTurnErrorDetail: string | null = null;
   const debugEvents: DebugEventRecord[] = [];
   let debugSeq = 0;
   // Set once the success-path debug write (near the end of the agent loop) has
@@ -2337,6 +2581,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userName ? { userName } : {}),
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
+        model: model.id,
+        thinking: debugThinking,
+        ...(debugSpeed ? { speed: debugSpeed } : {}),
         inProgress: true,
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
@@ -2473,6 +2720,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     ...(progressMeta?.agentSlug ? { agentSlug: progressMeta.agentSlug } : {}),
     userId,
     provider,
+    model: model.id,
+    thinking: debugThinking,
+    ...(debugSpeed ? { speed: debugSpeed } : {}),
     task,
     context: context ?? null,
     systemPromptOverride: Boolean(systemPromptOverride),
@@ -2539,7 +2789,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // Tools can legitimately run for minutes — pause the stall watchdog so a
       // slow tool isn't mistaken for a hung model.
       modelActive = false;
-      log.info(`[agent] Tool call: ${event.toolName} args=${JSON.stringify(event.args ?? {}).slice(0, 200)}`);
+      log.info(`[agent] Tool call: ${event.toolName} argCount=${Object.keys(event.args ?? {}).length} argKeys=[${Object.keys(event.args ?? {}).join(",")}]`);
       inflightCalls.set(event.toolCallId, { toolName: event.toolName, args: event.args, startedAt: Date.now() });
       pushDebugEvent("tool_execution_start", {
         toolName: event.toolName,
@@ -2746,6 +2996,17 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         // + single-flight) and keep the conversation lock alive, so a pod death
         // mid-run loses ≈one turn, not the whole conversation.
         const stopReason = (msg as { stopReason?: string }).stopReason;
+        // Track a terminal provider-error turn (the SDK already exhausted its own
+        // auto-retries, so this is what it hands back). A clean turn (tool_use or
+        // a normal end) means the model recovered → clear it. "aborted" is a stop
+        // (user/handoff), neither recovery nor a provider error → leave as-is.
+        if (stopReason === "error") {
+          lastTurnErrorDetail =
+            (msg as { errorMessage?: string }).errorMessage ??
+            "model returned stopReason=error";
+        } else if (stopReason !== "aborted") {
+          lastTurnErrorDetail = null;
+        }
         if (conversationId) {
           scheduleSessionCheckpoint(conversationId);
           void refreshSessionLock(conversationId);
@@ -3418,6 +3679,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         ...(userName ? { userName } : {}),
         ...(userEmail ? { userEmail } : {}),
         ...(provider ? { provider } : {}),
+        model: model.id,
+        thinking: debugThinking,
+        ...(debugSpeed ? { speed: debugSpeed } : {}),
         startedAt: debugStartedIso,
         finishedAt: new Date().toISOString(),
         task,
@@ -3533,6 +3797,24 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const sessionClfTokens = extractSessionClfTokens(
     (session as unknown as { messages?: unknown }).messages,
   );
+  // A run that produced NOTHING usable and ended on a terminal provider error
+  // (SDK auto-retries exhausted) must fall back to the next provider, exactly
+  // like a stall — throw a fallback-eligible ProviderTerminalError instead of
+  // returning an empty "success" that dead-ends here. Guard on empty text AND no
+  // structured/twin delivery so real output is never discarded. See
+  // lastTurnErrorDetail / ProviderTerminalError.
+  if (
+    lastTurnErrorDetail &&
+    !text.trim() &&
+    structuredOutputRef?.value === undefined &&
+    twinDeliverRef?.value === undefined
+  ) {
+    metric.count("agent_terminal_provider_error", {
+      provider: provider ?? "spaces",
+      agentSlug: progressMeta?.agentSlug ?? "unknown",
+    });
+    throw new ProviderTerminalError(provider ?? "spaces", lastTurnErrorDetail);
+  }
   return { text, toolsUsed, toolInvocations, tokenUsage, latency: latencyMetrics, sessionClfTokens, ...(streamedReasoning ? { reasoning: streamedReasoning } : {}), ...(twinDeliverRef?.value !== undefined ? { twinDelivery: twinDeliverRef.value } : {}) };
   } finally {
     // Always stop the progress reporter's keep-alive timer so it doesn't keep
@@ -3574,6 +3856,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           ...(userName ? { userName } : {}),
           ...(userEmail ? { userEmail } : {}),
           ...(provider ? { provider } : {}),
+          model: model.id,
+          thinking: debugThinking,
+          ...(debugSpeed ? { speed: debugSpeed } : {}),
           cancelled: true,
           startedAt: debugStartedIso,
           finishedAt: new Date().toISOString(),

@@ -76,7 +76,11 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
         {/* Header */}
         <div className='flex items-center justify-between px-6 py-4 border-b'>
           <h2 className='text-lg font-semibold'>Add emoji</h2>
-          <button onClick={onClose}>
+          <button
+            onClick={onClose}
+            data-track-category='EDITOR_TOOLBAR'
+            data-track-name='CLOSE_EMOJI_PICKER'
+          >
             <X className='h-5 w-5 text-muted-foreground hover:text-foreground' />
           </button>
         </div>
@@ -138,6 +142,8 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
         <div className='flex justify-end gap-3 px-6 py-4 border-t'>
           <button
             onClick={onClose}
+            data-track-category='EDITOR_TOOLBAR'
+            data-track-name='CANCEL_ADD_CUSTOM_EMOJI'
             disabled={isLoading}
             className='px-4 py-2 rounded hover:bg-accent disabled:opacity-40'
           >
@@ -145,6 +151,8 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
           </button>
           <button
             onClick={handleSave}
+            data-track-category='EDITOR_TOOLBAR'
+            data-track-name='SAVE_CUSTOM_EMOJI'
             disabled={!file || !name || isLoading}
             className='px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-40'
           >
@@ -195,6 +203,8 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       type='button'
       disabled={disabled}
       onClick={() => setEmojiOpen(true)}
+      data-track-category='EDITOR_TOOLBAR'
+      data-track-name='OPEN_EMOJI_PICKER'
       className={`p-1.5 rounded hover:bg-accent ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       aria-label='Insert emoji'
       data-testid='insert-emoji-btn'
@@ -254,6 +264,8 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
                 setShowAddEmoji(true);
                 setUploadError(undefined);
               }}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='START_ADD_CUSTOM_EMOJI'
             >
               Add Emoji
             </button>

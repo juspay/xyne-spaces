@@ -21,7 +21,7 @@ import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("memory-file-tools");
 
-const MAX_WRITE_CHARS = 10_000;
+const MAX_WRITE_CHARS = 20_000;
 
 function s2sHeaders(userId: string): Record<string, string> {
   return {

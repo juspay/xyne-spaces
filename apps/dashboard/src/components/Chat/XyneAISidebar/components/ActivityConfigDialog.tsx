@@ -90,6 +90,8 @@ export const ActivityConfigDialog = ({
           </h2>
           <button
             onClick={onClose}
+            data-track-category='XYNE_AI_SIDEBAR'
+            data-track-name='CLOSE_ACTIVITY_CONFIG'
             className='p-1 hover:bg-accent rounded transition-colors'
             type='button'
           >
@@ -138,6 +140,8 @@ export const ActivityConfigDialog = ({
               id='blacklist'
               checked={isBlacklisted}
               onChange={e => handleBlacklistChange(e.target.checked)}
+              data-track-category='XYNE_AI_SIDEBAR'
+              data-track-name='TOGGLE_ACTIVITY_BLACKLIST'
               className='w-4 h-4 text-destructive border-border rounded focus:ring-destructive/20'
             />
             <label htmlFor='blacklist' className='flex-1 text-sm text-destructive cursor-pointer'>
@@ -210,6 +214,8 @@ export const ActivityConfigDialog = ({
         <div className='flex justify-end gap-2 px-4 py-3 border-t border-border bg-muted'>
           <button
             onClick={onClose}
+            data-track-category='XYNE_AI_SIDEBAR'
+            data-track-name='CANCEL_ACTIVITY_CONFIG'
             className='px-4 py-2 text-sm font-medium text-muted-foreground bg-background border border-border rounded-md hover:bg-muted transition-colors'
             type='button'
           >
@@ -217,6 +223,8 @@ export const ActivityConfigDialog = ({
           </button>
           <button
             onClick={handleSave}
+            data-track-category='XYNE_AI_SIDEBAR'
+            data-track-name='SAVE_ACTIVITY_CONFIG'
             className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary rounded-md hover:bg-action-primary/90 transition-colors'
             type='button'
           >

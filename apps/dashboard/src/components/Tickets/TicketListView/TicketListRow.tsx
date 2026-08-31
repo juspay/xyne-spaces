@@ -1,5 +1,6 @@
 import { MouseEvent, ReactElement, useMemo } from 'react';
-import { Sparkles, Pencil, Wand2, Loader2 } from 'lucide-react';
+import { Wand2 } from 'lucide-react';
+import { SparkleAi02 as Sparkles, PencilEdit as Pencil, Spinner as Loader2 } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { findEmailAddress, parseFirstEmailAddress } from '../../../utils/emailAddress';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';

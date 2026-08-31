@@ -17,9 +17,11 @@
  */
 
 import { Readability } from "@mozilla/readability";
+import { errMsg } from "../../lib/errors.js";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
+import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("webfetch");
@@ -174,15 +176,36 @@ export async function handleWebfetch(
   }
 
   try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(fetchTimeoutMs),
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-        Accept: "text/html, text/plain;q=0.9, */*;q=0.1",
-      },
-      redirect: "follow",
-    });
+    const MAX_FETCH_REDIRECTS = 5;
+    let currentUrl = url;
+    let redirectCount = 0;
+    let response: Response;
+    for (;;) {
+      await assertSafeOutboundUrl(currentUrl);
+      response = await fetch(currentUrl, {
+        signal: AbortSignal.timeout(fetchTimeoutMs),
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+          Accept: "text/html, text/plain;q=0.9, */*;q=0.1",
+        },
+        redirect: "manual",
+      });
+
+      const status = response.status;
+      if (status === 301 || status === 302 || status === 303 || status === 307 || status === 308) {
+        const location = response.headers.get("location");
+        if (!location) break;
+        redirectCount += 1;
+        if (redirectCount > MAX_FETCH_REDIRECTS) {
+          return "Error: Fetch failed: too many redirects";
+        }
+        await response.body?.cancel().catch(() => undefined);
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
+      }
+      break;
+    }
 
     if (!response.ok) {
       return `Error: Fetch failed: ${response.status} ${response.statusText}`;
@@ -237,6 +260,6 @@ export async function handleWebfetch(
     }
     return markdown;
   } catch (e) {
-    return `Error: Webfetch failed: ${e instanceof Error ? e.message : String(e)}`;
+    return `Error: Webfetch failed: ${errMsg(e)}`;
   }
 }

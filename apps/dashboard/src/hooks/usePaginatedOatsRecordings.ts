@@ -17,6 +17,14 @@ const refreshListeners = new Set<() => void>();
 export function refreshOatsRecordings(): void {
   for (const listener of refreshListeners) listener();
 }
+
+type LabelsPatchListener = (recordingId: string, labels: string[]) => void;
+const labelsPatchListeners = new Set<LabelsPatchListener>();
+
+/** Patch one recording's labels in every mounted list in place, without a full refetch. */
+export function patchOatsRecordingLabels(recordingId: string, labels: string[]): void {
+  for (const listener of labelsPatchListeners) listener(recordingId, labels);
+}
 type RecordingCursor = { id: string; startedAt: number } | null;
 type OatsRecordingQuery =
   | ReturnType<typeof queries.createdOatsRecordings>
@@ -94,6 +102,22 @@ export function usePaginatedOatsRecordings(
       refreshListeners.delete(refreshRecordings);
     };
   }, [refreshRecordings]);
+
+  // Patches one row's labels in place so a label action doesn't force
+  // the full-list refetch that resets scroll position and pagination
+  useEffect(() => {
+    const listener: LabelsPatchListener = (recordingId, labels) => {
+      setRecordings(current =>
+        current.map(recording =>
+          recording.id === recordingId ? { ...recording, labels } : recording,
+        ),
+      );
+    };
+    labelsPatchListeners.add(listener);
+    return (): void => {
+      labelsPatchListeners.delete(listener);
+    };
+  }, []);
 
   return {
     recordings,

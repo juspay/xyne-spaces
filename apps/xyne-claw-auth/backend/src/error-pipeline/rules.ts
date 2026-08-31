@@ -1,4 +1,5 @@
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("error-pipeline");
@@ -25,7 +26,7 @@ function compileMarkers(src: string): RegExp | null {
   try {
     return new RegExp(src);
   } catch (err) {
-    log.error(`[rules] invalid regex in DB (skipped): ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`[rules] invalid regex in DB (skipped): ${errMsg(err)}`);
     return null;
   }
 }
@@ -67,7 +68,7 @@ export async function getRules(): Promise<CompiledBucket[] | null> {
     }));
     fetchedAt = Date.now();
   } catch (err) {
-    log.warn(`[rules] DB read failed (${err instanceof Error ? err.message : String(err)}) — keeping previous rules`);
+    log.warn(`[rules] DB read failed (${errMsg(err)}) — keeping previous rules`);
     fetchedAt = Date.now(); // back off — don't hammer a down DB per error
   }
   return cached;

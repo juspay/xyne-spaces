@@ -3,7 +3,6 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type TouchEvent as ReactTouchEvent,
-  useRef,
   useState,
 } from 'react';
 import { format } from 'date-fns';
@@ -18,6 +17,7 @@ import {
   type RecordingTicketLinkState,
 } from '../../../services/Recording/recordingService';
 import { logRecordingError, type RecordingTitleState } from '../../../utils/recordingUtils';
+import { useApplyRecordingLabelsChange } from '../../../hooks/useResolvedRecordingLabels';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
 import { RecordingParticipants } from './RecordingParticipants';
@@ -111,7 +111,7 @@ export const RecordingDetailV2Header = ({
 }: RecordingDetailV2HeaderProps): ReactElement => {
   const currentUser = useSelf();
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
-  const labelsUpdateSeqRef = useRef(0);
+  const applyLabelsChange = useApplyRecordingLabelsChange(onLabelsUpdated);
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
   const isOwner = recording.createdByUserId === currentUser?.id;
@@ -148,19 +148,8 @@ export const RecordingDetailV2Header = ({
     .filter(Boolean)
     .join(' · ');
 
-  /** Labels apply optimistically and roll back if the recording rejects the write. */
   const handleLabelsChange = async (labels: string[]): Promise<void> => {
-    const previousLabels = recording.labels ?? [];
-    const seq = ++labelsUpdateSeqRef.current;
-    onLabelsUpdated(labels);
-
-    try {
-      await recordingService.updateRecording(recording.externalId, { labels });
-    } catch (err) {
-      logRecordingError('RecordingDetailV2Header.updateLabels', err);
-      toast.error('Failed to update labels');
-      if (labelsUpdateSeqRef.current === seq) onLabelsUpdated(previousLabels);
-    }
+    await applyLabelsChange(recording.externalId, labels, 'RecordingDetailV2Header.updateLabels');
   };
 
   /**

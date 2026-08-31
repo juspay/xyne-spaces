@@ -90,7 +90,7 @@ model User {
 /// memories (semantic recall), these are named documents fetched deterministically
 /// by key — e.g. the Digital Twin's `soul.md` (always-loaded persona), `people.md`,
 /// `projects.md`. Up to 3 per (agent,user) may be flagged loadInPrompt, each
-/// ≤ 10k chars, and are injected verbatim into the agent's system prompt so it
+/// ≤ 20k chars, and are injected verbatim into the agent's system prompt so it
 /// works well with zero tool calls. For the twin these are compiled by the soul
 /// synthesizer from approved facts, editable by the user, and writable by the
 /// agent mid-chat. userId NULL = shared across all users of that agent.
@@ -104,7 +104,7 @@ model AgentMemoryFile {
   user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// Stable name / key, unique per (agent, user). Ends in `.md` by convention.
   name         String
-  /// Verbatim document content (≤ 10k chars, enforced in the app layer).
+  /// Verbatim document content (≤ 20k chars, enforced in the app layer).
   content      String   @default("")
   /// User-toggleable: inject this file into the agent's system prompt. At most
   /// 3 per (agent, user) may be true (enforced in the app layer).
@@ -957,6 +957,7 @@ model AgentDelegationGrant {
   approvedByUserId String?
   approvedAt       DateTime?
   createdByUserId  String?
+  requestReason    String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -1130,6 +1131,13 @@ model ChatMessage {
   /// The UI projects one selected path; siblings are reachable via the pager.
   parentId       String?
 
+  /// The context the user attached to THIS turn (channels, tickets, canvases,
+  /// calls, collections, files) as a normalized AttachedContextRef[] — the same
+  /// list that drove the run. Persisted so the pills can be shown read-only
+  /// above the message when a chat is reloaded. Null on assistant rows and on
+  /// legacy rows written before this column existed.
+  attachedContext Json?
+
   attachments ChatAttachment[]
   orgId       String
 
@@ -1154,7 +1162,7 @@ model ChatAttachment {
   metadata         Json?
   createdAt        DateTime @default(now())
 
-  chatMessage ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
+  chatMessage  ChatMessage?          @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
   designShares DesignArtifactShare[]
 
   @@index([chatMessageId])
@@ -1300,8 +1308,8 @@ model ArtifactAppAgentRun {
 /// verification; its encrypted copy exists so
 /// the owner can reopen the Share dialog without rotating a live link.
 model DesignArtifactShare {
-  id              String   @id @default(cuid())
-  tokenHash       String   @unique
+  id              String    @id @default(cuid())
+  tokenHash       String    @unique
   tokenCiphertext String
   tokenIv         String
   tokenAuthTag    String
@@ -1312,10 +1320,10 @@ model DesignArtifactShare {
   title           String
   expiresAt       DateTime?
   revokedAt       DateTime?
-  viewCount       Int      @default(0)
+  viewCount       Int       @default(0)
   lastViewedAt    DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   attachment ChatAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
 
@@ -1416,6 +1424,12 @@ enum AgentAuditEvent {
   PROVIDER_CREDENTIAL_UNBOUND
   PROVIDER_CREDENTIAL_ADOPTED
   PROVIDER_CREDENTIAL_DELETED
+  // Agent-authoring tools (create/update-subagent, create-mcp). Added by
+  // migration 20260818090000_agent_authoring_audit_events (ALTER TYPE ADD
+  // VALUE) — kept here so a fresh `prisma generate` accepts them.
+  SUBAGENT_CREATED
+  SUBAGENT_UPDATED
+  MCP_SERVER_CREATED
 }
 
 model AgentAuditLog {
@@ -1581,6 +1595,8 @@ model McpServer {
   healthcheckSpec      Json?
   writeToolPolicy      Json?
   connectorMeta        Json?
+  /// Explicitly marks if this connector requires an OAuth browser flow.
+  isOauth              Boolean                   @default(false)
   /// Whether this server type can fall back to admin-managed global
   /// credentials when a user has no personal connection. Off by default —
   /// admins must opt-in per server (e.g. enable it for shared infra creds
@@ -2006,43 +2022,43 @@ model ActiveGoal {
 }
 
 model ExperimentRun {
-  id                String              @id @default(cuid())
-  conversationId    String
-  channelId         String
-  agentSlug         String
-  userId            String
-  orgId             String
-  focus             String?
+  id                 String              @id @default(cuid())
+  conversationId     String
+  channelId          String
+  agentSlug          String
+  userId             String
+  orgId              String
+  focus              String?
   /// Per-experiment LLM pin, forwarded as providerOverride on every epoch
   /// dispatch. NULL = the agent's normal provider resolution.
-  provider          String?
-  modelId           String?
+  provider           String?
+  modelId            String?
   /// "experiment" (default proof-reward loop) or "understanding" (coverage-gated:
   /// end-experiment stays locked until the open-conjecture frontier is exhausted).
   /// Persisted per-run so EVERY epoch dispatch forwards it, not just the first.
-  kind              String              @default("experiment")
-  status            String              @default("running") /// running | finishing | done | aborted
-  epoch             Int                 @default(1)
-  deadlineAt        DateTime
-  currentHypothesis String?             @db.Text
-  currentSessionId  String?
-  lastEpochEndedAt  DateTime?
-  sandboxNote       String?
+  kind               String              @default("experiment")
+  status             String              @default("running") /// running | finishing | done | aborted
+  epoch              Int                 @default(1)
+  deadlineAt         DateTime
+  currentHypothesis  String?             @db.Text
+  currentSessionId   String?
+  lastEpochEndedAt   DateTime?
+  sandboxNote        String?
   /// Basenames of files the agent actually delivered to the thread via
   /// sandbox-deliver-files. A finding may only be marked `proved` if its
   /// proofArtifactPath resolves to one of these — proof left behind in a
   /// sandbox dies with the sandbox and is worthless to a human reader.
-  deliveredArtifacts String[]           @default([])
+  deliveredArtifacts String[]            @default([])
   /// Sessions of in-flight CHECKER runs. Checkers deliberately never claim
   /// currentSessionId (that would make the epoch handoff chain off their
   /// completion), which also meant `/experiment stop` could not reach them —
   /// a stopped run kept emitting checker output into the thread.
-  checkerSessionIds  String[]           @default([])
-  finalReport       String?             @db.Text
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  findings          ExperimentFinding[]
-  reviews           ExperimentReview[]
+  checkerSessionIds  String[]            @default([])
+  finalReport        String?             @db.Text
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  findings           ExperimentFinding[]
+  reviews            ExperimentReview[]
 
   @@index([conversationId, status])
   @@map("experiment_runs")
@@ -2050,17 +2066,17 @@ model ExperimentRun {
 
 // workspace-check:ignore — tenant scope inherited via experimentId -> ExperimentRun.orgId (FK, onDelete: Cascade); never queried cross-tenant.
 model ExperimentFinding {
-  id                String        @id @default(cuid())
+  id                String             @id @default(cuid())
   experimentId      String
-  experiment        ExperimentRun @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  experiment        ExperimentRun      @relation(fields: [experimentId], references: [id], onDelete: Cascade)
   epoch             Int
   status            String /// conjecture | proved | refuted
   title             String
-  hypothesis        String        @db.Text
-  note              String?       @db.Text
+  hypothesis        String             @db.Text
+  note              String?            @db.Text
   proofArtifactPath String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   reviews           ExperimentReview[]
 
   @@index([experimentId])
@@ -2516,4 +2532,113 @@ model EntityExtractionRun {
   @@index([workspaceId, channelId, status])
   @@index([workspaceId, status])
   @@map("entity_extraction_runs")
+}
+
+/// Scheduler state for an awakened agent — an agent that wakes on its own
+/// (periodic heartbeat, or a reflex fired by accumulated events) instead of
+/// waiting for a human to trigger it.
+///
+/// This table holds ONLY what the tick loop must index-scan. Every tunable
+/// knob lives in `agents.config.awakening` (JSON) instead, so the existing
+/// PUT /agents/:slug write path, its ACL and its audit diff keep working
+/// unchanged. The split matters: Postgres cannot index-scan JSON, and the
+/// claim query below runs every tick for every org.
+///
+/// `watermarkAt` is the exactly-once seam. It advances only after a window is
+/// successfully sealed, never rewinds (see awakening/cursor.ts), and is the
+/// sole source of truth for "what has this agent already seen".
+model AgentAwakeningState {
+  id      String @id @default(cuid())
+  agentId String @unique
+  orgId   String
+
+  enabled    Boolean   @default(false)
+  /// Wall-clock the tick loop compares against. Claimed with FOR UPDATE SKIP
+  /// LOCKED so N pods can run the same tick without double-firing an agent.
+  nextDueAt  DateTime
+  lastTickAt DateTime?
+
+  /// Exclusive upper bound of the last sealed window. The next window is
+  /// (watermarkAt, now - replicaSafetyMs].
+  watermarkAt        DateTime
+  /// Tie-breaker for events sharing watermarkAt to the millisecond.
+  watermarkMessageId String?
+
+  /// Backoff state. A failed window increments this and pushes nextDueAt out
+  /// exponentially; the first success resets it. This is the whole circuit
+  /// breaker — no separate state machine.
+  consecutiveFailures Int     @default(0)
+  consecutiveSkips    Int     @default(0)
+  lastError           String? @db.Text
+
+  /// Reflex cadence, tracked separately from the heartbeat.
+  ///
+  /// A reflex checks far more often than a heartbeat (a cheap COUNT, not a
+  /// window collect) and fires only once enough events have piled up. It keeps
+  /// its OWN watermark on purpose: the two wake kinds are meant to see the same
+  /// events for different reasons — the reflex reacts fast and shallow, the
+  /// heartbeat later synthesises the whole period AND reads what the reflexes
+  /// already did (requirement 7). Sharing one watermark would let a reflex
+  /// consume events the heartbeat then never sees.
+  reflexNextCheckAt  DateTime?
+  reflexWatermarkAt  DateTime?
+  /// Last time a reflex actually dispatched — enforces the minimum gap between
+  /// reflex runs so a busy channel cannot fire one every check.
+  reflexLastRunAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The only hot query: the per-tick claim scan.
+  @@index([enabled, nextDueAt])
+  /// The reflex claim scan — same shape, different cadence.
+  @@index([enabled, reflexNextCheckAt])
+  @@index([orgId])
+  @@map("agent_awakening_state")
+}
+
+/// One row per wake attempt, whether or not it dispatched a run.
+///
+/// Serves three jobs at once: the idempotency guard (`idempotencyKey`), the
+/// admin health view (outcome/skipReason/signals), and requirement 7 — a
+/// heartbeat reads the reflex runs whose window OVERLAPS its own so it does
+/// not redo work that already happened. Overlap, not containment: a reflex
+/// that started before the window and ran into it consumed events this
+/// heartbeat is about to see.
+model AgentAwakeningRun {
+  id      String @id @default(cuid())
+  agentId String
+  orgId   String
+
+  /// "heartbeat" | "reflex". Plain String — Postgres enums are frozen
+  /// repo-wide (scripts/validate-no-new-enums.sh).
+  kind String
+
+  /// Window bounds as epoch millis. BigInt so a JS Date round-trip cannot
+  /// silently lose precision on the overlap query.
+  windowStartMs BigInt
+  windowEndMs   BigInt
+
+  /// "ran" | "skipped" | "failed" | "shadow"
+  outcome    String
+  /// Populated when outcome = "skipped": which gate rule fired.
+  skipReason String?
+
+  eventCount Int   @default(0)
+  /// Denormalized signal counts the gate decided on — what an operator needs
+  /// to answer "why did/didn't it wake" without re-deriving the window.
+  signals    Json?
+
+  sessionId      String?
+  idempotencyKey String  @unique
+  artifactUri    String?
+  injectionsUsed Int     @default(0)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  /// Requirement 7: overlap lookup for a heartbeat reading prior reflexes.
+  @@index([agentId, windowStartMs])
+  @@index([orgId, startedAt])
+  @@map("agent_awakening_runs")
 }

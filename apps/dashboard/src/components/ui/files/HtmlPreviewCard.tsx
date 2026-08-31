@@ -142,6 +142,8 @@ export const HtmlPreviewCard: React.FC<HtmlPreviewCardProps> = ({
         className,
       )}
       onClick={onOpen}
+      data-track-category='MESSAGE_ATTACHMENT'
+      data-track-name='OPEN_HTML_PREVIEW'
       role='button'
       tabIndex={0}
       onKeyDown={e => {
@@ -231,6 +233,8 @@ export const HtmlPreviewCard: React.FC<HtmlPreviewCardProps> = ({
             e.stopPropagation();
             onOpen();
           }}
+          data-track-category='MESSAGE_ATTACHMENT'
+          data-track-name='OPEN_HTML_PREVIEW'
           className='flex shrink-0 items-center justify-center rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
           title='Open preview'
           aria-label={`Open ${fileName}`}

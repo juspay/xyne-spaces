@@ -1,4 +1,5 @@
 import type { ToolOutput as GeniusToolOutput } from '../../../../types/toolOutput';
+import type { AttachedContextItem } from '../components/ContextPickerPanel';
 
 // ============================================================================
 // Input context snapshot
@@ -491,6 +492,10 @@ export interface Message {
   traceId?: string; // Langfuse trace ID for feedback
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
   attachments?: MessageAttachment[]; // Attachments sent with the message
+  /** Context pills (channels/tickets/canvases/calls) the user attached to THIS
+   *  turn. Persisted per user message in claw-auth and shown read-only above the
+   *  message on reload. Set only on user messages. */
+  attachedContext?: AttachedContextItem[];
   userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts

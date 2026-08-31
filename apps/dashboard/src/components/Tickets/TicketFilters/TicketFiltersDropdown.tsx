@@ -13,22 +13,22 @@ import {
   BaseTicketType,
 } from '@xyne/shared';
 import {
-  ListFilter,
+  FilterLines as ListFilter,
   ChevronRight,
-  BarChart3,
-  User,
-  Users,
-  Calendar,
+  BarchartDefault as BarChart3,
+  UserDefault as User,
+  UserTwo as Users,
+  CalendarDefault as Calendar,
   ChevronDown,
-  BarChart4Icon,
-  Search,
+  BarchartDefault as BarChart4Icon,
+  SearchDefault as Search,
   Tag,
-  Hash,
-  X,
+  Hashtag as Hash,
+  MultipleCrossCancelDefault as X,
   Circle,
-  Loader2,
-  Layers,
-} from 'lucide-react';
+  Spinner as Loader2,
+  LayerTwo as Layers,
+} from '@xyne/icons';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { Button } from '../../ui/Button';

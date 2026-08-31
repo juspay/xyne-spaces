@@ -84,12 +84,21 @@ export const UploadModal = ({
       description='Attach a markdown file (e.g. an “about me”, working preferences, project context). The curator extracts candidate memories and adds them under the Documents cluster for your review.'
       footer={
         <>
-          <Button variant='ghost' size='sm' onClick={close} disabled={uploadMutation.isPending}>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={close}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_DIGITAL_TWIN_UPLOAD'
+            disabled={uploadMutation.isPending}
+          >
             Cancel
           </Button>
           <Button
             size='sm'
             onClick={submit}
+            data-track-category='Claw Agents'
+            data-track-name='UPLOAD_DIGITAL_TWIN_FILE'
             loading={uploadMutation.isPending}
             disabled={!filename || !content.trim()}
           >

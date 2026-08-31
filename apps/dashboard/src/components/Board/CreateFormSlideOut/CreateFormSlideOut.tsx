@@ -74,6 +74,8 @@ const SelectDropdown = ({
           <DropdownMenuItem
             key={option.value}
             onClick={() => onChange(option.value)}
+            data-track-category='board_config'
+            data-track-name='SELECT_FORM_OPTION'
             className={value === option.value ? 'bg-muted font-medium' : ''}
           >
             {option.label}
@@ -1013,6 +1015,8 @@ export const CreateFormSlideOut = ({
           )}
           <Button
             onClick={() => void handleSave()}
+            data-track-category='board_config'
+            data-track-name='SAVE_FORM'
             disabled={!isValid || isSubmitting}
             className='w-full bg-[#6276be] hover:bg-[#5060a0] disabled:bg-[#c9cccf] disabled:cursor-not-allowed text-white rounded-[8px] py-[6px] text-[13px] font-medium'
           >

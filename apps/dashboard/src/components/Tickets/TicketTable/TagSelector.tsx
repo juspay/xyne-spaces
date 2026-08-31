@@ -1,6 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { Check, X, Plus } from 'lucide-react';
+import {
+  CheckTickSingle as Check,
+  MultipleCrossCancelDefault as X,
+  PlusDefault as Plus,
+} from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 
 interface TagSelectorProps {

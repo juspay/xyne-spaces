@@ -170,12 +170,21 @@ const CreateRoleDialog = ({
         />
 
         <div className='flex justify-end gap-2 mt-5'>
-          <Button variant='outline' size='sm' onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => onOpenChange(false)}
+            data-track-category='ROLES'
+            data-track-name='CANCEL_CREATE_ROLE'
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button
             size='sm'
             onClick={() => void handleCreate()}
+            data-track-category='ROLES'
+            data-track-name='CREATE_ROLE'
             disabled={!canSubmit}
             loading={saving}
           >
@@ -228,6 +237,8 @@ const MemberRow = ({
         size='sm'
         variant='ghost'
         onClick={() => void onRemove(mapping.id, userId)}
+        data-track-category='ROLES'
+        data-track-name='REMOVE_ROLE_MEMBER'
         disabled={removing}
         className='opacity-0 group-hover:opacity-100 transition-opacity h-7 px-2 text-muted-foreground hover:text-destructive'
       >
@@ -401,12 +412,21 @@ const AddMembersDialog = ({
         </div>
 
         <div className='flex justify-end gap-2 mt-5'>
-          <Button variant='outline' size='sm' onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => onOpenChange(false)}
+            data-track-category='ROLES'
+            data-track-name='CANCEL_ADD_MEMBERS'
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button
             size='sm'
             onClick={() => void handleAdd()}
+            data-track-category='ROLES'
+            data-track-name='ADD_ROLE_MEMBERS'
             disabled={pending.size === 0 || saving}
             loading={saving}
           >
@@ -630,7 +650,13 @@ export const RoleManagementScreen = (): ReactElement => {
                   Roles are reusable named sets of users you can reference across the workspace.
                   Choose one from the list to view its members, or create a new one.
                 </p>
-                <Button size='sm' className='mt-4' onClick={() => setShowCreate(true)}>
+                <Button
+                  size='sm'
+                  className='mt-4'
+                  onClick={() => setShowCreate(true)}
+                  data-track-category='ROLES'
+                  data-track-name='OPEN_CREATE_ROLE_DIALOG'
+                >
                   <Plus size={14} /> New role
                 </Button>
               </div>
@@ -665,6 +691,8 @@ export const RoleManagementScreen = (): ReactElement => {
                         size='sm'
                         variant='outline'
                         onClick={() => setShowAddMembers(true)}
+                        data-track-category='ROLES'
+                        data-track-name='OPEN_ADD_MEMBERS_DIALOG'
                         className='mt-3'
                       >
                         <UserPlus size={14} /> Add users

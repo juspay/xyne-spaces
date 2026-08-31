@@ -1237,6 +1237,8 @@ export const ThreadMessages = ({
                         threadInfo,
                       });
                     }}
+                    data-track-category='THREAD_PANEL'
+                    data-track-name='OPEN_XYNE_AI_FROM_THREAD'
                     className='h-7 w-7 rounded-lg'
                   >
                     <XyneAIStar />
@@ -1295,7 +1297,12 @@ export const ThreadMessages = ({
                     </DropdownMenuItem>
                   )}
                   {!isMobile && (
-                    <DropdownMenuItem className='gap-2' onClick={openTicketDetailsExpandedView}>
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={openTicketDetailsExpandedView}
+                      data-track-category='THREAD_PANEL'
+                      data-track-name='OPEN_TICKET_EXPANDED_VIEW'
+                    >
                       <MaximizeTwoArrow size={16} className='shrink-0' />
                       <span className='flex-1'>Expand view</span>
                     </DropdownMenuItem>
@@ -1341,12 +1348,22 @@ export const ThreadMessages = ({
                     </DropdownMenuItem>
                   )}
                   {isElectronApp() && !isStandaloneWindow() && (
-                    <DropdownMenuItem className='gap-2' onClick={openInNewWindow}>
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={openInNewWindow}
+                      data-track-category='THREAD_PANEL'
+                      data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
+                    >
                       <ExternalLinkSquare size={16} className='shrink-0' />
                       <span className='flex-1'>Open in new window</span>
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem className='gap-2' onClick={handleCopyTicketViewLink}>
+                  <DropdownMenuItem
+                    className='gap-2'
+                    onClick={handleCopyTicketViewLink}
+                    data-track-category='THREAD_PANEL'
+                    data-track-name='COPY_TICKET_LINK'
+                  >
                     <LinkSlant size={16} className='shrink-0' />
                     <span className='flex-1'>Copy ticket link</span>
                   </DropdownMenuItem>
@@ -1356,6 +1373,8 @@ export const ThreadMessages = ({
                 <Tooltip content='Close'>
                   <Button
                     onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
+                    data-track-category='THREAD_PANEL'
+                    data-track-name='CLOSE_TICKET_DETAILS_THREAD'
                     className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                     variant='ghost'
                     size='sm'
@@ -1416,6 +1435,8 @@ export const ThreadMessages = ({
                         variant='ghost'
                         size='sm'
                         onClick={resolvedOnClose}
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='CLOSE_THREAD_PANEL'
                         aria-label='Close thread panel'
                       >
                         <X size={20} />
@@ -1554,6 +1575,8 @@ export const ThreadMessages = ({
                         className={cn('h-7 w-7 rounded-lg shrink-0', actionIconClass)}
                         style={APP_NO_DRAG_STYLE}
                         onClick={() => void navigate(`/newWindow/chat/dir/${derivedChannelId}`)}
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='BACK_TO_CHANNEL'
                         aria-label='Back to channel'
                       >
                         <ArrowLeft size={16} />
@@ -1603,6 +1626,8 @@ export const ThreadMessages = ({
                             threadInfo,
                           });
                         }}
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='OPEN_XYNE_AI_FROM_THREAD'
                         className='h-7 w-7 rounded-lg'
                       >
                         <XyneAIStar />
@@ -1710,7 +1735,12 @@ export const ThreadMessages = ({
                         </DropdownMenuItem>
                       )}
                       {isElectronApp() && !isStandaloneWindow() && (
-                        <DropdownMenuItem className='gap-2' onClick={openInNewWindow}>
+                        <DropdownMenuItem
+                          className='gap-2'
+                          onClick={openInNewWindow}
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
+                        >
                           <ExternalLinkSquare size={16} className='shrink-0' />
                           <span className='flex-1'>Open in new window</span>
                         </DropdownMenuItem>

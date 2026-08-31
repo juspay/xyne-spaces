@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check, Hash } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check, Hashtag as Hash } from '@xyne/icons';
 import Input from '../../../../ui/Input/Input';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import { useBrowsableChannels } from '../../../../../hooks/useChannels';

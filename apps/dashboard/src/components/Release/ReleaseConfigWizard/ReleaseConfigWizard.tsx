@@ -107,6 +107,8 @@ const SelectionCard = ({
   <button
     type='button'
     onClick={onClick}
+    data-track-category='Release'
+    data-track-name='WIZARD_STEP_CLICK'
     disabled={isDisabled}
     aria-disabled={isDisabled}
     className={cn(
@@ -331,6 +333,8 @@ const ApplicationRow = ({
         <button
           type='button'
           onClick={() => onRemove(app.id)}
+          data-track-category='Release'
+          data-track-name='REMOVE_WIZARD_APP'
           className='text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10'
           aria-label={isLocked ? 'Delete on save' : 'Remove'}
           title={isLocked ? 'This application will be deleted on Save' : 'Remove'}
@@ -557,7 +561,14 @@ const Step3Applications = ({
       </div>
 
       {allowApplicationListChanges && (
-        <Button variant='secondary' onClick={onAddApplication} className='w-full' size='sm'>
+        <Button
+          variant='secondary'
+          onClick={onAddApplication}
+          data-track-category='Release'
+          data-track-name='ADD_APPLICATION'
+          className='w-full'
+          size='sm'
+        >
           + Add Another Application
         </Button>
       )}
@@ -775,6 +786,8 @@ const ReleaseConfigWizardForm = ({
           <Button
             variant='secondary'
             onClick={showCancelOnLeft ? onClose : form.handleBack}
+            data-track-category='Release'
+            data-track-name='WIZARD_BACK_OR_CANCEL'
             disabled={form.isSaving}
           >
             {showCancelOnLeft ? (
@@ -787,13 +800,21 @@ const ReleaseConfigWizardForm = ({
           </Button>
 
           {form.currentStep < 2 ? (
-            <Button variant='default' onClick={form.handleNext} disabled={!canProceed}>
+            <Button
+              variant='default'
+              onClick={form.handleNext}
+              data-track-category='Release'
+              data-track-name='WIZARD_NEXT'
+              disabled={!canProceed}
+            >
               Next <ChevronRight size={16} />
             </Button>
           ) : (
             <Button
               variant='default'
               onClick={() => void form.handleSave()}
+              data-track-category='Release'
+              data-track-name='SAVE_RELEASE_CONFIG'
               disabled={!canSave || form.isSaving}
             >
               {form.isSaving

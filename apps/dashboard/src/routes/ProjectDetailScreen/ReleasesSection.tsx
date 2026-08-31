@@ -1,7 +1,7 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Rocket } from 'lucide-react';
+import { RocketShip as Rocket } from '@xyne/icons';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { ReleaseStagePicker } from '../../components/Release/ReleaseStagePicker';
@@ -61,6 +61,8 @@ export const ReleasesSection = ({ projectId }: ReleasesSectionProps): ReactEleme
             <tr
               key={ticket.id}
               onClick={() => void navigate(`/listProjects/${projectId}/releases/${ticket.id}`)}
+              data-track-category='ProjectDetail'
+              data-track-name='OPEN_RELEASE_ROW'
               className='border-t border-border hover:bg-muted/50 cursor-pointer transition-colors'
             >
               <td className='px-4 py-2 font-mono text-xs text-muted-foreground'>

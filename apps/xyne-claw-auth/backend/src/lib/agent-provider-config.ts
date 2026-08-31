@@ -1,4 +1,5 @@
 import { agentProviderCredentialsRepository, sharedProviderCredentialRepository, userProviderCredentialsRepository } from "../repositories/index.js";
+import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { extractCodexBearer } from "./codex-creds.js";
@@ -60,6 +61,93 @@ export const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openroute
  * "spaces".
  */
 export type SubagentProviderMode = "parent" | "spaces" | "fast-model";
+
+// ── Fast-mode provider profile ───────────────────────────────────────────────
+//
+// Fast mode (modelSettings.speed = "fast", or the per-message chat toggle) can
+// run on its OWN provider setup, configured in the agent's Model & provider tab
+// under the "Fast mode" view:
+//
+//   config.fastModeProfile = {
+//     providers: "inherit" | "custom",   // default inherit — same providers +
+//                                        // credentials as standard mode
+//     providerOrder?: string[],          // custom: fast-mode preference order
+//     models?: Record<provider, model>,  // custom: per-provider model override
+//                                        // (same credential key, different model)
+//   }
+//
+// Credential KEYS are per agent per provider and shared by both modes; the
+// profile only decides which providers are tried (and on which model). With
+// "inherit", fast mode is purely the provider-side speed tier (Anthropic
+// `speed: "fast"`) on the standard setup.
+//
+// NOT `config.fastMode` — that key is the legacy tool-catalog flag (`/fast`).
+
+export type ModelSpeed = "standard" | "fast";
+
+export interface FastModeProfile {
+  providers: "inherit" | "custom";
+  providerOrder: string[];
+  models: Record<string, string>;
+}
+
+export function parseFastModeProfile(config?: unknown): FastModeProfile {
+  const cfg = (config as Record<string, unknown> | null) ?? null;
+  const raw = cfg?.["fastModeProfile"];
+  const inherit: FastModeProfile = { providers: "inherit", providerOrder: [], models: {} };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return inherit;
+  const r = raw as Record<string, unknown>;
+  if (r["providers"] !== "custom") return inherit;
+  const providerOrder = Array.isArray(r["providerOrder"])
+    ? (r["providerOrder"] as unknown[]).filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
+    : [];
+  const models: Record<string, string> = {};
+  const rawModels = r["models"];
+  if (rawModels && typeof rawModels === "object" && !Array.isArray(rawModels)) {
+    for (const [k, v] of Object.entries(rawModels as Record<string, unknown>)) {
+      if (KNOWN_PROVIDERS.has(k) && typeof v === "string" && v.trim()) models[k] = v.trim();
+    }
+  }
+  return { providers: "custom", providerOrder, models };
+}
+
+/** The agent's default speed (modelSettings.speed); per-run overrides win over it. */
+export function agentDefaultSpeed(config?: unknown): ModelSpeed {
+  const cfg = (config as Record<string, unknown> | null) ?? null;
+  const ms = cfg?.["modelSettings"] as Record<string, unknown> | undefined;
+  return ms?.["speed"] === "fast" ? "fast" : "standard";
+}
+
+/**
+ * The config whose providerOrder / provider the run should resolve against.
+ * Standard speed, or fast with an inherited profile ⇒ the config unchanged.
+ * Fast with a custom profile ⇒ providerOrder swapped for the fast-mode order
+ * (legacy single `provider` dropped so it can't leak the standard pick back in).
+ */
+export function providerConfigForSpeed(config: unknown, speed: ModelSpeed): Record<string, unknown> {
+  const cfg = { ...((config as Record<string, unknown> | null) ?? {}) };
+  if (speed !== "fast") return cfg;
+  const profile = parseFastModeProfile(cfg);
+  if (profile.providers !== "custom") return cfg;
+  cfg["providerOrder"] = profile.providerOrder;
+  delete cfg["provider"];
+  return cfg;
+}
+
+/** Apply the fast profile's per-provider model overrides to resolved configs (in place). */
+export function applyFastModeModels<T extends { model: string }>(
+  providerConfigs: Record<string, T>,
+  config: unknown,
+  speed: ModelSpeed,
+): void {
+  if (speed !== "fast") return;
+  const profile = parseFastModeProfile(config);
+  if (profile.providers !== "custom") return;
+  for (const [provider, model] of Object.entries(profile.models)) {
+    const c = providerConfigs[provider];
+    if (c) c.model = model;
+  }
+}
 
 export function resolveSubagentProviderMode(config?: unknown): SubagentProviderMode {
   const cfg = (config as Record<string, unknown> | null) ?? null;
@@ -173,7 +261,7 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
       ...(row.reasoningEffort ? { reasoningEffort: row.reasoningEffort } : {}),
     };
   } catch (err) {
-    log.error(`Failed to decrypt ${provider} key for agent`, { error: err instanceof Error ? err.message : String(err) });
+    log.error(`Failed to decrypt ${provider} key for agent`, { error: errMsg(err) });
     return null;
   }
 }
@@ -200,9 +288,15 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
  */
 export async function resolveAgentProviderConfigs(
   agent: { id: string; config?: unknown },
-  opts: { headlessBulk?: boolean } = {},
+  opts: { headlessBulk?: boolean; speed?: ModelSpeed } = {},
 ): Promise<ResolvedAgentProviders> {
-  const cfg = (agent.config as Record<string, unknown> | null) ?? null;
+  // Fast mode may run on its own provider profile (see providerConfigForSpeed).
+  // Callers that know a per-run speed pass it; otherwise the agent default applies.
+  const speed = opts.speed ?? agentDefaultSpeed(agent.config);
+  const cfg = providerConfigForSpeed(agent.config, speed);
+  if (speed === "fast" && parseFastModeProfile(agent.config).providers === "custom") {
+    log.info(`Provider resolution: agent=${agent.id} fast-mode profile → order=[${(cfg["providerOrder"] as string[]).join(",")}]`);
+  }
 
   // Per-agent model downgrade for headless bulk traffic (automations, the
   // error pipeline, scheduled jobs). These paths fire on every PR / message /
@@ -226,7 +320,7 @@ export async function resolveAgentProviderConfigs(
         config: { ...(cfg ?? {}), provider: automationProvider, providerOrder: [automationProvider], providerAlwaysOn: true },
       };
       log.info(`Provider resolution (headless-bulk): agent=${agent.id} automationProvider=${automationProvider} → forced parent`);
-      return resolveAgentProviderConfigs(bulkAgent);
+      return resolveAgentProviderConfigs(bulkAgent, { speed });
     }
     log.warn(`Provider resolution (headless-bulk): agent=${agent.id} unknown automationProvider="${automationProvider}" — ignoring`);
   }
@@ -246,6 +340,7 @@ export async function resolveAgentProviderConfigs(
     const built = buildProviderConfig(provider, row);
     if (built) providerConfigs[provider] = built;
   }
+  applyFastModeModels(providerConfigs, agent.config, speed);
 
   // Refresh short-lived OAuth tokens before use (persist the rotated token back
   // to the agent cred row), same as the chat path. api_key / not-yet-expired
@@ -259,7 +354,7 @@ export async function resolveAgentProviderConfigs(
         claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
       } catch (err) {
         log.warn("Claude OAuth refresh failed for agent — credential likely needs reconnect", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
       }
     }
@@ -273,7 +368,7 @@ export async function resolveAgentProviderConfigs(
         codexCfg.apiKey = await getValidCodexBearer(target.credKey, credRow, target.persist);
       } catch (err) {
         log.warn("Codex OAuth refresh failed for agent — credential likely needs reconnect", {
-          error: err instanceof Error ? err.message : String(err),
+          error: errMsg(err),
         });
       }
     }
@@ -287,10 +382,19 @@ export async function resolveAgentProviderConfigs(
   }
 
   // always-on: the agent's provider wins. Resolve the parent, then the order.
+  // STRICT RANKING — the order is the source of truth, top first. "spaces" is
+  // the keyless platform provider and can ALWAYS serve, so an explicit spaces
+  // entry wins over lower-ranked saved credentials; a credential only routes
+  // when its provider outranks spaces (or spaces is absent). Entries without
+  // creds are skipped. No order at all → the platform default: a credential
+  // that was saved but never selected as a provider never routes a run.
+  // (Legacy `config.provider` still counts as an explicit selection for
+  // agents predating providerOrder.) Mirrors agent-chat.ts.
   let parent: string | undefined;
-  if (agentProviderOrder.length > 0) parent = agentProviderOrder.find((p) => providerConfigs[p]);
+  if (agentProviderOrder.length > 0) {
+    parent = agentProviderOrder.find((p) => p === "spaces" || providerConfigs[p]) ?? agentProviderOrder[0];
+  }
   if (!parent && agentLevelProvider && providerConfigs[agentLevelProvider]) parent = agentLevelProvider;
-  if (!parent) parent = Object.keys(providerConfigs)[0];
 
   const providerOrder = agentProviderOrder.length > 0 ? agentProviderOrder : parent ? [parent] : [];
   log.info(`Provider resolution (headless): agent=${agent.id} mode=always-on parent=${parent ?? "spaces"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${providerOrder.join(",")}]`);

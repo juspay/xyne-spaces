@@ -1,6 +1,6 @@
-import { ReactElement, useEffect, useRef } from 'react';
+import { ComponentPropsWithoutRef, ReactElement, useEffect, useRef } from 'react';
 
-interface CheckboxProps {
+interface CheckboxProps extends Omit<ComponentPropsWithoutRef<'input'>, 'onChange' | 'size'> {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
@@ -25,6 +25,7 @@ export function Checkbox({
   disabled = false,
   size = 'md',
   truncateLabel = false,
+  ...rest
 }: CheckboxProps): ReactElement {
   const sm = size === 'sm';
   const inputRef = useRef<HTMLInputElement>(null);
@@ -64,9 +65,17 @@ export function Checkbox({
             ...(ariaLabel ? { 'aria-label': ariaLabel } : {})
           }
           onChange={e => onChange(e.target.checked)}
+          // Default tag so every Checkbox is captured even when the call site
+          // adds nothing. `rest` is spread after it, so a call site passing
+          // data-track-category/name overrides these — same as any other
+          // element. globalClickTracker ignores clicks on inputs, so this is
+          // picked up by its change listener as a SELECTION_CHANGE.
+          data-track-category='CHECKBOX'
+          data-track-name={label ?? 'CHECKBOX'}
           className={`absolute inset-0 w-full h-full opacity-0 m-0 p-0 ${
             disabled ? 'cursor-not-allowed' : 'cursor-pointer'
           }`}
+          {...rest}
         />
         {indeterminate ? (
           <svg

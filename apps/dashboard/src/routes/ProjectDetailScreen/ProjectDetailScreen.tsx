@@ -9,7 +9,13 @@ import {
   type FlowPlan,
 } from '@xyne/shared';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Edit2, GitBranch, LayoutGrid, Rocket } from 'lucide-react';
+import {
+  ArrowLeft,
+  PencilEdit as Edit2,
+  GitBranch,
+  Grid01 as LayoutGrid,
+  RocketShip as Rocket,
+} from '@xyne/icons';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
@@ -111,9 +117,12 @@ const ProjectDetailScreen = (): ReactElement => {
   });
 
   // Fetch boards for this project (lightweight list without stages)
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId || '' }), {
-    enabled: !!projectId,
-  });
+  const [boards, boardsDetails] = useCachedQuery(
+    queries.boardsListByProject({ projectId: projectId || '' }),
+    {
+      enabled: !!projectId,
+    },
+  );
 
   // Consume the Ticket view's edit-board intent once.
   const requestedEditBoardId = searchParams.get('editBoard');
@@ -443,6 +452,7 @@ const ProjectDetailScreen = (): ReactElement => {
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
                   boards={boards}
+                  loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}

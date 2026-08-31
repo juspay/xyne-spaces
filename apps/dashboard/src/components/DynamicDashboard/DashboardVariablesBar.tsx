@@ -395,10 +395,21 @@ const VariableEditor = ({
         auto-upgrade <code>equals</code> filters to <code>in</code>.
       </p>
       <div className='flex justify-end gap-2 pt-1'>
-        <Button variant='ghost' onClick={onCancel}>
+        <Button
+          variant='ghost'
+          onClick={onCancel}
+          data-track-category='DYNAMIC_DASHBOARD'
+          data-track-name='CANCEL_DASHBOARD_VARIABLES'
+        >
           Cancel
         </Button>
-        <Button onClick={handleSave}>{initial ? 'Save changes' : 'Create variable'}</Button>
+        <Button
+          onClick={handleSave}
+          data-track-category='DYNAMIC_DASHBOARD'
+          data-track-name='SAVE_DASHBOARD_VARIABLES'
+        >
+          {initial ? 'Save changes' : 'Create variable'}
+        </Button>
       </div>
     </div>
   );

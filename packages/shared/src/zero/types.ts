@@ -118,6 +118,7 @@ export enum AttachmentEntityType {
   COLLECTION = 'COLLECTION',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
+  DESK_REPORT = 'DESK_REPORT',
 }
 
 // @ts-ignore TS1294

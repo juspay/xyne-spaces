@@ -10,6 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
+import Highlight from '@tiptap/extension-highlight';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
@@ -586,6 +587,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }).configure({
           HTMLAttributes: {
             class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
+          },
+        }),
+        Highlight.configure({
+          HTMLAttributes: {
+            class: 'chat-text-highlight',
           },
         }),
         MaxListDepthPlugin,
@@ -1792,6 +1798,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             handleAttachClick();
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_FILE'
                         >
                           <Plus className='h-4 w-4' /> Upload Files
                           <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
@@ -1801,6 +1809,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsTranscriptSelectorOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_TRANSCRIPT'
                         >
                           <FileText className='h-4 w-4' /> Add Call Summary
                         </DropdownMenuItem>
@@ -1809,6 +1819,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsCanvasAttachmentModalOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_CANVAS'
                         >
                           <FileText className='h-4 w-4' /> Canvas
                         </DropdownMenuItem>
@@ -1860,6 +1872,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('@').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_USER_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
@@ -1882,6 +1896,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('#').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_CHANNEL_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
@@ -1901,6 +1917,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={() => setShowFormatToolbar(prev => !prev)}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='TOGGLE_FORMAT_TOOLBAR'
                         className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
@@ -1943,6 +1961,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={onCancel}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='CANCEL_EDITING'
                         className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
@@ -2028,6 +2048,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     onCreateTicket(editor?.getText().trim() || '');
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='CREATE_TICKET_FROM_INPUT'
                                 >
                                   <Ticket className='h-4 w-4' /> Create a ticket
                                 </DropdownMenuItem>
@@ -2038,6 +2060,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     openScheduleDialog();
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='OPEN_SCHEDULE_DIALOG'
                                 >
                                   <Clock className='h-4 w-4' /> Schedule message
                                 </DropdownMenuItem>
@@ -2103,6 +2127,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   void handleSend();
                                   setIsSendMenuOpen(false);
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='SEND_FROM_MENU'
                               >
                                 <ArrowUp className='h-4 w-4' /> Send now
                               </DropdownMenuItem>
@@ -2111,6 +2137,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   setIsSendMenuOpen(false);
                                   openScheduleDialog();
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='OPEN_SCHEDULE_DIALOG'
                               >
                                 <Clock className='h-4 w-4' /> Schedule message
                               </DropdownMenuItem>

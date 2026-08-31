@@ -347,6 +347,8 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
           loading={saving}
           disabled={!dirty || temperatureConflict}
           onClick={() => void handleSave()}
+          data-track-category='Claw Agents'
+          data-track-name='SAVE_MODEL_PROVIDER'
         >
           {saving ? 'Saving…' : 'Save changes'}
         </Button>

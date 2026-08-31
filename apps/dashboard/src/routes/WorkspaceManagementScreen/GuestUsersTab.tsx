@@ -180,6 +180,8 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
           variant='outline'
           size='sm'
           onClick={() => void loadGuests()}
+          data-track-category='workspace-management'
+          data-track-name='RELOAD_GUEST_USERS'
           disabled={isLoading}
           className='gap-2'
         >
@@ -285,6 +287,8 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
                         variant='ghost'
                         size='sm'
                         onClick={() => setRevokeTarget({ guest, access })}
+                        data-track-category='workspace-management'
+                        data-track-name='OPEN_REVOKE_GUEST_CONFIRM'
                         className='text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0'
                       >
                         <Trash2 className='w-4 h-4' />
@@ -321,12 +325,20 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
           </p>
 
           <div className='flex gap-3 justify-end pt-2'>
-            <Button variant='outline' onClick={() => setRevokeTarget(null)} disabled={isRevoking}>
+            <Button
+              variant='outline'
+              onClick={() => setRevokeTarget(null)}
+              data-track-category='workspace-management'
+              data-track-name='CANCEL_REVOKE_GUEST'
+              disabled={isRevoking}
+            >
               Cancel
             </Button>
             <Button
               variant='destructive'
               onClick={() => void confirmRevoke()}
+              data-track-category='workspace-management'
+              data-track-name='CONFIRM_REVOKE_GUEST'
               disabled={isRevoking}
               className='gap-2'
             >

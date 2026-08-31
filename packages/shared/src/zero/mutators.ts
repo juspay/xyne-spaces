@@ -9664,6 +9664,9 @@ export const mutators = defineMutators({
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
         appWebhookDeliveryEnabled: z.boolean().optional(),
+        deskReportEnabled: z.boolean().optional(),
+        deskReportAgentSlug: z.string().optional().nullable(),
+        deskReportRangeDays: z.number().optional(),
       }),
       async ({
         tx,
@@ -9681,6 +9684,9 @@ export const mutators = defineMutators({
           metricsEnabled,
           frtStageNames,
           appWebhookDeliveryEnabled,
+          deskReportEnabled,
+          deskReportAgentSlug,
+          deskReportRangeDays,
         },
       }) => {
         const existing = await tx.run(
@@ -9700,6 +9706,9 @@ export const mutators = defineMutators({
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
             ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
+            ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
+            ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
+            ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
           });
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -9726,6 +9735,9 @@ export const mutators = defineMutators({
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
             appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
+            deskReportEnabled: deskReportEnabled ?? false,
+            deskReportAgentSlug: deskReportAgentSlug ?? null,
+            deskReportRangeDays: deskReportRangeDays ?? 1,
           });
         }
       },

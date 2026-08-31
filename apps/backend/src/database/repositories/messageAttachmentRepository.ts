@@ -19,6 +19,7 @@ export interface CreateMessageAttachmentInput {
   workspaceId: string;
   metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   createdAt?: Date;
+  uploadStatus?: string;
 }
 
 export class MessageAttachmentRepository {
@@ -42,6 +43,7 @@ export class MessageAttachmentRepository {
         conversationId: data.conversationId,
         workspaceId: data.workspaceId,
         metadata: data.metadata || {},
+        ...(data.uploadStatus && { uploadStatus: data.uploadStatus }),
         ...(data.createdAt && { createdAt: data.createdAt })
       }
     });

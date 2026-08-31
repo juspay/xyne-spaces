@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.237.1",
+  "version": "1.248.3",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -205,8 +205,6 @@
       }
     },
     "overrides": {
-      "@earendil-works/pi-agent-core": "0.80.7",
-      "@earendil-works/pi-ai": "0.80.7",
       "@excalidraw/excalidraw": "0.18.1",
       "@excalidraw/excalidraw>react": "^19.2.1",
       "@excalidraw/excalidraw>react-dom": "^19.2.1",

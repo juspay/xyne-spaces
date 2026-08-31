@@ -100,7 +100,7 @@ userMemoryRouter.post("/internal/user-memory/synthesize-file", validateS2SKey, a
       fileName: body.fileName,
       description: typeof body.description === "string" ? body.description : "",
       facts: body.facts.filter((f): f is string => typeof f === "string"),
-      maxChars: typeof body.maxChars === "number" ? body.maxChars : 10_000,
+      maxChars: typeof body.maxChars === "number" ? body.maxChars : 20_000,
       ...(typeof body.currentContent === "string" ? { currentContent: body.currentContent } : {}),
       ...(body.preserveEdits === true ? { preserveEdits: true } : {}),
     });
