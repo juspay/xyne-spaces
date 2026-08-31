@@ -281,6 +281,10 @@ export function getActiveRunCount(): number {
   return activeRuns.size;
 }
 
+export function getActiveSessionIds(): string[] {
+  return [...activeRuns.keys()];
+}
+
 export function cancelActiveRunsForDrain(reason = "server draining"): number {
   let cancelled = 0;
   for (const [sessionId, active] of activeRuns.entries()) {

@@ -4,7 +4,7 @@ process.env.SERVICE_NAME ||= "xyne-claw";
 import express from "express";
 import { SERVER } from "./config.js";
 import { initStore } from "./store.js";
-import { runRouter, getActiveRunCount, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
+import { runRouter, getActiveRunCount, getActiveSessionIds, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
 import { curatorRouter } from "./routes/curator.js";
 import { userMemoryRouter } from "./routes/user-memory.js";
 import { failureCuratorRouter } from "./routes/failure-curator.js";
@@ -55,10 +55,10 @@ app.get("/health", (_req, res) => {
 
 app.get("/healthz/ready", (_req, res) => {
   if (isDraining()) {
-    res.status(503).json({ status: "draining", service: "xyne-claw", activeRuns: getActiveRunCount() });
+    res.status(503).json({ status: "draining", service: "xyne-claw", activeRuns: getActiveRunCount(), activeSessionIds: getActiveSessionIds() });
     return;
   }
-  res.json({ status: "ready", service: "xyne-claw", activeRuns: getActiveRunCount() });
+  res.json({ status: "ready", service: "xyne-claw", activeRuns: getActiveRunCount(), activeSessionIds: getActiveSessionIds() });
 });
 
 app.use(runRouter);
