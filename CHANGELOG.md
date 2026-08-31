@@ -1,3 +1,10 @@
+## [1.248.0](https://github.com/juspay/xyne-spaces/compare/v1.247.0...v1.248.0) (2026-08-31)
+
+
+### Features
+
+* : Fix for nav bar when ask ai opens ([#970](https://github.com/juspay/xyne-spaces/issues/970)) ([6ea0e98](https://github.com/juspay/xyne-spaces/commit/6ea0e982de2d94517110aa454651fb30bb350c3c))
+
 ## [1.247.0](https://github.com/juspay/xyne-spaces/compare/v1.246.0...v1.247.0) (2026-08-31)
 
 
