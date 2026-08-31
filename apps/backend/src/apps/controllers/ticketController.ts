@@ -2231,7 +2231,6 @@ export class TicketController {
           },
           receivedAt: new Date(),
           emailType: EmailType.COMPOSE,
-          detectDuplicates: true,
           sentByUserId: userId,
           ...(effectiveBoardId && { boardId: effectiveBoardId }),
         });
@@ -2288,8 +2287,7 @@ export class TicketController {
         );
       }
 
-      // Duplicate detection runs inside emailService.createConversationWithEmail
-      // (opted in via detectDuplicates) — see the call above.
+      // Duplicate detection runs inside emailService.createConversationWithEmail.
 
       // Apply optional fields to the created ticket
       if (priority !== undefined || resolvedAssignedTo !== undefined || userGroupId !== undefined || stageName !== undefined || ticketType !== undefined) {

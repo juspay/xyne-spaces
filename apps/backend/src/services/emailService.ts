@@ -122,7 +122,6 @@ export interface CreateConversationWithEmailParams {
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
   emailType?: EmailType;
-  detectDuplicates?: boolean;
   // User who sent this email, for outbound-new flows. Null/undefined for inbound.
   sentByUserId?: string;
   rating?: number;
@@ -1069,7 +1068,6 @@ export class EmailService {
       sourceName,
       receivedAt,
       emailType = EmailType.DEFAULT,
-      detectDuplicates = emailType === EmailType.DEFAULT,
       sentByUserId,
       rating,
       clientVersionName,
@@ -1313,8 +1311,9 @@ export class EmailService {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
-    // Inbound mail, plus COMPOSE flows whose body is the reporter's own request.
-    if (detectDuplicates) {
+    // Ticket-creating mail only: DEFAULT (inbound) and COMPOSE (outbound-new).
+    // Fire-and-forget — a failure leaves the ticket with no related tickets, no retry.
+    if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
       ticketDuplicateService.persistDuplicateReferences({
         ticketId: ticket.id,
         ticketCreatedBy: ticket.createdBy,
