@@ -225,7 +225,7 @@ export class DoclingService {
    * @returns True if page info should be appended
    */
   private shouldAppendPageInfo(extension: string): boolean {
-    const supportedExtensions = ["pdf", "docx", "pptx", "ppt"];
+    const supportedExtensions = ["pdf", "docx"];
     return supportedExtensions.includes(extension);
   }
 

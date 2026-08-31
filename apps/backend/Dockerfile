@@ -66,7 +66,6 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     ca-certificates \
     libjemalloc2 \
-    libreoffice \
     && ln -sf "$(find /usr/lib -name 'libjemalloc.so.2' | head -1)" /usr/local/lib/libjemalloc.so.2 \
     && rm -rf /var/lib/apt/lists/*
 

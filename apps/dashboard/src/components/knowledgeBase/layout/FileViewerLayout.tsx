@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { FileViewerPanel } from '../viewer/FileViewerPanel';
-import { resolveKbBasePath } from '../../knowledgeBaseV2/utils/kbRoutePaths';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import {
   useProjectCollections,
@@ -9,7 +8,6 @@ import {
   setChannelId,
   setActiveCollection,
   setCurrentFolderId,
-  setCurrentFileId,
 } from '../hooks/useProjectCollections';
 
 // Minimal layout above FileViewerPanel's thin toolbar. The toolbar exposes an
@@ -17,7 +15,6 @@ import {
 // the Vespa fileId, not the route cuid).
 export const FileViewerLayout: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { projectId, channelId, collectionId, folderId, fileId } = useParams<{
     projectId: string;
     channelId: string;
@@ -52,7 +49,6 @@ export const FileViewerLayout: React.FC = () => {
   const {
     activeCollection,
     currentFolderId,
-    currentFileId,
     projectId: machineProjectId,
     channelId: machineChannelId,
   } = useProjectCollections();
@@ -75,36 +71,19 @@ export const FileViewerLayout: React.FC = () => {
     if (resolvedFolderId !== currentFolderId) setCurrentFolderId(resolvedFolderId);
   }, [resolvedFolderId, currentFolderId]);
 
-  // Lets the Contents panel highlight whichever file is currently open, the
-  // same way it highlights the active folder. Cleared on unmount so leaving
-  // the viewer (back to the folder browser) doesn't leave a stale file
-  // highlighted.
-  useEffect(() => {
-    if (fileId && fileId !== currentFileId) setCurrentFileId(fileId);
-  }, [fileId, currentFileId]);
-
-  useEffect(() => {
-    return () => setCurrentFileId(null);
-  }, []);
-
-  // This viewer is reachable both under /knowledge-base and /ai/knowledge —
-  // Back must return to whichever of those it was opened from, not always
-  // the standalone browser.
-  const basePath = resolveKbBasePath(location.pathname);
-
   const getBackNavigationPath = (): string => {
     if (!collectionId) {
-      return basePath;
+      return '/knowledge-base';
     }
-    // The listing screen lives at <basePath>?cl=&parent=, not under the old
-    // path-param scheme. Build the search-params URL so Back returns the
+    // The listing screen lives at /knowledge-base?cl=&parent=, not under the
+    // old path-param scheme. Build the search-params URL so Back returns the
     // user to the folder they came from instead of 404ing.
     const sp = new URLSearchParams();
     sp.set('cl', collectionId);
     if (resolvedFolderId) {
       sp.set('parent', resolvedFolderId);
     }
-    return `${basePath}?${sp.toString()}`;
+    return `/knowledge-base?${sp.toString()}`;
   };
 
   const handleBack = (): void => {

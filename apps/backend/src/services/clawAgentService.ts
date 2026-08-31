@@ -51,21 +51,10 @@ export interface ClawRunRequest {
   // attached context; separate from `canvasIds` (picker canvases, keyed by cuid).
   canvasId?: string;
   attachedContext?: Array<{
-    // 'collection' / 'folder' / 'file' carry KB picks from the ask-ai v2
-    // picker. claw-auth's resolveSection emits a prompt block that points
-    // the agent at kb-list-files / kb-search / kb-read-file with the right
-    // id — a 'folder' id is NOT pre-expanded to its files here, claw-auth
-    // resolves it itself at Vespa-query time.
-    type:
-      | 'channel'
-      | 'ticket'
-      | 'canvas'
-      | 'call'
-      | 'activity'
-      | 'collection'
-      | 'folder'
-      | 'file'
-      | string;
+    // 'collection' + 'file' carry KB picks from the ask-ai v2 picker.
+    // claw-auth's resolveSection emits a prompt block that points the agent
+    // at kb-list-files / kb-read-file with the right id.
+    type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity' | 'collection' | 'file' | string;
     id: string;
     title: string;
     threadId?: string;

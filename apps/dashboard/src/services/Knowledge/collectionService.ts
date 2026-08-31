@@ -5,22 +5,6 @@ export type { IngestionStatus };
 export type NodeType = 'FILE' | 'FOLDER';
 export type CollectionRole = 'VIEWER' | 'EDITOR' | 'OWNER';
 
-/** The backend's own item-type vocabulary (lowercase, e.g. searchItems'
- *  itemType field) — distinct from NodeType (the frontend's normalized,
- *  uppercase vocabulary). Named so toNodeType can switch over it exhaustively:
- *  if this union ever grows, toNodeType fails to compile until it's updated,
- *  instead of the new value silently falling through to 'FILE'. */
-export type BackendItemType = 'file' | 'folder';
-
-function toNodeType(itemType: BackendItemType): NodeType {
-  switch (itemType) {
-    case 'file':
-      return 'FILE';
-    case 'folder':
-      return 'FOLDER';
-  }
-}
-
 export interface CollectionChild {
   id: string;
   name: string;
@@ -106,24 +90,19 @@ export async function searchCollectionItems(
   collectionId: string,
   query: string,
 ): Promise<CollectionChild[]> {
-  // The backend's search response shape doesn't match CollectionChild's field
-  // names — it sends `itemType: 'folder' | 'file'` (lowercase, not `type`)
-  // and `collectionId` (the item's containing folder, same field name Zero's
-  // synced schema uses everywhere else — see CollectionTreeDataSync's
-  // filesByFolder map) rather than `parentId`. Mapped explicitly below
-  // instead of trusting a response type that never matched reality.
   const response = await apiInstance.get<{
     success: boolean;
     items: Array<{
       id: string;
       name: string;
-      itemType: BackendItemType;
+      type: NodeType;
       createdAt: string;
       updatedAt: string;
+      uploadedByEmail: string;
       ingestionStatus: IngestionStatus;
-      fileSize: string | null;
-      mimeType: string | null;
-      collectionId: string;
+      fileSize: string;
+      mimeType: string;
+      parentId: string | null;
     }>;
     query: string;
   }>(`/collections/${collectionId}/search`, {
@@ -133,15 +112,12 @@ export async function searchCollectionItems(
   return response.data.items.map(item => ({
     id: item.id,
     name: item.name,
-    type: toNodeType(item.itemType),
+    type: item.type,
     updatedAt: item.updatedAt,
     ingestionStatus: item.ingestionStatus,
     size: item.fileSize ? parseInt(item.fileSize, 10) || 0 : 0,
-    mimeType: item.mimeType ?? '',
-    // Root-level items' collectionId equals the collection being searched —
-    // normalize that to null to match CollectionChild.parentId's
-    // "root has no parent" convention used everywhere else.
-    parentId: item.collectionId === collectionId ? null : item.collectionId,
+    mimeType: item.mimeType,
+    parentId: item.parentId ?? null,
   }));
 }
 

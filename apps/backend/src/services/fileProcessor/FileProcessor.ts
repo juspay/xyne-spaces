@@ -6,7 +6,6 @@ import { BaseStrategy } from "./strategies/BaseStrategy"
 import { TextStrategy } from "./strategies/TextStrategy"
 import { PdfJsStrategy } from "./strategies/PdfJsStrategy"
 import { DocxStrategy } from "./strategies/DocxStrategy"
-import { PptxStrategy } from "./strategies/PptxStrategy"
 import { ImageDescriptionStrategy } from "./strategies/ImageStrategy"
 import { SpreadsheetStrategy } from "./strategies/SpreadsheetStrategy"
 import { PdfFallbackProcessor } from "./PdfFallbackProcessor"
@@ -242,9 +241,6 @@ export class FileProcessor {
                 return new PdfJsStrategy(config)
             case "docx":
                 return new DocxStrategy(config)
-            case "pptx":
-            case "ppt":
-                return new PptxStrategy(config)
             case "xls":
             case "xlsx":
                 return new SpreadsheetStrategy(config)
@@ -279,9 +275,6 @@ export class FileProcessor {
                 return new PdfJsStrategy(config)
             case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 return new DocxStrategy(config)
-            case "application/vnd.ms-powerpoint":
-            case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-                return new PptxStrategy(config)
             case "application/vnd.ms-excel":
             case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
                 return new SpreadsheetStrategy(config)

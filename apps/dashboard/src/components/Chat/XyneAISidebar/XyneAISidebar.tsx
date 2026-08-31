@@ -130,8 +130,6 @@ interface XyneAISidebarProps {
   kbChannelId?: string;
   kbDocId?: string;
   kbDocName?: string;
-  kbFolderId?: string;
-  kbFolderName?: string;
   // Bumped by xyneAIMachine each time OPEN is dispatched with a kbCollectionId.
   // The input box re-attaches the KB collection chip on every bump.
   kbOpenNonce?: number;
@@ -167,8 +165,6 @@ const XyneAISidebar = ({
   kbCollectionId: kbCollectionIdProp,
   kbDocId: kbDocIdProp,
   kbDocName: kbDocNameProp,
-  kbFolderId: kbFolderIdProp,
-  kbFolderName: kbFolderNameProp,
   kbOpenNonce,
   visible = true,
   forcedAgentSlug,
@@ -261,24 +257,6 @@ const XyneAISidebar = ({
   useEffect(() => {
     setFileScopes(kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : []);
   }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
-  // Folder scope(s) — multi-select, from the collection picker. Sent to
-  // claw-auth as a single 'folder' attached_context pointer per id — NOT
-  // expanded to a recursive file list here (xyneAIControllerV2.ts doesn't do
-  // that); claw-auth resolves it itself, at Vespa-query time, since Vespa's
-  // collectionId filter only ever matches a doc's ROOT collection and can't
-  // filter on a folder id directly.
-  // Seeded with the folder Ask AI was opened from (browsing inside a
-  // sub-folder in the KB screen, not its root); re-synced below like
-  // fileScopes so re-opening Ask AI from a folder re-attaches the chip even
-  // after it was manually removed.
-  const [folderScopes, setFolderScopes] = useState<{ id: string; name: string }[]>(
-    kbFolderIdProp ? [{ id: kbFolderIdProp, name: kbFolderNameProp || 'this folder' }] : [],
-  );
-  useEffect(() => {
-    setFolderScopes(
-      kbFolderIdProp ? [{ id: kbFolderIdProp, name: kbFolderNameProp || 'this folder' }] : [],
-    );
-  }, [kbFolderIdProp, kbFolderNameProp, kbOpenNonce]);
   // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
   const autoSendPendingQueryRef = useRef<string | null>(null);
   const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
@@ -761,7 +739,6 @@ const XyneAISidebar = ({
     activities: selectedActivities,
     collectionIds: selectedCollectionIds ?? [],
     fileIds: fileScopes.map(f => f.id),
-    folderIds: folderScopes.map(f => f.id),
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
@@ -1902,8 +1879,6 @@ const XyneAISidebar = ({
       : {}),
     fileScopes,
     onFileScopesChange: setFileScopes,
-    folderScopes,
-    onFolderScopesChange: setFolderScopes,
     onOpenContextModal: handleOpenContextModal,
     selectedTickets,
     onRemoveTicket: handleRemoveTicket,
