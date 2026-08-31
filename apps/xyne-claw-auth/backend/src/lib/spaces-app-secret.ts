@@ -59,22 +59,9 @@ export async function backfillSigningSecretFromSpacesDb(args: {
   spacesAppId: string;
 }): Promise<boolean> {
   const { agentId, spacesAppId } = args;
-  let spacesEncryptionKeys: ReadonlyMap<string, Buffer>;
-
-  try {
-    spacesEncryptionKeys = CONFIG.spacesEncryptionKeys;
-  } catch (err) {
+  if (CONFIG.spacesEncryptionKey.length === 0) {
     log.warn(
-      `[spaces-app-secret] invalid Spaces encryption-key configuration for agentId=${agentId}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-    return false;
-  }
-
-  if (spacesEncryptionKeys.size === 0) {
-    log.warn(
-      `[spaces-app-secret] Spaces encryption keys unset — cannot decrypt Spaces DB blob for agentId=${agentId}.`,
+      `[spaces-app-secret] SPACES_ENCRYPTION_KEY unset — cannot decrypt Spaces DB blob for agentId=${agentId}. Set it to xyne-spaces' ENCRYPTION_KEY value.`,
     );
     return false;
   }
@@ -84,7 +71,7 @@ export async function backfillSigningSecretFromSpacesDb(args: {
     return false;
   }
   try {
-    const plaintext = decryptSpacesCbc(blob, spacesEncryptionKeys);
+    const plaintext = decryptSpacesCbc(blob, CONFIG.spacesEncryptionKey);
     if (!plaintext) {
       log.warn(`[spaces-app-secret] decrypt produced empty secret for agentId=${agentId}`);
       return false;
