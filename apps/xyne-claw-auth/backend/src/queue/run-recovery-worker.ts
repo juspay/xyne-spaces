@@ -1118,12 +1118,43 @@ export async function handleRunHandoff(sessionId: string): Promise<{ rootSession
   return { rootSessionId, newSessionId, retriesUsed: state.retriesUsed, maxRetries: state.maxRetries };
 }
 
-export async function handleRunCompletion(sessionId: string, status: "completed" | "failed", error?: string): Promise<{ retried: boolean; exhausted: boolean; rootSessionId: string; retriesUsed: number; maxRetries: number; terminalDrop?: boolean } | null> {
+export type RunRecoveryCallbackDisposition = "untracked" | "active_initial" | "active_continuation" | "stale";
+
+/** Classify callback ownership without mutating recovery state. */
+export async function classifyRunRecoveryCallback(sessionId: string): Promise<RunRecoveryCallbackDisposition> {
+  const rootSessionId = await getRecoveryRootSessionId(sessionId);
+  if (!rootSessionId) return "untracked";
+  const state = await loadState(rootSessionId);
+  if (!state) return "untracked";
+  if (state.status !== "running" || state.activeSessionId !== sessionId) return "stale";
+  return state.retriesUsed > 0 || state.sessionHistory.some((attemptId) => attemptId !== state.rootSessionId)
+    ? "active_continuation"
+    : "active_initial";
+}
+
+export async function handleRunCompletion(sessionId: string, status: "completed" | "failed", error?: string): Promise<{ retried: boolean; exhausted: boolean; rootSessionId: string; retriesUsed: number; maxRetries: number; terminalDrop?: boolean; stale?: boolean } | null> {
   const rootSessionId = await getRecoveryRootSessionId(sessionId);
   if (!rootSessionId) return null;
 
   const state = await loadState(rootSessionId);
   if (!state) return null;
+
+  // A callback from a superseded physical attempt, or a duplicate callback
+  // after terminal settlement, must not settle or deliver the logical root.
+  if (state.status !== "running" || state.activeSessionId !== sessionId) {
+    log.info(
+      `[run-recovery] ignoring stale callback root=${rootSessionId} callbackSession=${sessionId} activeSession=${state.activeSessionId} callbackStatus=${status} recoveryStatus=${state.status}`,
+    );
+    return {
+      retried: false,
+      exhausted: state.status === "exhausted",
+      rootSessionId,
+      retriesUsed: state.retriesUsed,
+      maxRetries: state.maxRetries,
+      terminalDrop: true,
+      stale: true,
+    };
+  }
 
   if (status === "completed") {
     state.status = "completed";
