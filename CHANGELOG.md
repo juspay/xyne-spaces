@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.21](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.20...v1.219.0-release-20260825.21) (2026-08-31)
+
+
+### Bug Fixes
+
+* canvas links, files, dark mode and keyboard support ([#1223](https://github.com/juspay/xyne-spaces/issues/1223)) ([9e434e9](https://github.com/juspay/xyne-spaces/commit/9e434e9e71edf2c26b380e60dac55695cd8a2c24))
+
 ## [1.219.0-release-20260825.20](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.19...v1.219.0-release-20260825.20) (2026-08-31)
 
 
