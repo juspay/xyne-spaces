@@ -19,6 +19,9 @@ import {
   type IncomingCallRow,
 } from '../IncomingCall/IncomingCallCard.utils';
 import type { IncomingCallViewModel } from '../IncomingCall/IncomingCallCard.types';
+import { useCallWindowRing } from '../../../routes/CallWindow/useCallWindowRing';
+import { openJoinCallWindow } from '../../../routes/CallWindow/callWindowLauncher';
+import { sendCallWindowCommand } from '../../../utils/callWindowChannel';
 
 type CallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -83,6 +86,18 @@ export function IncomingCallModal(): React.ReactElement | null {
     });
   });
 
+  // A stable identity for "which calls are ringable right now". incomingCalls is a
+  // fresh array on every render (it also recomputes Date.now()), so using it as a
+  // dependency re-arms the 500ms debounce below on every render — under call-related
+  // re-render churn the timer can be starved indefinitely and INCOMING_CALL for the
+  // new call never dispatches at all.
+  const ringableIdsKey = (incomingCalls ?? [])
+    .map(call => String(call.externalId))
+    .sort()
+    .join(',');
+  const incomingCallsRef = useRef(incomingCalls);
+  incomingCallsRef.current = incomingCalls;
+
   useEffect(() => {
     // Clear any existing timeout
     if (processingTimeoutRef.current) {
@@ -94,9 +109,10 @@ export function IncomingCallModal(): React.ReactElement | null {
       // Only process incoming calls when in stable states (not during transitions)
       if (!canShowIncomingCalls) return;
 
-      if (!incomingCalls?.length) return;
+      const ringable = incomingCallsRef.current;
+      if (!ringable?.length) return;
 
-      incomingCalls.forEach(call => {
+      ringable.forEach(call => {
         const callId = String(call.externalId);
         const callWithRelations = call as CallWithRelations;
 
@@ -132,17 +148,13 @@ export function IncomingCallModal(): React.ReactElement | null {
         clearTimeout(processingTimeoutRef.current);
       }
     };
-  }, [incomingCalls, incomingCallQueue, canShowIncomingCalls, user?.id]);
+  }, [ringableIdsKey, incomingCallQueue, canShowIncomingCalls, user?.id, usersById]);
 
   // The caller hanging up removes the call from activeCalls. Tear the modal
   // down on that change rather than inside the debounce below — half a second
   // of a card for a call that has already ended reads as an unresponsive UI,
   // and the debounce exists to settle calls *arriving*, not leaving.
   const ringingCallId = incomingCallQueue[0]?.callId;
-  const ringableIdsKey = (incomingCalls ?? [])
-    .map(call => String(call.externalId))
-    .sort()
-    .join(',');
 
   const hasLoadedActiveCalls = allActiveCalls !== undefined;
 
@@ -152,7 +164,7 @@ export function IncomingCallModal(): React.ReactElement | null {
     // that ended — concluding otherwise would hang up on a live caller.
     if (!hasLoadedActiveCalls) return;
     if (ringableIdsKey.split(',').includes(ringingCallId)) return;
-    callActor.send({ type: 'REJECT' });
+    callActor.send({ type: 'REJECT', callId: ringingCallId });
   }, [ringingCallId, ringableIdsKey, hasLoadedActiveCalls]);
 
   // Initialize audio once
@@ -175,7 +187,15 @@ export function IncomingCallModal(): React.ReactElement | null {
   // Get the first call in the queue (active incoming call)
   const incomingCallData = incomingCallQueue[0];
 
-  // Play notification sound when incoming call appears
+  const ringingCall = (allActiveCalls ?? []).find(
+    call => String(call.externalId) === incomingCallData?.callId,
+  ) as CallWithRelations | undefined;
+
+  const { usesCallWindow, ringWindowShown, ringWindowCallId, focusRingWindow } = useCallWindowRing({
+    ringingCallId: isRinging && incomingCallData ? incomingCallData.callId : undefined,
+    callType: ringingCall?.callType,
+  });
+
   useEffect(() => {
     const shouldPlay = isRinging && incomingCallData;
 
@@ -197,24 +217,51 @@ export function IncomingCallModal(): React.ReactElement | null {
         audioRef.current.currentTime = 0;
       }
 
+      // The id of the call actually being accepted. Every downstream step is keyed on
+      // this, never on the queue head — the head is the oldest queued call, which after
+      // a DM call is the DM, not the channel call the user just clicked.
+      const targetCallId = callIdToAccept ?? incomingCallData?.callId;
+
       // Close the native notification if in Electron
       if (
         window.electronAPI &&
-        callIdToAccept &&
+        targetCallId &&
         typeof window.electronAPI.closeCallNotification === 'function'
       ) {
-        window.electronAPI.closeCallNotification(callIdToAccept);
+        window.electronAPI.closeCallNotification(targetCallId);
+      }
+
+      if (usesCallWindow) {
+        // Focus only when the ring window is already showing this exact call. Focusing
+        // blind joins whatever that window happens to display, which is the previous
+        // call whenever its navigation was deferred.
+        if (targetCallId && ringWindowShown && ringWindowCallId === targetCallId) {
+          focusRingWindow();
+        } else if (targetCallId) {
+          sendCallWindowCommand('leave');
+          openJoinCallWindow(targetCallId, { replaceLiveCall: true });
+        }
+        callActor.send({ type: 'REJECT', callId: targetCallId });
+        return;
       }
 
       if (isInActiveCall) {
         // Send SWITCH_CALL event to disconnect current call and join new one
-        callActor.send({ type: 'SWITCH_CALL', zero });
+        callActor.send({ type: 'SWITCH_CALL', zero, callId: targetCallId });
       } else {
         // Normal accept flow
-        callActor.send({ type: 'ACCEPT', zero });
+        callActor.send({ type: 'ACCEPT', zero, callId: targetCallId });
       }
     },
-    [isInActiveCall, zero],
+    [
+      focusRingWindow,
+      incomingCallData?.callId,
+      isInActiveCall,
+      ringWindowCallId,
+      ringWindowShown,
+      usesCallWindow,
+      zero,
+    ],
   );
 
   const handleRejectCall = useCallback(
@@ -239,8 +286,8 @@ export function IncomingCallModal(): React.ReactElement | null {
         void zero.mutate(mutators.calls.reject({ callId, timestamp: Date.now() }));
       }
 
-      // Update UI state
-      callActor.send({ type: 'REJECT' });
+      // Update UI state — keyed, so the queue drops the same call the mutator ended.
+      callActor.send({ type: 'REJECT', callId });
     },
     [zero, incomingCallData?.callId],
   );
@@ -305,6 +352,10 @@ export function IncomingCallModal(): React.ReactElement | null {
       cleanupNotificationClicked();
     };
   }, [incomingCallQueue, handleAcceptCall, handleRejectCall]);
+
+  if (usesCallWindow && ringWindowShown) {
+    return null;
+  }
 
   // Show incoming call modal when in ringing state
   if (isRinging && incomingCallData) {

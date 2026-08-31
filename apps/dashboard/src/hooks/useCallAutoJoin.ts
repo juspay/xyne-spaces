@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { useSearchParams } from 'react-router-dom';
 import { ConnectionState } from 'livekit-client';
@@ -8,6 +8,11 @@ import { queries } from '../zero/queries';
 import { useCallJoinOrInitiate } from './useCallJoinOrInitiate';
 import { useAuth } from './useAuth';
 import { useCallAutoJoinEnabled } from './callAutoJoinCacConfig';
+import {
+  getLiveCallWindowState,
+  isCallWindowActive,
+  subscribeLiveCallWindow,
+} from '../utils/callWindowChannel';
 import {
   isAutoJoinRequested,
   parseCallUrlOverrides,
@@ -75,7 +80,14 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
   const stateSnapshot = useSelector(roomActor, state => state);
   const machineState = stateSnapshot.value;
   const currentCallId = stateSnapshot.context.externalId;
+  const liveCallWindow = useSyncExternalStore(
+    subscribeLiveCallWindow,
+    getLiveCallWindowState,
+    () => null,
+  );
   const isInCall =
+    !!liveCallWindow ||
+    isCallWindowActive() ||
     stateSnapshot.matches('initiating') ||
     stateSnapshot.matches('joining') ||
     stateSnapshot.matches('connecting') ||

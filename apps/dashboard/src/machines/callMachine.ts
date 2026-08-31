@@ -30,9 +30,9 @@ export interface CallContext {
 // Simplified event types - only accept/reject for incoming calls
 export type CallEvent =
   | { type: 'INCOMING_CALL'; callData: CallContext['incomingCallQueue'][0] }
-  | { type: 'ACCEPT'; zero: Zero | null }
-  | { type: 'REJECT' }
-  | { type: 'SWITCH_CALL'; zero: Zero | null }
+  | { type: 'ACCEPT'; zero: Zero | null; callId?: string | undefined }
+  | { type: 'REJECT'; callId?: string | undefined }
+  | { type: 'SWITCH_CALL'; zero: Zero | null; callId?: string | undefined }
   | { type: 'SET_NATIVE_ACTIVE_CALL'; callId: string }
   | { type: 'CLEAR_NATIVE_ACTIVE_CALL' };
 
@@ -118,7 +118,11 @@ export const callMachine = setup({
 
     // Store the callId being accepted before removing from queue
     storeAcceptingCallId: assign({
-      acceptingCallId: ({ context }) => context.incomingCallQueue[0]?.callId || null,
+      acceptingCallId: ({ context, event }) => {
+        const requested =
+          event.type === 'ACCEPT' || event.type === 'SWITCH_CALL' ? event.callId : undefined;
+        return requested ?? context.incomingCallQueue[0]?.callId ?? null;
+      },
     }),
 
     // Clear the accepting callId and zero after joining
@@ -143,10 +147,25 @@ export const callMachine = setup({
       },
     }),
 
-    // Remove first call from queue (when accepted or rejected)
-    removeFromQueue: assign({
-      incomingCallQueue: ({ context }) => {
-        return context.incomingCallQueue.slice(1); // Remove first item
+    // Remove the accepted call by id. Positional removal drops whichever entry is at
+    // the head, which is the oldest call queued — not necessarily the one being joined.
+    removeAcceptedFromQueue: assign({
+      incomingCallQueue: ({ context }) =>
+        context.acceptingCallId
+          ? context.incomingCallQueue.filter(call => call.callId !== context.acceptingCallId)
+          : context.incomingCallQueue.slice(1),
+    }),
+
+    // Remove the rejected call by id, so the queue stays in step with the call the
+    // reject mutator actually ended.
+    removeRejectedFromQueue: assign({
+      incomingCallQueue: ({ context, event }) => {
+        const rejectedId =
+          (event.type === 'REJECT' ? event.callId : undefined) ??
+          context.incomingCallQueue[0]?.callId;
+        return rejectedId
+          ? context.incomingCallQueue.filter(call => call.callId !== rejectedId)
+          : context.incomingCallQueue.slice(1);
       },
     }),
 
@@ -197,16 +216,16 @@ export const callMachine = setup({
       on: {
         ACCEPT: {
           target: 'accepting',
-          actions: 'storeZero',
+          actions: ['storeZero', 'storeAcceptingCallId'],
         },
         REJECT: {
           target: 'ringing',
-          actions: 'removeFromQueue',
+          actions: 'removeRejectedFromQueue',
         },
         SWITCH_CALL: {
           guard: 'isInActiveCall',
           target: 'switching',
-          actions: 'storeZero',
+          actions: ['storeZero', 'storeAcceptingCallId'],
         },
         INCOMING_CALL: {
           actions: 'addIncomingCall',
@@ -240,15 +259,13 @@ export const callMachine = setup({
     accepting: {
       entry: [
         ({ context }): void => {
-          const callId = context.incomingCallQueue[0]?.callId ?? null;
           logger.info(Event.LIVEKIT_ROOM_EVENT, {
-            callId,
+            callId: context.acceptingCallId,
             eventName: 'accepting_state_entered',
             queueLength: context.incomingCallQueue.length,
           });
         },
-        'storeAcceptingCallId',
-        'removeFromQueue',
+        'removeAcceptedFromQueue',
       ],
       invoke: {
         src: 'joinCall',
@@ -256,12 +273,16 @@ export const callMachine = setup({
           callId: context.acceptingCallId || '',
           zero: context.zero,
         }),
+        // Back to ringing, not idle: a second call can still be queued, and idle only
+        // re-enters ringing on a fresh INCOMING_CALL — which addIncomingCall dedupes
+        // away, stranding that call. ringing's always-guard falls through to idle when
+        // the queue is empty.
         onDone: {
-          target: 'idle',
+          target: 'ringing',
           actions: 'clearAcceptingCallId',
         },
         onError: {
-          target: 'idle',
+          target: 'ringing',
           actions: 'clearAcceptingCallId',
         },
       },

@@ -39,6 +39,7 @@ import { channelService } from '../services/Chat/channelService';
 
 interface InitialStateLoaderProps {
   children: ReactNode;
+  blockUntilReady?: boolean;
 }
 
 interface PermissionsApiResponse {
@@ -81,7 +82,10 @@ const areQueriesCompleted = (obj: QueryDetails[]): boolean => {
 // Show modal after 60 seconds of disconnected/error state
 const MODAL_DELAY_MS = 60000;
 
-const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): ReactNode => {
+const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
+  children,
+  blockUntilReady = true,
+}): ReactNode => {
   const isRefreshing = useRef(false);
   const persistenceSetup = useRef(false);
 
@@ -500,7 +504,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     permissionsQuery.data?.success === true &&
     permissionsHydrated;
 
-  if (areAllQueriesCompleted) {
+  if (areAllQueriesCompleted || !blockUntilReady) {
     return (
       <SharedAuthProvider value={context}>
         <HttpClientProvider client={axiosHttpClient}>
@@ -511,7 +515,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
               }
             >
               {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
-              <DeferredLoader />
+              {areAllQueriesCompleted && <DeferredLoader />}
               {children}
             </ChannelServiceProvider>
           </AffinityServiceProvider>
