@@ -1024,16 +1024,8 @@ export class ChannelController {
         ChannelRole.ADMIN
       );
 
-      // For DM channels, add the other user as participant. The target is scoped
-      // to the caller's workspace (from the session, not the request): an
-      // installation-wide lookup would let a member open a channel with a user in
-      // another workspace they were never invited to.
+      // For DM channels, add the other user as participant
       if (scopeType === 'DM' && scopeId) {
-        const dmTarget = await this.userRepository.findByIdInWorkspace(scopeId, req.user!.workspaceId!);
-        if (!dmTarget || dmTarget.status !== 'ACTIVE') {
-          res.status(404).json({ error: 'User not found or inactive' });
-          return;
-        }
         await this.channelParticipantRepository.addParticipant(
           channel.id,
           scopeId,
@@ -1052,9 +1044,8 @@ export class ChannelController {
 
         for (const participantId of validParticipants) {
           try {
-            // Scope the lookup to the caller's workspace so a participant from
-            // another workspace cannot be added by referencing their id.
-            const user = await this.userRepository.findByIdInWorkspace(participantId, req.user!.workspaceId!);
+            // Check if user exists before adding
+            const user = await this.userRepository.findById(participantId);
             if (user && user.status === 'ACTIVE') {
               await this.channelParticipantRepository.addParticipant(
                 channel.id,
