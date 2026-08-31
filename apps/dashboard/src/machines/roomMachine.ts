@@ -1455,7 +1455,7 @@ export const roomMachine = setup({
      */
     routeToExternalCallLobby: ({ context }) => {
       if (!context.externalLobbyUrl) return;
-      openLink(context.externalLobbyUrl, null, { force: 'external', silent: true });
+      openLink(context.externalLobbyUrl, null, { force: 'external' });
     },
 
     showJoinCallErrorToast: ({ context }) => {
