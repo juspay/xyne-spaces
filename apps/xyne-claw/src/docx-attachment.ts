@@ -10,6 +10,7 @@
  * file shouldn't fail the whole /run.
  */
 import mammoth from "mammoth";
+import { matchesAttachmentType } from "./attachment-matcher.js";
 
 // Mammoth's bundled .d.ts only types `convertToHtml` / `extractRawText`,
 // but the runtime exposes `convertToMarkdown` too (see node_modules/mammoth
@@ -24,14 +25,13 @@ type MammothMarkdown = {
 };
 const mammothMd = mammoth as unknown as MammothMarkdown;
 
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOCX_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
 export const DOCX_EXTENSIONS = new Set([".docx"]);
 
-export function isDocxAttachment(fileName: string, mimeType: string): boolean {
-  if ((mimeType ?? "").toLowerCase() === DOCX_MIME) return true;
-  const dot = fileName.lastIndexOf(".");
-  if (dot < 0) return false;
-  return DOCX_EXTENSIONS.has(fileName.slice(dot).toLowerCase());
+export function isDocxAttachment(fileName: string, mimeType?: string | null): boolean {
+  return matchesAttachmentType(fileName, mimeType, DOCX_MIME_TYPES, DOCX_EXTENSIONS);
 }
 
 /** Cap on per-file markdown output so a 200-page contract doesn't drown
