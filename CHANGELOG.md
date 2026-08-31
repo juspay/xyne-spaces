@@ -1,3 +1,11 @@
+## [1.248.4](https://github.com/juspay/xyne-spaces/compare/v1.248.3...v1.248.4) (2026-08-31)
+
+
+### Bug Fixes
+
+* fix empty-result loader flash on cached cmd+K search ([#1191](https://github.com/juspay/xyne-spaces/issues/1191)) ([b415e93](https://github.com/juspay/xyne-spaces/commit/b415e93689d8da97527a119c73ef539270541fe5))
+* pass threadMentions as a rank-only term for messages ([#1251](https://github.com/juspay/xyne-spaces/issues/1251)) ([a6ab1bf](https://github.com/juspay/xyne-spaces/commit/a6ab1bffc96cf0c4e8e85365e3d6f7faf0f289f5))
+
 ## [1.248.3](https://github.com/juspay/xyne-spaces/compare/v1.248.2...v1.248.3) (2026-08-31)
 
 
