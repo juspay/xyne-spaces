@@ -2091,9 +2091,11 @@ export const router = createBrowserRouter(
                 <ZeroProvider>
                   <ZeroFallbackProvider>
                     <InitialStateLoader blockUntilReady={false}>
-                      <div className='h-full bg-background'>
-                        <CallWindowRoute />
-                      </div>
+                      <EditProvider>
+                        <div className='h-full bg-background'>
+                          <CallWindowRoute />
+                        </div>
+                      </EditProvider>
                     </InitialStateLoader>
                   </ZeroFallbackProvider>
                 </ZeroProvider>
