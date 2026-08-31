@@ -1783,6 +1783,7 @@ model Channel {
   emails             Email[]
   boardMappings      ChannelBoardMapping[]
   sdlcRepos          Repo[] @relation("RepoSdlcChannel")
+  collectionPermissions CollectionPermission[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -3628,6 +3629,10 @@ model CollectionPermission {
   collectionId String
   userId       String?
   userGroupId  String?
+  // Grants every current+future member of this channel access — always
+  // VIEWER (enforced in the grantPermission mutator), and only offered for
+  // workspace-scoped collections (no home channel of their own) in the UI.
+  channelId    String?
   role         String
   canShare     Boolean        @default(false)
   grantedBy    String?
@@ -3637,10 +3642,13 @@ model CollectionPermission {
   collection Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   user       User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
   userGroup  UserGroup?  @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+  channel    Channel?    @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   @@unique([collectionId, userId])
   @@unique([collectionId, userGroupId])
+  @@unique([collectionId, channelId])
   @@index([userGroupId])
+  @@index([channelId])
   @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
   @@map("collection_permissions")
   @@schema("public")

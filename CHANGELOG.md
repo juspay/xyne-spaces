@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.20](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.19...v1.219.0-release-20260825.20) (2026-08-31)
+
+
+### Features
+
+* add PPTX viewer, KB UI polish, and workspace toolbar admin control ([#1209](https://github.com/juspay/xyne-spaces/issues/1209)) ([5afdf45](https://github.com/juspay/xyne-spaces/commit/5afdf45515993748e1c28f3f4646ec819da51424)), closes [#964](https://github.com/juspay/xyne-spaces/issues/964) [#2479](https://github.com/juspay/xyne-spaces/issues/2479)
+
 ## [1.219.0-release-20260825.19](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.18...v1.219.0-release-20260825.19) (2026-08-30)
 
 
