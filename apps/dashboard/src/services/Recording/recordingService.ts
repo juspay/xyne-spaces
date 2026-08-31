@@ -132,11 +132,14 @@ export interface RecordingSharingResult {
   visibility?: CallVisibility;
 }
 
+/**
+ * The regenerate endpoint returns 202 immediately; generation runs in the
+ * background. Completion is observed through the Zero-replicated
+ * `detailedSummaryStatus` on the recording ('pending' → 'ready' | 'failed'),
+ * and the owner also receives a RECORDING_SUMMARY_READY notification.
+ */
 export interface RegenerateRecordingSummaryResult {
-  summaryTemplateId: string;
-  detailedSummaryCanvasId: string | null;
-  detailedSummaryReady: boolean;
-  summaryModelUsed?: 'fast' | 'thinking';
+  status: 'pending';
 }
 
 /** A Google Doc created from this recording's summary, as stored on call metadata. */
@@ -202,6 +205,7 @@ export interface RecordingDetail extends Recording {
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
+  detailedSummaryStatus: 'pending' | 'ready' | 'failed' | null;
   summaryModelUsed: 'fast' | 'thinking' | null;
   citationSegments: CitationSegment[];
   visibility?: CallVisibility;
