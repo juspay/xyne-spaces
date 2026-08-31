@@ -1769,6 +1769,9 @@ importers:
       express:
         specifier: ^4.21.0
         version: 4.22.2
+      express-rate-limit:
+        specifier: 8.5.2
+        version: 8.5.2(express@4.22.2)
       ioredis:
         specifier: ^5.8.2
         version: 5.11.1

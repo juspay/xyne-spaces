@@ -94,6 +94,7 @@ import SectionSettingsMenu, { MENU_ROW } from './SectionSettingsMenu';
 import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
@@ -679,6 +680,7 @@ const ChatDirectory = ({
                 <ChatPlus className='size-4' />
               </span>
               <span className='flex-1 min-w-0 text-left truncate block'>New Message</span>
+              <ShortcutHint shortcut='global.composeMessage' />
             </button>
             <button
               className={cn(
@@ -698,6 +700,7 @@ const ChatDirectory = ({
                 <Subtask className='size-4' />
               </span>
               <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
+              <ShortcutHint shortcut='global.openThreads' />
               {threadCount > 0 && (
                 <span className='size-5 flex items-center justify-center shrink-0'>
                   <Badge

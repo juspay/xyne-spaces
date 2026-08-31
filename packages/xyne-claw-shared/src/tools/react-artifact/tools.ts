@@ -511,6 +511,12 @@ export const createReactArtifactTool: ToolDefinition = {
     "describing a UI in prose. Use it when the answer is better shown than told — a dashboard, a chart, " +
     "a comparison table, an interactive explainer. Write TypeScript React (.tsx) and default-export a " +
     "component from the `entry` file.\n\n" +
+    "ONE APP PER CONVERSATION — this thread has a single app. Your FIRST call creates it; " +
+    "every later call REPLACES its contents as a new version of that same app. So when asked " +
+    "to change or fix something, re-send the whole project with the change applied — do not " +
+    "announce a new app, do not rename it unless asked, and do not drop features you built " +
+    "earlier just because the latest message did not mention them. Users can roll back to any " +
+    "earlier version, so a mistake is recoverable — but a silent regression is not obvious.\n\n" +
     "DESIGN SYSTEM — the project is preloaded with Tailwind v4 and the shadcn/ui base set. Do NOT " +
     "write these yourself and do NOT list them in `dependencies`; they are injected for you:\n" +
     `  • shadcn/ui components at /components/ui/<name>: ${SHADCN_UI_COMPONENTS.join(", ")}\n` +
@@ -544,8 +550,18 @@ export const createReactArtifactTool: ToolDefinition = {
       )
       .join("\n") +
     "\n      Rows come back with EXACTLY these fields — do not invent others, and do not " +
-    "assume a field exists because it would be convenient. User ids (assignedTo, createdBy) " +
-    "are opaque ids: fetch the `user` model via an ast source and join on id to show names.\n" +
+    "assume a field exists because it would be convenient.\n" +
+    "NAMES — ids are opaque, so NEVER render one and never join a `user` source to get a " +
+    "name. Use the preloaded lookup, which is already resolved for you:\n" +
+    "        import { useXyneDirectory } from './lib/xyne-data';\n" +
+    "        const { displayName, channelName } = useXyneDirectory();\n" +
+    "        displayName(message.senderId)   // \"Megha Trivedi\"\n" +
+    "        channelName(row.channelId)      // \"#product\", or a DM\'s participants\n" +
+    "      It costs no request and needs no dataRequirement. It also gets two things right " +
+    "that you cannot infer from a row: a user\'s name is `displayName || name || email` and " +
+    "`displayName` is usually EMPTY, and a DM channel\'s `name` column is not a name at all — " +
+    "it holds the participant ids, so rendering `channel.name` for a DM prints raw ids. " +
+    "Group DMs come back collapsed (\"Alice, Bob + 3 others\") and your own DM reads \"You\".\n" +
     "\n" +
     `      Or a direct query — source: { "kind": "ast", "model": …, "where": …, "orderBy": …, "take": … } ` +
     `over: ${[...ALLOWED_AST_MODELS].sort().join(", ")} (findMany or count, take <= ${MAX_AST_TAKE}). ` +
