@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.10](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.9...v1.239.0-release-20260827.10) (2026-08-31)
+
+
+### Features
+
+* read from replica and write to master ([#1269](https://github.com/juspay/xyne-spaces/issues/1269)) ([b6e677d](https://github.com/juspay/xyne-spaces/commit/b6e677d83ff173fa0866245b00a647c9944cacdf))
+
 ## [1.239.0-release-20260827.9](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.8...v1.239.0-release-20260827.9) (2026-08-31)
 
 
