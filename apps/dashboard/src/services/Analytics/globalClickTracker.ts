@@ -189,9 +189,10 @@ class GlobalClickTracker {
     const target = event.target as HTMLElement;
     if (!target) return;
 
+    // Passwords are excluded entirely — not even their length is recorded.
     const isTextInput =
       (target instanceof HTMLInputElement &&
-        ['text', 'search', 'url', 'number', 'email', 'tel', 'password'].includes(target.type)) ||
+        ['text', 'search', 'url', 'number', 'email', 'tel'].includes(target.type)) ||
       target instanceof HTMLTextAreaElement;
 
     if (!isTextInput) return;
@@ -202,9 +203,11 @@ class GlobalClickTracker {
     const trackingData = this.parseTrackingData(trackedElement);
     if (!trackingData) return;
 
+    // Never record the typed content — only that the field was filled.
     const el = target;
     this.trackEvent(trackingData, TriggerType.BLUR, {
-      input: el.value || '',
+      input_length: el.value.length,
+      filled: el.value.length > 0,
     });
   };
 

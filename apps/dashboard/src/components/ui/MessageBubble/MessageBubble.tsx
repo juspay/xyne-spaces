@@ -850,8 +850,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         data-component='MessageBubble'
         className={messageBubbleClassName}
         onClick={onClick}
-        data-track-category='MESSAGE'
-        data-track-name='OPEN_MESSAGE_BUBBLE'
+        {...(onClick
+          ? {
+              'data-track-category': 'MESSAGE',
+              'data-track-name': 'OPEN_MESSAGE_BUBBLE',
+              // Static label: the auto-label would capture message content.
+              'data-track-label': 'message_bubble',
+            }
+          : {})}
         onKeyDown={
           onClick
             ? (e): void => {

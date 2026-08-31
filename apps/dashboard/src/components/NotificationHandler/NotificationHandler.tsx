@@ -584,7 +584,12 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (isElectron && window.electronAPI && typeof window.electronAPI.onNavigateTo === 'function') {
       const handleNavigate = (url: string, workspaceId?: string): void => {
-        globalClickTracker.trackManualEvent('NOTIFICATIONS', 'CLICK_NATIVE_NOTIFICATION');
+        // The navigate-to IPC fires for notifications, deep links, tray and
+        // overlay navigations alike — the renderer cannot tell them apart, so
+        // this is recorded as a generic externally-triggered navigation.
+        globalClickTracker.trackManualEvent('NAVIGATION', 'ELECTRON_NAVIGATE', undefined, {
+          to: url,
+        });
         void handleNotificationClick(url, workspaceId);
       };
 

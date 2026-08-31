@@ -19,7 +19,8 @@ class ActivityTrackingService {
     try {
       const resolved = resolveModule(payload.url);
       // Named individually rather than spreading context_metadata: that object
-      // also holds free text and, for INPUT_CHANGE events, the raw typed value.
+      // can hold free text (INPUT_CHANGE events carry only value length, never
+      // the typed content).
       const meta = payload.context_metadata ?? {};
 
       sudoQueryService.identify({ id: payload.user_id });
@@ -37,6 +38,8 @@ class ActivityTrackingService {
         ...(typeof meta.path === 'string' && { path: meta.path }),
         // Previous URL on PAGE_VIEW events — lets navigation flows be queried.
         ...(typeof meta.from === 'string' && { from: meta.from }),
+        // Target URL on ELECTRON_NAVIGATE events.
+        ...(typeof meta.to === 'string' && { to: meta.to }),
         ...(typeof meta.label === 'string' && { label: meta.label }),
         ...(typeof meta.tabValue === 'string' && { tabValue: meta.tabValue }),
         ...(typeof meta.tab === 'string' && { tab: meta.tab }),
