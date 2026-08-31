@@ -1,9 +1,10 @@
 import multer from 'multer';
-import { PassThrough, type Readable } from 'node:stream';
-import { fileTypeFromBuffer } from 'file-type';
+import { PassThrough, Writable, type Readable } from 'node:stream';
+import { Parse as parseZipStream, type Entry as ZipEntry } from 'unzipper';
 import { logger } from '../utils/logger';
 import { storageService } from '../services/storage';
 import { AppError } from './errorHandler';
+import { config } from '@/config/env';
 
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
@@ -102,17 +103,55 @@ export function classifyUpload(mimetype?: string, originalName?: string): Upload
   return ALLOWED_UPLOAD_EXTENSIONS.has(ext) ? 'allowed' : 'not-allowlisted';
 }
 
-/** file-type's recommended read length; covers signatures not at offset zero. */
+/** Bytes read before storing: enough for every signature checked below. */
 const SNIFF_BYTES = 4100;
 
 /**
  * Executable formats, refused whatever the file is named. Kept narrow on purpose:
  * only content that is unambiguously a program. Nothing legitimate begins with a
- * PE/ELF/Mach-O header, so there is no false-positive tail — whereas matching the
+ * PE/ELF/Mach-O header, so there is no false-positive tail — whereas matching a
  * detected type against the declared extension would reject real files, since
  * .apk/.jar/.docx/.xlsx are all Zip containers and text has no signature at all.
+ * The checks mirror `file`/file-type; universal Mach-O shares its magic with Java
+ * class files and is told apart by the architecture count, as `file` does.
  */
-const EXECUTABLE_CONTENT = new Set(['exe', 'elf', 'macho']);
+function executableKind(head: Buffer): 'exe' | 'elf' | 'macho' | null {
+  if (head.length >= 2 && head[0] === 0x4d && head[1] === 0x5a) return 'exe';
+  if (head.length < 4) return null;
+  const magic = head.readUInt32BE(0);
+  if (magic === 0x7f454c46) return 'elf';
+  if (magic === 0xfeedface || magic === 0xfeedfacf || magic === 0xcefaedfe || magic === 0xcffaedfe) {
+    return 'macho';
+  }
+  if (magic === 0xcafebabe && head.length >= 8) {
+    const architectures = head.readUInt32BE(4);
+    if (architectures > 0 && architectures <= 30) return 'macho';
+  }
+  return null;
+}
+
+/**
+ * The EICAR test file — the industry-standard harmless string every scanner is
+ * expected to detect. Refusing it means the screening can be exercised end to end
+ * without handling real malware, which is also how an assessor will test it.
+ */
+const EICAR_SIGNATURE = Buffer.from(
+  'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*',
+  'latin1',
+);
+
+/** Why a file's bytes were refused, or null when they were not. */
+async function forbiddenContentReason(head: Buffer): Promise<string | null> {
+  if (head.length === 0) return null;
+  if (head.indexOf(EICAR_SIGNATURE) !== -1) return 'eicar-test-file';
+  return executableKind(head);
+}
+
+function extensionOf(name: string): string {
+  const lower = name.toLowerCase().trim();
+  const dot = lower.lastIndexOf('.');
+  return dot === -1 || dot === lower.length - 1 ? '' : lower.slice(dot + 1);
+}
 
 /**
  * Read the first bytes of a stream and return a stream that still yields the whole
@@ -190,16 +229,14 @@ async function screenExecutableContent(
   mimetype: string | undefined,
 ): Promise<Readable> {
   const { head, body } = await readHeadAndRewind(stream, SNIFF_BYTES);
-  if (head.length === 0) return body;
 
-  const detected = await fileTypeFromBuffer(head);
-  if (!detected || !EXECUTABLE_CONTENT.has(detected.ext)) return body;
+  const reason = await forbiddenContentReason(head);
+  if (!reason) return body;
 
   logger.warn('[UPLOAD] Rejected executable content', {
     originalName,
     declaredMimetype: mimetype,
-    detectedExt: detected.ext,
-    detectedMime: detected.mime,
+    detected: reason,
   });
   body.destroy();
   throw new AppError('File content is not permitted', 400);
@@ -207,6 +244,217 @@ async function screenExecutableContent(
 
 /** Exposed for tests; the storage engines that call it need a live request. */
 export const __screenExecutableContentForTest = screenExecutableContent;
+
+// ── Archive inspection ────────────────────────────────────────────────────
+//
+// A Zip is the one allowed container whose contents the extension and content
+// checks above cannot see, so its entries get the same two checks: an entry
+// named like a blocked type, or whose bytes are an executable, refuses the whole
+// archive. Only plain `.zip` uploads are opened. The other Zip-based formats the
+// product accepts (apk, ipa, docx, …) legitimately carry native code or are
+// consumed as a unit, and opening them would refuse real files.
+
+/** A Zip inside a Zip is opened; anything deeper is refused rather than followed. */
+const MAX_ARCHIVE_DEPTH = 2;
+/** Bounds on how much work one upload can demand of the inspector. */
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_ARCHIVE_INFLATED_BYTES = 4 * 1024 * 1024 * 1024;
+
+class ArchiveViolation extends AppError {
+  constructor(public readonly reason: string, public readonly entryPath: string) {
+    super('Archive contains content that is not permitted', 400);
+  }
+}
+
+/** Consume a stream fully, keeping only its first `byteCount` bytes. */
+function captureHead(stream: Readable, byteCount: number, budget: { bytes: number }): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let kept = 0;
+    const sink = new Writable({
+      write(chunk: Buffer, _encoding, next) {
+        budget.bytes += chunk.length;
+        if (budget.bytes > MAX_ARCHIVE_INFLATED_BYTES) {
+          next(new ArchiveViolation('inflates beyond the inspection limit', ''));
+          return;
+        }
+        if (kept < byteCount) {
+          chunks.push(chunk.subarray(0, byteCount - kept));
+          kept += chunk.length;
+        }
+        next();
+      },
+    });
+    sink.once('finish', () => resolve(Buffer.concat(chunks)));
+    sink.once('error', reject);
+    stream.once('error', reject);
+    stream.pipe(sink);
+  });
+}
+
+function inspectZipEntries(
+  archive: Readable,
+  depth: number,
+  budget: { entries: number; bytes: number },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const parser = parseZipStream();
+    let chain: Promise<void> = Promise.resolve();
+    let failed = false;
+
+    const fail = (err: unknown) => {
+      if (failed) return;
+      failed = true;
+      parser.destroy();
+      reject(err);
+    };
+
+    parser.on('entry', (entry: ZipEntry) => {
+      chain = chain
+        .then(async () => {
+          if (failed) {
+            entry.autodrain();
+            return;
+          }
+          budget.entries += 1;
+          if (budget.entries > MAX_ARCHIVE_ENTRIES) {
+            throw new ArchiveViolation('has more entries than can be inspected', entry.path);
+          }
+          if (entry.type === 'Directory') {
+            await entry.autodrain().promise();
+            return;
+          }
+          if (classifyUpload(undefined, entry.path) === 'blocked') {
+            throw new ArchiveViolation('blocked file type', entry.path);
+          }
+          if (extensionOf(entry.path) === 'zip') {
+            if (depth >= MAX_ARCHIVE_DEPTH) {
+              throw new ArchiveViolation('nested archives beyond the inspection depth', entry.path);
+            }
+            await inspectZipEntries(entry, depth + 1, budget);
+            return;
+          }
+          const head = await captureHead(entry, SNIFF_BYTES, budget);
+          const reason = await forbiddenContentReason(head);
+          if (reason) throw new ArchiveViolation(reason, entry.path);
+        })
+        .catch((err) => {
+          entry.autodrain();
+          fail(err);
+        });
+    });
+
+    // A `.zip` that cannot be parsed is not something a user can extract either;
+    // refusing it costs nothing legitimate and denies a malformed header as a
+    // way past the inspection.
+    parser.once('error', (err: Error) =>
+      fail(new ArchiveViolation(`could not be read (${err.message})`, '')),
+    );
+    parser.once('finish', () => {
+      chain.then(() => {
+        if (!failed) resolve();
+      }, fail);
+    });
+    archive.once('error', fail);
+    archive.pipe(parser);
+  });
+}
+
+type ArchiveScreeningMode = 'shadow' | 'enforce';
+let archiveScreeningMode: ArchiveScreeningMode = config.uploads.archiveScreening;
+
+/** Exposed for tests. */
+export function __setArchiveScreeningModeForTest(mode: ArchiveScreeningMode): void {
+  archiveScreeningMode = mode;
+}
+
+/**
+ * Inspect a Zip upload while it streams to storage. The returned `body` is what
+ * storage receives; `verdict` settles when inspection finishes. In enforce mode a
+ * violation destroys `body` so the upload stops, and rejects `verdict` so the
+ * caller can remove anything already stored. In shadow mode the violation is
+ * logged and the file stored regardless, so the inspector can be watched for
+ * false positives before it is allowed to refuse anything.
+ */
+function screenArchiveContent(
+  stream: Readable,
+  originalName: string,
+): { body: Readable; verdict: Promise<void> } {
+  const body = new PassThrough();
+  const toInspector = new PassThrough();
+  stream.once('error', (err) => {
+    body.destroy(err);
+    toInspector.destroy(err);
+  });
+  stream.pipe(body);
+  stream.pipe(toInspector);
+
+  const verdict = inspectZipEntries(toInspector, 1, { entries: 0, bytes: 0 }).catch((err) => {
+    const violation = err instanceof ArchiveViolation ? err : null;
+    logger.warn('[UPLOAD] Archive content violation', {
+      originalName,
+      mode: archiveScreeningMode,
+      reason: violation?.reason ?? String(err),
+      entryPath: violation?.entryPath,
+    });
+    toInspector.destroy();
+    if (archiveScreeningMode === 'shadow') return;
+    const rejection = violation ?? new AppError('Archive could not be inspected', 400);
+    body.destroy(rejection);
+    throw rejection;
+  });
+
+  return { body, verdict };
+}
+
+/** Exposed for tests; resolves to the full stored bytes or rejects with the verdict. */
+export async function __screenArchiveContentForTest(stream: Readable, originalName: string): Promise<Buffer> {
+  const { body, verdict } = screenArchiveContent(stream, originalName);
+  const stored = new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    body.on('data', (c: Buffer) => chunks.push(c));
+    body.once('end', () => resolve(Buffer.concat(chunks)));
+    body.once('error', reject);
+  });
+  const [storedOutcome] = await Promise.allSettled([stored, verdict]);
+  await verdict;
+  if (storedOutcome.status === 'rejected') throw storedOutcome.reason;
+  return storedOutcome.value;
+}
+
+/**
+ * Run every content check and store the file. Inspection of an archive overlaps
+ * the upload, so a violation found after storage has finished is followed by
+ * removal of what was stored; the caller only ever sees the rejection.
+ */
+async function uploadScreened<R extends { path: string }>(
+  stream: Readable,
+  originalName: string,
+  mimetype: string | undefined,
+  upload: (body: Readable) => Promise<R>,
+): Promise<R> {
+  const screened = await screenExecutableContent(stream, originalName, mimetype);
+  if (extensionOf(originalName) !== 'zip') {
+    return upload(screened);
+  }
+
+  const { body, verdict } = screenArchiveContent(screened, originalName);
+  const [uploadOutcome, verdictOutcome] = await Promise.allSettled([upload(body), verdict]);
+  if (verdictOutcome.status === 'rejected') {
+    if (uploadOutcome.status === 'fulfilled') {
+      await storageService.deleteFile(uploadOutcome.value.path).catch((err) => {
+        logger.error('[UPLOAD] Failed to remove rejected archive from storage', {
+          originalName,
+          storagePath: uploadOutcome.value.path,
+          error: err,
+        });
+      });
+    }
+    throw verdictOutcome.reason;
+  }
+  if (uploadOutcome.status === 'rejected') throw uploadOutcome.reason;
+  return uploadOutcome.value;
+}
 
 /**
  * Skips a refused file rather than failing the request: returning an error to multer
@@ -271,19 +519,19 @@ const streamingStorage: multer.StorageEngine = {
         });
       });
 
-      const screened = await screenExecutableContent(file.stream, originalName, file.mimetype);
-
-      const result = await storageService.uploadStream(screened, {
-        filename: originalName,
-        contentType: file.mimetype || 'application/octet-stream',
-        metadata: {
-          originalName,
-          uploadedAt: new Date().toISOString(),
-          proxied: 'true',
-        },
-        scopeType: 'CONVERSATION',
-        scopeId: 'temp',
-      });
+      const result = await uploadScreened(file.stream, originalName, file.mimetype, (body) =>
+        storageService.uploadStream(body, {
+          filename: originalName,
+          contentType: file.mimetype || 'application/octet-stream',
+          metadata: {
+            originalName,
+            uploadedAt: new Date().toISOString(),
+            proxied: 'true',
+          },
+          scopeType: 'CONVERSATION',
+          scopeId: 'temp',
+        }),
+      );
 
       logger.info(`[UPLOAD-STREAM] Stream propagated to object storage`, {
         traceLabel,
@@ -338,17 +586,18 @@ function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEng
         return;
       }
 
-      screenExecutableContent(file.stream, file.originalname, file.mimetype)
-        .then((screened) => storageService.uploadStream(screened, {
-        filename: file.originalname || `upload-${Date.now()}`,
-        contentType: file.mimetype || 'application/octet-stream',
-        scopeType: 'collection',
-        scopeId,
-        metadata: {
-          originalName: file.originalname,
-          uploadedAt: new Date().toISOString(),
-        },
-      })).then((result) => {
+      uploadScreened(file.stream, file.originalname, file.mimetype, (body) =>
+        storageService.uploadStream(body, {
+          filename: file.originalname || `upload-${Date.now()}`,
+          contentType: file.mimetype || 'application/octet-stream',
+          scopeType: 'collection',
+          scopeId,
+          metadata: {
+            originalName: file.originalname,
+            uploadedAt: new Date().toISOString(),
+          },
+        }),
+      ).then((result) => {
         logger.info(`[COLLECTION-UPLOAD] Streamed to GCS: ${file.originalname} -> ${result.path} (${result.size} bytes)`);
         cb(null, { path: result.path, filename: result.filename, size: result.size });
       }).catch((error) => {

@@ -547,6 +547,13 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+  // 'shadow' logs what archive inspection would refuse and stores the file anyway;
+  // 'enforce' refuses it. Start in shadow, flip once the logs show no false positives.
+  UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
+  // Comma-separated internal host suffixes the link-preview / outbound fetch guard
+  // refuses by name (e.g. corporate or in-cluster domains). Empty by default; set
+  // per environment so no internal topology is committed to source.
+  SSRF_INTERNAL_HOST_SUFFIXES: Joi.string().allow('').default(''),
 
 }).unknown();
 
@@ -1140,5 +1147,14 @@ export const config = {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
+  },
+  uploads: {
+    archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
+  },
+  ssrf: {
+    internalHostSuffixes: (envVars.SSRF_INTERNAL_HOST_SUFFIXES as string)
+      .split(',')
+      .map((suffix: string) => suffix.trim().toLowerCase().replace(/^\.+/, ''))
+      .filter(Boolean),
   },
 };

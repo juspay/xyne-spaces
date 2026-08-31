@@ -1,5 +1,16 @@
 import { Readable } from 'node:stream';
-import { classifyUpload, __screenExecutableContentForTest } from './upload';
+import JSZip from 'jszip';
+
+// The screening under test never reaches storage; keep its ESM-only client out of the CJS test runtime.
+jest.mock('../services/storage', () => ({
+  storageService: { uploadStream: jest.fn(), deleteFile: jest.fn() },
+}));
+import {
+  classifyUpload,
+  __screenExecutableContentForTest,
+  __screenArchiveContentForTest,
+  __setArchiveScreeningModeForTest,
+} from './upload';
 
 describe('classifyUpload', () => {
   it('blocks executables and server-side scripts regardless of declared type', () => {
@@ -150,5 +161,93 @@ describe('executable content screening', () => {
     await expect(
       __screenExecutableContentForTest(stream, 'partial.bin', 'application/octet-stream'),
     ).rejects.toThrow(/ECONNRESET/);
+  });
+});
+
+/** The EICAR test file: what an assessor uploads to check that screening is live. */
+const eicarTestFile = Buffer.from(
+  'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*',
+  'latin1',
+);
+
+async function zipOf(entries: Record<string, Buffer | string>): Promise<Buffer> {
+  const zip = new JSZip();
+  for (const [name, content] of Object.entries(entries)) zip.file(name, content);
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+describe('EICAR test file', () => {
+  it('is refused as a plain upload', async () => {
+    await expect(
+      __screenExecutableContentForTest(streamOf(eicarTestFile, 16), 'eicar.com', 'application/octet-stream'),
+    ).rejects.toThrow(/not permitted/i);
+  });
+});
+
+describe('archive content screening', () => {
+  beforeAll(() => __setArchiveScreeningModeForTest('enforce'));
+  it('refuses a zip carrying the EICAR test file', async () => {
+    const archive = await zipOf({ 'eicar.com': eicarTestFile });
+    await expect(
+      __screenArchiveContentForTest(streamOf(archive, 64), 'eicar.com.zip'),
+    ).rejects.toThrow(/not permitted/i);
+  });
+
+  it('refuses a zip whose entry is an executable renamed to look like an image', async () => {
+    const archive = await zipOf({ 'holiday.png': peExecutable, 'notes.txt': 'hello' });
+    await expect(
+      __screenArchiveContentForTest(streamOf(archive, 64), 'photos.zip'),
+    ).rejects.toThrow(/not permitted/i);
+  });
+
+  it('refuses a zip with an entry of a blocked type, whatever its bytes', async () => {
+    const archive = await zipOf({ 'tools/installer.exe': 'echo not really a program' });
+    await expect(
+      __screenArchiveContentForTest(streamOf(archive, 64), 'tools.zip'),
+    ).rejects.toThrow(/not permitted/i);
+  });
+
+  it('passes an ordinary archive through to storage intact', async () => {
+    const archive = await zipOf({
+      'report.csv': 'a,b,c\n1,2,3\n',
+      'images/chart.png': pngImage,
+      'docs/': '',
+    });
+    const stored = await __screenArchiveContentForTest(streamOf(archive, 100), 'bundle.zip');
+    expect(stored.equals(archive)).toBe(true);
+  });
+
+  it('opens a zip inside a zip and refuses what it finds there', async () => {
+    const inner = await zipOf({ 'eicar.com': eicarTestFile });
+    const outer = await zipOf({ 'readme.txt': 'see inside', 'inner.zip': inner });
+    await expect(
+      __screenArchiveContentForTest(streamOf(outer, 64), 'outer.zip'),
+    ).rejects.toThrow(/not permitted/i);
+  });
+
+  it('refuses nesting deeper than it will inspect', async () => {
+    const level3 = await zipOf({ 'plain.txt': 'nothing here' });
+    const level2 = await zipOf({ 'l3.zip': level3 });
+    const level1 = await zipOf({ 'l2.zip': level2 });
+    await expect(
+      __screenArchiveContentForTest(streamOf(level1, 64), 'deep.zip'),
+    ).rejects.toThrow(/not permitted/i);
+  });
+
+  it('refuses a .zip that is not a zip rather than storing it uninspected', async () => {
+    await expect(
+      __screenArchiveContentForTest(streamOf(Buffer.from('this is not an archive'), 8), 'fake.zip'),
+    ).rejects.toThrow(/not permitted|could not be inspected/i);
+  });
+
+  it('in shadow mode logs the violation but stores the file untouched', async () => {
+    __setArchiveScreeningModeForTest('shadow');
+    try {
+      const archive = await zipOf({ 'eicar.com': eicarTestFile, 'notes.txt': 'hello' });
+      const stored = await __screenArchiveContentForTest(streamOf(archive, 64), 'eicar.com.zip');
+      expect(stored.equals(archive)).toBe(true);
+    } finally {
+      __setArchiveScreeningModeForTest('enforce');
+    }
   });
 });
