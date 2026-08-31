@@ -21,13 +21,24 @@
 
 /** base template name → its rotation variants (identical goldens, N snapshots). */
 const ROTATION_SETS: Record<string, readonly string[]> = {
+  // 4-way (a-d). e/f were added 2026-08-31 as extra headroom during a storm and
+  // removed the same day — they were never the problem. The real cause: `cursors`
+  // defaulted to 0, so every claw pod began its round-robin at `a` and the tail of
+  // the list was never reached. Measured with the 6-way set in place:
+  //   rot-a 4 PVCs, rot-b 4, rot-c 3, rot-d 1, rot-e 0, rot-f 0
+  // The two newest variants took ZERO traffic while a/b/c throttled on snapshots
+  // minutes old. Adding variants could not help because clones never got that far.
+  // Fixed by seeding the cursor at a random offset (see `cursors` below).
+  //
+  // Still unfixed, and the bigger lever: a failed clone retries every 12-30s with
+  // no backoff, so once a source is throttled the retries keep it throttled. More
+  // variants divide the per-snapshot rate; they do not stop a retry loop from
+  // re-saturating whatever it is given. Fix backoff before adding e/f back.
   "agent-workspace-gvisor-template": [
     "agent-workspace-gvisor-template-a",
     "agent-workspace-gvisor-template-b",
     "agent-workspace-gvisor-template-c",
     "agent-workspace-gvisor-template-d",
-    "agent-workspace-gvisor-template-e",
-    "agent-workspace-gvisor-template-f",
   ],
   // euler: 2-way (not 4). It storms the most of any pool — 5 times between
   // 2026-08-11 and 2026-08-18, every one a RESOURCE_OPERATION_RATE_EXCEEDED on
