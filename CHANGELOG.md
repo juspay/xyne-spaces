@@ -1,3 +1,10 @@
+## [1.248.3](https://github.com/juspay/xyne-spaces/compare/v1.248.2...v1.248.3) (2026-08-31)
+
+
+### Bug Fixes
+
+* canvas notes numbered list and recording summary colors ([#1227](https://github.com/juspay/xyne-spaces/issues/1227)) ([e089323](https://github.com/juspay/xyne-spaces/commit/e08932343ed018ff8ad0523c09a015a617dbe431))
+
 ## [1.248.2](https://github.com/juspay/xyne-spaces/compare/v1.248.1...v1.248.2) (2026-08-31)
 
 
