@@ -1,3 +1,17 @@
+## [1.248.2](https://github.com/juspay/xyne-spaces/compare/v1.248.1...v1.248.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* canvas links, files, dark mode and keyboard support ([#1225](https://github.com/juspay/xyne-spaces/issues/1225)) ([3c67d22](https://github.com/juspay/xyne-spaces/commit/3c67d22cb4cde037567029ecb70159c385aa7760))
+
+## [1.248.1](https://github.com/juspay/xyne-spaces/compare/v1.248.0...v1.248.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* added copy button in link preview ([#540](https://github.com/juspay/xyne-spaces/issues/540)) ([9677463](https://github.com/juspay/xyne-spaces/commit/967746374d7576ddbdbd8d1c3f635f01b8caf53a))
+
 ## [1.248.0](https://github.com/juspay/xyne-spaces/compare/v1.247.0...v1.248.0) (2026-08-31)
 
 
