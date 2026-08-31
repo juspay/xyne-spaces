@@ -44,7 +44,6 @@ export const sdlcChatLayout = (input: {
 export const sdlcChatNavigationSearch = (input: {
   currentSearch: string;
   destinationSearch?: string;
-  destinationHasConversations: boolean;
 }): string => {
   const current = new URLSearchParams(input.currentSearch);
   const destination = new URLSearchParams(input.destinationSearch ?? '');
@@ -59,7 +58,8 @@ export const sdlcChatNavigationSearch = (input: {
   }
 
   destination.delete('conversation');
-  if (currentLayout.activeTab === 'conversations' && input.destinationHasConversations) {
+  destination.delete('selectedTab');
+  if (currentLayout.activeTab === 'conversations') {
     destination.set('discussion', '1');
     destination.set('chat', 'conversations');
   } else {

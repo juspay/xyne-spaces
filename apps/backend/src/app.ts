@@ -224,6 +224,7 @@ export class App {
           url.startsWith(`${apiPathPrefix}?`);
         if (isPrefixed) {
           req.url = `/api${url.slice(apiPathPrefix.length)}`;
+          req.originalUrl = req.url;
         }
         next();
       });

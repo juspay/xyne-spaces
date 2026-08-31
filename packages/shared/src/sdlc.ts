@@ -183,6 +183,16 @@ export const sdlcDiscussionSchema = z
   });
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
+export const entityLinkContextSchema = z.object({
+  sourceType: z.enum(["CANVAS", "TRACK"]),
+  sourceId: z.string().min(1),
+  linkId: z.string().min(1),
+});
+export type EntityLinkContextInput = z.infer<typeof entityLinkContextSchema>;
+
+export const entityLinkOwnerSchema = entityLinkContextSchema.omit({ linkId: true });
+export type EntityLinkOwner = z.infer<typeof entityLinkOwnerSchema>;
+
 export const SDLC_TRACK_STATUSES = ["ACTIVE", "COMPLETED", "ARCHIVED"] as const;
 export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
 
