@@ -87,12 +87,13 @@ export const shouldStartFreshSdlcAssistant = (input: {
   input.actorRepositoryId !== input.repositoryId;
 
 export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
-  repoQueryComplete: boolean;
+  /** Both the channel and the entity links, since the context needs both. */
+  dataLoaded: boolean;
   discussionOpen: boolean;
   selectedConversationId: string | null;
   discussionContextResolved: boolean;
 }): boolean =>
-  input.repoQueryComplete &&
+  input.dataLoaded &&
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;

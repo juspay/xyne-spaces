@@ -16,6 +16,11 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
     tx: Transaction<Schema>,
   ): Promise<void> {
     assertWorkspaceMatch(this.ctx, args.workspaceId, 'sdlc_entity_links');
+    // The edge's only scope. Every reader filters on it, so an unscoped row is
+    // written and then invisible to everyone.
+    if (!args.channelId) {
+      throw new MutationACLError('SDLC entity links require a hub', 'sdlc_entity_links');
+    }
     // Repository membership is structure, not content: only the hub endpoints write it.
     if (args.relationType === SDLC_MEMBERSHIP_RELATION) {
       throw new MutationACLError(
@@ -26,14 +31,12 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
     // Track membership is structure too, but sdlc.createTrack writes it through this
     // path, so it is gated rather than refused: the writer must be in that hub.
     if (args.relationType === SDLC_TRACK_MEMBERSHIP_RELATION) {
-      const participant = args.channelId
-        ? await tx.run(
-            zql.channel_participants
-              .where('channelId', args.channelId)
-              .where('userId', this.ctx.userID)
-              .one(),
-          )
-        : null;
+      const participant = await tx.run(
+        zql.channel_participants
+          .where('channelId', args.channelId)
+          .where('userId', this.ctx.userID)
+          .one(),
+      );
       if (!participant) {
         throw new MutationACLError('Hub membership required', 'sdlc_entity_links');
       }

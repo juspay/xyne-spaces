@@ -3267,7 +3267,9 @@ model SdlcEntityLink {
   workspaceId  String
   /// @deprecated -> scope is channelId; the repository is an endpoint of the edge, not a column
   repoId       String?
-  channelId    String?
+  /// Nullable in Postgres for pre-multirepo rows; required here so no new write
+  /// can omit the edge's scope.
+  channelId    String
   sourceType   String
   sourceId     String
   targetType   String
