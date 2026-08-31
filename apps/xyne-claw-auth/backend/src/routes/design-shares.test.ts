@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({
   share: null as null | Record<string, any>,
   attachmentId: "attachment-1",
   orgMembers: [["user-1", "org-1"]] as Array<[string, string]>,
-  config: { encryptionKey: Buffer.alloc(32, 9), frontendUrl: "https://spaces.xyne.juspay.net/claw" },
+  config: { encryptionKey: Buffer.alloc(32, 9), spacesAppUrl: "https://app.spaces.xyne.juspay.net/claw" },
 }));
 
 vi.mock("../config.js", () => ({ CONFIG: state.config }));
@@ -179,14 +179,14 @@ describe("design artifact sharing", () => {
     expect(refreshed.sharePath).toBe(first.sharePath);
   });
 
-  it("does not duplicate the /claw prefix when building an external share URL", async () => {
+  it("builds external share URLs from the canonical public Spaces origin", async () => {
     const { designShareUrl } = await import("./design-shares.js");
     expect(designShareUrl("/claw/v3/design/shared#token")).toBe(
-      "https://spaces.xyne.juspay.net/claw/v3/design/shared#token",
+      "https://app.spaces.xyne.juspay.net/claw/v3/design/shared#token",
     );
-    state.config.frontendUrl = "https://spaces.xyne.juspay.net";
+    state.config.spacesAppUrl = "https://app.spaces.xyne.juspay.net";
     expect(designShareUrl("/claw/v3/design/shared#token")).toBe(
-      "https://spaces.xyne.juspay.net/claw/v3/design/shared#token",
+      "https://app.spaces.xyne.juspay.net/claw/v3/design/shared#token",
     );
   });
 

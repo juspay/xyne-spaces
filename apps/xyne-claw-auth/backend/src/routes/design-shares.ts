@@ -46,13 +46,13 @@ function sharePath(rawToken: string): string {
   return `/claw/v3/design/shared#${encodeURIComponent(rawToken)}`;
 }
 
-/** Build a browser URL whether FRONTEND_URL is origin-rooted or already `/claw`-rooted. */
+/** Build a browser URL from the canonical public Spaces origin. */
 export function designShareUrl(path: string): string {
-  const frontendBase = CONFIG.frontendUrl.replace(/\/+$/, "");
-  const relativePath = frontendBase.endsWith("/claw") && path.startsWith("/claw/")
+  const spacesBase = CONFIG.spacesAppUrl.replace(/\/+$/, "");
+  const relativePath = spacesBase.endsWith("/claw") && path.startsWith("/claw/")
     ? path.slice("/claw".length)
     : path;
-  return `${frontendBase}${relativePath}`;
+  return `${spacesBase}${relativePath}`;
 }
 
 function ownerResponse(
