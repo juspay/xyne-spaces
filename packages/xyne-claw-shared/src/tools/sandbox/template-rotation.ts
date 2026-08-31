@@ -26,17 +26,6 @@ const ROTATION_SETS: Record<string, readonly string[]> = {
     "agent-workspace-gvisor-template-b",
     "agent-workspace-gvisor-template-c",
     "agent-workspace-gvisor-template-d",
-    // e/f added 2026-08-30: 4-way was no longer enough. Measured 32 claims in
-    // one hour (18 of them agent-workspace, spread 5/5/4/4 across a-d), and
-    // EVERY variant throttled simultaneously — so the rotation was working and
-    // simply out of headroom, unlike the earlier storms which were config
-    // faults (one snapshot, or a rotation nothing routed to).
-    //
-    // NOTE this is headroom, not a fix. The thing that turns a brief throttle
-    // into a sustained one is that a failed clone retries every 12-30s with no
-    // backoff: 15 stuck claims generated more clone attempts than the live
-    // traffic did. Adding variants divides the per-snapshot rate; it does not
-    // stop a retry loop from re-saturating whatever it is given.
     "agent-workspace-gvisor-template-e",
     "agent-workspace-gvisor-template-f",
   ],
@@ -143,7 +132,8 @@ const cursors: Record<string, number> = {};
 export function rotateTemplate(base: string): string {
   const variants = ROTATION_SETS[base];
   if (!variants || variants.length === 0) return base;
-  const n = cursors[base] ?? 0;
+  // Seed at a random offset rather than 0 — see the note on `cursors` above.
+  const n = cursors[base] ?? Math.floor(Math.random() * variants.length);
   cursors[base] = n + 1;
   return variants[n % variants.length]!;
 }

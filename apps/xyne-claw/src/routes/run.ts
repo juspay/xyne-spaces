@@ -1021,7 +1021,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
           : processTaskError !== undefined
             ? String(processTaskError)
             : "Run ended without emitting a result (likely session-locked or silent early-return — check claw logs for this sessionId)";
-        const status: "completed" | "failed" | "cancelled" = processTaskError ? "failed" : "completed";
+        const status: "completed" | "failed" | "cancelled" = processTaskError || activeRun.handoffCapFired ? "failed" : "completed";
         emitter.forceDone(sessionId, status, reason);
       }
       const terminal = emitter.terminalPayload();
