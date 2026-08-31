@@ -1463,6 +1463,10 @@ export class CallController {
             typeof callMetadata?.detailedSummaryReady === 'boolean'
               ? callMetadata.detailedSummaryReady
               : null,
+          detailedSummaryFailed:
+            typeof callMetadata?.detailedSummaryFailed === 'boolean'
+              ? callMetadata.detailedSummaryFailed
+              : false,
           linkedTicketId:
             typeof callMetadata?.linkedTicketId === 'string'
               ? callMetadata.linkedTicketId

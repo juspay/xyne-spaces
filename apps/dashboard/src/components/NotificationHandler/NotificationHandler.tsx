@@ -777,6 +777,10 @@ function getToastFn(notificationType: string) {
       return toast.success;
     case 'collection_deleted':
       return toast.warning;
+    case 'scribe_summary_ready':
+      return toast.success;
+    case 'scribe_summary_failed':
+      return toast.error;
     default:
       return toast.info;
   }

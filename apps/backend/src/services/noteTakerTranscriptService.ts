@@ -12,8 +12,9 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess, NotificationType } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
+import { notificationService } from '@/services/notificationService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
@@ -149,15 +150,23 @@ class NoteTakerTranscriptService {
         detailedSummaryPromise,
         saveLabelsPromise,
       ]);
-      await this.finalizeCallUpdates(call, {
+      const detailedSummaryFailed = !detailedSummary;
+      const persisted = await this.finalizeCallUpdates(call, {
         metadata: {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
           detailedSummaryReady: detailedSummary ? true : undefined,
+          detailedSummaryFailed,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
+      // Only report an outcome the DB actually reflects — if the write itself
+      // failed, REST/Zero still show the previous state, and telling the user
+      // "ready"/"failed" here would be lying about what's persisted.
+      if (persisted) {
+        await this.notifySummaryOutcome(call, detailedSummaryFailed ? 'failed' : 'ready');
+      }
       await this.queueVespaIndexing(call);
 
       // Thread-linked recording: already auto-shared to the thread's channel
@@ -316,7 +325,7 @@ class NoteTakerTranscriptService {
       markedItems?: RecordingSummaryMarkedItem[];
       summaryTemplateId?: string | null;
     },
-  ): Promise<void> {
+  ): Promise<boolean> {
     const metadataChanges = updates.metadata
       ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
       : [];
@@ -361,7 +370,7 @@ class NoteTakerTranscriptService {
       data.summaryTemplateId = updates.summaryTemplateId;
     }
 
-    if (Object.keys(data).length === 0) return;
+    if (Object.keys(data).length === 0) return true;
 
     try {
       await repositories.calls.update(call.id, data);
@@ -369,8 +378,43 @@ class NoteTakerTranscriptService {
         fields_updated: Object.keys(data).join(','),
         path: 'note_taker',
       });
+      return true;
     } catch (error) {
       logger.error(`[${call.externalId}] metadata_update_failed`, { error, path: 'note_taker' });
+      return false;
+    }
+  }
+
+  private async notifySummaryOutcome(call: Call, outcome: 'ready' | 'failed'): Promise<void> {
+    try {
+      if (!call.createdByUserId || !call.workspaceId) return;
+
+      const notificationType =
+        outcome === 'ready' ? NotificationType.SCRIBE_SUMMARY_READY : NotificationType.SCRIBE_SUMMARY_FAILED;
+      const freshCall = await repositories.calls.findByExternalId(call.externalId);
+      const recordingTitle = freshCall?.title || call.title || 'Impromptu Recording';
+      await notificationService.createNotification(call.createdByUserId, {
+        title: `An update on your scribe: ${recordingTitle}`,
+        message: outcome === 'ready' ? 'Ready to view.' : "Couldn't generate this summary.",
+        type: notificationType,
+        relatedEntityType: 'call',
+        relatedEntityId: call.externalId,
+        // Relative — NotificationHandler's withWorkspacePrefix adds the
+        // workspace segment automatically from metadata.workspaceId below.
+        actionUrl: `/recordings/${call.externalId}?tab=summary`,
+        workspaceId: call.workspaceId,
+        metadata: {
+          callId: call.externalId,
+          workspaceId: call.workspaceId,
+          recordingTitle,
+          outcome,
+        },
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] scribe_summary_notification_failed`, {
+        error,
+        path: 'note_taker',
+      });
     }
   }
 

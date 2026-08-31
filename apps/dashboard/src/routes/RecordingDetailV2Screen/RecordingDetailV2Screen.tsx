@@ -192,6 +192,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
   useEffect(() => {
     if (requestedTab === 'notes') {
       setTabPreference('notes');
+    } else if (requestedTab === 'summary') {
+      setTabPreference('secondary');
     }
   }, [recordingId, requestedTab]);
 
@@ -434,6 +436,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const rawLinkedTicketMessageId = metadata?.['linkedTicketMessageId'];
       const rawDetailedSummaryCanvasId = metadata?.['detailedSummaryCanvasId'];
       const rawDetailedSummaryReady = metadata?.['detailedSummaryReady'];
+      const rawDetailedSummaryFailed = metadata?.['detailedSummaryFailed'];
       const rawNotesCanvasId = metadata?.['notesCanvasId'] ?? metadata?.['notesCanvasViewAccessId'];
       const googleDocs = parseRecordingGoogleDocLinks(metadata?.['googleDocs']);
       const next: RecordingDetail = {
@@ -453,6 +456,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
           typeof rawDetailedSummaryReady === 'boolean'
             ? rawDetailedSummaryReady
             : prev.detailedSummaryReady,
+        detailedSummaryFailed:
+          typeof rawDetailedSummaryFailed === 'boolean'
+            ? rawDetailedSummaryFailed
+            : prev.detailedSummaryFailed,
         notesCanvasId:
           prev.notesCanvasId ?? (typeof rawNotesCanvasId === 'string' ? rawNotesCanvasId : null),
         // An empty list here means metadata hasn't carried the key yet (older
@@ -477,6 +484,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
   useEffect(() => {
     const request = getSummaryRequest(recordingId);
     if (!request || recording?.externalId !== recordingId) return;
+    if (recording?.detailedSummaryFailed) {
+      setAwaitingSummary(false);
+      setSummaryFailed(true);
+      setPendingSummaryTemplateId(null);
+      clearSummaryRequested(recordingId);
+      return;
+    }
     const requestedSummaryIsReady = request.templateId
       ? recording?.summaryTemplateId === request.templateId && !!recording?.detailedSummaryReady
       : !!recording?.detailedSummaryReady;
@@ -486,6 +500,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     clearSummaryRequested(recordingId);
   }, [
     recording?.detailedSummaryReady,
+    recording?.detailedSummaryFailed,
     recording?.externalId,
     recording?.summaryTemplateId,
     recordingId,
@@ -781,7 +796,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // persists across unmounts the same way an explicit regenerate already does.
   useEffect(() => {
     if (!recordingId || recording?.externalId !== recordingId) return;
-    if (awaitingSummary || summaryFailed) return;
+    if (awaitingSummary || summaryFailed || recording?.detailedSummaryFailed) return;
     const hasDetailedSummaryNow =
       !!recording?.detailedSummaryCanvasId && recording?.detailedSummaryReady !== false;
     const hasTranscriptNow =
@@ -859,9 +874,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
   const summaryPendingExpired =
     !hasDetailedSummary && endedAtMs !== null && Date.now() - endedAtMs > SUMMARY_PENDING_GRACE_MS;
 
+  const summaryGenerationFailed = summaryFailed || !!recording.detailedSummaryFailed;
+
   const showSummaryShimmer =
     awaitingSummary ||
-    (!hasDetailedSummary && hasTranscript && !summaryFailed && !summaryPendingExpired);
+    (!hasDetailedSummary && hasTranscript && !summaryGenerationFailed && !summaryPendingExpired);
 
   const handleMarkerSelect = (item: MarkedItem): void => {
     // A moment already announces itself in the transcript with a divider, so only
@@ -1142,7 +1159,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   canGenerate={hasTranscript}
                   onGenerate={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
                   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
-                  hasFailed={summaryFailed}
+                  hasFailed={summaryGenerationFailed}
                   generationRunId={summaryRunNonce}
                   initialProgress={getSummaryProgress(recordingId)}
                   initialStageIndex={getSummaryStage(recordingId)}

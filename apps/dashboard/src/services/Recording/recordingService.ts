@@ -199,6 +199,7 @@ export interface RecordingDetail extends Recording {
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
+  detailedSummaryFailed: boolean;
   citationSegments: CitationSegment[];
   /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
   googleDocs?: RecordingGoogleDocLink[];
