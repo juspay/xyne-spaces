@@ -483,13 +483,19 @@ const SearchResultItem = ({
           <div className='flex items-center gap-1.5'>
             {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result)}
             <div className='flex-1 min-w-0'>
-              <div className='flex items-center gap-1.5 text-sm'>
-                <span className='font-medium text-foreground truncate'>
-                  {result.searchContext?.senderName}
+              {/* Sender / channel on the left, timestamp pinned right — same shape as
+                  the desk-mail row above and the ticket and file rows below. */}
+              <div className='flex items-center justify-between gap-2 text-sm'>
+                <span className='flex min-w-0 items-center gap-1.5'>
+                  <span className='font-medium text-foreground truncate'>
+                    {result.searchContext?.senderName}
+                  </span>
+                  <span className='shrink-0 text-xs text-muted-foreground'>{preposition}</span>
+                  <span className='text-xs font-medium text-foreground truncate'>
+                    {result.title}
+                  </span>
                 </span>
-                <span className='text-xs text-muted-foreground'>{preposition}</span>
-                <span className='text-xs font-medium text-foreground truncate'>{result.title}</span>
-                <span className='text-xs text-muted-foreground'>
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
                   {utcToIst(result.metadata.timestamp)}
                 </span>
               </div>

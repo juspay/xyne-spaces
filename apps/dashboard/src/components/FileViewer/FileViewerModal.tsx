@@ -46,6 +46,12 @@ interface FilePreviewModalProps {
   files?: FileItem[];
   currentIndex?: number;
   onNavigate?: (index: number) => void;
+  /**
+   * Tailwind z-index class for the overlay and content. Raise it when the modal
+   * is opened from inside a higher-stacked surface — the Cmd+K palette sits at
+   * z-[9999], so the default would render the preview behind it.
+   */
+  zIndexClass?: string;
 }
 
 // Inline Loading Component
@@ -290,6 +296,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   files,
   currentIndex = 0,
   onNavigate,
+  zIndexClass = 'z-[56]',
 }) => {
   // Simple state - service handles all caching and complexity
   const [fileData, setFileData] = useState<File | null>(null);
@@ -774,9 +781,11 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[56]' />
+        <Dialog.Overlay
+          className={`fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 ${zIndexClass}`}
+        />
         <Dialog.Content
-          className={`fixed z-[56] bg-black focus:outline-none
+          className={`fixed ${zIndexClass} bg-black focus:outline-none
           data-[state=closed]:fade-out transition-all ease-in-out duration-300
           data-[state=open]:fade-in overflow-hidden
           ${

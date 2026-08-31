@@ -1986,24 +1986,22 @@ const ChannelCommandMenu = ({
     });
   }, [syncEnterIntent, markNavigated]);
 
-  const handleFilePreview = useCallback(
-    (result: DisplaySearchResult): void => {
-      // Handle attachment preview - show file preview modal
-      if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
-        return;
-      }
+  const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
+    // Handle attachment preview - show file preview modal
+    if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
+      return;
+    }
 
-      const { attachmentId, internalUrl } = result.searchContext;
-      setPreviewFile({
-        fileName: result.title,
-        fileUrl: attachmentId ? `/attachments/${attachmentId}/download` : internalUrl,
-        mimeType: result.searchContext.mimeType || 'application/octet-stream',
-        fileSize: result.searchContext.fileSize || 0,
-      });
-      onOpenChange(false);
-    },
-    [onOpenChange],
-  );
+    const { attachmentId, internalUrl } = result.searchContext;
+    // Cmd+K stays open behind the preview so closing the preview returns to the
+    // results instead of dismissing the whole palette.
+    setPreviewFile({
+      fileName: result.title,
+      fileUrl: attachmentId ? `/attachments/${attachmentId}/download` : internalUrl,
+      mimeType: result.searchContext.mimeType || 'application/octet-stream',
+      fileSize: result.searchContext.fileSize || 0,
+    });
+  }, []);
 
   // Handle mouse hover over ticket and Desk items to show preview
   const handleTicketMouseEnter = useCallback(
@@ -2975,6 +2973,9 @@ const ChannelCommandMenu = ({
           fileUrl={previewFile.fileUrl}
           mimeType={previewFile.mimeType}
           fileSize={previewFile.fileSize}
+          // Cmd+K's own surface is z-[9999]; the preview opens on top of it and
+          // its default z-[56] would put it behind.
+          zIndexClass='z-[10002]'
         />
       )}
     </>
