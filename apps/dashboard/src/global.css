@@ -2875,6 +2875,7 @@ html .bn-code-block-source-popup-ok-button:hover {
   .bn-block-outer
   .bn-block
   .bn-block-content[data-content-type="numberedListItem"]::before {
+  content: attr(data-index) ".";
   min-width: 24px;
   height: 1.55em;
   align-self: flex-start;
@@ -3938,9 +3939,9 @@ img.inline-emoji,
   line-height: 1.5;
 }
 
-/* Headless detailed summaries use muted body copy while section headings retain
+/* Recording summaries use muted generated body copy while section headings retain
    foreground contrast. List markers inherit this color from their content block. */
-.detailed-summary-canvas-editor
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
   .bn-editor
   .bn-block-content:is(
     [data-content-type="paragraph"],
@@ -3953,7 +3954,18 @@ img.inline-emoji,
   color: hsl(var(--muted-foreground)) !important;
 }
 
-.detailed-summary-canvas-editor .bn-editor .bn-block-content[data-content-type="heading"] {
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block-content[data-content-type="heading"] {
+  color: hsl(var(--foreground)) !important;
+}
+
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block-content[data-text-color="recording-summary-edited"],
+:is(.detailed-summary-canvas-editor, .recording-summary-canvas-editor)
+  .bn-editor
+  .bn-block:has(> .bn-block-content[data-text-color="recording-summary-edited"]) {
   color: hsl(var(--foreground)) !important;
 }
 
