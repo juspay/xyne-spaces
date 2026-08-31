@@ -88,6 +88,9 @@ import {
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
 import {
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
   sdlcDiscussionSchema,
 } from '../sdlc.js';
@@ -1806,7 +1809,7 @@ export const mutators = defineMutators({
           await tx.mutate.sdlc_entity_links.insert({
             id: sdlcDiscussion.linkId,
             workspaceId: ctx.workspaceId,
-            repoId: sdlcDiscussion.repoId,
+            channelId,
             sourceType: sdlcDiscussion.ownerType,
             sourceId: sdlcDiscussion.ownerId,
             targetType: 'CONVERSATION',
@@ -7910,41 +7913,44 @@ export const mutators = defineMutators({
     createLink: defineMutator(
       createSdlcLinkSchema.extend({
         id: z.string(),
-        repoId: z.string(),
+        channelId: z.string(),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {
-        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
-        }
+        // Links belong to the hub. createSdlcLinkSchema already excludes the
+        // membership relation, so this cannot forge a CHANNEL -> REPOSITORY edge.
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', args.channelId)
             .where('userId', ctx.userID)
             .one(),
         );
         if (!participant) {
-          throw new Error('Repository membership required');
+          throw new Error('Hub membership required');
         }
-        const sourceExists = args.sourceType === 'CANVAS'
-          ? Boolean(await tx.run(
-              zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one(),
-            ))
-          : args.sourceType === 'TICKET'
-            ? Boolean(await tx.run(
-                zql.tickets.where('id', args.sourceId).where('channelId', repo.channelId).one(),
-              ))
-            : args.sourceType === 'CHANNEL'
-              ? args.sourceId === repo.channelId
-              : false;
+        const sourceExists =
+          args.sourceType === 'CANVAS'
+            ? Boolean(
+                await tx.run(
+                  zql.canvases.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                ),
+              )
+            : args.sourceType === 'TICKET'
+              ? Boolean(
+                  await tx.run(
+                    zql.tickets.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                  ),
+                )
+              : args.sourceType === 'CHANNEL'
+                ? args.sourceId === args.channelId
+                : false;
         if (!sourceExists) {
-          throw new Error('Relationship source does not belong to this SDLC repository');
+          throw new Error('Relationship source does not belong to this SDLC hub');
         }
         await tx.mutate.sdlc_entity_links.insert({
           id: args.id,
           workspaceId: ctx.workspaceId,
-          repoId: args.repoId,
+          channelId: args.channelId,
           sourceType: args.sourceType,
           sourceId: args.sourceId,
           targetType: args.targetType,
@@ -7956,26 +7962,27 @@ export const mutators = defineMutators({
       },
     ),
     deleteLink: defineMutator(
-      z.object({ repoId: z.string(), linkId: z.string() }),
-      async ({ tx, ctx, args: { repoId, linkId } }) => {
-        const repo = await tx.run(zql.repos.where('id', repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
-        }
+      z.object({ channelId: z.string(), linkId: z.string() }),
+      async ({ tx, ctx, args: { channelId, linkId } }) => {
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', channelId)
             .where('userId', ctx.userID)
             .one(),
         );
         if (!participant) {
-          throw new Error('Repository membership required');
+          throw new Error('Hub membership required');
         }
         const link = await tx.run(
-          zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one(),
+          zql.sdlc_entity_links.where('id', linkId).where('channelId', channelId).one(),
         );
         if (!link) {
           throw new Error('SDLC relationship not found');
+        }
+        // Structural edges are not content: repository membership is detached through
+        // the hub API, track membership only with the track. The mutation ACL agrees.
+        if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(link.relationType)) {
+          throw new Error('Structural SDLC edges are not deleted through the link API');
         }
         await tx.mutate.sdlc_entity_links.delete({ id: linkId });
       },
@@ -7984,35 +7991,45 @@ export const mutators = defineMutators({
     createTrack: defineMutator(
       z.object({
         id: z.string(),
-        repoId: z.string(),
+        linkId: z.string(),
+        channelId: z.string(),
         name: z.string().trim().min(1).max(120),
         description: z.string().trim().max(2000).optional(),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {
-        const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
-        }
+        // Tracks belong to the hub, never to one repository in it.
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', args.channelId)
             .where('userId', ctx.userID)
             .one(),
         );
         if (!participant) {
-          throw new Error('Repository membership required');
+          throw new Error('Hub membership required');
         }
         await tx.mutate.sdlc_tracks.insert({
           id: args.id,
           workspaceId: ctx.workspaceId,
-          repoId: args.repoId,
           name: args.name,
           description: args.description,
           status: 'ACTIVE',
           createdBy: ctx.userID,
           createdAt: args.timestamp,
           updatedAt: args.timestamp,
+        });
+        // The track carries no scope column; this edge is what places it in the hub.
+        await tx.mutate.sdlc_entity_links.insert({
+          id: args.linkId,
+          workspaceId: ctx.workspaceId,
+          channelId: args.channelId,
+          sourceType: 'CHANNEL',
+          sourceId: args.channelId,
+          targetType: 'TRACK',
+          targetId: args.id,
+          relationType: SDLC_TRACK_MEMBERSHIP_RELATION,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
         });
       },
     ),
@@ -8029,13 +8046,20 @@ export const mutators = defineMutators({
         if (!track) {
           throw new Error('SDLC track not found');
         }
-        const repo = await tx.run(zql.repos.where('id', track.repoId).one());
-        if (!repo?.channelId) {
-          throw new Error('SDLC repository not found');
+        const membership = await tx.run(
+          zql.sdlc_entity_links
+            .where('targetType', 'TRACK')
+            .where('targetId', args.trackId)
+            .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+            .one(),
+        );
+        if (!membership?.channelId) {
+          throw new Error('SDLC channel not found');
         }
+        const channelId = membership.channelId;
         const participant = await tx.run(
           zql.channel_participants
-            .where('channelId', repo.channelId)
+            .where('channelId', channelId)
             .where('userId', ctx.userID)
             .one(),
         );
