@@ -31,16 +31,6 @@ jest.mock('@/services/superpositionClient', () => ({
   },
 }));
 
-const mockConfig = {
-  enablePrSpecCheck: true,
-  specRequiredSections: [
-    'Problem statement',
-    'Solutioning',
-    'Test cases',
-    'Implementation details',
-  ],
-};
-jest.mock('@/config/env', () => ({ config: mockConfig }));
 jest.mock('@/utils/logger', () => ({
   logger: { info: jest.fn(), error: jest.fn(), debug: jest.fn(), warn: jest.fn() },
 }));
@@ -58,12 +48,7 @@ import {
   type BuildStatusTarget,
 } from './pullRequestValidationService';
 
-const ALL_SECTIONS = [
-  'Problem statement',
-  'Solutioning',
-  'Test cases',
-  'Implementation details',
-];
+const ALL_SECTIONS = ['Problem statement', 'Solutioning', 'Test cases'];
 
 /** Mirrors what /spec writes: a lead description, then the spec block. */
 const completeSpec = `Add a GitHub Actions check to validate that PR titles contain a valid ticket ID.
@@ -109,17 +94,17 @@ Fix it.
 `;
     expect(validateSpecSections(partial)).toEqual({
       isValid: false,
-      missing: ['Test cases', 'Implementation details'],
+      missing: ['Test cases'],
       hasSpecHeading: true,
     });
   });
 
   it('rejects a heading with no content under it', () => {
     const empty = completeSpec.replace(
-      '- Implemented as a reusable composite action.\n',
+      'PRs across Juspay repos have no automated gate enforcing ticket IDs.\n',
       '   \n'
     );
-    expect(validateSpecSections(empty).missing).toEqual(['Implementation details']);
+    expect(validateSpecSections(empty).missing).toEqual(['Problem statement']);
   });
 
   it('flags every section when there is no spec at all', () => {
@@ -246,11 +231,7 @@ We should document the Test cases somewhere.
 - Test cases
 - Implementation details
 `;
-    expect(validateSpecSections(prose).missing).toEqual([
-      'Solutioning',
-      'Test cases',
-      'Implementation details',
-    ]);
+    expect(validateSpecSections(prose).missing).toEqual(['Solutioning', 'Test cases']);
   });
 
   it('ignores headings inside fenced code blocks', () => {
@@ -309,12 +290,8 @@ Fixed.
 
 ### Test cases
 
-One case.
-
-### Implementation details
-
 `;
-    expect(validateSpecSections(empty).missing).toEqual(['Implementation details']);
+    expect(validateSpecSections(empty).missing).toEqual(['Test cases']);
   });
 
   it('honours a caller-supplied section list', () => {
@@ -329,12 +306,104 @@ Approach
 Fix it.
 `;
     expect(validateSpecSections(renamed, ['Problem', 'Approach']).isValid).toBe(true);
-    expect(validateSpecSections(renamed).missing).toEqual([
-      'Problem statement',
-      'Solutioning',
-      'Test cases',
-      'Implementation details',
-    ]);
+    expect(validateSpecSections(renamed).missing).toEqual(ALL_SECTIONS);
+  });
+
+  // Review findings: each of these failed a complete spec, or passed an empty one.
+  it('does not treat a bulleted section name as a heading', () => {
+    const bulleted = `## Specification
+
+### Problem statement
+
+A.
+
+### Solutioning
+
+B.
+
+### Test cases
+
+Steps:
+* Test cases
+* Problem statement
+
+Real content.
+`;
+    expect(validateSpecSections(bulleted).isValid).toBe(true);
+  });
+
+  it('accepts a section and its body on one line', () => {
+    const inline = `Specification
+
+Problem statement: users cannot log in
+Solutioning: add a login screen
+Test cases: sign in with a valid password
+`;
+    expect(validateSpecSections(inline).isValid).toBe(true);
+  });
+
+  it('accepts bold labels with an inline body', () => {
+    expect(
+      validateSpecSections(
+        'Specification\n**Problem statement:** Broken.\n**Solutioning:** Fixed.\n**Test cases:** One.\n'
+      ).isValid
+    ).toBe(true);
+  });
+
+  it('ignores a trailing Specification line with no sections after it', () => {
+    const strayWrapper = `Problem statement
+A.
+
+Solutioning
+B.
+
+Test cases
+C.
+
+Specification
+`;
+    expect(validateSpecSections(strayWrapper).isValid).toBe(true);
+  });
+
+  it('does not let a different fence character close a fence', () => {
+    const mixedFence = `## Specification
+
+### Problem statement
+
+A.
+
+\`\`\`
+~~~
+# Solutioning
+# Test cases
+\`\`\`
+`;
+    expect(validateSpecSections(mixedFence).missing).toEqual(['Solutioning', 'Test cases']);
+  });
+
+  it('does not scan indented code blocks for sections', () => {
+    const indented = `## Specification
+
+### Problem statement
+
+A.
+
+### Solutioning
+
+B.
+
+    # Test cases
+    some code
+`;
+    expect(validateSpecSections(indented).missing).toEqual(['Test cases']);
+  });
+
+  it('fails closed when the required list is empty', () => {
+    expect(validateSpecSections('## Specification\n### Anything\nx\n', [])).toEqual({
+      isValid: false,
+      missing: [],
+      hasSpecHeading: false,
+    });
   });
 
   it('does not let a same-named heading outside the spec block count', () => {
@@ -385,13 +454,19 @@ describe('validatePullRequest spec status', () => {
       'https://github.com/juspay/xyne-spaces/pull/690',
       0,
       GITHUB_TARGET,
-    );
+    ).then(async result => {
+      // The spec status is posted without being awaited; let it settle.
+      await new Promise(resolve => setImmediate(resolve));
+      return result;
+    });
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockFindDuplicatePR.mockResolvedValue(null);
-    mockConfig.enablePrSpecCheck = true;
-    mockIsReady.mockReturnValue(false);
+    // Superposition is the only switch now, so turn it on for these tests.
+    mockIsReady.mockReturnValue(true);
+    mockGetBooleanValue.mockResolvedValue(true);
+    mockGetStringValue.mockResolvedValue(ALL_SECTIONS.join(','));
   });
 
   const ticketWithoutSpec = () =>
@@ -401,8 +476,8 @@ describe('validatePullRequest spec status', () => {
       description: 'No spec here at all.',
     });
 
-  it('posts no spec status at all when ENABLE_PR_SPEC_CHECK is off', async () => {
-    mockConfig.enablePrSpecCheck = false;
+  it('posts no spec status at all when the check is off', async () => {
+    mockGetBooleanValue.mockResolvedValue(false);
     mockGetTicketByXyneId.mockResolvedValue({
       id: 'cmt1g1qoa0nqwa3vxas6vs9mm',
       status: 'TODO',
@@ -417,8 +492,7 @@ describe('validatePullRequest spec status', () => {
   });
 
   describe('Superposition (CAC) switches', () => {
-    it('lets CAC turn the check off even when the env flag is on', async () => {
-      mockIsReady.mockReturnValue(true);
+    it('stays off when CAC says so, and passes the repo as context', async () => {
       mockGetBooleanValue.mockResolvedValue(false);
       ticketWithoutSpec();
 
@@ -429,30 +503,23 @@ describe('validatePullRequest spec status', () => {
       ]);
       expect(mockGetBooleanValue).toHaveBeenCalledWith(
         'pr_spec_check_enabled',
-        true,
+        false,
         expect.objectContaining({ workspaceId: 'workspace-1', repo: 'xyne-spaces' }),
       );
     });
 
-    it('lets CAC turn the check on even when the env flag is off', async () => {
-      mockConfig.enablePrSpecCheck = false;
-      mockIsReady.mockReturnValue(true);
-      mockGetBooleanValue.mockResolvedValue(true);
-      mockGetStringValue.mockResolvedValue(mockConfig.specRequiredSections.join(','));
+    it('stays off when Superposition is unavailable', async () => {
+      mockIsReady.mockReturnValue(false);
       ticketWithoutSpec();
 
       await validate('feat: XYNE-56567 add spec validation check');
 
-      expect(postedStatuses()[1]).toEqual([
-        'Spec Validation',
-        'failure',
-        'No specification on XYNE-56567 - run /spec on the ticket',
+      expect(postedStatuses()).toEqual([
+        ['Ticket Validation', 'success', 'PR validation passed'],
       ]);
     });
 
     it('uses the section list CAC supplies', async () => {
-      mockIsReady.mockReturnValue(true);
-      mockGetBooleanValue.mockResolvedValue(true);
       mockGetStringValue.mockResolvedValue('Problem statement, Solutioning');
       mockGetTicketByXyneId.mockResolvedValue({
         id: 'cmt1g1qoa0nqwa3vxas6vs9mm',
@@ -470,17 +537,14 @@ describe('validatePullRequest spec status', () => {
       ]);
     });
 
-    it('falls back to the env config when CAC throws', async () => {
-      mockIsReady.mockReturnValue(true);
+    it('stays off when CAC throws', async () => {
       mockGetBooleanValue.mockRejectedValue(new Error('superposition down'));
       ticketWithoutSpec();
 
       await validate('feat: XYNE-56567 add spec validation check');
 
-      expect(postedStatuses()[1]).toEqual([
-        'Spec Validation',
-        'failure',
-        'No specification on XYNE-56567 - run /spec on the ticket',
+      expect(postedStatuses()).toEqual([
+        ['Ticket Validation', 'success', 'PR validation passed'],
       ]);
     });
   });
@@ -527,7 +591,7 @@ describe('validatePullRequest spec status', () => {
     expect(postedStatuses()[1]).toEqual([
       'Spec Validation',
       'failure',
-      'XYNE-56567 spec missing: Solutioning, Test cases, Implementation details',
+      'XYNE-56567 spec missing: Solutioning, Test cases',
     ]);
   });
 

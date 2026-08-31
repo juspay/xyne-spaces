@@ -2,7 +2,6 @@ import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
 import { BitbucketManager } from '@/bitbucket/apis';
 import { githubManager, sanitizeForLog } from '@/git-providers/github/apis';
-import { config } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { logger } from '@/utils/logger';
 import { sanitizeProjectCode, isValidProjectCode, VCSProviderType } from '@xyne/shared';
@@ -35,6 +34,7 @@ const PR_VALIDATION_CONFIG = {
     KEY: 'xyne-spec-check',
     NAME: 'Spec Validation',
   },
+  REQUIRED_SPEC_SECTIONS: ['Problem statement', 'Solutioning', 'Test cases'],
   SPEC_FLAGS: {
     ENABLED: 'pr_spec_check_enabled',
     REQUIRED_SECTIONS: 'pr_spec_required_sections',
@@ -52,6 +52,7 @@ export interface SpecValidationResult {
 interface SpecMarker {
   name: string;
   line: number;
+  hasInlineBody: boolean;
 }
 
 const normalizeHeading = (text: string): string =>
@@ -62,18 +63,48 @@ const normalizeHeading = (text: string): string =>
     .trim()
     .toLowerCase();
 
+const LIST_ITEM = /^([-*+]|\d+[.)])\s+/;
+const INDENTED_CODE = /^(?: {4,}|\t)/;
+const FENCE = /^(`{3,}|~{3,})(.*)$/;
+
+const matchMarker = (
+  line: string,
+  sectionNames: Set<string>
+): { name: string; hasInlineBody: boolean } | null => {
+  if (LIST_ITEM.test(line)) return null;
+
+  const text = line.replace(/^#{1,6}\s*/, '');
+  const whole = normalizeHeading(text);
+  if (sectionNames.has(whole)) return { name: whole, hasInlineBody: false };
+
+  const separator = text.search(/[:–—]|\s-\s/);
+  if (separator > 0) {
+    const name = normalizeHeading(text.slice(0, separator));
+    const body = text.slice(separator + 1).replace(/[*_`]/g, '').trim();
+    if (sectionNames.has(name) && body.length > 0) return { name, hasInlineBody: true };
+  }
+  return null;
+};
+
 const parseMarkers = (lines: string[], sectionNames: Set<string>): SpecMarker[] => {
   const markers: SpecMarker[] = [];
-  let inFence = false;
+  let fence: { char: string; length: number } | null = null;
+
   lines.forEach((raw, index) => {
     const line = raw.trim();
-    if (/^(```|~~~)/.test(line)) {
-      inFence = !inFence;
+    const fenceMatch = line.match(FENCE);
+    if (fenceMatch) {
+      const char = fenceMatch[1]![0]!;
+      const length = fenceMatch[1]!.length;
+      const info = fenceMatch[2]!.trim();
+      if (!fence) fence = { char, length };
+      else if (char === fence.char && length >= fence.length && info === '') fence = null;
       return;
     }
-    if (inFence) return;
-    const name = normalizeHeading(line);
-    if (sectionNames.has(name)) markers.push({ name, line: index });
+    if (fence || INDENTED_CODE.test(raw)) return;
+
+    const marker = matchMarker(line, sectionNames);
+    if (marker) markers.push({ ...marker, line: index });
   });
   return markers;
 };
@@ -84,9 +115,10 @@ const parseMarkers = (lines: string[], sectionNames: Set<string>): SpecMarker[] 
  */
 export function validateSpecSections(
   description: string | null | undefined,
-  sections: readonly string[] = config.specRequiredSections
+  sections: readonly string[] = PR_VALIDATION_CONFIG.REQUIRED_SPEC_SECTIONS
 ): SpecValidationResult {
   const required = [...sections];
+  if (!required.length) return { isValid: false, missing: [], hasSpecHeading: false };
   if (!description || !description.trim()) {
     return { isValid: false, missing: required, hasSpecHeading: false };
   }
@@ -97,15 +129,23 @@ export function validateSpecSections(
   ]);
   const lines = description.split(/\r?\n/);
   const markers = parseMarkers(lines, sectionNames);
-  const specIndex = markers.findIndex(marker => marker.name === SPEC_SECTION);
-  const hasSpecHeading = specIndex !== -1;
+  const hasSpecHeading = markers.some(marker => marker.name === SPEC_SECTION);
 
-  const scope = hasSpecHeading ? markers.slice(specIndex + 1) : markers;
+  let scope = markers;
+  for (const [index, marker] of markers.entries()) {
+    if (marker.name !== SPEC_SECTION) continue;
+    const after = markers.slice(index + 1);
+    if (after.some(other => other.name !== SPEC_SECTION)) {
+      scope = after;
+      break;
+    }
+  }
 
   const missing = required.filter(section => {
     const target = normalizeHeading(section);
     const index = scope.findIndex(marker => marker.name === target);
     if (index === -1) return true;
+    if (scope[index]!.hasInlineBody) return false;
     // Content runs to the next section name, or to the end of the description.
     const bodyStart = scope[index]!.line + 1;
     const bodyEnd = index + 1 < scope.length ? scope[index + 1]!.line : lines.length;
@@ -183,7 +223,9 @@ export class PullRequestValidationService {
       numberOfComments,
       target,
     );
-    await this.postSpecBuildStatus(target, commitHash, workspaceId, result);
+    void this.postSpecBuildStatus(target, commitHash, workspaceId, result).catch(error =>
+      logger.error('[PR-Validation] Spec status posting failed:', error)
+    );
     return result;
   }
 
@@ -355,7 +397,13 @@ export class PullRequestValidationService {
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(target, commitHash, 'success', description);
+    await this.postBuildStatus(
+      target,
+      commitHash,
+      'success',
+      description,
+      PR_VALIDATION_CONFIG.BUILD_STATUS,
+    );
   }
 
   private async postFailedBuildStatus(
@@ -363,7 +411,13 @@ export class PullRequestValidationService {
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(target, commitHash, 'failure', description);
+    await this.postBuildStatus(
+      target,
+      commitHash,
+      'failure',
+      description,
+      PR_VALIDATION_CONFIG.BUILD_STATUS,
+    );
   }
 
   /**
@@ -375,12 +429,12 @@ export class PullRequestValidationService {
     workspaceId: string
   ): Promise<{ enabled: boolean; sections: string[] }> {
     const fallback = {
-      enabled: config.enablePrSpecCheck,
-      sections: config.specRequiredSections,
+      enabled: false,
+      sections: [...PR_VALIDATION_CONFIG.REQUIRED_SPEC_SECTIONS],
     };
 
     if (!superpositionClient.isReady()) {
-      logger.debug('[PR-Validation] Superposition not ready, using env spec-check config');
+      logger.debug('[PR-Validation] Superposition not ready, spec check stays off');
       return fallback;
     }
 
@@ -413,7 +467,7 @@ export class PullRequestValidationService {
 
       return { enabled, sections: sections.length ? sections : fallback.sections };
     } catch (error) {
-      logger.warn('[PR-Validation] Superposition lookup failed, using env spec-check config:', error);
+      logger.warn('[PR-Validation] Superposition lookup failed, spec check stays off:', error);
       return fallback;
     }
   }
@@ -436,6 +490,9 @@ export class PullRequestValidationService {
     // Pending, not failed: the spec has not been found wanting, it has not been
     // looked at. Still blocks a required check, without claiming a spec is missing.
     if (result.ticketDescription === undefined || !result.xyneId) {
+      // Bitbucket has no terminal state for "not applicable": an INPROGRESS
+      // build would never be finalized, so skip rather than leave one hanging.
+      if (target.provider === VCSProviderType.BITBUCKET_SERVER) return;
       await this.postBuildStatus(
         target,
         commitHash,
@@ -483,7 +540,8 @@ export class PullRequestValidationService {
     commitHash: string,
     state: BuildStatusState,
     description: string,
-    buildStatus: { KEY: string; NAME: string } = PR_VALIDATION_CONFIG.BUILD_STATUS
+    // Required: a default here would silently post under the wrong context.
+    buildStatus: { KEY: string; NAME: string }
   ): Promise<void> {
     try {
       if (target.provider === VCSProviderType.GITHUB) {

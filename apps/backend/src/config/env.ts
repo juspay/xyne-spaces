@@ -389,11 +389,6 @@ const envSchema = Joi.object({
   JENKINS_WEBHOOK_SECRET: Joi.string().allow('').default(''),
   GITHUB_TOKEN: Joi.string().allow('').default(''),
   GITHUB_API_URL: Joi.string().uri().default('https://api.github.com'),
-  // "Spec Validation" PR check. Off so deploying it changes nothing.
-  ENABLE_PR_SPEC_CHECK: Joi.boolean().default(false),
-  SPEC_REQUIRED_SECTIONS: Joi.string().default(
-    'Problem statement,Solutioning,Test cases,Implementation details'
-  ),
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
@@ -922,11 +917,6 @@ export const config = {
     token: envVars.GITHUB_TOKEN,
     apiUrl: envVars.GITHUB_API_URL,
   },
-  enablePrSpecCheck: envVars.ENABLE_PR_SPEC_CHECK as boolean,
-  specRequiredSections: (envVars.SPEC_REQUIRED_SECTIONS as string)
-    .split(',')
-    .map(section => section.trim())
-    .filter(Boolean),
   workingHours: {
     start: envVars.WORKING_HOUR_START,
     end: envVars.WORKING_HOUR_END,
