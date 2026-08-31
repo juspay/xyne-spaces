@@ -1,3 +1,10 @@
+## [1.249.2](https://github.com/juspay/xyne-spaces/compare/v1.249.1...v1.249.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* one app per conversation, not one per generation ([#1245](https://github.com/juspay/xyne-spaces/issues/1245)) ([9b5b1c8](https://github.com/juspay/xyne-spaces/commit/9b5b1c8916a558450f5d420b261615c0a89c1966))
+
 ## [1.249.1](https://github.com/juspay/xyne-spaces/compare/v1.249.0...v1.249.1) (2026-08-31)
 
 
