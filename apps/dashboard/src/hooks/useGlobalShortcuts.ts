@@ -3,7 +3,7 @@ import type { PanelImperativeHandle } from 'react-resizable-panels';
 import type { RefObject } from 'react';
 import { CHAT_SIDEBAR_KEYBOARD_STEP } from '../routes/ChatScreen/chatSidebarWidth';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../machines/roomMachine';
 import { browserPanelActor } from '../machines/browserPanelMachine';
@@ -29,6 +29,27 @@ export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): v
     workspaceId?: string;
   }>();
   const isChatOpen = useSelector(roomActor, state => state.context.isChatOpen);
+  const maxHistoryIndexRef = useRef(0);
+
+  useEffect(() => {
+    const historyState = window.history.state as { idx?: number } | null;
+    const currentIndex = historyState?.idx ?? 0;
+    maxHistoryIndexRef.current = Math.max(maxHistoryIndexRef.current, currentIndex);
+  }, [location]);
+
+  const navigateInHistory = useCallback(
+    (delta: -1 | 1) => {
+      const historyState = window.history.state as { idx?: number } | null;
+      const currentIndex = historyState?.idx ?? 0;
+      const canNavigate =
+        delta === -1 ? currentIndex > 0 : currentIndex < maxHistoryIndexRef.current;
+
+      if (canNavigate) {
+        void navigate(delta);
+      }
+    },
+    [navigate],
+  );
 
   // The top-level panel is percentage-sized; the ChatScreen sidebar is pixel-pinned,
   // so each gets its own step.
@@ -91,12 +112,12 @@ export const useGlobalShortcuts = ({ leftPanelRef }: UseGlobalShortcutsProps): v
 
   // Go back in navigation history
   useShortcutById('global.goBack', () => {
-    void navigate(-1);
+    navigateInHistory(-1);
   });
 
   // Go forward in navigation history
   useShortcutById('global.goForward', () => {
-    void navigate(1);
+    navigateInHistory(1);
   });
 
   // Toggle right sidebar (close thread panel if open)

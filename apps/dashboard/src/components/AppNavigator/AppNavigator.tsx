@@ -96,7 +96,7 @@ const AppNavigator = (): ReactElement => {
         <button
           type='button'
           aria-label='Search'
-          onClick={() => invokeShortcut('mod+k')}
+          onClick={() => invokeShortcut('mod+g')}
           className={buttonClass}
           data-track-category='APP_NAVIGATOR'
           data-track-name='OPEN_SEARCH'

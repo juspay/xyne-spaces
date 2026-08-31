@@ -17,7 +17,7 @@ export interface ShortcutDefinition {
 export const shortcuts = {
   // ===== GLOBAL NAVIGATION =====
   'global.search': {
-    keys: ['mod+k', 'mod+g'],
+    keys: ['mod+g'],
     scope: 'global',
     allowInInputs: true,
     priority: 100,
@@ -51,22 +51,24 @@ export const shortcuts = {
     allowInInputs: true,
   },
   'global.goBack': {
-    keys: ['mod+['],
+    keys: ['mod+j'],
+    displayKeys: ['mod+j'],
     scope: 'global',
     description: 'Go back in navigation history',
     category: 'Navigation',
     priority: 50,
-    allowInInputs: true,
-    useKey: true,
+    allowInInputs: false,
+    preventDefault: true,
   },
   'global.goForward': {
-    keys: ['mod+]'],
+    keys: ['mod+k'],
+    displayKeys: ['mod+k'],
     scope: 'global',
     description: 'Go forward in navigation history',
     category: 'Navigation',
     priority: 50,
-    allowInInputs: true,
-    useKey: true,
+    allowInInputs: false,
+    preventDefault: true,
   },
   'global.goToRailItem': {
     keys: ['mod+1', 'mod+2', 'mod+3', 'mod+4', 'mod+5', 'mod+6', 'mod+7', 'mod+8', 'mod+9'],

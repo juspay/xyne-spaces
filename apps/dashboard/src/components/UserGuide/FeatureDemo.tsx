@@ -687,7 +687,7 @@ function threadsScenes(): SceneConfig[] {
 
 function searchScenes(): SceneConfig[] {
   return [
-    // Step 0: Cmd+K shortcut hint
+    // Step 0: Cmd+G shortcut hint
     {
       cx: 50,
       cy: 50,
@@ -702,7 +702,7 @@ function searchScenes(): SceneConfig[] {
                     Search anything...
                   </span>
                   <kbd className='text-[8px] bg-muted rounded px-1 border border-border text-muted-foreground'>
-                    ⌘K
+                    ⌘G
                   </kbd>
                 </div>
                 <div className='space-y-0.5 text-[9px] text-muted-foreground'>
@@ -1704,7 +1704,7 @@ function genericScenes(visualKey: string): SceneConfig[] {
     shortcuts: {
       title: 'Shortcuts',
       icon: <Wrench size={10} />,
-      lines: ['⌘K — Global Search', '⌘⇧M — New Direct Message', '? — Open shortcuts modal'],
+      lines: ['⌘G — Global Search', '⌘⇧M — New Direct Message', '? — Open shortcuts modal'],
     },
     'call-recording-share': {
       title: 'Call Context',

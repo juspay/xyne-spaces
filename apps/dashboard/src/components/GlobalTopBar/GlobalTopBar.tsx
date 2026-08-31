@@ -43,7 +43,7 @@ const NavigationAndSearch = (): ReactElement => {
   const maxIndexRef = useRef(0);
   const [searchOpen, setSearchOpen] = useState(false);
   // Restore the previous query only when the overlay is opened by clicking the
-  // header search bar on the results screen — the global Cmd+K shortcut and the
+  // header search bar on the results screen — the global Cmd+G shortcut and the
   // empty-state still open with a blank input.
   const [restoreQuery, setRestoreQuery] = useState(false);
   // Cmd+F (screen mode) opens this bar pre-scoped with an in:<channel> chip; the
@@ -67,7 +67,7 @@ const NavigationAndSearch = (): ReactElement => {
     setCanGoForward(currentIndex < maxIndexRef.current);
   }, [location]);
 
-  // Listen for the screen-mode search-bar activation event. Cmd+K dispatches it
+  // Listen for the screen-mode search-bar activation event. Cmd+G dispatches it
   // with no detail (empty bar); Cmd+F dispatches it with an in:<channel> mention
   // so the bar opens pre-scoped; Cmd+/ dispatches it with `command: true` so the bar
   // opens seeded with `/`. Either way it opens with no query restore.
@@ -105,7 +105,7 @@ const NavigationAndSearch = (): ReactElement => {
       setSearchOpen(true);
       return;
     }
-    const success = invokeShortcut('mod+k');
+    const success = invokeShortcut('mod+g');
     if (!success) toast.error('Search unavailable');
   };
 
