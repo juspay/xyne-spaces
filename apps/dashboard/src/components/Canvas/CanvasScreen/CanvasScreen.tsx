@@ -30,6 +30,7 @@ import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import {
+  AudioLines,
   ArrowLeft,
   Archive,
   CheckCircle,
@@ -87,6 +88,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+import { getRecordingCanvasCallId } from '../canvasFilters';
 import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
@@ -959,6 +961,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const isKnowledgeCanvas =
     selectedCanvas?.metadata &&
     (selectedCanvas.metadata as KnowledgeCanvasMetadata).source === 'workflow_knowledge';
+  const isCallDetailedSummaryCanvas =
+    selectedCanvas?.metadata &&
+    typeof selectedCanvas.metadata === 'object' &&
+    !Array.isArray(selectedCanvas.metadata) &&
+    selectedCanvas.metadata.source === 'call_detailed_summary';
 
   // Handle knowledge approval
   const handleApproveKnowledge = async (): Promise<void> => {
@@ -1091,6 +1098,15 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       canvasInfo,
     });
   };
+
+  const recordingCallId = selectedCanvas ? getRecordingCanvasCallId(selectedCanvas) : null;
+  const handleOpenRecordingNotes = useCallback((): void => {
+    if (!recordingCallId) return;
+
+    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+      state: { from: `${location.pathname}${location.search}` },
+    });
+  }, [location.pathname, location.search, navigate, recordingCallId]);
 
   const handleExportMarkdown = useCallback((): void => {
     void (async (): Promise<void> => {
@@ -1363,6 +1379,24 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           <Share01 size={16} className='shrink-0 opacity-60' />
                         </button>
 
+                        {recordingCallId && (
+                          <button
+                            type='button'
+                            onClick={handleOpenRecordingNotes}
+                            className={`${headerIconButtonClass} bg-muted text-muted-foreground hover:bg-border hover:text-foreground`}
+                            title='Open recording notes'
+                            aria-label='Open recording notes'
+                            data-track-category='CANVAS'
+                            data-track-name='Open_Recording_Notes_From_Canvas'
+                            data-track-metadata={JSON.stringify({
+                              canvasId: selectedCanvas.id,
+                              recordingId: recordingCallId,
+                            })}
+                          >
+                            <AudioLines size={16} strokeWidth={2.2} className='shrink-0' />
+                          </button>
+                        )}
+
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
                           {showAskAiAction && (
@@ -1434,6 +1468,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                   <DropdownMenuItem
                                     className='gap-2'
                                     onClick={handleExportMarkdown}
+                                    data-track-category='CANVAS'
+                                    data-track-name='EXPORT_MARKDOWN'
                                     data-testid='canvas-export-markdown'
                                   >
                                     <Markdown size={16} className='shrink-0' />
@@ -1442,6 +1478,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                   <DropdownMenuItem
                                     className='gap-2'
                                     onClick={handleExportPdf}
+                                    data-track-category='CANVAS'
+                                    data-track-name='EXPORT_PDF'
                                     data-testid='canvas-export-pdf'
                                   >
                                     <File02PdfFormat size={16} className='shrink-0' />
@@ -1455,6 +1493,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 onClick={() => {
                                   editorRef.current?.handlePresent();
                                 }}
+                                data-track-category='CANVAS'
+                                data-track-name='PRESENT_CANVAS'
                                 data-testid='canvas-present-item'
                               >
                                 <PlaySquare size={16} className='shrink-0' />
@@ -1475,6 +1515,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                         setSelectedTheme(theme.value);
                                         editorRef.current?.handleThemeChange(theme.value);
                                       }}
+                                      data-track-category='CANVAS'
+                                      data-track-name='SELECT_CANVAS_THEME'
                                     >
                                       <span className='flex-1 truncate'>{theme.label}</span>
                                       {selectedTheme === theme.value && (
@@ -1572,7 +1614,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   <span className='font-medium text-foreground'>{previewUpdatedAtText}</span>
                 </div>
                 <div className='flex items-center gap-2'>
-                  <Button variant='secondary' size='sm' onClick={handleBackToCurrentVersion}>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={handleBackToCurrentVersion}
+                    data-track-category='CANVAS'
+                    data-track-name='BACK_TO_CURRENT_VERSION'
+                  >
                     Back to current
                   </Button>
                   {hasVersionDiff && (
@@ -1580,6 +1628,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       variant={showVersionDiff ? 'default' : 'secondary'}
                       size='sm'
                       onClick={() => setShowVersionDiff(prev => !prev)}
+                      data-track-category='CANVAS'
+                      data-track-name='TOGGLE_VERSION_DIFF'
                       aria-pressed={showVersionDiff}
                     >
                       <GitCompare size={14} />
@@ -1591,6 +1641,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       variant='default'
                       size='sm'
                       onClick={() => void handleRestoreVersion(previewVersion)}
+                      data-track-category='CANVAS'
+                      data-track-name='RESTORE_CANVAS_VERSION'
                       loading={restoringVersionId === previewVersion.id}
                     >
                       <RotateCcw size={14} />
@@ -1643,6 +1695,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   title={currentTitle}
                   editable={canEdit}
                   placeholder='Start writing your canvas...'
+                  className={cn(isCallDetailedSummaryCanvas && 'recording-summary-canvas-editor')}
+                  trackEditedRecordingSummaryBlocks={Boolean(isCallDetailedSummaryCanvas)}
                   onFileUpload={handleFileUpload}
                   onChange={handleCollaborativeContentChange}
                   onCollaboratorsChange={handleCollaboratorsChange}

@@ -45,6 +45,8 @@ const ESSENTIAL_RESOURCES = [
   { name: 'XYNE-APPS', description: 'Xyne Apps management endpoints (/api/apps/*)' },
   { name: 'VESPA', description: 'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*)' },
   { name: 'RELEASE-MANAGER', description: 'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.' },
+  { name: 'ROLES', description: 'Role creation and management UI' },
+  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
 ];
 
 // Default user groups with their permissions

@@ -13,7 +13,7 @@ import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisi
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
-import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -68,7 +68,7 @@ interface CanvasSideEffectContext {
   workspaceId: string;
 }
 
-import { executeStreamingLlmRequest } from './callLlmRetry';
+import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -84,6 +84,33 @@ function sanitizeInput(input: string | null): string {
   // Limit length to prevent excessive token usage (adjust as needed)
   const maxLength = 100000; // ~100K chars
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
+}
+
+/**
+ * Some legacy custom-template prompts cause the model to copy the template
+ * prompt-generation response shape and return { "systemPrompt": "..." }.
+ * Accept that response defensively, but keep ordinary Markdown untouched.
+ */
+function normalizeDetailedSummaryMarkdown(content: string): string {
+  const trimmed = content.trim();
+  const fencedJson = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+  const candidate = fencedJson ?? trimmed;
+
+  try {
+    const parsed: unknown = JSON.parse(candidate);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>).systemPrompt === 'string'
+    ) {
+      return ((parsed as Record<string, unknown>).systemPrompt as string).trim();
+    }
+  } catch {
+    // Normal Markdown is not JSON and should pass through unchanged.
+  }
+
+  return content;
 }
 
 function renderPromptTemplate(template: string, values: Record<string, string>): string {
@@ -624,8 +651,7 @@ async function convertMarkdownToBlockNote(
   citationCtx?: CitationContext,
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   try {
-    const editor = ServerBlockNoteEditor.create();
-    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+    const parsed = await withServerEditor((editor) => editor.tryParseMarkdownToBlocks(markdown));
 
     // Collect mentioned IDs during the mention-processing pass
     const mentionedIds = new Set<string>();
@@ -986,6 +1012,7 @@ export class CallDocumentService {
     templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     citationSegments?: CitationContext['segments'],
+    modelType?: SummaryModelType,
   ): Promise<{
     summary: string;
     template: SummaryTemplate;
@@ -1033,16 +1060,22 @@ export class CallDocumentService {
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta
-        ? accumulated => onDelta(stripRecordingSummaryMarkedItemAnnotations(accumulated))
+        ? accumulated => onDelta(
+            stripRecordingSummaryMarkedItemAnnotations(
+              normalizeDetailedSummaryMarkdown(accumulated),
+            ),
+          )
         : undefined,
+      modelType,
     );
 
     if (!rawSummary) return null;
 
+    const normalizedSummary = normalizeDetailedSummaryMarkdown(rawSummary);
     const markedItems = citationSegments
-      ? extractMarkedItemsFromRecordingSummary(rawSummary, citationSegments)
+      ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
       : [];
-    const summary = stripRecordingSummaryMarkedItemAnnotations(rawSummary);
+    const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
     return { summary, template, markedItems };
   }
@@ -1059,6 +1092,7 @@ export class CallDocumentService {
     promptTemplate = DETAILED_SUMMARY_PROMPT,
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
     // Use people who actually spoke in the transcript. A channel roster can contain
     // members who never joined or contributed to this particular call.
@@ -1091,6 +1125,14 @@ export class CallDocumentService {
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
     const sanitizedSystemPrompt = systemPrompt ? sanitizeInput(systemPrompt) : '';
+    const effectiveSystemPrompt = sanitizedSystemPrompt
+      ? `${sanitizedSystemPrompt}
+
+MANDATORY OUTPUT CONTRACT:
+- Return only the completed meeting summary as Markdown.
+- Never wrap the summary in JSON or emit a systemPrompt, summary, content, or markdown property.
+- Follow the section structure, formatting, citation, and marked-item requirements in the user prompt.`
+      : '';
 
     const buildPrompt = () => {
       let prompt = renderPromptTemplate(promptTemplate, {
@@ -1109,7 +1151,8 @@ export class CallDocumentService {
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
-      ...(sanitizedSystemPrompt ? { systemPrompt: sanitizedSystemPrompt } : {}),
+      ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
+      ...(modelType ? { modelType } : {}),
       onDelta,
     });
 
@@ -1310,7 +1353,10 @@ export class CallDocumentService {
     callTitle?: string | null,
     citationCtx?: CitationContext,
     workspaceIdOverride?: string,
-    options: { deferInsertSideEffects?: boolean } = {},
+    options: {
+      deferInsertSideEffects?: boolean;
+      summaryModelPreference?: 'fast' | 'thinking';
+    } = {},
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1371,6 +1417,12 @@ export class CallDocumentService {
               generatedAt: now.toISOString(),
               mentionedUserIds, // Store mentioned users for side effect handler
               version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+              // Recording summary LLM tier the client carried from its
+              // localStorage at recording start; read back on the headless
+              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
+              ...(options.summaryModelPreference
+                ? { summaryModelPreference: options.summaryModelPreference }
+                : {}),
             },
           },
         });
@@ -1429,17 +1481,20 @@ export class CallDocumentService {
     currentVersion: number,
     callId: string,
     callTitle?: string | null,
-    citationCtx?: CitationContext
+    citationCtx?: CitationContext,
+    callStartedAt?: Date
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
       const now = new Date();
 
-      // Prepare canvas content (title, content, mentions, citations)
+      // Prepare canvas content (title, content, mentions, citations). Falls back to
+      // a timestamp-based title (instead of the bare "(Updated)" placeholder) when
+      // callTitle isn't ready yet — e.g. AI title generation is still racing this update.
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
-        undefined,
+        callStartedAt,
         callTitle,
         citationCtx
       );
@@ -1635,7 +1690,8 @@ export class CallDocumentService {
         existingCanvas.version,
         callId,
         callTitle,
-        citationCtx
+        citationCtx,
+        callStartedAt
       );
 
       return {

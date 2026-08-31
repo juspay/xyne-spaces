@@ -19,6 +19,7 @@ import { isOneToOneDMChannel, isGroupDMChannel } from '../ChatDirectory/ChatDire
 import Button from '../../ui/Button';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
@@ -118,7 +119,40 @@ const Info = ({
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: channel.projectId }));
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: channel.id }),
+  );
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: channel.projectId }),
+  );
+
+  const boards = useMemo(() => {
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'Info',
+        resolution: 'channel-board-mapping',
+        channelId: channel.id,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'Info',
+      resolution: 'project-boards-fallback',
+      channelId: channel.id,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, channel.id]);
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(() => {
@@ -949,12 +983,20 @@ const ChannelMembers = ({
               : 'This person will lose access to the channel but may rejoin later.'}
           </p>
           <div className='flex justify-end gap-3'>
-            <Button variant='secondary' onClick={() => setRemoveDialogOpen(false)} className='px-6'>
+            <Button
+              variant='secondary'
+              onClick={() => setRemoveDialogOpen(false)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CANCEL_REMOVE_PARTICIPANT'
+              className='px-6'
+            >
               Cancel
             </Button>
             <Button
               variant='destructive'
               onClick={() => userToRemove && handleRemoveParticipant(userToRemove.id)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CONFIRM_REMOVE_PARTICIPANT'
               className='px-6'
             >
               Remove

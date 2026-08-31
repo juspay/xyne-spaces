@@ -277,6 +277,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const metadata = message?.metadata as Record<string, unknown> | null;
 
+  // Recording anchors use recording-specific actions.
+  const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+
   // Both internal and external link previews are stored in link_preview_md.
   // Memoized: ChatBubble re-renders on every hover, and parsing per render
   // made cursor sweeps across messages spike CPU.
@@ -835,8 +838,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
   // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
   // but do not open this message in the generic editor, which would discard that wrapper.
-  const canEditMessage = canModifyMessage && !isSlashCommandArtifactMessage(message.content);
-  const canDeleteMessage = canModifyMessage && !hasTicket;
+  const canEditMessage =
+    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isRecordingMessage;
+  const canDeleteMessage = canModifyMessage && !hasTicket && !isRecordingMessage;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -1046,7 +1050,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onRemindMeOption: handleReminderPresetSelect,
         }),
       ...(!isMessageDeleted &&
-        (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage }),
+        (isCallMessage || !isSystemMessage) &&
+        !isRecordingMessage && { onForwardMessage: handleForwardMessage }),
       isPinned: conversation?.pinned || false,
       ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
       ...(canEditMessage && { onEditMessage: handleEditMessage }),
@@ -1366,7 +1371,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...((!isSystemMessage || isTicketCreationMessage) &&
                 !isMessageDeleted && { onRemindMe: handleOpenReminderOptions })}
               {...(!isMessageDeleted &&
-                (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
+                (isCallMessage || !isSystemMessage) &&
+                !isRecordingMessage && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && { onEditMessage: handleEditMessage })}
@@ -1511,6 +1517,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 variant='ghost'
                 className='w-full justify-start'
                 onClick={e => handleReminderPresetSelect(option.option, e)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SELECT_REMINDER_PRESET'
               >
                 {option.label}
               </Button>
@@ -1584,10 +1592,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             </div>
 
             <div className='flex justify-end gap-2 pt-2'>
-              <Button variant='outline' onClick={() => setIsCustomReminderModalOpen(false)}>
+              <Button
+                variant='outline'
+                onClick={() => setIsCustomReminderModalOpen(false)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='CANCEL_CUSTOM_REMINDER'
+              >
                 Cancel
               </Button>
-              <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+              <Button
+                onClick={handleSaveCustomReminder}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SAVE_CUSTOM_REMINDER'
+                disabled={!customReminderDate}
+              >
                 Save
               </Button>
             </div>

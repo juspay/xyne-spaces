@@ -2,7 +2,6 @@ import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   FileText,
-  Folder,
   Hash,
   Loader2,
   RefreshCw,
@@ -19,7 +18,7 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { cn } from '../../utils/classNames';
 import { useSelf } from '../../hooks/useUsers';
 
-type GuestEntityType = 'PROJECT' | 'CHANNEL' | 'CANVAS';
+type GuestEntityType = 'CHANNEL' | 'CANVAS';
 
 type GuestAccessGrant = {
   id: string;
@@ -75,8 +74,6 @@ const formatDate = (value: string): string =>
 
 const getEntityIcon = (type: GuestEntityType): ReactElement => {
   switch (type) {
-    case 'PROJECT':
-      return <Folder className='w-4 h-4' />;
     case 'CHANNEL':
       return <Hash className='w-4 h-4' />;
     case 'CANVAS':
@@ -86,8 +83,6 @@ const getEntityIcon = (type: GuestEntityType): ReactElement => {
 
 const getEntityBadgeClass = (type: GuestEntityType): string => {
   switch (type) {
-    case 'PROJECT':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
     case 'CHANNEL':
       return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300';
     case 'CANVAS':
@@ -185,6 +180,8 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
           variant='outline'
           size='sm'
           onClick={() => void loadGuests()}
+          data-track-category='workspace-management'
+          data-track-name='RELOAD_GUEST_USERS'
           disabled={isLoading}
           className='gap-2'
         >
@@ -290,6 +287,8 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
                         variant='ghost'
                         size='sm'
                         onClick={() => setRevokeTarget({ guest, access })}
+                        data-track-category='workspace-management'
+                        data-track-name='OPEN_REVOKE_GUEST_CONFIRM'
                         className='text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0'
                       >
                         <Trash2 className='w-4 h-4' />
@@ -326,12 +325,20 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
           </p>
 
           <div className='flex gap-3 justify-end pt-2'>
-            <Button variant='outline' onClick={() => setRevokeTarget(null)} disabled={isRevoking}>
+            <Button
+              variant='outline'
+              onClick={() => setRevokeTarget(null)}
+              data-track-category='workspace-management'
+              data-track-name='CANCEL_REVOKE_GUEST'
+              disabled={isRevoking}
+            >
               Cancel
             </Button>
             <Button
               variant='destructive'
               onClick={() => void confirmRevoke()}
+              data-track-category='workspace-management'
+              data-track-name='CONFIRM_REVOKE_GUEST'
               disabled={isRevoking}
               className='gap-2'
             >

@@ -4,7 +4,7 @@ import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useActiveUsers, useUser, useSelf } from '../../../hooks/useUsers';
-import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel, matchesUserQuery } from '../../../utils/userDisplayName';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 
@@ -68,11 +68,7 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
     const query = searchValue.trim().toLowerCase();
     const matched = !query
       ? activeUsers
-      : activeUsers.filter(
-          user =>
-            getUserDisplayName(user).toLowerCase().includes(query) ||
-            (user.email ?? '').toLowerCase().includes(query),
-        );
+      : activeUsers.filter(user => matchesUserQuery(user, searchValue));
     // You first, then channel members, then everyone else; cap the rendered
     // rows since this list isn't virtualized.
     const membersFirst = channelMembersFirst(matched, user => user.id, memberIds);

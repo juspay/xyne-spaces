@@ -9,7 +9,6 @@ import {
   Mail,
   AlertCircle,
   Hash,
-  Folder,
   FileText,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
@@ -59,12 +58,10 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [entityType, setEntityType] = useState<string>('');
   const [entityId, setEntityId] = useState('');
-  const [channelId, setChannelId] = useState('');
   const { isMobile } = usePlatform();
   const emailInputRef = useRef<HTMLInputElement>(null);
 
   const allChannels = useAllChannels();
-  const [projects] = useCachedQuery(queries.getAllProjectsList());
 
   const [openCanvases] = useCachedQuery(queries.hierarchyCanvases({ scope: 'personal_root' }), {
     enabled: entityType === 'CANVAS',
@@ -85,12 +82,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             label: c.name,
             icon: <Hash className='w-4 h-4 text-muted-foreground' />,
           }));
-      case 'PROJECT':
-        return projects.map(p => ({
-          value: p.id,
-          label: p.name,
-          icon: <Folder className='w-4 h-4 text-muted-foreground' />,
-        }));
       case 'CANVAS':
         return (
           (openCanvases as unknown as Array<{ id: string; title: string }> | undefined) ?? []
@@ -102,7 +93,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
       default:
         return [];
     }
-  }, [entityType, allChannels, projects, openCanvases]);
+  }, [entityType, allChannels, openCanvases]);
 
   const [allInvitations] = useCachedQuery(queries.getAllInvitations({}));
 
@@ -129,10 +120,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
         toast.error('Please select an entity');
         return false;
       }
-      if (entityType === 'PROJECT' && !channelId.trim()) {
-        toast.error('Please select a channel for the guest');
-        return false;
-      }
     }
     return true;
   };
@@ -156,9 +143,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
       if (role === WorkspaceRole.GUEST) {
         payload['entityId'] = entityId.trim();
         payload['entityType'] = entityType;
-        if (entityType === 'PROJECT') {
-          payload['channelId'] = channelId.trim();
-        }
       }
 
       await apiInstance.post('/invitations', payload);
@@ -168,7 +152,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
       setRole(WorkspaceRole.MEMBER);
       setEntityType('');
       setEntityId('');
-      setChannelId('');
       setShowConfirmDialog(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send invitation';
@@ -267,8 +250,9 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     setRole(WorkspaceRole.ADMIN);
                     setEntityType('');
                     setEntityId('');
-                    setChannelId('');
                   }}
+                  data-track-category='WorkspaceManagement'
+                  data-track-name='SELECT_INVITE_ROLE_ADMIN'
                   className={cn(role === WorkspaceRole.ADMIN && 'bg-accent')}
                 >
                   Admin
@@ -278,14 +262,17 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     setRole(WorkspaceRole.MEMBER);
                     setEntityType('');
                     setEntityId('');
-                    setChannelId('');
                   }}
+                  data-track-category='WorkspaceManagement'
+                  data-track-name='SELECT_INVITE_ROLE_MEMBER'
                   className={cn(role === WorkspaceRole.MEMBER && 'bg-accent')}
                 >
                   Member
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setRole(WorkspaceRole.GUEST)}
+                  data-track-category='WorkspaceManagement'
+                  data-track-name='SELECT_INVITE_ROLE_GUEST'
                   className={cn(role === WorkspaceRole.GUEST && 'bg-accent')}
                 >
                   Guest
@@ -294,6 +281,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             </DropdownMenu>
             <Button
               onClick={openConfirmDialog}
+              data-track-category='WorkspaceManagement'
+              data-track-name='OPEN_INVITE_CONFIRM'
               disabled={isSubmitting || !email.trim()}
               className='gap-2'
             >
@@ -313,7 +302,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                 onChange={e => {
                   setEntityType(e.target.value);
                   setEntityId('');
-                  setChannelId('');
                 }}
                 className='px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary min-w-[140px]'
                 data-track-category='WorkspaceManagement'
@@ -322,7 +310,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                 <option value=''>Select entity type...</option>
                 <option value='CHANNEL'>Channel</option>
                 <option value='CANVAS'>Canvas</option>
-                <option value='PROJECT'>Project</option>
               </select>
               {entityType && (
                 <div className='flex-1 min-w-[200px]'>
@@ -331,34 +318,9 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     selectedValue={entityId || null}
                     onSelect={value => {
                       setEntityId(value ?? '');
-                      setChannelId('');
                     }}
                     placeholder={`Select ${entityType.toLowerCase()}...`}
                     searchPlaceholder={`Search ${entityType.toLowerCase()}s...`}
-                    width='100%'
-                  />
-                </div>
-              )}
-              {entityType === 'PROJECT' && entityId && (
-                <div className='flex-1 min-w-[200px]'>
-                  <EntitySelector
-                    options={allChannels
-                      .filter(
-                        c =>
-                          c.projectId === entityId &&
-                          c.scopeType !== ChannelScopeType.DM &&
-                          c.scopeType !== ChannelScopeType.GROUP_DM &&
-                          !c.isArchived,
-                      )
-                      .map(c => ({
-                        value: c.id,
-                        label: c.name,
-                        icon: <Hash className='w-4 h-4 text-muted-foreground' />,
-                      }))}
-                    selectedValue={channelId || null}
-                    onSelect={value => setChannelId(value ?? '')}
-                    placeholder='Select channel...'
-                    searchPlaceholder='Search channels...'
                     width='100%'
                   />
                 </div>
@@ -417,17 +379,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     </p>
                   </div>
                 </div>
-                {entityType === 'PROJECT' && channelId && (
-                  <div className='flex items-center gap-3'>
-                    <Hash className='w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0' />
-                    <div>
-                      <p className='text-xs text-amber-700 dark:text-amber-300'>Channel</p>
-                      <p className='text-sm font-semibold text-amber-900 dark:text-amber-100'>
-                        {allChannels.find(c => c.id === channelId)?.name ?? channelId}
-                      </p>
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </div>
@@ -442,12 +393,16 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             <Button
               variant='outline'
               onClick={() => setShowConfirmDialog(false)}
+              data-track-category='WorkspaceManagement'
+              data-track-name='CANCEL_SEND_INVITATION'
               disabled={isSubmitting}
             >
               Cancel
             </Button>
             <Button
               onClick={() => void handleSendInvitation()}
+              data-track-category='WorkspaceManagement'
+              data-track-name='SEND_INVITATION'
               disabled={isSubmitting}
               className='gap-2'
             >
@@ -507,6 +462,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                     variant='ghost'
                     size='sm'
                     onClick={() => handleRevokeInvitation(invitation.id)}
+                    data-track-category='WorkspaceManagement'
+                    data-track-name='REVOKE_INVITATION'
                     className='text-destructive hover:text-destructive hover:bg-destructive/10'
                   >
                     Revoke

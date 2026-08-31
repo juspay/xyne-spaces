@@ -9,11 +9,10 @@ import {
   UserTwo,
 } from '@xyne/icons';
 import { toast } from 'sonner';
-import { useChannelSearch, useUserGroupSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
+import { UnifiedParticipantSearch } from '../../../components/ui/UnifiedParticipantSearch/UnifiedParticipantSearch';
 import { useAuth } from '../../../hooks/useAuth';
-import { useActiveUsers } from '../../../hooks/useUsers';
 import {
   recordingService,
   type SummaryTemplate,
@@ -24,7 +23,6 @@ import {
 } from '../../../services/Recording/recordingService';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
 
 interface SummaryTemplateShareModalProps {
   template: SummaryTemplate;
@@ -45,7 +43,6 @@ export function SummaryTemplateShareModal({
   onSharesChange,
 }: SummaryTemplateShareModalProps): ReactElement {
   const { user: currentUser } = useAuth();
-  const activeUsers = useActiveUsers();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
   const [shares, setShares] = useState<SummaryTemplateShare[]>([]);
@@ -57,8 +54,6 @@ export function SummaryTemplateShareModal({
   const [publicationAction, setPublicationAction] =
     useState<SummaryTemplatePublicationAction | null>(null);
   const [showAdmins, setShowAdmins] = useState(true);
-  const userGroups = useUserGroupSearch(searchQuery, 10);
-  const channels = useChannelSearch(searchQuery, 10);
   const isOwner = currentUser?.id === template.createdBy && template.canEdit;
 
   useEffect(() => {
@@ -106,41 +101,10 @@ export function SummaryTemplateShareModal({
     [shares],
   );
 
-  const options = useMemo(() => {
-    const userOptions = activeUsers
-      .filter(user => user.id !== template.createdBy && !sharedUserIds.has(user.id))
-      .map(user => ({
-        label: getUserDisplayName(user),
-        subtitle: user.email ?? '',
-        value: `user:${user.id}`,
-        icon: <Avatar userId={user.id} size='sm' showActiveStatus={false} />,
-      }));
-    const groupOptions = userGroups
-      .filter(group => !sharedUserGroupIds.has(group.id))
-      .map(group => ({
-        label: group.name,
-        subtitle: 'Group',
-        value: `user_group:${group.id}`,
-        icon: <UserTwo className='size-3.5 text-muted-foreground' />,
-      }));
-    const channelOptions = channels
-      .filter(channel => !sharedChannelIds.has(channel.id))
-      .map(channel => ({
-        label: channel.name,
-        subtitle: 'Channel',
-        value: `channel:${channel.id}`,
-        icon: <Hashtag className='size-3.5 text-muted-foreground' />,
-      }));
-    return [...userOptions, ...groupOptions, ...channelOptions];
-  }, [
-    activeUsers,
-    channels,
-    sharedChannelIds,
-    sharedUserGroupIds,
-    sharedUserIds,
-    template.createdBy,
-    userGroups,
-  ]);
+  const excludedUserIds = useMemo(
+    () => new Set([template.createdBy, ...sharedUserIds]),
+    [sharedUserIds, template.createdBy],
+  );
 
   const toTarget = (value: string): SummaryTemplateShareTarget =>
     value.startsWith('user_group:')
@@ -236,12 +200,14 @@ export function SummaryTemplateShareModal({
 
       {isOwner && (
         <>
-          <SearchParticipants
-            options={options}
+          <UnifiedParticipantSearch
             selectedValues={selectedValues}
             onMultiSelect={setSelectedValues}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            excludedUserIds={excludedUserIds}
+            excludedUserGroupIds={sharedUserGroupIds}
+            excludedChannelIds={sharedChannelIds}
             exclusiveSelection={false}
           />
           {selectedValues.length > 0 && (

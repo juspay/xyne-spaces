@@ -121,6 +121,7 @@ export class GoogleRefetch extends BaseRefetch {
               });
               return null;
             }
+            logger.info(`${TAG} fetched new email for channel ${ingestChannelId}`, { messageId: id, threadId });
 
             const parsedEmail = google.parseEmailData(messageData);
             const preDownloadedAttachments = await preDownloadGmailAttachments({

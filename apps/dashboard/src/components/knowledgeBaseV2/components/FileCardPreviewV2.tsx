@@ -366,10 +366,13 @@ export const FileCardPreviewV2: React.FC<FileCardPreviewV2Props> = ({ format, si
   const fmt = format.toLowerCase();
   const banner = BANNER[fmt] ?? 'bg-zinc-500 text-white';
   const dims = size === 'sm' ? 'w-9 h-[3rem] p-1.5 space-y-2' : 'w-14 h-[4.5rem] p-2 space-y-3';
+  // Top-right, not bottom-right — bottom-right is reserved for the
+  // ingestion status badge (FileFailedBadgeV2 in FileCardV2.tsx), which sits
+  // there to match FolderCardV2's CollectionStatusBadgeV2 corner.
   const bannerPos =
     size === 'sm'
-      ? '-right-1.5 bottom-1 text-[7px] px-1 py-px'
-      : '-right-2 bottom-1.5 text-[8px] px-1.5 py-0.5';
+      ? '-right-1.5 top-1 text-[7px] px-1 py-px'
+      : '-right-2 top-1.5 text-[8px] px-1.5 py-0.5';
 
   return (
     <div aria-hidden className='relative size-fit'>

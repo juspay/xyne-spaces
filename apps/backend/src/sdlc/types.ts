@@ -37,7 +37,7 @@ export interface SdlcSetupExecution {
 
 export interface SdlcArtifact {
   canvasId?: string;
-  kind: 'BASELINE' | 'PRD' | 'TECH_DOC';
+  kind?: 'BASELINE';
   viewAccessId?: string;
   url?: string;
 }

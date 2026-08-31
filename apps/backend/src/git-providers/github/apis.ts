@@ -3,6 +3,14 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import type { IGitProvider, GitDiffFile, GithubConfig } from '../types';
 
+// GitHub login / repo name: alphanumerics, '-', '_', '.' (no path separators).
+const GITHUB_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
+// Abbreviated or full git object id.
+const GIT_SHA_PATTERN = /^[0-9a-f]{7,64}$/i;
+// Strip control characters (incl. CR/LF) so user-derived text can't forge log lines.
+const sanitizeForLog = (value: string): string =>
+  value.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 200);
+
 export class GithubManager implements IGitProvider {
   private readonly config: GithubConfig;
 
@@ -80,6 +88,69 @@ export class GithubManager implements IGitProvider {
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'xyne-spaces',
     };
+  }
+
+  /**
+   * Post a commit status (the GitHub counterpart of Bitbucket's build status).
+   * Shows up on the PR checks list under `context`; branch protection can require it.
+   * Description is capped at 140 chars by the API.
+   *
+   * owner/repo/sha originate from webhook payloads: they are allow-list validated
+   * before being placed in the request path, and only encoded segments are logged.
+   */
+  async postCommitStatus(
+    owner: string,
+    repo: string,
+    commitSha: string,
+    state: 'pending' | 'success' | 'failure' | 'error',
+    context: string,
+    description: string,
+    targetUrl?: string,
+  ): Promise<void> {
+    if (!GITHUB_NAME_PATTERN.test(owner) || !GITHUB_NAME_PATTERN.test(repo)) {
+      throw new Error('Invalid GitHub owner/repo for commit status');
+    }
+    if (!GIT_SHA_PATTERN.test(commitSha)) {
+      throw new Error('Invalid commit SHA for commit status');
+    }
+    const safeOwner = encodeURIComponent(owner);
+    const safeRepo = encodeURIComponent(repo);
+    const safeSha = encodeURIComponent(commitSha);
+    const url = `${this.config.apiUrl}/repos/${safeOwner}/${safeRepo}/statuses/${safeSha}`;
+    const safeDescription = sanitizeForLog(description);
+    const payload = {
+      state,
+      context,
+      description: description.length > 140 ? `${description.slice(0, 137)}...` : description,
+      ...(targetUrl && { target_url: targetUrl }),
+    };
+    logger.debug('[GitHub-API] Posting commit status', {
+      owner: safeOwner,
+      repo: safeRepo,
+      sha: safeSha,
+      state,
+      context,
+      description: safeDescription,
+    });
+    try {
+      await axios.post(url, payload, { headers: this.getHeaders() });
+      logger.info('[GitHub-API] Commit status posted', {
+        owner: safeOwner,
+        repo: safeRepo,
+        sha: safeSha,
+        state,
+        context,
+        description: safeDescription,
+      });
+    } catch (error) {
+      const axiosError = error as AxiosError;
+      logger.error('[GitHub-API] Error posting commit status:', {
+        status: axiosError.response?.status,
+        data: axiosError.response?.data,
+        message: axiosError.message,
+      });
+      throw error;
+    }
   }
 
   /**

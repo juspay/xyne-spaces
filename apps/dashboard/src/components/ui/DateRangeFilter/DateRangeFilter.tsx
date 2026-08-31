@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
+import { TimePicker } from '../TimePicker/TimePicker';
 
 export interface DateRangeValue {
   startDate: Date;
@@ -186,6 +187,8 @@ export const CalendarView: React.FC<{
         <button
           type='button'
           onClick={prevMonth}
+          data-track-category='DATE_RANGE_FILTER'
+          data-track-name='PREV_MONTH'
           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
         >
           <ChevronLeft className='size-4' />
@@ -194,6 +197,8 @@ export const CalendarView: React.FC<{
         <button
           type='button'
           onClick={nextMonth}
+          data-track-category='DATE_RANGE_FILTER'
+          data-track-name='NEXT_MONTH'
           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
         >
           <ChevronRight className='size-4' />
@@ -218,6 +223,8 @@ export const CalendarView: React.FC<{
               key={day}
               type='button'
               onClick={() => handleDayClick(day)}
+              data-track-category='DATE_RANGE_FILTER'
+              data-track-name='SELECT_DAY'
               onMouseEnter={() => setHoverDate(new Date(year, month, day))}
               onMouseLeave={() => setHoverDate(null)}
               className={cn(
@@ -234,6 +241,33 @@ export const CalendarView: React.FC<{
   );
 };
 
+/* ── Time-of-day helpers ── */
+// `TimePicker` speaks 12-hour "h:mm AM/PM" strings — this is its native
+// display/parse format (see its own usage in ScheduleCallModal.tsx), so we
+// convert to/from that instead of a 24-hour "HH:mm" of our own.
+const formatTimeLabel = (d: Date): string =>
+  d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+const parseTimeLabel = (value: string): { h: number; m: number } | null => {
+  const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(value.trim());
+  if (!match?.[1] || !match[2] || !match[3]) return null;
+  const h = (Number(match[1]) % 12) + (/PM/i.test(match[3]) ? 12 : 0);
+  return { h, m: Number(match[2]) };
+};
+
+const applyTime = (date: Date, h: number, m: number, isEnd: boolean): Date => {
+  const r = new Date(date);
+  if (isEnd) r.setHours(h, m, 59, 999);
+  else r.setHours(h, m, 0, 0);
+  return r;
+};
+
+const isFullDaySpan = (r: DateRangeValue): boolean =>
+  r.startDate.getHours() === 0 &&
+  r.startDate.getMinutes() === 0 &&
+  r.endDate.getHours() === 23 &&
+  r.endDate.getMinutes() === 59;
+
 /* ── Main component ── */
 export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   dateRange,
@@ -249,9 +283,11 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
 
   const rangeLabel = useMemo(() => {
     if (!dateRange) return 'Select dates';
-    if (isSameDay(dateRange.startDate, dateRange.endDate))
-      return formatShortDate(dateRange.startDate);
-    return `${formatShortDate(dateRange.startDate)} – ${formatShortDate(dateRange.endDate)}`;
+    const base = isSameDay(dateRange.startDate, dateRange.endDate)
+      ? formatShortDate(dateRange.startDate)
+      : `${formatShortDate(dateRange.startDate)} – ${formatShortDate(dateRange.endDate)}`;
+    if (isFullDaySpan(dateRange)) return base;
+    return `${base} · ${formatTimeLabel(dateRange.startDate)}–${formatTimeLabel(dateRange.endDate)}`;
   }, [dateRange]);
 
   const handlePresetSelect = (preset: Preset) => {
@@ -259,9 +295,31 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     setPresetOpen(false);
   };
 
+  const carryTime = (picked: Date, existing: Date | undefined, isEnd: boolean): Date =>
+    existing ? applyTime(picked, existing.getHours(), existing.getMinutes(), isEnd) : picked;
+
   const handleCalendarSelect = (range: DateRangeValue) => {
-    onChange(range);
-    setCalendarOpen(false);
+    // Carry over whatever time-of-day is already set, instead of resetting
+    // a deliberately-narrowed time window back to the full day. Popover
+    // stays open — picking the date shouldn't close it before the user gets
+    // a chance to also set the time.
+    onChange({
+      startDate: carryTime(range.startDate, dateRange?.startDate, false),
+      endDate: carryTime(range.endDate, dateRange?.endDate, true),
+    });
+  };
+
+  // Time picker applies instantly against the already-committed range — no
+  // separate staging/Apply step, so picking a date and narrowing its time
+  // are just two ordinary edits to the same value.
+  const handleTimeChange = (
+    field: 'startDate' | 'endDate',
+    isEnd: boolean,
+    value: string,
+  ): void => {
+    const parsed = dateRange && parseTimeLabel(value);
+    if (!dateRange || !parsed) return;
+    onChange({ ...dateRange, [field]: applyTime(dateRange[field], parsed.h, parsed.m, isEnd) });
   };
 
   const handleClear = (e: React.MouseEvent) => {
@@ -303,6 +361,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                 key={preset.label}
                 type='button'
                 onClick={() => handlePresetSelect(preset)}
+                data-track-category='DATE_RANGE_FILTER'
+                data-track-name='SELECT_PRESET'
                 className={cn(
                   'flex w-full items-center rounded-sm px-2 py-1.5 text-sm select-none',
                   activePreset === preset.label
@@ -334,6 +394,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                 type='button'
                 data-id='date-range-clear'
                 onClick={handleClear}
+                data-track-category='DATE_RANGE_FILTER'
+                data-track-name='CLEAR_RANGE'
                 className='p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted'
               >
                 <X className='size-3' />
@@ -351,6 +413,21 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             onCloseAutoFocus={e => e.preventDefault()}
           >
             <CalendarView range={dateRange} onSelect={handleCalendarSelect} />
+            <div className='flex items-center gap-2 border-t border-border p-3'>
+              <TimePicker
+                value={dateRange ? formatTimeLabel(dateRange.startDate) : ''}
+                onChange={value => handleTimeChange('startDate', false, value)}
+                placeholder='Start time'
+                disabled={!dateRange}
+              />
+              <span className='text-xs text-muted-foreground'>–</span>
+              <TimePicker
+                value={dateRange ? formatTimeLabel(dateRange.endDate) : ''}
+                onChange={value => handleTimeChange('endDate', true, value)}
+                placeholder='End time'
+                disabled={!dateRange}
+              />
+            </div>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>

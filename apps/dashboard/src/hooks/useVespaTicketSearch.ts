@@ -108,12 +108,15 @@ const fetchAllFilterOnlyDynamicFieldResults = async (
   }
 };
 
+export const stripHighlightMarkup = (value: string | undefined): string =>
+  value?.replace(/<\/?hi>/gi, '') ?? '';
+
 function toTicket(r: DisplaySearchResult): Ticket {
   const ctx = r.searchContext ?? {};
   return {
     id: r.id,
-    title: r.title,
-    description: r.context ?? '',
+    title: stripHighlightMarkup(r.title),
+    description: stripHighlightMarkup(r.context),
     status: '' as never,
     statusV2: (ctx.ticketStatus as TicketStatusV2) ?? TicketStatusV2.TODO,
     priority: (ctx.priority as TicketPriority) ?? TicketPriority.MEDIUM,

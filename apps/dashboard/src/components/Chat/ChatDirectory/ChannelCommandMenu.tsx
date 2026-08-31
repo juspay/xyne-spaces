@@ -36,7 +36,7 @@ import {
   isOneToOneDMChannel,
   getDMParticipantIdsToFetch,
   parseDMParticipantIds,
-  getDMSearchableNames,
+  getDMNames,
   formatChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -93,12 +93,8 @@ import {
 } from '../../../services/Analytics/mixpanelService';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-import {
-  useSearchMetrics,
-  filterChannelsBySearchableNames,
-  rankUsersWithMfu,
-  CMDK_USER_LIMIT,
-} from '../../../hooks/useSearchMetrics';
+import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
+import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import { useScope, useShortcutById } from '../../../shortcuts';
@@ -442,14 +438,17 @@ const ChannelCommandMenu = ({
       channel: Channel;
       category: ChannelCategory;
       searchableNames?: string[];
+      searchNames?: string[];
     }> = [];
 
     // Add starred channels
     starred.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
@@ -464,10 +463,12 @@ const ChannelCommandMenu = ({
 
     // Add direct messages
     directMessages.forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
 
@@ -953,6 +954,11 @@ const ChannelCommandMenu = ({
     const params = new URLSearchParams();
     if (text.trim()) params.set('query', text.trim());
     if (tab) params.set('tab', tab);
+
+    // Carry the cmd+K toggles so the full-screen page issues the identical Vespa request
+    // (same filtered results) and can reuse the popup's cached search.
+    params.set('onlyMyChannels', String(onlyMyChannels));
+    params.set('includeBotMessages', String(includeBotMessages));
 
     const fromMentions = mentions.filter(m => m.type === MentionType.USER && m.prefix === 'from:');
     const fromEmails = fromMentions.filter(m => m.id.includes('@')).map(m => m.id);
@@ -2159,6 +2165,22 @@ const ChannelCommandMenu = ({
     cleanedSearchText,
   ]);
 
+  // Slack-style strong starred match: the Starred section only LEADS (hoists above People/Channels)
+  // when a starred item's displayed name prefix-matches the query. Without this, ANY query hoisted
+  // Starred, so a weak fuzzy hit on a starred DM (e.g. "venkatesan" matching a starred
+  // "…Venkattaramanujam" DM shown as "Mamtha") jumped above the exact "Venkatesan S" user. Checks
+  // every matched starred item (not just the top, which affinity may hold), mirroring the prefix
+  // rule hasStrongUserMatch/hasStrongChannelMatch use.
+  const hasStrongStarredMatch = useMemo(() => {
+    if (hasFromOrInFilter) return false;
+    const q = cleanedSearchText.toLowerCase().trim();
+    if (!q) return false;
+    const starredMatches = groupedChannels[ChannelCategory.STARRED] ?? [];
+    return starredMatches.some(item =>
+      (item.searchableNames ?? []).some(name => name.toLowerCase().startsWith(q)),
+    );
+  }, [hasFromOrInFilter, groupedChannels, cleanedSearchText]);
+
   const iconSize = 14;
 
   const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
@@ -2844,7 +2866,7 @@ const ChannelCommandMenu = ({
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
   const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
-  const hoistStarred = canHoist && !hasFromOrInFilter && searchText.trim().length > 0;
+  const hoistStarred = canHoist && hasStrongStarredMatch;
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
 
@@ -3618,6 +3640,9 @@ const ChannelCommandMenu = ({
                       </button>
                     ))}
                     <div className='my-1 border-t border-border' />
+                    {/* State-only — deliberately not mirrored to the URL: a per-click searchParams
+                        update would push a browser history entry each toggle. The URL is stamped
+                        once at the full-screen hand-off (buildSearchParams) instead. */}
                     <button
                       type='button'
                       onMouseDown={e => e.preventDefault()}
@@ -3674,6 +3699,9 @@ const ChannelCommandMenu = ({
                     className='z-[10000] bg-popover border border-border rounded-lg shadow-md min-w-[180px] p-1 text-popover-foreground'
                     onOpenAutoFocus={e => e.preventDefault()}
                   >
+                    {/* State-only — deliberately not mirrored to the URL: a per-click searchParams
+                        update would push a browser history entry each toggle. The URL is stamped
+                        once at the full-screen hand-off (buildSearchParams) instead. */}
                     <button
                       type='button'
                       onMouseDown={e => e.preventDefault()}
@@ -4513,6 +4541,8 @@ const ChannelCommandMenu = ({
                     variant='secondary'
                     size='sm'
                     onClick={toggleDeskMergeMode}
+                    data-track-category='SEARCH'
+                    data-track-name='TOGGLE_DESK_MERGE_MODE'
                     className={MERGE_BAR_BUTTON_NO_RING}
                   >
                     Cancel
@@ -4529,6 +4559,8 @@ const ChannelCommandMenu = ({
                       variant='ghost'
                       size='sm'
                       onClick={clearDeskMergeSelection}
+                      data-track-category='SEARCH'
+                      data-track-name='CLEAR_DESK_MERGE_SELECTION'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Clear
@@ -4537,6 +4569,8 @@ const ChannelCommandMenu = ({
                       variant='secondary'
                       size='sm'
                       onClick={toggleDeskMergeMode}
+                      data-track-category='SEARCH'
+                      data-track-name='TOGGLE_DESK_MERGE_MODE'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Cancel
@@ -4545,6 +4579,8 @@ const ChannelCommandMenu = ({
                       size='sm'
                       disabled={selectedMergeTickets.size < 2}
                       onClick={() => setShowMergeDialog(true)}
+                      data-track-category='SEARCH'
+                      data-track-name='OPEN_MERGE_DIALOG'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Merge {selectedMergeTickets.size > 0 ? `(${selectedMergeTickets.size})` : ''}

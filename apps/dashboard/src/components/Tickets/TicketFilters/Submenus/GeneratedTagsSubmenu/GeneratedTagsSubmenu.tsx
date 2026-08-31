@@ -1,5 +1,10 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check, ChevronRight, ArrowLeft } from 'lucide-react';
+import {
+  SearchDefault as Search,
+  CheckTickSingle as Check,
+  ChevronRight,
+  ArrowLeft,
+} from '@xyne/icons';
 import { tagsConfigApi } from '../../../../../api/tagsConfigApi';
 import type { ChannelGeneratedTagItem } from '../../../../../api/tagsConfigApi';
 import { usePlatform } from '../../../../../hooks/usePlatform';

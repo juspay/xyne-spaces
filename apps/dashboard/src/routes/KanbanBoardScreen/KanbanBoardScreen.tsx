@@ -8,36 +8,34 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { TextAlignJustify, FileSpreadsheet, Archive } from 'lucide-react';
 import {
-  Plus,
-  List,
-  SquareKanban,
-  Settings2,
-  ChevronDownIcon,
+  PlusDefault as Plus,
+  FilterHorizontal as Settings2,
+  ChevronDown as ChevronDownIcon,
   ChevronRight,
-  User,
-  Calendar,
-  CircleCheckBig,
-  Vote,
+  UserDefault as User,
+  CalendarDefault as Calendar,
+  CheckTickCircle as CircleCheckBig,
+  Poll as Vote,
   Tag,
-  CheckIcon,
-  X,
-  Clock,
-  TextAlignJustify,
-  BarChart3,
-  Bookmark,
-  Share2,
+  CheckTickSingle as CheckIcon,
+  MultipleCrossCancelDefault as X,
+  ClockDefault as Clock,
+  BarchartDefault as BarChart3,
+  BookmarkDefault as Bookmark,
+  Share02 as Share2,
   GitBranch,
-  Pencil,
-  CheckCircle2,
-  XCircle,
-  Download,
-  FileSpreadsheet,
+  PencilEdit as Pencil,
+  CheckTickCircle as CheckCircle2,
+  MultipleCrossCancelCircle as XCircle,
+  DownloadDown as Download,
   FileText,
-  Archive,
   ArrowLeft,
-  Search,
-} from 'lucide-react';
+  SearchDefault as Search,
+  KanbanBoard as SquareKanban,
+  GridTable,
+} from '@xyne/icons';
 import { CalendarView } from '../../components/Tickets/CalendarView';
 import TicketReportsScreen from '../../routes/TicketReportsScreen/TicketReportsScreen';
 import ReactFlow, {
@@ -174,7 +172,7 @@ import { flowGroupCoverId } from '../../components/Board/FlowRun/useFlowRunGraph
 import Avatar from '../../components/ui/Avatar/Avatar';
 import {
   getPriorityIcon,
-  isStageEtaOverdue,
+  isStageOverdue,
 } from '../../components/Tickets/TicketCard/TicketCard.utils';
 import {
   TicketPriority,
@@ -1857,7 +1855,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Filter tickets based on view mode and filters.
   // NOTE: ALL filters including dynamic field filters are applied CLIENT-SIDE.
-  const deferredFilters = useDeferredValue(filters);
+  //
+  // In a channel Kanban view a board can be shared across multiple channels, so
+  // the board's tickets are not all "this channel's" tickets. Scope every ticket
+  // path (page fetch, counts, board-nav args, legacy client filter) to tickets
+  // created in this channel by forcing `sourceChannels` to the current channel.
+  // This applies both when a specific board is selected and in the "All Boards"
+  // view. The filter dropdown UI still reads the raw `filters`, so this scoping
+  // stays invisible there.
+  const scopedFilters = useMemo(() => {
+    if (channelId && viewMode === 'project') {
+      return { ...filters, sourceChannels: [channelId] };
+    }
+    return filters;
+  }, [filters, channelId, viewMode]);
+
+  const deferredFilters = useDeferredValue(scopedFilters);
 
   const filteredTickets = useMemo(() => {
     if (!shouldUseLegacyTicketsQuery || !allProjectTickets) {
@@ -1894,7 +1907,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     // Filter for stage overdue tickets
     if (showOverdueOnly) {
-      tickets = tickets.filter(ticket => isStageEtaOverdue(ticket));
+      tickets = tickets.filter(ticket => isStageOverdue(ticket));
     }
 
     return tickets;
@@ -2910,11 +2923,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (lastKanbanColumnQueryKeyRef.current === kanbanColumnQueryKey) return;
 
     lastKanbanColumnQueryKeyRef.current = kanbanColumnQueryKey;
-    if (searchTerm.trim().length === 0) {
-      setLocalTickets(null);
-      setKanbanTicketsByColumn({});
-    }
-  }, [isKanbanLayout, kanbanColumnQueryKey, searchTerm]);
+    setLocalTickets(null);
+    setKanbanTicketsByColumn({});
+  }, [isKanbanLayout, kanbanColumnQueryKey]);
 
   useEffect(() => {
     if (isKanbanLayout) {
@@ -3220,8 +3231,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   } | null>(null);
   const lastKnownKanbanGroupsQueryKeyRef = useRef<string | null>(null);
   const lastKnownKanbanTicketsRef = useRef<{
+    queryKey: string;
     tickets: Ticket[];
   } | null>(null);
+  const lastKnownKanbanTicketsQueryKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isKanbanLayout) return;
@@ -3241,12 +3254,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   useEffect(() => {
     if (!isKanbanLayout) return;
+
+    // On the pass where the query key changes, `localTickets` here still holds the previous
+    // query's rows: the reset above only queues setLocalTickets(null), which lands next render.
+    // Stamping the new key onto those rows would make the queryKey check below always pass, so
+    // drop the remembered rows instead and let a later pass re-record the new query's results.
+    if (lastKnownKanbanTicketsQueryKeyRef.current !== kanbanColumnQueryKey) {
+      lastKnownKanbanTicketsQueryKeyRef.current = kanbanColumnQueryKey;
+      lastKnownKanbanTicketsRef.current = null;
+      return;
+    }
+
     if (!localTickets || localTickets.length === 0) return;
 
     lastKnownKanbanTicketsRef.current = {
+      queryKey: kanbanColumnQueryKey,
       tickets: localTickets,
     };
-  }, [isKanbanLayout, localTickets]);
+  }, [isKanbanLayout, kanbanColumnQueryKey, localTickets]);
 
   const hasMatchingLastKnownKanbanGroups =
     lastKnownKanbanGroupsQueryKeyRef.current === kanbanColumnQueryKey &&
@@ -3262,12 +3287,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (
       hasSearchTerm &&
       lastKnownKanbanTickets !== null &&
+      lastKnownKanbanTickets.queryKey === kanbanColumnQueryKey &&
       lastKnownKanbanTickets.tickets.length > 0
     ) {
       return lastKnownKanbanTickets.tickets;
     }
     return localTickets ?? [];
-  }, [hasSearchTerm, localTickets]);
+  }, [hasSearchTerm, kanbanColumnQueryKey, localTickets]);
 
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
@@ -3308,7 +3334,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         : (serverCountGroup?.stages ?? {});
       const ticketsByColumn = shouldUseStatusColumns
         ? groupTicketsByStatus(groupTickets, stages)
-        : groupTicketsByStage(groupTickets, stages, canReorder);
+        : groupTicketsByStage(groupTickets, stages, canReorder && !hasSearchTerm);
 
       let displayName = serverCountGroup?.displayName ?? groupName;
       let entityType: 'user' | 'group' | null = null;
@@ -3571,12 +3597,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     )}
                   />
                   <div className='flex justify-end gap-2 pt-1'>
-                    <Button variant='ghost' size='sm' onClick={() => setIsSavePopoverOpen(false)}>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setIsSavePopoverOpen(false)}
+                      data-track-category='Tickets'
+                      data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
+                    >
                       Cancel
                     </Button>
                     <Button
                       size='sm'
                       onClick={handleConfirmSaveWorkspaceView}
+                      data-track-category='Tickets'
+                      data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
                       disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
                     >
                       Save
@@ -3651,7 +3685,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     data-track-name='SetTableView'
                     data-testid='table-view-btn'
                   >
-                    <List className='w-3.5 h-3.5' />
+                    <GridTable className='w-3.5 h-3.5' />
                   </button>
                 </Tooltip>
                 {!isMobile && (
@@ -5131,11 +5165,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={cancelRejectedApproval}>
+              <Button
+                variant='secondary'
+                onClick={cancelRejectedApproval}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_REJECTED_APPROVAL'
+              >
                 Cancel
               </Button>
               <Button
                 onClick={confirmRejectedApproval}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_REJECTED_APPROVAL'
                 className='bg-primary text-primary-foreground hover:bg-blue-700'
               >
                 Approve
@@ -5161,7 +5202,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 : `Are you sure you want to delete the saved view "${deleteViewConfirm.name}"? This action cannot be undone.`}
             </p>
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setDeleteViewConfirm(null)}>
+              <Button
+                variant='secondary'
+                onClick={() => setDeleteViewConfirm(null)}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_DELETE_VIEW'
+              >
                 Cancel
               </Button>
               <Button
@@ -5197,6 +5243,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   };
                   void run();
                 }}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_DELETE_VIEW'
                 className='bg-red-500 text-white hover:bg-red-600'
               >
                 Delete

@@ -3,7 +3,11 @@ import { isBaselineCanvasType } from '@xyne/shared/sdlc';
 interface SdlcActivityNavigationActivity {
   canvasId?: string | null;
   canvas?:
-    | { readonly id: string; readonly sdlcArtifact?: { readonly artifactType?: unknown } | null }
+    | {
+        readonly id: string;
+        readonly folderId?: string | null;
+        readonly sdlcArtifact?: { readonly artifactType?: unknown } | null;
+      }
     | null
     | undefined;
   ticketId?: string | null;
@@ -19,11 +23,9 @@ interface SdlcActivityNavigationActivity {
     | undefined;
 }
 
-const canvasSection = (artifactType: unknown): string | null => {
+const canvasSpecialSection = (artifactType: unknown): string | null => {
   if (typeof artifactType !== 'string') return null;
   if (isBaselineCanvasType(artifactType)) return 'baseline';
-  if (artifactType === 'PRD') return 'prds';
-  if (artifactType === 'TECH_DOC') return 'tech-docs';
   if (artifactType === 'WIKI') return 'wiki';
   return null;
 };
@@ -46,9 +48,17 @@ export function resolveSdlcActivityTarget(input: {
 
   const canvasId = input.activity.canvasId ?? input.activity.canvas?.id;
   if (canvasId) {
-    const section = canvasSection(input.activity.canvas?.sdlcArtifact?.artifactType);
-    if (section) {
-      return sdlcPath(repoId, section, new URLSearchParams({ canvas: canvasId }));
+    const special = canvasSpecialSection(input.activity.canvas?.sdlcArtifact?.artifactType);
+    if (special) {
+      return sdlcPath(repoId, special, new URLSearchParams({ canvas: canvasId }));
+    }
+    const folderId = input.activity.canvas?.folderId;
+    if (folderId) {
+      return sdlcPath(
+        repoId,
+        'artifacts',
+        new URLSearchParams({ type: folderId, canvas: canvasId }),
+      );
     }
   }
 

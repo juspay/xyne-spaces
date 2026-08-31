@@ -8,6 +8,7 @@ import { createMarkdownComponents } from '../../utils/markdownComponents';
 import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
+import { useDailyBriefEnabled } from '../../hooks/useDailyBriefEnabled';
 import { BriefHistoryMenu, HEADER_ICON_CLASS } from './BriefHistoryMenu';
 import { BriefSettingsDialog } from './BriefSettingsDialog';
 import { BriefIntroBanner } from './BriefIntroBanner';
@@ -203,6 +204,11 @@ const DailyBriefScreen = (): ReactElement => {
   const regenerateStartedAtRef = useRef<number | null>(null);
   const isInPanelWebview = useIsInPanelWebview();
   const { introSeen, markIntroSeen } = useBriefIntroSeen();
+  const {
+    enabled: briefEnabled,
+    saving: briefEnabling,
+    setEnabled: setBriefEnabled,
+  } = useDailyBriefEnabled();
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!mountedRef.current) return;
@@ -433,7 +439,27 @@ const DailyBriefScreen = (): ReactElement => {
       return <BriefSkeleton />;
     }
     if (!selected) {
-      return <p className={BODY_TEXT_CLASS}>No brief to show yet. Use “Generate” to create one.</p>;
+      return (
+        <div className='flex flex-col items-start gap-3'>
+          <p className={BODY_TEXT_CLASS}>
+            {briefEnabled === false
+              ? 'No brief to show yet. Turn on the morning brief to get one each day, or use “Generate” to create one now.'
+              : 'No brief to show yet. Use “Generate” to create one.'}
+          </p>
+          {briefEnabled === false && (
+            <button
+              type='button'
+              onClick={() => setBriefEnabled(true)}
+              disabled={briefEnabling}
+              data-track-category='DailyBrief'
+              data-track-name='daily-brief-empty-enable'
+              className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50'
+            >
+              {briefEnabling ? 'Turning on…' : 'Turn on morning brief'}
+            </button>
+          )}
+        </div>
+      );
     }
     if (IS_DEV && showRaw) {
       return (
@@ -577,7 +603,13 @@ const DailyBriefScreen = (): ReactElement => {
       <main className='min-h-0 flex-1 overflow-y-auto px-6 pb-16'>
         <article className='mx-auto w-full max-w-[750px]'>
           {!introSeen && !isBusy && (
-            <BriefIntroBanner onSeeMore={() => setFeaturesOpen(true)} onDismiss={markIntroSeen} />
+            <BriefIntroBanner
+              onSeeMore={() => setFeaturesOpen(true)}
+              onDismiss={markIntroSeen}
+              briefEnabled={briefEnabled ?? undefined}
+              onEnableBrief={() => setBriefEnabled(true)}
+              enabling={briefEnabling}
+            />
           )}
           {hasBrief && !isBusy && (
             <h1 className='py-10 text-center font-serif text-[40px] font-semibold italic leading-[1.2] text-foreground'>

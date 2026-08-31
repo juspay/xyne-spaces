@@ -1,11 +1,19 @@
 import { Prisma } from '@prisma/client';
 import { DatabaseClient, readReplicaDb } from '../client';
 import {
+  DeskMetricKey,
   DeskMetricsAgentRow,
+  DeskMetricsAiCategoryCount,
+  DeskMetricsAiSubCategoryCount,
+  DeskMetricsCustomFieldBreakdown,
+  DeskMetricsCustomFieldSummary,
+  DeskMetricsDeskSummary,
+  DeskMetricsPartial,
   DeskMetricsResponse,
   DeskMetricsTicketRow,
   TicketPriority,
   TicketStatusV2,
+  UNCLASSIFIED_AI_CATEGORY,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
@@ -26,6 +34,7 @@ import { logger } from '@/utils/logger';
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_BREAKDOWN_VALUES_PER_FIELD = 25;
 
 const activeTicketFilter = (assigneeIds: string[] = []): Prisma.Sql => {
   const assigneeCondition =
@@ -41,6 +50,39 @@ const activeTicketFilter = (assigneeIds: string[] = []): Prisma.Sql => {
       ${assigneeCondition}
   )`;
 };
+
+/** Everything both entry points need to describe one metrics run. */
+export interface DeskMetricsQueryParams {
+  channelId: string;
+  timeRange?: string;
+  frtStageNames: string[];
+  assigneeIds: string[];
+  stageNames: string[];
+  priorities: TicketPriority[];
+  userGroupIds: string[];
+  tagValues: string[];
+  aiCategories?: string[];
+  aiSubCategories?: string[];
+  customFieldFilter?: {
+    keys: string[];
+    perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
+  };
+}
+
+/** Compiled SQL fragments for one run, produced once by buildContext. */
+interface MetricsContext {
+  db: ReturnType<DeskMetricsRepository['getDbInstance']>;
+  channelId: string;
+  gte: Date;
+  lte: Date;
+  assigneeIds: string[];
+  cohortCte: Prisma.Sql;
+  frtStop: Prisma.Sql;
+  resolvedAtSql: Prisma.Sql;
+  resolvedPredicate: Prisma.Sql;
+  reopenedSql: Prisma.Sql;
+  ticketScopeExists: Prisma.Sql;
+}
 
 export class DeskMetricsRepository {
   private getDbInstance() {
@@ -70,20 +112,7 @@ export class DeskMetricsRepository {
     return { gte: new Date(now.getTime() - 7 * DAY_MS), lte: now };
   }
 
-  async getMetrics(params: {
-    channelId: string;
-    timeRange?: string;
-    frtStageNames: string[];
-    assigneeIds: string[];
-    stageNames: string[];
-    priorities: TicketPriority[];
-    userGroupIds: string[];
-    tagValues: string[];
-    customFieldFilter?: {
-      keys: string[];
-      perKeyFilters?: Record<string, { values?: string[]; textTerms?: string[] }>;
-    };
-  }): Promise<DeskMetricsResponse> {
+  private async buildContext(params: DeskMetricsQueryParams): Promise<MetricsContext> {
     const {
       channelId,
       frtStageNames,
@@ -94,6 +123,8 @@ export class DeskMetricsRepository {
       tagValues,
       customFieldFilter,
     } = params;
+    const aiCategories = params.aiCategories ?? [];
+    const aiSubCategories = params.aiSubCategories ?? [];
     const db = this.getDbInstance();
     const { gte, lte } = this.resolveRange(params.timeRange);
 
@@ -246,6 +277,16 @@ export class DeskMetricsRepository {
         Prisma.sql`filter_ticket."userGroupId" IN (${Prisma.join(userGroupIds)})`
       );
     }
+    if (aiCategories.length > 0) {
+      ticketAttributeConditions.push(
+        Prisma.sql`filter_ticket."aiCategory" IN (${Prisma.join(aiCategories)})`
+      );
+    }
+    if (aiSubCategories.length > 0) {
+      ticketAttributeConditions.push(
+        Prisma.sql`filter_ticket."aiSubCategory" IN (${Prisma.join(aiSubCategories)})`
+      );
+    }
     const ticketAttributeExists =
       ticketAttributeConditions.length > 0
         ? Prisma.sql`AND EXISTS (
@@ -270,7 +311,41 @@ export class DeskMetricsRepository {
           ${ticketScopeExists}
       )`;
 
-    const frtStop = frtStopSql();
+
+    return {
+      db,
+      channelId,
+      gte,
+      lte,
+      assigneeIds,
+      cohortCte,
+      frtStop: frtStopSql(),
+      resolvedAtSql,
+      resolvedPredicate,
+      reopenedSql,
+      ticketScopeExists,
+    };
+  }
+
+  /**
+   * Dashboard payload — every metric, every cohort ticket row.
+   */
+  async getMetrics(params: DeskMetricsQueryParams): Promise<DeskMetricsResponse> {
+    const ctx = await this.buildContext(params);
+    const {
+      db,
+      channelId,
+      gte,
+      lte,
+      assigneeIds,
+      cohortCte,
+      frtStop,
+      resolvedAtSql,
+      resolvedPredicate,
+      reopenedSql,
+      ticketScopeExists,
+    } = ctx;
+
     const [
       aggregates,
       tickets,
@@ -323,6 +398,373 @@ export class DeskMetricsRepository {
       tickets,
       agents,
     };
+  }
+
+  /**
+   * Agent-facing run: computes only the requested metrics and only as many
+   * ticket rows as were asked for. Everything else is identical to getMetrics
+   */
+  async queryMetrics(
+    params: DeskMetricsQueryParams & {
+      metrics: DeskMetricKey[];
+      includeTickets?: number;
+      customFieldBreakdown?: string[];
+    }
+  ): Promise<DeskMetricsPartial> {
+    const ctx = await this.buildContext(params);
+    const {
+      db,
+      channelId,
+      gte,
+      lte,
+      assigneeIds,
+      cohortCte,
+      frtStop,
+      resolvedAtSql,
+      resolvedPredicate,
+      reopenedSql,
+      ticketScopeExists,
+    } = ctx;
+
+    const wanted = new Set(params.metrics);
+    const needsAggregate = wanted.has('frt') || wanted.has('rt') || wanted.has('counts');
+    const needsCounts = wanted.has('counts');
+    // Fetch one extra row so the caller can tell a full page from a truncated one.
+    const ticketLimit =
+      wanted.has('tickets') && params.includeTickets && params.includeTickets > 0
+        ? params.includeTickets
+        : null;
+    // A named breakdown implies the field work even if 'customFields' wasn't asked for.
+    const breakdownFields = params.customFieldBreakdown ?? [];
+
+    const [
+      aggregates,
+      tickets,
+      emailRepliesInRange,
+      stageCounts,
+      priority,
+      csat,
+      trend,
+      agents,
+      tagCategories,
+      tagBreakdown,
+      customFields,
+      customFieldBreakdown,
+      aiCategoryCountRows,
+      aiSubCategoryCountRows,
+    ] = await Promise.all([
+      needsAggregate ? this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql) : null,
+      ticketLimit ? this.ticketRows(db, cohortCte, frtStop, resolvedAtSql, ticketLimit + 1) : null,
+      needsCounts ? this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists) : null,
+      needsCounts ? this.stageCounts(db, cohortCte) : null,
+      wanted.has('priority') ? this.priorityBreakdown(db, cohortCte) : null,
+      wanted.has('csat') ? this.csatStats(db, channelId, gte, lte, ticketScopeExists) : null,
+      wanted.has('trend')
+        ? this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists)
+        : null,
+      wanted.has('agents')
+        ? this.agentPerformance(
+            db,
+            cohortCte,
+            frtStop,
+            resolvedAtSql,
+            reopenedSql,
+            channelId,
+            gte,
+            lte,
+            assigneeIds,
+            ticketScopeExists
+          )
+        : null,
+      wanted.has('tags') ? this.tagCategoryBreakdown(db, cohortCte) : null,
+      wanted.has('tags') ? this.tagBreakdown(db, cohortCte) : null,
+      wanted.has('customFields') ? this.customFieldSummary(db, cohortCte) : null,
+      breakdownFields.length > 0 ? this.customFieldBreakdown(db, cohortCte, breakdownFields) : null,
+      wanted.has('aiCategories') ? this.aiCategoryCounts(db, cohortCte) : null,
+      wanted.has('aiCategories') ? this.aiSubCategoryCounts(db, cohortCte) : null,
+    ]);
+
+    const result: DeskMetricsPartial = {
+      range: { from: gte.toISOString(), to: lte.toISOString() },
+    };
+
+    if (aggregates) {
+      if (wanted.has('frt')) {
+        result.frt = { avgSeconds: aggregates.avgFrt, respondedTickets: aggregates.responded };
+      }
+      if (wanted.has('rt')) {
+        result.rt = { avgSeconds: aggregates.avgRt, resolvedTickets: aggregates.resolved };
+      }
+      if (wanted.has('counts')) {
+        result.counts = {
+          openedInRange: aggregates.opened,
+          emailRepliesInRange: emailRepliesInRange ?? 0,
+          stageCounts: stageCounts ?? [],
+        };
+      }
+    }
+    if (csat) result.csat = csat;
+    if (priority) result.priority = priority;
+    if (trend) result.trend = trend;
+    if (agents) result.agents = agents;
+    if (tagCategories) result.tagCategories = tagCategories;
+    if (tagBreakdown) result.tagBreakdown = tagBreakdown;
+    if (customFields) result.customFields = customFields;
+    if (customFieldBreakdown) result.customFieldBreakdown = customFieldBreakdown;
+    if (aiCategoryCountRows) result.aiCategoryCounts = aiCategoryCountRows;
+    if (aiSubCategoryCountRows) result.aiSubCategoryCounts = aiSubCategoryCountRows;
+    if (tickets && ticketLimit) {
+      result.ticketsTruncated = tickets.length > ticketLimit;
+      result.tickets = tickets.slice(0, ticketLimit);
+    }
+
+    return result;
+  }
+
+
+  /**
+   * Every desk in the caller's workspace that the caller participates in.
+   */
+  async listAccessibleDesks(
+    workspaceId: string,
+    userId: string
+  ): Promise<DeskMetricsDeskSummary[]> {
+    const db = this.getDbInstance();
+
+    const preferences = await db.emailChannelPreference.findMany({
+      where: { workspaceId },
+      select: { channelId: true, deskType: true, metricsEnabled: true },
+    });
+    if (preferences.length === 0) return [];
+
+    const channelIds = preferences.map(p => p.channelId);
+    // Membership is the same gate the per-desk endpoints apply, checked in bulk
+    // here so listing 50 desks is one query rather than 50.
+    const memberships = await db.channelParticipant.findMany({
+      where: { userId, channelId: { in: channelIds } },
+      select: { channelId: true },
+    });
+    const allowed = new Set(memberships.map(m => m.channelId));
+    if (allowed.size === 0) return [];
+
+    const channels = await db.channel.findMany({
+      where: { id: { in: [...allowed] }, workspaceId },
+      select: { id: true, name: true },
+    });
+    const nameById = new Map(channels.map(c => [c.id, c.name]));
+
+    return preferences
+      .filter(p => allowed.has(p.channelId) && nameById.has(p.channelId))
+      .map(p => ({
+        channelId: p.channelId,
+        channelName: nameById.get(p.channelId) ?? null,
+        deskType: p.deskType,
+        metricsEnabled: p.metricsEnabled === true,
+      }))
+      .sort((a, b) => (a.channelName ?? '').localeCompare(b.channelName ?? ''));
+  }
+
+  /**
+   * Ticket counts per AI category over the cohort.
+   */
+  private async aiCategoryCounts(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<DeskMetricsAiCategoryCount[]> {
+    const rows = await db.$queryRaw<Array<{ ai_category: string; count: number }>>(
+      Prisma.sql`
+        WITH ${cohortCte}
+        SELECT COALESCE(t."aiCategory", ${UNCLASSIFIED_AI_CATEGORY}) AS ai_category,
+               COUNT(*)::int AS count
+        FROM cohort c
+        JOIN "public"."tickets" t ON t.id = c."ticketId"
+        GROUP BY 1
+        ORDER BY count DESC, ai_category ASC
+      `
+    );
+    return rows.map(r => ({ aiCategory: r.ai_category, count: r.count }));
+  }
+
+  private async aiSubCategoryCounts(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<DeskMetricsAiSubCategoryCount[]> {
+    const rows = await db.$queryRaw<
+      Array<{ ai_category: string; ai_sub_category: string; count: number }>
+    >(
+      Prisma.sql`
+        WITH ${cohortCte}
+        SELECT COALESCE(t."aiCategory", ${UNCLASSIFIED_AI_CATEGORY}) AS ai_category,
+               COALESCE(t."aiSubCategory", ${UNCLASSIFIED_AI_CATEGORY}) AS ai_sub_category,
+               COUNT(*)::int AS count
+        FROM cohort c
+        JOIN "public"."tickets" t ON t.id = c."ticketId"
+        GROUP BY 1, 2
+        ORDER BY count DESC, ai_category ASC, ai_sub_category ASC
+      `
+    );
+    return rows.map(r => ({
+      aiCategory: r.ai_category,
+      aiSubCategory: r.ai_sub_category,
+      count: r.count,
+    }));
+  }
+
+  /**
+   * Text form of a custom field value.
+   */
+  private customFieldValueSql(): Prisma.Sql {
+    return Prisma.sql`(
+      CASE WHEN jsonb_typeof(fev."actualFieldValue") = 'array'
+        THEN (
+          SELECT string_agg(av.value, ', ' ORDER BY av.ord)
+          FROM jsonb_array_elements_text(fev."actualFieldValue")
+            WITH ORDINALITY AS av(value, ord)
+        )
+        ELSE COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", ''))
+      END
+    )`;
+  }
+
+  /**
+   * One row per (ticket, field), newest wins. form_entity_values is unique on
+   * (entityId, entityType, fieldId, contextId, version), so a ticket can carry
+   * several rows for the same field across stage context and version — without
+   * this dedup a breakdown would double-count them.
+   */
+  private dedupedFieldValuesCte(): Prisma.Sql {
+    return Prisma.sql`
+      deduped_cf AS (
+        SELECT DISTINCT ON (fev."entityId", COALESCE(gf."fieldName", ff."fieldName"))
+          fev."entityId" AS ticket_id,
+          COALESCE(gf."fieldName", ff."fieldName") AS field_name,
+          fev."actualFieldValue" AS raw_value,
+          ${this.customFieldValueSql()} AS field_value
+        FROM "public"."form_entity_values" fev
+        LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
+        LEFT JOIN "public"."form_fields" ff ON ff.id = fev."fieldId"
+        WHERE fev."entityId" IN (SELECT "ticketId" FROM cohort)
+          AND fev."entityType" = 'TICKET'
+        ORDER BY fev."entityId", COALESCE(gf."fieldName", ff."fieldName"),
+                 fev."updatedAt" DESC, fev.id DESC
+      )`;
+  }
+
+  /**
+   * deduped_cf with array fields expanded element-by-element, so "Issues"
+   * yields Cab/Auto/Other rather than one row per literal combination. Shared
+   * by discovery and breakdown so their value counts can never disagree.
+   */
+  private expandedFieldValuesCte(): Prisma.Sql {
+    return Prisma.sql`
+      expanded_cf AS (
+        SELECT
+          d.ticket_id,
+          d.field_name,
+          jsonb_typeof(d.raw_value) = 'array' AS multi_value,
+          CASE WHEN jsonb_typeof(d.raw_value) = 'array' THEN el.value ELSE d.field_value END
+            AS value
+        FROM deduped_cf d
+        -- Coerce non-arrays to '[]' so the set-returning function is never
+        -- handed a scalar; the LEFT JOIN then yields one NULL row and the CASE
+        -- above falls back to the plain value.
+        LEFT JOIN LATERAL jsonb_array_elements_text(
+          CASE WHEN jsonb_typeof(d.raw_value) = 'array' THEN d.raw_value ELSE '[]'::jsonb END
+        ) AS el(value) ON true
+      )`;
+  }
+
+  /** Which custom fields the cohort's tickets actually carry. */
+  private async customFieldSummary(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql
+  ): Promise<DeskMetricsCustomFieldSummary[]> {
+    const rows = await db.$queryRaw<
+      Array<{
+        field_name: string;
+        multi_value: boolean;
+        tickets_with_value: number;
+        distinct_values: number;
+      }>
+    >(
+      Prisma.sql`
+        WITH ${cohortCte},
+        ${this.dedupedFieldValuesCte()},
+        ${this.expandedFieldValuesCte()}
+        SELECT
+          field_name,
+          bool_or(multi_value) AS multi_value,
+          COUNT(DISTINCT ticket_id) FILTER (WHERE value IS NOT NULL AND value <> '')::int
+            AS tickets_with_value,
+          COUNT(DISTINCT value)::int AS distinct_values
+        FROM expanded_cf
+        WHERE field_name IS NOT NULL
+        GROUP BY field_name
+        ORDER BY tickets_with_value DESC, field_name ASC
+      `
+    );
+    return rows.map((r): DeskMetricsCustomFieldSummary => ({
+      field: r.field_name,
+      multiValue: r.multi_value,
+      ticketsWithValue: r.tickets_with_value,
+      distinctValues: r.distinct_values,
+    }));
+  }
+
+  /**
+   * Value distribution for the named custom fields.
+   */
+  private async customFieldBreakdown(
+    db: ReturnType<DeskMetricsRepository['getDbInstance']>,
+    cohortCte: Prisma.Sql,
+    fields: string[]
+  ): Promise<DeskMetricsCustomFieldBreakdown[]> {
+    if (fields.length === 0) return [];
+    const rows = await db.$queryRaw<
+      Array<{ field_name: string; multi_value: boolean; value: string; tickets: number }>
+    >(
+      Prisma.sql`
+        WITH ${cohortCte},
+        ${this.dedupedFieldValuesCte()},
+        ${this.expandedFieldValuesCte()}
+        SELECT field_name, multi_value, value, tickets
+        FROM (
+          SELECT field_name, bool_or(multi_value) AS multi_value, value,
+                 COUNT(DISTINCT ticket_id)::int AS tickets,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY field_name
+                   ORDER BY COUNT(DISTINCT ticket_id) DESC, value ASC
+                 ) AS rn
+          FROM expanded_cf
+          WHERE field_name IN (${Prisma.join(fields)})
+            AND value IS NOT NULL AND value <> ''
+          GROUP BY field_name, value
+        ) ranked
+        WHERE rn <= ${MAX_BREAKDOWN_VALUES_PER_FIELD + 1}
+        ORDER BY field_name ASC, tickets DESC, value ASC
+      `
+    );
+
+    const byField = new Map<string, DeskMetricsCustomFieldBreakdown>();
+    for (const r of rows) {
+      const entry: DeskMetricsCustomFieldBreakdown = byField.get(r.field_name) ?? {
+        field: r.field_name,
+        multiValue: r.multi_value,
+        values: [],
+      };
+      entry.multiValue = entry.multiValue || r.multi_value;
+      entry.values.push({ value: r.value, tickets: r.tickets });
+      byField.set(r.field_name, entry);
+    }
+    return [...byField.values()].map(entry =>
+      entry.values.length > MAX_BREAKDOWN_VALUES_PER_FIELD
+        ? {
+            ...entry,
+            values: entry.values.slice(0, MAX_BREAKDOWN_VALUES_PER_FIELD),
+            truncated: true,
+          }
+        : entry,
+    );
   }
 
   private async resolvedStageNamesForChannel(channelId: string): Promise<string[]> {
@@ -403,12 +845,17 @@ export class DeskMetricsRepository {
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     cohortCte: Prisma.Sql,
     frtStopSql: Prisma.Sql,
-    resolvedAtSql: Prisma.Sql
+    resolvedAtSql: Prisma.Sql,
+    limit?: number
   ): Promise<DeskMetricsTicketRow[]> {
+    // The dashboard takes every cohort row; the agent surface caps it, because
+    // each row carries custom fields and tags and would swamp a context window.
+    const limitSql = limit ? Prisma.sql` LIMIT ${limit}` : Prisma.sql``;
     const rows = await db.$queryRaw<
       Array<{
         ticket_id: string;
         xyne_id: string | null;
+        channel_id: string;
         title: string | null;
         created_at: Date;
         priority: string;
@@ -429,7 +876,7 @@ export class DeskMetricsRepository {
           SELECT DISTINCT ON (fev."entityId", COALESCE(gf."fieldName", ff."fieldName"))
             fev."entityId" AS ticket_id,
             COALESCE(gf."fieldName", ff."fieldName") AS field_name,
-            COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", '')) AS field_value
+            ${this.customFieldValueSql()} AS field_value
           FROM "public"."form_entity_values" fev
           LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
           LEFT JOIN "public"."form_fields" ff ON ff.id = fev."fieldId"
@@ -466,6 +913,7 @@ export class DeskMetricsRepository {
         SELECT
           c."ticketId" AS ticket_id,
           t."xyneId" AS xyne_id,
+          t."channelId" AS channel_id,
           t.title,
           c.created_at,
           t.priority::text AS priority,
@@ -485,7 +933,7 @@ export class DeskMetricsRepository {
         LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
         LEFT JOIN form_vals fv ON fv.ticket_id = c."ticketId"
         LEFT JOIN ticket_tags_agg tta ON tta.ticket_id = c."ticketId"
-        ORDER BY c.created_at DESC
+        ORDER BY c.created_at DESC${limitSql}
       `
     );
     return rows.map((r) => {
@@ -494,6 +942,7 @@ export class DeskMetricsRepository {
       return {
         ticketId: r.ticket_id,
         xyneId: r.xyne_id,
+        channelId: r.channel_id,
         title: r.title,
         createdAt: r.created_at.getTime(),
         priority: r.priority,

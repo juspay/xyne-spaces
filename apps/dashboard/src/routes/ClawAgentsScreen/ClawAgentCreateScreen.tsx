@@ -115,23 +115,44 @@ const ClawAgentCreateScreen = (): ReactElement => {
             widthClass,
           )}
         >
-          <Button variant='ghost' onClick={cancel}>
+          <Button
+            variant='ghost'
+            onClick={cancel}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_CREATE_AGENT'
+          >
             Cancel
           </Button>
           <div className='flex items-center gap-2'>
             {step > 0 && (
-              <Button variant='outline' onClick={goBack}>
+              <Button
+                variant='outline'
+                onClick={goBack}
+                data-track-category='Claw Agents'
+                data-track-name='AGENT_WIZARD_BACK'
+              >
                 <ChevronLeft className='size-4' />
                 Back
               </Button>
             )}
             {step < LAST_STEP ? (
-              <Button onClick={goNext} disabled={!canNext}>
+              <Button
+                onClick={goNext}
+                data-track-category='Claw Agents'
+                data-track-name='AGENT_WIZARD_NEXT'
+                disabled={!canNext}
+              >
                 Next
                 <ChevronRight className='size-4' />
               </Button>
             ) : (
-              <Button onClick={handleCreate} loading={createMutation.isPending} disabled={!canNext}>
+              <Button
+                onClick={handleCreate}
+                data-track-category='Claw Agents'
+                data-track-name='CREATE_AGENT'
+                loading={createMutation.isPending}
+                disabled={!canNext}
+              >
                 {!createMutation.isPending && <Check className='size-4' />}
                 Create agent
               </Button>

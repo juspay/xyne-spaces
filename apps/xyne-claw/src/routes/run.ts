@@ -30,6 +30,7 @@ import {
   type ClawStreamMeta,
   type ClawDoneStatus,
   type Todo,
+  type UiWidget,
   type ToolExecutionContext,
   cleanupSdlcSandboxCredentialsForContext,
 } from "xyne-claw-shared";
@@ -87,6 +88,7 @@ import {
   AgentDelegationGovernor,
   buildCallableAgentTools,
   buildOrchestratorCallableAgentTool,
+  clampMaxDelegationsPerRun,
   type CallableAgentLightSpec,
   type CallableAgentSpec,
   type NestedAgentRunner,
@@ -114,8 +116,10 @@ import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
+import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
+import { buildSuggestConnectorsTool, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -141,6 +145,12 @@ import {
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import {
+  buildPrefetchBlock,
+  prefetchEnabled,
+  startPrefetchExtraction,
+  type ExecutableTool,
+} from "../prefetch.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -161,6 +171,12 @@ interface ActiveRunControl {
    *  respond-to-user termination (which also aborts the controller). Lets the
    *  catch block honor a user stop instead of posting a just-generated answer. */
   userCancelled?: boolean;
+  /** Same-user follow-up requested an early, user-visible reply for the current
+   *  run before the queued follow-up is dispatched. Unlike /cancel, this must
+   *  complete with a posted result so the transcript remains linear. */
+  gracefulInterruptRequested?: boolean;
+  gracefulInterruptSummaryTimer?: ReturnType<typeof setTimeout>;
+  requestGracefulInterruptSummary?: () => Promise<boolean>;
   hasCallbackUrl?: boolean;
   sseClientAttached?: boolean;
   sseReconnectGraceTimer?: ReturnType<typeof setTimeout>;
@@ -219,8 +235,8 @@ function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined
     deadlineAt,
     ...(focus ? { focus } : {}),
     ...(obj["mode"] === "review" ? { mode: "review" as const } : {}),
-    ...(obj["kind"] === "understanding" || obj["kind"] === "framework" || obj["kind"] === "security"
-      ? { kind: obj["kind"] as "understanding" | "framework" | "security" }
+    ...(obj["kind"] === "understanding" || obj["kind"] === "framework" || obj["kind"] === "security" || obj["kind"] === "repo-history"
+      ? { kind: obj["kind"] as "understanding" | "framework" | "security" | "repo-history" }
       : {}),
   };
 }
@@ -453,6 +469,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     mode,
     experiment: rawExperiment,
     planContinuation,
+    awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = req.body as {
     userId?: string;
@@ -514,6 +531,16 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
     contextFiles?: Array<{ path: string; content: string }>;
+    /** Set by claw-auth's awakening dispatcher for an unattended run. */
+    awakening?: {
+      kind: string;
+      writePolicy: string;
+      shadow: boolean;
+      injectEnabled?: boolean;
+      windowStartMs?: number;
+      windowEndMs?: number;
+      entryPath?: string;
+    };
     additionalInstructions?: string;
     researchContext?: {
       type: string;
@@ -575,7 +602,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       focus?: string;
       /** "understanding" = coverage-gated variant: exit on an exhausted
        *  code-path frontier instead of the deadline. Set by claw-auth. */
-      kind?: "understanding" | "framework" | "security";
+      kind?: "understanding" | "framework" | "security" | "repo-history";
     };
     /** True when this run is Turn 2 (auto) dispatched right after a plan was
      *  approved (or a trivial plan auto-continued). Used only to emit a
@@ -837,8 +864,10 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       planContinuation,
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
+      awakening,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+      if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
     });
     return;
@@ -962,6 +991,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         planContinuation,
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
+        awakening,
       );
     } catch (err) {
       processTaskError = err;
@@ -971,6 +1001,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         clearTimeout(activeRun.sseReconnectGraceTimer);
       }
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+      if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
       activeRuns.delete(sessionId);
       // Backstop: processTask has several silent-return paths (most notably
       // SessionLockedError — another pod owns this run and suppresses the
@@ -1064,8 +1095,10 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     shouldGenerateFollowUpSuggestions,
     typeof callbackUrl === "string" ? callbackUrl : undefined,
+    awakening,
   ).finally(() => {
     if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+    if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
     activeRuns.delete(sessionId);
   });
 });
@@ -1188,6 +1221,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     sandboxPreview: (sid, payload: ClawSandboxPreviewPayload) => write({ event: "sandbox-preview", seq: next(), sessionId: sid, payload }),
     plan: (sid, todos: Todo[]) => write({ event: "plan", seq: next(), sessionId: sid, todos }),
     pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
+    uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
       if (payload.reasoningDelta !== undefined) {
         write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
@@ -1252,6 +1286,83 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
     clog.error(`[run] /clear-session failed for ${sessionKey}: ${err instanceof Error ? err.message : String(err)}`);
     res.status(500).json({ success: false, error: "failed to clear session" });
   }
+});
+
+/**
+ * Liveness probe for claw-auth's run-recovery watchdog.
+ *
+ * The watchdog previously inferred death from heartbeat age alone, but a
+ * heartbeat only lands on progress events — so a run sitting inside ONE long
+ * tool call (a /design browser QA pass, a big sandbox build) looks dead while
+ * it is working perfectly. It would then re-dispatch the whole request, and
+ * the retry raced the original: two agents, two sandboxes, duplicate
+ * deliverables (2026-08-18 /design thread — one request produced four runs and
+ * shipped the same HTML twice).
+ *
+ * `activeRuns` is the authoritative answer to "is this still executing"; it is
+ * in-process, which is sound while xyne-claw runs a single replica. If that
+ * ever scales out this must move to Redis, otherwise a run on another replica
+ * reads as dead. Deliberately NOT ownership-checked like /cancel: this returns
+ * one boolean about a session id the caller already holds, and it must keep
+ * working for recovery paths that have no user context.
+ */
+router.get("/run/:sessionId/alive", validateS2SKey, (req, res: Response) => {
+  const { sessionId } = req.params as { sessionId?: string };
+  if (!sessionId) {
+    res.status(400).json({ success: false, error: "sessionId is required" });
+    return;
+  }
+  res.json({ success: true, sessionId, alive: activeRuns.has(sessionId) });
+});
+
+router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: Response) => {
+  const { sessionId } = req.params as { sessionId?: string };
+  if (!sessionId) {
+    res.status(400).json({ success: false, error: "sessionId is required" });
+    return;
+  }
+
+  const active = activeRuns.get(sessionId);
+  if (!active) {
+    res.json({ success: true, sessionId, status: "not_running" });
+    return;
+  }
+
+  const callerUserId = req.headers["x-user-id"];
+  if (
+    typeof callerUserId !== "string" ||
+    !callerUserId ||
+    callerUserId !== active.userId
+  ) {
+    res
+      .status(403)
+      .json({ success: false, error: "Not authorized to interrupt this run" });
+    return;
+  }
+
+  // This is intentionally NOT userCancelled. /cancel suppresses output; a
+  // same-user follow-up wants the active turn to summarize/post what it has, then
+  // let claw-auth drain the queued follow-up as the next user turn. Prefer a
+  // model-generated summary via steering, but keep a bounded hard-abort fallback
+  // so a stuck tool/provider cannot block the new prompt forever.
+  active.gracefulInterruptRequested = true;
+  if (!active.gracefulInterruptSummaryTimer) {
+    const timeoutMs = Number(process.env["CLAW_INTERRUPT_SUMMARY_TIMEOUT_MS"] ?? 15_000);
+    const delay = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 15_000;
+    active.gracefulInterruptSummaryTimer = setTimeout(() => {
+      if (!active.abortController.signal.aborted) {
+        clog.warn(`[run] interrupt-with-reply summary timed out; aborting session=${sessionId}`);
+        active.abortController.abort();
+      }
+    }, delay);
+    active.gracefulInterruptSummaryTimer.unref?.();
+  }
+  void active.requestGracefulInterruptSummary?.().then((queued) => {
+    if (!queued && !active.abortController.signal.aborted) {
+      active.abortController.abort();
+    }
+  });
+  res.json({ success: true, sessionId, status: "interrupt_requested" });
 });
 
 router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
@@ -1337,6 +1448,24 @@ router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
+function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: string[]; toolInvocations?: Array<{ toolName?: string; isError?: boolean }> }): string {
+  const trimmed = partialResult.trim();
+  const details: string[] = [];
+  const tools = [...new Set(fallback?.toolsUsed ?? [])].slice(0, 8);
+  if (tools.length > 0) details.push(`Tools used so far: ${tools.join(", ")}.`);
+  const invocations = fallback?.toolInvocations ?? [];
+  if (invocations.length > 0) {
+    const lastTool = [...invocations].reverse().find((inv) => typeof inv.toolName === "string" && inv.toolName.trim().length > 0);
+    details.push(`Tool calls completed so far: ${invocations.length}${lastTool?.toolName ? `; latest: ${lastTool.toolName}${lastTool.isError ? " (failed)" : ""}.` : "."}`);
+  }
+  const fallbackText = details.length > 0
+    ? details.join("\n")
+    : "I had not produced a stable partial result yet.";
+  return trimmed
+    ? `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:**\n\n${trimmed}`
+    : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
+}
+
 async function processTask(
   sessionId: string,
   sessionToken: string,
@@ -1418,7 +1547,25 @@ async function processTask(
   planContinuation?: boolean,
   shouldGenerateFollowUpSuggestions?: boolean,
   lateFollowUpCallbackUrl?: string,
+  /** Present when claw-auth woke this agent on its own (heartbeat / reflex). */
+  awakening?: {
+    kind: string;
+    writePolicy: string;
+    shadow: boolean;
+    injectEnabled?: boolean;
+    windowStartMs?: number;
+    windowEndMs?: number;
+    entryPath?: string;
+  },
 ): Promise<void> {
+  // Query prefetch (opt-in, `agentConfig.prefetchContext`). Fired at the TOP of
+  // the run so the fast-model extractor overlaps the expensive setup that
+  // follows — session restore and the MCP tool listing — instead of adding its
+  // latency in front of the first turn. It is awaited far below, once the tool
+  // palette exists and the resolvers can run. Never rejects; see prefetch.ts.
+  const prefetchSpecPromise = prefetchEnabled(agentConfig)
+    ? startPrefetchExtraction(task)
+    : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
   // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
   // workspaces are deleted whole in the finally, but a persistent cwd survives
@@ -1561,6 +1708,7 @@ async function processTask(
   // alongside the others so the catch handler can still ship a queued card when
   // the turn ends some other way.
   const describeAgentRef: DescribeAgentRef = {};
+  const suggestConnectorsRef: SuggestConnectorsRef = {};
   // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
   // fires abortRun, so the brief is recovered from ref.value in the catch block
   // and shipped as `dailyBrief` on the callback.
@@ -1903,6 +2051,38 @@ async function processTask(
 
     // For google-agent: fetch the user's Google OAuth token from xyne-claw-auth
     const effectiveConfig = { ...(agentConfig ?? {}) };
+
+    // Surface-default tool injection, per run only. Slack already injects its
+    // subagent in claw-auth before dispatch; Spaces runs arrive directly from
+    // the Spaces webhook and need the same default here so mention/automation/
+    // scheduled runs can read the room without mutating the stored agent config.
+    // Scheduled jobs post into a Spaces channel too, so they get the same spaces
+    // default as an interactive mention. A missing tools object means the agent
+    // is unrestricted, so do not create one.
+    const effectiveTools = effectiveConfig["tools"];
+    const isSpacesSurfaceEvent =
+      eventType === "APP_MENTIONED" ||
+      eventType === "DIRECT_MESSAGE" ||
+      eventType === "USER_MENTIONED" ||
+      eventType === "automation" ||
+      eventType === "scheduled_job" ||
+      eventType === "scheduled" ||
+      (conversationId?.startsWith("scheduled_") ?? false);
+    if (
+      isSpacesSurfaceEvent &&
+      effectiveTools &&
+      typeof effectiveTools === "object" &&
+      !Array.isArray(effectiveTools)
+    ) {
+      const toolsObj = effectiveTools as Record<string, unknown>;
+      const subagents = Array.isArray(toolsObj["subagents"])
+        ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
+        : [];
+      if (!subagents.includes("spaces")) {
+        effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
+      }
+    }
+
     // Parent agent's provider config — looked up from user's provider credentials.
     // We also reuse it to drive custom:create-ppt so PPT generation uses the
     // same user credential/model instead of shared env keys.
@@ -1950,9 +2130,9 @@ async function processTask(
     // (URL or emitter, whichever is plumbed).
     const progressEmitter = progressUrl && typeof progressUrl !== "string" ? progressUrl : undefined;
     const progressUrlForCustom = typeof progressUrl === "string" ? progressUrl : undefined;
-    const emitPlanForCustom =
+    const emitUiWidgetForCustom =
       progressEmitter
-        ? (todos: Todo[]) => progressEmitter.plan(sessionId, todos)
+        ? async (widget: UiWidget) => progressEmitter.uiWidget(sessionId, widget)
         : undefined;
     customToolsResult = loadCustomTools(
       effectiveConfig,
@@ -1965,7 +2145,7 @@ async function processTask(
       sessionToken,
       undefined,
       runtimeProviderConfig,
-      emitPlanForCustom,
+      emitUiWidgetForCustom,
       taskCommand?.autoTools ?? [],
     );
     const {
@@ -2036,13 +2216,12 @@ async function processTask(
     let twinPersonaBlock = "";
 
     // Memory — opt-in per agent via agentConfig.memoryEnabled=true.
-    // No more inject-all-recalled-facts. Instead: inject a tiny taxonomy hint
-    // and let the agent search on demand via the memory-search tool.
-    //
-    // The Digital Twin (slug=digital-twin) is per-user: scope the taxonomy
-    // to memories tagged `user:<userId>` so the injected hint doesn't leak
-    // other users' subsystem counts. Other memory-enabled agents see the
-    // full shared taxonomy.
+    // No more inject-all-recalled-facts. Shared memory-enabled agents get the
+    // memory-search tool only; we intentionally do not inject a per-turn system
+    // reminder because that biases source-of-truth-first workflows (RCA,
+    // metrics, reports, code review) toward stale memory. Digital Twin remains
+    // separate: it receives a personal-memory hint because its product contract
+    // is to answer as the user.
     const memoryEnabled =
       agentConfig?.["memoryEnabled"] === true ||
       agentConfig?.["memoryEnabled"] === "true";
@@ -2054,7 +2233,7 @@ async function processTask(
         isDigitalTwin ? { userTag: `user:${userId}` } : undefined,
         memoryBankId,
       ).catch(() => []);
-      if (taxonomy.length > 0) {
+      if (isDigitalTwin && taxonomy.length > 0) {
         const lines = taxonomy
           .slice(0, 12)
           .map(
@@ -2064,37 +2243,18 @@ async function processTask(
           .join("\n");
         activeInjections.push({
           id: "__memory-taxonomy",
-          label: isDigitalTwin
-            ? "Your Personal Memory"
-            : "Shared Knowledge Bank",
-          content: isDigitalTwin
-            ? [
-                "You have a personal memory bank — facts about THIS user that they",
-                "themselves approved. Currently you have memories under these clusters:",
-                "",
-                lines,
-                "",
-                "When you need to know how the user works, who they collaborate with,",
-                "what they prefer, or what they own, call `memory-search` FIRST with a",
-                "specific natural-language query. Never invent facts about the user —",
-                "only use what the tool returns.",
-              ].join("\n")
-            : [
-                "You have access to a shared knowledge bank for this agent. It contains",
-                "facts learned across past sessions, grouped by subsystem:",
-                "",
-                lines,
-                "",
-                "RULE: before starting any non-trivial task, make ONE `memory-search`",
-                "call — pick the closest subsystem above (unscoped only if none fits).",
-                "This bank holds hard-won specifics from past sessions: root causes,",
-                "gotchas, exact configs, decisions that never made it into code or",
-                "docs. Skipping the search repeats old mistakes; one call is cheap.",
-                "",
-                "Apply what comes back (you may say it came from memory). If it is",
-                "empty or irrelevant, proceed — do not retry the same query. Do not",
-                "invent facts from memory — only use what the tool returns.",
-              ].join("\n"),
+          label: "Your Personal Memory",
+          content: [
+            "You have a personal memory bank — facts about THIS user that they",
+            "themselves approved. Currently you have memories under these clusters:",
+            "",
+            lines,
+            "",
+            "When you need to know how the user works, who they collaborate with,",
+            "what they prefer, or what they own, call `memory-search` FIRST with a",
+            "specific natural-language query. Never invent facts about the user —",
+            "only use what the tool returns.",
+          ].join("\n"),
         });
       }
 
@@ -2102,7 +2262,7 @@ async function processTask(
       // twin speaks AS the user with ZERO tool calls. Injected via
       // activeInjections (not systemPrompt) so it applies on BOTH the @mention
       // flow (which sends no systemPrompt) and interactive chat. Files are the
-      // user's own, ≤3, each ≤10k chars — enforced in claw-auth.
+      // user's own, ≤3, each ≤20k chars — enforced in claw-auth.
       if (isDigitalTwin) {
         const promptFiles = await fetchAgentPromptFiles(agentSlug, userId).catch(() => []);
         if (promptFiles.length > 0) {
@@ -2225,13 +2385,17 @@ async function processTask(
 
     const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
-    const fastCatalogCandidateItems = fastModeEnabled
-      ? buildToolCatalog({
-          groups: allGroups,
-          customTools: customToolDefs,
-          ...(customSubagents ? { customSubagents } : {}),
-        })
-      : [];
+    // The catalog is built for EVERY run, not just fast-mode ones. Its CONTENT
+    // is what differs: with subagent delegation on, the wrappers already carry
+    // their read tools, so only presentation (response-only) tools are lazy.
+    // With delegation off (fast mode) the catalog stands in for the wrappers
+    // and carries their read tools too — identical to before.
+    const fastCatalogCandidateItems = buildToolCatalog({
+      groups: allGroups,
+      customTools: customToolDefs,
+      ...(customSubagents ? { customSubagents } : {}),
+      includeSubagentTools: fastModeEnabled,
+    });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
     let fastCatalogNames: string[] = [];
@@ -2431,7 +2595,7 @@ async function processTask(
           calleeSessionToken,
           undefined,
           calleeProviderConfigForTools,
-          emitPlanForCustom,
+          emitUiWidgetForCustom,
         );
         const calleeGroupsWithoutKb = calleeMcp.groups.filter((g) => g.serverType !== "knowledge-base");
         const calleeKbTools = calleeMcp.groups.find((g) => g.serverType === "knowledge-base")?.tools ?? [];
@@ -2533,8 +2697,20 @@ async function processTask(
       }
     };
 
+    // Per-agent, per-run delegation budget. Read from the parent agent's
+    // free-form config bag (set in the Behaviour screen) and clamped to a safe
+    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset.
+    const maxDelegationsPerRun = clampMaxDelegationsPerRun(
+      agentConfig?.["maxDelegationsPerRun"],
+    );
+    if (agentConfig?.["maxDelegationsPerRun"] !== undefined) {
+      log(
+        `A2A delegation budget: agent=${agentSlug ?? "root"} configured=${String(agentConfig["maxDelegationsPerRun"])} effective=${maxDelegationsPerRun}`,
+      );
+    }
     const delegationGovernor = new AgentDelegationGovernor({
       ownerSlug: agentSlug ?? "root",
+      maxDelegationsPerRun,
       onEvent: (ev) => {
         log(`A2A ${ev.kind}: ${ev.caller} -> ${ev.callee}${ev.reason ? ` (${ev.reason})` : ""}`);
         if (ev.kind === "requested" || ev.kind === "queued" || ev.kind === "started") {
@@ -2607,6 +2783,19 @@ async function processTask(
       `Tools: ${subagentTools.length} subagents, ${directTools.length} direct, ${customToolDefs.length} custom, ${parentHoistedTools.length} parent-hoisted, ${kbHoistedTools.length} kb-hoisted${fastModeEnabled ? `, [fast] catalogCandidates=${fastCatalogCandidateItems.length}` : ""}`,
     );
 
+    // Presentation tools (post-code-block / post-diff / post-chart / visualize)
+    // render as cards in the Spaces thread, so a thread run gets them in the
+    // CATALOG regardless of the agent's tools.custom selection. Framework
+    // default, not per-agent config — same rationale as the plan tools below,
+    // but lazy (one index line each) instead of always-active. See
+    // ../presentation-catalog.ts for why these three conditions and no others.
+    const presentationDefaultOn = presentationCatalogDefaultOn({
+      channelId,
+      eventType,
+      conversationId,
+      isScheduledOrAutomationRun,
+    });
+
     // Apply agent-level tool config from DB (agent.config.tools). Reuses the
     // toolsConfigEarly parse we did above for the directPickSuffixes hoist.
     if (toolsConfigEarly) {
@@ -2659,6 +2848,11 @@ async function processTask(
           // Slash-command contracts own their minimum palette. Keep these
           // per-run tools even when the stored Agent.config did not select them.
           if (forcedTaskCommandTools.has(t.name)) return true;
+          // Thread runs get the presentation tools for free. Surviving this
+          // gate is exactly what lets them reach fastCatalogItems below —
+          // they still can't become always-active, because both catalog
+          // builders keep them out of fastAlwaysActiveToolNames.
+          if (isFreePresentationTool(t as { source?: string }, presentationDefaultOn)) return true;
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
           const isAllowedCustom = allowedCustom.has(t.name) || (toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false);
           if (isAllowedCustom) return true;
@@ -2724,12 +2918,28 @@ async function processTask(
     // server-owned here and cannot be changed from the dashboard. Excluded from the
     // twin flow (belt-and-suspenders; claw-auth never sets it for USER_MENTIONED).
     const isDailyBrief = mode === "daily_brief" && !isTwinMentionFlow;
+    // Per-agent opt-OUT (`agentConfig.planTracking`, default ON). Distinct from
+    // `postTodos`, which only hides the Spaces card while the agent still keeps
+    // the list: this removes the todo tools AND the primer, so no turn is spent
+    // on plan bookkeeping at all.
+    //
+    // Why an agent would turn it off: `todo-write` ends the assistant turn like
+    // any tool call, and the primer below mandates a todo-only turn at BOTH ends
+    // of a run ("before your first tool call", and again immediately before the
+    // final answer). On a slow model that is two full round trips of pure
+    // bookkeeping — measured at ~50% of wall-clock on ask-ai runs. Search-style
+    // agents that answer in one message get no value from the checklist card and
+    // pay the whole cost.
+    const planTrackingEnabled =
+      agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
     const planToolsDefaultOn =
+      planTrackingEnabled &&
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
       !isDailyBrief;
+    if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) allTools.push(...planTools);
@@ -2770,6 +2980,8 @@ async function processTask(
           ? `Framework mode — injected experiment tools (epoch ${experiment.epoch}, candidate-gated exit)`
           : experiment.kind === "understanding"
           ? `Understanding mode — injected experiment tools (epoch ${experiment.epoch}, coverage-gated exit)`
+          : experiment.kind === "repo-history"
+          ? `Repo-history mode — injected experiment tools (epoch ${experiment.epoch}, progress-gated exit at HEAD)`
           : `Experiment mode — injected experiment tools (epoch ${experiment.epoch}, remaining ${experimentRemaining(experiment.deadlineAt)})`,
       );
     }
@@ -2808,6 +3020,9 @@ async function processTask(
       !isDailyBrief;
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));
+      // Same gate as describe-agent: a connector card is only worth posting
+      // where a human is watching and can press Connect.
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef));
     }
 
 
@@ -2861,7 +3076,12 @@ async function processTask(
     if (modelSettings) {
       log(`Per-agent modelSettings: ${JSON.stringify(modelSettings)}`);
     }
-    const outputFormat = parseOutputFormat(agentConfig);
+    // Command overlay wins for this run only — never written back to the agent.
+    const outputFormat = parseOutputFormat(
+      taskCommand?.agentConfigOverlay
+        ? { ...(agentConfig ?? {}), ...taskCommand.agentConfigOverlay }
+        : agentConfig,
+    );
     const structuredOutputRef: StructuredOutputRef = {};
     const structuredOutputActive = !!outputFormat && !isCopilot && !isPlanMode && !isDailyBrief;
     requiresStructuredDelivery = structuredOutputActive;
@@ -2991,6 +3211,28 @@ async function processTask(
       }
     }
 
+    // An artifact app must NEVER be able to build another artifact app. Left
+    // alone, an app that asks its agent to "make me a dashboard for this" gets
+    // one, whose agent can be asked again — the same unbounded self-replication
+    // the schedule-task ban above exists to stop, with the same inability to
+    // kill it from the outside once a chain is in flight. Apps also lose
+    // schedule-task, so one cannot arm a cron that keeps invoking agents after
+    // the user has closed and forgotten it.
+    //
+    // This filter is the AUTHORITATIVE half of the guard. claw-auth also strips
+    // both slugs from tools.custom at dispatch, but that alone is not enough:
+    // an agent with no tools config gets every tool by default, so there would
+    // be nothing there to filter.
+    const isArtifactAppRun =
+      eventType === "artifact_app" || (conversationId?.startsWith("app_") ?? false);
+    if (isArtifactAppRun) {
+      const before = allTools.length;
+      allTools = allTools.filter((t) => t.name !== "create-app" && t.name !== "schedule-task");
+      if (allTools.length !== before) {
+        log("Artifact-app run — create-app + schedule-task removed (self-replication ban)");
+      }
+    }
+
     // Read-only routing (sbx-git): scheduled / automation runs are diverted to
     // the SHARED read-only sbx-git sandbox (see sandboxRepoSetup → resolveSbxGit),
     // so they must not carry mutating sandbox tools. Strip them here as the
@@ -3061,7 +3303,13 @@ async function processTask(
     }
 
     allTools = dedupeToolsByName(allTools);
-    if (fastModeEnabled) {
+    // Derived predicate, not a new config knob: the catalog machinery runs when
+    // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
+    // byte-identical — a fast-mode run with an EMPTY catalog still gets its
+    // (empty) meta-tools exactly as it did before, rather than silently losing
+    // search-tools/load-tools.
+    const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
+    if (catalogActive) {
       const registeredToolNames = new Set(allTools.map((tool) => tool.name));
       fastCatalogItems = fastCatalogCandidateItems.filter((item) =>
         registeredToolNames.has(item.entry.name) &&
@@ -3082,7 +3330,7 @@ async function processTask(
       fastMetaTools = allTools.filter((tool) => tool.name === "search-tools" || tool.name === "load-tools");
     }
 
-    const fastModeLoadedToolBudget = fastModeEnabled
+    const fastModeLoadedToolBudget = catalogActive
       ? Math.max(
           0,
           providerToolRequestCap(provider) -
@@ -3090,8 +3338,8 @@ async function processTask(
             allTools.filter((tool) => !fastCatalogNames.includes(tool.name)).length,
         )
       : undefined;
-    if (fastModeEnabled) {
-      log(`[fast] catalog=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)}`);
+    if (catalogActive) {
+      log(`[catalog] entries=${fastCatalogItems.length} active=0 budget=${fastModeLoadedToolBudget ?? 0} totalCap=${providerToolRequestCap(provider)} fastMode=${fastModeEnabled} presentationDefault=${presentationDefaultOn}`);
     }
 
     const tools = allTools.length > 0 ? allTools : undefined;
@@ -3099,7 +3347,9 @@ async function processTask(
     // Task commands (/explainer …): a leading command binds the run to a
     // required tool — instruction injected here, exit gated in runTask.
     const taskCommandToolAvailable =
-      taskCommand !== null && allTools.some((t) => t.name === taskCommand.requiredTool);
+      taskCommand !== null &&
+      (taskCommand.requiredTool === undefined ||
+        allTools.some((t) => t.name === taskCommand.requiredTool));
     if (taskCommand) {
       // The fenced-```html contract exists for Design Studio's live preview,
       // where the chat UI hides the block. Webhook-originated runs (Spaces
@@ -3115,10 +3365,13 @@ async function processTask(
       activeInjections.push({
         id: `__task-command-${taskCommand.command.slice(1)}`,
         label: `Command: ${taskCommand.command}`,
-        content: (taskCommandToolAvailable ? taskCommand.instruction : taskCommand.missingToolInstruction) + surfaceSuffix,
+        content:
+          (taskCommandToolAvailable
+            ? taskCommand.instruction
+            : (taskCommand.missingToolInstruction ?? taskCommand.instruction)) + surfaceSuffix,
       });
       log(
-        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool} (available=${taskCommandToolAvailable})`,
+        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool ?? "(delivery contract)"} (available=${taskCommandToolAvailable})`,
       );
     }
     const designSystemInjection = buildDesignSystemPromptInjection(taskCommand, agentConfig);
@@ -3502,6 +3755,33 @@ async function processTask(
         : idLines.join("\n");
     }
 
+    // Resolve the prefetch spec now that the tool palette is final: the
+    // resolvers ARE the agent's own Spaces tools, invoked through the same
+    // `execute` closure the model would use, so ACL and permissions come along
+    // for free and there is no second auth path to keep in sync.
+    if (prefetchSpecPromise) {
+      const prefetchStartedAt = Date.now();
+      try {
+        const block = await buildPrefetchBlock({
+          spec: await prefetchSpecPromise,
+          tools: allTools as unknown as ExecutableTool[],
+          identity: {
+            userId,
+            ...(userName ? { userName } : {}),
+            ...(userEmail ? { userEmail } : {}),
+          },
+        });
+        if (block) {
+          fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
+          log(`[prefetch] attached ${block.length} chars in ${Date.now() - prefetchStartedAt}ms`);
+        }
+      } catch (err) {
+        // Belt-and-braces: prefetch.ts already swallows everything, but a
+        // prefetch failure must never be the reason a run does not happen.
+        log(`[prefetch] skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // Key sessions by user + conversationId + agentSlug so each caller gets an isolated sandbox per thread.
     // Branching: when claw-auth has cloned the source session to a sibling
     // `piSessionConversationId`, use THAT as the storage key — the DB
@@ -3572,9 +3852,11 @@ async function processTask(
       ...(experiment?.kind === "understanding" ? [UNDERSTANDING_SKILL_PATH] : []),
     ];
 
-    const securityGuide = `\n\n## Security mode\nYou are in a security run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). Keep TWO TIERS apart, because mixing them is what makes a security report untrustworthy.\n\nLEAD (status=conjecture) — you read the code and the defect looks real. Cite file:line. Most findings belong here, and there is no shame in it.\nCONFIRMED (status=proved) — you EXECUTED it and captured the result: the request you sent, the status or output you got back, and where you verified the effect. The ledger refuses a close without an observation, so do not try to word around it. A script that greps source and asserts a vulnerable pattern is present is not a confirmation — it re-proves what you already read.\n\nDEFENDED is a real result. If you try it and a guard stops you, close it refuted and name the guard. Also check whether a SAFE SIBLING already exists — the same operation done correctly elsewhere in the repo. That has been the single most common shape, and it is the cheapest fix to recommend.\n\nDo not promote a lead because it looks obvious. Confirming a wrong finding is expensive: it becomes a ticket someone has to disprove.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename, extended each epoch, with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry. The sandbox recycles — if the file is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
+    const securityGuide = `\n\n## Security mode\nYou are in a security run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). Keep TWO TIERS apart, because mixing them is what makes a security report untrustworthy.\n\nLEAD (status=conjecture) — you read the code and the defect looks real. Cite file:line. Most findings belong here, and there is no shame in it.\nCONFIRMED (status=proved) — you EXECUTED it and captured the result: the request you sent, the status or output you got back, and where you verified the effect. The ledger refuses a close without an observation, so do not try to word around it. A script that greps source and asserts a vulnerable pattern is present is not a confirmation — it re-proves what you already read.\n\nDEFENDED is a real result. If you try it and a guard stops you, close it refuted and name the guard. Also check whether a SAFE SIBLING already exists — the same operation done correctly elsewhere in the repo. That has been the single most common shape, and it is the cheapest fix to recommend.\n\nDo not promote a lead because it looks obvious. Confirming a wrong finding is expensive: it becomes a ticket someone has to disprove.\n\nThis run is TIME-BOXED: end-experiment refuses until the deadline, because attack surface cannot be exhausted — there is always one more endpoint. When a surface runs dry, move to a different one rather than restating closed findings.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename, extended EVERY epoch (so a run that ends at the deadline still delivers everything found), with the two tiers in separate sections and the exact reproduction for every CONFIRMED entry. The sandbox recycles — if the file is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
 
-    const frameworkGuide = `\n\n## Framework mode\nYou are in a framework run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). You are NOT hunting bugs. You are looking for places where the same thing is written over and over and should be ONE abstraction — a helper, a base class, a middleware, a codegen step, a lint rule.\n\nAn opportunity is only closed with a COUNT and the LIST: at least 3 occurrences, each cited as file.ext:LINE. Two is a coincidence, three is a pattern — the ledger enforces this, so a close without three citations is refused. For each one say what the abstraction would be, what it replaces, and WHAT IT WOULD HAVE PREVENTED. If you cannot name a bug, an inconsistency or a drift that the abstraction would have stopped, it is taste rather than an opportunity: refute it and move on.\n\nRefuting is real progress. Repetition that is deliberately explicit, or that varies more than it repeats, must be closed as refuted with the reason — a wrong extraction costs more than the duplication it replaces, and a report full of speculative abstractions is worse than a short one.\n\nThe exit is exhaustion, not the clock: enumerate the candidate areas in scope as open conjectures first, then close each. When open reaches 0 and the report is delivered, end.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename you reuse every epoch — never epoch1.md, epoch2.md. Each opportunity gets: the pattern, the occurrence count, the file:line list, the proposed abstraction, and an honest migration cost. Extend the same file each epoch; the sandbox recycles, so if it is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
+    const frameworkGuide = `\n\n## Framework mode\nYou are in a framework run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "unspecified"}). You are NOT hunting bugs. You are looking for STRUCTURAL gaps — places where the codebase is harder to extend safely than it should be because a framework-level construct is missing or inconsistent. Duplication is only ONE shape of this; do not reduce framework mode to finding copy-paste.\n\nThe shapes worth finding include (not a fixed list — name what you actually see):\n- convention-drift: one concept implemented several inconsistent ways (auth checks, error mapping, pagination) — the sites VARY, and that variance is the problem.\n- missing-paved-path: a common need everyone solves ad-hoc because there is no blessed way to do it.\n- change-amplification: adding one feature keeps touching N unrelated files because there is no seam / extension point.\n- boilerplate: mechanical scaffolding a base class, codegen, or lint rule could erase.\n- duplication: literally the same logic repeated.\n\nTAG EVERY OPPORTUNITY. Each closed opportunity carries a Tag that is YOUR OWN word for its shape (kebab-case). Reuse a tag you can already see in the ledger below if it fits; coin a new one only if it genuinely does not. The ledger enforces, for every proved opportunity, a note containing:\n  Tag: <your tag>\n  <at least one file.ext:LINE where the gap lives>\n  Prevents: <the concrete bug, drift, or change-amplification the framework would have stopped>\nThe \`Prevents:\` line is the real bar — it is what separates an opportunity from taste, and it holds for any tag. If you cannot name what the framework prevents, it is taste: refute it and move on. Note that a VARYING pattern (five different auth checks) is a legitimate convention-drift opportunity even though the code is not identical — do NOT refute it just because the occurrences differ.\n\nRefuting is real progress: a wrong extraction costs more than the duplication it replaces, and a report full of speculative abstractions is worse than a short one.\n\nThe exit is exhaustion, not the clock: enumerate the candidate areas in scope as open conjectures first, then close each (proved or refuted). When open reaches 0 and the report is delivered, end.\n\nThe DELIVERABLE is ONE markdown report with a STABLE filename you reuse every epoch — never epoch1.md, epoch2.md. GROUP the opportunities BY TAG; each gets its file:line evidence, the proposed abstraction, its Prevents, and an honest migration cost. Also include a Tag Index table summarizing every tag used: tag name, finding count, affected areas, proposed paved path/framework abstraction, and migration cost. Extend the same file each epoch; the sandbox recycles, so if it is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT.`;
+
+    const repoHistoryGuide = `\n\n## Repo-history mode\nYou are in a PROGRESS-gated repo-history run (epoch ${experiment?.epoch ?? 0}; focus ${experiment?.focus ?? "whole repo"}). Your job is to reconstruct the coding SPEC of this repo — the rules and decisions someone would need to REBUILD it — by walking git history OLDEST→NEWEST. The exit is reaching HEAD, not the clock.\n\nCURSOR + BATCHING: the ledger records how far you have walked. Establish the frontier once with \`git log <initial-sha>..HEAD --reverse --oneline\` (oldest first; default initial-sha = the repo's first commit unless a sha was given in focus). Each epoch, take the NEXT BATCH after the cursor — a sensible chunk (~20-50 ordinary commits), but a SQUASH/MERGE commit is its own batch (it is one decision with one big diff and no granular commits, so read its PR discussion for the WHY instead of parsing the whole diff). Advance the cursor to the last sha you distilled and record it. Never re-read batches behind the cursor.\n\nEXTRACT DECISIONS, NOT DIFFS. For each batch, record the coding RULE it establishes — the convention, invariant, or always/never — not a changelog. TAG each by theme (kebab-case: error-handling, provider-fallback, security, naming, …), reusing an existing tag when it fits. The ledger enforces, for every proved entry, a note containing:\n  Rule: <the durable instruction someone rebuilding the repo would follow>\n  sha: <the commit it derives from>\n  Tag: <your theme tag>\n\nRECONCILE AGAINST HEAD — the correctness bar. History is full of dead ends: a rule set early is often REVERSED or REWRITTEN later, and here that usually arrives as a plain "fix" commit, NOT a git revert. So you cannot trust commit messages — when a later batch's code overturns a rule already in the ledger, AMEND that entry in place; never leave two contradictory rules. A rule HEAD no longer honours moves to the GRAVEYARD with a \`Supersedes:\` line and why it died. The final doc must not contain a single rule the current code contradicts — the running code is the spec; history only supplies the WHY.\n\nThe DELIVERABLE is ONE self-contained .html decision-log — no network requests, no JavaScript, so it renders offline — with a STABLE filename you reuse every epoch (never epoch1.html). Three sections: CURRENT RULES (reconciled to HEAD, grouped by tag) / LINEAGE (which sha introduced or changed each rule) / GRAVEYARD (tried-and-abandoned, with why); use plain HTML tables so the rules and their shas read cleanly. Author it in the sandbox and send it with sandbox-deliver-files. Extend the same file each epoch; the sandbox recycles, so if it is missing locally, recover it with spaces-thread-attachments + spaces-fetch-attachment and extend THAT. When the cursor reaches HEAD and the doc is delivered, end.`;
 
     const experimentGuide = experiment?.mode === "review"
       ? `\n\n## Experiment checker\nYou are the CHECKER for a running experiment, not a participant. Do NOT hunt for new findings, do not start a hypothesis, and do not try to end the experiment — you have neither tool. Verify each finding you were given against the current code and the delivered proof, then call experiment-review once per finding. Your verdict is advisory; it never changes a finding's status. When unsure, say contradicts or unverifiable — a false confirm becomes a ticket a human has to disprove. Finish with ONE short line of verdict counts.`
@@ -3582,6 +3864,8 @@ async function processTask(
       ? securityGuide
       : experiment?.kind === "framework"
       ? frameworkGuide
+      : experiment?.kind === "repo-history"
+      ? repoHistoryGuide
       : experiment?.kind === "understanding"
       ? `\n\n## Understanding mode\nYou are in a coverage-gated understanding run (epoch ${experiment.epoch}; focus ${experiment.focus ?? "unspecified"}). Your job is to UNDERSTAND every reachable code path in scope, not to accumulate trivially-provable facts. The exit is exhaustion, not the clock: end-experiment unlocks only when the open-conjecture frontier reaches 0 (with at least one path closed). Loop: read the ledger -> if the frontier is empty, enumerate every entrypoint and branch in scope as an open conjecture (experiment-ledger action=record status=conjecture, one per path) -> pick ONE open path, trace it to real behavior, and ADD every new callee or branch you discover as a new open conjecture BEFORE you close the current one (proved/refuted) with file:line evidence and a description of what the code actually does and why. The frontier grows as you explore and shrinks only when a path is genuinely explained — never close a path with a shallow structural restatement. When open reaches 0 the scope is exhausted: deliver the artifact and end.\n\nThe DELIVERABLE is one self-contained .html explanation document, authored in the sandbox and sent with sandbox-deliver-files — not chat prose and not the ledger, which no reader will open. Follow the loaded understanding skills for its structure, its inline-SVG diagrams (no mermaid: the file must render with no network and no JavaScript) and the file:line citation discipline. Build it incrementally as paths close rather than all at once at the end, so a run that hits the safety cap still delivers a document covering what it did explain.\n\nONE CANONICAL DOCUMENT, NOT ONE PER EPOCH. The deliverable has a single STABLE filename you reuse every epoch (e.g. <topic>-explained.html) — never epoch1.html, epoch2.html. Each epoch EXTENDS the same document; do not start a new one. The sandbox is ephemeral and recycles across a long run, so at the START of each epoch, if that file is not on local disk, it means you are in a fresh sandbox: recover the latest version you already delivered — spaces-thread-attachments to find your canonical .html, spaces-fetch-attachment to pull it back — and extend THAT, rather than rebuilding from nothing or emitting a fragment. Re-deliver the same filename after each extension so the newest version always wins.\n\nAn incrementally-built document is in the order you EXPLORED, which is the wrong order to READ: before you deliver, do a consolidation pass that reorganises it into reading order — TL;DR and mental model first, then the end-to-end flows (each with its own diagram), then per-component detail grouped by role, then the exhaustive per-entity reference LAST, then the lookup table. Renumber sections contiguously, merge anything stated twice, and push deep detail down out of the overview. A document whose sections jump out of sequence or open with deep internals was never reorganised.`
       : experiment
@@ -3603,13 +3887,30 @@ async function processTask(
           `CONTEXT: mentionNote=${(context ?? "").includes("You were @mentioned")} | sender=${senderName ?? "(none)"} channel=${channelName ?? "(none)"}`,
       );
     }
-    const fastModeCatalogPrompt = fastModeEnabled
-      ? renderToolCatalogForPrompt(fastCatalogItems.map((item) => item.entry))
+    const fastModeCatalogPrompt = catalogActive
+      ? renderToolCatalogForPrompt(fastCatalogItems.map((item) => item.entry), {
+          // Only fast mode actually turns delegation off; asserting it on a
+          // normal run would be a lie the model acts on.
+          subagentDelegationDisabled: fastModeEnabled,
+        })
       : "";
     if (fastModeCatalogPrompt) {
       fullContext = fullContext
         ? `${fullContext}\n\n${fastModeCatalogPrompt}`
         : fastModeCatalogPrompt;
+    }
+    // Reads as an addendum to the catalog index above: WHY this run has the
+    // presentation catalog (the surface, not the agent's tool config) and HOW
+    // to answer on a chat surface. Empty unless presentation entries actually
+    // survived into this run's catalog.
+    const presentationPrimer = presentationDefaultOn
+      ? buildPresentationPrimer(fastCatalogItems.map((item) => item.entry))
+      : "";
+    if (presentationPrimer) {
+      fullContext = fullContext
+        ? `${fullContext}\n\n${presentationPrimer}`
+        : presentationPrimer;
+      log(`[catalog] presentation primer injected (${presentationPrimer.length} chars)`);
     }
     const fastModeSubagentSkills =
       fastModeEnabled && customSubagents && customSubagents.length > 0
@@ -3654,7 +3955,8 @@ async function processTask(
     //   - First entry = the current parent (runtimeProvider).
     //   - Subsequent entries = remaining providers from `providerOrder`
     //     for which we actually have credentials in `providerConfigs`.
-    //   - Final entry = "spaces" (Kimi) unless the parent already was it.
+    //   - Final entry = "spaces" (Kimi) unless the parent already was it and
+    //     agentConfig.providerFallbackToSpaces has not been explicitly disabled.
     type Attempt = {
       provider: string | undefined;
       config: typeof providerConfig | undefined;
@@ -3671,8 +3973,11 @@ async function processTask(
         attempts.push({ provider: p, config: cfg });
       }
     }
-    if (runtimeProvider && runtimeProvider !== "spaces") {
+    const providerFallbackToSpaces = agentConfig?.["providerFallbackToSpaces"] !== false;
+    if (runtimeProvider && runtimeProvider !== "spaces" && providerFallbackToSpaces) {
       attempts.push({ provider: "spaces", config: undefined });
+    } else if (runtimeProvider && runtimeProvider !== "spaces" && !providerFallbackToSpaces) {
+      clog.info(`[agent] provider fallback to spaces disabled session=${sessionId} provider=${runtimeProvider}`);
     }
     const attemptByProvider = new Map(
       attempts
@@ -3728,7 +4033,7 @@ async function processTask(
           resolvedTriggers.length > 0 ? resolvedTriggers : undefined,
         promptInjections:
           activeInjections.length > 0 ? activeInjections : undefined,
-        ...(taskCommand && taskCommandToolAvailable
+        ...(taskCommand?.requiredTool && taskCommandToolAvailable
           ? { requiredTool: { name: taskCommand.requiredTool, nudge: taskCommand.nudge } }
           : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
@@ -3755,11 +4060,28 @@ async function processTask(
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: backgroundSubagentRegistry,
         fastMode: fastModeEnabled,
-        ...(fastModeEnabled ? { fastToolCatalogNames: fastCatalogNames } : {}),
-        ...(fastModeEnabled ? { fastToolController } : {}),
-        ...(fastModeEnabled ? { fastMaxActiveTools: fastModeLoadedToolBudget } : {}),
+        ...(catalogActive ? { fastToolCatalogNames: fastCatalogNames } : {}),
+        ...(catalogActive ? { fastToolController } : {}),
+        ...(catalogActive ? { fastMaxActiveTools: fastModeLoadedToolBudget } : {}),
         ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
         handoff: handoffControl,
+        gracefulInterrupt: {
+          isRequested: () => activeRuns.get(sessionId)?.gracefulInterruptRequested === true,
+          registerSummaryRequest: (requestSummary) => {
+            const active = activeRuns.get(sessionId);
+            if (active) active.requestGracefulInterruptSummary = requestSummary;
+          },
+        },
+        ...(awakening
+          ? {
+              awakening: {
+                kind: awakening.kind,
+                writePolicy: awakening.writePolicy,
+                shadow: awakening.shadow,
+                ...(awakening.injectEnabled !== undefined ? { injectEnabled: awakening.injectEnabled } : {}),
+              },
+            }
+          : {}),
       });
 
     // Capture provider-fallback context so an empty FINAL result can tell the
@@ -3820,7 +4142,7 @@ async function processTask(
             }
           }
           log(
-            `Quota fallback: ${from} → ${to}. Underlying: ${lastFallbackUnderlying}`,
+            `Provider fallback: ${from} → ${to}. Underlying: ${lastFallbackUnderlying}`,
           );
         },
         onEmpty: (provider, terminal) => {
@@ -4116,6 +4438,28 @@ async function processTask(
       return;
     }
 
+    if (activeRuns.get(sessionId)?.gracefulInterruptRequested === true) {
+      log(`Session interrupted with model summary: ${sessionId}`);
+      await sendCallback(callbackUrl, sessionToken, {
+        sessionId,
+        userId,
+        conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
+        fastMode: fastModeForCallback,
+        status: "completed",
+        result: buildInterruptSummary(callbackResultText, {
+          toolsUsed: combinedToolsUsed,
+          toolInvocations: result.toolInvocations,
+        }),
+        toolsUsed: combinedToolsUsed,
+        tokenUsage: result.tokenUsage,
+        ...(result.toolInvocations.length > 0 ? { toolInvocations: result.toolInvocations } : {}),
+        provider: completedProvider,
+        model: completedModel,
+      });
+      return;
+    }
+
     // Durable terminal marker — the source of truth for "this run finished",
     // written to GCS BEFORE the result callback. A deploy/SIGTERM can drop the
     // callback (the 2026-06-11 incident), leaving recovery to re-dispatch; the
@@ -4193,7 +4537,7 @@ async function processTask(
     }
 
     clog.info(
-      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options.length ?? 0}`,
+      `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options?.length ?? 0}`,
     );
     await sendCallback(callbackUrl, sessionToken, {
       sessionId,
@@ -4244,6 +4588,9 @@ async function processTask(
       // A draft (terminal, normally recovered in the catch) wins over a profile
       // card if a turn somehow produced both — the decision surface matters more
       // than the description.
+      ...(suggestConnectorsRef.value
+        ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
+        : {}),
       ...(proposeAgentRef.value || describeAgentRef.value
         ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
         : {}),
@@ -4428,6 +4775,9 @@ async function processTask(
         // A queued capability card must survive the copilot terminal path too,
         // or "what can you do?" silently loses its card on those agents.
         ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
+        ...(suggestConnectorsRef.value
+          ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
+          : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),
@@ -4529,6 +4879,36 @@ async function processTask(
         model: callbackModel,
       });
     } else if (err instanceof RunCancelledError || abortSignal?.aborted) {
+      const gracefulInterrupt = activeRuns.get(sessionId)?.gracefulInterruptRequested === true;
+      const partialResult = err instanceof RunCancelledError ? err.partialText?.trim() : "";
+      if (gracefulInterrupt) {
+        log(`Session interrupted with reply: ${sessionId}`);
+        const interruptSummary = buildInterruptSummary(partialResult, err instanceof RunCancelledError ? {
+          toolsUsed: err.toolsUsed,
+          toolInvocations: err.toolInvocations,
+        } : undefined);
+        await sendCallback(callbackUrl, sessionToken, {
+          sessionId,
+          userId,
+          conversationId: conversationId ?? null,
+          agentSlug: agentSlug ?? null,
+          fastMode: fastModeForCallback,
+          status: "completed",
+          result: interruptSummary,
+          ...(err instanceof RunCancelledError && err.toolsUsed.length > 0
+            ? { toolsUsed: err.toolsUsed }
+            : {}),
+          ...(err instanceof RunCancelledError && err.toolInvocations.length > 0
+            ? { toolInvocations: err.toolInvocations }
+            : {}),
+          ...(err instanceof RunCancelledError
+            ? { tokenUsage: err.tokenUsage }
+            : {}),
+          provider: callbackProvider,
+          model: callbackModel,
+        });
+        return;
+      }
       log(`Session cancelled: ${sessionId}`);
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
@@ -4581,13 +4961,34 @@ async function processTask(
         requiresStructuredDelivery,
         stallProgress,
       );
+      // Route EVERY terminal transient failure into claw-auth's capacity-retry
+      // flow (scheduleProviderRetry — health-gated, auto-retries when the
+      // provider recovers) instead of dead-ending on a "work stopped" notice.
+      // We only reach here when isTransientProviderError(err) AND the whole
+      // provider fallback chain is exhausted — a platform availability problem
+      // (stall / 5xx / network), never a deterministic agent error or a user
+      // cancel (both handled by earlier branches). Previously only the
+      // EMPTY-completion capacity case was tagged, so stalls/timeouts — the
+      // dominant failure under load — got the terminal notice and no retry.
+      // Tagging emptyReason makes claw-auth's isCapacityFailure recognise it:
+      // interactive runs send an EMPTY result so it lands in the empty-result
+      // retry hook and the retry CARD replaces the notice; structured jobs keep
+      // their failed terminal (deliverable fails closed) and the tag routes them
+      // to the silent automation retry.
+      const transientDetail = err instanceof ProviderStallError
+        ? `model stopped responding for ${Math.round(err.idleMs / 1000)}s`
+        : (err instanceof Error ? err.message : String(err)).split(/\r?\n/, 1)[0]!.slice(0, 200);
       await sendCallback(callbackUrl, sessionToken, {
         sessionId,
         userId,
         conversationId: conversationId ?? null,
         agentSlug: agentSlug ?? null,
         fastMode: fastModeForCallback,
-        ...terminal,
+        ...(requiresStructuredDelivery
+          ? terminal
+          : { status: "completed" as const, result: "" }),
+        emptyReason: "provider_capacity" as const,
+        ...(transientDetail ? { emptyReasonDetail: transientDetail } : {}),
         ...(err instanceof ProviderStallError && err.toolsUsed.length > 0
           ? { toolsUsed: err.toolsUsed }
           : {}),

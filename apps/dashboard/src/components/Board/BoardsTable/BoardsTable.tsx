@@ -3,6 +3,7 @@ import { ReactElement, useMemo, useState } from 'react';
 import { Edit2, Copy, Check, Rocket, CornerDownRight } from 'lucide-react';
 import { BoardType } from '@xyne/shared';
 import { EmptyState } from '../EmptyState';
+import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import { Button } from '../../ui/Button';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
@@ -40,6 +41,9 @@ interface BoardsTableProps {
   // When set, the release group header shows "Workflow & Fields" (board field
   // editor) instead of the repo-config edit — repo config lives elsewhere.
   onWorkflowFields?: (board: BoardWithStages) => void;
+  // True while the boards query is still resolving. Distinguishes
+  // "still loading" from "genuinely no boards" so we don't flash the empty state.
+  loading?: boolean;
 }
 
 type RowKind =
@@ -57,6 +61,7 @@ export const BoardsTable = ({
   applicationByBoardId,
   onBoardClick,
   onWorkflowFields,
+  loading = false,
 }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
@@ -153,6 +158,10 @@ export const BoardsTable = ({
 
     return out;
   }, [boards, applicationByBoardId]);
+
+  if (loading) {
+    return <DelayedSpinner className='flex min-h-40 items-center justify-center py-8' />;
+  }
 
   if (boards?.length === 0) {
     return (
@@ -387,6 +396,8 @@ export const BoardsTable = ({
                       size='iconSm'
                       className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
                       onClick={e => handleCopyId(e, board.id)}
+                      data-track-category='Board'
+                      data-track-name='COPY_BOARD_ID'
                       title='Copy board ID'
                     >
                       {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}

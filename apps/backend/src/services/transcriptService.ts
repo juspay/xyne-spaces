@@ -17,7 +17,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
-import { executeCallLlmWithRetry, executeStreamingLlmRequest } from './callLlmRetry';
+import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
@@ -277,7 +277,7 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private async createAgent(callId?: string): Promise<Agent | null> {
+  private async createAgent(callId?: string, modelType?: SummaryModelType): Promise<Agent | null> {
     try {
       const userId = await this.getCreatedByUserIdForCall(callId);
       const credential = await orgLLMCredentialService.getCredentialByUserId(
@@ -290,7 +290,17 @@ export class TranscriptService {
       // exists yet (e.g. local/dev where AI provisioning never ran).
       const apiKey = credential?.apiKey || config.llm.callLitellmApiKey;
       const baseUrl = credential?.baseUrl || config.llm.litellmBaseUrl;
-      const defaultModel = credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
+      // Model tier selection: when the fast/thinking env models are configured
+      // they drive which model runs (that's the whole point of the per-user
+      // preference); otherwise fall back to the org credential's model, then the
+      // generic call model. `callRecordingFastLitellmModel`/`callRecordingThinkingLitellmModel`
+      // themselves fall back to CALL_LITELLM_MODEL (see config/env.ts).
+      const tierModel =
+        modelType === 'thinking'
+          ? config.llm.callRecordingThinkingLitellmModel
+          : config.llm.callRecordingFastLitellmModel;
+      const defaultModel =
+        tierModel || credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
 
       if (!apiKey || !baseUrl) {
         logger.warn('Org LiteLLM credentials not configured and no CALL_LITELLM_API_KEY/LITELLM_BASE_URL env fallback set. AI features will be disabled.', {
@@ -1075,14 +1085,14 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate AI summary from the formatted transcript with explicit retry loop.
    */
-  async generateCallSummary(transcript: string, callId?: string): Promise<string | null> {
+  async generateCallSummary(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
     const callCreator = await this.getCallCreatorName(callId);
     const prompt = CALL_SUMMARY_PROMPT
       .replace('{callCreator}', callCreator || 'Unknown')
       .replace('{transcript}', transcript);
 
     const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(callId),
+      () => this.createAgent(callId, modelType),
       () => prompt,
       'call_summary',
       callId || 'unknown',
@@ -1115,11 +1125,12 @@ Output ONLY the processed transcript, nothing else.`;
     transcript: string,
     callId?: string,
     promptTemplate = CALL_TITLE_PROMPT,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
     const prompt = promptTemplate.replace('{transcript}', transcript);
 
     const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(callId),
+      () => this.createAgent(callId, modelType),
       () => prompt,
       'call_title',
       callId || 'unknown',
@@ -1129,7 +1140,7 @@ Output ONLY the processed transcript, nothing else.`;
       return null;
     }
 
-    return extracted.content.substring(0, 50);
+    return extracted.content.substring(0, 60);
   }
 
   /**
@@ -1137,8 +1148,8 @@ Output ONLY the processed transcript, nothing else.`;
    * retry/extraction path as `generateCallTitle`, but using the recording-
    * specific prompt so recording and regular-call title wording can diverge.
    */
-  async generateRecordingTitle(transcript: string, callId?: string): Promise<string | null> {
-    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT);
+  async generateRecordingTitle(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
+    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT, modelType);
   }
 
   /**

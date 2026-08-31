@@ -119,6 +119,8 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
           <div className='flex-1 min-w-0'>
             <button
               onClick={() => handleNavigateToTicket(created)}
+              data-track-category='MESSAGE'
+              data-track-name='OPEN_SUGGESTED_TICKET'
               className='text-sm text-left hover:underline focus:outline-none bg-transparent border-none p-0'
             >
               <span className='font-semibold text-primary'>{created.xyneId}</span>
@@ -143,6 +145,8 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
               className='mt-1 h-4 w-4 shrink-0 rounded border-border cursor-pointer'
               disabled={isUpdating}
               onChange={() => toggleSelection(suggestion.suggestionId)}
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_TICKET_SUGGESTION'
             />
             <label htmlFor={checkboxId} className='text-sm text-left flex-1 cursor-pointer'>
               <span className='font-medium text-foreground'>{suggestion.title}</span>
@@ -160,6 +164,8 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
         <div className='pt-1'>
           <button
             onClick={startCreation}
+            data-track-category='MESSAGE'
+            data-track-name='START_TICKET_FROM_SUGGESTION'
             disabled={isUpdating}
             className='text-sm font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed bg-transparent border-none p-0'
           >

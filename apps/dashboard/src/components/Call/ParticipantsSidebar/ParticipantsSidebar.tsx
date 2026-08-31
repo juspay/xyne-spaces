@@ -88,6 +88,313 @@ function isLiveKitExternalParticipant(participantInfo: ParticipantInfo): boolean
   }
 }
 
+function SpeakingStatus({
+  livekitParticipant,
+}: {
+  livekitParticipant: Participant | undefined;
+}): React.ReactElement | null {
+  const isSpeaking = useIsSpeaking(livekitParticipant);
+  if (!isSpeaking) return null;
+  return <SpeakingIndicator />;
+}
+
+function SectionHeader({
+  title,
+  count,
+  isExpanded,
+  onToggle,
+}: {
+  title: string;
+  count: number;
+  isExpanded: boolean;
+  onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      onClick={onToggle}
+      className='flex items-center justify-between w-full px-3 py-2.5 hover:bg-muted transition-colors'
+      data-track-category='CALLS'
+      data-track-name='Toggle_Participants_Section'
+      data-track-metadata={JSON.stringify({ section: title, isExpanded: !isExpanded })}
+    >
+      <span className='text-sm font-medium text-foreground'>{title}</span>
+      <div className='flex items-center gap-4'>
+        <span className='text-sm text-muted-foreground'>{count}</span>
+        {isExpanded ? (
+          <ChevronUp size={16} className='text-muted-foreground' />
+        ) : (
+          <ChevronDown size={16} className='text-muted-foreground' />
+        )}
+      </div>
+    </button>
+  );
+}
+
+interface ParticipantItemProps {
+  participant: CallParticipant;
+  showMuteButton?: boolean;
+  currentUserId?: string | null;
+  isExternal?: boolean;
+  callId: string;
+  hostUserId: string | undefined;
+  raisedHands: string[];
+  livekitParticipantMap: Map<string, ParticipantInfo>;
+  mutingParticipantId: string | null;
+  removingParticipantId: string | null;
+  onMuteParticipant: (participantUserId: string) => void | Promise<void>;
+  onRemoveParticipant: (participantUserId: string, name: string) => void | Promise<void>;
+}
+
+// ParticipantItem component that uses useUser hook internally
+function ParticipantItem({
+  participant,
+  showMuteButton = false,
+  currentUserId,
+  isExternal = false,
+  callId,
+  hostUserId,
+  raisedHands,
+  livekitParticipantMap,
+  mutingParticipantId,
+  removingParticipantId,
+  onMuteParticipant,
+  onRemoveParticipant,
+}: ParticipantItemProps): React.ReactElement {
+  const { response, userId, displayName } = participant;
+  const wasRemovedByHost =
+    (participant.metadata as CallParticipantMetadata | null)?.removedByHost === true;
+  // Only look up user via Zero if we don't have a displayName and it's not external
+  const shouldLookupUser = !isExternal && !displayName;
+  const participantUser = useUser(shouldLookupUser ? userId : '');
+  const isInCall = response === InvitationResponse.ACCEPTED || response === 'ACCEPTED';
+  const isMutingThis = mutingParticipantId === userId;
+
+  // Get LiveKit participant for speaking detection and mute status
+  const livekitParticipant = livekitParticipantMap.get(userId);
+  const livekitParticipantObj = livekitParticipant?.participant;
+  const isMicrophoneEnabled = livekitParticipant?.isMicrophoneEnabled ?? true;
+
+  // Determine if mute button should be shown for this participant
+  // Show only if: host, participant is in call, not the current user (self), not an agent
+  const canMute =
+    showMuteButton && isInCall && userId !== currentUserId && !userId.startsWith('agent-');
+  const canRemove = canMute;
+  const isRemovingThis = removingParticipantId === userId;
+
+  // Use displayName when provided (e.g. from API for external view), otherwise look up user
+  const participantName = displayName
+    ? displayName
+    : isExternal
+      ? 'Guest'
+      : getUserDisplayName(participantUser);
+
+  // Check if user is deactivated (only for non-external users with lookup)
+  const isDeactivated = !isExternal && !displayName ? isUserDeactivated(participantUser) : false;
+
+  // Get initials for external users fallback
+  const fallbackInitial = participantName.charAt(0).toUpperCase();
+
+  const isRaised = raisedHands.includes(userId);
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 py-2 px-3 rounded-lg transition-colors',
+        isRaised ? 'bg-amber-50 ring-1 ring-amber-300' : 'hover:bg-muted',
+      )}
+    >
+      <div className='relative'>
+        {isExternal ? (
+          <div className='flex items-center justify-center w-5 h-5 bg-orange-400 text-white text-xs font-medium rounded-sm'>
+            {fallbackInitial}
+          </div>
+        ) : (
+          <Avatar userId={userId} size='sm' />
+        )}
+        {isInCall && (
+          <span className='absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white' />
+        )}
+      </div>
+      <div className='flex-1 min-w-0'>
+        <div className='flex items-center gap-1.5'>
+          <p
+            className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+          >
+            {participantName}
+          </p>
+          {hostUserId && userId === hostUserId && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 shrink-0'>
+              Host
+            </span>
+          )}
+          {isDeactivated && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+              Deactivated
+            </span>
+          )}
+          {isExternal && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
+              External
+            </span>
+          )}
+        </div>
+        {wasRemovedByHost ? (
+          <p className='text-xs text-red-500'>Removed by host</p>
+        ) : (
+          <>
+            {response === InvitationResponse.LEFT && (
+              <p className='text-xs text-muted-foreground'>Left the call</p>
+            )}
+            {response === InvitationResponse.INVITED && (
+              <p className='text-xs text-yellow-600'>Invited</p>
+            )}
+            {response === InvitationResponse.DECLINED && (
+              <p className='text-xs text-red-500'>Declined</p>
+            )}
+            {response === InvitationResponse.REQUESTED && (
+              <p className='text-xs text-orange-500'>Requesting to join</p>
+            )}
+          </>
+        )}
+      </div>
+      {/* Hand raise indicator */}
+      {isRaised && (
+        <div className='p-1.5 text-amber-500' title='Hand raised'>
+          <Hand size={16} className='fill-amber-400/30' />
+        </div>
+      )}
+      {/* Speaking indicator - only show when mic is enabled */}
+      {isInCall && livekitParticipantObj && isMicrophoneEnabled && (
+        <SpeakingStatus livekitParticipant={livekitParticipantObj} />
+      )}
+      {/* Mute status indicator (for non-host or when participant is muted) */}
+      {isInCall && !isMicrophoneEnabled && !canMute && (
+        <div className='p-1.5 text-red-500' title='Muted'>
+          <MicOff size={16} />
+        </div>
+      )}
+      {/* Mute/Unmute button - always visible for host */}
+      {canMute && (
+        <button
+          onClick={() => void onMuteParticipant(userId)}
+          disabled={isMutingThis || !isMicrophoneEnabled}
+          className={`p-1.5 rounded-md transition-colors disabled:cursor-not-allowed ${
+            !isMicrophoneEnabled
+              ? 'text-red-500 bg-red-50'
+              : 'hover:bg-secondary text-muted-foreground hover:text-foreground'
+          }`}
+          data-track-category='CALLS'
+          data-track-name='MUTE_PARTICIPANT'
+          data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
+          title={!isMicrophoneEnabled ? `${participantName} is muted` : `Mute ${participantName}`}
+        >
+          {isMutingThis ? (
+            <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
+          ) : !isMicrophoneEnabled ? (
+            <MicOff size={16} />
+          ) : (
+            <Mic size={16} />
+          )}
+        </button>
+      )}
+      {canRemove && (
+        <button
+          onClick={() => void onRemoveParticipant(userId, participantName)}
+          disabled={isRemovingThis}
+          className='p-1.5 rounded-md transition-colors disabled:cursor-not-allowed text-muted-foreground hover:bg-red-50 hover:text-red-600'
+          data-track-category='CALLS'
+          data-track-name='REMOVE_PARTICIPANT'
+          data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
+          title={`Remove ${participantName} from the call`}
+        >
+          {isRemovingThis ? (
+            <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
+          ) : (
+            <UserX size={16} />
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface RequestedParticipantItemProps {
+  participant: CallParticipant;
+  canActOnRequest: boolean;
+  approvingId: string | null;
+  rejectingId: string | null;
+  onApprove: (participantId: string) => void;
+  onReject: (participantId: string) => void;
+}
+
+// Inner component for requested participants — looks up user name via useUser
+function RequestedParticipantItem({
+  participant,
+  canActOnRequest,
+  approvingId,
+  rejectingId,
+  onApprove,
+  onReject,
+}: RequestedParticipantItemProps): React.ReactElement {
+  const { userId, displayName, isExternal } = participant;
+  const participantUser = useUser(!isExternal ? userId : '');
+  const resolvedName = displayName || participantUser?.name || 'Guest';
+  const initial = resolvedName.charAt(0).toUpperCase();
+
+  return (
+    <div className='flex items-center gap-3 py-2 px-3 hover:bg-orange-50/50 transition-colors'>
+      <div className='relative'>
+        <div className='flex items-center justify-center w-8 h-8 bg-orange-400 text-white text-xs font-semibold rounded-full'>
+          {initial}
+        </div>
+      </div>
+      <div className='flex-1 min-w-0'>
+        <div className='flex items-center gap-1.5'>
+          <p className='text-sm font-medium text-foreground truncate'>{resolvedName}</p>
+          {isExternal && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
+              External
+            </span>
+          )}
+        </div>
+        <p className='text-xs text-orange-500'>Requesting to join</p>
+      </div>
+      {canActOnRequest && (
+        <div className='flex items-center gap-1.5 shrink-0'>
+          <button
+            onClick={() => onApprove(participant.id)}
+            disabled={approvingId === participant.id}
+            className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            title='Admit'
+            data-track-category='CALLS'
+            data-track-name='APPROVE_LOBBY_REQUEST'
+          >
+            {approvingId === participant.id ? (
+              <div className='w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin' />
+            ) : (
+              <Check size={14} />
+            )}
+          </button>
+          <button
+            onClick={() => onReject(participant.id)}
+            disabled={rejectingId === participant.id}
+            className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            title='Decline'
+            data-track-category='CALLS'
+            data-track-name='REJECT_LOBBY_REQUEST'
+          >
+            {rejectingId === participant.id ? (
+              <div className='w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
+            ) : (
+              <XIcon size={14} />
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ParticipantsSidebar({
   callId,
   onClose,
@@ -296,281 +603,14 @@ export function ParticipantsSidebar({
     [onRejectLobbyRequest, rejectingId],
   );
 
-  // Inner component for speaking detection (needs to be separate to use hooks conditionally)
-  const SpeakingStatus = ({
-    livekitParticipant,
-  }: {
-    livekitParticipant: Participant | undefined;
-  }): React.ReactElement | null => {
-    const isSpeaking = useIsSpeaking(livekitParticipant);
-    if (!isSpeaking) return null;
-    return <SpeakingIndicator />;
-  };
-
-  // ParticipantItem component that uses useUser hook internally
-  const ParticipantItem = ({
-    participant,
-    showMuteButton = false,
-    currentUserId,
-    isExternal = false,
-  }: {
-    participant: CallParticipant;
-    showMuteButton?: boolean;
-    currentUserId?: string | null;
-    isExternal?: boolean;
-  }): React.ReactElement => {
-    const { response, userId, displayName } = participant;
-    const wasRemovedByHost =
-      (participant.metadata as CallParticipantMetadata | null)?.removedByHost === true;
-    // Only look up user via Zero if we don't have a displayName and it's not external
-    const shouldLookupUser = !isExternal && !displayName;
-    const participantUser = useUser(shouldLookupUser ? userId : '');
-    const isInCall = response === InvitationResponse.ACCEPTED || response === 'ACCEPTED';
-    const isMutingThis = mutingParticipantId === userId;
-
-    // Get LiveKit participant for speaking detection and mute status
-    const livekitParticipant = livekitParticipantMap.get(userId);
-    const livekitParticipantObj = livekitParticipant?.participant;
-    const isMicrophoneEnabled = livekitParticipant?.isMicrophoneEnabled ?? true;
-
-    // Determine if mute button should be shown for this participant
-    // Show only if: host, participant is in call, not the current user (self), not an agent
-    const canMute =
-      showMuteButton && isInCall && userId !== currentUserId && !userId.startsWith('agent-');
-    const canRemove = canMute;
-    const isRemovingThis = removingParticipantId === userId;
-
-    // Use displayName when provided (e.g. from API for external view), otherwise look up user
-    const participantName = displayName
-      ? displayName
-      : isExternal
-        ? 'Guest'
-        : getUserDisplayName(participantUser);
-
-    // Check if user is deactivated (only for non-external users with lookup)
-    const isDeactivated = !isExternal && !displayName ? isUserDeactivated(participantUser) : false;
-
-    // Get initials for external users fallback
-    const fallbackInitial = participantName.charAt(0).toUpperCase();
-
-    const isRaised = raisedHands.includes(userId);
-
-    return (
-      <div
-        className={cn(
-          'flex items-center gap-3 py-2 px-3 rounded-lg transition-colors',
-          isRaised ? 'bg-amber-50 ring-1 ring-amber-300' : 'hover:bg-muted',
-        )}
-      >
-        <div className='relative'>
-          {isExternal ? (
-            <div className='flex items-center justify-center w-5 h-5 bg-orange-400 text-white text-xs font-medium rounded-sm'>
-              {fallbackInitial}
-            </div>
-          ) : (
-            <Avatar userId={userId} size='sm' />
-          )}
-          {isInCall && (
-            <span className='absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white' />
-          )}
-        </div>
-        <div className='flex-1 min-w-0'>
-          <div className='flex items-center gap-1.5'>
-            <p
-              className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-            >
-              {participantName}
-            </p>
-            {hostUserId && userId === hostUserId && (
-              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 shrink-0'>
-                Host
-              </span>
-            )}
-            {isDeactivated && (
-              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                Deactivated
-              </span>
-            )}
-            {isExternal && (
-              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
-                External
-              </span>
-            )}
-          </div>
-          {wasRemovedByHost ? (
-            <p className='text-xs text-red-500'>Removed by host</p>
-          ) : (
-            <>
-              {response === InvitationResponse.LEFT && (
-                <p className='text-xs text-muted-foreground'>Left the call</p>
-              )}
-              {response === InvitationResponse.INVITED && (
-                <p className='text-xs text-yellow-600'>Invited</p>
-              )}
-              {response === InvitationResponse.DECLINED && (
-                <p className='text-xs text-red-500'>Declined</p>
-              )}
-              {response === InvitationResponse.REQUESTED && (
-                <p className='text-xs text-orange-500'>Requesting to join</p>
-              )}
-            </>
-          )}
-        </div>
-        {/* Hand raise indicator */}
-        {isRaised && (
-          <div className='p-1.5 text-amber-500' title='Hand raised'>
-            <Hand size={16} className='fill-amber-400/30' />
-          </div>
-        )}
-        {/* Speaking indicator - only show when mic is enabled */}
-        {isInCall && livekitParticipantObj && isMicrophoneEnabled && (
-          <SpeakingStatus livekitParticipant={livekitParticipantObj} />
-        )}
-        {/* Mute status indicator (for non-host or when participant is muted) */}
-        {isInCall && !isMicrophoneEnabled && !canMute && (
-          <div className='p-1.5 text-red-500' title='Muted'>
-            <MicOff size={16} />
-          </div>
-        )}
-        {/* Mute/Unmute button - always visible for host */}
-        {canMute && (
-          <button
-            onClick={() => void handleMuteParticipant(userId)}
-            disabled={isMutingThis || !isMicrophoneEnabled}
-            className={`p-1.5 rounded-md transition-colors disabled:cursor-not-allowed ${
-              !isMicrophoneEnabled
-                ? 'text-red-500 bg-red-50'
-                : 'hover:bg-secondary text-muted-foreground hover:text-foreground'
-            }`}
-            data-track-category='CALLS'
-            data-track-name='MUTE_PARTICIPANT'
-            data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
-            title={!isMicrophoneEnabled ? `${participantName} is muted` : `Mute ${participantName}`}
-          >
-            {isMutingThis ? (
-              <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
-            ) : !isMicrophoneEnabled ? (
-              <MicOff size={16} />
-            ) : (
-              <Mic size={16} />
-            )}
-          </button>
-        )}
-        {canRemove && (
-          <button
-            onClick={() => void handleRemoveParticipant(userId, participantName)}
-            disabled={isRemovingThis}
-            className='p-1.5 rounded-md transition-colors disabled:cursor-not-allowed text-muted-foreground hover:bg-red-50 hover:text-red-600'
-            data-track-category='CALLS'
-            data-track-name='REMOVE_PARTICIPANT'
-            data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
-            title={`Remove ${participantName} from the call`}
-          >
-            {isRemovingThis ? (
-              <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
-            ) : (
-              <UserX size={16} />
-            )}
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  // Inner component for requested participants — looks up user name via useUser
-  const RequestedParticipantItem = ({
-    participant,
-  }: {
-    participant: CallParticipant;
-  }): React.ReactElement => {
-    const { userId, displayName, isExternal } = participant;
-    const participantUser = useUser(!isExternal ? userId : '');
-    const resolvedName = displayName || participantUser?.name || 'Guest';
-    const initial = resolvedName.charAt(0).toUpperCase();
-
-    return (
-      <div className='flex items-center gap-3 py-2 px-3 hover:bg-orange-50/50 transition-colors'>
-        <div className='relative'>
-          <div className='flex items-center justify-center w-8 h-8 bg-orange-400 text-white text-xs font-semibold rounded-full'>
-            {initial}
-          </div>
-        </div>
-        <div className='flex-1 min-w-0'>
-          <div className='flex items-center gap-1.5'>
-            <p className='text-sm font-medium text-foreground truncate'>{resolvedName}</p>
-            {isExternal && (
-              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
-                External
-              </span>
-            )}
-          </div>
-          <p className='text-xs text-orange-500'>Requesting to join</p>
-        </div>
-        {isHost && onApproveLobbyRequest && onRejectLobbyRequest && (
-          <div className='flex items-center gap-1.5 shrink-0'>
-            <button
-              onClick={() => void handleApprove(participant.id)}
-              disabled={approvingId === participant.id}
-              className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              title='Admit'
-              data-track-category='CALLS'
-              data-track-name='APPROVE_LOBBY_REQUEST'
-            >
-              {approvingId === participant.id ? (
-                <div className='w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin' />
-              ) : (
-                <Check size={14} />
-              )}
-            </button>
-            <button
-              onClick={() => void handleReject(participant.id)}
-              disabled={rejectingId === participant.id}
-              className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              title='Decline'
-              data-track-category='CALLS'
-              data-track-name='REJECT_LOBBY_REQUEST'
-            >
-              {rejectingId === participant.id ? (
-                <div className='w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
-              ) : (
-                <XIcon size={14} />
-              )}
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const SectionHeader = ({
-    title,
-    count,
-    isExpanded,
-    onToggle,
-  }: {
-    title: string;
-    count: number;
-    isExpanded: boolean;
-    onToggle: () => void;
-  }): React.ReactElement => (
-    <button
-      onClick={onToggle}
-      className='flex items-center justify-between w-full px-3 py-2.5 hover:bg-muted transition-colors'
-      data-track-category='CALLS'
-      data-track-name='Toggle_Participants_Section'
-      data-track-metadata={JSON.stringify({ section: title, isExpanded: !isExpanded })}
-    >
-      <span className='text-sm font-medium text-foreground'>{title}</span>
-      <div className='flex items-center gap-4'>
-        <span className='text-sm text-muted-foreground'>{count}</span>
-        {isExpanded ? (
-          <ChevronUp size={16} className='text-muted-foreground' />
-        ) : (
-          <ChevronDown size={16} className='text-muted-foreground' />
-        )}
-      </div>
-    </button>
+  // Anyone already in the call can admit/decline join requests — not just the host.
+  // (Only the host gets the toast)
+  const isAttendee = useMemo(
+    () => contributors.some(participant => participant.userId === resolvedCurrentUserId),
+    [contributors, resolvedCurrentUserId],
   );
+  const canActOnLobbyRequests =
+    (isHost || isAttendee) && !!onApproveLobbyRequest && !!onRejectLobbyRequest;
 
   return (
     <>
@@ -625,8 +665,8 @@ export function ParticipantsSidebar({
 
         {/* Participants List */}
         <div className='flex-1 overflow-y-auto p-3 space-y-3'>
-          {/* Requested Section — participants waiting for approval (host only) */}
-          {isHost && requested.length > 0 && (
+          {/* Requested Section — participants waiting for approval (host or any attendee) */}
+          {canActOnLobbyRequests && requested.length > 0 && (
             <div
               className='border border-orange-200 rounded-lg overflow-hidden bg-orange-50/30'
               data-testid='requested-section'
@@ -640,7 +680,15 @@ export function ParticipantsSidebar({
               {isRequestedExpanded && (
                 <div className='border-t border-orange-200'>
                   {requested.map(participant => (
-                    <RequestedParticipantItem key={participant.id} participant={participant} />
+                    <RequestedParticipantItem
+                      key={participant.id}
+                      participant={participant}
+                      canActOnRequest={canActOnLobbyRequests}
+                      approvingId={approvingId}
+                      rejectingId={rejectingId}
+                      onApprove={handleApprove}
+                      onReject={handleReject}
+                    />
                   ))}
                 </div>
               )}
@@ -668,6 +716,14 @@ export function ParticipantsSidebar({
                       showMuteButton={isHost}
                       currentUserId={resolvedCurrentUserId}
                       isExternal={participant.isExternal ?? false}
+                      callId={callId}
+                      hostUserId={hostUserId}
+                      raisedHands={raisedHands}
+                      livekitParticipantMap={livekitParticipantMap}
+                      mutingParticipantId={mutingParticipantId}
+                      removingParticipantId={removingParticipantId}
+                      onMuteParticipant={handleMuteParticipant}
+                      onRemoveParticipant={handleRemoveParticipant}
                     />
                   ))}
                 </div>
@@ -695,6 +751,14 @@ export function ParticipantsSidebar({
                       participant={participant}
                       currentUserId={resolvedCurrentUserId}
                       isExternal={participant.isExternal ?? false}
+                      callId={callId}
+                      hostUserId={hostUserId}
+                      raisedHands={raisedHands}
+                      livekitParticipantMap={livekitParticipantMap}
+                      mutingParticipantId={mutingParticipantId}
+                      removingParticipantId={removingParticipantId}
+                      onMuteParticipant={handleMuteParticipant}
+                      onRemoveParticipant={handleRemoveParticipant}
                     />
                   ))}
                 </div>

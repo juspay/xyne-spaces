@@ -35,7 +35,8 @@ export type ResourceName =
   | 'TICKET-MIGRATION'
   | 'CONFLUENCE-MIGRATION'
   | 'EXTERNAL-STEP-RESPONSE'
-  | 'VESPA';
+  | 'VESPA'
+  | 'SDLC';
 
 export interface PermissionEntry {
   resourceName: ResourceName;
@@ -66,6 +67,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
     { resourceName: 'CANVASES', accessType: AccessType.WRITE },
+    { resourceName: 'SDLC', accessType: AccessType.WRITE },
   ],
   COMMUNITY_MEMBER: [
     { resourceName: 'TICKETS', accessType: AccessType.WRITE },
@@ -79,6 +81,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
     { resourceName: 'CANVASES', accessType: AccessType.WRITE },
+    { resourceName: 'SDLC', accessType: AccessType.WRITE },
   ],
   ADMIN: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
@@ -103,6 +106,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'CONFLUENCE-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
     { resourceName: 'VESPA', accessType: AccessType.ADMIN },
+    { resourceName: 'SDLC', accessType: AccessType.ADMIN },
   ],
   OWNER: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
@@ -127,6 +131,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'CONFLUENCE-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
     { resourceName: 'VESPA', accessType: AccessType.ADMIN },
+    { resourceName: 'SDLC', accessType: AccessType.ADMIN },
   ],
   GUEST: [
     { resourceName: 'TICKETS', accessType: AccessType.WRITE },

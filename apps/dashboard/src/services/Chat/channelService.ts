@@ -110,13 +110,10 @@ export interface ChannelMember {
 }
 
 export class ChannelService {
-  async checkDuplicateChannel(
-    title: string,
-    orgName: string,
-  ): Promise<CheckDuplicateChannelResponse> {
+  async checkDuplicateChannel(title: string): Promise<CheckDuplicateChannelResponse> {
     const response = await apiInstance.post<CheckDuplicateChannelResponse>(
       '/channels/check-duplicate',
-      { name: title, projectId: orgName || 'default' },
+      { name: title },
     );
     return response.data;
   }

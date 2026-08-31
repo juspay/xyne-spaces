@@ -1,10 +1,21 @@
 import React from 'react';
 import { cn } from '../../../utils/classNames';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface IngestStatusV2Props {
   status: string | null | undefined;
 }
+
+// Small pill badge — dot/icon + label, matching the tag chips on Canvas
+// cards (CanvasList.tsx's label pills: rounded-md border, muted background,
+// h-5, 11px text) rather than the bare unlabeled icon this used to be.
+// FAILED is deliberately absent here — a failed file instead gets the same
+// circular badge a failed folder does (see FileFailedBadgeV2), not a text
+// pill, so failure reads consistently across both.
+const STATUS_CONFIG: Record<string, { label: string; textClassName: string }> = {
+  PENDING: { label: 'Pending', textClassName: 'text-muted-foreground' },
+  PROCESSING: { label: 'Processing', textClassName: 'text-amber-600 dark:text-amber-400' },
+};
 
 export const IngestStatusV2: React.FC<IngestStatusV2Props> = ({ status }) => {
   if (!status || status === 'COMPLETED' || status === 'NONE') {
@@ -12,30 +23,19 @@ export const IngestStatusV2: React.FC<IngestStatusV2Props> = ({ status }) => {
   }
 
   const normalized = status.toUpperCase();
+  const config = STATUS_CONFIG[normalized];
+  if (!config) return null;
 
-  if (normalized === 'PENDING') {
-    return (
-      <span className={cn('inline-flex h-4 w-4 items-center justify-center')} title='Pending'>
-        <Loader2 className='h-3 w-3 animate-spin text-gray-400' strokeWidth={1.75} />
-      </span>
-    );
-  }
-
-  if (normalized === 'PROCESSING') {
-    return (
-      <span className={cn('inline-flex h-4 w-4 items-center justify-center')} title='Processing'>
-        <Loader2 className='h-3 w-3 animate-spin text-amber-500' strokeWidth={1.75} />
-      </span>
-    );
-  }
-
-  if (normalized === 'FAILED') {
-    return (
-      <span className={cn('inline-flex h-4 w-4 items-center justify-center')} title='Failed'>
-        <AlertCircle className='h-3 w-3 text-red-500' strokeWidth={1.75} />
-      </span>
-    );
-  }
-
-  return null;
+  return (
+    <span
+      className={cn(
+        'inline-flex h-5 max-w-full shrink-0 items-center gap-1 rounded-md border border-border bg-muted px-1.5 text-[11px] leading-none',
+        config.textClassName,
+      )}
+      title={config.label}
+    >
+      <Loader2 className='h-2.5 w-2.5 shrink-0 animate-spin' strokeWidth={2} />
+      <span className='truncate'>{config.label}</span>
+    </span>
+  );
 };

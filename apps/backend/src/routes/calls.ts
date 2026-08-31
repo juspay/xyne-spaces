@@ -23,6 +23,7 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
 router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+router.post('/recordings/:callId/generate-labels', callController.regenerateRecordingLabels);
 router.get(
   '/recordings/:callId/email-compose-context',
   recordingEmailController.getComposeContext,
@@ -32,6 +33,7 @@ router.post('/recordings/:callId/export-google-doc', recordingGoogleDocControlle
 router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
+router.post('/recordings/:callId/participants', callController.manageRecordingParticipants);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);

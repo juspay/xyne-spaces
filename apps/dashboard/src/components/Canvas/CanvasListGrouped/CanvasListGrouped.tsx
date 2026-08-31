@@ -25,6 +25,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   isPersonalSectionCollapsed,
   onSetPersonalSectionCollapsed,
   excludeCallGeneratedCanvases = true,
+  excludeRecordingGeneratedCanvases = true,
   showStarredOnly = false,
   includeArchived = false,
   onlyArchived = false,
@@ -64,6 +65,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     currentUserId,
     collapsedProjects,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     showStarredOnly,
     includeArchived,
     onlyArchived,
@@ -542,6 +544,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           adminChannelIds={activeAdminChannelIds}
           isPersonalSectionCollapsed={isPersonalSectionCollapsed}
           excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+          excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
           collapsedProjects={collapsedProjects}
           collapsedChannels={collapsedChannels}
           collapsedFolders={collapsedFolders}

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import {
   resolveCanvasHierarchy,
@@ -11,6 +12,7 @@ import { isBaselineCanvasType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import { repositories } from '@/database/repositories';
 
 export interface CanvasAuthResult {
   hasAccess: boolean;
@@ -64,7 +66,7 @@ class CanvasAuthService {
   ): Promise<boolean> {
     const channel = await db.channel.findUnique({
       where: { id: channelId },
-      select: { workspaceId: true, projectId: true },
+      select: { workspaceId: true },
     });
     if (!channel || channel.workspaceId !== workspaceId) {
       return false;
@@ -79,41 +81,7 @@ class CanvasAuthService {
       },
       select: { id: true },
     });
-    if (directGuestAccess) {
-      return true;
-    }
-
-    if (!channel.projectId) {
-      return false;
-    }
-
-    const projectGuestAccess = await db.guestAccess.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        accessibleEntityType: GuestEntity.PROJECT,
-        accessibleEntityId: channel.projectId,
-      },
-      select: { id: true },
-    });
-    return Boolean(projectGuestAccess);
-  }
-
-  private async hasGuestProjectAccess(
-    userId: string,
-    workspaceId: string,
-    projectId: string
-  ): Promise<boolean> {
-    const projectGuestAccess = await db.guestAccess.findFirst({
-      where: {
-        workspaceId,
-        userId,
-        accessibleEntityType: GuestEntity.PROJECT,
-        accessibleEntityId: projectId,
-      },
-      select: { id: true },
-    });
-    return Boolean(projectGuestAccess);
+    return Boolean(directGuestAccess);
   }
 
   private async hasEffectiveChannelAccess(
@@ -177,9 +145,6 @@ class CanvasAuthService {
       if (canvas.channelId) {
         return this.hasGuestChannelAccess(userId, context.workspaceId, canvas.channelId);
       }
-      if (canvas.projectId) {
-        return this.hasGuestProjectAccess(userId, context.workspaceId, canvas.projectId);
-      }
       return false;
     }
     return true;
@@ -199,19 +164,7 @@ class CanvasAuthService {
     ) {
       return true;
     }
-    if (!canvas.projectId) {
-      return false;
-    }
-    const projectGuestAccess = await db.guestAccess.findFirst({
-      where: {
-        workspaceId: context.workspaceId,
-        userId,
-        accessibleEntityType: GuestEntity.PROJECT,
-        accessibleEntityId: canvas.projectId,
-      },
-      select: { id: true },
-    });
-    return Boolean(projectGuestAccess);
+    return false;
   }
 
   async checkCanvasAccess(canvasId: string, userId: string): Promise<CanvasAuthResult> {
@@ -398,6 +351,7 @@ class CanvasAuthService {
       projectId?: string;
       folderId?: string;
       title?: string;
+      metadata?: Record<string, unknown>;
     }
   ): Promise<void> {
     try {
@@ -484,6 +438,7 @@ class CanvasAuthService {
             ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
             ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
             ...(folderId ? { folderId } : {}),
+            ...(options?.metadata ? { metadata: options.metadata as Prisma.InputJsonValue } : {}),
           },
         }),
         db.canvasParticipant.upsert({
@@ -528,6 +483,40 @@ class CanvasAuthService {
       logger.error('Failed to auto-create canvas', { canvasId, userId, error });
       throw error;
     }
+  }
+
+  async syncNotesCanvasTitle(callDbId: string, callTitle: string): Promise<void> {
+    const call = await repositories.calls.findById(callDbId);
+    const notesCanvasId = (call?.metadata as Record<string, unknown> | null)?.notesCanvasId;
+    if (typeof notesCanvasId !== 'string' || !notesCanvasId) {
+      return;
+    }
+
+    await db.canvas.update({
+      where: { id: notesCanvasId },
+      data: { title: `Notes: ${callTitle}` },
+    });
+  }
+
+  /**
+   * Mirrors syncNotesCanvasTitle for the Detailed Summary canvas. Needed
+   * because summary generation reads Call.title concurrently with AI title
+   * generation (a race), so the summary canvas frequently gets created with
+   * a timestamp-fallback title before the real one is known — this corrects
+   * it once the title is actually saved.
+   */
+  async syncDetailedSummaryCanvasTitle(callDbId: string, callTitle: string): Promise<void> {
+    const call = await repositories.calls.findById(callDbId);
+    const detailedSummaryCanvasId = (call?.metadata as Record<string, unknown> | null)
+      ?.detailedSummaryCanvasId;
+    if (typeof detailedSummaryCanvasId !== 'string' || !detailedSummaryCanvasId) {
+      return;
+    }
+
+    await db.canvas.update({
+      where: { id: detailedSummaryCanvasId },
+      data: { title: `Summary: ${callTitle}` },
+    });
   }
 }
 

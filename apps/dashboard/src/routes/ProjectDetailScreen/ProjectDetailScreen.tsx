@@ -15,14 +15,15 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
-  Boxes,
   ChevronRight,
-  Edit2,
+  PencilEdit as Edit2,
   GitBranch,
-  LayoutGrid,
-  Plus,
-  Rocket,
-} from 'lucide-react';
+  Grid01 as LayoutGrid,
+  PlusDefault as Plus,
+  RocketShip as Rocket,
+} from '@xyne/icons';
+// Boxes has no @xyne/icons equivalent yet; lucide-react is still a live dep.
+import { Boxes } from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
@@ -153,9 +154,12 @@ const ProjectDetailScreen = (): ReactElement => {
   });
 
   // Fetch boards for this project (lightweight list without stages)
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId || '' }), {
-    enabled: !!projectId,
-  });
+  const [boards, boardsDetails] = useCachedQuery(
+    queries.boardsListByProject({ projectId: projectId || '' }),
+    {
+      enabled: !!projectId,
+    },
+  );
 
   // Consume the Ticket view's edit-board intent once.
   const requestedEditBoardId = searchParams.get('editBoard');
@@ -350,7 +354,7 @@ const ProjectDetailScreen = (): ReactElement => {
 
   const { data: channelDuplicateCheck } = useQuery({
     queryKey: ['checkDuplicateChannel', debouncedRepositoryName, 'default'],
-    queryFn: () => channelService.checkDuplicateChannel(debouncedRepositoryName, 'default'),
+    queryFn: () => channelService.checkDuplicateChannel(debouncedRepositoryName),
     enabled:
       Boolean(debouncedRepositoryName) && validateChannelName(debouncedRepositoryName) === null,
     staleTime: 0,
@@ -601,6 +605,7 @@ const ProjectDetailScreen = (): ReactElement => {
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
                   boards={boards}
+                  loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}

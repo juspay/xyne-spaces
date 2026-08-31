@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client'
-import { CallType, EntityUserAccess, ShareableEntityType } from '@xyne/shared'
+import { CallType, CallVisibility, EntityUserAccess, ShareableEntityType } from '@xyne/shared'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getAccessibleChannelIds, isGuestContext } from './channel-access-helper'
 
@@ -73,6 +73,7 @@ export class CallsACL extends BaseQueryACL<
             ...(sharedCallIds.length
               ? [{ callType: CallType.HEADLESS, id: { in: sharedCallIds } }]
               : []),
+            { callType: CallType.HEADLESS, visibility: CallVisibility.PUBLIC },
           ],
         },
         { workspaceId: this.ctx.workspaceId },

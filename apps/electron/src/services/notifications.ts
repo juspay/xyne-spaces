@@ -63,7 +63,7 @@ export function showNotification(data: NotificationData, mainWindow: BrowserWind
 
     // Bounce the dock if on macOS and not focused
     if (process.platform === 'darwin' && !mainWindow?.isFocused()) {
-      app.dock.bounce();
+      app.dock?.bounce();
     }
   } catch (error) {
     Logger.logError('notification.show.failed', error);
@@ -139,7 +139,7 @@ export function showCallNotification(
     notification.show();
 
     if (process.platform === 'darwin' && !mainWindow?.isFocused()) {
-      app.dock.bounce('critical');
+      app.dock?.bounce('critical');
     }
   } catch (error) {
     Logger.logError('call-notification.show.failed', error, { call_id: data.callId });

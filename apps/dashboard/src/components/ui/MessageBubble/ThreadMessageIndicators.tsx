@@ -31,6 +31,8 @@ export const ThreadInfoIndicator: React.FC<ThreadInfoIndicatorProps> = ({
           `/chat/dir/${channelId}/${threadInfo.conversationId}/#origin=${threadInfo.conversationId}&messageId=${messageId}`,
         )
       }
+      data-track-category='MESSAGE'
+      data-track-name='OPEN_THREAD_FROM_INDICATOR'
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -71,6 +73,8 @@ export const AlsoSentToChannelIndicator: React.FC<AlsoSentToChannelIndicatorProp
           const messageLink = `/chat/dir/${channelId}#origin=${childConversationId}`;
           void navigate(messageLink);
         }}
+        data-track-category='MESSAGE'
+        data-track-name='COPY_THREAD_LINK'
         className='text-xs text-primary hover:text-primary/80 hover:underline mt-1 p-0 h-auto'
       >
         Also sent to{' '}
@@ -116,6 +120,8 @@ export const ViewNewerRepliesButton: React.FC<ViewNewerRepliesButtonProps> = ({
     >
       <button
         onClick={handleOpenParentThread}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_PARENT_THREAD'
         className={`flex items-center gap-2 text-xs bg-transparent border-0 cursor-pointer transition-opacity duration-200 hover:opacity-80 flex-1 ${
           isMe ? 'max-[500px]:justify-end' : ''
         }`}

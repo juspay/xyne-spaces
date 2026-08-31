@@ -22,7 +22,7 @@ interface CanvasHierarchyFolderRecord {
 }
 
 interface CanvasHierarchyChannelRecord {
-  projectId: string;
+  projectId?: string | null;
 }
 
 type MaybeRecord<T> = T | null | undefined;
@@ -79,14 +79,12 @@ export async function resolveCanvasHierarchy(
       throw new CanvasHierarchyResolutionError('CHANNEL_NOT_FOUND', 'Channel not found');
     }
 
-    if (resolvedProjectId != null && resolvedProjectId !== channel.projectId) {
+    if (resolvedProjectId != null && channel.projectId != null && resolvedProjectId !== channel.projectId) {
       throw new CanvasHierarchyResolutionError(
         'CHANNEL_PROJECT_MISMATCH',
         'Canvas channel does not belong to project',
       );
     }
-
-    resolvedProjectId = channel.projectId;
   }
 
   return {

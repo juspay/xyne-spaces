@@ -1,5 +1,4 @@
 import { db } from '@/database/client';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { logger } from '@/utils/logger';
 import type { Prisma } from '@prisma/client';
 import { NudgeKind, SurfaceAreaType, NudgeState } from '@xyne/shared';
@@ -11,7 +10,7 @@ interface PersistCandidatesInput {
   sourceId: string;
   sourceType: SurfaceAreaType;
   nudgeKind: NudgeKind;
-  projectId: string;
+  workspaceId: string;
   candidates: NudgeCandidate[];
   priority?: string; // definition-level default
 }
@@ -42,11 +41,9 @@ class NudgeService {
   }
 
   async persistCandidates(input: PersistCandidatesInput): Promise<void> {
-    const { sourceId, sourceType, nudgeKind, projectId, candidates, priority } = input;
+    const { sourceId, sourceType, nudgeKind, workspaceId, candidates, priority } = input;
 
     if (candidates.length === 0) return;
-
-    const workspaceId = await resolveWorkspaceIdFromModel(db, 'project', { id: projectId });
 
     try {
       await db.$transaction(async (tx) => {
@@ -61,7 +58,6 @@ class NudgeService {
               priority: candidate.priority ?? priority ?? 'medium',
               actions: (candidate.actions as Prisma.InputJsonValue) ?? undefined,
               state: NudgeState.ACTIVE,
-              projectId,
               visibleTo: candidate.visibleTo ?? null,
             },
           });

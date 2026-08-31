@@ -73,6 +73,9 @@ export function SegmentedToggle<T extends string>({
             type='button'
             data-slot='segmented-toggle-item'
             onClick={() => onChange(option.value)}
+            data-track-category='SEGMENTED_TOGGLE'
+            data-track-name='CHANGE_SEGMENT'
+            data-track-metadata={JSON.stringify({ value: option.value })}
             title={option.title}
             className={cn(
               'relative z-10 flex h-full items-center justify-center gap-1.5 rounded-full whitespace-nowrap',

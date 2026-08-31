@@ -401,6 +401,8 @@ export class GitHubWebhookService {
       context.repoUrl,
       context.prUrl,
       context.numberOfComments,
+      // Report the verdict as a GitHub commit status ("Ticket Validation" check on the PR).
+      { provider: VCSProviderType.GITHUB, owner: context.projectName, repo: context.repoName },
     );
   }
 

@@ -25,6 +25,8 @@ import { cn } from '../../../../utils/classNames';
 import { Dialog } from '../../../ui/Dialog';
 import { RecapPanel } from '../../../RecapPanel';
 import type { RecapCard } from '../../../RecapPanel/RecapPanel.types';
+import { xyneAIActor, type ThreadInfo } from '../../../../machines/xyneAIMachine';
+import { XyneAIStar } from '../../../icons/xyne-ai';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -93,6 +95,40 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
       }
     },
     [isMobile, navigate],
+  );
+
+  const buildAskAIThreadInfo = useCallback((card: RecapCard): ThreadInfo | null => {
+    const firstCitation = Object.values(card.pointCitations ?? {}).find(
+      citation => citation.conversationId,
+    );
+    const conversationId =
+      firstCitation?.conversationId ?? card.drilldown.conversationId ?? undefined;
+    if (!conversationId) return null;
+
+    const messageId = firstCitation?.messageId ?? card.drilldown.messageId ?? undefined;
+    return {
+      conversationId,
+      channelId: card.channelId,
+      senderName: card.channelName,
+      previewText: `${card.channelName} recap reference`,
+      ...(messageId && { messageId }),
+      isThreadMessage: true,
+    };
+  }, []);
+
+  const handleAskAIAboutRecapReference = useCallback(
+    (card: RecapCard): void => {
+      const threadInfo = buildAskAIThreadInfo(card);
+      if (!threadInfo) return;
+      setSelectedCard(null);
+      xyneAIActor.send({
+        type: 'OPEN',
+        channelId: card.channelId,
+        threadInfo,
+        startFreshChat: true,
+      });
+    },
+    [buildAskAIThreadInfo],
   );
 
   const greeting = getGreeting();
@@ -399,18 +435,32 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
               <span className='text-xs text-muted-foreground/60'>
                 {selectedCard.messageCount} messages summarized
               </span>
-              <button
-                type='button'
-                onClick={() => {
-                  setSelectedCard(null);
-                  void navigate('/chat/dir/recap');
-                }}
-                className='text-xs text-primary transition-colors hover:underline'
-                data-track-category='AILanding'
-                data-track-name='ViewAllFromRecapPreview'
-              >
-                View all recaps
-              </button>
+              <div className='flex items-center gap-3'>
+                {buildAskAIThreadInfo(selectedCard) && (
+                  <button
+                    type='button'
+                    onClick={() => handleAskAIAboutRecapReference(selectedCard)}
+                    className='inline-flex items-center gap-1 text-xs text-primary transition-colors hover:underline'
+                    data-track-category='AILanding'
+                    data-track-name='AskAIRecapReference'
+                  >
+                    <XyneAIStar size={13} />
+                    Ask AI
+                  </button>
+                )}
+                <button
+                  type='button'
+                  onClick={() => {
+                    setSelectedCard(null);
+                    void navigate('/chat/dir/recap');
+                  }}
+                  className='text-xs text-primary transition-colors hover:underline'
+                  data-track-category='AILanding'
+                  data-track-name='ViewAllFromRecapPreview'
+                >
+                  View all recaps
+                </button>
+              </div>
             </div>
           </div>
         )}

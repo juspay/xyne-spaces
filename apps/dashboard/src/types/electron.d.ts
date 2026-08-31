@@ -52,6 +52,7 @@ export interface ElectronAPI {
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
+  onAppWindowLimitReached: (callback: (limit: number) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
@@ -100,6 +101,7 @@ export interface ElectronAPI {
   ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
+  onRecordingStopForTeardown?: (callback: () => void) => () => void;
   onRecordingResumeRequest?: (callback: () => void) => () => void;
   onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;

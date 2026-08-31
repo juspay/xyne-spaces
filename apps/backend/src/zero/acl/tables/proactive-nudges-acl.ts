@@ -15,8 +15,7 @@ export class ProactiveNudgesACL extends BaseACL<'proactive_nudges'> {
   private async verifyChannelInWorkspace(channelId: string, tx: Transaction<Schema>): Promise<void> {
     const channel = await tx.run(zql.channels.where('id', channelId).one());
     if (!channel) throw new MutationACLError('Proactive nudge not found: channel does not exist', 'proactive_nudges');
-    const project = await tx.run(zql.projects.where('id', channel.projectId).one());
-    if (!project || project.workspaceId !== this.ctx.workspaceId) {
+    if (channel.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Proactive nudge not found in this workspace', 'proactive_nudges');
     }
   }

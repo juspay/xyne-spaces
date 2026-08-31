@@ -58,8 +58,10 @@ import { toast } from 'sonner';
 import {
   filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
+  filterExcludedRecordingGeneratedCanvases,
   filterStarredCanvases,
-  isExcludedCallGeneratedCanvas,
+  isAnyCallGeneratedCanvas,
+  isExcludedRecordingGeneratedCanvas,
   withStarredCanvasState,
 } from '../canvasFilters';
 import { cn } from '../../../utils/classNames';
@@ -486,6 +488,8 @@ const getFilteredCanvasItems = ({
   canvases,
   onlyCallGeneratedCanvases,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
+  onlyRecordingGeneratedCanvases,
   showStarredOnly,
   activeFilter,
   currentUserId,
@@ -499,6 +503,8 @@ const getFilteredCanvasItems = ({
   canvases: Canvas[];
   onlyCallGeneratedCanvases: boolean;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
+  onlyRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
   activeFilter: FilterTab;
   currentUserId?: string | undefined;
@@ -510,8 +516,13 @@ const getFilteredCanvasItems = ({
   filterSearchQuery?: boolean;
 }): Canvas[] => {
   let filtered = onlyCallGeneratedCanvases
-    ? canvases.filter(isExcludedCallGeneratedCanvas)
-    : filterExcludedCallGeneratedCanvases(canvases, excludeCallGeneratedCanvases);
+    ? canvases.filter(isAnyCallGeneratedCanvas)
+    : onlyRecordingGeneratedCanvases
+      ? canvases.filter(isExcludedRecordingGeneratedCanvas)
+      : filterExcludedRecordingGeneratedCanvases(
+          filterExcludedCallGeneratedCanvases(canvases, excludeCallGeneratedCanvases),
+          excludeRecordingGeneratedCanvases,
+        );
   filtered = filterStarredCanvases(filtered, showStarredOnly);
 
   filtered = filtered.filter(canvas =>
@@ -661,6 +672,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   searchQuery: string;
   onlyCallGeneratedCanvases: boolean;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
+  onlyRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
   includeArchived: boolean;
   onlyArchived: boolean;
@@ -679,6 +692,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   searchQuery,
   onlyCallGeneratedCanvases,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
+  onlyRecordingGeneratedCanvases,
   showStarredOnly,
   includeArchived,
   onlyArchived,
@@ -709,6 +724,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
         canvases: archiveFilteredFolderCanvases,
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
+        excludeRecordingGeneratedCanvases,
+        onlyRecordingGeneratedCanvases,
         showStarredOnly,
         activeFilter,
         currentUserId,
@@ -724,7 +741,9 @@ const ChannelScopeFolderGroupSection: React.FC<{
       archiveFilteredFolderCanvases,
       currentUserId,
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       onlyCallGeneratedCanvases,
+      onlyRecordingGeneratedCanvases,
       searchQuery,
       searchScope,
       selectedLabel,
@@ -809,7 +828,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   paginated = false,
   channelId,
   excludeCallGeneratedCanvases = true,
+  excludeRecordingGeneratedCanvases = true,
   onlyCallGeneratedCanvases = false,
+  onlyRecordingGeneratedCanvases = false,
   showStarredOnly = false,
   includeArchived = false,
   onlyArchived = false,
@@ -988,9 +1009,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     activeFilter,
     channelId,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     includeArchived,
     onlyArchived,
     onlyCallGeneratedCanvases,
+    onlyRecordingGeneratedCanvases,
     paginated,
     debouncedSearchQuery,
     searchScope,
@@ -1186,6 +1209,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         canvases: itemsForMainList,
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
+        excludeRecordingGeneratedCanvases,
+        onlyRecordingGeneratedCanvases,
         showStarredOnly,
         activeFilter,
         currentUserId,
@@ -1201,8 +1226,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       effectiveSearchScope,
       effectiveSelectedScopeChannelId,
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       itemsForMainList,
       onlyCallGeneratedCanvases,
+      onlyRecordingGeneratedCanvases,
       debouncedSearchQuery,
       selectedLabel,
       selectedSharedByUserId,
@@ -1212,6 +1239,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   const hasPrimaryCanvasFilters =
     onlyCallGeneratedCanvases ||
+    onlyRecordingGeneratedCanvases ||
     onlyArchived ||
     showStarredOnly ||
     activeFilter !== 'all' ||
@@ -1226,6 +1254,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     trimmedSearchQuery || 'no-search'
   }:${onlyCallGeneratedCanvases ? 'only-call' : 'mixed-call'}:${
     excludeCallGeneratedCanvases ? 'exclude-call' : 'include-call'
+  }:${excludeRecordingGeneratedCanvases ? 'exclude-recording' : 'include-recording'}:${
+    onlyRecordingGeneratedCanvases ? 'only-recording' : 'mixed-recording'
   }:${onlyArchived ? 'only-archived' : includeArchived ? 'with-archived' : 'without-archived'}:${
     showStarredOnly ? 'starred' : 'all-stars'
   }`;
@@ -1241,7 +1271,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     Boolean(selectedLabel) ||
     trimmedSearchQuery.length > 0 ||
     showStarredOnly ||
-    onlyCallGeneratedCanvases;
+    onlyCallGeneratedCanvases ||
+    onlyRecordingGeneratedCanvases;
   const shouldScanFilteredUserPages =
     hasClientSideResultFilters &&
     effectiveSearchScope !== 'via_channel' &&
@@ -1279,6 +1310,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ),
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
+        excludeRecordingGeneratedCanvases,
+        onlyRecordingGeneratedCanvases,
         showStarredOnly,
         activeFilter,
         currentUserId,
@@ -1294,9 +1327,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       effectiveSearchScope,
       effectiveSelectedScopeChannelId,
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       includeArchived,
       onlyArchived,
       onlyCallGeneratedCanvases,
+      onlyRecordingGeneratedCanvases,
       debouncedSearchQuery,
       selectedChannelRootCanvasesResult,
       selectedLabel,
@@ -1313,9 +1348,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     effectiveSearchScope,
     effectiveSelectedScopeChannelId,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     includeArchived,
     onlyArchived,
     onlyCallGeneratedCanvases,
+    onlyRecordingGeneratedCanvases,
     debouncedSearchQuery,
     selectedLabel,
     selectedSharedByUserId,
@@ -1582,7 +1619,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ? 'you'
         : userNameById.get(editorUserId) || (editorUserId ? 'Unknown' : 'someone');
     const labels = getCanvasLabels(canvas);
-    const isBotGeneratedCanvas = isExcludedCallGeneratedCanvas(canvas);
+    const isBotGeneratedCanvas = isAnyCallGeneratedCanvas(canvas);
     const isCanvasCreator = canvas.createdBy === currentUserId;
     const menuItems: CanvasCardMenuItem[] = [
       ...(onToggleStar
@@ -1888,6 +1925,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 searchQuery={debouncedSearchQuery}
                 onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
                 excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+                excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
+                onlyRecordingGeneratedCanvases={onlyRecordingGeneratedCanvases}
                 showStarredOnly={showStarredOnly}
                 includeArchived={includeArchived}
                 onlyArchived={onlyArchived}

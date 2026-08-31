@@ -52,6 +52,7 @@ import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
@@ -71,6 +72,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -1129,22 +1131,20 @@ export class EmailService {
       }
     }
 
-    const projectId = channel.projectId;
-
     // Fetch boardId from EmailChannelPreference table
     const emailChannelPreference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
 
-    // Priority: passedBoardId (explicit, from request) > emailChannelPreference.boardId (admin default) > first board in project
+    // Priority: passedBoardId (explicit, from request) > emailChannelPreference.boardId (admin default) > ChannelBoardMapping (isDefault or oldest)
     let configuredBoardId = passedBoardId || emailChannelPreference?.boardId;
 
     if (!configuredBoardId) {
-      logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to first board in project ${projectId}`);
-      const firstBoard = await this.prisma.board.findFirst({ where: { projectId }, orderBy: { createdAt: 'asc' }, select: { id: true } });
-      configuredBoardId = firstBoard?.id;
+      logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to ChannelBoardMapping`);
+      const resolved = await resolveChannelDefaultBoard(this.prisma, channelId);
+      configuredBoardId = resolved?.boardId;
     }
 
     if (!configuredBoardId) {
-      logger.error(`[EmailService] No board found for channel ${channelId} in project ${projectId}`);
+      logger.error(`[EmailService] No board found for channel ${channelId}`);
       throw new Error(`EmailChannelPreference must have a boardId configured. Channel: ${channelId}. Please configure boardId in email_channel_preferences table.`);
     }
 
@@ -1155,11 +1155,7 @@ export class EmailService {
       throw new Error(`Configured boardId ${configuredBoardId} not found in database. Please verify email_channel_preferences.boardId points to a valid board.`);
     }
 
-    // Validate that the board belongs to the same project as the channel
-    if (configuredBoard.projectId !== projectId) {
-      logger.error(`[EmailService] Board project mismatch: boardId ${configuredBoardId} belongs to project ${configuredBoard.projectId}, but channel belongs to project ${projectId}`);
-      throw new Error(`Configured boardId ${configuredBoardId} belongs to different project (${configuredBoard.projectId} vs ${projectId}). Email channel and board must be in the same project.`);
-    }
+    const projectId = configuredBoard.projectId;
 
     const boardId = configuredBoardId;
     logger.info(`[EmailService] Using configured boardId ${boardId} from EmailChannelPreference table`);
@@ -1314,6 +1310,24 @@ export class EmailService {
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
+
+    // Ticket-creating mail only: DEFAULT (inbound) and COMPOSE (outbound-new).
+    // Fire-and-forget — a failure leaves the ticket with no related tickets, no retry.
+    if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
+      ticketDuplicateService.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        userId,
+      }).catch((error: unknown) => {
+        logger.error('[EmailService] Failed to persist duplicate references for ticket', {
+          ticketId: ticket.id,
+          error,
+        });
+      });
+    }
 
     // Enqueue AI classification as a Redis worker job
     await emailClassificationQueue.getQueue().add('classify', {
@@ -2073,7 +2087,6 @@ export class EmailService {
       );
     }
 
-    const projectId = channel.projectId;
     if (sourceName) {
       try {
         const ctx = createBlockingContext({
@@ -2142,6 +2155,7 @@ export class EmailService {
 
     let boardId: string | undefined;
     let groupId: string | null = null;
+    let projectId: string | undefined;
     if (!existingFirstEmail) {
       const externalSource = await this.prisma.externalSource.findUnique({
         where: { id: externalSourceId },
@@ -2150,17 +2164,18 @@ export class EmailService {
       boardId =
         preference?.boardId ?? externalSource?.boardId ?? undefined;
       if (!boardId) {
-        const firstBoard = await this.prisma.board.findFirst({
-          where: { projectId },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
-        });
-        boardId = firstBoard?.id;
+        const resolved = await resolveChannelDefaultBoard(this.prisma, channelId);
+        boardId = resolved?.boardId;
+        projectId = resolved?.projectId ?? undefined;
       }
       if (!boardId) {
         throw new Error(
-          `[EmailService] No board configured for channel ${channelId} (project ${projectId})`,
+          `[EmailService] No board configured for channel ${channelId}`,
         );
+      }
+      if (!projectId) {
+        const board = await this.boardRepository.findById(boardId);
+        projectId = board?.projectId ?? undefined;
       }
       groupId = preference?.assigneeUserGroupId ?? null;
     }
@@ -2227,7 +2242,7 @@ export class EmailService {
             },
           });
 
-          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+          const xyneId = await TicketIdService.generateTicketId(tx, projectId!);
           const createdTicket = await tx.ticket.create({
             data: {
               title: firstEmail.subject,
@@ -2238,7 +2253,7 @@ export class EmailService {
               channelId,
               workspaceId: channel.workspaceId,
               xyneId,
-              projectId,
+              projectId: projectId!,
               boardId: boardId!,
               lastEmailAt: firstEmail.receivedAt ?? new Date(),
               stageName: firstStage.name,
@@ -2519,7 +2534,7 @@ export class EmailService {
       ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${txResult.ticketId}:`, err));
 
       if (groupId) {
-        const ticketForEmit = { id: txResult.ticketId, workspaceId: channel.workspaceId, channelId, boardId: boardId!, projectId, createdBy: userId };
+        const ticketForEmit = { id: txResult.ticketId, workspaceId: channel.workspaceId, channelId, boardId: boardId!, projectId: projectId!, createdBy: userId };
         void emitTicketUpdated({
           ticket: ticketForEmit as Parameters<typeof emitTicketUpdated>[0]['ticket'],
           changes: { userGroupId: { previousValue: null, newValue: groupId } },
@@ -2562,6 +2577,24 @@ export class EmailService {
           error,
         );
       });
+
+      // isNew implies !existingFirstEmail, where projectId is resolved — so this is always
+      // truthy here; the guard is what narrows string | undefined for TS.
+      if (projectId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: txResult.ticketId,
+          ticketCreatedBy: userId,
+          title: firstEmail.subject,
+          description: firstEmail.body,
+          projectId,
+          userId,
+        }).catch((error: unknown) => {
+          logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
+            ticketId: txResult.ticketId,
+            error,
+          });
+        });
+      }
 
       // Enqueue AI classification as a Redis worker job
       await emailClassificationQueue.getQueue().add('classify', {

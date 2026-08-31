@@ -1,12 +1,12 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, UserPlus, X } from 'lucide-react';
+import { SearchDefault as Search, UserPlus, MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Popover } from '../../ui/Popover/Popover';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { useActiveUsers, useSelf } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel, matchesUserQuery } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
@@ -45,13 +45,7 @@ export function AssigneePicker({
   const filteredUsers = useMemo(() => {
     if (!users) return [];
     const q = search.trim().toLowerCase();
-    const matched = !q
-      ? users
-      : users.filter(u => {
-          const name = getUserDisplayName(u).toLowerCase();
-          const email = (u.email ?? '').toLowerCase();
-          return name.includes(q) || email.includes(q);
-        });
+    const matched = !q ? users : users.filter(u => matchesUserQuery(u, search));
     // You first, then channel members, then non-members (kept, since a user who
     // left the channel may still be the assignee). Applies idle and searching.
     const membersFirst = channelMembersFirst(matched, u => u.id, gate.memberIds);

@@ -12,7 +12,11 @@ const SUGGESTION_SAMPLE_SIZE = 100;
  */
 export function useRecordingLabelSuggestions(enabled = true): string[] {
   const [recordings] = useCachedQuery(
-    queries.createdOatsRecordings({ limit: SUGGESTION_SAMPLE_SIZE, start: null }),
+    queries.createdOatsRecordings({
+      limit: SUGGESTION_SAMPLE_SIZE,
+      start: null,
+      participantId: null,
+    }),
     { enabled },
   );
 

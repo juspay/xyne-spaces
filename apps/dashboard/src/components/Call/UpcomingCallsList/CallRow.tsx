@@ -84,6 +84,8 @@ export function CallRow({
             e.stopPropagation();
             onJoinCall(call);
           }}
+          data-track-category='Calls'
+          data-track-name='JOIN_UPCOMING_CALL'
           className={cn(
             'shrink-0 text-sm',
             isActive

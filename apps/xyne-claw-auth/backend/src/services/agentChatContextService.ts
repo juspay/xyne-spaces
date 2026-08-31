@@ -1,11 +1,12 @@
 import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { errMsg } from "../lib/errors.js";
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file";
-// 'collection' / 'file' are not user-searchable via this service (they're
-// picked through the dashboard's KB picker, not via the generic search), so
-// they're intentionally excluded from the search-type enum.
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file" | "folder";
+// 'collection' / 'file' / 'folder' are not user-searchable via this service
+// (they're picked through the dashboard's KB picker, not via the generic
+// search), so they're intentionally excluded from the search-type enum.
 export type ContextItemType = ContextType | "repository";
-export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file"> | "repository" | "all";
+export type ContextSearchType = Exclude<ContextType, "activity" | "collection" | "file" | "folder"> | "repository" | "all";
 
 export interface ContextItem {
   id: string;
@@ -15,11 +16,27 @@ export interface ContextItem {
   meta?: Record<string, unknown>;
 }
 
+/**
+ * What an attached canvas IS, when the attaching surface knows. A recording
+ * attaches two canvases whose rows are indistinguishable — the machine-written
+ * summary and the human's own notes — and they carry very different authority,
+ * so the role travels with the item instead of being guessed from the title.
+ */
+export type CanvasRole = "call-notes" | "call-summary";
+
+const CANVAS_ROLES: readonly CanvasRole[] = ["call-notes", "call-summary"];
+
+function isCanvasRole(value: unknown): value is CanvasRole {
+  return typeof value === "string" && (CANVAS_ROLES as readonly string[]).includes(value);
+}
+
 export interface AttachedContextRef {
   type: ContextType;
   id: string;
   title: string;
   threadId?: string;
+  /** Canvas items only. Absent for a canvas the user picked by hand. */
+  canvasRole?: CanvasRole;
   // Activity-specific fields
   eventName?: string;
   eventCategory?: string;
@@ -118,6 +135,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     call: 0,
     collection: 0,
     file: 0,
+    folder: 0,
   };
 
   for (const raw of input) {
@@ -126,7 +144,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     const type = obj["type"];
     const id = obj["id"];
     const title = obj["title"];
-    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity|collection|file" };
+    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity|collection|file|folder" };
     if (typeof id !== "string" || id.trim().length === 0) return { items: [], error: "attachedContext.id must be a non-empty string" };
     if (typeof title !== "string" || title.trim().length === 0) return { items: [], error: "attachedContext.title must be a non-empty string" };
     const threadId = obj["threadId"];
@@ -147,11 +165,17 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     }
     
     // Build item with all activity-specific fields if applicable
+    const canvasRole = obj["canvasRole"];
+    if (canvasRole != null && !isCanvasRole(canvasRole)) {
+      return { items: [], error: "attachedContext.canvasRole must be one of call-notes|call-summary" };
+    }
+
     const item: AttachedContextRef = {
       type,
       id: id.trim(),
       title: title.trim(),
       ...(typeof threadId === "string" && threadId.trim().length > 0 ? { threadId: threadId.trim() } : {}),
+      ...(isCanvasRole(canvasRole) ? { canvasRole } : {}),
     };
     
     // Add activity-specific fields if this is an activity
@@ -209,7 +233,7 @@ export async function buildAttachedContextPayload(
     try {
       return await resolveSection(item, auth);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       return {
         header: `${labelForType(item.type)} "${item.title}" (id=${item.id})`,
         inlineText: `Unable to resolve attached context: ${message}`,
@@ -231,7 +255,7 @@ export async function buildAttachedContextPayload(
     try {
       sections.unshift(await resolveThreadSection(threadConversationId, auth));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       sections.unshift({
         header: `Spaces thread (conversationId=${threadConversationId})`,
         inlineText: `Unable to resolve thread: ${message}. Read it with \`spaces-messages\` (conversationId=${threadConversationId}).`,
@@ -247,7 +271,7 @@ export async function buildAttachedContextPayload(
     try {
       sections.unshift(await resolveCanvasByViewAccessSection(canvasViewAccessId, auth));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMsg(err);
       sections.unshift({
         header: `Canvas (viewAccessId=${canvasViewAccessId})`,
         inlineText: `Unable to resolve canvas: ${message}. Read it with \`spaces-read-canvas\` (viewAccessId=${canvasViewAccessId}).`,
@@ -277,6 +301,37 @@ export async function buildAttachedContextPayload(
     lines.push("No additional data available.");
   }
 
+  // A recording's Ask AI attaches the call plus up to two canvases that read as
+  // interchangeable documents unless the difference is spelled out. State how to
+  // rank them — and only when such items are actually attached, so ordinary chats
+  // don't carry instructions about documents they don't have.
+  const hasCallItem = sections.some((section) => section.header.startsWith("Call "));
+  const hasNotesCanvas = items.some((item) => item.canvasRole === "call-notes");
+  const hasSummaryCanvas = items.some((item) => item.canvasRole === "call-summary");
+  const callGuidance: string[] = [];
+  if (hasNotesCanvas || hasSummaryCanvas) {
+    callGuidance.push(
+      "",
+      "**How to weigh the attached call material** — these are three different kinds of evidence, not three copies of the same thing:",
+      ...(hasCallItem
+        ? [
+            "- The **transcript** (via the call above) is the verbatim record of what was actually said. It is the source of truth: when the documents and the transcript disagree, the transcript wins, and anything load-bearing gets checked against it.",
+          ]
+        : []),
+      ...(hasNotesCanvas
+        ? [
+            "- **My notes** are human-written and tell you what I cared about and how I framed it — follow my wording and priorities. They are deliberately partial, so never read a gap in them as \"this didn't happen\".",
+          ]
+        : []),
+      ...(hasSummaryCanvas
+        ? [
+            "- The **AI summary** is machine-generated and is orientation only. Treat it as a lead to verify, never as a citable fact on its own.",
+          ]
+        : []),
+      "- Read them together before answering. If my notes and the AI summary conflict, say so plainly and resolve it from the transcript rather than silently picking one.",
+    );
+  }
+
   // Single consolidated guidance block. Kept AFTER the item list so the model
   // reads "here is what's attached" then "here is how to use it", right before
   // the "## Query" that claw appends.
@@ -284,6 +339,8 @@ export async function buildAttachedContextPayload(
     "",
     "---",
     "Refer to these attached item(s) to answer my query. The details above are only a stub — fetch fresh data with each item's noted `spaces-*` / `kb-*` tools before answering, and ground your answer in all of them.",
+    ...callGuidance,
+    ...(callGuidance.length > 0 ? [""] : []),
     "- If my message isn't really a question (just a greeting or small talk), reply normally instead of forcing it onto the attached items.",
     "- If the query is vague, don't guess — search broad: fan out several queries across the org, then converge on the single best-quality answer.",
     "- If anything is ambiguous or you're unsure, ask me before assuming.",
@@ -473,6 +530,7 @@ async function resolveSection(item: AttachedContextRef, auth?: SpacesAuthContext
   if (item.type === "activity") return resolveActivitySection(item);
   if (item.type === "collection") return resolveCollectionSection(item);
   if (item.type === "file") return resolveFileSection(item);
+  if (item.type === "folder") return resolveFolderSection(item);
   return resolveCallSection(item, auth);
 }
 
@@ -497,6 +555,23 @@ async function resolveFileSection(item: AttachedContextRef): Promise<ResolvedCon
   const lines = [
     `File: ${item.title} (fileId=${item.id})`,
     `Fetch: read its full content with \`kb-read-file\` (fileId=${item.id}).`,
+  ];
+  return { header, inlineText: lines.join("\n") };
+}
+
+/** Knowledge Base folder (a non-root collection node) attached from the
+ *  ask-ai v2 picker. Same shape as resolveCollectionSection — the `id` works
+ *  as a `collectionId` arg to kb-list-files/kb-search/kb-read-file exactly
+ *  like a root collection id does, since folders are collection-tree nodes
+ *  too. buildVespaScope (kb-handlers.ts) is what actually handles the
+ *  root-vs-folder distinction when kb-search turns this into a Vespa filter
+ *  — Vespa's collectionId filter only ever matches a doc's ROOT collection,
+ *  so a folder id there expands to explicit docIds instead. */
+async function resolveFolderSection(item: AttachedContextRef): Promise<ResolvedContextSection> {
+  const header = `Folder "${item.title}" (id=${item.id})`;
+  const lines = [
+    `Folder: ${item.title} (collectionId=${item.id})`,
+    `Fetch: enumerate files with \`kb-list-files\` (collectionId=${item.id}); find one with \`kb-search\` (collectionId=${item.id} + query); read a file with \`kb-read-file\` (fileId from kb-list-files).`,
   ];
   return { header, inlineText: lines.join("\n") };
 }
@@ -658,9 +733,29 @@ async function resolveCanvasSection(item: AttachedContextRef, auth?: SpacesAuthC
   const row = rows[0];
 
   const title = row?.title ?? item.title;
-  const header = `Canvas "${title}" (id=${item.id})`;
+  // Label the role in the header too — the model scans headers first, and
+  // "Canvas" alone would make the AI summary and the user's notes look
+  // interchangeable when a recording attaches both.
+  const roleLabel =
+    item.canvasRole === "call-notes"
+      ? "My notes"
+      : item.canvasRole === "call-summary"
+        ? "AI summary"
+        : "Canvas";
+  const header = `${roleLabel} "${title}" (id=${item.id})`;
+  const roleLine =
+    item.canvasRole === "call-notes"
+      ? "What this is: MY OWN notes, typed by me during the call. Human-written and authoritative about what I " +
+        "considered important, but partial by nature — shorthand, half-sentences, and gaps where I stopped typing. " +
+        "Absence of something here does NOT mean it wasn't discussed; check the transcript before concluding that."
+      : item.canvasRole === "call-summary"
+        ? "What this is: an AI-GENERATED summary of the call, not written by a human. Useful for orientation, but it " +
+          "can compress, omit, or get details wrong — verify anything load-bearing against the transcript before " +
+          "repeating it as fact."
+        : null;
   const inlineText = [
     `Canvas: ${title} (id=${item.id})`,
+    ...(roleLine ? [roleLine] : []),
     `Fetch: read its full content with \`spaces-read-canvas\` (id=${item.id}).`,
   ].join("\n");
   return { header, inlineText };
@@ -695,7 +790,7 @@ async function resolveCallSection(item: AttachedContextRef, auth?: SpacesAuthCon
     ...(threadId ? [`Thread conversationId: ${threadId}`] : []),
     ...(call.startsAt ? [`Starts: ${formatDate(call.startsAt)}`] : []),
     ...(call.endsAt ? [`Ends: ${formatDate(call.endsAt)}`] : []),
-    `Fetch: transcript & AI summary with \`spaces-meeting-insights\`; metadata/participants with \`spaces-calls\` (${call.channelId ? `channelId=${call.channelId}, ` : ""}search="${callSearch}")${threadId ? `; read the call thread with \`spaces-messages\` (conversationId=${threadId})` : ""}.`,
+    `Fetch: the FULL transcript with \`spaces-calls\` (callId=${item.id}, includeTranscript=true); search across calls with \`spaces-meeting-insights\`; metadata/participants with \`spaces-calls\` (${call.channelId ? `channelId=${call.channelId}, ` : ""}search="${callSearch}")${threadId ? `; read the call thread with \`spaces-messages\` (conversationId=${threadId})` : ""}.`,
   ];
   return { header, inlineText: lines.join("\n") };
 }
@@ -771,7 +866,8 @@ function isContextType(value: unknown): value is ContextType {
     value === "call" ||
     value === "activity" ||
     value === "collection" ||
-    value === "file"
+    value === "file" ||
+    value === "folder"
   );
 }
 
@@ -782,5 +878,6 @@ function labelForType(type: ContextType): string {
   if (type === "activity") return "Activity";
   if (type === "collection") return "Collection";
   if (type === "file") return "File";
+  if (type === "folder") return "Folder";
   return "Call";
 }

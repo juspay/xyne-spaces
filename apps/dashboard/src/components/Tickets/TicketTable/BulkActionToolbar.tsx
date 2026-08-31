@@ -1,7 +1,14 @@
 import type React from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
-import { CircleCheckBig, UserIcon, X, Layers, Calendar, Tag } from 'lucide-react';
+import {
+  CheckTickCircle as CircleCheckBig,
+  UserDefault as UserIcon,
+  MultipleCrossCancelDefault as X,
+  LayerTwo as Layers,
+  CalendarDefault as Calendar,
+  Tag,
+} from '@xyne/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import type { TicketStatusV2, TicketPriority } from '@xyne/shared';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
@@ -47,6 +54,14 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
 }) => {
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
 
+  // The server rejects an eta in the past, so past days can't be offered. Midnight,
+  // not `new Date()` — otherwise today itself would compare as earlier and be disabled.
+  const startOfToday = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+  }, []);
+
   const assigneeOptions = useAssigneeOptions(users, userGroups);
   const stageOptions = useStageOptions(stages);
 
@@ -55,15 +70,15 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
       className='
     bg-card
     p-2 sm:p-3
-    flex flex-col sm:flex-row sm:items-center w-full md:max-w-[760px] gap-2 sm:gap-4
+    flex flex-col sm:flex-row sm:items-center w-full sm:w-max gap-2 sm:gap-4
     absolute bottom-20 left-1/2 -translate-x-1/2
     right-2 sm:right-auto
     rounded-2xl shadow-2xl border border-border
     z-50
-    max-w-[calc(100vw-1rem)]
+    max-w-[min(100%,calc(100vw-1rem))]
   '
     >
-      <div className='flex flex-wrap lg:flex-nowrap items-center justify-between sm:justify-start gap-1 sm:gap-6 w-full sm:w-auto'>
+      <div className='flex flex-wrap items-center justify-between sm:justify-start gap-1 sm:gap-6 w-full sm:w-auto'>
         {/* Selection Info Section */}
         <div className='flex items-center gap-2 pb-2 sm:pb-0 sm:pr-4 flex-1 sm:flex-none min-w-0'>
           <button
@@ -79,7 +94,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             {selectedCount} {selectedCount === 1 ? 'ticket' : 'tickets'} selected
           </span>
         </div>
-        <div className='flex flex-wrap items-center gap-3 sm:gap-1 md:flex-nowrap justify-start w-full sm:w-auto'>
+        <div className='flex flex-wrap items-center gap-3 sm:gap-1 justify-start w-full sm:w-auto'>
           {/* Assignee Selector */}
           <EntitySelector
             options={assigneeOptions}
@@ -155,6 +170,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               <div className='absolute bottom-full mb-4 left-0 z-50'>
                 <DatePicker
                   selectedDate={null}
+                  minDate={startOfToday}
                   onSelect={date => {
                     onDueDateChange(date);
                     setActiveMenu(null);
@@ -180,8 +196,9 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               variant='inline'
               isOpen={activeMenu === 'stage'}
               onOpenChange={open => setActiveMenu(open ? 'stage' : null)}
-              inputClassName='!bg-transparent text-foreground border-none placeholder:text-foreground hover:bg-background/5 text-xs sm:text-sm px-2'
+              inputClassName='!bg-transparent text-foreground border-none placeholder:text-foreground hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
               inputIcon={<TicketStatusIcon size={14} />}
+              showIndicator={false}
             />
           )}
 

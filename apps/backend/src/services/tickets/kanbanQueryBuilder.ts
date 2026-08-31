@@ -265,15 +265,10 @@ export const buildKanbanTicketWhere = (
       hasItems(filters.stages) ? { stageName: { in: [...filters.stages] } } : undefined,
       hasItems(filters.ticketTypes) ? { ticketType: { in: [...filters.ticketTypes] } } : undefined,
       context.showOverdueOnly
-        ? {
+        ? ({
             statusV2: { notIn: [TicketStatusV2.COMPLETED, TicketStatusV2.CANCELLED] },
-            stageEtaEntries: {
-              some: {
-                stageLeftAt: null,
-                stageEta: { lt: new Date() },
-              },
-            },
-          }
+            isStageOverdue: true,
+          } as Prisma.TicketWhereInput)
         : undefined,
     ]),
   };

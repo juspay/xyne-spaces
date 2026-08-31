@@ -11,6 +11,7 @@
  */
 
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { createLogger, createTraceId } from "../logger.js";
 import {
@@ -56,7 +57,7 @@ async function fetchApprovedFactsBySubsystem(userId: string): Promise<Map<string
   } catch (err) {
     logger.warn("[soul-synth] fetch approved facts failed", {
       userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
   return bySub;
@@ -107,7 +108,7 @@ async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | nul
       ...(data.trace ? { trace: data.trace } : {}),
     };
   } catch (err) {
-    return { content: null, error: err instanceof Error ? err.message : String(err) };
+    return { content: null, error: errMsg(err) };
   }
 }
 

@@ -688,6 +688,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                 `${baseRoute}/${row.channelId}/${row.conversationId}/${row.internalTicketId}?selectedTab=details`,
               )
             }
+            data-track-category='Release'
+            data-track-name='OPEN_RELEASE_CONVERSATION'
           >
             {row.ticketId}
           </button>
@@ -801,6 +803,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                 state: { tab: 'releases', from: 'releaseManager' },
               })
             }
+            data-track-category='Release'
+            data-track-name='BACK_TO_PROJECT_RELEASES'
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
           >
             <ArrowLeft size={20} />
@@ -833,6 +837,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                     const w = window.open(window.location.href, '_blank');
                     w?.focus();
                   }}
+                  data-track-category='Release'
+                  data-track-name='OPEN_RELEASE_IN_NEW_WINDOW'
                   className='p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                   title='Open in new window'
                   aria-label='Open in new window'
@@ -1089,6 +1095,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                         <button
                           type='button'
                           onClick={goPrevArtPage}
+                          data-track-category='Release'
+                          data-track-name='ARTIFACTS_PREV_PAGE'
                           disabled={artPageIndex === 0}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -1097,6 +1105,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                         <button
                           type='button'
                           onClick={goNextArtPage}
+                          data-track-category='Release'
+                          data-track-name='ARTIFACTS_NEXT_PAGE'
                           disabled={!artHasMore}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -1227,6 +1237,8 @@ const ReleaseDetailScreen = (): ReactElement => {
               type='button'
               className='px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors'
               onClick={failureDialog.close}
+              data-track-category='Release'
+              data-track-name='CLOSE_FAILURE_DIALOG'
             >
               Cancel
             </button>
@@ -1237,6 +1249,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                 !failureDialog.state.failureReason.trim() || failureDialog.state.isSubmitting
               }
               onClick={() => void failureDialog.submit()}
+              data-track-category='Release'
+              data-track-name='SUBMIT_FAILURE_DIALOG'
             >
               {failureDialog.state.isSubmitting ? 'Saving...' : 'Submit'}
             </button>

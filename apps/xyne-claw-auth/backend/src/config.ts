@@ -70,7 +70,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -267,6 +267,30 @@ export const CONFIG = {
    */
   searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
   /**
+   * EnterpriseRAG-Bench (Onyx) eval harness — targets a SEPARATE Vespa cluster
+   * holding the benchmark corpus, never the prod-connected one above.
+   *
+   *   ONYX_EVAL_VESPA_ENDPOINT  benchmark Vespa query endpoint — used ONLY by
+   *                             the harness's gold-material fetch by id
+   *                             (§5.3 search); the agent-under-test NEVER
+   *                             touches this — retrieval runs via spaces-search
+   *                             (the prod code path).
+   *   ONYX_EVAL_WORKSPACE_ID    workspaceId stamped on every benchmark doc —
+   *                             used verbatim as the YQL `workspaceId contains`
+   *                             filter for the gold fetch (Vespa only, is a
+   *                             string literal there; no DB validates it).
+   *   ONYX_EVAL_CLAW_TIMEOUT_MS the claw run timeout applied to the S2S call.
+   *
+   * The dispatch fires the SEEDED "onyx-ask-ai" agent row — slug hardcoded in
+   * the worker; bench tool narrowing (onyx-bench-search only) is also
+   * programmatic. Retrieval reaches the benchmark Vespa DIRECTLY
+   * (CONFIG.onyxVespaEndpoint) from the tool child — no spaces backend in the
+   * path.
+   */
+  onyxVespaEndpoint: (process.env["ONYX_EVAL_VESPA_ENDPOINT"] ?? "").replace(/\/+$/, ""),
+  onyxWorkspaceId: process.env["ONYX_EVAL_WORKSPACE_ID"] ?? "",
+  onyxEvalClawTimeoutMs: Number(process.env["ONYX_EVAL_CLAW_TIMEOUT_MS"] ?? 300_000),
+  /**
    * Entity extraction — reads a channel's threads/tickets out of Vespa and
    * discovers the entity types the org talks about. The completions run on
    * xyne-claw (see services/entityExtraction/entityLlmClient.ts), so the model
@@ -346,3 +370,20 @@ export const ERROR_PIPELINE = {
   agentUserId: process.env["ERROR_PIPELINE_AGENT_USER_ID"] ?? "",
   agentTimeoutMs: 30 * 60 * 1000,
 } as const;
+
+export const CLAUDE_OAUTH = {
+  clientId: process.env["CLAUDE_OAUTH_CLIENT_ID"] ?? "",
+  authorizeUrl: process.env["CLAUDE_OAUTH_AUTHORIZE_URL"] ?? "",
+  tokenUrl: process.env["CLAUDE_OAUTH_TOKEN_URL"] ?? "",
+  redirectUri: process.env["CLAUDE_OAUTH_REDIRECT_URI"] ?? "",
+  scopes: process.env["CLAUDE_OAUTH_SCOPES"] ?? "",
+  pkcePrefix: process.env["CLAUDE_OAUTH_PKCE_PREFIX"] ?? "claude-pkce-user:",
+} as const;
+
+export const claudeOAuthConfigured = (): boolean =>
+  Boolean(
+    CLAUDE_OAUTH.clientId &&
+      CLAUDE_OAUTH.authorizeUrl &&
+      CLAUDE_OAUTH.tokenUrl &&
+      CLAUDE_OAUTH.redirectUri,
+  );

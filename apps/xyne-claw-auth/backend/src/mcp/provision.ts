@@ -1,3 +1,4 @@
+import { errMsg } from "../lib/errors.js";
 import {
   mkdtempSync,
   existsSync,
@@ -270,7 +271,7 @@ export async function provisionStdioCommand(
   } catch (err) {
     log.warn(
       `[mcp/provision] ${parsed.spec}: provisioning failed, falling back to npx — ${
-        err instanceof Error ? err.message : String(err)
+        errMsg(err)
       }`,
     );
     return { command: cmd, args };
@@ -298,7 +299,7 @@ export async function prewarmSpec(spec: string): Promise<boolean> {
     return true;
   } catch (err) {
     log.error(
-      `[mcp/provision] prewarm FAILED for ${spec}: ${err instanceof Error ? err.message : String(err)}`,
+      `[mcp/provision] prewarm FAILED for ${spec}: ${errMsg(err)}`,
     );
     return false;
   }

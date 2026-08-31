@@ -8,6 +8,7 @@ import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { websocketService } from '../../services/clients/socketClient';
 import { sendSosAlertEvent, useSosAlertStore, type SosAlert } from '../../stores/sosAlertStore';
+import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton audio element (same leak-avoidance pattern as NotificationHandler).
 let sirenAudio: HTMLAudioElement | null = null;
@@ -141,6 +142,7 @@ export const SosAlertBanner: React.FC = () => {
         alert.actionUrl || (alert.workspaceId ? `/${alert.workspaceId}/chat` : '/chat');
 
       if (alert.workspaceId && alert.workspaceId !== activeWorkspaceId) {
+        if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
         try {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,

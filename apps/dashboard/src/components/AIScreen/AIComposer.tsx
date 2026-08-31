@@ -21,6 +21,7 @@ import {
   Globe,
   Microscope,
   File as FileIcon,
+  Folder,
   BookOpen,
   Ticket,
   Phone,
@@ -33,13 +34,17 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
+import { ModelThinkingSelector } from './ModelThinkingSelector';
+import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
   ContextPickerPanel,
+  attachedContextToSelections,
   type ContextSelections,
+  type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
@@ -61,6 +66,10 @@ export interface AIComposerHandle {
   clearContent: () => void;
   focus: () => void;
   setPrompt: (value: string) => void;
+  /** REPLACE the composer's editable context with these items (empty clears it).
+   *  Used on chat switch to carry the opened conversation's last-turn context
+   *  into the composer. */
+  setContext: (items: AttachedContextItem[]) => void;
 }
 
 interface AIComposerProps {
@@ -132,7 +141,7 @@ function ContextPill({
       <span
         className={cn(
           'max-w-[140px] truncate text-[12.5px] font-medium',
-          accent ? 'text-[#7C3AED]' : 'text-foreground',
+          accent ? 'text-claw-ai-fg' : 'text-foreground',
         )}
       >
         {label}
@@ -233,9 +242,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   }));
   const [collections, setCollections] = useState(() => seed.collections);
   const [fileScopes, setFileScopes] = useState(() => seed.fileScopes);
+  const [folderScopes, setFolderScopes] = useState(() => seed.folderScopes);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
+  // Per-run model pin + thinking level. The model list is the account's allowed
+  // models off the selected agent's shared LiteLLM key; "Default" = the model
+  // configured in the DB. Both reset when the agent changes — a pick from one
+  // agent's list may not exist on another's.
+  const [selectedModel, setSelectedModel] = useState<string | null>(() => seed.model);
+  const [thinkingLevel, setThinkingLevel] = useState<
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | null
+  >(() => seed.thinkingLevel);
 
   // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
   // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
@@ -255,6 +273,22 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   );
   const instant = selectedAgent?.instantAgent === true;
 
+  const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
+  const { data: agentModelsData } = useQuery({
+    queryKey: ['claw-agent-models', modelAgentSlug],
+    queryFn: () => fetchClawAgentModels(modelAgentSlug),
+    staleTime: 60_000,
+  });
+  // Reset the pin/thinking picks when the AGENT changes — but not on mount,
+  // where they may be seeded from initialExtras (landing → chat handoff).
+  const prevModelAgentSlug = useRef(modelAgentSlug);
+  useEffect(() => {
+    if (prevModelAgentSlug.current === modelAgentSlug) return;
+    prevModelAgentSlug.current = modelAgentSlug;
+    setSelectedModel(null);
+    setThinkingLevel(null);
+  }, [modelAgentSlug]);
+
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
     queryFn: async (): Promise<XyneAIConfigResponse> => {
@@ -266,6 +300,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
 
+  const modelPinProvider = agentModelsData?.pinProvider ?? 'litellm';
+
   const buildContext = useCallback(
     (): ComposerContext => ({
       channels: selections.channels,
@@ -275,20 +311,28 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       recordings: selections.recordings,
       collections,
       fileScopes,
+      folderScopes,
       research: null,
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
       instant,
+      model: selectedModel,
+      modelProvider: selectedModel ? modelPinProvider : null,
+      thinkingLevel,
     }),
     [
       selections,
       collections,
       fileScopes,
+      folderScopes,
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
       instant,
+      selectedModel,
+      modelPinProvider,
+      thinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -436,6 +480,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setValue(nextValue);
         window.setTimeout(() => textareaRef.current?.focus(), 0);
       },
+      setContext: (items: AttachedContextItem[]): void => {
+        const next = attachedContextToSelections(items);
+        setSelections({
+          channels: next.channels,
+          tickets: next.tickets,
+          canvases: next.canvases,
+          transcripts: next.transcripts,
+          recordings: next.recordings,
+        });
+        setCollections(next.collections);
+        setFileScopes(next.fileScopes);
+        setFolderScopes(next.folderScopes);
+      },
     }),
     [handleFilesAdded],
   );
@@ -544,8 +601,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections.transcripts.length > 0 ||
       selections.recordings.length > 0 ||
       collections.length > 0 ||
-      fileScopes.length > 0,
-    [attachments, selections, collections, fileScopes],
+      fileScopes.length > 0 ||
+      folderScopes.length > 0,
+    [attachments, selections, collections, fileScopes, folderScopes],
   );
 
   const canSend = value.trim().length > 0;
@@ -653,7 +711,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {collections.map(collection => (
                 <ContextPill
                   key={`co-${collection.id}`}
-                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={collection.name}
                   accent
                   onRemove={() => setCollections(prev => prev.filter(c => c.id !== collection.id))}
@@ -662,10 +720,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {fileScopes.map(fs => (
                 <ContextPill
                   key={`fs-${fs.id}`}
-                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={fs.name}
                   accent
                   onRemove={() => setFileScopes(prev => prev.filter(f => f.id !== fs.id))}
+                />
+              ))}
+              {folderScopes.map(folder => (
+                <ContextPill
+                  key={`fo-${folder.id}`}
+                  icon={<Folder className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
+                  label={folder.name}
+                  accent
+                  onRemove={() => setFolderScopes(prev => prev.filter(f => f.id !== folder.id))}
                 />
               ))}
               {attachments.map(attachment => (
@@ -735,8 +802,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               <ComposerCollectionPicker
                 collections={collections}
                 fileScopes={fileScopes}
+                folderScopes={folderScopes}
                 onCollectionsChange={setCollections}
                 onFileScopesChange={setFileScopes}
+                onFolderScopesChange={setFolderScopes}
               />
               <div className='mx-0.5 h-4 w-px bg-border' />
 
@@ -809,6 +878,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   onAgentChange={slug => onAgentChange?.(slug, buildContext())}
                 />
               )}
+              <ModelThinkingSelector
+                models={agentModelsData?.models ?? []}
+                defaultModel={agentModelsData?.defaultModel ?? null}
+                selectedModel={selectedModel}
+                onSelectModel={setSelectedModel}
+                thinkingLevel={thinkingLevel}
+                onSelectThinking={setThinkingLevel}
+                disabled={pending}
+              />
               <ComposerVoiceButton
                 onTranscript={handleTranscript}
                 onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}

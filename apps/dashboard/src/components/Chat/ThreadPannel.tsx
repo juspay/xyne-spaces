@@ -61,6 +61,7 @@ import { FileBubble } from '../ui/FileBubble/FileBubble';
 import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
+import { ShortcutTooltip } from '../ui/ShortcutTooltip';
 import { mixpanelService } from '../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
@@ -80,7 +81,6 @@ import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { ThreadAssistDock, type TwinSourceInfo } from './TwinReplyDraft/ThreadAssistDock';
-import { TwinReasoningDrawer } from './TwinReplyDraft/TwinReasoningDrawer';
 import { useThreadAssist } from './TwinReplyDraft/useThreadAssist';
 import type {
   PostedTarget,
@@ -477,6 +477,7 @@ export const ThreadMessages = ({
             }
           : undefined;
       return {
+        ...(draft.senderId ? { userId: draft.senderId } : {}),
         ...(draft.senderName ? { name: draft.senderName } : {}),
         ...(text ? { text } : {}),
         ...(onJump ? { onJump } : {}),
@@ -498,7 +499,11 @@ export const ThreadMessages = ({
         recap={assist.recap}
         reply={assist.reply}
         onPosted={handleTwinPosted}
-        onOpenReasoning={setReasoningDraft}
+        onReasoningOpenChange={(d: TwinReplyDraftView, open: boolean) =>
+          setReasoningDraft(open ? d : undefined)
+        }
+        reasoningOpen={!!reasoningDraft}
+        conversationId={derivedConversationId ?? ''}
         resolveSource={resolveTwinSource}
         attached={attached}
         {...(attached && { onBeginEdit: (d: TwinReplyDraftView) => setTwinEditDraftId(d.id) })}
@@ -507,15 +512,6 @@ export const ThreadMessages = ({
     ) : null;
   const twinDock = renderTwinDock(true);
   const twinDockCard = renderTwinDock(false);
-
-  const reasoningDrawer = (
-    <TwinReasoningDrawer
-      open={!!reasoningDraft}
-      draft={reasoningDraft}
-      conversationId={derivedConversationId ?? ''}
-      onClose={() => setReasoningDraft(undefined)}
-    />
-  );
 
   // Check if the route is /threads (with optional workspace prefix)
   const isThreadsRoute = location.pathname.endsWith('/chat/dir/threads');
@@ -996,7 +992,6 @@ export const ThreadMessages = ({
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
-        {reasoningDrawer}
         <Tabs.Root
           value={underTicketActiveTab}
           onValueChange={value => setUnderTicketActiveTab(value as UnderTicketTabType)}
@@ -1180,7 +1175,6 @@ export const ThreadMessages = ({
         <DragAndDropOverlay isVisible={isDragging} />
         {/* pt-3 only (not py-3): a second padded header always follows this one, and its
             own pt-3 supplies the 12px below — py-3 here would double it to 24px. */}
-        {reasoningDrawer}
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
             <div className='flex gap-2 items-center min-w-0'>
@@ -1244,6 +1238,8 @@ export const ThreadMessages = ({
                         threadInfo,
                       });
                     }}
+                    data-track-category='THREAD_PANEL'
+                    data-track-name='OPEN_XYNE_AI_FROM_THREAD'
                     className='h-7 w-7 rounded-lg'
                   >
                     <XyneAIStar />
@@ -1302,7 +1298,12 @@ export const ThreadMessages = ({
                     </DropdownMenuItem>
                   )}
                   {!isMobile && (
-                    <DropdownMenuItem className='gap-2' onClick={openTicketDetailsExpandedView}>
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={openTicketDetailsExpandedView}
+                      data-track-category='THREAD_PANEL'
+                      data-track-name='OPEN_TICKET_EXPANDED_VIEW'
+                    >
                       <MaximizeTwoArrow size={16} className='shrink-0' />
                       <span className='flex-1'>Expand view</span>
                     </DropdownMenuItem>
@@ -1348,12 +1349,22 @@ export const ThreadMessages = ({
                     </DropdownMenuItem>
                   )}
                   {isElectronApp() && !isStandaloneWindow() && (
-                    <DropdownMenuItem className='gap-2' onClick={openInNewWindow}>
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={openInNewWindow}
+                      data-track-category='THREAD_PANEL'
+                      data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
+                    >
                       <ExternalLinkSquare size={16} className='shrink-0' />
                       <span className='flex-1'>Open in new window</span>
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem className='gap-2' onClick={handleCopyTicketViewLink}>
+                  <DropdownMenuItem
+                    className='gap-2'
+                    onClick={handleCopyTicketViewLink}
+                    data-track-category='THREAD_PANEL'
+                    data-track-name='COPY_TICKET_LINK'
+                  >
                     <LinkSlant size={16} className='shrink-0' />
                     <span className='flex-1'>Copy ticket link</span>
                   </DropdownMenuItem>
@@ -1363,6 +1374,8 @@ export const ThreadMessages = ({
                 <Tooltip content='Close'>
                   <Button
                     onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
+                    data-track-category='THREAD_PANEL'
+                    data-track-name='CLOSE_TICKET_DETAILS_THREAD'
                     className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                     variant='ghost'
                     size='sm'
@@ -1423,6 +1436,8 @@ export const ThreadMessages = ({
                         variant='ghost'
                         size='sm'
                         onClick={resolvedOnClose}
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='CLOSE_THREAD_PANEL'
                         aria-label='Close thread panel'
                       >
                         <X size={20} />
@@ -1561,6 +1576,8 @@ export const ThreadMessages = ({
                         className={cn('h-7 w-7 rounded-lg shrink-0', actionIconClass)}
                         style={APP_NO_DRAG_STYLE}
                         onClick={() => void navigate(`/newWindow/chat/dir/${derivedChannelId}`)}
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='BACK_TO_CHANNEL'
                         aria-label='Back to channel'
                       >
                         <ArrowLeft size={16} />
@@ -1610,6 +1627,8 @@ export const ThreadMessages = ({
                             threadInfo,
                           });
                         }}
+                        data-track-category='THREAD_PANEL'
+                        data-track-name='OPEN_XYNE_AI_FROM_THREAD'
                         className='h-7 w-7 rounded-lg'
                       >
                         <XyneAIStar />
@@ -1717,7 +1736,12 @@ export const ThreadMessages = ({
                         </DropdownMenuItem>
                       )}
                       {isElectronApp() && !isStandaloneWindow() && (
-                        <DropdownMenuItem className='gap-2' onClick={openInNewWindow}>
+                        <DropdownMenuItem
+                          className='gap-2'
+                          onClick={openInNewWindow}
+                          data-track-category='THREAD_PANEL'
+                          data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
+                        >
                           <ExternalLinkSquare size={16} className='shrink-0' />
                           <span className='flex-1'>Open in new window</span>
                         </DropdownMenuItem>
@@ -1743,7 +1767,7 @@ export const ThreadMessages = ({
 
                   {/* Close Button */}
                   {(!simpleView || resolvedOnClose) && (
-                    <Tooltip content='Close'>
+                    <ShortcutTooltip label='Close' shortcut='global.toggleRightSidebar'>
                       <Button
                         variant='ghost'
                         size='sm'
@@ -1756,7 +1780,7 @@ export const ThreadMessages = ({
                       >
                         <MultipleCrossCancelDefault size={16} />
                       </Button>
-                    </Tooltip>
+                    </ShortcutTooltip>
                   )}
                 </div>
               </div>

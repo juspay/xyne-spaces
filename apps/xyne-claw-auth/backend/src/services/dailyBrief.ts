@@ -19,6 +19,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
@@ -127,9 +128,11 @@ export async function generateDailyBrief(
     onProgress?: (label: string) => void;
     signal?: AbortSignal;
     trigger?: DailyBriefTrigger;
+    attempt?: number;
   } = {},
 ): Promise<GenerateBriefResult | null> {
   const trigger = opts.trigger ?? "scheduled";
+  const attempt = opts.attempt ?? 1;
   const startedAt = Date.now();
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -209,7 +212,7 @@ export async function generateDailyBrief(
         `[daily-brief] run for ${userId} finished without a dailyBrief payload (lastEvent=${streamResult.lastEventName}, error=${streamResult.errorReason ?? "none"})`,
       );
       await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket);
-      recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt);
+      recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt, attempt);
       return null;
     }
 
@@ -231,13 +234,13 @@ export async function generateDailyBrief(
       generatedAt,
     });
     log.info(`[daily-brief] generated + persisted for ${userId} (session=${sessionId ?? "?"})`);
-    recordDailyBriefGenerated(trigger, "ready", Date.now() - startedAt);
+    recordDailyBriefGenerated(trigger, "ready", Date.now() - startedAt, attempt);
     if (trigger === "scheduled") recordScheduledDeliveryDelay(dateBucket, generatedAt);
     return { brief, content, sessionId };
   } catch (err) {
-    log.error(`[daily-brief] generation failed for ${userId}:`, err instanceof Error ? err.message : String(err));
+    log.error(`[daily-brief] generation failed for ${userId}:`, errMsg(err));
     await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket).catch(() => {});
-    recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt);
+    recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt, attempt);
     return null;
   }
 }

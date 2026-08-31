@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Copy, Phone, Users } from 'lucide-react';
-import { useSelector } from '@xstate/react';
+import { Copy, Phone, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   InvitationResponse,
@@ -11,6 +10,7 @@ import {
   parseSlashCommandArtifactMessage,
   slashCommandArtifactPropsSchema,
   type FlowComponent,
+  type SlashCommandArtifactClosed,
   type SlashCommandArtifactDefinition,
   type SlashCommandArtifactEndedCall,
 } from '@xyne/shared';
@@ -23,15 +23,11 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { formatTimeAmPm } from '../../utils/dateUtils';
 import { formatElapsedTime } from '../../utils/recordingUtils';
 import { Event, logger } from '../../utils/logger';
-import { roomActor } from '../../machines/roomMachine';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { useZero } from '../../hooks/useZero';
+import { mutators } from '../../zero/mutators';
 import { useFlow } from '../flowUI/FlowContext';
 import { useActiveSlashCommandArtifact } from './SlashCommandArtifactSideEffects';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
 
 /**
  * Composer entry for a slash-command artifact. Presentation and side-effect
@@ -234,6 +230,8 @@ interface SlashCommandArtifactCardProps {
   definition: SlashCommandArtifactDefinition;
   /** Summary of the last finished call, baked into the message by the server. */
   endedCallSummary?: SlashCommandArtifactEndedCall;
+  /** Set once the author closed the artifact, baked into the message. */
+  closedSummary?: SlashCommandArtifactClosed;
   messageId?: string;
   conversationId?: string;
   channelId?: string;
@@ -246,6 +244,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
   children,
   definition,
   endedCallSummary,
+  closedSummary,
   messageId,
   conversationId,
   channelId,
@@ -255,24 +254,28 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
 }) => {
   const sender = useUser(senderId ?? '');
   const { user } = useAuthContext();
+  const zero = useZero();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   // Live state comes from the shared artifact subscription — no per-card query.
-  // It is ACTIVE-only, so a row here means this incident's call is current.
+  // It is ACTIVE-only, so a row here means this incident is still open.
   const activeArtifact = useActiveSlashCommandArtifact(messageId);
   // Live call details reuse the app-wide active-call subscription that already
   // backs every "X started a call" message.
   const linkedCall = useActiveCall(activeArtifact?.callExternalId ?? '');
-  const currentCallId = useSelector(roomActor, state => state.context.externalId);
-  const { initiateCall, joinCall, isInCall } = useCallJoinOrInitiate();
+  const { initiateCall, isInCall } = useCallJoinOrInitiate();
   const channelParticipation = useChannelParticipation(channelId ?? '');
   const [isCopying, setIsCopying] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const lastStateDiagnosticSignature = useRef<string | null>(null);
 
   const activeCallExternalId = linkedCall ? activeArtifact?.callExternalId : undefined;
   const hasActiveCall = !!activeCallExternalId;
-  // Once its call ends the artifact leaves the ACTIVE subscription, so the
-  // ended state is read from the summary the server baked into this message.
-  const endedCall = hasActiveCall ? undefined : endedCallSummary;
-  const isInArtifactCall = hasActiveCall && currentCallId === activeCallExternalId;
+  // Both terminal states are read from the message rather than the artifact row:
+  // once an incident finishes it leaves the ACTIVE-only subscription, so a live
+  // row is what makes the client-authored summaries untrustworthy, not the
+  // absence of one.
+  const endedCall = activeArtifact ? undefined : endedCallSummary;
+  const closed = activeArtifact ? undefined : closedSummary;
   const activeDuration = useCallDuration(linkedCall?.startedAt, hasActiveCall);
   const senderName = getUserDisplayName(sender) || 'Someone';
   const activeResponderCount = hasActiveCall
@@ -284,6 +287,9 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
   // in a public channel but must not start a call from it — that would relink
   // the artifact to a fresh call and orphan any call already running.
   const canActOnArtifact = !!channelParticipation;
+  // Closing is the author's call alone; the mutator and its ACL enforce the same
+  // rule server-side, this only decides whether the control is offered.
+  const isArtifactOwner = !!senderId && !!user?.id && senderId === user.id;
   const joinedCount = endedCall?.joinedCount ?? 0;
   const endedDuration = endedCall ? formatElapsedTime(endedCall.durationMs) : '';
 
@@ -304,28 +310,15 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
       artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
       channelKey: getSlashCommandArtifactDiagnosticKey(channelId),
     });
+    // Deliberately channel-scoped: no conversationId, no targetUserIds. An
+    // incident belongs to the whole channel, so every member is invited and sees
+    // "Join" on the channel's live-call message rather than "Request to join",
+    // and the call's system message lands in the channel instead of the thread
+    // the artifact happens to live in.
     initiateCall({
       channelId,
-      // Targeting only the initiator starts a normal call without ringing the channel.
-      targetUserIds: [user.id],
-      ...(conversationId && { conversationId }),
       ...(messageId && { artifactMessageId: messageId }),
     });
-  };
-
-  const handlePrimaryCallAction = (): void => {
-    if (activeCallExternalId) {
-      if (!isInArtifactCall) {
-        logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
-          action: 'join_call_from_card',
-          artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
-          callKey: getSlashCommandArtifactDiagnosticKey(activeCallExternalId),
-        });
-        joinCall({ callId: activeCallExternalId });
-      }
-      return;
-    }
-    startNewCall();
   };
 
   const handleCopyCallLink = async (): Promise<void> => {
@@ -353,7 +346,52 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
     }
   };
 
-  const resolvedState = hasActiveCall ? 'active' : endedCall ? 'completed' : 'pending';
+  const handleCloseArtifact = async (): Promise<void> => {
+    if (!messageId || !isArtifactOwner || isClosing) return;
+    const confirmed = await confirm({
+      title: `Close this ${definition.bodyNoun}?`,
+      description:
+        `The ${definition.badge} alert stops showing for everyone in the channel and no ` +
+        'call can be started from it. This cannot be undone.',
+      confirmLabel: `Close ${definition.bodyNoun}`,
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
+    setIsClosing(true);
+    try {
+      const result = zero.mutate(
+        mutators.messages.closeSlashCommandArtifact({ messageId, timestamp: Date.now() }),
+      );
+      await result.server;
+      logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
+        action: 'close_artifact',
+        artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
+        channelKey: getSlashCommandArtifactDiagnosticKey(channelId),
+      });
+    } catch (error) {
+      logger.warn(Event.SLASH_COMMAND_ARTIFACT_INVARIANT_FAILED, {
+        reason: 'close_artifact_failed',
+        artifactKey: getSlashCommandArtifactDiagnosticKey(messageId),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      toast.error(`Could not close this ${definition.bodyNoun}`);
+    } finally {
+      setIsClosing(false);
+    }
+  };
+
+  const resolvedState = hasActiveCall
+    ? 'active'
+    : closed
+      ? 'closed'
+      : endedCall
+        ? 'completed'
+        : 'pending';
+  // The author can stand an incident down only while nothing is running: during
+  // a call the call itself is the thing to end, and once it has ended or been
+  // closed the artifact is already finished.
+  const canCloseArtifact = isArtifactOwner && resolvedState === 'pending';
   const artifactKey = getSlashCommandArtifactDiagnosticKey(messageId);
   const trackingMetadata = JSON.stringify({
     slashCommandArtifactCommand: definition.command,
@@ -404,12 +442,37 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               : `${joinedCount} joined the call`}
           </span>
         )}
+        {canCloseArtifact && (
+          <button
+            type='button'
+            onClick={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              void handleCloseArtifact();
+            }}
+            disabled={isClosing}
+            className='-mr-1 ml-auto flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
+            aria-label={`Close this ${definition.bodyNoun}`}
+            title={`Close this ${definition.bodyNoun}`}
+            data-prevent-thread
+            data-track-category='SLASH_COMMAND_ARTIFACT'
+            data-track-name='CLOSE_ARTIFACT'
+            data-track-metadata={trackingMetadata}
+          >
+            <X className='size-4' />
+          </button>
+        )}
       </div>
 
       <div className='px-4 py-3 text-sm leading-6 text-foreground'>{children}</div>
 
       <div className='flex flex-wrap items-center gap-2 px-4 pb-4'>
-        {endedCall ? (
+        {resolvedState === 'closed' ? (
+          <div className='inline-flex h-10 items-center gap-2 rounded-lg bg-muted px-3 text-sm font-medium text-muted-foreground'>
+            <X className='size-4' />
+            <span>Closed by {senderName}</span>
+          </div>
+        ) : resolvedState === 'completed' ? (
           <>
             <div className='inline-flex h-10 items-center gap-2 rounded-lg bg-muted px-3 text-sm font-medium text-muted-foreground'>
               <Phone className='size-4' />
@@ -435,64 +498,59 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               Start a new call
             </button>
           </>
-        ) : (
-          <div className='inline-flex overflow-hidden rounded-lg bg-foreground text-background'>
+        ) : resolvedState === 'active' ? (
+          <>
+            {/* Informational only. Joining happens on the channel's live-call
+                message, which the channel-scoped call above puts in front of
+                every member. */}
+            <div
+              className='inline-flex h-10 items-center gap-2 rounded-lg bg-muted px-3 text-sm font-medium text-muted-foreground'
+              aria-live='polite'
+            >
+              <span className='size-2.5 animate-pulse rounded-full bg-orange-500 motion-reduce:animate-none' />
+              <Phone className='size-4' />
+              <span>Call live{activeDuration ? ` · ${activeDuration}` : ''}</span>
+            </div>
             <button
               type='button'
               onClick={event => {
                 event.preventDefault();
                 event.stopPropagation();
-                handlePrimaryCallAction();
+                void handleCopyCallLink();
               }}
-              disabled={!canActOnArtifact || (!hasActiveCall && isInCall)}
-              className='inline-flex h-10 items-center gap-2 px-4 text-sm font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60'
-              aria-label={hasActiveCall && !isInArtifactCall ? 'Join call' : undefined}
+              disabled={!linkedCall?.roomLink || isCopying}
+              className='inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-semibold hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60'
               data-prevent-thread
               data-track-category='SLASH_COMMAND_ARTIFACT'
-              data-track-name={hasActiveCall ? 'JOIN_CALL' : 'START_CALL'}
+              data-track-name='COPY_CALL_LINK'
               data-track-metadata={trackingMetadata}
             >
-              {hasActiveCall && (
-                <span className='size-2.5 animate-pulse rounded-full bg-orange-500' />
-              )}
-              <Phone className='size-4' />
-              {hasActiveCall ? activeDuration || 'Join call' : 'Start call'}
+              <Copy className='size-4' />
+              Copy link
             </button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type='button'
-                  onClick={event => event.stopPropagation()}
-                  className='flex h-10 w-10 items-center justify-center border-l border-background/20 hover:bg-background/10'
-                  aria-label='Call options'
-                  data-prevent-thread
-                  data-track-category='SLASH_COMMAND_ARTIFACT'
-                  data-track-name='OPEN_CALL_OPTIONS'
-                  data-track-metadata={trackingMetadata}
-                >
-                  <ChevronDown className='size-4' />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align='start' side='bottom'>
-                <DropdownMenuItem
-                  disabled={!activeCallExternalId || isCopying}
-                  onClick={event => {
-                    event.stopPropagation();
-                    void handleCopyCallLink();
-                  }}
-                  data-track-category='SLASH_COMMAND_ARTIFACT'
-                  data-track-name='COPY_CALL_LINK'
-                  data-track-metadata={trackingMetadata}
-                >
-                  <Copy className='size-4' />
-                  Copy call link
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          </>
+        ) : (
+          <button
+            type='button'
+            onClick={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              startNewCall();
+            }}
+            disabled={!canActOnArtifact || isInCall}
+            className='inline-flex h-10 items-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60'
+            data-prevent-thread
+            data-track-category='SLASH_COMMAND_ARTIFACT'
+            data-track-name='START_CALL'
+            data-track-metadata={trackingMetadata}
+          >
+            <Phone className='size-4' />
+            Start call
+          </button>
         )}
       </div>
+
+      <ConfirmDialog />
     </section>
   );
 };
@@ -512,6 +570,7 @@ export const SlashCommandArtifactNode: React.FC<{
     <SlashCommandArtifactCard
       definition={definition}
       {...(props.endedCall && { endedCallSummary: props.endedCall })}
+      {...(props.closed && { closedSummary: props.closed })}
       messageId={messageId}
       conversationId={conversationId}
       {...(messageContext?.channelId && { channelId: messageContext.channelId })}

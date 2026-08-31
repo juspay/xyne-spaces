@@ -16,6 +16,7 @@ import {
   TextQuote,
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
+import { Highlighter } from 'lucide-react';
 import type { EditorToolbarProps } from './EditorToolbar.types';
 import Dialog from '../Dialog';
 import Button from '../Button';
@@ -31,6 +32,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     italic: false,
     strike: false,
     underline: false,
+    highlight: false,
     code: false,
     codeBlock: false,
     link: false,
@@ -59,6 +61,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         italic: editor.isActive('italic'),
         strike: editor.isActive('strike'),
         underline: editor.isActive('underline'),
+        highlight: editor.isActive('highlight'),
         code: editor.isActive('code'),
         codeBlock: editor.isActive('codeBlock'),
         link: editor.isActive('link'),
@@ -107,6 +110,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   const handleUnderline = useCallback(() => {
     editor?.chain().focus().toggleUnderline().run();
+  }, [editor]);
+
+  const handleHighlight = useCallback(() => {
+    editor?.chain().focus().toggleHighlight().run();
   }, [editor]);
 
   const handleCode = useCallback(() => {
@@ -263,6 +270,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   if (!editor) return null;
 
+  const supportsHighlight = editor.extensionManager.extensions.some(
+    extension => extension.name === 'highlight',
+  );
+
   const buttonClass = (active: boolean): string =>
     variant === 'compact'
       ? `pt-[6px] pr-[8px] pb-[7px] pl-[8px] rounded transition-all duration-200 ease-in-out ${
@@ -287,6 +298,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <button
               type='button'
               onClick={handleBold}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='FORMAT_BOLD'
               onMouseDown={e => e.preventDefault()}
               className={buttonClass(isActive.bold)}
               aria-label='Bold'
@@ -300,6 +313,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <button
               type='button'
               onClick={handleItalic}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='FORMAT_ITALIC'
               className={buttonClass(isActive.italic)}
               aria-label='Italic'
               aria-pressed={isActive.italic}
@@ -312,6 +327,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <button
               type='button'
               onClick={handleUnderline}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='FORMAT_UNDERLINE'
               className={buttonClass(isActive.underline)}
               aria-label='Underline'
               aria-pressed={isActive.underline}
@@ -324,6 +341,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <button
               type='button'
               onClick={handleStrikethrough}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='FORMAT_STRIKETHROUGH'
               className={buttonClass(isActive.strike)}
               aria-label='Strikethrough'
               aria-pressed={isActive.strike}
@@ -332,10 +351,29 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </button>
           </Tooltip>
 
+          {supportsHighlight && (
+            <Tooltip content='Highlight (⌘⇧H)' delayDuration={1000} skipDelayDuration={1000}>
+              <button
+                type='button'
+                onClick={handleHighlight}
+                data-track-category='EDITOR_TOOLBAR'
+                data-track-name='FORMAT_HIGHLIGHT'
+                onMouseDown={e => e.preventDefault()}
+                className={buttonClass(isActive.highlight)}
+                aria-label='Highlight'
+                aria-pressed={isActive.highlight}
+              >
+                <Highlighter className='h-4 w-4' />
+              </button>
+            </Tooltip>
+          )}
+
           <Tooltip content='Clear Formatting (⌘\\)' delayDuration={1000} skipDelayDuration={1000}>
             <button
               type='button'
               onClick={handleClearFormatting}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='CLEAR_FORMATTING'
               onMouseDown={e => e.preventDefault()}
               className={buttonClass(false)}
               aria-label='Clear formatting'
@@ -350,6 +388,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <button
                   type='button'
                   onClick={handleCode}
+                  data-track-category='EDITOR_TOOLBAR'
+                  data-track-name='FORMAT_INLINE_CODE'
                   onMouseDown={e => e.preventDefault()}
                   className={buttonClass(isActive.code)}
                   aria-label='Inline code'
@@ -363,6 +403,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <button
                   type='button'
                   onClick={handleCodeBlock}
+                  data-track-category='EDITOR_TOOLBAR'
+                  data-track-name='FORMAT_CODE_BLOCK'
                   className={buttonClass(isActive.codeBlock)}
                   aria-label='Code block'
                   aria-pressed={isActive.codeBlock}
@@ -383,6 +425,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <button
                   type='button'
                   onClick={handleLink}
+                  data-track-category='EDITOR_TOOLBAR'
+                  data-track-name='OPEN_LINK_DIALOG'
                   className={buttonClass(isActive.link)}
                   aria-label='Insert link'
                   aria-pressed={isActive.link}
@@ -401,6 +445,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 </h2>
                 <button
                   onClick={() => setOpen(false)}
+                  data-track-category='EDITOR_TOOLBAR'
+                  data-track-name='CLOSE_LINK_DIALOG'
                   className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
                 >
                   <MultipleCrossCancelDefault className='h-4 w-4' />
@@ -433,6 +479,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 {isActive.link && (
                   <Button
                     onClick={removeLink}
+                    data-track-category='EDITOR_TOOLBAR'
+                    data-track-name='REMOVE_LINK'
                     className='rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-300'
                     variant='ghost'
                   >
@@ -442,6 +490,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <div className='flex gap-2 ml-auto'>
                   <Button
                     onClick={() => setOpen(false)}
+                    data-track-category='EDITOR_TOOLBAR'
+                    data-track-name='CANCEL_LINK'
                     variant='secondary'
                     className='rounded px-3 py-1.5 text-xs text-foreground'
                   >
@@ -449,6 +499,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   </Button>
                   <Button
                     onClick={applyLink}
+                    data-track-category='EDITOR_TOOLBAR'
+                    data-track-name='APPLY_LINK'
                     disabled={!linkUrl.trim()}
                     className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
                   >
@@ -475,6 +527,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                     setImageTab('upload');
                     setImageOpen(prev => !prev);
                   }}
+                  data-track-category='EDITOR_TOOLBAR'
+                  data-track-name='OPEN_IMAGE_MENU'
                   className={buttonClass(imageOpen)}
                   aria-label='Insert image'
                 >
@@ -489,6 +543,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                     <button
                       type='button'
                       onClick={() => setImageTab('upload')}
+                      data-track-category='EDITOR_TOOLBAR'
+                      data-track-name='IMAGE_TAB_UPLOAD'
                       className={`flex-1 py-2 text-xs font-medium transition-colors ${imageTab === 'upload' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                       Upload
@@ -496,6 +552,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                     <button
                       type='button'
                       onClick={() => setImageTab('url')}
+                      data-track-category='EDITOR_TOOLBAR'
+                      data-track-name='IMAGE_TAB_URL'
                       className={`flex-1 py-2 text-xs font-medium transition-colors ${imageTab === 'url' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                       URL
@@ -507,6 +565,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                       <button
                         type='button'
                         onClick={() => fileInputRef.current?.click()}
+                        data-track-category='EDITOR_TOOLBAR'
+                        data-track-name='IMAGE_CHOOSE_FROM_DEVICE'
                         className='w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-accent rounded-lg transition-colors'
                       >
                         <PhotoImageDefault className='h-4 w-4 shrink-0' />
@@ -526,6 +586,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                         <button
                           type='button'
                           onClick={insertImageFromUrl}
+                          data-track-category='EDITOR_TOOLBAR'
+                          data-track-name='INSERT_IMAGE_FROM_URL'
                           disabled={!imageUrl.trim()}
                           className='w-full py-1.5 text-xs font-medium bg-primary text-white rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity'
                         >
@@ -546,6 +608,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <button
                 type='button'
                 onClick={handleBlockquote}
+                data-track-category='EDITOR_TOOLBAR'
+                data-track-name='FORMAT_BLOCKQUOTE'
                 className={buttonClass(isActive.blockquote)}
                 aria-label='Quote'
                 aria-pressed={isActive.blockquote}
@@ -559,6 +623,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <button
               type='button'
               onClick={handleBulletList}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='FORMAT_BULLET_LIST'
               className={buttonClass(isActive.bulletList)}
               aria-label='Bullet list'
               aria-pressed={isActive.bulletList}
@@ -571,6 +637,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             <button
               type='button'
               onClick={handleOrderedList}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='FORMAT_NUMBERED_LIST'
               className={buttonClass(isActive.orderedList)}
               aria-label='Numbered list'
               aria-pressed={isActive.orderedList}
@@ -591,6 +659,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <button
                 type='button'
                 onClick={handleTaskList}
+                data-track-category='EDITOR_TOOLBAR'
+                data-track-name='FORMAT_TASK_LIST'
                 className={buttonClass(isActive.taskList)}
                 aria-label='Task list'
                 aria-pressed={isActive.taskList}
@@ -605,6 +675,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <button
                 type='button'
                 onClick={handleBlockquote}
+                data-track-category='EDITOR_TOOLBAR'
+                data-track-name='FORMAT_BLOCKQUOTE'
                 className={buttonClass(isActive.blockquote)}
                 aria-label='Quote'
                 aria-pressed={isActive.blockquote}

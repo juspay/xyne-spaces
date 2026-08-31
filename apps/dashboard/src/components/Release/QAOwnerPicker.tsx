@@ -87,6 +87,8 @@ export const QAOwnerPicker = ({
             type='button'
             className='w-full rounded-sm px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted'
             onClick={() => handleSelect(null)}
+            data-track-category='Release'
+            data-track-name='CLEAR_QA_OWNER'
           >
             Clear
           </button>
@@ -100,6 +102,8 @@ export const QAOwnerPicker = ({
               u.id === testedBy && 'font-semibold',
             )}
             onClick={() => handleSelect(u.id)}
+            data-track-category='Release'
+            data-track-name='SELECT_QA_OWNER'
           >
             {u.name ?? u.email}
           </button>

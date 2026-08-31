@@ -1,4 +1,4 @@
-import { type VespaSearchResponse } from '../types';
+import { ticketSchema, type VespaSearchResponse } from '../types';
 import { highlightText, calculatePrefixBoost } from './highlight';
 import type { ILogger } from '../services/searchService';
 
@@ -102,15 +102,94 @@ const stripHighlightTags = (text: string): string => {
     return { highlighted, wasHighlighted: highlighted.includes('<hi>') };
 };
   /**
+   * Ticket fields scanned by the text-presence escape hatch below: the ticket's own free
+   * text plus its id, and nothing else.
+   *
+   * Deliberately narrow. Metadata like stage/status/boardName/assignee/tags/form values is
+   * reachable through the structured ticket filters, so rescuing on it would only readmit
+   * noise — an unanchored substring match on a low-cardinality field means a query like
+   * "done" or "high" rescues every ticket in that state. `description_clean` is included
+   * because it is the markup-stripped twin of `description`.
+   *
+   * Fields absent from the response's summary class are simply skipped.
+   */
+  const TICKET_TEXT_FIELDS = ['title', 'description', 'description_clean', 'xyneId'];
+
+  /** Lowercased concatenation of a ticket hit's scanned text fields, <hi> tags stripped. */
+  const buildTicketHaystack = (fields: Record<string, any> | undefined): string => {
+    if (!fields) return '';
+    const parts: string[] = [];
+
+    for (const name of TICKET_TEXT_FIELDS) {
+      const value = fields[name];
+      if (typeof value === 'string') {
+        parts.push(value);
+      } else if (Array.isArray(value)) {
+        parts.push(value.filter((v): v is string => typeof v === 'string').join(' '));
+      }
+    }
+
+    return stripHighlightTags(parts.join(' ')).toLowerCase();
+  };
+
+  /**
+   * True when the query is literally present in the ticket's text — either as a whole
+   * phrase or with every term appearing as a substring somewhere.
+   *
+   * This is the recall path that nativeRank cannot express: the ticket rank profile scores
+   * `nativeRank(title, description)` only, so a hit that matched via the 3-gram fields
+   * (title_fuzzy/description_fuzzy) or via xyneId scores exactly 0 and would otherwise be
+   * dropped even though the user's text is right there in the ticket. Purely semantic
+   * (nearestNeighbor) hits have no such literal overlap, so they stay filtered out and do
+   * not leak back in as noise.
+   */
+  const ticketMatchesQueryText = (
+    fields: Record<string, any> | undefined,
+    query: string,
+  ): boolean => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return false;
+
+    const haystack = buildTicketHaystack(fields);
+    if (!haystack) return false;
+    if (haystack.includes(needle)) return true;
+
+    // Substrings are matched per-term so multi-word queries survive reordering, but every
+    // term must be present — "any term" would readmit near-unrelated tickets.
+    const terms = [...new Set(needle.split(/\s+/).filter((t) => t.length >= 2))];
+    return terms.length > 0 && terms.every((term) => haystack.includes(term));
+  };
+
+  /**
+   * Schema name of a hit, read from its Vespa id (`id:<namespace>:<schema>::<docid>`).
+   *
+   * Preferred over the `docType` summary field, which only the `lean` document-summary
+   * exposes — reading it would make the rescue below fire or not depending on which
+   * summary class the caller happened to request. The id is always present.
+   */
+  const schemaOf = (node: any): string => String(node?.id ?? '').split(':')[2] ?? '';
+
+  /**
    * Filter by native rank threshold
+   *
+   * `ticketTextMatch` opts ticket hits into the text-presence escape hatch described above:
+   * pass the (time-keyword-stripped) user query.
+   *
+   * Returns the ids of hits kept only by that escape hatch. They scored below the threshold
+   * and would have been dropped before it existed, so callers sizing up how well the exact
+   * pass did — e.g. deciding whether to run the fuzzy fallback — must not count them as
+   * evidence of success, or the rescue silently suppresses the fallback.
    */
  export const filterByNativeRank = (
     response: VespaSearchResponse,
     threshold: number,
-    logger: ILogger
-  ): VespaSearchResponse => {
+    logger: ILogger,
+    ticketTextMatch?: { query: string }
+  ): { response: VespaSearchResponse; rescuedIds: Set<string> } => {
+    const rescuedIds = new Set<string>();
+
     if (!response.root?.children || response.root.children.length === 0 || threshold <= 0) {
-      return response;
+      return { response, rescuedIds };
     }
 
     const result = processNodesRecursively(response.root.children, (node) => {
@@ -120,13 +199,27 @@ const stripHighlightTags = (text: string): string => {
       if (typeof nativeRank === 'number' && nativeRank >= threshold) {
         return { keep: true, node };
       }
+
+      const isTicketHit = !!ticketTextMatch && schemaOf(node) === ticketSchema;
+
+      if (isTicketHit && ticketMatchesQueryText(node.fields, ticketTextMatch.query)) {
+        rescuedIds.add(String(node.id ?? ''));
+        return { keep: true, node };
+      }
+
       return { keep: false };
     });
 
     if (result.filteredCount > 0) {
       logger.info(`Filtered ${result.filteredCount} results below nativerank threshold ${threshold}`);
     }
-  return buildResponse(response , result.nodes , result.nodes.length , result.filteredCount>0);
+    if (rescuedIds.size > 0) {
+      logger.info(`Kept ${rescuedIds.size} ticket results below nativerank threshold via literal text match`);
+    }
+  return {
+    response: buildResponse(response , result.nodes , result.nodes.length , result.filteredCount>0),
+    rescuedIds,
+  };
 }
 
   /**

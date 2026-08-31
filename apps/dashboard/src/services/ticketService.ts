@@ -10,7 +10,7 @@ export interface CreateTicketRequest {
   title: string;
   description: string;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   ticketType: BaseTicketType;
   boardId?: string;
   sourceConversationId?: string;

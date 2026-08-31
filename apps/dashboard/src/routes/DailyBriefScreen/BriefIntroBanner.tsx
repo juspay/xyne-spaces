@@ -5,9 +5,20 @@ import { cn } from '@/utils/classNames';
 interface BriefIntroBannerProps {
   onSeeMore: () => void;
   onDismiss: () => void;
+  /** Master opt-in for the scheduled brief. Undefined while the config is still loading. */
+  briefEnabled?: boolean | undefined;
+  onEnableBrief?: (() => void) | undefined;
+  enabling?: boolean | undefined;
 }
 
-export function BriefIntroBanner({ onSeeMore, onDismiss }: BriefIntroBannerProps): ReactElement {
+export function BriefIntroBanner({
+  onSeeMore,
+  onDismiss,
+  briefEnabled,
+  onEnableBrief,
+  enabling = false,
+}: BriefIntroBannerProps): ReactElement {
+  const showEnable = briefEnabled === false && onEnableBrief !== undefined;
   return (
     <div
       className={cn(
@@ -33,15 +44,34 @@ export function BriefIntroBanner({ onSeeMore, onDismiss }: BriefIntroBannerProps
         <p className='text-[16px] font-normal leading-[20px] text-foreground/80'>
           Everything that needs you, is overdue, waiting, and assigned to you summarized
         </p>
-        <button
-          type='button'
-          onClick={onSeeMore}
-          data-track-category='DailyBrief'
-          data-track-name='daily-brief-intro-see-more'
-          className='mt-1 flex h-7 items-center rounded-[8px] border border-border bg-background px-2.5 text-[14px] font-semibold leading-[20px] text-foreground shadow-sm transition-colors hover:bg-accent'
-        >
-          Learn more
-        </button>
+        {showEnable && (
+          <p className='text-[13px] leading-[18px] text-muted-foreground'>
+            You are not set up to receive this each morning yet.
+          </p>
+        )}
+        <div className='mt-1 flex items-center gap-2'>
+          {showEnable && (
+            <button
+              type='button'
+              onClick={onEnableBrief}
+              disabled={enabling}
+              data-track-category='DailyBrief'
+              data-track-name='daily-brief-intro-enable'
+              className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50'
+            >
+              {enabling ? 'Turning on…' : 'Turn on morning brief'}
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={onSeeMore}
+            data-track-category='DailyBrief'
+            data-track-name='daily-brief-intro-see-more'
+            className='flex h-7 items-center rounded-[8px] border border-border bg-background px-2.5 text-[14px] font-semibold leading-[20px] text-foreground shadow-sm transition-colors hover:bg-accent'
+          >
+            Learn more
+          </button>
+        </div>
       </div>
     </div>
   );

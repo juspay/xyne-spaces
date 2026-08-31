@@ -51,6 +51,11 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 
+const RecordingParticipantsCommandSchema = z.object({
+  action: z.enum(['add', 'remove']),
+  userId: z.string().min(1).max(64),
+});
+
 const UpdateHeadlessRecordingSchema = z
   .object({
     title: z.string().trim().min(1).max(255).optional(),
@@ -64,6 +69,9 @@ const UpdateHeadlessRecordingSchema = z
 
 const RegenerateHeadlessSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
+  // Optional explicit model tier (e.g. the "Try the thinking model" button).
+  // Omitted → the creator's saved preference is used.
+  modelType: z.enum(['fast', 'thinking']).optional(),
 });
 
 export class CallController {
@@ -400,7 +408,14 @@ export class CallController {
         conversationId,
         artifactMessageId,
         sdlcLink,
+        summaryModelPreference,
       } = req.body;
+      // Recording summary LLM tier the client carried from its localStorage;
+      // stamped onto the detailed summary canvas so headless call-end
+      // auto-generation can honour a 'thinking' default. Anything but explicit
+      // 'thinking' is 'fast'.
+      const summaryModelPref: 'fast' | 'thinking' =
+        summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -429,6 +444,10 @@ export class CallController {
         stage = 'notes_canvas_creation';
         await canvasAuthService.createCanvasForUser(notesCanvasId, userId, {
           title: 'Untitled Notes',
+          metadata: {
+            source: 'call_notes',
+            callId: callExternalId,
+          },
         });
 
         stage = 'detailed_summary_canvas_creation';
@@ -450,6 +469,7 @@ export class CallController {
           undefined,
           undefined,
           req.user!.workspaceId,
+          { summaryModelPreference: summaryModelPref },
         );
         if (!detailedSummaryCanvasId) {
           throw new Error('Failed to create detailed summary canvas');
@@ -560,8 +580,10 @@ export class CallController {
       // No pre-flight validation of artifactMessageId: every artifact write is
       // scoped to the call's channel (see setSlashCommandArtifactLifecycle), so
       // an id that does not belong to this channel matches zero rows.
+      // Not gated on conversationId — an artifact's call is channel-scoped even
+      // though the artifact message itself may live inside a thread.
       const linkedArtifactMessageId =
-        typeof artifactMessageId === 'string' && conversationId ? artifactMessageId : undefined;
+        typeof artifactMessageId === 'string' ? artifactMessageId : undefined;
 
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
@@ -623,6 +645,20 @@ export class CallController {
               data: { metadata: restMeta as Prisma.InputJsonValue },
             });
             queueCallVespaFeed(existingCall.id, { source: CallVespaFeedSource.CallControllerInitiateCallClearRemovedByHostExistingRoom });
+          }
+
+          // A channel already running a call is the call this incident should
+          // use — adopt it rather than leaving the artifact card stuck pending.
+          if (linkedArtifactMessageId && existingCall.channelId) {
+            stage = 'existing_call_artifact_link';
+            const linked = await repositories.calls.linkArtifactToActiveCall({
+              callId: existingCall.id,
+              callExternalId: existingCall.externalId,
+              channelId: existingCall.channelId,
+              artifactMessageId: linkedArtifactMessageId,
+              metadata: existingCall.metadata,
+            });
+            logger.info(`[${existingCall.externalId}] artifact_link_on_existing_call | linked=${linked}, correlation_id=${correlationId}`);
           }
 
           // Room exists, generate token to join the existing call
@@ -733,7 +769,6 @@ export class CallController {
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
-        projectId: channel.projectId,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
         sttModel: sttModel || 'azure',
@@ -941,7 +976,6 @@ export class CallController {
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
-          projectId: channel.projectId,
           createdBy: call.createdByUserId,
           ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
         });
@@ -1406,6 +1440,7 @@ export class CallController {
           title: call.title,
           status: call.status,
           createdByUserId: call.createdByUserId,
+          visibility: call.visibility,
           startedAt: call.startedAt,
           endedAt: call.endedAt,
           durationMs: call.endedAt
@@ -1450,6 +1485,13 @@ export class CallController {
               : null,
           // Google Docs exported from this recording's summary, newest first.
           googleDocs: readRecordingGoogleDocLinks(call.metadata),
+          // Which model tier produced the current summary. `null` for recordings
+          // generated before this feature — the frontend treats null as "offer the
+          // thinking-model upgrade" (only an explicit 'thinking' hides it).
+          summaryModelUsed:
+            callMetadata?.summaryModelUsed === 'fast' || callMetadata?.summaryModelUsed === 'thinking'
+              ? (callMetadata.summaryModelUsed as 'fast' | 'thinking')
+              : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
@@ -1457,6 +1499,54 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to fetch recording detail:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch recording' });
+    }
+  };
+
+  manageRecordingParticipants = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const input = RecordingParticipantsCommandSchema.parse(req.body);
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      if (input.action === 'add') {
+        const participant = await repositories.users.findById(input.userId);
+        if (
+          !participant ||
+          participant.workspaceId !== req.user!.workspaceId ||
+          participant.leftAt !== null
+        ) {
+          res.status(400).json({ success: false, error: 'User not found in this workspace' });
+          return;
+        }
+      }
+
+      await repositories.calls.updateRecordingParticipants(callId, input.action, input.userId);
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to manage recording participants', { error, callId });
+      res.status(400).json({ success: false, error: 'Failed to update participants' });
     }
   };
 
@@ -1504,9 +1594,16 @@ export class CallController {
         }
       }
 
+      // Labels arrive as a mix of already-applied Tag ids and raw text just typed
+      // in the dashboard — resolve creates a real Tag row (method=manual) for any
+      // raw text, so Call.labels only ever holds Tag ids, never bare strings.
+      const resolvedLabels = input.labels
+        ? await noteTakerTranscriptService.resolveLabelsToTagIds(call, input.labels)
+        : undefined;
+
       await repositories.calls.update(call.id, {
         ...(input.title ? { title: input.title } : {}),
-        ...(input.labels ? { labels: [...new Set(input.labels)] } : {}),
+        ...(resolvedLabels ? { labels: resolvedLabels } : {}),
         ...(input.markedItems !== undefined
           ? { markedItems: input.markedItems as Prisma.InputJsonValue[] }
           : {}),
@@ -1583,6 +1680,7 @@ export class CallController {
       const result = await noteTakerTranscriptService.regenerateSummary(
         call,
         input.summaryTemplateId,
+        input.modelType,
       );
       if (!result) {
         res.status(404).json({
@@ -1600,6 +1698,53 @@ export class CallController {
       }
       logger.error(`[${callId}] Failed to regenerate recording summary`, error);
       res.status(500).json({ success: false, error: 'Failed to regenerate recording summary' });
+    }
+  };
+
+  /**
+   * POST /api/calls/recordings/:callId/generate-labels
+   * Generate topical labels for a headless recording on demand (list-view action),
+   * mirroring the auto-generation that normally runs off the transcript-ready webhook.
+   */
+  regenerateRecordingLabels = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (
+        !call ||
+        call.callType !== CallType.HEADLESS ||
+        (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
+      ) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const labelIds = await noteTakerTranscriptService.regenerateLabels(call);
+      if (labelIds === null) {
+        res.status(404).json({
+          success: false,
+          error: 'Transcript is not available',
+        });
+        return;
+      }
+
+      res.json({ success: true, labelIds });
+    } catch (error) {
+      logger.error(`[${callId}] Failed to generate recording labels`, error);
+      res.status(500).json({ success: false, error: 'Failed to generate recording labels' });
     }
   };
 

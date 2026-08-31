@@ -526,6 +526,39 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
+// GET /:id/versions — full lineage (all versions) this automation belongs to, newest first
+router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    // Scope by workspaceId so a user cannot read another tenant's lineage.
+    const workflow = await db.workflow.findFirst({
+      where: {
+        id: req.params.id,
+        workflowType: AUTOMATION_WORKFLOW_TYPE,
+        workspaceId: auth.workspaceId,
+      },
+    });
+    if (!workflow) {
+      res.status(404).json({ success: false, error: 'Automation not found' });
+      return;
+    }
+
+    const seriesId = workflow.automationSeriesId ?? workflow.id;
+    const versions = (await approvalService.listLineageVersions(seriesId)).filter(
+      v => v.workspaceId === auth.workspaceId,
+    );
+    res.json({ success: true, data: versions, timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error('[automations] list versions failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to list automation versions' });
+  }
+});
+
 // PUT /:id — create a new DRAFT version in the same lineage (automationSeriesId preserved)
 router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {

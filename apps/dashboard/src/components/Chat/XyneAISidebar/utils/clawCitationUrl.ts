@@ -69,8 +69,12 @@ export function buildClawCitationUrl(citation: ClawCitation): string | null {
     return `/chat/dir/${citation.channelId}`;
   }
 
-  if (citation.kind === 'canvas' && citation.canvasId) {
-    return `/chat/canvas/${citation.canvasId}`;
+  // Canvas citations key on `viewAccessId` (what claw emits); `canvasId` is a
+  // legacy fallback and is normally unset for kind="canvas".
+  const canvasKey =
+    citation.kind === 'canvas' ? citation.viewAccessId || citation.canvasId : undefined;
+  if (citation.kind === 'canvas' && canvasKey) {
+    return `/chat/canvas/${canvasKey}`;
   }
 
   // Note-taker recordings have no channel and no thread, so they can't be cited

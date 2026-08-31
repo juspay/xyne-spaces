@@ -23,8 +23,8 @@ const ITEMS_PER_PAGE = 15;
 type AppsView = 'installed' | 'org' | 'marketplace';
 
 const VIEW_TABS: { value: AppsView; label: string }[] = [
-  { value: 'installed', label: 'Installed' },
   { value: 'org', label: 'Org Apps' },
+  { value: 'installed', label: 'Installed' },
   { value: 'marketplace', label: 'Marketplace' },
 ];
 
@@ -39,7 +39,7 @@ const AppsScreen = (): ReactElement => {
   const currentPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
   const view: AppsView = isAppsView(searchParams.get('view'))
     ? (searchParams.get('view') as AppsView)
-    : 'installed';
+    : 'org';
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -487,7 +487,14 @@ const AppsScreen = (): ReactElement => {
                 Showing {filteredApps.length} of {searchTotal}
               </span>
               {hasMore && (
-                <Button variant='outline' size='sm' onClick={loadMore} disabled={isSearching}>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={loadMore}
+                  data-track-category='Apps'
+                  data-track-name='LOAD_MORE_APPS'
+                  disabled={isSearching}
+                >
                   {isSearching ? 'Loading…' : 'Load more'}
                 </Button>
               )}
@@ -501,6 +508,8 @@ const AppsScreen = (): ReactElement => {
                 variant='outline'
                 size='sm'
                 onClick={handlePreviousPage}
+                data-track-category='Apps'
+                data-track-name='APPS_PREV_PAGE'
                 disabled={!hasPreviousPage}
                 className='gap-1'
               >
@@ -512,6 +521,8 @@ const AppsScreen = (): ReactElement => {
                 variant='outline'
                 size='sm'
                 onClick={handleNextPage}
+                data-track-category='Apps'
+                data-track-name='APPS_NEXT_PAGE'
                 disabled={!hasNextPage}
                 className='gap-1'
               >

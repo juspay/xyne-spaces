@@ -11,7 +11,7 @@ import {
   AuthProvider,
   ChannelRole,
   CanvasRole,
-  ChannelScopeType, OrgRole, UserStatus } from '@xyne/shared';
+  OrgRole, UserStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
@@ -164,15 +164,11 @@ export class InvitationService {
     }
 
     if (invitationRole === 'GUEST' && (!params.entityId || !params.entityType)) {
-      throw new Error('Guest invitations must target a project, channel, or canvas');
-    }
-
-    if (invitationRole === 'GUEST' && params.entityType === GuestEntity.PROJECT && !params.channelId) {
-      throw new Error('Guest invitations to a project must specify a channel');
+      throw new Error('Guest invitations must target a channel or canvas');
     }
 
     if (invitationRole === 'GUEST' && params.entityId && params.entityType) {
-      await this.validateGuestEntity(params.entityId, params.entityType, workspaceId, params.channelId);
+      await this.validateGuestEntity(params.entityId, params.entityType, workspaceId);
     }
 
     const selectedOrg = await this.prisma.organization.findUnique({
@@ -453,7 +449,6 @@ export class InvitationService {
     entityId: string,
     entityType: string,
     workspaceId: string,
-    channelId?: string,
   ): Promise<void> {
     switch (entityType) {
       case GuestEntity.CHANNEL: {
@@ -498,33 +493,6 @@ export class InvitationService {
           });
           if (!creator) {
             throw new Error('Guest invitation target canvas is not in this workspace');
-          }
-        }
-        return;
-      }
-
-      case GuestEntity.PROJECT: {
-        const project = await this.prisma.project.findFirst({
-          where: { id: entityId, workspaceId },
-          select: { id: true },
-        });
-        if (!project) {
-          throw new Error('Guest invitation target project does not exist in this workspace');
-        }
-
-        if (channelId) {
-          const channel = await this.prisma.channel.findFirst({
-            where: {
-              id: channelId,
-              projectId: entityId,
-              workspaceId,
-              scopeType: { notIn: [ChannelScopeType.DM, ChannelScopeType.GROUP_DM] },
-              isArchived: false,
-            },
-            select: { id: true },
-          });
-          if (!channel) {
-            throw new Error('Guest invitation target channel does not exist in this project');
           }
         }
         return;
@@ -606,38 +574,6 @@ export class InvitationService {
         },
       });
       return `/${workspaceId}/chat/canvas/${entityId}`;
-    }
-
-    if (entityType === GuestEntity.PROJECT) {
-      const project = await tx.project.findFirst({
-        where: { id: entityId, workspaceId },
-        select: { id: true },
-      });
-      if (!project) {
-        throw new Error('Guest invitation target project does not exist in this workspace');
-      }
-
-      const targetChannelId = invitation.channelId;
-      if (!targetChannelId) {
-        throw new Error('Guest invitation to project is missing the target channel');
-      }
-
-      const channel = await tx.channel.findFirst({
-        where: {
-          id: targetChannelId,
-          projectId: entityId,
-          workspaceId,
-          scopeType: { notIn: [ChannelScopeType.DM, ChannelScopeType.GROUP_DM] },
-          isArchived: false,
-        },
-        select: { id: true },
-      });
-      if (!channel) {
-        throw new Error('Guest invitation target channel does not exist in this project');
-      }
-
-      await this.ensureChannelGuestState(targetChannelId, userId, workspaceId, tx);
-      return `/${workspaceId}/chat/dir/${targetChannelId}`;
     }
 
     throw new Error(`Unsupported guest invitation entity type: ${entityType}`);

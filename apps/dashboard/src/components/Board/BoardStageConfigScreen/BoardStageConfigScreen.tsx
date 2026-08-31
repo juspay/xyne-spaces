@@ -2237,7 +2237,13 @@ const BoardStageConfigScreen = ({
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
         <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Board not found</p>
-          <Button onClick={onClose}>Close</Button>
+          <Button
+            onClick={onClose}
+            data-track-category='board_config'
+            data-track-name='CLOSE_STAGE_CONFIG'
+          >
+            Close
+          </Button>
         </div>
       </div>
     );
@@ -2266,12 +2272,19 @@ const BoardStageConfigScreen = ({
           </div>
 
           <div className='flex items-center gap-3'>
-            <Button variant='secondary' onClick={onClose}>
+            <Button
+              variant='secondary'
+              onClick={onClose}
+              data-track-category='board_config'
+              data-track-name='CANCEL_STAGE_CONFIG'
+            >
               Cancel
             </Button>
             <Button
               className='bg-[#6276BE] hover:bg-[#5060A0] text-white'
               onClick={() => void handleSave()}
+              data-track-category='board_config'
+              data-track-name='SAVE_STAGE_CONFIG'
             >
               {onNext ? 'Next' : 'Finish'}
             </Button>

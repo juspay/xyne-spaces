@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadCustomTools } from "../src/custom-tools.js";
 import {
   DESIGN_SYSTEM_MAX_CHARS,
+  SPEC_QUESTION_OUTLINE,
   buildDesignSystemPromptInjection,
   parseTaskCommand,
   resolveTaskCommandMode,
@@ -217,5 +218,62 @@ describe("/record-skill task command", () => {
 
   it("executes immediately instead of entering plan mode", () => {
     expect(resolveTaskCommandMode("/record-skill", "plan")).toBe("auto");
+  });
+});
+
+describe("/spec task command", () => {
+  it("matches only the leading command token", () => {
+    expect(parseTaskCommand("/spec write the spec for XYNE-1")?.command).toBe("/spec");
+    expect(parseTaskCommand("  /SPEC\nXYNE-1")?.command).toBe("/spec");
+    expect(parseTaskCommand("please /spec XYNE-1")).toBeNull();
+    expect(parseTaskCommand("/specs XYNE-1")).toBeNull();
+  });
+
+  it("binds the run with a command-owned skill and delivery contract", () => {
+    const command = parseTaskCommand("/spec XYNE-1");
+    expect(command?.requiredTool).toBeUndefined();
+    expect(command?.skillPaths).toEqual(["spec-skills"]);
+    expect(command?.instruction).toContain("Ticket Specs skill");
+    const outputFormat = command?.agentConfigOverlay?.["outputFormat"] as
+      | { type?: string; template?: string }
+      | undefined;
+    expect(outputFormat?.type).toBe("markdown");
+    expect(outputFormat?.template).toBe(SPEC_QUESTION_OUTLINE);
+  });
+
+  it("keeps the first turn as a context-first interview", () => {
+    for (const heading of [
+      "Problem statement",
+      "Solutioning",
+      "Test cases",
+      "Implementation details",
+      "Out of scope",
+    ]) {
+      expect(SPEC_QUESTION_OUTLINE).toContain(heading);
+    }
+    expect(SPEC_QUESTION_OUTLINE).toContain("summarize the ticket/context");
+    expect(SPEC_QUESTION_OUTLINE).toContain("existing description/Specification state");
+    expect(SPEC_QUESTION_OUTLINE).toContain("contextual clarification questions");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT mechanically ask");
+  });
+
+  it("allows technical context but prevents implementation-derived specs and same-turn writes", () => {
+    expect(SPEC_QUESTION_OUTLINE).toContain("technical context or code/PR context");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT derive requirement intent solely from implementation");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Ask the minimum useful batch of questions");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT create, draft, or update the Specification");
+  });
+
+  it("keeps the overlay off the agent's own config", () => {
+    const savedConfig: Record<string, unknown> = { tools: { custom: ["todo-read"] } };
+    const command = parseTaskCommand("/spec XYNE-1");
+    const merged = { ...savedConfig, ...(command?.agentConfigOverlay ?? {}) };
+
+    expect(merged["outputFormat"]).toBeDefined();
+    expect(savedConfig["outputFormat"]).toBeUndefined();
+  });
+
+  it("executes immediately instead of entering plan mode", () => {
+    expect(resolveTaskCommandMode("/spec XYNE-1", "plan")).toBe("auto");
   });
 });

@@ -169,6 +169,8 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
                 onClick={() => {
                   grantGroupMentionAccess(props.groupId, role);
                 }}
+                data-track-category='CANVAS'
+                data-track-name='GRANT_GROUP_MENTION_ACCESS'
               >
                 {formatCanvasRoleLabel(role)}
               </Button>
@@ -207,6 +209,8 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
                   role,
                 );
               }}
+              data-track-category='CANVAS'
+              data-track-name='GRANT_USER_MENTION_ACCESS'
             >
               {role.charAt(0) + role.slice(1).toLowerCase()}
             </Button>

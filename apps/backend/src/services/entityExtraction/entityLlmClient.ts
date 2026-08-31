@@ -36,7 +36,9 @@ async function callLiteLLM(messages: Array<{ role: string; content: string }>): 
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.litellm.apiKey}`,
+        // The same dedicated key thread-type classification runs on: one service account
+        // for the classification workers, so their limits are not the gateway's shared ones.
+        Authorization: `Bearer ${config.litellm.threadTypeClassificationApiKey || config.litellm.apiKey}`,
       },
       body: JSON.stringify({
         model: config.entityExtraction.model,

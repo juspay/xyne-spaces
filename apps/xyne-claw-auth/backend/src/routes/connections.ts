@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -17,141 +18,121 @@ const router = Router();
 
 router.use("/:userId", pinUserIdParam);
 
-router.get("/:userId/connections", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const userId = req.params.userId;
+router.get("/:userId/connections", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
+  const userId = req.params.userId;
 
-    const connections = await prisma.userMcpConnection.findMany({
-      where: { userId },
-      include: { mcpServer: true },
-      orderBy: { createdAt: "desc" },
-    });
+  const connections = await prisma.userMcpConnection.findMany({
+    where: { userId },
+    include: { mcpServer: true },
+    orderBy: { createdAt: "desc" },
+  });
 
-    const data = connections.map((c: typeof connections[number]) => ({
-      id: c.id,
-      userId: c.userId,
-      mcpServerId: c.mcpServerId,
-      mcpServer: c.mcpServer,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-    }));
+  const data = connections.map((c: typeof connections[number]) => ({
+    id: c.id,
+    userId: c.userId,
+    mcpServerId: c.mcpServerId,
+    mcpServer: c.mcpServer,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  }));
 
-    res.json({ success: true, data });
-  } catch (err) {
-    log.error("[connections] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  ok(res, data);
+}));
+
+router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
+  const userId = req.params.userId;
+  const { mcpServerId, credentials } = req.body as {
+    mcpServerId?: string;
+    credentials?: Record<string, unknown>;
+  };
+
+  if (!mcpServerId || typeof mcpServerId !== "string") {
+    throw badRequest("mcpServerId is required");
   }
-});
 
-router.post("/:userId/connections", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const userId = req.params.userId;
-    const { mcpServerId, credentials } = req.body as {
-      mcpServerId?: string;
-      credentials?: Record<string, unknown>;
-    };
-
-    if (!mcpServerId || typeof mcpServerId !== "string") {
-      res.status(400).json({ success: false, error: "mcpServerId is required" });
-      return;
-    }
-
-    if (!credentials || typeof credentials !== "object") {
-      res.status(400).json({ success: false, error: "credentials is required and must be an object" });
-      return;
-    }
-
-    const serverExists = await prisma.mcpServer.findUnique({ where: { id: mcpServerId } });
-    if (!serverExists) {
-      res.status(404).json({ success: false, error: "MCP server not found" });
-      return;
-    }
-
-    const validation = await validateCredentials(serverExists.type, credentials);
-    if (!validation.valid) {
-      res.status(400).json({ success: false, error: validation.error });
-      return;
-    }
-
-    const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
-
-    const connection = await prisma.userMcpConnection.upsert({
-      where: { userId_mcpServerId: { userId, mcpServerId } },
-      create: {
-        userId,
-        mcpServerId,
-        encryptedCreds: encrypted.ciphertext,
-        iv: encrypted.iv,
-        authTag: encrypted.authTag,
-      },
-      update: {
-        encryptedCreds: encrypted.ciphertext,
-        iv: encrypted.iv,
-        authTag: encrypted.authTag,
-      },
-      include: { mcpServer: true },
-    });
-
-    // Auto-register tools from this MCP server. First evict any cached MCP
-    // child process for this user+server — its env was baked at spawn time
-    // and won't pick up the new credentials we just wrote (token, sessionId,
-    // etc.) without a respawn. Without this, Spaces' x-session-id refresh
-    // path silently breaks because the cached child has the OLD env.
-    await evictSession(userId, serverExists.type).catch((err) => {
-      log.error(`[connections] evictSession failed for ${serverExists.type}:`, err);
-    });
-    if (await hasConnectorDefinition(serverExists.type)) {
-      syncToolsForServer(userId, serverExists.type, serverExists.name, credentials as Record<string, unknown>).catch((err) => {
-        log.error(`[connections] tool sync failed for ${serverExists.type}:`, err);
-      });
-    }
-
-    res.status(201).json({
-      success: true,
-      data: {
-        id: connection.id,
-        userId: connection.userId,
-        mcpServerId: connection.mcpServerId,
-        mcpServer: connection.mcpServer,
-        createdAt: connection.createdAt,
-        updatedAt: connection.updatedAt,
-      },
-    });
-  } catch (err) {
-    log.error("[connections] create error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (!credentials || typeof credentials !== "object") {
+    throw badRequest("credentials is required and must be an object");
   }
-});
 
-router.delete("/:userId/connections/:id", async (req: Request<{ userId: string; id: string }>, res: Response) => {
-  try {
-    const userId = req.params.userId;
-    const id = req.params.id;
-
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { id, userId },
-      include: { mcpServer: true },
-    });
-
-    if (!connection) {
-      res.status(404).json({ success: false, error: "Connection not found" });
-      return;
-    }
-
-    await prisma.userMcpConnection.delete({ where: { id } });
-
-    // Drop any cached MCP client/transport for this (user, serverType) pair so
-    // the next listTools/callTool doesn't hit a stale bearer token.
-    await evictSession(userId, connection.mcpServer.type).catch((err) => {
-      log.error(`[connections] evictSession failed for ${connection.mcpServer.type}:`, err);
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    log.error("[connections] delete error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const serverExists = await prisma.mcpServer.findUnique({ where: { id: mcpServerId } });
+  if (!serverExists) {
+    throw notFound("MCP server not found");
   }
-});
+
+  const validation = await validateCredentials(serverExists.type, credentials);
+  if (!validation.valid) {
+    throw badRequest(validation.error);
+  }
+
+  const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
+
+  const connection = await prisma.userMcpConnection.upsert({
+    where: { userId_mcpServerId: { userId, mcpServerId } },
+    create: {
+      userId,
+      mcpServerId,
+      encryptedCreds: encrypted.ciphertext,
+      iv: encrypted.iv,
+      authTag: encrypted.authTag,
+    },
+    update: {
+      encryptedCreds: encrypted.ciphertext,
+      iv: encrypted.iv,
+      authTag: encrypted.authTag,
+    },
+    include: { mcpServer: true },
+  });
+
+  // Auto-register tools from this MCP server. First evict any cached MCP
+  // child process for this user+server — its env was baked at spawn time
+  // and won't pick up the new credentials we just wrote (token, sessionId,
+  // etc.) without a respawn. Without this, Spaces' x-session-id refresh
+  // path silently breaks because the cached child has the OLD env.
+  await evictSession(userId, serverExists.type).catch((err) => {
+    log.error(`[connections] evictSession failed for ${serverExists.type}:`, err);
+  });
+  if (await hasConnectorDefinition(serverExists.type)) {
+    syncToolsForServer(userId, serverExists.type, serverExists.name, credentials as Record<string, unknown>).catch((err) => {
+      log.error(`[connections] tool sync failed for ${serverExists.type}:`, err);
+    });
+  }
+
+  res.status(201).json({
+    success: true,
+    data: {
+      id: connection.id,
+      userId: connection.userId,
+      mcpServerId: connection.mcpServerId,
+      mcpServer: connection.mcpServer,
+      createdAt: connection.createdAt,
+      updatedAt: connection.updatedAt,
+    },
+  });
+}));
+
+router.delete("/:userId/connections/:id", asyncHandler(async (req: Request<{ userId: string; id: string }>, res: Response) => {
+  const userId = req.params.userId;
+  const id = req.params.id;
+
+  const connection = await prisma.userMcpConnection.findFirst({
+    where: { id, userId },
+    include: { mcpServer: true },
+  });
+
+  if (!connection) {
+    throw notFound("Connection not found");
+  }
+
+  await prisma.userMcpConnection.delete({ where: { id } });
+
+  // Drop any cached MCP client/transport for this (user, serverType) pair so
+  // the next listTools/callTool doesn't hit a stale bearer token.
+  await evictSession(userId, connection.mcpServer.type).catch((err) => {
+    log.error(`[connections] evictSession failed for ${connection.mcpServer.type}:`, err);
+  });
+
+  ok(res);
+}));
 
 router.get("/:userId/connections/:id/health", async (req: Request<{ userId: string; id: string }>, res: Response) => {
   try {
@@ -274,85 +255,79 @@ router.get("/:userId/connections/:id/health", async (req: Request<{ userId: stri
   }
 });
 
-router.post("/:userId/connections/auto-connect-spaces", async (req: Request<{ userId: string }>, res: Response) => {
-  try {
-    const userId = req.params.userId;
-    const { spacesToken: bodyToken } = req.body as { spacesToken?: string };
+router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
+  const userId = req.params.userId;
+  const { spacesToken: bodyToken } = req.body as { spacesToken?: string };
 
-    // Accept token from body OR from httpOnly cookie (forwarded by proxy).
-    // Spaces authV2 puts the JWT in `xyne_ws_<workspaceId>_token` (picked via
-    // `xyne_last_workspace`). The legacy `google_access_token` cookie is a
-    // fallback — only use it if it looks like a JWT, since during the
-    // pending-auth window it holds a JSON blob.
-    const cookie = req.headers.cookie ?? "";
-    const readCookie = (name: string): string | undefined => {
-      const m = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-      return m?.[1] ? decodeURIComponent(m[1]) : undefined;
-    };
-    const lastWorkspace = readCookie("xyne_last_workspace");
-    const workspaceToken = lastWorkspace ? readCookie(`xyne_ws_${lastWorkspace}_token`) : undefined;
-    const legacyRaw = readCookie("google_access_token");
-    const legacyJwt = legacyRaw && legacyRaw.split(".").length === 3 ? legacyRaw : undefined;
-    const cookieToken = workspaceToken ?? legacyJwt;
-    const sessionId = readCookie("user_session_id");
-    const spacesToken = bodyToken || cookieToken;
+  // Accept token from body OR from httpOnly cookie (forwarded by proxy).
+  // Spaces authV2 puts the JWT in `xyne_ws_<workspaceId>_token` (picked via
+  // `xyne_last_workspace`). The legacy `google_access_token` cookie is a
+  // fallback — only use it if it looks like a JWT, since during the
+  // pending-auth window it holds a JSON blob.
+  const cookie = req.headers.cookie ?? "";
+  const readCookie = (name: string): string | undefined => {
+    const m = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+    return m?.[1] ? decodeURIComponent(m[1]) : undefined;
+  };
+  const lastWorkspace = readCookie("xyne_last_workspace");
+  const workspaceToken = lastWorkspace ? readCookie(`xyne_ws_${lastWorkspace}_token`) : undefined;
+  const legacyRaw = readCookie("google_access_token");
+  const legacyJwt = legacyRaw && legacyRaw.split(".").length === 3 ? legacyRaw : undefined;
+  const cookieToken = workspaceToken ?? legacyJwt;
+  const sessionId = readCookie("user_session_id");
+  const spacesToken = bodyToken || cookieToken;
 
-    // TEMP [sid-debug] — remove after verifying sessionId flows end-to-end
-    const cookieNames = cookie.split(";").map((c) => c.trim().split("=")[0]).filter(Boolean);
-    const tokenSource = bodyToken ? "body" : workspaceToken ? "workspace-cookie" : legacyJwt ? "legacy-jwt" : "NONE";
+  // TEMP [sid-debug] — remove after verifying sessionId flows end-to-end
+  const cookieNames = cookie.split(";").map((c) => c.trim().split("=")[0]).filter(Boolean);
+  const tokenSource = bodyToken ? "body" : workspaceToken ? "workspace-cookie" : legacyJwt ? "legacy-jwt" : "NONE";
 
-    if (!spacesToken || typeof spacesToken !== "string") {
-      res.status(400).json({ success: false, error: "spacesToken is required (via body or cookie)" });
-      return;
-    }
-
-    const serverType = "xyne-spaces";
-    let server = await prisma.mcpServer.findFirst({ where: { type: serverType } });
-    if (!server) {
-      server = await prisma.mcpServer.create({
-        data: { name: "Xyne Spaces", type: serverType, url: "", description: "Internal Xyne Spaces platform integration" },
-      });
-    }
-
-    const credentials: Record<string, string> = { url: CONFIG.spacesInternalUrl, token: spacesToken };
-    if (sessionId) credentials["sessionId"] = sessionId;
-    // workspaceId is required by Spaces' legacy auth.ts middleware: it only
-    // looks at `req.cookies.xyne_session` *after* confirming `workspaceId` is
-    // present (header or `xyne_last_workspace` cookie). Without it the
-    // session-refresh path is skipped entirely → 401 once the JWT expires.
-    const resolvedWorkspaceId = lastWorkspace ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
-    if (resolvedWorkspaceId) credentials["workspaceId"] = resolvedWorkspaceId;
-    // TEMP [sid-debug] — remove after verifying
-    log.info(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);
-    const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
-
-    const connection = await prisma.userMcpConnection.upsert({
-      where: { userId_mcpServerId: { userId, mcpServerId: server.id } },
-      create: { userId, mcpServerId: server.id, encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
-      update: { encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
-      include: { mcpServer: true },
-    });
-
-    // Evict the cached MCP child so its baked-in env (XYNE_SPACES_SESSION_ID,
-    // XYNE_SPACES_TOKEN) is replaced with the freshly stored creds on the
-    // next mcp/call. Without this, the child keeps its original env forever
-    // and Spaces 401s once the original token expires (sessionId never gets
-    // sent because the child was spawned with an empty/stale one).
-    await evictSession(userId, serverType).catch((err) => {
-      log.error(`[connections] evictSession failed for ${serverType}:`, err);
-    });
-    if (await hasConnectorDefinition(serverType)) {
-      syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
-        log.error(`[connections] tool sync failed for ${serverType}:`, err);
-      });
-    }
-
-    log.info(`[connections] Auto-connected xyne-spaces for user ${userId}`);
-    res.json({ success: true, data: { id: connection.id, mcpServer: connection.mcpServer } });
-  } catch (err) {
-    log.error("[connections] auto-connect-spaces error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (!spacesToken || typeof spacesToken !== "string") {
+    throw badRequest("spacesToken is required (via body or cookie)");
   }
-});
+
+  const serverType = "xyne-spaces";
+  let server = await prisma.mcpServer.findFirst({ where: { type: serverType } });
+  if (!server) {
+    server = await prisma.mcpServer.create({
+      data: { name: "Xyne Spaces", type: serverType, url: "", description: "Internal Xyne Spaces platform integration" },
+    });
+  }
+
+  const credentials: Record<string, string> = { url: CONFIG.spacesInternalUrl, token: spacesToken };
+  if (sessionId) credentials["sessionId"] = sessionId;
+  // workspaceId is required by Spaces' legacy auth.ts middleware: it only
+  // looks at `req.cookies.xyne_session` *after* confirming `workspaceId` is
+  // present (header or `xyne_last_workspace` cookie). Without it the
+  // session-refresh path is skipped entirely → 401 once the JWT expires.
+  const resolvedWorkspaceId = lastWorkspace ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+  if (resolvedWorkspaceId) credentials["workspaceId"] = resolvedWorkspaceId;
+  // TEMP [sid-debug] — remove after verifying
+  log.info(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);
+  const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
+
+  const connection = await prisma.userMcpConnection.upsert({
+    where: { userId_mcpServerId: { userId, mcpServerId: server.id } },
+    create: { userId, mcpServerId: server.id, encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
+    update: { encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
+    include: { mcpServer: true },
+  });
+
+  // Evict the cached MCP child so its baked-in env (XYNE_SPACES_SESSION_ID,
+  // XYNE_SPACES_TOKEN) is replaced with the freshly stored creds on the
+  // next mcp/call. Without this, the child keeps its original env forever
+  // and Spaces 401s once the original token expires (sessionId never gets
+  // sent because the child was spawned with an empty/stale one).
+  await evictSession(userId, serverType).catch((err) => {
+    log.error(`[connections] evictSession failed for ${serverType}:`, err);
+  });
+  if (await hasConnectorDefinition(serverType)) {
+    syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
+      log.error(`[connections] tool sync failed for ${serverType}:`, err);
+    });
+  }
+
+  log.info(`[connections] Auto-connected xyne-spaces for user ${userId}`);
+  ok(res, { id: connection.id, mcpServer: connection.mcpServer });
+}));
 
 export { router as connectionsRouter };

@@ -421,7 +421,13 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
 
           {/* Footer */}
           <div className='flex justify-end border-t border-border px-5 py-3.5'>
-            <Button variant='outline' size='sm' onClick={handleClose}>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={handleClose}
+              data-track-category='voice-signature'
+              data-track-name='CLOSE_VOICE_SIGNATURE_MODAL'
+            >
               {isProcessing ? 'Processing…' : 'Done'}
             </Button>
           </div>

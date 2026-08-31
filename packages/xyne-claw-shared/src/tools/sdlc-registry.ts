@@ -30,6 +30,7 @@ export const SDLC_TOOL_NAMES = {
   createPullRequest: "spaces-sdlc-create-pull-request",
   listTracks: "spaces-sdlc-list-tracks",
   createTrack: "spaces-sdlc-create-track",
+  listArtifactTypes: "spaces-sdlc-list-artifact-types",
 } as const;
 
 export type SdlcToolName = (typeof SDLC_TOOL_NAMES)[keyof typeof SDLC_TOOL_NAMES];
@@ -47,6 +48,7 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
   { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "execution_or_interactive" },
   { name: SDLC_TOOL_NAMES.listTracks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.createTrack, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
+  { name: SDLC_TOOL_NAMES.listArtifactTypes, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
 ] as const;
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [

@@ -1,4 +1,5 @@
 import { CONFIG } from "../config.js";
+import { errMsg } from "./errors.js";
 import { getSpacesAuthForUser } from "./spaces-db.js";
 import { spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
 
@@ -70,7 +71,7 @@ export async function resolveSdlcRepositoryForUser(
       },
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errMsg(error);
     const status = Number(message.match(/Spaces API (\d{3})/)?.[1] ?? 503);
     return {
       ok: false,

@@ -13,15 +13,16 @@ import {
   ChevronBigDown,
   ChevronBigUp,
   FileText,
+  FolderDefault,
   Globe,
   Hashtag,
   LockClose,
-  MicOn,
   MultipleCrossCancelDefault,
   Notebook,
   PhoneDefault,
   TicketToken,
 } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Avatar from '../../../ui/Avatar/Avatar';
 import useMeasure from '../../../../hooks/useMeasure';
@@ -118,6 +119,7 @@ const DEBUG_PILLS: {
   recordings: SelectedRecording[];
   collections: NamedItem[];
   fileScopes: NamedItem[];
+  folderScopes: NamedItem[];
 } = {
   channels: [
     { id: 'dbg-ch-public', name: 'general', isPrivate: false },
@@ -130,6 +132,7 @@ const DEBUG_PILLS: {
   recordings: [{ id: 'dbg-recording', title: 'Design review' }],
   collections: [{ id: 'dbg-collection', name: 'Engineering Handbook' }],
   fileScopes: [{ id: 'dbg-filescope', name: 'architecture-overview.md' }],
+  folderScopes: [{ id: 'dbg-folderscope', name: 'design-docs' }],
 };
 
 type DebugPillKind = keyof typeof DEBUG_PILLS;
@@ -169,6 +172,9 @@ export interface ContextPillRowProps {
 
   fileScopes: NamedItem[];
   onFileScopesChange?: (fileScopes: NamedItem[]) => void;
+
+  folderScopes?: NamedItem[];
+  onFolderScopesChange?: (folderScopes: NamedItem[]) => void;
 
   collections: NamedItem[];
   onRemoveCollection: (id: string) => void;
@@ -242,6 +248,8 @@ export const ContextPillRow = ({
   onRemoveChannel,
   fileScopes,
   onFileScopesChange,
+  folderScopes = [],
+  onFolderScopesChange,
   collections,
   onRemoveCollection,
   attachments,
@@ -283,6 +291,7 @@ export const ContextPillRow = ({
   const rowRecordings = DEBUG_CONTEXT_PILLS ? debugPills.recordings : recordings;
   const rowCollections = DEBUG_CONTEXT_PILLS ? debugPills.collections : collections;
   const rowFileScopes = DEBUG_CONTEXT_PILLS ? debugPills.fileScopes : fileScopes;
+  const rowFolderScopes = DEBUG_CONTEXT_PILLS ? debugPills.folderScopes : folderScopes;
 
   // Flattened so the row can slice by "how many fit" without caring which kind
   // each pill is. Order is the display order.
@@ -516,6 +525,36 @@ export const ContextPillRow = ({
     });
   });
 
+  rowFolderScopes.forEach(fo => {
+    pills.push({
+      key: `fo-${fo.id}`,
+      node: (
+        <div className={CONTEXT_PILL_CLASS}>
+          <div className='flex items-center gap-1.5'>
+            <div className='flex-shrink-0'>
+              <FolderDefault className={CONTEXT_PILL_ICON_CLASS} />
+            </div>
+            <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[160px] truncate`}>{fo.name}</span>
+          </div>
+          {(DEBUG_CONTEXT_PILLS || onFolderScopesChange) && (
+            <button
+              onClick={() => {
+                removeDebugPill('folderScopes', fo.id);
+                onFolderScopesChange?.(folderScopes.filter(f => f.id !== fo.id));
+              }}
+              className={CONTEXT_PILL_REMOVE_CLASS}
+              aria-label={`Remove folder scope ${fo.name}`}
+              data-track-category='XyneAI'
+              data-track-name='REMOVE_FOLDER_SCOPE'
+            >
+              <MultipleCrossCancelDefault className='w-3 h-3' />
+            </button>
+          )}
+        </div>
+      ),
+    });
+  });
+
   rowCollections.forEach(collection => {
     pills.push({
       key: `collection-${collection.id}`,
@@ -693,7 +732,7 @@ export const ContextPillRow = ({
           {pillContent(
             <>
               <div className='flex-shrink-0'>
-                <MicOn className={CONTEXT_PILL_ICON_CLASS} />
+                <AudioLines className={CONTEXT_PILL_ICON_CLASS} />
               </div>
               <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
                 {recording.title}
@@ -702,7 +741,9 @@ export const ContextPillRow = ({
             onRecordingClick && (recording.externalId || recording.channelId)
               ? {
                   onClick: (): void => onRecordingClick(recording),
-                  ariaLabel: `Open recording ${recording.title}`,
+                  ariaLabel: recording.externalId
+                    ? `Open transcript for ${recording.title}`
+                    : `Open recording ${recording.title}`,
                   trackName: 'CLICK_RECORDING_CONTEXT_PILL',
                   trackMetadata: JSON.stringify({ recordingId: recording.id }),
                 }

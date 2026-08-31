@@ -31,6 +31,10 @@ export interface CallData {
   participantPreviewUserIds?: string | null;
   participants?: readonly CallParticipant[];
   callOrigin?: CallOrigin;
+  // Every call's metadata carries the conversationId of the message it posted
+  // into (the thread's own conversation for a thread call, a fresh one for a
+  // channel call) — see callRepository.createCallWithParticipantsAndMessage.
+  metadata?: { conversationId?: string } | null;
 }
 
 interface CallTriggerModalProps {

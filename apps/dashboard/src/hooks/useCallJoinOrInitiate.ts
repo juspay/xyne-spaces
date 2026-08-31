@@ -8,13 +8,27 @@ import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { usePlatform } from './usePlatform';
 import { isSdlcSurface } from '../config';
 import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
+import type { CallUrlOverrides } from '../utils/callUrlOverrides';
 
-interface JoinCallParams {
+/**
+ * Call setup a caller can request up front, applied by roomMachine as the call
+ * connects. Optional; omitting it keeps the existing defaults (the user's saved
+ * mic/camera join preferences).
+ */
+interface CallSetupOverrides {
+  /**
+   * Present when the join was driven by a call URL's query params; carries what
+   * that URL asked for. roomMachine re-checks the CAC flag before acting on it.
+   */
+  callUrlOverrides?: CallUrlOverrides;
+}
+
+interface JoinCallParams extends CallSetupOverrides {
   callId: string;
   onComplete?: () => void;
 }
 
-interface InitiateCallParams {
+interface InitiateCallParams extends CallSetupOverrides {
   channelId: string;
   targetUserIds?: string[];
   callDisplayName?: string;
@@ -36,17 +50,20 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   const { isMobile } = usePlatform();
 
   // Store pending action and completion callback
-  const pendingActionRef = useRef<{
-    type: 'JOIN_CALL' | 'INITIATE_CALL';
-    callId?: string;
-    channelId?: string;
-    targetUserIds?: string[];
-    callDisplayName?: string;
-    conversationId?: string;
-    artifactMessageId?: string;
-    sdlcLink?: SdlcCallLink;
-    onComplete?: () => void;
-  } | null>(null);
+  const pendingActionRef = useRef<
+    | (CallSetupOverrides & {
+        type: 'JOIN_CALL' | 'INITIATE_CALL';
+        callId?: string;
+        channelId?: string;
+        targetUserIds?: string[];
+        callDisplayName?: string;
+        conversationId?: string;
+        artifactMessageId?: string;
+        sdlcLink?: SdlcCallLink;
+        onComplete?: () => void;
+      })
+    | null
+  >(null);
 
   // Get state from roomActor
   const stateSnapshot = useSelector(roomActor, state => state);
@@ -78,6 +95,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           callId: action.callId,
           zero,
           viewMode: isMobile ? 'full' : 'mini',
+          ...(action.callUrlOverrides && { callUrlOverrides: action.callUrlOverrides }),
         });
 
         // Call completion callback after sending join event
@@ -89,6 +107,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
           callType: CallType.AUDIO,
           zero,
           viewMode: isMobile ? 'full' : 'mini',
+          ...(action.callUrlOverrides && { callUrlOverrides: action.callUrlOverrides }),
           ...(action.targetUserIds && { targetUserIds: action.targetUserIds }),
           ...(action.callDisplayName && { callDisplayName: action.callDisplayName }),
           ...(action.conversationId && { conversationId: action.conversationId }),
@@ -116,7 +135,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   /**
    * Join a specific call
    */
-  const joinCall = ({ callId, onComplete }: JoinCallParams): void => {
+  const joinCall = ({ callId, onComplete, ...overrides }: JoinCallParams): void => {
     if (!callId) return;
 
     // Case 1: User not in any call - join directly
@@ -127,6 +146,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         callId,
         zero,
         viewMode: isMobile ? 'full' : 'mini',
+        ...(overrides.callUrlOverrides && { callUrlOverrides: overrides.callUrlOverrides }),
       });
       onComplete?.();
       return;
@@ -136,6 +156,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     pendingActionRef.current = {
       type: 'JOIN_CALL',
       callId,
+      ...overrides,
       ...(onComplete && { onComplete }),
     };
     roomActor.send({ type: 'DISCONNECT' });
@@ -153,6 +174,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     artifactMessageId,
     sdlcLink,
     onComplete,
+    ...overrides
   }: InitiateCallParams): void => {
     if (!channelId) return;
 
@@ -185,6 +207,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         callType: CallType.AUDIO,
         zero,
         viewMode: isMobile ? 'full' : 'mini',
+        ...(overrides.callUrlOverrides && { callUrlOverrides: overrides.callUrlOverrides }),
         ...(targetUserIds && { targetUserIds }),
         ...(callDisplayName && { callDisplayName }),
         ...(conversationId && { conversationId }),
@@ -199,6 +222,7 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
     pendingActionRef.current = {
       type: 'INITIATE_CALL',
       channelId,
+      ...overrides,
       ...(targetUserIds && { targetUserIds }),
       ...(callDisplayName && { callDisplayName }),
       ...(conversationId && { conversationId }),

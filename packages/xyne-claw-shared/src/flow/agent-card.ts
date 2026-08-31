@@ -71,6 +71,12 @@ export interface AgentIdentity {
   slug: string;
   /** Handle credited under the name ("Built by @fractal-agent"). */
   builtBy?: string;
+  /** Owner's display name, credited in the card chin. */
+  ownedBy?: string;
+  /** Owner's user id, for the avatar beside that credit. */
+  ownedById?: string;
+  /** Reach: 'global' is org-wide, 'personal' belongs to one user. */
+  scope?: 'personal' | 'global';
   description?: string;
   systemPrompt?: string;
   modelId?: string;
@@ -134,6 +140,9 @@ export function agentIdentity(input: {
   name: string;
   slug: string;
   builtBy?: string | null;
+  ownedBy?: string | null;
+  ownedById?: string | null;
+  scope?: string | null;
   description?: string | null;
   systemPrompt?: string | null;
   modelId?: string | null;
@@ -151,6 +160,11 @@ export function agentIdentity(input: {
   // plain handle wherever else it is used.
   const builtBy = trimmed(input.builtBy, 80)?.replace(/^@+/, "");
   if (builtBy) identity.builtBy = builtBy;
+  const ownedBy = trimmed(input.ownedBy, 80)?.replace(/^@+/, "");
+  if (ownedBy) identity.ownedBy = ownedBy;
+  const ownedById = trimmed(input.ownedById, 80);
+  if (ownedById) identity.ownedById = ownedById;
+  if (input.scope === 'global' || input.scope === 'personal') identity.scope = input.scope;
   const description = trimmed(input.description, MAX_DESC);
   if (description) identity.description = description;
   const systemPrompt = trimmed(input.systemPrompt, MAX_CARD_PROMPT);
@@ -227,6 +241,106 @@ export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): 
       ...(data.requestId ? { requestId: data.requestId } : {}),
       agentSlug: data.agentSlug,
       ...(data.targetSlug ? { targetSlug: data.targetSlug } : {}),
+      userId: data.userId,
+      ...(data.conversationId ? { conversationId: data.conversationId } : {}),
+      ...(data.channelId ? { channelId: data.channelId } : {}),
+    })
+    .build();
+}
+
+export const MAX_AGENT_LIST_CARDS = 5;
+
+export interface AgentListCardData extends Omit<AgentCardData, 'targetSlug'> {
+  totalMatches?: number;
+}
+
+export function buildAgentListFlow(
+  agents: AgentIdentity[],
+  data: AgentListCardData,
+  max: number = MAX_AGENT_LIST_CARDS,
+): FlowDefinition {
+  const shown = agents.slice(0, Math.max(1, max));
+  const total = data.totalMatches ?? agents.length;
+  const hidden = Math.max(0, total - shown.length);
+
+  const builder = new FlowBuilder(`agent-list-${data.userId}-${shown.map((a) => a.slug).join('-')}`);
+
+  shown.forEach((agent, i) => {
+    builder.addComponent({
+      id: `${AGENT_COMPONENT_ID}-${agent.slug}`,
+      type: 'agent',
+      props: { variant: 'profile', agent },
+      ...(i < shown.length - 1 ? { style: { margin: '0 0 12px 0' } } : {}),
+    });
+  });
+
+  if (hidden > 0) {
+    builder.addText('agent-list-overflow', `+${hidden} more`, { variant: 'muted', size: 'sm' });
+  }
+
+  return builder
+    .setData({
+      actionType: 'agent-card',
+      variant: 'profile',
+      agentSlug: data.agentSlug,
+      userId: data.userId,
+      ...(data.conversationId ? { conversationId: data.conversationId } : {}),
+      ...(data.channelId ? { channelId: data.channelId } : {}),
+    })
+    .build();
+}
+
+export interface AgentSummaryRow {
+  slug: string;
+  name: string;
+  description?: string;
+}
+
+export interface AgentSummaryCounts {
+  total: number;
+  global?: number;
+  personal?: number;
+  agents?: AgentSummaryRow[];
+}
+
+/**
+ * Roster summary card — "you have N agents", with a link into the library.
+ *
+ * The counts come from the server's own query, never from the model: an agent
+ * asked "how many agents do we have?" must not answer from memory. There is no
+ * route in the payload — the dashboard node builds the library link from the
+ * workspace it is already in.
+ */
+export function buildAgentSummaryFlow(
+  counts: AgentSummaryCounts,
+  data: Omit<AgentCardData, 'targetSlug' | 'requestId'>,
+  /** Overrides the default "N agents available" heading. */
+  label?: string,
+): FlowDefinition {
+  return new FlowBuilder(`agent-summary-${data.userId}`)
+    .addComponent({
+      id: 'agent-summary',
+      type: 'agent_summary',
+      props: {
+        total: counts.total,
+        ...(label ? { label } : {}),
+        ...(counts.global !== undefined ? { global: counts.global } : {}),
+        ...(counts.personal !== undefined ? { personal: counts.personal } : {}),
+        ...(counts.agents?.length
+          ? {
+              agents: counts.agents.map((a) => ({
+                slug: a.slug,
+                name: a.name,
+                ...(a.description ? { description: a.description } : {}),
+              })),
+            }
+          : {}),
+      },
+    })
+    .setData({
+      actionType: 'agent-card',
+      variant: 'summary',
+      agentSlug: data.agentSlug,
       userId: data.userId,
       ...(data.conversationId ? { conversationId: data.conversationId } : {}),
       ...(data.channelId ? { channelId: data.channelId } : {}),

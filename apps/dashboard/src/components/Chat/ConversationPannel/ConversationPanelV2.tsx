@@ -23,6 +23,7 @@ import PinListV2 from '../PinListV2';
 import { ThreadMessages } from '../ThreadPannel';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import CanvasTab from '../../Canvas/CanvasTab';
+import CanvasScreen from '../../Canvas/CanvasScreen';
 import { Panel, ResizableGroup, Separator } from '../../ui/Resizable/Resizable';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -144,6 +145,7 @@ const ConversationPanelV2 = ({
   const tab = searchParams.get('tab') || getDefaultTab();
   const ticketId = searchParams.get('ticketId');
   const conversationId = searchParams.get('conversationId');
+  const canvasId = searchParams.get('canvasId');
 
   const participationStatus = useGetChannelUserStatus(channelId);
   const [initialMessageById] = useCachedQuery(
@@ -291,7 +293,8 @@ const ConversationPanelV2 = ({
             ) : (
               <KanbanBoardScreen channelId={channelId} />
             ))}
-          {tab === 'canvas' && <CanvasTab channelId={channelId} />}
+          {tab === 'canvas' &&
+            (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}
           {tab === 'links' && <LinksTab channelId={channelId} />}
         </div>
       </div>

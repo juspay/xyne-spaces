@@ -106,14 +106,16 @@ export const AppsTable = ({
   // Check if user has admin access
   const hasAdminAccess = appAccessLevel === 'ADMIN';
 
-  // Who may edit, by screen:
-  // - Installed view: editing the install copy -> any XYNE-APPS admin.
+  // Who may OPEN the edit dialog, by screen:
+  // - Installed view: any XYNE-APPS admin, plus the app's creator (webhooks only -- see below).
   // - Org/Marketplace view: editing the app template -> creator only (matches AppsACL.canUpdate).
   const canEditApp = (app: AppRow): boolean => {
     if (appAccessLevel === 'READ' || appAccessLevel === null) return false;
-    if (isInstalledView) return hasAdminAccess;
+    if (isInstalledView) return hasAdminAccess || app.createdBy === currentUserId;
     return app.createdBy === currentUserId;
   };
+
+  const canEditInstallSettings = (): boolean => !isInstalledView || hasAdminAccess;
 
   const [editingAppId, setEditingAppId] = useState<string | null>(null);
   const [editingApp, setEditingApp] = useState<AppRow | null>(null);
@@ -250,6 +252,8 @@ export const AppsTable = ({
                   e.stopPropagation();
                   void handleCopyBotUserId(app);
                 }}
+                data-track-category='Apps'
+                data-track-name='COPY_BOT_USER_ID'
                 title='Copy bot user ID'
                 className='h-6 w-6 p-0'
               >
@@ -324,6 +328,8 @@ export const AppsTable = ({
               variant='ghost'
               size='sm'
               onClick={() => void handleCopyToken(app.id)}
+              data-track-category='Apps'
+              data-track-name='COPY_APP_TOKEN'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
@@ -352,6 +358,8 @@ export const AppsTable = ({
               variant='ghost'
               size='sm'
               onClick={() => void handleCopySigningSecret(app.id)}
+              data-track-category='Apps'
+              data-track-name='COPY_APP_SIGNING_SECRET'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
@@ -476,6 +484,7 @@ export const AppsTable = ({
             appInstallations={editingApp.installations}
             editMode={isInstalledView ? 'install' : 'template'}
             installedAppId={isInstalledView ? (editingApp.installations?.[0]?.id ?? null) : null}
+            canEditInstallSettings={canEditInstallSettings()}
             onSave={handleSaveEdit}
             onUploadPicture={uploadPictureHandler}
             isLoading={isUpdatingApp}

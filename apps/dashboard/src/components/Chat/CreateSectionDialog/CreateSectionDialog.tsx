@@ -360,7 +360,14 @@ export const CreateSectionDialog = ({
       <div className='flex items-center justify-between pt-2'>
         <span className='text-sm text-muted-foreground'>Step 2 of 2</span>
         <div className='flex gap-3'>
-          <Button type='button' variant='outline' size='default' onClick={handleSkip}>
+          <Button
+            type='button'
+            variant='outline'
+            size='default'
+            onClick={handleSkip}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='SKIP_ADD_CHANNELS_TO_SECTION'
+          >
             Skip
           </Button>
           <Button
@@ -368,6 +375,8 @@ export const CreateSectionDialog = ({
             variant='default'
             size='default'
             onClick={handleAddChannels}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='ADD_CHANNELS_TO_SECTION'
             disabled={selected.size === 0}
             className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
           >

@@ -139,7 +139,7 @@
     "partial-json": "^0.1.7",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "^6.2.108",
     "pdfkit": "^0.18.0",
     "pg": "^8.16.3",
     "postgres": "^3.4.7",

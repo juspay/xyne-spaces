@@ -1,30 +1,47 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Archive } from 'lucide-react';
 import {
-  Archive,
-  Check,
-  Copy,
-  History,
-  Link2,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Search,
-  Trash2,
-  Zap,
-} from 'lucide-react';
+  ChatDefault,
+  ChevronLeft,
+  ChevronRight,
+  ChevronSortVertical,
+  CopyDefault,
+  DeleteDustbin01,
+  EnvelopeDefault,
+  LightningThunderElectricOn,
+  LinkHorizontal,
+  PencilEditBox,
+  PencilEdit,
+  PhoneDefault,
+  PlusDefault,
+  ReminderClockwise,
+  SearchDefault,
+  SendPlaneHorizontal,
+  Spinner,
+  Tag,
+  ThreeDotsMenuHorizontal,
+  TicketToken,
+  Webhook,
+} from '@xyne/icons';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { Button } from '../../ui/Button/Button';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import Input from '../../ui/Input/Input';
 import { Popover } from '../../ui/Popover/Popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/Select/Select';
 import { Switch } from '../../ui/Switch';
 import { Tooltip } from '../../ui/Tooltip';
 import Avatar from '../../ui/Avatar/Avatar';
-import { fetchStepCatalog, fetchTriggerCatalog } from '../../../api/automationsApi';
+import { fetchTriggerCatalog } from '../../../api/automationsApi';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -34,38 +51,46 @@ import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import type { Automation } from '../Automation.types';
-import { AutomationStatusValues, isLiveStatus, isProposalStatus } from '../Automation.types';
+import { AutomationStatusValues, isLiveStatus } from '../Automation.types';
 import { workflowToAutomation } from '../automation.adapter';
 import type { AutomationsListProps } from './AutomationsList.types';
 import {
-  categoryForTrigger,
-  filterAutomations,
+  automationTriggerIconName,
+  DEFAULT_AUTOMATION_SORT,
   formatRelative,
-  LIST_CATEGORIES,
-  LIST_CATEGORY_DESCRIPTIONS,
-  LIST_CATEGORY_LABELS,
+  sortAutomations,
   statusPillClasses,
   summarizeAutomation,
-  type ListCategory,
+  type AutomationSort,
+  type AutomationSortDirection,
+  type AutomationSortField,
 } from './AutomationsList.utils';
-
-function isHistoryRow(a: Automation): boolean {
-  return (
-    a.status === AutomationStatusValues.ARCHIVED ||
-    a.status === AutomationStatusValues.REJECTED ||
-    a.status === AutomationStatusValues.REVOKED ||
-    a.status === AutomationStatusValues.AUTO_REVOKED
-  );
-}
+import { AutomationFiltersBar } from './AutomationFiltersBar/AutomationFiltersBar';
+import {
+  DEFAULT_AUTOMATION_FILTERS,
+  filterAutomations,
+  hasActiveFilters,
+  isVisibleToUser,
+  type AutomationFilters,
+} from './AutomationFiltersBar/filters';
 
 export function AutomationsList({
   onCreate,
   onOpen,
   onShowRuns,
-  filterPredicate,
+  initialChannelIds,
+  onClone,
+  onEditFork,
 }: AutomationsListProps): React.ReactElement {
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<ListCategory>('all');
+  const [filters, setFilters] = useState<AutomationFilters>(() =>
+    initialChannelIds?.length
+      ? { ...DEFAULT_AUTOMATION_FILTERS, channelIds: initialChannelIds }
+      : DEFAULT_AUTOMATION_FILTERS,
+  );
+  const [sort, setSort] = useState<AutomationSort>(DEFAULT_AUTOMATION_SORT);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
@@ -73,41 +98,37 @@ export function AutomationsList({
   const navigate = useNavigate();
   const isAutomationsAdmin = useIsAutomationsAdmin();
   const { workspaceId } = useAuthContextValues();
-  const isArchivedTab = category === 'archived';
 
   const triggerCatalogQuery = useQuery({
     queryKey: ['automations', 'schema', 'triggers'],
     queryFn: fetchTriggerCatalog,
     staleTime: 5 * 60 * 1000,
   });
-  const stepCatalogQuery = useQuery({
-    queryKey: ['automations', 'schema', 'steps'],
-    queryFn: fetchStepCatalog,
-    staleTime: 5 * 60 * 1000,
-  });
   const triggerCatalog = triggerCatalogQuery.data ?? [];
-  const stepCatalog = stepCatalogQuery.data ?? [];
 
   const [rows, rowsMeta] = useCachedQuery(queries.automationsList({ workspaceId }));
   const isLoading = !rows || rowsMeta?.type !== 'complete';
-  const adapted: Automation[] = useMemo(() => {
-    const mapped = (rows ?? []).map(workflowToAutomation);
-    return filterPredicate ? mapped.filter(filterPredicate) : mapped;
-  }, [rows, filterPredicate]);
+  const adapted: Automation[] = useMemo(() => (rows ?? []).map(workflowToAutomation), [rows]);
 
-  const items: Automation[] = useMemo(() => {
-    if (isArchivedTab) {
-      return adapted.filter(isHistoryRow);
-    }
+  const visibleItems: Automation[] = useMemo(() => {
     const meId = me?.id ?? null;
-    return adapted.filter(
-      a =>
-        isLiveStatus(a.status) ||
-        (isProposalStatus(a.status) && !isHistoryRow(a) && meId !== null && a.createdById === meId),
-    );
-  }, [adapted, me, isArchivedTab]);
+    return adapted.filter(a => isVisibleToUser(a, meId));
+  }, [adapted, me]);
 
-  const archivedCount = useMemo(() => adapted.filter(isHistoryRow).length, [adapted]);
+  // Authors of any version that went live (current or superseded) may toggle it.
+  const lineageAuthorIds = useMemo(() => {
+    const bySeries = new Map<string, Set<string>>();
+    for (const a of adapted) {
+      if (!isLiveStatus(a.status) && a.status !== AutomationStatusValues.ARCHIVED) continue;
+      const seriesId = a.automationSeriesId ?? a.id;
+      const set = bySeries.get(seriesId) ?? new Set<string>();
+      set.add(a.createdById);
+      bySeries.set(seriesId, set);
+    }
+    return bySeries;
+  }, [adapted]);
+  const isLineageAuthor = (item: Automation): boolean =>
+    !!me && (lineageAuthorIds.get(item.automationSeriesId ?? item.id)?.has(me.id) ?? false);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
@@ -157,6 +178,10 @@ export function AutomationsList({
   });
 
   const handleClone = (item: Automation): void => {
+    if (onClone) {
+      onClone(item);
+      return;
+    }
     void navigate(`/automations/new?fork=${item.id}&clone=1`);
   };
 
@@ -165,94 +190,100 @@ export function AutomationsList({
       onOpen(item);
       return;
     }
+    if (onEditFork) {
+      onEditFork(item);
+      return;
+    }
     void navigate(`/automations/new?fork=${item.id}`);
   };
-  const liveItems = useMemo(() => {
-    const meId = me?.id ?? null;
-    return adapted.filter(
-      a =>
-        isLiveStatus(a.status) ||
-        (isProposalStatus(a.status) && !isHistoryRow(a) && meId !== null && a.createdById === meId),
-    );
-  }, [adapted, me]);
+  const filtered = useMemo(
+    () => sortAutomations(filterAutomations(visibleItems, query, filters), sort),
+    [visibleItems, query, filters, sort],
+  );
 
-  const counts = useMemo(() => {
-    const out: Record<ListCategory, number> = {
-      all: liveItems.length,
-      tickets: 0,
-      email: 0,
-      archived: archivedCount,
-    };
-    for (const item of liveItems) {
-      const c = categoryForTrigger(item.config?.trigger?.type);
-      if (c !== 'all') out[c] += 1;
-    }
-    return out;
-  }, [liveItems, archivedCount]);
+  useEffect(() => setPage(1), [query, filters, sort]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageItems = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize],
+  );
 
-  const categoryFiltered =
-    category === 'all' || category === 'archived'
-      ? items
-      : items.filter(item => categoryForTrigger(item.config?.trigger?.type) === category);
-  const filtered = filterAutomations(categoryFiltered, query);
-
-  const hasAnyFilter = !!query.trim() || category !== 'all';
+  const hasAnyFilter = hasActiveFilters(query, filters);
 
   return (
     <div className='flex h-full w-full flex-col bg-background'>
-      <div className='flex flex-col gap-3 border-b border-border px-6 py-4'>
-        <div className='flex items-center gap-3'>
-          <div className='flex flex-1 items-center gap-2'>
-            <Zap className='size-5 text-foreground' />
-            <h1 className='text-base font-semibold text-foreground'>Automations</h1>
+      <header className='sticky top-0 z-10 flex flex-col gap-4 border-b border-border bg-background px-6 pt-5 pb-4'>
+        <div className='flex items-center gap-5'>
+          <div className='flex min-w-0 flex-1 flex-col gap-1'>
+            <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
+              Automations
+            </h1>
+            <p className='text-[15px] leading-[1.2] text-muted-foreground'>
+              Create and manage workflows that react to events across your workspace.
+            </p>
           </div>
-          <div className='relative w-[280px]'>
-            <Search
-              aria-hidden='true'
-              className='pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground'
-            />
-            <Input
-              type='search'
-              aria-label='Search automations'
-              placeholder='Search automations…'
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              className='pl-8'
-            />
-          </div>
-          {/* Approvals inbox is readable by anyone — non-admins see the
-              queue but the Approve / Reject buttons stay admin-gated. */}
-          <Link to='/automations/approvals'>
-            <Button variant='outline' className='font-semibold'>
-              <Check className='size-4' />
-              Approvals
-            </Button>
-          </Link>
-          <Button onClick={onCreate} className='font-semibold'>
-            <Plus className='size-4' />
+          <Button
+            onClick={onCreate}
+            data-track-category='automations-list'
+            data-track-name='CREATE_AUTOMATION'
+            className='shrink-0 font-semibold'
+          >
+            <PlusDefault className='size-4' />
             New automation
           </Button>
         </div>
-        <CategoryTabs category={category} counts={counts} onChange={setCategory} />
-      </div>
+        <div className='flex flex-wrap items-center justify-between gap-3'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <div className='relative w-56 max-w-full'>
+              <SearchDefault
+                aria-hidden='true'
+                className='pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground'
+              />
+              <Input
+                type='search'
+                aria-label='Search automations'
+                placeholder='Search automations…'
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                className='h-8 rounded-md pl-8 text-xs'
+              />
+            </div>
+            <AutomationFiltersBar
+              query={query}
+              filters={filters}
+              onChange={setFilters}
+              onClearQuery={() => setQuery('')}
+              items={visibleItems}
+            />
+          </div>
+          <SortDropdown value={sort} onChange={setSort} />
+        </div>
+      </header>
 
       <div className='flex-1 overflow-y-auto bg-muted/30'>
         <div className='mx-auto flex w-full max-w-5xl flex-col gap-3 px-6 py-6'>
-          <p className='text-xs text-muted-foreground'>{LIST_CATEGORY_DESCRIPTIONS[category]}</p>
-          {isLoading && items.length === 0 ? (
+          {!isLoading && filtered.length > 0 && (
+            <p className='text-xs text-muted-foreground'>
+              {filtered.length === visibleItems.length
+                ? `${filtered.length} ${filtered.length === 1 ? 'automation' : 'automations'}`
+                : `${filtered.length} of ${visibleItems.length} automations`}
+            </p>
+          )}
+          {isLoading && visibleItems.length === 0 ? (
             <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>
-              <Loader2 className='mr-2 size-4 animate-spin' />
+              <Spinner className='mr-2 size-4 animate-spin' />
               Loading automations…
             </div>
           ) : filtered.length === 0 ? (
             <EmptyState hasFilter={hasAnyFilter} onCreate={onCreate} />
           ) : (
-            <ul className='flex flex-col gap-2'>
-              {filtered.map(item => (
+            <ul className='flex flex-col gap-3'>
+              {pageItems.map(item => (
                 <AutomationRow
                   key={item.id}
                   automation={item}
-                  summary={summarizeAutomation(item, triggerCatalog, stepCatalog)}
+                  summary={summarizeAutomation(item, triggerCatalog)}
+                  triggerIconName={automationTriggerIconName(item, triggerCatalog)}
                   onOpen={() => onOpen(item)}
                   onEdit={() => handleEdit(item)}
                   onShowRuns={onShowRuns ? () => onShowRuns(item) : undefined}
@@ -266,7 +297,8 @@ export function AutomationsList({
                   onToggleActive={
                     isLiveStatus(item.status) &&
                     (item.status === AutomationStatusValues.DISABLED ||
-                      (item.status === AutomationStatusValues.ACTIVE && isAutomationsAdmin))
+                      (item.status === AutomationStatusValues.ACTIVE &&
+                        (isAutomationsAdmin || isLineageAuthor(item))))
                       ? next => (next ? activateMutation.mutate(item.id) : setPendingDisable(item))
                       : undefined
                   }
@@ -277,6 +309,18 @@ export function AutomationsList({
                 />
               ))}
             </ul>
+          )}
+          {filtered.length > 0 && (
+            <PaginationBar
+              page={page}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              onPageSizeChange={size => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
           )}
         </div>
       </div>
@@ -385,55 +429,116 @@ export function AutomationsList({
   );
 }
 
-function CategoryTabs({
-  category,
-  counts,
+const SORT_OPTIONS: {
+  value: string;
+  field: AutomationSortField;
+  direction: AutomationSortDirection;
+  label: string;
+}[] = [
+  {
+    value: 'updatedAt-desc',
+    field: 'updatedAt',
+    direction: 'desc',
+    label: 'Last updated (newest)',
+  },
+  { value: 'updatedAt-asc', field: 'updatedAt', direction: 'asc', label: 'Last updated (oldest)' },
+  { value: 'createdAt-desc', field: 'createdAt', direction: 'desc', label: 'Created (newest)' },
+  { value: 'createdAt-asc', field: 'createdAt', direction: 'asc', label: 'Created (oldest)' },
+  { value: 'name-asc', field: 'name', direction: 'asc', label: 'Name (A–Z)' },
+  { value: 'name-desc', field: 'name', direction: 'desc', label: 'Name (Z–A)' },
+  { value: 'status-asc', field: 'status', direction: 'asc', label: 'Status' },
+];
+
+function SortDropdown({
+  value,
   onChange,
 }: {
-  category: ListCategory;
-  counts: Record<ListCategory, number>;
-  onChange: (next: ListCategory) => void;
+  value: AutomationSort;
+  onChange: (next: AutomationSort) => void;
+}): React.ReactElement {
+  const current = `${value.field}-${value.direction}`;
+  return (
+    <Select
+      value={current}
+      onValueChange={next => {
+        const opt = SORT_OPTIONS.find(o => o.value === next);
+        if (opt) onChange({ field: opt.field, direction: opt.direction });
+      }}
+    >
+      <SelectTrigger
+        size='sm'
+        className='h-8 flex-shrink-0 gap-1.5 text-xs'
+        aria-label='Sort automations'
+      >
+        <ChevronSortVertical className='size-3.5' aria-hidden='true' />
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align='end'>
+        {SORT_OPTIONS.map(opt => (
+          <SelectItem key={opt.value} value={opt.value}>
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+const PAGE_SIZE_OPTIONS = [50, 100, 250, 500];
+
+function PaginationBar({
+  page,
+  pageSize,
+  totalPages,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 }): React.ReactElement {
   return (
-    <div
-      role='tablist'
-      aria-label='Filter automations by trigger category'
-      className='flex items-center gap-1'
-    >
-      {LIST_CATEGORIES.map(c => {
-        const active = c === category;
-        return (
-          <button
-            key={c}
-            type='button'
-            role='tab'
-            tabIndex={active ? 0 : -1}
-            aria-selected={active}
-            aria-label={`${LIST_CATEGORY_LABELS[c]}, ${counts[c]} ${counts[c] === 1 ? 'automation' : 'automations'}`}
-            onClick={() => onChange(c)}
-            data-track-category='automations-list'
-            data-track-name={`category-tab-${c}`}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-              active
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent/40',
-            )}
-          >
-            {LIST_CATEGORY_LABELS[c]}
-            <span
-              aria-hidden='true'
-              className={cn(
-                'rounded-full px-1.5 text-[10px] font-semibold tabular-nums',
-                active ? 'bg-background/20 text-background' : 'bg-muted text-muted-foreground',
-              )}
-            >
-              {counts[c]}
-            </span>
-          </button>
-        );
-      })}
+    <div className='flex flex-shrink-0 items-center justify-between border-t border-border pt-3'>
+      <div className='flex items-center gap-2'>
+        <span className='text-xs text-muted-foreground'>Rows per page</span>
+        <Select value={String(pageSize)} onValueChange={v => onPageSizeChange(Number(v))}>
+          <SelectTrigger size='sm' className='h-8 w-[68px] text-xs' aria-label='Rows per page'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align='start'>
+            {PAGE_SIZE_OPTIONS.map(size => (
+              <SelectItem key={size} value={String(size)}>
+                {size}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className='flex items-center gap-3'>
+        <span className='text-xs text-muted-foreground'>
+          Page {page} of {totalPages}
+        </span>
+        <Button
+          variant='outline'
+          size='iconSm'
+          disabled={page <= 1}
+          aria-label='Previous page'
+          onClick={() => onPageChange(page - 1)}
+        >
+          <ChevronLeft className='size-4' />
+        </Button>
+        <Button
+          variant='outline'
+          size='iconSm'
+          disabled={page >= totalPages}
+          aria-label='Next page'
+          onClick={() => onPageChange(page + 1)}
+        >
+          <ChevronRight className='size-4' />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -455,24 +560,42 @@ function EmptyState({
   return (
     <div className='mx-auto max-w-md py-16 text-center'>
       <div className='mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400'>
-        <Zap className='size-6' />
+        <LightningThunderElectricOn className='size-6' />
       </div>
       <h2 className='mb-1 text-base font-medium text-foreground'>No automations yet</h2>
       <p className='mb-4 text-sm text-muted-foreground'>
         Build a no-code workflow that runs on a trigger — a schedule, a manual click, or an event
         from your workspace.
       </p>
-      <Button size='sm' onClick={onCreate}>
-        <Plus className='size-4' />
+      <Button
+        size='sm'
+        onClick={onCreate}
+        data-track-category='automations-list'
+        data-track-name='CREATE_AUTOMATION'
+      >
+        <PlusDefault className='size-4' />
         Create your first automation
       </Button>
     </div>
   );
 }
 
+/** Maps each trigger's backend-assigned icon name (see `automationTriggerIconName`) to its @xyne/icons equivalent, so the row icon actually reflects what the automation fires on. */
+const TRIGGER_ICON_BY_NAME: Record<string, typeof LightningThunderElectricOn> = {
+  Phone: PhoneDefault,
+  Mail: EnvelopeDefault,
+  Send: SendPlaneHorizontal,
+  Tag,
+  MessageSquare: ChatDefault,
+  Ticket: TicketToken,
+  PenSquare: PencilEditBox,
+  Webhook,
+};
+
 interface AutomationRowProps {
   automation: Automation;
   summary: string;
+  triggerIconName: string | undefined;
   onOpen: () => void;
   onEdit: () => void;
   onShowRuns?: (() => void) | undefined;
@@ -486,6 +609,7 @@ interface AutomationRowProps {
 function AutomationRow({
   automation,
   summary,
+  triggerIconName,
   onOpen,
   onEdit,
   onShowRuns,
@@ -495,6 +619,8 @@ function AutomationRow({
   onToggleActive,
   toggleLoading,
 }: AutomationRowProps): React.ReactElement {
+  const TriggerIcon =
+    (triggerIconName && TRIGGER_ICON_BY_NAME[triggerIconName]) || LightningThunderElectricOn;
   const [menuOpen, setMenuOpen] = useState(false);
   const isActive = automation.status === 'ACTIVE';
   const creator = useUser(automation.createdById);
@@ -531,17 +657,17 @@ function AutomationRow({
         data-track-category='automations-list'
         data-track-name='row-open'
         className={cn(
-          'group flex cursor-pointer flex-col gap-2 border-b border-border bg-background px-6 py-3 transition-colors',
-          'hover:bg-muted/40',
+          'group flex cursor-pointer flex-col gap-2 rounded-xl border border-border bg-background px-4 py-3 transition-colors',
+          'hover:border-foreground/20 hover:bg-muted/40',
           'focus-visible:outline-none focus-visible:bg-muted/40',
         )}
       >
         <div className='flex items-start gap-3'>
           <div
             aria-hidden='true'
-            className='flex size-9 flex-shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400'
+            className='flex size-9 flex-shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400'
           >
-            <Zap className='size-4' />
+            <TriggerIcon className='size-4' />
           </div>
           <button
             type='button'
@@ -566,7 +692,7 @@ function AutomationRow({
               </span>
               <span
                 className={cn(
-                  'rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                  'rounded-md border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
                   statusPillClasses(automation.status),
                 )}
               >
@@ -623,7 +749,7 @@ function AutomationRow({
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
                   )}
                 >
-                  <MoreHorizontal className='size-4' aria-hidden='true' />
+                  <ThreeDotsMenuHorizontal className='size-4' aria-hidden='true' />
                 </button>
               }
             >
@@ -633,7 +759,7 @@ function AutomationRow({
               {automation.status !== AutomationStatusValues.PENDING_APPROVAL && (
                 <RowMenuButton
                   label='Edit'
-                  icon={<Pencil className='size-4' />}
+                  icon={<PencilEdit className='size-4' />}
                   onClick={() => {
                     setMenuOpen(false);
                     onEdit();
@@ -642,7 +768,7 @@ function AutomationRow({
               )}
               <RowMenuButton
                 label='Clone'
-                icon={<Copy className='size-4' />}
+                icon={<CopyDefault className='size-4' />}
                 onClick={() => {
                   setMenuOpen(false);
                   onClone();
@@ -650,7 +776,7 @@ function AutomationRow({
               />
               <RowMenuButton
                 label='Copy link'
-                icon={<Link2 className='size-4' />}
+                icon={<LinkHorizontal className='size-4' />}
                 onClick={() => {
                   setMenuOpen(false);
                   handleCopyLink();
@@ -659,7 +785,7 @@ function AutomationRow({
               {onShowRuns && (
                 <RowMenuButton
                   label='Run history'
-                  icon={<History className='size-4' />}
+                  icon={<ReminderClockwise className='size-4' />}
                   onClick={() => {
                     setMenuOpen(false);
                     onShowRuns();
@@ -686,7 +812,7 @@ function AutomationRow({
                   <RowMenuButton
                     label='Delete'
                     danger
-                    icon={<Trash2 className='size-4' />}
+                    icon={<DeleteDustbin01 className='size-4' />}
                     onClick={() => {
                       setMenuOpen(false);
                       onDelete();

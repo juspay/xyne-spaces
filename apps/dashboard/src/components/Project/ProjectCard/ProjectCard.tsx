@@ -1,7 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
-import { Copy, Check } from 'lucide-react';
+import { CopyDefault as Copy, CheckTickSingle as Check } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
 import type { Project } from '@xyne/shared';
@@ -99,6 +99,8 @@ export const ProjectCard = ({
               size='iconSm'
               className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
               onClick={handleCopyId}
+              data-track-category='Projects'
+              data-track-name='COPY_PROJECT_ID'
               title='Copy project ID'
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}

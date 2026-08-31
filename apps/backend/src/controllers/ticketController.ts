@@ -45,6 +45,7 @@ import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { db } from '@/database/client';
@@ -456,17 +457,32 @@ export class TicketController {
         }
 
         const channel = await this.channelRepository.findById(cacConfig.channelId);
-        if (!channel?.projectId) {
-          res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
+        if (!channel) {
+          res.status(503).json({ error: 'Support channel not found.' });
           return;
         }
 
         const SUPPORT_TAG = 'Support Ticket';
         const existingTags: string[] = Array.isArray(req.body.tags) ? req.body.tags : [];
         req.body.channelId = cacConfig.channelId;
-        req.body.projectId = channel.projectId;
         if (cacConfig.boardId) {
           req.body.boardId = cacConfig.boardId;
+          const board = await this.boardRepository.findBoardById(cacConfig.boardId);
+          if (!board?.projectId) {
+            res.status(503).json({ error: 'Support board has no project mapping.' });
+            return;
+          }
+          req.body.projectId = board.projectId;
+        } else {
+          // No explicit board configured — resolve the channel's default board
+          // (ChannelBoardMapping first, legacy channel.projectId as fallback) and
+          // derive projectId from that board, never from channel.projectId directly.
+          const resolved = await resolveChannelDefaultBoard(db, channel.id);
+          if (!resolved?.projectId) {
+            res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
+            return;
+          }
+          req.body.projectId = resolved.projectId;
         }
         req.body.tags = [
           SUPPORT_TAG,
@@ -480,7 +496,7 @@ export class TicketController {
         title,
         description,
         assignedTo,
-        projectId,
+        projectId: clientProjectId,
         userGroupId,
         statusV2,
         priority,
@@ -498,6 +514,8 @@ export class TicketController {
         ticketType,
         stageName
       }: CreateTicketRequest & { parentTicketId?: string } = req.body;
+
+      let projectId = clientProjectId;
 
       const fromTicketsTab = req.body.fromTicketsTab === true || req.body.fromTicketsTab === 'true';
 
@@ -673,6 +691,9 @@ export class TicketController {
       const initialMessageId = randomUUID();
 
       const board = await this.boardRepository.findBoardById(boardId);
+      if (board?.projectId) {
+        projectId = board.projectId;
+      }
       const effectiveStatusV2 =
         board?.boardType === BoardType.FLOW ? TicketStatusV2.TODO : (statusV2 as TicketStatusV2);
       const effectiveStageName = board?.boardType === BoardType.FLOW ? 'TODO' : stageName;

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { normalizePrUrl, readPrBindingData } from "./agent-widget-binding.js";
+import {
+  normalizePrUrl,
+  readPrBindingData,
+  planScreenId,
+  planExternalKey,
+  readPlanBindingData,
+} from "./agent-widget-binding.js";
 import type { AgentWidgetBinding } from "@prisma/client";
 
 /**
@@ -67,5 +73,59 @@ describe("readPrBindingData", () => {
     expect(readPrBindingData(bindingWith({ provider: "bitbucket" }))).toBeNull();
     expect(readPrBindingData(bindingWith({ title: "no provider" }))).toBeNull();
     expect(readPrBindingData(bindingWith(null))).toBeNull();
+  });
+});
+
+describe("plan binding keys", () => {
+  it("derives one screenId per plan card, from the card's own messageId", () => {
+    expect(planScreenId("msg-abc")).toBe("agent-plan-msg-abc");
+    expect(planScreenId("msg-abc")).not.toBe(planScreenId("msg-def"));
+  });
+
+  it("scopes the conversation correlate per agent, so two agents in one thread don't collide", () => {
+    expect(planExternalKey("conv-1", "credit-doctor")).not.toBe(planExternalKey("conv-1", "other-agent"));
+    expect(planExternalKey("conv-1", "credit-doctor")).toBe(planExternalKey("conv-1", "credit-doctor"));
+  });
+});
+
+describe("readPlanBindingData", () => {
+  it("parses a well-formed plan binding blob", () => {
+    const parsed = readPlanBindingData(
+      bindingWith({
+        todos: [
+          { id: "t1", title: "Pull the failing invoices" },
+          { id: "t2", title: "Reconcile against ledger" },
+        ],
+        title: "Credit reconciliation",
+        desc: "two steps",
+        document: "## Plan\n...",
+        ownerUserId: "user-1",
+      }),
+    );
+    expect(parsed).toMatchObject({
+      ownerUserId: "user-1",
+      title: "Credit reconciliation",
+      document: "## Plan\n...",
+    });
+    expect(parsed?.todos).toHaveLength(2);
+  });
+
+  // The row is the ONLY source of these two facts once Redis has expired, so a
+  // blob missing either can't be approved — half-resolving it would either run an
+  // empty plan or let the wrong user approve.
+  it("returns null without an owner or without executable todos", () => {
+    expect(readPlanBindingData(bindingWith({ todos: [{ id: "t1", title: "x" }] }))).toBeNull();
+    expect(readPlanBindingData(bindingWith({ todos: [], ownerUserId: "user-1" }))).toBeNull();
+    expect(readPlanBindingData(bindingWith(null))).toBeNull();
+  });
+
+  it("drops malformed todo entries rather than trusting them", () => {
+    const parsed = readPlanBindingData(
+      bindingWith({
+        todos: [{ id: "t1", title: "keep" }, { id: 7, title: "bad id" }, { id: "t3" }, null],
+        ownerUserId: "user-1",
+      }),
+    );
+    expect(parsed?.todos).toEqual([{ id: "t1", title: "keep" }]);
   });
 });

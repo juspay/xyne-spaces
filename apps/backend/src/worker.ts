@@ -41,6 +41,7 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { sdlcWorker } from '@/workers/sdlcWorker';
@@ -300,6 +301,21 @@ class WorkerService {
         await emailClassificationWorker.start();
       }
 
+      if (appConfig.radar.enabled) {
+        logger.info('Starting radar execution worker...');
+        // Guarded, unlike its neighbours: an unguarded throw reaches the outer
+        // catch, which exits the process — taking unrelated workers down with
+        // a dark-launched feature none of them depend on.
+        try {
+          await radarExecutionWorker.start();
+        } catch (error) {
+          logger.error(
+            '[RADAR-EXECUTION-WORKER] Failed to start; continuing without it',
+            error,
+          );
+        }
+      }
+
       if (appConfig.enableAiProvisioningWorker) {
         logger.info('Starting AI provisioning worker...');
         await aiProvisioningWorker.start();
@@ -502,6 +518,10 @@ class WorkerService {
 
       if (appConfig.enableEmailClassificationWorker) {
         await emailClassificationWorker.shutdown();
+      }
+
+      if (appConfig.radar.enabled) {
+        await radarExecutionWorker.shutdown();
       }
 
       if (appConfig.enableAiProvisioningWorker) {
