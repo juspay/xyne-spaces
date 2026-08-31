@@ -29,6 +29,7 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
+  LayoutGridTwoVertical,
   type PikaIconProps,
   Tag,
 } from '@xyne/icons';
@@ -88,6 +89,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/chat/dir', label: 'Chat', icon: Hashtag, popout: true },
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault, popout: true },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn, popout: true },
+  { path: '/streams', label: 'Streams', icon: LayoutGridTwoVertical, popout: true },
   { path: '/calls', label: 'Calls', icon: PhoneDefault, popout: true },
   { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon, popout: true },
   { path: '/projects', label: 'Tickets', icon: TicketToken, popout: true },
@@ -167,7 +169,9 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
-export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS];
+// Streams is here rather than in REQUIRED so it appears in the rail out of the
+// box but can still be toggled off — it is new, and nothing else depends on it.
+export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS, '/streams'];
 
 // Whether a path is locked into the toolbar (cannot be toggled off).
 export const isRequiredToolbarPath = (path: string): boolean =>

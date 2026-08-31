@@ -4793,3 +4793,735 @@ img.inline-emoji,
 [data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
   z-index: 10;
 }
+
+/* Streams strip: the horizontal scrollbar is a primary control, not incidental
+   overflow. Without a trackpad it is the only way to pan the stream, so it gets a
+   visible rail and a chunky thumb rather than the app-wide hairline. */
+.streams-strip {
+  scrollbar-width: auto;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.5) hsl(var(--muted) / 0.6);
+}
+.streams-strip::-webkit-scrollbar {
+  height: 12px;
+}
+.streams-strip::-webkit-scrollbar-track {
+  @apply rounded-full;
+  background: hsl(var(--muted) / 0.6);
+}
+.streams-strip::-webkit-scrollbar-thumb {
+  @apply rounded-full;
+  background: hsl(var(--muted-foreground) / 0.5);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.streams-strip::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.8);
+  background-clip: content-box;
+}
+
+/* Press feedback for every pressable in a stream.
+
+   Carries the colour properties as well as `transform` rather than sitting
+   alongside `transition-colors`: two rules cannot merge one `transition`
+   declaration, so the later of the two would silently drop the other's
+   properties. One class owns the whole transition, and elements using it drop
+   their `transition-colors`/`transition-opacity` utility.
+
+   `transform` is deliberately the only moving property. A column's width is
+   written every frame by the resize drag, so nothing here may ever transition
+   a layout property. */
+.streams-hover,
+.streams-press,
+.streams-press-row {
+  transition-property: transform, color, background-color, border-color, opacity, box-shadow;
+  transition-duration: 140ms;
+  /* Stronger than the built-in ease-out, which is too weak to read as a press. */
+  transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+.streams-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+/* Full-width list rows: the same 3% on a 380px row is a lurch rather than a
+   press, so they get a scale you feel without watching the edges travel. */
+.streams-press-row:active:not(:disabled) {
+  transform: scale(0.99);
+}
+/* `.streams-hover` is the same transition with no press at all — for rows that
+   fill an inset card edge to edge. Scaling one of those shrinks its hover fill
+   away from the card's own rounded border for the length of the press, which
+   reads as the panel flexing rather than as the row responding. */
+
+/* "It is already open, and it is here."
+
+   Two pulses rather than one: a single flash is easy to miss when the strip is
+   also scrolling toward the column at the same moment, and easy to mistake for a
+   render glitch. Two reads as deliberate. */
+@keyframes streams-column-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+  }
+  25%,
+  75% {
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.55);
+  }
+}
+.streams-column-flash {
+  /* 300ms, down from 900. This is a confirmation cue — "it is already open, and
+     it is here" — and a cue that outlasts the glance it answers stops reading as
+     an answer and starts reading as an alert. Kept in step with
+     `COLUMN_FLASH_MS` in Streams.types.ts, which drives the timer that clears
+     the class; the two must not drift or the ring is removed mid-fade. */
+  animation: streams-column-flash 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Every pressable here is a bare <button>, so without this they inherit the
+   browser's system focus ring — a heavy accent-blue outline that is far louder
+   than anything else on the page and, because focus lands here programmatically
+   during focus arbitration, shows up after plain mouse presses too.
+   `--ring` is the same quiet token the rest of the app focuses with.
+
+   Replaced, not removed: a keyboard user still has to be able to see where they
+   are. `outline` rather than a ring box-shadow so it neither gets clipped by a
+   column's `overflow-hidden` nor fights the shadow the jump pills already carry. */
+.streams-hover:focus-visible,
+.streams-press:focus-visible,
+.streams-press-row:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+
+/* Scroll-aware top/bottom edge fade for a column's feed list.
+
+   A static mask always clips the first and last rows even when nothing is
+   hidden that way — at rest that reads as a rendering fault rather than a hint.
+   The fade is driven from the scroller's own position instead:
+     • at the top     → no top fade (first row crisp)
+     • once scrolled  → top fade grows in over the first --fade px
+     • more below     → bottom fade shown
+     • at the bottom  → bottom fade shrinks away (last row crisp)
+
+   Scroll-driven animations advance with the scroll offset rather than the rAF
+   clock, so this costs nothing per frame — no scroll listener, no layout read —
+   and stays correct in a backgrounded tab.
+
+   The custom properties are registered so they animate as <length>. Without
+   scroll-timeline support both stay 0px and the list simply shows un-faded:
+   degraded, never mis-faded. */
+@property --streams-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --streams-fade-bot {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.streams-fade-y {
+  --fade: 16px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--streams-fade-top),
+    #000 calc(100% - var(--streams-fade-bot)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--streams-fade-top),
+    #000 calc(100% - var(--streams-fade-bot)),
+    transparent 100%
+  );
+}
+
+@supports (animation-timeline: scroll()) {
+  .streams-fade-y {
+    animation:
+      streams-fade-top linear both,
+      streams-fade-bot linear both;
+    animation-timeline: scroll(self), scroll(self);
+    /* Top fades in over the first --fade px; bottom fades out over the last. */
+    animation-range:
+      0 var(--fade),
+      calc(100% - var(--fade)) 100%;
+  }
+  @keyframes streams-fade-top {
+    from {
+      --streams-fade-top: 0px;
+    }
+    to {
+      --streams-fade-top: var(--fade);
+    }
+  }
+  @keyframes streams-fade-bot {
+    from {
+      --streams-fade-bot: var(--fade);
+    }
+    to {
+      --streams-fade-bot: 0px;
+    }
+  }
+}
+
+/* A soft edge where a column's content passes under its own header.
+
+   The header is opaque and sits directly on the content, so without this the
+   first line of a message list is simply guillotined at the header's lower
+   edge — a hard horizontal cut across live text. It was hidden for as long as
+   every channel column carried a "Catch me up" bar, which supplied a band of
+   chrome between the two; with that gone the cut is what you see.
+
+   Top only. The bottom of a column is a composer with its own border and focus
+   ring, and fading into those would read as a rendering fault rather than as
+   depth. One stop, so the gradient's last colour carries to 100%.
+
+   Static rather than scroll-driven, unlike `.streams-fade-y`: that one lives on
+   a scroller and reads `scroll(self)`, and the element that scrolls here is
+   inside the surface, several components down. The cut is worth softening
+   whether or not anything is moving. */
+.streams-fade-head {
+  --fade-head: 14px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-head));
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-head));
+}
+
+/* The same fade on the stream's horizontal axis.
+
+   This replaced a pair of `from-background` gradient overlays. A colour
+   gradient can only imitate transparency over a known, flat backdrop: the
+   moment a wallpaper sits behind the stream, those overlays paint an opaque slab
+   of the wrong colour across the strip's ends. A mask makes the *content*
+   transparent instead, so whatever is actually behind shows through — wallpaper,
+   gradient, or nothing.
+
+   Its own `--fade-x` rather than the `--fade` the vertical fade uses: the strip
+   is an *ancestor* of every feed list, and a plain custom property inherits, so
+   one shared name would push the strip's 32px down onto lists that want 16. */
+/* ── Stream tab row ──────────────────────────────────────────────────────────
+
+   How lit a tab is: 0 when its column is off screen, 1 when the column is fully
+   on screen, ramped in between. Written per frame from the strip's scroll
+   position — see `paint` in StreamTopNav.
+
+   Initial 1 so a tab that never gets written is lit rather than dimmed. The
+   pinned run is exactly that case: those columns sit outside the scroller and
+   are always on screen, so there is nothing to measure and nothing that should
+   ever dim them. */
+@property --tab-on {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+/* Hovering the row lifts every tab to full, so you can read the whole stream
+   without moving it. Its own variable rather than a `:hover` colour override,
+   and that separation is the point: `--tab-on` is written every frame from the
+   scroll position and must never carry a transition, or the lighting would lag
+   the stream. This one changes twice per hover and nothing else touches it, so it
+   can ease. The tab takes whichever of the two is brighter.
+
+   `inherits: true` — it is set once on the row and read by every tab under it. */
+@property --tab-hover {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+:root {
+  /* How present an unlit tab is. The dial for "the two states do not feel
+     different enough" — down toward 0.25 pushes the stream you are not looking at
+     further back, up toward 0.7 brings it forward. */
+  --tab-off: 0.4;
+  --tab-hover-dur: 140ms;
+}
+
+/* Eased in, instant out. Asymmetric on purpose and the opposite way round from
+   the ticks' own hover: lifting the row is a reveal and wants a moment, but
+   dropping it is not an animation you are watching — you have already left, and
+   a row that stays lit for a beat after the pointer is gone reads as the state
+   being stuck rather than as the state easing. The `0s` here is the exit; the
+   duration lives on the hover rule so it applies only on the way in. */
+.streams-nav {
+  --tab-hover: 0;
+  transition: --tab-hover 0s;
+}
+/* `:has(:focus-visible)`, not `:focus-within`. A click focuses the tab it lands
+   on, so `:focus-within` held the whole row lit until you clicked something else
+   — the row read as stuck on rather than as responding to you. `:focus-visible`
+   is the keyboard-only half of focus, which is the case this rule was for. */
+.streams-nav:hover,
+.streams-nav:has(:focus-visible) {
+  --tab-hover: 1;
+  transition: --tab-hover var(--tab-hover-dur) var(--jump-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streams-nav {
+    transition: none;
+  }
+}
+
+.streams-nav-tab {
+  /* Colour alone, no fill. A background behind the lit run made the row read as
+     five selected things rather than as five things you happen to be looking at
+     — the signal is "this is on screen", which is ambient, and a filled pill is
+     the vocabulary of a choice. The icon comes along for free: it paints in
+     `currentColor`.
+
+     The unlit end is `--muted-foreground` carrying alpha rather than a second
+     opaque grey. Two reasons: at full strength `--muted-foreground` is still a
+     confident colour, so the gap between a tab you are looking at and one you
+     are not was a shade rather than a difference — and any *opaque* dim colour
+     is a guess about what is behind the row, which on this bar can be a
+     wallpaper. Alpha composites with whatever is actually there.
+
+     Only the text carries alpha, never a fill, which is what keeps this from
+     being the see-through tab the earlier version was rightly avoiding. */
+  color: hsl(var(--muted-foreground) / var(--tab-off));
+  color: color-mix(
+    in oklab,
+    hsl(var(--muted-foreground) / var(--tab-off)),
+    hsl(var(--foreground)) calc(max(var(--tab-on), var(--tab-hover)) * 100%)
+  );
+  /* Transform only, and this override is load-bearing. `.streams-press` puts a
+     140ms curve on opacity and background so a press has weight — but here those
+     two properties are not a state that changes, they are a continuous readout of
+     where the stream is scrolled. Transitioning them would put a 140ms lag between
+     the strip and the row, which is precisely the thing every other decision in
+     this file is spent avoiding. The press keeps its transform. */
+  transition-property: transform;
+}
+
+/* The unread count, grey until you look at the row.
+
+   A red pill is a summons, and a row of them sitting permanently in the header
+   is a stream that is always shouting — which is the same failure the `ActivityDot`
+   note describes, a wall of badges reading as a table of figures. Desaturated,
+   the pill still says *how many* and still says *which column*; what it stops
+   saying is *right now*. Hovering the row is you asking, and that is when the
+   colour is worth spending.
+
+   `grayscale()` rather than a second grey token, because the pill's design is
+   already right — this is the same pill at zero saturation, not a different one.
+   It rides `--tab-hover`, which is the row's own hover variable: eased in over
+   140ms, dropped instantly on leave, and inherited, so every badge in the row
+   answers together rather than one at a time under the pointer. */
+.streams-nav-badge {
+  filter: grayscale(calc(1 - var(--tab-hover)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* `--tab-hover` loses its curve elsewhere under reduced motion; the state
+     change itself still happens, so there is nothing to disable here. */
+  .streams-nav-badge {
+    transition: none;
+  }
+}
+
+/* `squeeze`: the label's width follows the light, so the run you can see reads
+   as names and the rest of the stream collapses to its icons. `max-width` rather
+   than `width` so a short name still takes only what it needs. */
+.streams-nav-squeeze {
+  max-width: calc(var(--tab-on) * 9rem);
+}
+
+/* ── Stream tab row, index variant ───────────────────────────────────────────
+
+   The stream as a lined index: one tick per column, no names at all until you
+   point at one.
+
+   A name costs ~90px and a tick costs 12, so this is the only row that never
+   overflows — the whole stream fits whatever its length, and every mechanism the
+   other four variants carry for "wider than the space" (following the strip,
+   edge masks, the aperture) is simply not needed here.
+
+   What it buys beyond compactness: the lit run stops being a colour change
+   smeared across words of unequal width and becomes a contiguous block of tall
+   marks — a shape you can read the width and position of at a glance, the way
+   you read a scrollbar thumb.
+
+   Two channels, two jobs, and they do not overlap:
+
+   - **height** is state — how much of that column is on screen, plus the one
+     you are pointing at;
+   - **colour** is the same lit/unlit readout the tabs use, plus accent for the
+     tick under the cursor.
+
+   And two speeds, which is the part worth being deliberate about. `--tab-on` is
+   written every frame from `scrollLeft` and carries no transition at all, so the
+   row never lags the stream. `--tick-hover` changes twice per hover and nothing
+   else touches it, so it eases — and it eases *asymmetrically*, faster in than
+   out. The tick you just left drains away while the new one comes up, rather
+   than snapping back and pulling your eye backwards. */
+
+@property --tick-hover {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+:root {
+  /* Every one of these is a dial (Streams dev panel, `Ticks`). None of the five
+     numbers is derivable — how thin a mark can be and still read as a run, and
+     how far apart before the run stops reading as one object, are both functions
+     of what is behind the row, which is itself dialled. */
+  --tick-pitch: 12px;
+  --tick-w: 1px;
+  /* Off, on, and pointed-at. The gap between the first two is the lit run; the
+     third is small on purpose — it says "this one" without making the row jump.
+
+     Unitless, and that is not a style choice: the mark is drawn at the tallest of
+     the three and scaled down to the others, and CSS has no division by a length.
+     Numbers divide. */
+  --tick-h-off: 7;
+  --tick-h-on: 15;
+  --tick-h-hover: 21;
+  --tick-in-dur: 150ms;
+  --tick-out-dur: 250ms;
+  /* Where the mark sits in its target, and which edge it grows from. One dial
+     writes both; they are meaningless apart. `center` grows the tick from its
+     middle in both directions, `top`/`flex-start` hangs it from the top of the
+     row and grows it downward only. */
+  --tick-align: center;
+  --tick-origin: center;
+  /* How present an alerting tick is when its column is off screen. The whole
+     point of the mark is to be seen from a stream you are not looking at, so it
+     does not get to fall all the way to `--tab-off`. */
+  --tick-alert-floor: 0.85;
+}
+
+/* The button computes; the mark draws. Both derived values are plain custom
+   properties, which is what lets the mark read them at all — `--tab-on` and
+   `--tick-hover` are both registered `inherits: false` (deliberately: a tab that
+   is never written must not pick up its neighbour's light), so a pseudo-element
+   would see their initial values, not this tick's. An unregistered property is
+   substituted at computed-value time on the element that declares it, so what
+   inherits down is the *answer*, not the expression. */
+.streams-nav-tick {
+  --tick-hover: 0;
+  /* The height the mark should be, as a fraction of the height it is drawn at. */
+  --tick-scale: calc(
+    (
+        var(--tick-h-off) + (var(--tick-h-on) - var(--tick-h-off)) * var(--tab-on) +
+          (var(--tick-h-hover) - var(--tick-h-on)) * var(--tick-hover)
+      ) /
+      var(--tick-h-hover)
+  );
+  /* How present the mark is. Opacity rather than the tabs' `color-mix`, and the
+     reason is the same as the reason for `scaleY` below — see the mark. A single
+     ink at varying opacity is also honest here in a way it is not for text: this
+     is a 1px rule, not a glyph, so there is no legibility floor to protect and
+     nothing gained by moving hue as well as weight. */
+  --tick-lit: calc(var(--tab-off) + (1 - var(--tab-off)) * max(var(--tab-on), var(--tab-hover)));
+  --tick-ink: var(--tick-lit);
+  /* The whole target, not the mark — the pitch is what the pointer has to hit. */
+  width: var(--tick-pitch);
+  align-items: var(--tick-align);
+  color: hsl(var(--foreground));
+  transition: --tick-hover var(--tick-out-dur) var(--jump-ease);
+}
+
+/* `transform` and `opacity`, never `background-size` or `color`.
+   
+   This is the fix for the row feeling low-framerate, and the distinction is not
+   a micro-optimisation — it is a different pipeline. `background-size` and
+   `color` are **paint** properties: every change re-rasterises the element,
+   anti-aliased edges and all. `--tab-on` is rewritten on every tick on every
+   frame the stream moves, so the old version repainted the entire row, every
+   frame, forever — and because each mark's sub-pixel height landed on a slightly
+   different anti-aliasing every time, the whole row shimmered even when almost
+   nothing had changed.
+   
+   `transform` and `opacity` are **composite** properties. The mark is rasterised
+   once, at its tallest, and the compositor scales and fades that one bitmap. No
+   repaint at any value, and the result is sub-pixel accurate rather than
+   re-sampled — which is the difference between a line growing and a line
+   flickering between two roundings of itself. */
+.streams-nav-tick::before {
+  content: "";
+  width: var(--tick-w);
+  height: calc(var(--tick-h-hover) * 1px);
+  border-radius: 999px;
+  background: currentcolor;
+  transform: scaleY(var(--tick-scale));
+  transform-origin: var(--tick-origin);
+  opacity: var(--tick-ink);
+  will-change: transform, opacity;
+}
+
+/* A column with something in it, in the accent — the same `--primary` red the
+   `ActivityDot` uses everywhere else in Streams, so red means the same thing in
+   the index as it does in a column header or an overview card.
+
+   This is why hover is no longer accent. Two reds cannot both be "look here",
+   and of the two this is the one that is *news*: hover is something you already
+   know, because your own pointer is doing it. Hover keeps the two signals it
+   always had — full ink and the height lift — and an alerting tick under the
+   pointer stays red while still being the tall one, so the two never collide. */
+.streams-nav-tick[data-alert] {
+  color: hsl(var(--primary));
+  --tick-ink: max(var(--tick-lit), var(--tick-alert-floor));
+}
+
+/* Height eases; colour does not. The split is the whole feel of this thing —
+   your eye gets the answer on the next frame and the motion arrives after it,
+   so nothing is ever waiting on a curve to tell you what you are pointing at. */
+.streams-nav-tick:hover,
+.streams-nav-tick:focus-visible {
+  --tick-hover: 1;
+  --tick-ink: 1;
+  transition-duration: var(--tick-in-dur);
+}
+
+/* Below the row, not above: the header is the top of the window, and a label
+   that has to dodge the viewport edge is a label that moves. Centred on its own
+   tick and `pointer-events: none`, so crossing the row never has the label
+   itself take the hover away from the tick under it. */
+.streams-nav-tick-label {
+  /* Above the stream, and it has to be said explicitly: the header precedes the
+     strip in the DOM, so a label hanging below it would otherwise paint under
+     the very columns it names — and under the veil, which is `z-4`. */
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 50%;
+  translate: -50% 0;
+  margin-top: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--tick-out-dur) var(--jump-ease);
+}
+.streams-nav-tick:hover .streams-nav-tick-label,
+.streams-nav-tick:focus-visible .streams-nav-tick-label {
+  opacity: 1;
+  transition-duration: var(--tick-in-dur);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streams-nav-tick,
+  .streams-nav-tick-label {
+    transition: none !important;
+  }
+}
+
+/* ── Stream tab row, window variant ──────────────────────────────────────────
+
+   An aperture over the stream's tabs rather than the whole list.
+
+   At rest the box is only as wide as the run of columns you can actually see,
+   so the tabs for everything else are outside it and clipped — not merely
+   transparent. That distinction is the reason width carries the reveal rather
+   than opacity alone: a masked-but-present tab is still a hit target, so a row
+   faded to nothing would silently eat clicks aimed at the header behind it.
+
+   Hovering widens the box to the whole stream. The mask stays on in both states,
+   narrow, and only softens the two ends — it is what stops a tab being sliced
+   mid-glyph by the box edge, which is the one thing that makes an aperture read
+   as a clipping bug rather than as a window.
+
+   Modelled at a distance on the iOS camera's mode selector: compact at rest,
+   more revealed while you are working it, faded back after. None of its
+   specifics — the growing track's own proportions, its selected-mode pill, its
+   bouncy settle — are reproduced here. */
+@property --streams-window-fade {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+/* How much of each end's fade is currently earned, 0 to 1, written per frame
+   from the row's own scroll position.
+
+   A fade that is always on is worse than none: at the start of the stream it dims
+   the first tab for no reason and reads as a rendering fault rather than as
+   "there is more this way". This is the same rule `.streams-fade-x` gets for
+   free from a scroll timeline — the window cannot use one, because its scroll
+   is written rather than gestured and the timeline would be driving off a value
+   this component is itself setting. So it is measured instead, in the same
+   frame the centring is.
+
+   Initial 1 so that before the first measurement both ends are soft. Erring
+   toward a fade that should not be there is a moment of dimness; erring the
+   other way is a tab guillotined by the box edge. */
+@property --window-edge-start {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --window-edge-end {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+:root {
+  /* ONE width, in both states, and this is the fix for the tab that ran away
+     from the cursor.
+
+     The box used to grow on hover. Its content is positioned from its left edge,
+     so widening a centred box walks that edge outward — and every tab in it goes
+     with it, in the opposite direction on each side. You aim at a tab, the row
+     opens because you are now hovering it, and the thing you were aiming at has
+     moved out from under you. Worse the further from centre you aim, which is
+     exactly where the tabs you cannot already see are.
+
+     So the box never changes size. The mask alone carries the reveal: heavy at
+     rest, so only a band in the middle is legible, and retracting to the ends on
+     hover. Nothing is laid out differently between the two states, so nothing
+     can move — the tab under the cursor when the row opens is the same tab, at
+     the same pixel, when it finishes opening.
+
+     Capped against the viewport so the box never reaches the stream switcher on
+     its left or the stream's verbs on its right: it is centred on the screen and
+     those two are not. */
+  --window-w: min(64rem, 70vw);
+  /* The aperture, expressed as what is masked off either side rather than as a
+     width. At 30% the legible band is the middle 40% — about five tabs on a wide
+     screen, which is the run of columns the stream shows. */
+  --window-fade-rest: 30%;
+  --window-fade-open: 4%;
+  --window-reveal-dur: 260ms;
+  --window-collapse-dur: 200ms;
+  --window-ease: var(--jump-ease);
+}
+
+.streams-window {
+  width: var(--window-w);
+  --streams-window-fade: var(--window-fade-rest);
+  /* Each end's fade is the shared size scaled by whether that end has earned
+     it. A percentage times a number is a percentage, so the hover transition on
+     `--streams-window-fade` still carries both. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 calc(var(--streams-window-fade) * var(--window-edge-start)),
+    #000 calc(100% - var(--streams-window-fade) * var(--window-edge-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 calc(var(--streams-window-fade) * var(--window-edge-start)),
+    #000 calc(100% - var(--streams-window-fade) * var(--window-edge-end)),
+    transparent 100%
+  );
+  transition: --streams-window-fade var(--window-collapse-dur) var(--window-ease);
+}
+
+/* `focus-within` as well as `hover`, and not as an afterthought: the row is a
+   list of buttons, so tabbing into it is a real way to arrive and a keyboard
+   user landing on a tab clipped outside the aperture would be focusing
+   something they cannot see. */
+.streams-window:hover,
+.streams-window:focus-within {
+  --streams-window-fade: var(--window-fade-open);
+  transition: --streams-window-fade var(--window-reveal-dur) var(--window-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The mask *is* the reveal, so it cannot simply be removed — without it
+     hovering would do nothing at all. It arrives at once instead of easing. */
+  .streams-window {
+    transition: none !important;
+  }
+}
+
+/* Registered so they can *tween*, not just switch.
+   An unregistered custom property is raw token substitution — the value jumps
+   and the mask jumps with it, which is what made the focus-mode fade snap on and
+   off rather than arrive. Declared `<length>`, they interpolate, so a transition
+   on them is a fade that actually fades. */
+@property --fade-x-start {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+@property --fade-x-end {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+
+@property --streams-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --streams-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.streams-fade-x {
+  /* Matched to the w-8 overlays this replaced. */
+  --fade-x: 32px;
+  /* Per-edge, so one end can be tuned without the other. Both default to the
+     shared size, so setting only `--fade-x` still moves both — and an inline
+     `--fade-x-start` from the dial overrides just that edge. */
+  --fade-x-start: var(--fade-x);
+  --fade-x-end: var(--fade-x);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--streams-fade-start),
+    #000 calc(100% - var(--streams-fade-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--streams-fade-start),
+    #000 calc(100% - var(--streams-fade-end)),
+    transparent 100%
+  );
+}
+
+@supports (animation-timeline: scroll()) {
+  .streams-fade-x {
+    animation:
+      streams-fade-start linear both,
+      streams-fade-end linear both;
+    /* The inline axis of the same scroller. */
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range:
+      0 var(--fade-x-start),
+      calc(100% - var(--fade-x-end)) 100%;
+  }
+  @keyframes streams-fade-start {
+    from {
+      --streams-fade-start: 0px;
+    }
+    to {
+      --streams-fade-start: var(--fade-x-start);
+    }
+  }
+  @keyframes streams-fade-end {
+    from {
+      --streams-fade-end: var(--fade-x-end);
+    }
+    to {
+      --streams-fade-end: 0px;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Gentler, not zero — colour and opacity still carry the state change, only
+     the movement goes. */
+  .streams-press:active:not(:disabled),
+  .streams-press-row:active:not(:disabled) {
+    transform: none;
+  }
+  .streams-strip {
+    scroll-behavior: auto;
+  }
+  /* `.streams-fade-y` is deliberately NOT disabled here. Nothing moves
+     independently of the user's own scroll — the mask tracks the scroll offset
+     exactly as the content does, so there is no motion to reduce. Switching it
+     off would pin a permanent fade over the first and last rows, which is the
+     worse outcome. */
+}

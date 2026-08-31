@@ -25,6 +25,7 @@ import {
 import { useAllUnreadCount } from '../../../../hooks/useUnreadCount';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../../hooks/useAuth';
+import { useStreamChannels } from '../../../../contexts/StreamContext';
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import type { DisplaySearchResult } from '../../../../types/search';
 
@@ -89,6 +90,15 @@ interface ContextPickerProps {
   selectedIds: ContextPickerSelectedIds;
   /** Toggle a channel pick into/out of the attached context. */
   onToggleChannel?: (channel: Channel, displayName: string) => void;
+  /**
+   * Attach several channels in one go.
+   *
+   * Separate from `onToggleChannel` because the toggle computes the next
+   * selection from the selection it was rendered with. Called N times in a loop,
+   * all N calls read the same starting state and the last one wins — "attach all
+   * 5" attaches one. A bulk call lets the host fold the whole list in once.
+   */
+  onAttachChannels?: (channels: readonly { channel: Channel; displayName: string }[]) => void;
   /** Toggle a backend-result pick — the active tab disambiguates call vs recording. */
   onToggleResult?: (result: DisplaySearchResult, tab: TabType) => void;
   /**
@@ -140,6 +150,7 @@ const selectedSetForTab = (
 export const ContextPicker = ({
   selectedIds,
   onToggleChannel,
+  onAttachChannels,
   onToggleResult,
   onClose,
 }: ContextPickerProps): ReactElement => {
@@ -303,14 +314,51 @@ export const ContextPicker = ({
     return <Hash size={14} />;
   };
 
-  // CHANNELS tab renders the local corpus grouped by category, like the menu.
+  /**
+   * The channels the surrounding stream is already showing, hoisted to the top of
+   * the Channels tab.
+   *
+   * When Ask AI is a column in a stream, the columns beside it are the single best
+   * guess at what a question is about — you assembled them because they are what
+   * you are working on. Ranking them above a workspace-wide list by recency is
+   * the difference between the picker guessing and the picker knowing.
+   *
+   * Empty everywhere else, so the group simply does not render.
+   */
+  const streamChannelIds = useStreamChannels();
+  const streamChannels = useMemo(() => {
+    if (streamChannelIds.length === 0) return [];
+    const inStream = new Set(streamChannelIds);
+    // Ordered by the stream, not by the corpus: the arrangement is the ranking.
+    return streamChannelIds
+      .map(id => filteredLocalChannels.find(item => item.channel.id === id))
+      .filter((item): item is (typeof filteredLocalChannels)[number] =>
+        item !== undefined ? inStream.has(item.channel.id) : false,
+      );
+  }, [streamChannelIds, filteredLocalChannels]);
+
+  const unattachedStreamChannels = useMemo(
+    () => streamChannels.filter(item => !selectedIds.channels.has(item.channel.id)),
+    [streamChannels, selectedIds.channels],
+  );
+
+  // CHANNELS tab renders the local corpus grouped by category, like the menu —
+  // minus whatever "In this stream" already lifted out.
+  //
+  // Hoisted means moved, not copied. Leaving the duplicate in was not just a
+  // second row to scroll past: cmdk identifies an item by its `value`, and both
+  // rows are the same channel with the same display name, so both carry the same
+  // value. cmdk then marks BOTH as selected and the arrow keys land on a row you
+  // are not looking at.
   const groupedChannels = useMemo(() => {
+    const hoisted = new Set(streamChannels.map(item => item.channel.id));
     const groups: Partial<Record<ChannelCategory, typeof filteredLocalChannels>> = {};
     filteredLocalChannels.forEach(item => {
+      if (hoisted.has(item.channel.id)) return;
       (groups[item.category] ??= []).push(item);
     });
     return groups;
-  }, [filteredLocalChannels]);
+  }, [filteredLocalChannels, streamChannels]);
 
   // Tab / Shift+Tab cycles the strip with wrap-around — ChannelCommandMenu's
   // inline-mode behaviour (the old context picker ran the menu inline).
@@ -424,24 +472,12 @@ export const ContextPicker = ({
                 No channels found
               </div>
             ) : (
-              CHANNEL_CATEGORY_ORDER.map(category => {
-                const items = groupedChannels[category];
-                if (!items || items.length === 0) return null;
-
-                const isExpanded = expandedCategories.has(category);
-                const hasMore = items.length > DISPLAY_LIMIT;
-                const displayItems = !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-                const hiddenCount = items.length - DISPLAY_LIMIT;
-
-                return (
-                  <Command.Group
-                    key={category}
-                    heading={CATEGORY_LABELS[category]}
-                    className={GROUP_HEADING_CLASS}
-                  >
-                    {displayItems.map(({ channel }) => (
+              <>
+                {streamChannels.length > 0 && (
+                  <Command.Group heading='In this stream' className={GROUP_HEADING_CLASS}>
+                    {streamChannels.map(({ channel }) => (
                       <ChannelCommandItem
-                        key={channel.id}
+                        key={`stream-${channel.id}`}
                         channel={channel}
                         currentUserID={currentUserID}
                         unreadCount={unreadCounts[channel.id] ?? 0}
@@ -450,31 +486,84 @@ export const ContextPicker = ({
                         isSelected={selectedIds.channels.has(channel.id)}
                       />
                     ))}
-                    {hasMore && (
+                    {/* Attaches only what is not attached yet. Toggling the whole
+                        list would *detach* the ones you had already picked, which
+                        is the opposite of what a control called "attach all"
+                        promises — and the reason this is not simply a loop over
+                        the same toggle the rows use. */}
+                    {unattachedStreamChannels.length > 1 && onAttachChannels !== undefined && (
                       <button
                         type='button'
-                        onClick={() =>
-                          setExpandedCategories(prev => {
-                            const next = new Set(prev);
-                            if (next.has(category)) {
-                              next.delete(category);
-                            } else {
-                              next.add(category);
-                            }
-                            return next;
-                          })
-                        }
+                        onClick={() => {
+                          onAttachChannels(
+                            unattachedStreamChannels.map(({ channel, searchableNames }) => ({
+                              channel,
+                              displayName: searchableNames?.[0] ?? channel.name ?? '',
+                            })),
+                          );
+                        }}
                         className='w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors hover:text-foreground hover:bg-accent'
                         data-track-category='XyneAI'
-                        data-track-name='CONTEXT_PICKER_SHOW_MORE'
-                        data-track-metadata={JSON.stringify({ category })}
+                        data-track-name='CONTEXT_PICKER_ATTACH_STREAM'
                       >
-                        {isExpanded ? 'Show less' : `Show ${hiddenCount} more`}
+                        Attach all {unattachedStreamChannels.length} from this stream
                       </button>
                     )}
                   </Command.Group>
-                );
-              })
+                )}
+                {CHANNEL_CATEGORY_ORDER.map(category => {
+                  const items = groupedChannels[category];
+                  if (!items || items.length === 0) return null;
+
+                  const isExpanded = expandedCategories.has(category);
+                  const hasMore = items.length > DISPLAY_LIMIT;
+                  const displayItems =
+                    !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                  const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                  return (
+                    <Command.Group
+                      key={category}
+                      heading={CATEGORY_LABELS[category]}
+                      className={GROUP_HEADING_CLASS}
+                    >
+                      {displayItems.map(({ channel }) => (
+                        <ChannelCommandItem
+                          key={channel.id}
+                          channel={channel}
+                          currentUserID={currentUserID}
+                          unreadCount={unreadCounts[channel.id] ?? 0}
+                          onSelect={displayName => onToggleChannel?.(channel, displayName)}
+                          getChannelIcon={getChannelIcon}
+                          isSelected={selectedIds.channels.has(channel.id)}
+                        />
+                      ))}
+                      {hasMore && (
+                        <button
+                          type='button'
+                          onClick={() =>
+                            setExpandedCategories(prev => {
+                              const next = new Set(prev);
+                              if (next.has(category)) {
+                                next.delete(category);
+                              } else {
+                                next.add(category);
+                              }
+                              return next;
+                            })
+                          }
+                          className='w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors hover:text-foreground hover:bg-accent'
+                          data-track-category='XyneAI'
+                          data-track-name='CONTEXT_PICKER_SHOW_MORE'
+                          data-track-metadata={JSON.stringify({ category })}
+                        >
+                          {isExpanded ? 'Show less' : `Show ${hiddenCount} more`}
+                        </button>
+                      )}
+                    </Command.Group>
+                  );
+                })}
+              </>
             )
           ) : (
             // ── Vespa-backed tabs: tickets / canvas / calls / recordings ──

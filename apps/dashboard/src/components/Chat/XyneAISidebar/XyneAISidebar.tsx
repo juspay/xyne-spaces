@@ -143,10 +143,22 @@ interface XyneAISidebarProps {
   initialQuery?: string | undefined;
   autoSendNonce?: number;
   researchContext?: XyneAIResearchContext | null;
+  // Seed text that is *not* sent — bump seedNonce to place it in the composer and
+  // leave it there to be edited. For hosts that hand the user a prepared question
+  // rather than a finished one.
+  seedQuery?: string;
+  seedNonce?: number;
   // Reports whether the active conversation is streaming, so an embedding caller can mute its own controls.
   onStreamingChange?: (isStreaming: boolean) => void;
   // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
   onFinalResponse?: (content: string) => void;
+  // Drops the tilted suggestion cards from the empty state, leaving the heading.
+  // Set by hosts that embed this in a narrow slot (e.g. a Streams column).
+  hideEmptyStateSuggestions?: boolean;
+  // Drops the header row entirely. For hosts whose own chrome already carries a
+  // title and a close, where this one is a second bar under the first however
+  // little it contains.
+  hideHeader?: boolean;
 }
 
 const XyneAISidebar = ({
@@ -176,8 +188,12 @@ const XyneAISidebar = ({
   initialQuery,
   autoSendNonce,
   researchContext,
+  seedQuery,
+  seedNonce,
   onStreamingChange,
   onFinalResponse,
+  hideEmptyStateSuggestions = false,
+  hideHeader = false,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -290,6 +306,19 @@ const XyneAISidebar = ({
     autoSendPendingQueryRef.current = initialQuery;
     setInputValue(initialQuery);
   }, [autoSendNonce, initialQuery]);
+  // Seed *without* sending, which `autoSendNonce` above deliberately cannot do —
+  // it exists for callers that already know the whole question. A host that hands
+  // over a starting point instead needs the text in the box and the cursor after
+  // it, and firing a model call on the caller's behalf would be the wrong trade:
+  // the gestures that produce a seed (dropping a thread onto an Ask AI column)
+  // are far cheaper than the request they would otherwise trigger.
+  const lastSeedNonceRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (seedNonce === undefined || seedNonce === lastSeedNonceRef.current) return;
+    if (!seedQuery?.trim()) return;
+    lastSeedNonceRef.current = seedNonce;
+    setInputValue(seedQuery);
+  }, [seedNonce, seedQuery]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -2045,7 +2074,7 @@ const XyneAISidebar = ({
           <div ref={sidebarContentRef} className='flex h-full min-h-0 flex-col'>
             {aiOnboarding.isActive ? (
               <XyneAIOnboardingHeader onClose={completeOnboarding} />
-            ) : isFullscreen && messages.length === 0 ? null : (
+            ) : hideHeader ? null : isFullscreen && messages.length === 0 ? null : (
               <XyneAIHeader
                 onNewChat={handleNewChat}
                 onShowHistory={() => setShowHistorySidebar(true)}
@@ -2194,7 +2223,7 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   ) : (
-                    <XyneAIEmptyState />
+                    <XyneAIEmptyState hideSuggestions={hideEmptyStateSuggestions} />
                   )
                 ) : (
                   <div className={cn(isFullscreen ? 'flex justify-center' : '')}>

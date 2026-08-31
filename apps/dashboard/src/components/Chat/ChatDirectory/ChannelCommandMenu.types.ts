@@ -222,6 +222,19 @@ export interface ChannelCommandMenuProps {
   hideTabs?: boolean;
   /** When true, enables desk ticket merge UI (only set when opened via the support screen search button) */
   deskMergeEnabled?: boolean;
+  /**
+   * How a chosen row is marked — a solid brand tick (`filled`, the default) or a
+   * bordered one (`outline`). Pick `outline` where the mark states a fact about
+   * a row you cannot act on, rather than offering a choice.
+   */
+  selectionVariant?: 'filled' | 'outline';
+  /**
+   * Collapse the tab strip to icons, showing only the active tab's label.
+   *
+   * For hosts that give the strip a column's width rather than a dialog's. Off
+   * by default: every existing caller keeps the full-label row it had.
+   */
+  compactTabs?: boolean;
 }
 
 /* ------------------------------------------------------------------------- *

@@ -40,6 +40,7 @@ import {
   formatChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Avatar from '../../ui/Avatar/Avatar';
 import Badge from '../../ui/Badge';
 import { DisplaySearchResult } from '../../../types/search';
@@ -116,6 +117,53 @@ function stripHtmlTags(html: string): string {
   div.innerHTML = html;
   return div.textContent || html;
 }
+/**
+ * Bring a clicked tab to the middle of its own strip — and nothing else.
+ *
+ * This used to be `scrollIntoView({ inline: 'center' })`, which is not a
+ * request to scroll one element: it scrolls *every* scrollable ancestor until
+ * the target is centred in each. Harmless in a dialog, where there are none.
+ * Not harmless once this menu renders inside a page that scrolls — the Streams
+ * add-column palette lives in a horizontally scrolling stream, so centring a tab
+ * inside a 380px panel also centred that panel in the stream, and the whole row
+ * of columns slid sideways every time you picked a category.
+ *
+ * Scrolling the strip by the delta between the two centres does the visible
+ * half of the old behaviour and stops at the strip's own edge.
+ */
+const centreTabInStrip = (tab: HTMLElement): void => {
+  const strip = tab.closest<HTMLElement>('[data-tab-strip]');
+  if (!strip) return;
+  const tabBox = tab.getBoundingClientRect();
+  const stripBox = strip.getBoundingClientRect();
+  strip.scrollBy({
+    left: tabBox.left + tabBox.width / 2 - (stripBox.left + stripBox.width / 2),
+    behavior: 'smooth',
+  });
+};
+
+/**
+ * How a chosen row is marked.
+ *
+ * `filled` is the multi-select reading: a solid brand-coloured tick, the same
+ * weight as a checkbox, because in the Ask AI picker choosing and un-choosing is
+ * the whole interaction and the mark is the control.
+ *
+ * `outline` is for lists where the mark is a *fact*, not a control — the Streams
+ * add palette showing which columns the stream already holds. Those rows are inert,
+ * and a row of solid brand ticks down the side of an inert list reads as seven
+ * buttons demanding attention.
+ */
+export type SelectionVariant = 'filled' | 'outline';
+
+const selectionTickClass = (variant: SelectionVariant): string =>
+  cn(
+    'flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full',
+    variant === 'outline'
+      ? 'border border-border text-muted-foreground'
+      : 'bg-primary text-primary-foreground',
+  );
+
 // Exported so the Ask AI inline context picker (XyneAISidebar/ContextPicker)
 // renders channel rows with this exact component instead of a copy.
 export const ChannelCommandItem = ({
@@ -126,6 +174,7 @@ export const ChannelCommandItem = ({
   onItemMouseDown,
   getChannelIcon,
   isSelected = false,
+  selectionVariant = 'filled',
 }: {
   channel: Channel;
   currentUserID: string;
@@ -134,6 +183,7 @@ export const ChannelCommandItem = ({
   onItemMouseDown?: (e: React.MouseEvent) => void;
   getChannelIcon: (channel: Channel) => ReactElement;
   isSelected?: boolean;
+  selectionVariant?: SelectionVariant;
 }): ReactElement | null => {
   const { displayName } = useChannelDisplayName(channel, currentUserID);
   const { isMobile } = usePlatform();
@@ -172,7 +222,7 @@ export const ChannelCommandItem = ({
         )}
       </div>
       {isSelected ? (
-        <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
+        <span className={selectionTickClass(selectionVariant)}>
           <CheckTickSingle size={10} />
         </span>
       ) : (
@@ -286,6 +336,7 @@ const ChannelCommandMenu = ({
   open,
   onOpenChange,
   contextSelectionMode = false,
+  selectionVariant = 'filled',
   contextItems = [],
   onContextItemToggle,
   onContextSelectionConfirm,
@@ -293,6 +344,7 @@ const ChannelCommandMenu = ({
   initialQuery,
   enabledTabs,
   inline = false,
+  compactTabs = false,
   onTabChange,
   initialTab,
   hideTabs = false,
@@ -2629,6 +2681,7 @@ const ChannelCommandMenu = ({
                     }}
                     onItemMouseDown={handleItemMouseDown}
                     getChannelIcon={getChannelIcon}
+                    selectionVariant={selectionVariant}
                     isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                   />
                 );
@@ -2692,6 +2745,7 @@ const ChannelCommandMenu = ({
                     }}
                     onItemMouseDown={handleItemMouseDown}
                     getChannelIcon={getChannelIcon}
+                    selectionVariant={selectionVariant}
                     isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                   />
                 );
@@ -2769,6 +2823,7 @@ const ChannelCommandMenu = ({
                       }}
                       onItemMouseDown={handleItemMouseDown}
                       getChannelIcon={getChannelIcon}
+                      selectionVariant={selectionVariant}
                       isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                     />
                   );
@@ -2835,6 +2890,7 @@ const ChannelCommandMenu = ({
                           }}
                           onItemMouseDown={handleItemMouseDown}
                           getChannelIcon={getChannelIcon}
+                          selectionVariant={selectionVariant}
                           isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                         />
                       );
@@ -3809,11 +3865,25 @@ const ChannelCommandMenu = ({
         >
           {/* Tabs - hidden when bot is selected or hideTabs is true */}
           <div
+            data-tab-strip
             className={`shrink-0 overflow-x-auto no-scrollbar px-4 py-1.5 focus:outline-none focus-visible:outline-none ${isMobile ? 'mx-1' : ''} ${hideTabs ? 'hidden' : ''}`}
           >
             <Tabs.Root value={activeTab}>
               <Tabs.List
-                className='flex items-center justify-start gap-2'
+                // `min-w-max` is what makes the strip a *scroller* rather than a
+                // squeezer. Without it the row is a plain flex line that shrinks
+                // its children to fit the 378px a column gives it: the active
+                // tab's label gets clipped mid-word and the 14px icons are
+                // squashed narrower to make room. Overflowing and scrolling is
+                // the correct failure — the tab keeps its size and the strip
+                // carries it. Only for compact hosts: everywhere else the row has
+                // the room it always had, and squeezing never happens.
+                className={cn(
+                  'flex items-center justify-start',
+                  // Tighter where six tabs share a column's width and 8px gaps are
+                  // 40px of the budget. A dialog has room for both.
+                  compactTabs ? 'min-w-max gap-1' : 'gap-2',
+                )}
                 onKeyDownCapture={e => {
                   // Capture arrow keys before Radix UI's internal handler
                   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -3822,59 +3892,117 @@ const ChannelCommandMenu = ({
                   }
                 }}
               >
-                {tabs.map(tab => (
-                  <Tabs.Trigger
-                    key={tab.id}
-                    value={tab.id}
-                    onKeyDown={e => {
-                      // Disable left/right arrow key navigation between tabs
-                      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                        e.preventDefault();
-                      }
-                    }}
-                    asChild
-                  >
-                    <button
-                      onClick={e => {
-                        if (activeTab === tab.id) {
-                          if (!inline) {
-                            setActiveTab(TabType.ALL);
-                            onTabChange?.(TabType.ALL);
-                          }
-                          // In inline mode, clicking the active tab does nothing
-                        } else {
-                          setActiveTab(tab.id);
-                          onTabChange?.(tab.id);
+                {tabs.map(tab => {
+                  /* Compact, only the active tab spells itself out.
+     
+                     Six icon+label tabs need 633px and the Streams palette gives
+                     the strip 378, so half of them used to sit off the right edge
+                     of a scroller with no affordance — reachable only by knowing
+                     they were there. Collapsed to icons the six fit in ~300px with
+                     room to spare, and the one that still needs words is the one
+                     saying what you are filtered to.
+     
+                     Same treatment as the Activity tab strip, including the way it
+                     is done: the label is a grid track animated from 1fr to 0fr, so
+                     it slides shut instead of vanishing. Every other host keeps all
+                     its labels — none of them is short of width. */
+                  const showLabel = !compactTabs || activeTab === tab.id;
+                  const trigger = (
+                    <Tabs.Trigger
+                      key={tab.id}
+                      value={tab.id}
+                      onKeyDown={e => {
+                        // Disable left/right arrow key navigation between tabs
+                        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                          e.preventDefault();
                         }
-                        // Blur input when clicking tabs
-                        if (inputRef.current) {
-                          inputRef.current.blur();
-                        }
-                        e.currentTarget.scrollIntoView({
-                          behavior: 'smooth',
-                          block: 'nearest',
-                          inline: 'center',
-                        });
                       }}
-                      className={cn(
-                        // No focus ring: Tab is bound to tab-cycling here, so a click-focused
-                        // trigger would paint a ring on the next Tab press. The active tab's
-                        // bg-accent treatment already communicates position.
-                        'flex items-center justify-center gap-2 px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0',
-                        activeTab === tab.id
-                          ? 'bg-accent text-foreground'
-                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                        isMobile && 'text-base w-fit h-9 px-3',
-                      )}
-                      data-track-category='CHANNEL_SEARCH'
-                      data-track-name='SELECT_SEARCH_TAB'
-                      data-track-metadata={JSON.stringify({ tab: tab.id })}
+                      asChild
                     >
-                      {tab.icon}
-                      {tab.label}
-                    </button>
-                  </Tabs.Trigger>
-                ))}
+                      <button
+                        aria-label={tab.label}
+                        onClick={e => {
+                          if (activeTab === tab.id) {
+                            // Clicking the active tab clears the filter — but only
+                            // where ALL is somewhere to land. Inline callers that
+                            // omit it from `enabledTabs` have no unfiltered state,
+                            // so for them this stays a no-op, as it always was.
+                            if (!inline || activeEnabledTabs.includes(TabType.ALL)) {
+                              setActiveTab(TabType.ALL);
+                              onTabChange?.(TabType.ALL);
+                            }
+                          } else {
+                            setActiveTab(tab.id);
+                            onTabChange?.(tab.id);
+                          }
+                          // Blur input when clicking tabs
+                          if (inputRef.current) {
+                            inputRef.current.blur();
+                          }
+                          centreTabInStrip(e.currentTarget);
+                        }}
+                        className={cn(
+                          // No focus ring: Tab is bound to tab-cycling here, so a click-focused
+                          // trigger would paint a ring on the next Tab press. The active tab's
+                          // bg-accent treatment already communicates position.
+                          'flex items-center justify-center px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0',
+                          // Paired with the strip's `min-w-max` — together they make
+                          // the row overflow instead of squeezing its tabs.
+                          compactTabs ? 'shrink-0' : null,
+                          activeTab === tab.id
+                            ? 'bg-accent text-foreground'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                          isMobile && 'text-base w-fit h-9 px-3',
+                        )}
+                        data-track-category='CHANNEL_SEARCH'
+                        data-track-name='SELECT_SEARCH_TAB'
+                        data-track-metadata={JSON.stringify({ tab: tab.id })}
+                      >
+                        {tab.icon && (
+                          <span className='flex size-4 shrink-0 items-center justify-center'>
+                            {tab.icon}
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            'grid overflow-hidden transition-[grid-template-columns,opacity,margin] duration-300 ease-in-out motion-reduce:transition-none',
+                            tab.icon ? 'ml-2' : null,
+                            showLabel
+                              ? 'grid-cols-[1fr] opacity-100'
+                              : 'ml-0 grid-cols-[0fr] opacity-0',
+                          )}
+                        >
+                          <span className='min-w-0 overflow-hidden whitespace-nowrap'>
+                            {tab.label}
+                          </span>
+                        </span>
+                      </button>
+                    </Tabs.Trigger>
+                  );
+                  // Wrapped unconditionally, even when the label is already
+                  // showing and the tooltip would repeat it. Swapping the wrapper
+                  // in and out on selection changes the element type at this
+                  // position, so React unmounts the old button and mounts a new
+                  // one — and a freshly mounted element has no previous value to
+                  // transition from, which is why the label used to snap open
+                  // instead of sliding. The Activity strip wraps unconditionally
+                  // for the same reason.
+                  //
+                  // Held shut rather than removed where the labels are already on
+                  // screen: a tooltip that repeats the word beside it is noise, and
+                  // every host but the compact one shows every label.
+                  return (
+                    <Tooltip
+                      key={tab.id}
+                      content={tab.label}
+                      side='top'
+                      delayDuration={500}
+                      {...(compactTabs ? {} : { open: false })}
+                    >
+                      {trigger}
+                    </Tooltip>
+                  );
+                })}
               </Tabs.List>
             </Tabs.Root>
           </div>
@@ -4447,7 +4575,7 @@ const ChannelCommandMenu = ({
                                   {item.title}
                                 </span>
                                 {isSelected && (
-                                  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
+                                  <span className={selectionTickClass(selectionVariant)}>
                                     <CheckTickSingle size={10} />
                                   </span>
                                 )}
