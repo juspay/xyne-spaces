@@ -31,6 +31,9 @@ interface MeetingInfo {
   startedAt: string;
 }
 
+/** Why a meeting stopped — carried into telemetry so a crash is not read as a hang-up. */
+type MeetingEndReason = 'mic-inactive' | 'detector-stopped' | 'detector-crashed';
+
 // ── Constants ──────────────────────────────────────────────────────
 
 /**
@@ -149,6 +152,9 @@ class MeetingDetectorService {
         log.error('[MeetingDetector] Process error:', err.message);
         Logger.logError(ElectronEvent.MEETING_DETECTOR_ERROR, err, {}, 'MeetingDetector');
         this.process = null;
+        // A dead mic-monitor can never report the mic going quiet, so any
+        // meeting it was tracking has to be closed out here.
+        this.clearMeeting('detector-crashed');
         this.scheduleRestart();
       });
 
@@ -156,6 +162,7 @@ class MeetingDetectorService {
         log.info(`[MeetingDetector] Process exited with code=${code} signal=${signal}`);
         Logger.info(ElectronEvent.MEETING_DETECTOR_PROCESS_EXIT, { code, signal }, 'MeetingDetector');
         this.process = null;
+        this.clearMeeting('detector-crashed');
 
         if (!this.stopped && code !== 0) {
           this.scheduleRestart();
@@ -170,6 +177,9 @@ class MeetingDetectorService {
 
   public stop(): void {
     this.stopped = true;
+    // Turning detection off mid-meeting kills the mic-monitor, so the
+    // mic-inactive event that would normally end this meeting never arrives.
+    this.clearMeeting('detector-stopped');
 
     if (this.meetingEndTimer) {
       clearTimeout(this.meetingEndTimer);
@@ -209,6 +219,31 @@ class MeetingDetectorService {
   }
 
   // ── Private ────────────────────────────────────────────────────
+
+  /**
+   * End the current meeting and tell everyone who is listening.
+   *
+   * Every path that makes further mic events impossible has to come through
+   * here. The renderer silences incoming-call ringing while a meeting is set, so
+   * a stranded `currentMeeting` means calls ring silently for the rest of the
+   * session — which reads to the user as the ringtone being broken, not as a
+   * detector that quietly died.
+   */
+  private clearMeeting(reason: MeetingEndReason): void {
+    if (this.meetingEndTimer) {
+      clearTimeout(this.meetingEndTimer);
+      this.meetingEndTimer = null;
+    }
+
+    const meeting = this.currentMeeting;
+    if (!meeting) return;
+    this.currentMeeting = null;
+
+    log.info(`[MeetingDetector] Meeting ended (${reason}):`, meeting);
+    Logger.info(ElectronEvent.MEETING_ENDED, { ...meeting, reason }, 'MeetingDetector');
+    this.notifyRenderer('meeting:ended', meeting);
+    hideMeetingPopup();
+  }
 
   private getBinaryPath(): string {
     if (app.isPackaged) {
@@ -324,15 +359,7 @@ class MeetingDetectorService {
 
       this.meetingEndTimer = setTimeout(() => {
         this.meetingEndTimer = null;
-        if (this.currentMeeting) {
-          const meeting = this.currentMeeting;
-          this.currentMeeting = null;
-
-          log.info('[MeetingDetector] Meeting ended:', meeting);
-          Logger.info(ElectronEvent.MEETING_ENDED, { ...meeting }, 'MeetingDetector');
-          this.notifyRenderer('meeting:ended', meeting);
-          hideMeetingPopup();
-        }
+        this.clearMeeting('mic-inactive');
       }, MEETING_END_DEBOUNCE_MS);
     }
   }

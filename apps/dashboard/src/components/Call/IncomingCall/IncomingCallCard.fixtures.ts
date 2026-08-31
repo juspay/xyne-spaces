@@ -34,8 +34,9 @@ const stack = (
 
 const base = {
   isInActiveCall: false,
+  isSilenced: false,
   invitedBy: null,
-} satisfies Pick<IncomingCallViewModel, 'isInActiveCall' | 'invitedBy'>;
+} satisfies Pick<IncomingCallViewModel, 'isInActiveCall' | 'isSilenced' | 'invitedBy'>;
 
 export interface IncomingCallFixture {
   /** Matches the numbering in the design doc; blocked states continue past 10. */
@@ -140,11 +141,14 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
   },
   {
     n: 8,
-    label: 'Already in a call — notice + Switch call',
+    label: 'Already in a call — silenced, notice + Switch call',
     vm: {
       ...base,
       callId: 'fx-8',
       isInActiveCall: true,
+      // Being in a call is the first thing that silences a ring, so this state
+      // never occurs without the bell.
+      isSilenced: true,
       context: { kind: 'direct', icon: 'user', text: 'Incoming call' },
       identity: { mode: 'solo', userId: null, displayName: 'Ankit Sharma' },
       name: 'Ankit Sharma',
@@ -223,6 +227,21 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       identity: stack(['Rohan Mehta', 'Priya Nair', 'Harsh Iyer'], 4),
       name: 'Rohan Mehta',
       subtitle: 'with Priya, Harsh +5',
+    },
+  },
+  {
+    n: 14,
+    label: 'Silenced — recording or in a meeting elsewhere',
+    vm: {
+      ...base,
+      callId: 'fx-14',
+      // Unlike n:8 there is no active call, so the bell is the only thing
+      // marking this apart from n:1 — which is the whole point of the state.
+      isSilenced: true,
+      context: { kind: 'direct', icon: 'user', text: 'Incoming call' },
+      identity: { mode: 'solo', userId: null, displayName: 'Meera Pillai' },
+      name: 'Meera Pillai',
+      subtitle: 'meera.pillai@juspay.in',
     },
   },
 ];
