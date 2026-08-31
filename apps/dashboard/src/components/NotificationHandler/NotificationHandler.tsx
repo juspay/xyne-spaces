@@ -15,6 +15,7 @@ import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { useSelector } from '@xstate/react';
 import { CallType } from '@xyne/shared';
+import { buildSdlcPath } from '@xyne/shared/sdlc';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
@@ -73,6 +74,8 @@ interface NotificationData {
       commentThreadId?: string;
       conversation?: Conversation;
       notificationType?: string;
+      sdlcChannelId?: string;
+      ticketId?: string;
     };
     metadata?: {
       notificationType?: string;
@@ -227,10 +230,30 @@ export const NotificationHandler: React.FC = () => {
             ),
           });
         }
+        // Socket delivery spreads metadata into `data`; the REST row keeps `metadata`.
+        const ids = { ...data.notification.metadata, ...data.notification.data };
+        const sdlcActionUrl = ids.sdlcChannelId
+          ? buildSdlcPath({
+              channelId: ids.sdlcChannelId,
+              canvasId: ids.canvasId,
+              ticketId: ids.ticketId,
+              conversationId: ids.conversationId,
+              messageId: ids.messageId,
+              blockId: ids.blockId,
+              commentThreadId: ids.commentThreadId,
+            })
+          : undefined;
         const resolvedRawActionUrl =
-          data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
+          sdlcActionUrl ||
+          data.notification.actionUrl ||
+          canvasRedirectUrl ||
+          fallbackChatActionUrl;
         const resolvedActionUrl = resolvedRawActionUrl
-          ? withWorkspacePrefix(resolvedRawActionUrl, notificationWorkspaceId)
+          ? withWorkspacePrefix(
+              resolvedRawActionUrl,
+              // Unprefixed SDLC paths bind :workspaceId to "sdlc" — never ship one.
+              notificationWorkspaceId ?? activeWorkspaceIdRef.current,
+            )
           : undefined;
 
         // Always show workspace at the top when available, matching Slack.
