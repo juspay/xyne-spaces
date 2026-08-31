@@ -44,6 +44,16 @@ class WebSocketService {
   private connectionAttemptStartTime: number | null = null;
   private sessionStartTime: number | null = null;
   private firstConnectionAttemptTime: number | null = null;
+  private connectListeners: Array<() => void> = [];
+
+  // Survives socket recreation, unlike on('connect') which binds to the
+  // current socket instance. Fires on every (re)connection.
+  onConnect(listener: () => void): () => void {
+    this.connectListeners.push(listener);
+    return () => {
+      this.connectListeners = this.connectListeners.filter(l => l !== listener);
+    };
+  }
 
   connect(): Promise<void> {
     // If already connected, return immediately
@@ -138,6 +148,15 @@ class WebSocketService {
         this.reconnectionStartTime = null;
         this.firstConnectionAttemptTime = null;
         this.connectionPromise = null; // Clear the promise after successful connection
+
+        for (const listener of this.connectListeners) {
+          try {
+            listener();
+          } catch {
+            // A listener failure must not break the connection flow.
+          }
+        }
+
         resolve();
       });
 

@@ -23,6 +23,12 @@ class GlobalClickTracker {
   private originalPushState: History['pushState'] | null = null;
   private originalReplaceState: History['replaceState'] | null = null;
   private authSubscription: { unsubscribe: () => void } | null = null;
+  // Events captured before the websocket handshake completes (the landing
+  // PAGE_VIEW always is — auth resolves before connect() finishes) are held
+  // here and drained on connect instead of being dropped.
+  private pendingEvents: ActivityEventPayload[] = [];
+  private static readonly MAX_PENDING_EVENTS = 50;
+  private unsubscribeConnect: (() => void) | null = null;
 
   constructor() {
     this.sessionId = uuidv4();
@@ -56,6 +62,7 @@ class GlobalClickTracker {
     this.setupChangeListener();
     this.setupBlurListener();
     this.setupPageViewListener();
+    this.unsubscribeConnect = websocketService.onConnect(this.flushPendingEvents);
     this.isInitialized = true;
   }
 
@@ -79,6 +86,9 @@ class GlobalClickTracker {
     }
     this.authSubscription?.unsubscribe();
     this.authSubscription = null;
+    this.unsubscribeConnect?.();
+    this.unsubscribeConnect = null;
+    this.pendingEvents = [];
     this.isInitialized = false;
   }
 
@@ -309,6 +319,19 @@ class GlobalClickTracker {
     return result;
   }
 
+  private flushPendingEvents = (): void => {
+    if (this.pendingEvents.length === 0) return;
+    // Original capture timestamps are preserved on the queued payloads.
+    const events = this.pendingEvents.splice(0, this.pendingEvents.length);
+    for (const event of events) {
+      if (websocketService.isConnectedToServer()) {
+        websocketService.emit(WS_ACTIVITY_EVENT, event);
+      } else {
+        this.pendingEvents.push(event);
+      }
+    }
+  };
+
   // For surfaces the DOM listener cannot reach (portalled toasts, native
   // notification actions, third-party modals that drop data-* attributes).
   trackManualEvent(
@@ -363,6 +386,12 @@ class GlobalClickTracker {
 
       if (websocketService.isConnectedToServer()) {
         websocketService.emit(WS_ACTIVITY_EVENT, event);
+      } else {
+        // Queue instead of dropping; drained by flushPendingEvents on connect.
+        if (this.pendingEvents.length >= GlobalClickTracker.MAX_PENDING_EVENTS) {
+          this.pendingEvents.shift();
+        }
+        this.pendingEvents.push(event);
       }
     } catch (error) {
       logger.error(LogEvent.FRONTEND_ERROR, {
