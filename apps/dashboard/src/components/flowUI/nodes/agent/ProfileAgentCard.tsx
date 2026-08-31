@@ -4,6 +4,7 @@ import type { AgentProfileProps, FlowComponent } from '@xyne/shared';
 import { useFlow } from '../../FlowContext';
 import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
+import { ChatWithAgentButton } from './ChatWithAgentButton';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
 
 /**
@@ -44,6 +45,13 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
           'No owner'
         )}
       </AuditLine>
+    </div>
+  );
+
+  const footerNode = (
+    <div className='flex w-full items-center justify-between gap-3'>
+      {auditNode}
+      <ChatWithAgentButton slug={props.agent.slug} />
     </div>
   );
 
@@ -95,7 +103,7 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
       </div>
 
       <div className='flex min-h-[44px] items-center justify-between gap-3 px-3 py-2'>
-        {auditNode}
+        {footerNode}
       </div>
 
       <AgentPreview
@@ -105,7 +113,7 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
         agent={props.agent}
         note={props.note}
         statePill={statePill}
-        footer={auditNode}
+        footer={footerNode}
         conversationId={conversationId ?? undefined}
       />
     </CardShell>
