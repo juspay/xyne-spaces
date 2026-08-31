@@ -536,7 +536,7 @@ describe('validatePullRequest spec status', () => {
 
     expect(postedStatuses()).toEqual([
       ['Ticket Validation', 'failure', expect.stringContaining('PR title must format')],
-      ['Spec Validation', 'failure', 'Ticket not resolved - spec not checked'],
+      ['Spec Validation', 'pending', 'Ticket not resolved - spec not checked'],
     ]);
   });
 
@@ -547,7 +547,7 @@ describe('validatePullRequest spec status', () => {
 
     expect(postedStatuses()).toEqual([
       ['Ticket Validation', 'failure', 'Ticket XYNE-99999 does not exist'],
-      ['Spec Validation', 'failure', 'Ticket not resolved - spec not checked'],
+      ['Spec Validation', 'pending', 'Ticket not resolved - spec not checked'],
     ]);
   });
 
@@ -558,7 +558,7 @@ describe('validatePullRequest spec status', () => {
 
     expect(postedStatuses()).toEqual([
       ['Ticket Validation', 'failure', 'Internal error during PR validation'],
-      ['Spec Validation', 'failure', 'Ticket not resolved - spec not checked'],
+      ['Spec Validation', 'pending', 'Ticket not resolved - spec not checked'],
     ]);
   });
 

@@ -138,6 +138,14 @@ export type BuildStatusTarget =
 
 const DEFAULT_BUILD_STATUS_TARGET: BuildStatusTarget = { provider: VCSProviderType.BITBUCKET_SERVER };
 
+type BuildStatusState = 'success' | 'failure' | 'pending';
+
+const BITBUCKET_BUILD_STATE: Record<BuildStatusState, 'SUCCESSFUL' | 'FAILED' | 'INPROGRESS'> = {
+  success: 'SUCCESSFUL',
+  failure: 'FAILED',
+  pending: 'INPROGRESS',
+};
+
 export class PullRequestValidationService {
   private ticketRepository: TicketRepository;
   private prMetricsRepository: PRMetricsRepository;
@@ -347,7 +355,7 @@ export class PullRequestValidationService {
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(target, commitHash, true, description);
+    await this.postBuildStatus(target, commitHash, 'success', description);
   }
 
   private async postFailedBuildStatus(
@@ -355,7 +363,7 @@ export class PullRequestValidationService {
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(target, commitHash, false, description);
+    await this.postBuildStatus(target, commitHash, 'failure', description);
   }
 
   /**
@@ -425,25 +433,27 @@ export class PullRequestValidationService {
 
     const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
 
-    if (result.ticketDescription === undefined) {
+    // Pending, not failed: the spec has not been found wanting, it has not been
+    // looked at. Still blocks a required check, without claiming a spec is missing.
+    if (result.ticketDescription === undefined || !result.xyneId) {
       await this.postBuildStatus(
         target,
         commitHash,
-        false,
+        'pending',
         PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_CHECKED,
         specStatus,
       );
       return;
     }
 
-    const ticketId = result.xyneId ?? 'ticket';
+    const ticketId = result.xyneId;
     const spec = validateSpecSections(result.ticketDescription, sections);
 
     if (spec.isValid) {
       await this.postBuildStatus(
         target,
         commitHash,
-        true,
+        'success',
         PR_VALIDATION_CONFIG.SPEC_MESSAGES.VALIDATION_PASSED,
         specStatus,
       );
@@ -460,7 +470,7 @@ export class PullRequestValidationService {
     logger.info(
       `[PR-Validation] Spec check failed for ${ticketId}: missing ${spec.missing.join(', ')}`
     );
-    await this.postBuildStatus(target, commitHash, false, errorMessage, specStatus);
+    await this.postBuildStatus(target, commitHash, 'failure', errorMessage, specStatus);
   }
 
   /**
@@ -470,7 +480,7 @@ export class PullRequestValidationService {
   private async postBuildStatus(
     target: BuildStatusTarget,
     commitHash: string,
-    success: boolean,
+    state: BuildStatusState,
     description: string,
     buildStatus: { KEY: string; NAME: string } = PR_VALIDATION_CONFIG.BUILD_STATUS
   ): Promise<void> {
@@ -480,7 +490,7 @@ export class PullRequestValidationService {
           target.owner,
           target.repo,
           commitHash,
-          success ? 'success' : 'failure',
+          state,
           buildStatus.NAME,
           description,
         );
@@ -488,7 +498,7 @@ export class PullRequestValidationService {
       }
       await this.bitbucketManager.postBuildStatus(
         commitHash,
-        success ? 'SUCCESSFUL' : 'FAILED',
+        BITBUCKET_BUILD_STATE[state],
         buildStatus.KEY,
         buildStatus.NAME,
         process.env.FRONTEND_URL || '',
@@ -496,7 +506,7 @@ export class PullRequestValidationService {
       );
     } catch (error) {
       logger.error(
-        `[PR-Validation] Failed to post ${success ? 'successful' : 'failed'} ${buildStatus.NAME} status (${target.provider}):`,
+        `[PR-Validation] Failed to post ${state} ${buildStatus.NAME} status (${target.provider}):`,
         error
       );
     }
