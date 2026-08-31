@@ -1,0 +1,26 @@
+# Code owners for security-sensitive access-control code.
+#
+# When a PR touches any path below, GitHub requires an approval from the
+# owning team IN ADDITION to the normal required reviews — enforced by the
+# "Require review from Code Owners" branch-protection setting on main.
+#
+# NOTE: replace @juspay/acl-guardians with the actual team slug once the
+# team is created (GitHub org → Teams → New team). The team needs at least
+# read access to this repository for CODEOWNERS to take effect.
+
+# Prisma ACL query layer (backend database access control)
+/apps/backend/src/database/acl/ @juspay/acl-guardians
+
+# Prisma ACL middleware — client extension enforcing ACL + tenant context
+/apps/backend/src/database/tenant/ @juspay/acl-guardians
+
+# Zero ACL definitions (backend + shared)
+/apps/backend/src/zero/acl/ @juspay/acl-guardians
+/packages/shared/src/zero/acl/ @juspay/acl-guardians
+
+# Zero mutators (backend, dashboard, shared)
+/apps/backend/src/zero/mutators.ts @juspay/acl-guardians
+/apps/dashboard/src/zero/mutators.ts @juspay/acl-guardians
+/packages/shared/src/zero/mutators.ts @juspay/acl-guardians
+/apps/backend/src/zero/formsMutatorHelpers.ts @juspay/acl-guardians
+/packages/shared/src/zero/formsMutatorHelpers.ts @juspay/acl-guardians
