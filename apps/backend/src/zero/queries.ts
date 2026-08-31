@@ -5210,6 +5210,23 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  savedDeskTicketConfigsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.saved_user_configurations
+        .where('contextType', SavedConfigContextType.DESK_TICKET)
+        .where('contextId', channelId)
+        .where(({ or, cmp }) =>
+          or(
+            cmp('userId', ctx.userID),
+            cmp('visibility', SavedConfigVisibility.PUBLIC),
+          ),
+        )
+        .related('values')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   // Apps Queries
   // (getAllAppsPaginated removed — it returned every app across all orgs unscoped.)
 

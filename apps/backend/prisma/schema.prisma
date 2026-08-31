@@ -4176,7 +4176,7 @@ model SavedUserConfiguration {
 
   values      SavedUserConfigurationValue[]
 
-  @@unique([userId, contextId, name])
+  @@unique([userId, contextType, contextId, name])
   @@index([contextType, contextId])
   @@index([userId])
   @@map("saved_user_configurations")

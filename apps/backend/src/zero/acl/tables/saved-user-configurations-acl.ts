@@ -4,6 +4,21 @@ import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema, type QueryContext } from '../core/types';
 import { zql } from '../../queries';
 
+async function isChannelAdmin(
+  tx: Transaction<Schema>,
+  userId: string,
+  channelId: string,
+): Promise<boolean> {
+  const participant = await tx.run(
+    zql.channel_participants
+      .where('channelId', channelId)
+      .where('userId', userId)
+      .where('role', ChannelRole.ADMIN)
+      .one(),
+  );
+  return !!participant;
+}
+
 /**
  * Checks if a user can create or promote a saved view to PUBLIC visibility.
  * Allowed if the user is:
@@ -62,17 +77,13 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
     }
 
     if (args.visibility === SavedConfigVisibility.PUBLIC) {
-      if (args.contextType === SavedConfigContextType.DESK_METRICS) {
-        const participant = await tx.run(
-          zql.channel_participants
-            .where('channelId', args.contextId)
-            .where('userId', this.ctx.userID)
-            .where('role', ChannelRole.ADMIN)
-            .one(),
-        );
-        if (!participant) {
+      if (
+        args.contextType === SavedConfigContextType.DESK_METRICS ||
+        args.contextType === SavedConfigContextType.DESK_TICKET
+      ) {
+        if (!(await isChannelAdmin(tx, this.ctx.userID, args.contextId))) {
           throw new MutationACLError(
-            'Saved view insert failed: only channel admins can create public desk metrics views',
+            'Saved view insert failed: only channel admins can create public desk views',
             'saved_user_configurations',
           );
         }
@@ -113,17 +124,13 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
       args.visibility === SavedConfigVisibility.PUBLIC &&
       config.visibility !== SavedConfigVisibility.PUBLIC
     ) {
-      if (config.contextType === SavedConfigContextType.DESK_METRICS) {
-        const participant = await tx.run(
-          zql.channel_participants
-            .where('channelId', config.contextId)
-            .where('userId', this.ctx.userID)
-            .where('role', ChannelRole.ADMIN)
-            .one(),
-        );
-        if (!participant) {
+      if (
+        config.contextType === SavedConfigContextType.DESK_METRICS ||
+        config.contextType === SavedConfigContextType.DESK_TICKET
+      ) {
+        if (!(await isChannelAdmin(tx, this.ctx.userID, config.contextId))) {
           throw new MutationACLError(
-            'Saved view update failed: only channel admins can make desk metrics views public',
+            'Saved view update failed: only channel admins can make desk views public',
             'saved_user_configurations',
           );
         }

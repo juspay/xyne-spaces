@@ -14357,14 +14357,15 @@ export function createMutators(
           tx,
           args: { id, name, contextType, contextId, visibility, timestamp, values },
         }) => {
-          // Check for duplicate name (case-insensitive) per user per contextId
+          // Check for duplicate name (case-insensitive) per user per contextType+contextId
           const allUserConfigs = await tx.run(
             zql.saved_user_configurations
               .where('userId', authData.sub)
+              .where('contextType', contextType)
               .where('contextId', contextId)
           );
-          if (allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-            throw new Error('A saved view with this name already exists for this board');
+          if (allUserConfigs.some(c => c.name === name)) {
+            throw new Error('A saved view with this name already exists');
           }
 
           await tx.mutate.saved_user_configurations.insert({
@@ -14420,15 +14421,16 @@ export function createMutators(
             throw new Error('You can only edit your own saved views');
           }
 
-          // If renaming, check for duplicate name (case-insensitive)
-          if (name && name.toLowerCase() !== config.name.toLowerCase()) {
+          // If renaming, check for duplicate name (case-insensitive) within same contextType+contextId
+          if (name && name !== config.name) {
             const allUserConfigs = await tx.run(
               zql.saved_user_configurations
                 .where('userId', authData.sub)
+                .where('contextType', config.contextType)
                 .where('contextId', config.contextId)
             );
-            if (allUserConfigs.some(c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase())) {
-              throw new Error('A saved view with this name already exists for this board');
+            if (allUserConfigs.some(c => c.id !== configId && c.name === name)) {
+              throw new Error('A saved view with this name already exists');
             }
           }
 

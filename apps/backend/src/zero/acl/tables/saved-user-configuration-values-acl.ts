@@ -24,19 +24,25 @@ interface TicketFilterFieldDescriptor {
  * Column type (string vs number) is derived from col.type at runtime — not hardcoded.
  */
 const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
-  boards:           { col: ticketCols.boardId,         enumValues: null },
-  assignee:         { col: ticketCols.assignedTo,      enumValues: null },
-  createdBy:        { col: ticketCols.createdBy,       enumValues: null },
-  userGroups:       { col: ticketCols.userGroupId,     enumValues: null },
-  tags:             { col: tagCols.name,               enumValues: null },
-  stages:           { col: ticketCols.stageName,       enumValues: null },
-  ticketTypes:      { col: ticketCols.ticketType,      enumValues: null },
-  sourceChannels:   { col: ticketCols.channelId,       enumValues: null },
-  dueDateStart:     { col: ticketCols.eta,             enumValues: null },
-  dueDateEnd:       { col: ticketCols.eta,             enumValues: null },
-  createdDateStart: { col: ticketCols.createdAt,       enumValues: null },
-  createdDateEnd:   { col: ticketCols.createdAt,       enumValues: null },
-  priority:         { col: ticketCols.priority,        enumValues: new Set(Object.values(TicketPriority)) },
+  // Direct column mappings
+  boards:              { col: ticketCols.boardId,        enumValues: null },
+  assignee:            { col: ticketCols.assignedTo,     enumValues: null },
+  createdBy:           { col: ticketCols.createdBy,      enumValues: null },
+  userGroups:          { col: ticketCols.userGroupId,    enumValues: null },
+  tags:                { col: tagCols.name,              enumValues: null },
+  generatedTags:       { col: tagCols.name,              enumValues: null },
+  stages:              { col: ticketCols.stageName,      enumValues: null },
+  ticketTypes:         { col: ticketCols.ticketType,     enumValues: null },
+  sourceChannels:      { col: ticketCols.channelId,      enumValues: null },
+  conversationLabelId: { col: ticketCols.id,             enumValues: null },
+  aiCategory:          { col: ticketCols.aiCategory,     enumValues: null },
+  dueDateStart:        { col: ticketCols.eta,            enumValues: null },
+  dueDateEnd:          { col: ticketCols.eta,            enumValues: null },
+  createdDateStart:    { col: ticketCols.createdAt,      enumValues: null },
+  createdDateEnd:      { col: ticketCols.createdAt,      enumValues: null },
+  lastEmailAtStart:    { col: ticketCols.lastEmailAt,    enumValues: null },
+  lastEmailAtEnd:      { col: ticketCols.lastEmailAt,    enumValues: null },
+  priority:            { col: ticketCols.priority,       enumValues: new Set(Object.values(TicketPriority)) },
 };
 
 function validateTicketValue(fieldName: string, fieldValue: string): void {
@@ -50,6 +56,22 @@ function validateTicketValue(fieldName: string, fieldValue: string): void {
 
   // Virtual UI-state field (the groupBy column name), not a real column.
   if (fieldName === '__groupBy') return;
+
+  // Boolean filters — value must be "true" or "false"
+  if (
+    fieldName === 'assigned' ||
+    fieldName === 'created' ||
+    fieldName === 'hasAiDraft' ||
+    fieldName === 'hasSubTickets'
+  ) {
+    if (fieldValue !== 'true' && fieldValue !== 'false') {
+      throw new MutationACLError(`${fieldName} must be "true" or "false"`, table);
+    }
+    return;
+  }
+
+  // Dynamic form field values — serialized as "dynamicFields.<fieldId>" with JSON value
+  if (fieldName.startsWith('dynamicFields.')) return;
 
   if (fieldName === 'roleAssignments') {
     const [roleId, userIdsCsv] = fieldValue.split('|');

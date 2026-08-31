@@ -6,13 +6,13 @@ import { mutators } from '../zero/mutators';
 import { useZero } from './useZero';
 import { useCachedQuery } from './useCachedQuery';
 import {
-  deskMetricsFiltersToValues,
-  valuesToDeskMetricsFilters,
-  type DeskMetricsValueRow,
-} from '../utils/deskMetricsViewSerialization';
-import type { StoredFilters } from './usePersistedDeskMetricsFilters';
+  deskTicketFiltersToValues,
+  valuesToDeskTicketFilters,
+  type DeskTicketValueRow,
+} from '../utils/deskTicketViewSerialization';
+import type { TicketFilters } from '../components/Tickets/TicketFilters/types';
 
-export interface DeskMetricsSavedView {
+export interface DeskTicketSavedView {
   id: string;
   name: string;
   userId: string;
@@ -20,17 +20,17 @@ export interface DeskMetricsSavedView {
   values: readonly { fieldName: string; fieldValue: string; entityName: SavedConfigEntityName }[];
 }
 
-export function useDeskMetricsSavedViews(
+export function useDeskTicketSavedViews(
   channelId: string,
-  applyView?: (partial: Partial<StoredFilters>, viewId: string) => void,
+  applyView?: (filters: TicketFilters) => void,
 ) {
   const zero = useZero();
 
-  const [rawViews] = useCachedQuery(queries.savedDeskMetricsConfigsByChannel({ channelId }), {
+  const [rawViews] = useCachedQuery(queries.savedDeskTicketConfigsByChannel({ channelId }), {
     enabled: !!channelId,
   });
 
-  const savedViews: DeskMetricsSavedView[] = (rawViews ?? []).map(v => ({
+  const savedViews: DeskTicketSavedView[] = (rawViews ?? []).map(v => ({
     id: v.id,
     name: v.name,
     userId: v.userId,
@@ -43,25 +43,24 @@ export function useDeskMetricsSavedViews(
       if (!applyView) return;
       const view = savedViews.find(v => v.id === viewId);
       if (!view) return;
-      applyView(valuesToDeskMetricsFilters(view.values), viewId);
+      applyView(valuesToDeskTicketFilters(view.values));
     },
     [savedViews, applyView],
   );
 
-  // Returns the new view's id on success, throws on error (server-confirmed).
   const saveView = useCallback(
     async (
       name: string,
-      filters: StoredFilters,
+      filters: TicketFilters,
       visibility: SavedConfigVisibility = SavedConfigVisibility.PRIVATE,
     ): Promise<string> => {
       const id = uuidv4();
-      const valueRows: DeskMetricsValueRow[] = deskMetricsFiltersToValues(filters);
+      const valueRows: DeskTicketValueRow[] = deskTicketFiltersToValues(filters);
       const res = await zero.mutate(
         mutators.savedUserConfiguration.create({
           id,
           name,
-          contextType: SavedConfigContextType.DESK_METRICS,
+          contextType: SavedConfigContextType.DESK_TICKET,
           contextId: channelId,
           channelId,
           visibility,
@@ -77,24 +76,6 @@ export function useDeskMetricsSavedViews(
     [zero, channelId],
   );
 
-  const updateView = useCallback(
-    async (configId: string, name: string, filters: StoredFilters): Promise<void> => {
-      const valueRows: DeskMetricsValueRow[] = deskMetricsFiltersToValues(filters);
-      const res = await zero.mutate(
-        mutators.savedUserConfiguration.update({
-          configId,
-          name,
-          timestamp: Date.now(),
-          values: valueRows.map(r => ({ id: uuidv4(), ...r })),
-        }),
-      ).server;
-      if (res.type === 'error') {
-        throw new Error(res.error?.message ?? 'Failed to update view');
-      }
-    },
-    [zero],
-  );
-
   const deleteView = useCallback(
     async (configId: string): Promise<void> => {
       const res = await zero.mutate(mutators.savedUserConfiguration.delete({ configId })).server;
@@ -105,14 +86,5 @@ export function useDeskMetricsSavedViews(
     [zero],
   );
 
-  const getViewFilters = useCallback(
-    (viewId: string): Partial<StoredFilters> | null => {
-      const view = savedViews.find(v => v.id === viewId);
-      if (!view) return null;
-      return valuesToDeskMetricsFilters(view.values);
-    },
-    [savedViews],
-  );
-
-  return { savedViews, saveView, updateView, deleteView, getViewFilters, applySavedView };
+  return { savedViews, saveView, deleteView, applySavedView };
 }

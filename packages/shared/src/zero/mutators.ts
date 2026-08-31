@@ -10673,10 +10673,13 @@ export const mutators = defineMutators({
         args: { id, name, contextType, contextId, visibility, timestamp, values },
       }) => {
         const allUserConfigs = await tx.run(
-          zql.saved_user_configurations.where('userId', ctx.userID).where('contextId', contextId),
+          zql.saved_user_configurations
+            .where('userId', ctx.userID)
+            .where('contextType', contextType)
+            .where('contextId', contextId),
         );
-        if (allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-          throw new Error('A saved view with this name already exists for this board');
+        if (allUserConfigs.some(c => c.name === name)) {
+          throw new Error('A saved view with this name already exists');
         }
 
         await tx.mutate.saved_user_configurations.insert({
@@ -10732,18 +10735,15 @@ export const mutators = defineMutators({
           throw new Error('You can only edit your own saved views');
         }
 
-        if (name && name.toLowerCase() !== config.name.toLowerCase()) {
+        if (name && name !== config.name) {
           const allUserConfigs = await tx.run(
             zql.saved_user_configurations
               .where('userId', ctx.userID)
+              .where('contextType', config.contextType)
               .where('contextId', config.contextId),
           );
-          if (
-            allUserConfigs.some(
-              c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase(),
-            )
-          ) {
-            throw new Error('A saved view with this name already exists for this board');
+          if (allUserConfigs.some(c => c.id !== configId && c.name === name)) {
+            throw new Error('A saved view with this name already exists');
           }
         }
 

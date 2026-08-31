@@ -40,9 +40,10 @@ export const TicketTagsRow = ({ ticketId }: { ticketId: string }): JSX.Element |
 
   const filtered = useMemo(() => groups.filter(g => g.tags.length > 0), [groups]);
 
+  const totalChips = useMemo(() => filtered.reduce((sum, g) => sum + g.tags.length, 0), [filtered]);
+
   const { displayGroups, hiddenCount } = useMemo(() => {
     if (expanded) return { displayGroups: filtered, hiddenCount: 0 };
-    const totalChips = filtered.reduce((sum, g) => sum + g.tags.length, 0);
     if (totalChips <= MAX_VISIBLE_CHIPS) return { displayGroups: filtered, hiddenCount: 0 };
     let remaining = MAX_VISIBLE_CHIPS;
     const truncated = filtered.reduce<typeof filtered>((acc, g) => {
@@ -52,7 +53,7 @@ export const TicketTagsRow = ({ ticketId }: { ticketId: string }): JSX.Element |
       return [...acc, { ...g, tags: g.tags.slice(0, take) }];
     }, []);
     return { displayGroups: truncated, hiddenCount: totalChips - MAX_VISIBLE_CHIPS };
-  }, [filtered, expanded]);
+  }, [filtered, expanded, totalChips]);
 
   if (isLoading || filtered.every(g => g.tags.length === 0)) return null;
 
@@ -71,6 +72,17 @@ export const TicketTagsRow = ({ ticketId }: { ticketId: string }): JSX.Element |
           data-track-name='ExpandTagChips'
         >
           +{hiddenCount}
+        </button>
+      )}
+      {expanded && totalChips > MAX_VISIBLE_CHIPS && (
+        <button
+          type='button'
+          onClick={() => setExpanded(false)}
+          className='inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium leading-none border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+          data-track-category='Tags'
+          data-track-name='CollapseTagChips'
+        >
+          Show less
         </button>
       )}
     </div>

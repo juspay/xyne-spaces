@@ -4359,6 +4359,23 @@ export const queries = defineQueries({
     },
   ),
 
+  savedDeskTicketConfigsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.saved_user_configurations
+        .where('contextType', SavedConfigContextType.DESK_TICKET)
+        .where('contextId', channelId)
+        .where(({ or, cmp }) =>
+          or(
+            cmp('userId', ctx.userID),
+            cmp('visibility', SavedConfigVisibility.PUBLIC),
+          ),
+        )
+        .related('values')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   getWorkspaceById: defineQuery(
     z.object({ workspaceId: z.string() }),
     ({ args: { workspaceId } }) => {

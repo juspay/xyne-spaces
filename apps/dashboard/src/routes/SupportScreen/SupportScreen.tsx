@@ -1,60 +1,4 @@
-import {
-  ChevronDown,
-  ChevronUp,
-  ChevronLeft,
-  ChevronRight,
-  RefreshCw,
-  X,
-  PanelRight,
-  ReplyAll,
-  ArrowLeft,
-  ArrowUp,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  LayoutGrid,
-  List,
-  Table2,
-  Columns3,
-  Check,
-  Tag,
-  Split,
-  Paperclip,
-  Link as LinkIcon,
-  Settings,
-  Plug,
-  Plus,
-  Wand2,
-  Sparkles,
-  Loader2,
-  Pencil,
-  Archive,
-  AlertCircle,
-  Users2,
-  Users,
-  Lock,
-  Hash,
-  Inbox,
-  CheckCheck,
-  Search,
-  GitMerge,
-  Mail,
-  MailOpen,
-  User,
-  ListFilter,
-  BarChart4Icon,
-  CalendarDays,
-  BarChart3,
-  Bookmark,
-  Circle,
-  UserPlus,
-  Info as InfoIcon,
-  Ticket as TicketIcon,
-  Tag as TagIcon,
-  CalendarRange,
-  MoreHorizontal,
-  Ban,
-  FileText,
-} from 'lucide-react';
+import { ReplyAll, Split, Wand2, Archive, Plug, MailOpen, MoreHorizontal, Ban } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelType,
@@ -64,6 +8,7 @@ import {
   NotificationLevel,
   AutoDraftStatus,
   MailboxState,
+  ChannelRole,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -189,12 +134,11 @@ import { mutators } from '../../zero/mutators';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
-import { useDeskMetricsSavedViews } from '../../hooks/useDeskMetricsSavedViews';
-import { usePersistedDeskMetricsFilters } from '../../hooks/usePersistedDeskMetricsFilters';
-import { valuesToDeskMetricsFilters } from '../../utils/deskMetricsViewSerialization';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
+import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
@@ -690,6 +634,25 @@ const SupportScreen = (): ReactElement => {
     },
     [sendFilters],
   );
+
+  const ticketViewsChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : '';
+  const {
+    savedViews: ticketSavedViews,
+    saveView: saveTicketView,
+    deleteView: deleteTicketView,
+    applySavedView: applyTicketSavedView,
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+
+  const [channelParticipantsForTickets] = useCachedQuery(
+    queries.channelParticipants({ channelId: ticketViewsChannelId }),
+    { enabled: !!ticketViewsChannelId },
+  );
+  const isTicketViewsChannelAdmin = (channelParticipantsForTickets ?? []).some(
+    p => p.userId === userID && p.role === ChannelRole.ADMIN,
+  );
+
+  const [activeTicketViewId, setActiveTicketViewId] = useState<string | null>(null);
 
   useEffect(() => {
     sendFilters({
@@ -1309,13 +1272,8 @@ const SupportScreen = (): ReactElement => {
     selectedChannelId !== ALL_CHANNELS_ID &&
     !!channelPreference?.metricsEnabled;
 
-  // Desk metrics saved views — only active when a specific metrics-enabled channel is selected
-  const { savedViews: deskMetricsSavedViews } = useDeskMetricsSavedViews(selectedChannelId ?? '');
-  const { applyView: applyDeskMetricsView } = usePersistedDeskMetricsFilters(
-    userID,
-    selectedChannelId ?? '',
-  );
-  const [deskMetricsSavedViewsOpen, setDeskMetricsSavedViewsOpen] = useState(false);
+  // Desk metrics saved views — only active when a specific metrics-enabled channel is selected.
+  // Use empty string when ALL_CHANNELS_ID is selected so the query gate (!!channelId) stays false.
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
@@ -2889,97 +2847,31 @@ const SupportScreen = (): ReactElement => {
                         </Tooltip>
                       )}
                       {isSelectedChannelJoined && metricsEnabled && (
-                        <>
-                          <Tooltip content='Desk metrics' side='bottom'>
-                            <button
-                              onClick={() => {
-                                const base = selectedChannelId
-                                  ? `${supportBase}/${selectedChannelId}`
-                                  : supportBase;
-                                if (isMetricsOpen) {
-                                  void navigate(base, { replace: true });
-                                } else {
-                                  void navigate(`${base}?metrics=open`);
-                                }
-                              }}
-                              className={cn(
-                                'p-1.5 rounded transition-colors',
-                                isMetricsOpen
-                                  ? 'bg-muted text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                              )}
-                              data-track-category='Support'
-                              data-track-name='OpenDeskMetrics'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <BarChart3 size={16} />
-                            </button>
-                          </Tooltip>
-                          <Tooltip content='Saved metric views' side='bottom'>
-                            <div className='relative'>
-                              <button
-                                type='button'
-                                onClick={() => setDeskMetricsSavedViewsOpen(v => !v)}
-                                className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
-                                data-track-category='Support'
-                                data-track-name='OpenSavedMetricViews'
-                              >
-                                <Bookmark size={16} />
-                              </button>
-                              {deskMetricsSavedViewsOpen && (
-                                <>
-                                  <button
-                                    type='button'
-                                    className='fixed inset-0 z-40 cursor-default'
-                                    onClick={() => setDeskMetricsSavedViewsOpen(false)}
-                                    aria-label='Close saved views'
-                                    data-track-category='Support'
-                                    data-track-name='CloseSavedViewsDropdown'
-                                  />
-                                  <div className='absolute right-0 top-full z-50 mt-1 w-56 rounded-[10px] border border-border bg-background shadow-lg'>
-                                    <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                                      Saved metric views
-                                    </div>
-                                    {deskMetricsSavedViews.length === 0 ? (
-                                      <div className='p-4 text-center text-sm text-muted-foreground'>
-                                        No saved views yet
-                                      </div>
-                                    ) : (
-                                      <div className='max-h-60 overflow-y-auto p-1'>
-                                        {deskMetricsSavedViews.map(view => (
-                                          <button
-                                            key={view.id}
-                                            type='button'
-                                            onClick={() => {
-                                              applyDeskMetricsView(
-                                                valuesToDeskMetricsFilters(view.values),
-                                                view.id,
-                                              );
-                                              setDeskMetricsSavedViewsOpen(false);
-                                              const base = selectedChannelId
-                                                ? `${supportBase}/${selectedChannelId}`
-                                                : supportBase;
-                                              void navigate(`${base}?metrics=open`);
-                                            }}
-                                            className='flex w-full items-center gap-2 rounded-[6px] px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted'
-                                            data-track-category='Support'
-                                            data-track-name='ApplySavedMetricView'
-                                          >
-                                            <Bookmark
-                                              size={13}
-                                              className='shrink-0 text-muted-foreground'
-                                            />
-                                            <span className='truncate'>{view.name}</span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </Tooltip>
-                        </>
+                        <Tooltip content='Desk metrics' side='bottom'>
+                          <button
+                            onClick={() => {
+                              const base = selectedChannelId
+                                ? `${supportBase}/${selectedChannelId}`
+                                : supportBase;
+                              if (isMetricsOpen) {
+                                void navigate(base, { replace: true });
+                              } else {
+                                void navigate(`${base}?metrics=open`);
+                              }
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isMetricsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenDeskMetrics'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <BarChart3 size={16} />
+                          </button>
+                        </Tooltip>
                       )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
@@ -3417,6 +3309,23 @@ const SupportScreen = (): ReactElement => {
                               </div>
                             )}
                           </Popover.Root>
+
+                          {ticketViewsChannelId && (
+                            <DeskSavedViewsControls
+                              savedViews={ticketSavedViews}
+                              activeViewId={activeTicketViewId}
+                              onActiveViewChange={setActiveTicketViewId}
+                              currentUserId={userID}
+                              isChannelAdmin={isTicketViewsChannelAdmin}
+                              onApply={applyTicketSavedView}
+                              onSave={(name, visibility) =>
+                                saveTicketView(name, filters, visibility)
+                              }
+                              onDelete={deleteTicketView}
+                              trackCategory='Support'
+                              align='start'
+                            />
+                          )}
 
                           {hasAnyFilterActive && (
                             <Button
