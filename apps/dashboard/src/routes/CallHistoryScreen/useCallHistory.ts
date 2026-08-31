@@ -5,6 +5,11 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { roomActor } from '../../machines/roomMachine';
+import {
+  openInitiateCallWindow,
+  openJoinCallWindow,
+  shouldUseCallWindow,
+} from '../CallWindow/callWindowLauncher';
 import { CallType, CallStatus, ChannelScopeType, MeetingStatus } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
@@ -316,6 +321,10 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   // Get active calls to check if channel has ongoing call
 
   const joinCall = (callId: string): void => {
+    if (shouldUseCallWindow(isMobile)) {
+      openJoinCallWindow(callId);
+      return;
+    }
     // Use JOIN_CALL for all calls - backend API handles both regular and scheduled calls
     roomActor.send({
       type: 'JOIN_CALL',
@@ -333,6 +342,15 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
   const initiateCall = (call: Call, participants = call.participants): void => {
     const participantUserIds = participants?.map(p => p.userId) || [];
+
+    if (shouldUseCallWindow(isMobile) && call.channelId) {
+      openInitiateCallWindow({
+        channelId: call.channelId,
+        callType: CallType.AUDIO,
+        targetUserIds: participantUserIds,
+      });
+      return;
+    }
 
     roomActor.send({
       type: 'INITIATE_CALL',
@@ -470,6 +488,10 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     if (channelSelection) {
       // Extract channel ID and start call in that channel
       const channelId = channelSelection.replace('channel:', '');
+      if (shouldUseCallWindow(isMobile)) {
+        openInitiateCallWindow({ channelId, callType: CallType.AUDIO });
+        return;
+      }
       roomActor.send({
         type: 'INITIATE_CALL',
         channelId,

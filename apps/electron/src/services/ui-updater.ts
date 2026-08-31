@@ -4,6 +4,7 @@ import { pipeline } from 'stream/promises';
 import { createHash } from 'crypto';
 import path from 'path';
 import log from 'electron-log/main';
+import { getMainWindow } from '../window/manager';
 import {config} from '../app/config';
 
 // Track if there's a staged update waiting to be applied when window loses focus
@@ -481,7 +482,7 @@ export async function downloadUIUpdate(): Promise<boolean> {
     // Note: isFocused() can return false even when the user is looking at the window
     // (e.g., if they clicked on the desktop or another app momentarily)
     // isVisible() is more reliable for determining if the user can see the window
-    const mainWindow = BrowserWindow.getAllWindows()[0];
+    const mainWindow = getMainWindow();
    
     
     if (mainWindow && !mainWindow.isDestroyed()) {

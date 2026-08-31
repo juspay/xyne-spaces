@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { SdlcCallLink } from '@xyne/shared';
 import { useSelector } from '@xstate/react';
 import { useZero } from './useZero';
@@ -12,6 +12,16 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
 import { isSdlcSurface } from '../config';
 import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
+import {
+  getLiveCallWindowState,
+  sendCallWindowCommand,
+  subscribeLiveCallWindow,
+} from '../utils/callWindowChannel';
+import {
+  openInitiateCallWindow,
+  openJoinCallWindow,
+  shouldUseCallWindow,
+} from '../routes/CallWindow/callWindowLauncher';
 
 type ActiveCall = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -75,17 +85,31 @@ export const useCallActions = ({
   // Get active calls from roomActor context
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls) as ActiveCall[];
 
-  // Find active call in the current channel
+  // Find active call in the current channel. Match CHANNEL explicitly rather than
+  // excluding CONVERSATION — the query is ordered newest-first, so "anything but a
+  // thread call" follows a calendar call that started later and resolves the wrong
+  // call. CHANNEL is what the backend converges on in findActiveCallByChannelId.
   const currentChannelCall = activeCalls?.find(
-    call => call.channelId === channelId && call.callOrigin !== CallOrigin.CONVERSATION,
+    call => call.channelId === channelId && call.callOrigin === CallOrigin.CHANNEL,
   );
   const hasActiveCallInChannel = !!currentChannelCall;
 
+  const liveCallWindow = useSyncExternalStore(
+    subscribeLiveCallWindow,
+    getLiveCallWindowState,
+    () => null,
+  );
+  const isCallWindowOnThisChannel = !!(
+    currentChannelCall && liveCallWindow?.callId === currentChannelCall.externalId
+  );
+
   // Check if user is actually in this channel's call (for both initiator and receiver)
   const isUserInCurrentChannelCall = !!(
-    isInCall &&
-    currentChannelCall &&
-    (isCurrentChannelOnCall || stateSnapshot.context.externalId === currentChannelCall.externalId)
+    isCallWindowOnThisChannel ||
+    (isInCall &&
+      currentChannelCall &&
+      (isCurrentChannelOnCall ||
+        stateSnapshot.context.externalId === currentChannelCall.externalId))
   );
 
   // Check cross-device active status via DB participant record
@@ -148,6 +172,26 @@ export const useCallActions = ({
         },
         window.location.origin,
       );
+      return;
+    }
+
+    if (shouldUseCallWindow(isMobile)) {
+      if (isCallWindowOnThisChannel) {
+        sendCallWindowCommand('leave');
+        return;
+      }
+      if (hasActiveCallInChannel) {
+        openJoinCallWindow(currentChannelCall.externalId);
+      } else {
+        openInitiateCallWindow({
+          channelId,
+          callType: CallType.AUDIO,
+          targetUserIds,
+          callDisplayName,
+          conversationId,
+          sdlcLink,
+        });
+      }
       return;
     }
 

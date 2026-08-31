@@ -9,6 +9,11 @@ import { usePlatform } from './usePlatform';
 import { isSdlcSurface } from '../config';
 import { SDLC_FRAME_MESSAGE } from '../routes/SdlcScreen/sdlcFrameMessages';
 import type { CallUrlOverrides } from '../utils/callUrlOverrides';
+import {
+  openInitiateCallWindow,
+  openJoinCallWindow,
+  shouldUseCallWindow,
+} from '../routes/CallWindow/callWindowLauncher';
 
 /**
  * Call setup a caller can request up front, applied by roomMachine as the call
@@ -48,6 +53,7 @@ interface UseCallJoinOrInitiateReturn {
 export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   const zero = useZero();
   const { isMobile } = usePlatform();
+  const usesCallWindow = shouldUseCallWindow(isMobile);
 
   // Store pending action and completion callback
   const pendingActionRef = useRef<
@@ -138,6 +144,12 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   const joinCall = ({ callId, onComplete, ...overrides }: JoinCallParams): void => {
     if (!callId) return;
 
+    if (usesCallWindow && !overrides.callUrlOverrides) {
+      openJoinCallWindow(callId);
+      onComplete?.();
+      return;
+    }
+
     // Case 1: User not in any call - join directly
     if (!isInCall) {
       requestMediaPermissions();
@@ -194,6 +206,20 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
         },
         window.location.origin,
       );
+      onComplete?.();
+      return;
+    }
+
+    if (usesCallWindow && !overrides.callUrlOverrides) {
+      openInitiateCallWindow({
+        channelId,
+        callType: CallType.AUDIO,
+        targetUserIds,
+        callDisplayName,
+        conversationId,
+        artifactMessageId,
+        sdlcLink,
+      });
       onComplete?.();
       return;
     }

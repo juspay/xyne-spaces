@@ -9,6 +9,7 @@ import {
 } from '../hooks/useParticipantNetworkQuality';
 import { type RecordingType } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
+import { APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
 import ThreadMessages from '../../Chat/ThreadPannel';
@@ -100,6 +101,7 @@ interface FullCallViewProps {
   hideAIAssistant?: boolean | undefined;
   /** Hide minimize button (for external users) */
   hideMinimize?: boolean | undefined;
+  isWindowChrome?: boolean | undefined;
   /** Whether the current user is an external (unauthenticated) user */
   isExternalUser?: boolean | undefined;
   /** Call chat panel state */
@@ -152,6 +154,7 @@ export function FullCallView({
   hideThreadChat = false,
   hideAIAssistant = false,
   hideMinimize = false,
+  isWindowChrome = false,
   isExternalUser = false,
   isCallChatOpen = false,
   onToggleCallChat,
@@ -455,8 +458,9 @@ export function FullCallView({
       <div
         className={cn(
           'flex justify-between items-center pr-4 py-3',
-          isElectron && isMac ? 'pl-24' : 'pl-4',
+          isWindowChrome ? 'pl-[92px]' : isElectron && isMac ? 'pl-24' : 'pl-4',
         )}
+        style={isWindowChrome ? APP_DRAG_STYLE : undefined}
       >
         <div className='flex items-center gap-2'>
           <div className='relative visual-regression-hide'>
@@ -485,7 +489,10 @@ export function FullCallView({
             </>
           )}
         </div>
-        <div className='flex items-center gap-3'>
+        <div
+          className='flex items-center gap-3'
+          style={isWindowChrome ? APP_NO_DRAG_STYLE : undefined}
+        >
           <CallPrivacyIndicator
             isTranscriptionEnabled={isTranscriptionEnabled}
             isHost={isHost}

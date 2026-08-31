@@ -1,5 +1,5 @@
 import log from 'electron-log/main';
-import { session, BrowserWindow, app } from 'electron';
+import { session, BrowserWindow, app, webContents } from 'electron';
 import { config } from '../app/config';
 import { clearAllCookies } from './cookies';
 import path from 'path';
@@ -10,10 +10,15 @@ import { showScreenPicker } from './screen-picker';
 import Store from 'electron-store';
 
 let mainWindow: BrowserWindow | null = null;
+let callWindow: BrowserWindow | null = null;
 const store = new Store();
 
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window;
+}
+
+export function setCallWindow(window: BrowserWindow | null): void {
+  callWindow = window;
 }
 
 let cachedUserEmail: string | null = null;
@@ -139,7 +144,8 @@ export function setupXyneSpacesInterceptor(): void {
 /**
  * XYNE-16859 Issue 24: deny screen/microphone capture web APIs
  * (`getUserMedia`, `getDisplayMedia`) for any webContents that is not the
- * top-level main application window. Without this, an XSS'd `<webview>` or
+ * top-level main application window or the registered call window (see
+ * `setCallWindow`). Without this, an XSS'd `<webview>` or
  * browser panel could bypass our error-report:* IPC gate entirely by calling
  * `navigator.mediaDevices.getUserMedia` / `getDisplayMedia` directly, since
  * macOS's app-level Screen-Recording + Microphone TCC grants would otherwise
@@ -173,10 +179,11 @@ function isAppOwnedWindowContents(webContents: Electron.WebContents | undefined)
   return owner.webContents === webContents && appOwnedWindows.has(owner);
 }
 
-function isTopLevelMainWindow(webContents: Electron.WebContents | undefined): boolean {
+function isTopLevelAppWindow(webContents: Electron.WebContents | undefined): boolean {
   if (!webContents) return false;
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  return webContents === mainWindow.webContents;
+  if (mainWindow && !mainWindow.isDestroyed() && webContents === mainWindow.webContents) return true;
+  if (callWindow && !callWindow.isDestroyed() && webContents === callWindow.webContents) return true;
+  return false;
 }
 // Mirrors preload.ts isTrustedOrigin(), but evaluated main-side against a webContents URL.
 function isFirstPartyUrl(rawUrl: string | undefined): boolean {
@@ -196,11 +203,11 @@ function installMediaPermissionGuard(targetSession: Electron.Session, label: str
   targetSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
       const allowed =
-        isTopLevelMainWindow(webContents) ||
+        isTopLevelAppWindow(webContents) ||
         (isAppOwnedWindowContents(webContents) && isFirstPartyUrl(details?.requestingUrl));
       if (!allowed) {
         Logger.warn(
-          `[permissions:${label}] denied ${permission} for non-main webContents (url=${webContents?.getURL() ?? 'n/a'})`,
+          `[permissions:${label}] denied ${permission} for non-app webContents (url=${webContents?.getURL() ?? 'n/a'})`,
         );
       }
       callback(allowed);
@@ -209,7 +216,7 @@ function installMediaPermissionGuard(targetSession: Electron.Session, label: str
     // Main window keeps permissive behaviour; first-party Xyne content outside it gets ONLY
     // the narrow clipboard/fullscreen set; every other session (in-app browser panel
     // `persist:browser-tabs`, the `preview` partition, embedded `<webview>`s) is denied.
-    if (isTopLevelMainWindow(webContents)) {
+    if (isTopLevelAppWindow(webContents)) {
       callback(true);
       return;
     }
@@ -218,21 +225,21 @@ function installMediaPermissionGuard(targetSession: Electron.Session, label: str
       return;
     }
     Logger.warn(
-      `[permissions:${label}] denied ${permission} for non-main webContents (url=${webContents?.getURL() ?? 'n/a'})`,
+      `[permissions:${label}] denied ${permission} for non-app webContents (url=${webContents?.getURL() ?? 'n/a'})`,
     );
     callback(false);
   });
   targetSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
       return (
-        isTopLevelMainWindow(webContents ?? undefined) ||
+        isTopLevelAppWindow(webContents ?? undefined) ||
         (isAppOwnedWindowContents(webContents ?? undefined) && isFirstPartyUrl(requestingOrigin))
       );
     }
     // Non-media permission checks succeed for the first-party main window,
     // and for the narrow clipboard/fullscreen set on first-party content hosted outside
     // it (e.g. the in-app browser panel); untrusted embedded content is denied.
-    if (isTopLevelMainWindow(webContents ?? undefined)) return true;
+    if (isTopLevelAppWindow(webContents ?? undefined)) return true;
     return FIRST_PARTY_NONMEDIA_PERMISSIONS.has(permission) && isFirstPartyUrl(webContents?.getURL());
   });
 }
@@ -366,7 +373,7 @@ export function setupRequestInterceptor(): void {
  * Called on startup and re-called after a native OS picker fallback completes.
  */
 function setupDisplayMediaHandler(): void {
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     const safeCallback = (streams: Electron.Streams): void => {
       try {
         callback(streams);
@@ -376,7 +383,14 @@ function setupDisplayMediaHandler(): void {
         Logger.info('[ScreenShare] Cancelled or no stream provided:', String(err));
       }
     };
-    showScreenPicker(safeCallback);
+    let requester: BrowserWindow | null = null;
+    try {
+      const senderContents = request.frame ? webContents.fromFrame(request.frame) : null;
+      requester = senderContents ? BrowserWindow.fromWebContents(senderContents) : null;
+    } catch {
+      requester = null;
+    }
+    showScreenPicker(safeCallback, requester);
   });
 }
 
