@@ -24,6 +24,7 @@ import {
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { logger } from '@/utils/logger';
+import { invitationService } from '@/services/invitationService';
 
 interface ResetCodePayload {
   code: string;
@@ -94,6 +95,19 @@ export class EmailAuthController {
       const normalizedEmail = email.toLowerCase().trim();
       const loginLockKey = `emaillogin:lock:${normalizedEmail}`;
       const loginAttemptKey = `emaillogin:attempts:${normalizedEmail}`;
+      const normalizedInvitationId = typeof invitationId === 'string'
+        ? invitationId.trim()
+        : '';
+      const pendingInvitation = normalizedInvitationId
+        ? await this.prisma.invitation.findFirst({
+          where: {
+            invitationId: normalizedInvitationId,
+            email: normalizedEmail,
+            acceptedAt: null,
+            expiredAt: { gt: new Date() },
+          },
+        })
+        : null;
 
       const existingLock = await redisService.get(loginLockKey);
       if (existingLock) {
@@ -114,25 +128,33 @@ export class EmailAuthController {
         where: { email: normalizedEmail },
       });
 
-      if (!orgMember || orgMember.leftAt) {
-        // Keep this response identical to the wrong-password response below.
-        res.status(401).json({
-          error: 'Invalid credentials',
-          message: 'Email or password is incorrect',
-        });
-        return;
+      let authenticatedWithGuestInvitationTempPassword = false;
+
+      if (!orgMember || orgMember.leftAt || !orgMember.passwordHash) {
+        if (pendingInvitation?.role === WorkspaceRole.GUEST) {
+          const guestTempPassword = await invitationService.verifyGuestInvitationTempPassword({
+            invitationId: pendingInvitation.invitationId ?? normalizedInvitationId,
+            email: normalizedEmail,
+            password,
+          });
+          authenticatedWithGuestInvitationTempPassword = Boolean(guestTempPassword);
+        }
+
+        if (!authenticatedWithGuestInvitationTempPassword) {
+          // Keep this response identical to the wrong-password path below.
+          res.status(401).json({
+            error: 'Invalid credentials',
+            message: 'Email or password is incorrect',
+          });
+          return;
+        }
       }
 
-      if (!orgMember.passwordHash) {
-        res.status(401).json({
-          error: 'Invalid credentials',
-          message: 'Email or password is incorrect',
-        });
-        return;
-      }
-
-      // 2. Verify password against orgMember.passwordHash
-      const isValid = await verifyEmailPassword(password, orgMember.passwordHash);
+      // 2. Verify password against orgMember.passwordHash, unless this is a
+      // first-time guest login using the Redis-backed invitation password.
+      const isValid = authenticatedWithGuestInvitationTempPassword
+        ? true
+        : await verifyEmailPassword(password, orgMember!.passwordHash!);
       if (!isValid) {
         const redis = redisService.getClient();
         const failedAttempts = await redis.incr(loginAttemptKey);
@@ -190,27 +212,10 @@ export class EmailAuthController {
 
       // 3. Find user's active workspace(s)
       const workspaceUsers = await this.prisma.user.findMany({
-        where: { orgMemberId: orgMember.memberId, leftAt: null },
+        where: { orgMemberId: orgMember?.memberId ?? '__pending_guest_invitation__', leftAt: null },
         orderBy: { createdAt: 'desc' },
         include: { workspace: true },
       });
-
-      // Invitation handling is keyed only by an explicit invitationId from the
-      // auth URL. Regular email login should not be diverted by unrelated
-      // pending invitations for the same email.
-      const normalizedInvitationId = typeof invitationId === 'string'
-        ? invitationId.trim()
-        : '';
-      const pendingInvitation = normalizedInvitationId
-        ? await this.prisma.invitation.findFirst({
-          where: {
-            invitationId: normalizedInvitationId,
-            email: normalizedEmail,
-            acceptedAt: null,
-            expiredAt: { gt: new Date() },
-          },
-        })
-        : null;
 
       if (workspaceUsers.length === 0 && !pendingInvitation) {
         // Check if user has approved community workspace join request(s).
@@ -472,8 +477,8 @@ export class EmailAuthController {
           name: workspaceUser.name,
           workspaceId: workspaceUser.workspaceId,
           role: workspaceUser.role,
-          orgRole: orgMember.role,
-          memberId: orgMember.memberId,
+          orgRole: orgMember!.role,
+          memberId: orgMember!.memberId,
           authProvider: AuthProvider.EMAIL,
         },
         workspaces,
