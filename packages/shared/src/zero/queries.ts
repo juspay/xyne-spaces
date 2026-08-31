@@ -3701,6 +3701,13 @@ export const queries = defineQueries({
         )
         .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc')),
   ),
+  sdlcChannelTickets: defineQuery(
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
+    ({ args: { channelId } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false),
+  ),
   sdlcDiscussionConversations: defineQuery(
     z.object({
       channelId: z.string(),

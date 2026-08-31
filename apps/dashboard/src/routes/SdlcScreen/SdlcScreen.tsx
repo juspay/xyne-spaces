@@ -538,11 +538,24 @@ export default function SdlcScreen(): ReactElement {
   const [relatedTickets] = useCachedQuery(
     queries.sdlcTicketsByIds({ ticketIds: relatedTicketIds }),
   );
+  const isSdlcChannelMember = Boolean(
+    repo &&
+      !(repo instanceof Error) &&
+      repo.channel?.participants?.some(participant => participant.userId === auth.userID),
+  );
+  const [channelTickets] = useCachedQuery(
+    queries.sdlcChannelTickets({
+      channelId: repo && !(repo instanceof Error) ? (repo.channelId ?? '') : '',
+      isMember: isSdlcChannelMember,
+    }),
+    { enabled: Boolean(repo && !(repo instanceof Error) && repo.channelId) },
+  );
   const tickets = useMemo<readonly SdlcTicket[]>(
     () =>
       Array.isArray(relatedTickets) ? (relatedTickets as unknown as readonly SdlcTicket[]) : [],
     [relatedTickets],
   );
+  const channelTicketCount = Array.isArray(channelTickets) ? channelTickets.length : tickets.length;
   const selectedCanvasConversationLinkIds = useMemo(
     () =>
       selectedCanvas
@@ -1736,7 +1749,7 @@ export default function SdlcScreen(): ReactElement {
                       : item.id === 'baseline'
                         ? baseline.length
                         : item.id === 'tickets'
-                          ? tickets.length
+                          ? channelTicketCount
                           : item.id === 'tracks'
                             ? tracks.filter(track => track.status === 'ACTIVE').length
                             : ''}
@@ -2220,7 +2233,7 @@ export default function SdlcScreen(): ReactElement {
                         value={`${readyCount}/${SDLC_BASELINE_COUNT}`}
                         icon={ShieldCheck}
                       />
-                      <Metric label='Tickets' value={String(tickets.length)} icon={CircleDot} />
+                      <Metric label='Tickets' value={String(channelTicketCount)} icon={CircleDot} />
                     </div>
                     {repo.channelId ? (
                       <SdlcActivityPreview key={repo.channelId} channelId={repo.channelId} />
