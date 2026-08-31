@@ -1,9 +1,10 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
-import { BulkTicketCreationJobData } from '@/types/bulkTicket';
+import type { BulkTicketCreationJobData } from '@/types/bulkTicket';
 
-export const BULK_TICKET_JOB_NAME = 'create-bulk-tickets';
+export const BULK_TICKET_JOB_NAME_SUB = 'sub-ticket';
+export const BULK_TICKET_JOB_NAME_BULK = 'bulk-ticket';
 
 /**
  * Queue for asynchronous bulk ticket creation.
@@ -42,9 +43,6 @@ class BulkTicketCreationQueue {
           removeOnFail: false,
         },
         settings: {
-          // A batch of up to 100 tickets can take a while; give the lock room
-          // and keep stall re-processing to a single retry. Idempotency in the
-          // worker (per-row Redis set) makes an accidental re-run safe.
           lockDuration: 5 * 60 * 1000,
           stalledInterval: 60 * 1000,
           maxStalledCount: 1,
@@ -67,20 +65,22 @@ class BulkTicketCreationQueue {
   }
 
   /**
-   * Enqueue one bulk-creation batch. The Bull `jobId` is derived from the
-   * batch's `jobKey`, so an identical retry from the caller cannot double-enqueue.
+   * Enqueue one bulk-creation batch. The job name distinguishes parent-sub
+   * mode (`sub-ticket`) from all-parents mode (`bulk-ticket`).
    */
-  async enqueue(data: BulkTicketCreationJobData): Promise<void> {
+  async enqueue(jobName: string, data: BulkTicketCreationJobData): Promise<Bull.Job> {
     if (!this.isInitialized) {
       await this.initialize();
     }
     const queue = this.getQueue();
-    await queue.add(BULK_TICKET_JOB_NAME, data, { jobId: `bulk-${data.jobKey}` });
+    const job = await queue.add(jobName, data);
     logger.info('[BULK-TICKET] Enqueued batch', {
-      jobKey: data.jobKey,
-      count: data.items.length,
+      jobId: job.id,
+      jobName,
+      count: data.subTickets.length,
       mode: data.mode,
     });
+    return job;
   }
 
   getQueue(): Bull.Queue<BulkTicketCreationJobData> {
