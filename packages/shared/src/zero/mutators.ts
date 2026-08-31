@@ -3605,7 +3605,15 @@ export const mutators = defineMutators({
         const call = await tx.run(zql.calls.where('id', callId).one());
         if (!call) throw new Error('Call not found');
         if (call.createdByUserId !== ctx.userID) {
-          throw new Error('Only the call creator can admit participants');
+          // Anyone already in the call can admit, not just the creator.
+          const self = await tx.run(
+            zql.call_participants
+              .where('callId', callId)
+              .where('userId', ctx.userID)
+              .where('response', InvitationResponse.ACCEPTED)
+              .one(),
+          );
+          if (!self) throw new Error('Only call attendees can admit participants');
         }
         await tx.mutate.call_participants.update({
           id: participantId,
@@ -3620,7 +3628,14 @@ export const mutators = defineMutators({
         const call = await tx.run(zql.calls.where('id', callId).one());
         if (!call) throw new Error('Call not found');
         if (call.createdByUserId !== ctx.userID) {
-          throw new Error('Only the call creator can decline participants');
+          const self = await tx.run(
+            zql.call_participants
+              .where('callId', callId)
+              .where('userId', ctx.userID)
+              .where('response', InvitationResponse.ACCEPTED)
+              .one(),
+          );
+          if (!self) throw new Error('Only call attendees can decline participants');
         }
         await tx.mutate.call_participants.update({
           id: participantId,
