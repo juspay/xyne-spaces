@@ -259,9 +259,6 @@ export class TagRepository {
       orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
       distinct: ['conversationId'],
       select: { id: true, conversationId: true },
-      // `distinct` is applied by the query engine, so this LIMIT is what keeps
-      // the window's whole email set from being fetched to dedupe it here.
-      take: 20_000,
     });
     if (emails.length === 0) return [];
 
