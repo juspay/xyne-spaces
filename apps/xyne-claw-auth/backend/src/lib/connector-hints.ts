@@ -119,7 +119,14 @@ function keywordIndex(text: string, keyword: string): number {
 }
 
 /** Connector types the text implies, in the order they first appear. */
-export function connectorTypesFromText(text: string): string[] {
+export interface ConnectorMatchOptions {
+  includeKeywords?: boolean;
+}
+
+export function connectorTypesFromText(
+  text: string,
+  options: ConnectorMatchOptions = {},
+): string[] {
   if (!text.trim()) return [];
 
   const urls = extractUrls(text);
@@ -137,13 +144,36 @@ export function connectorTypesFromText(text: string): string[] {
       }
     }
 
-    for (const keyword of hint.keywords ?? []) {
-      const at = keywordIndex(prose, keyword);
-      if (at >= 0 && (earliest === -1 || at < earliest)) earliest = at;
+    if (options.includeKeywords) {
+      for (const keyword of hint.keywords ?? []) {
+        const at = keywordIndex(prose, keyword);
+        if (at >= 0 && (earliest === -1 || at < earliest)) earliest = at;
+      }
     }
 
     if (earliest >= 0) hits.push({ serverType: hint.serverType, at: earliest });
   }
 
   return hits.sort((a, b) => a.at - b.at).map((h) => h.serverType);
+}
+
+/**
+ * Verbs that mean "wire this up", as opposed to merely naming a product.
+ * Deliberately narrow: "link" and "add" are excluded because they appear far
+ * more often as nouns or unrelated verbs ("paste the link", "add the numbers")
+ * than as connect intent, and a false positive here bypasses the
+ * already-usable filter.
+ */
+const CONNECT_INTENT =
+  /\b(re)?connect(ed|ing|ion|ions)?\b|\bauthori[sz]e\b|\bintegrate\b|\bset ?up\b|\bsign in\b|\blog in\b|\bhook up\b/i;
+
+/**
+ * Connector types the HUMAN explicitly asked to connect, read from their own
+ * message. The model cannot be trusted to report this: it has an incentive to
+ * claim explicit intent so its card is shown, and has been observed doing so
+ * for plain task requests.
+ */
+export function connectorTypesUserAskedToConnect(text: string): string[] {
+  if (!text.trim() || !CONNECT_INTENT.test(text)) return [];
+  return connectorTypesFromText(text, { includeKeywords: true });
 }
