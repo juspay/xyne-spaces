@@ -151,6 +151,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       conversationId,
       onSendMessage,
       onContentChange,
+      onTextChange,
       onCancel,
       mentionItems = [],
       voiceMentionItems = [],
@@ -194,6 +195,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideComposerTools = false,
       hideVoiceInput = false,
       compact = false,
+      editorOnly = false,
       sendDisabled = false,
       bottomLeftSlot,
       disableDraftUpload = false,
@@ -668,7 +670,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         setIsInCodeBlock(editor.isActive('codeBlock'));
       },
       onUpdate: ({ editor }) => {
-        const textContent = editor.getText().trim();
+        const editorText = editor.getText();
+        onTextChange?.(editorText);
+        const textContent = editorText.trim();
         setContent(prev => {
           const next = textContent.length > 0 ? 'has-content' : '';
           return prev === next ? prev : next;
@@ -1121,6 +1125,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       updateEmojiSizeClass(editor);
     }, [editor, value, updateEmojiSizeClass]);
 
+    const getUserTags = useCallback((): Record<string, { name: string; userId: string }> => {
+      if (!editor) return {};
+
+      const userTags: Record<string, { name: string; userId: string }> = {};
+      editor.state.doc.descendants(node => {
+        if (node.type.name !== 'mention' || node.attrs['mentionType'] !== 'user') return;
+        const userId = node.attrs['userId'] as string | null;
+        const username = node.attrs['username'] as string | null;
+        if (userId && username) {
+          userTags[`<${username}>`] = { name: username, userId };
+        }
+      });
+      return userTags;
+    }, [editor]);
+
     // Expose imperative API for drag and drop and clearing content
     useImperativeHandle(
       ref,
@@ -1151,6 +1170,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.focus();
         },
         getHtml: (): string => editor?.getHTML() ?? '',
+        getUserTags,
         isSuggestionOpen: (): boolean => {
           if (!editor) return false;
           const state = editor.state;
@@ -1437,6 +1457,38 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       [editor],
     );
+
+    if (editorOnly) {
+      return (
+        <div className={`relative ${className}`} data-input-id={id}>
+          {features.mentions && (
+            <MentionSelector
+              editor={editor}
+              mentionItems={mentionItems}
+              {...(onMentionSearch && { onMentionSearch })}
+              {...(onMentionSelect && { onMentionSelect })}
+            />
+          )}
+          <div
+            className={`relative px-2 py-1 ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}`}
+          >
+            <EditorContent
+              editor={editor}
+              className={`
+                chat-input-field w-full min-h-[60px] resize-none border-0 outline-none bg-transparent
+                text-[15px] leading-6 break-words text-foreground placeholder:text-muted-foreground
+                [&_a]:pointer-events-none [&_p.is-editor-empty:before]:hidden ${emojiSizeClass}
+              `}
+            />
+            {!editor?.getText().length && !isInCodeBlock && (
+              <div className='pointer-events-none absolute inset-0 flex min-h-[60px] select-none items-start px-2 py-1 text-[15px] leading-6 text-muted-foreground/80'>
+                {placeholder}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className={`flex-shrink-0 relative ${className}`} data-input-id={id}>

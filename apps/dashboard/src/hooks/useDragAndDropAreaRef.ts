@@ -10,6 +10,7 @@ export interface InputBoxHandle {
   isSuggestionOpen: () => boolean;
   focus: () => void;
   getHtml?: () => string;
+  getUserTags?: () => Record<string, { name: string; userId: string }>;
 }
 
 interface UseDragAndDropAreaRefReturn {

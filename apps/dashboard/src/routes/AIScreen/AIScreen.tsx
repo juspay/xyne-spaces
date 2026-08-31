@@ -12,6 +12,7 @@ import {
   type AIComposerAttachment,
 } from '../../components/AIScreen/AIComposer';
 import type { ComposerContext } from '../../components/AIScreen/composerContext';
+import type { UserTag } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
 import { CitationDocsProvider } from '../../components/AIScreen/citationDocs';
 import { ChatWithCitationDocs } from '../../components/AIScreen/CitationDocsPanel';
@@ -44,6 +45,7 @@ const AIScreen = (): ReactElement => {
   const [initialAttachments, setInitialAttachments] = useState<AIComposerAttachment[] | undefined>(
     undefined,
   );
+  const [initialUserTags, setInitialUserTags] = useState<Record<string, UserTag> | undefined>();
   const [initialExtras, setInitialExtras] = useState<ComposerContext | undefined>(undefined);
   const [chatKey, setChatKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -98,6 +100,7 @@ const AIScreen = (): ReactElement => {
     setShowChatView(Boolean(sessionFromUrl));
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialUserTags(undefined);
     setChatKey(prev => prev + 1);
   }, [sessionFromUrl, activeSessionId]);
 
@@ -190,6 +193,7 @@ const AIScreen = (): ReactElement => {
     setActiveSessionId('');
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialUserTags(undefined);
     setInitialExtras(undefined);
     setChatKey(prev => prev + 1);
     setShowChatView(false); // Return to landing page
@@ -201,6 +205,7 @@ const AIScreen = (): ReactElement => {
       setActiveSessionId(sessionId);
       setInitialQuery('');
       setInitialAttachments(undefined);
+      setInitialUserTags(undefined);
       // Preserve the composer's current selections when opening a recent chat
       // (mirrors XyneAISidebar, where composer state lives in the parent and is
       // not reset on conversation load).
@@ -223,12 +228,19 @@ const AIScreen = (): ReactElement => {
   const handleInitialQueryConsumed = useCallback((): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialUserTags(undefined);
   }, []);
 
   const handleComposerSubmit = useCallback(
-    (text: string, attachments?: AIComposerAttachment[], context?: ComposerContext): void => {
+    (
+      text: string,
+      attachments?: AIComposerAttachment[],
+      context?: ComposerContext,
+      userTags?: Record<string, UserTag>,
+    ): void => {
       setInitialQuery(text);
       setInitialAttachments(attachments);
+      setInitialUserTags(userTags);
       setInitialExtras(context);
       setActiveSessionId('');
       setChatKey(prev => prev + 1);
@@ -245,6 +257,7 @@ const AIScreen = (): ReactElement => {
   const handleAgentChange = useCallback((_slug: string | null, context: ComposerContext): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialUserTags(undefined);
     setInitialExtras(context);
     setActiveSessionId('');
     setChatKey(prev => prev + 1);
@@ -353,6 +366,7 @@ const AIScreen = (): ReactElement => {
                 sessionId={activeSessionId || undefined}
                 initialQuery={initialQuery}
                 initialAttachments={initialAttachments}
+                initialUserTags={initialUserTags}
                 initialExtras={initialExtras}
                 onSetMobileSidebarOpen={setMobileSidebarOpen}
                 onConversationChange={handleConversationChange}
