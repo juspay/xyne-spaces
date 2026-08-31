@@ -98,7 +98,9 @@ import {
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
-  sdlcDiscussionSchema,
+  entityLinkContextSchema,
+  updateSubTicketsMdFromZero,
+  linkSubTicketConversationToParentFromZero,
 } from '@xyne/shared';
 import { THREAD_TYPE_NAMES } from '@xyne/shared';
 import {
@@ -134,7 +136,6 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
-import { resolveSdlcDiscussionOwnerId } from '@/sdlc/sdlcDiscussionOwner';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -2438,7 +2439,7 @@ export function createMutators(
           messageId: z.string(),
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
-          sdlcDiscussion: sdlcDiscussionSchema.optional(),
+          entityLinkContext: entityLinkContextSchema.optional(),
         }),
         async ({
           tx,
@@ -2450,7 +2451,7 @@ export function createMutators(
             messageId,
             timestamp,
             attachmentIds,
-            sdlcDiscussion,
+            entityLinkContext,
           },
         }) => {
           if (content === '') {
@@ -2480,40 +2481,24 @@ export function createMutators(
             throw new Error('You need to be a participant for adding a conversations');
           }
 
-          if (sdlcDiscussion) {
-            const [repo, membership, existingDiscussion] = await Promise.all([
-              tx.run(zql.repos.where('id', sdlcDiscussion.repoId).one()),
-              // The repository has to be part of this hub; it may be part of
-              // others too, which is why membership is the check.
-              tx.run(
-                zql.sdlc_entity_links
-                  .where('channelId', channelId)
-                  .where('targetType', 'REPOSITORY')
-                  .where('targetId', sdlcDiscussion.repoId)
-                  .where('relationType', SDLC_MEMBERSHIP_RELATION)
-                  .one(),
-              ),
-              tx.run(
-                zql.sdlc_entity_links
-                  .where('channelId', channelId)
-                  .where('targetType', 'CONVERSATION')
-                  .where('targetId', conversationId)
-                  .where('relationType', 'DISCUSSION'),
-              ),
-            ]);
-            if (!repo || repo.workspaceId !== authData.workspaceId || !membership) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
+          if (entityLinkContext) {
+            const existingDiscussion = await tx.run(
+              zql.sdlc_entity_links
+                .where('channelId', channelId)
+                .where('targetType', 'CONVERSATION')
+                .where('targetId', conversationId)
+                .where('relationType', 'DISCUSSION'),
+            );
             if (existingDiscussion.length > 0) {
               throw new Error('Conversation already has an SDLC discussion owner');
             }
-            if (sdlcDiscussion.ownerType === 'TRACK') {
+            if (entityLinkContext.sourceType === 'TRACK') {
               // A track has no scope column: its CHANNEL -> TRACK edge is the check.
               const trackEdge = await tx.run(
                 zql.sdlc_entity_links
                   .where('channelId', channelId)
                   .where('targetType', 'TRACK')
-                  .where('targetId', sdlcDiscussion.ownerId)
+                  .where('targetId', entityLinkContext.sourceId)
                   .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
                   .one(),
               );
@@ -2521,55 +2506,18 @@ export function createMutators(
                 throw new Error('Invalid SDLC discussion owner');
               }
             } else {
-            if (!sdlcDiscussion.surfaceType || !sdlcDiscussion.surfaceId) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
-            const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
-              {
-                workspaceId: authData.workspaceId,
-                channelId,
-                surfaceType: sdlcDiscussion.surfaceType,
-                surfaceId: sdlcDiscussion.surfaceId,
-              },
-              {
-                getCanvas: async id => {
-                  const canvas = await tx.run(zql.canvases.where('id', id).one());
-                  if (!canvas) return null;
-                  // Kind lives on the artifact row now; a canvas with no SDLC
-                  // artifact is not a valid discussion owner.
-                  const artifact = await tx.run(
-                    zql.sdlc_artifacts.where('artifactId', id).one(),
-                  );
-                  return { ...canvas, artifactType: artifact?.artifactType ?? '' };
-                },
-                getTicket: async id => {
-                  const ticket = await tx.run(zql.tickets.where('id', id).one());
-                  return ticket?.channelId ? { ...ticket, channelId: ticket.channelId } : null;
-                },
-                getPullRequest: async id =>
-                  (await tx.run(zql.pull_requests.where('id', id).one())) ?? null,
-                findLinkSource: async input => {
-                  const link = await tx.run(
-                    zql.sdlc_entity_links
-                      .where('channelId', input.channelId)
-                      .where('targetType', input.targetType)
-                      .where('targetId', input.targetId)
-                      .where('relationType', input.relationType)
-                      .one(),
-                  );
-                  if (
-                    !link ||
-                    (link.sourceType !== 'CANVAS' && link.sourceType !== 'TICKET')
-                  ) {
-                    return null;
-                  }
-                  return { sourceType: link.sourceType, sourceId: link.sourceId };
-                },
-              },
-            );
-            if (canonicalOwnerCanvasId !== sdlcDiscussion.ownerId) {
-              throw new Error('Invalid SDLC discussion owner');
-            }
+              const [canvas, artifact] = await Promise.all([
+                tx.run(zql.canvases.where('id', entityLinkContext.sourceId).one()),
+                tx.run(zql.sdlc_artifacts.where('artifactId', entityLinkContext.sourceId).one()),
+              ]);
+              if (
+                !canvas ||
+                canvas.workspaceId !== authData.workspaceId ||
+                canvas.channelId !== channelId ||
+                !artifact
+              ) {
+                throw new Error('Invalid SDLC discussion owner');
+              }
             }
           }
 
@@ -2586,13 +2534,13 @@ export function createMutators(
             createdAt: now,
           });
 
-          if (sdlcDiscussion) {
+          if (entityLinkContext) {
             await tx.mutate.sdlc_entity_links.insert({
-              id: sdlcDiscussion.linkId,
+              id: entityLinkContext.linkId,
               workspaceId: authData.workspaceId,
               channelId,
-              sourceType: sdlcDiscussion.ownerType,
-              sourceId: sdlcDiscussion.ownerId,
+              sourceType: entityLinkContext.sourceType,
+              sourceId: entityLinkContext.sourceId,
               targetType: 'CONVERSATION',
               targetId: conversationId,
               relationType: 'DISCUSSION',
@@ -7020,6 +6968,23 @@ export function createMutators(
             updatedBy: authData.sub,
             updatedAt: timestamp,
           });
+
+          if (mappedTicketId !== undefined) {
+            const mappings = (await tx.run(
+              zql.ticket_sub_ticket_mappings.where('subTicketId', subTicketId),
+            )) as Array<{ ticketId: string }>;
+            for (const mapping of mappings) {
+              await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
+            }
+            if (mappedTicketId && mappings[0]) {
+              await linkSubTicketConversationToParentFromZero(
+                tx,
+                zql,
+                mappedTicketId,
+                mappings[0].ticketId,
+              );
+            }
+          }
         },
       ),
     },
