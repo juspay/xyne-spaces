@@ -18,7 +18,8 @@ import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
 import { grantPermissionsForRole } from './permissionMatrix';
 import crypto from 'crypto';
-import { hashPassword } from '../utils/passwordUtils';
+import { hashPassword, verifyEmailPassword } from '../utils/passwordUtils';
+import { redisService } from './redisService';
 import { organizationDomainService } from './organizationDomainService';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { aiProvisioningService } from './aiProvisioningService';
@@ -48,6 +49,13 @@ export interface InvitationWithDetails extends Invitation {
   } | null;
 }
 
+const GUEST_INVITATION_TEMP_PASSWORD_PREFIX = 'guestinvitation:temp-password';
+
+interface GuestInvitationTempPasswordPayload {
+  email: string;
+  passwordHash: string;
+}
+
 export class InvitationService {
   private prisma: PrismaClient;
   private channelUserStatusRepository: ChannelUserStatusRepository;
@@ -62,6 +70,55 @@ export class InvitationService {
     if (role === WorkspaceRole.ADMIN) return OrgRole.ADMIN;
     if (role === WorkspaceRole.COMMUNITY_MEMBER) return OrgRole.COMMUNITY_MEMBER;
     return OrgRole.MEMBER;
+  }
+
+  private getGuestInvitationTempPasswordKey(invitationId: string): string {
+    return `${GUEST_INVITATION_TEMP_PASSWORD_PREFIX}:${invitationId}`;
+  }
+
+  private async readGuestInvitationTempPassword(invitationId: string): Promise<GuestInvitationTempPasswordPayload | null> {
+    const raw = await redisService.get(this.getGuestInvitationTempPasswordKey(invitationId));
+    if (!raw) return null;
+
+    try {
+      const payload = JSON.parse(raw) as Partial<GuestInvitationTempPasswordPayload>;
+      if (typeof payload.email !== 'string' || typeof payload.passwordHash !== 'string') {
+        return null;
+      }
+      return { email: payload.email, passwordHash: payload.passwordHash };
+    } catch {
+      return null;
+    }
+  }
+
+  private async storeGuestInvitationTempPassword(params: {
+    invitationId: string;
+    email: string;
+    passwordHash: string;
+    expiredAt: Date | null;
+  }): Promise<void> {
+    const now = Date.now();
+    const ttlSeconds = params.expiredAt
+      ? Math.max(Math.ceil((params.expiredAt.getTime() - now) / 1000), 1)
+      : 15 * 24 * 60 * 60;
+
+    await redisService.set(
+      this.getGuestInvitationTempPasswordKey(params.invitationId),
+      JSON.stringify({ email: params.email, passwordHash: params.passwordHash }),
+      ttlSeconds,
+    );
+  }
+
+  async verifyGuestInvitationTempPassword(params: {
+    invitationId: string;
+    email: string;
+    password: string;
+  }): Promise<GuestInvitationTempPasswordPayload | null> {
+    const payload = await this.readGuestInvitationTempPassword(params.invitationId);
+    if (!payload || payload.email !== params.email.toLowerCase()) return null;
+
+    const valid = await verifyEmailPassword(params.password, payload.passwordHash);
+    return valid ? payload : null;
   }
 
   private async markInvitationAccepted(tx: TxClient, invitationId: string): Promise<void> {
@@ -235,7 +292,19 @@ export class InvitationService {
     });
 
     if (activeInvitation) {
-      throw new Error(`An invitation for ${email} already exists in this workspace`);
+      if (invitationRole === 'GUEST' && !existingUser) {
+        const activeTempPassword = await this.readGuestInvitationTempPassword(activeInvitation.invitationId ?? activeInvitation.id);
+        if (!activeTempPassword) {
+          await this.prisma.invitation.update({
+            where: { id: activeInvitation.id },
+            data: { expiredAt: new Date() },
+          });
+        } else {
+          throw new Error(`An invitation for ${email} already exists in this workspace`);
+        }
+      } else {
+        throw new Error(`An invitation for ${email} already exists in this workspace`);
+      }
     }
 
     // Calculate expiration date (15 days from now)
@@ -313,9 +382,12 @@ export class InvitationService {
    * Delete an invitation completely (used for cleanup on failure)
    */
   async deleteInvitation(id: string): Promise<void> {
-    await this.prisma.invitation.delete({
+    const deleted = await this.prisma.invitation.delete({
       where: { id },
+      select: { id: true, invitationId: true },
     });
+
+    await redisService.del(this.getGuestInvitationTempPasswordKey(deleted.invitationId ?? deleted.id));
 
     logger.info(`[InvitationService] Deleted invitation ${id}`);
   }
@@ -345,6 +417,24 @@ export class InvitationService {
 
       return tempPassword;
     });
+  }
+
+  /**
+   * Generate a first-login password for a guest invitation without writing an
+   * OrgMember yet. The hash lives only in Redis and expires with the invitation.
+   */
+  async generateGuestInvitationTempPassword(invitation: Pick<Invitation, 'invitationId' | 'id' | 'email' | 'expiredAt'>): Promise<string> {
+    const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars
+    const passwordHash = await hashPassword(tempPassword);
+
+    await this.storeGuestInvitationTempPassword({
+      invitationId: invitation.invitationId ?? invitation.id,
+      email: invitation.email.toLowerCase(),
+      passwordHash,
+      expiredAt: invitation.expiredAt,
+    });
+
+    return tempPassword;
   }
 
   /**
@@ -592,6 +682,7 @@ export class InvitationService {
       name: string;
       providerUserId: string;
       authProvider: string;
+      passwordHash?: string;
     },
     tx: TxClient,
   ): Promise<{ user: User; redirectPath: string | null }> {
@@ -603,16 +694,26 @@ export class InvitationService {
       throw new Error(`Cannot accept invitation — ${userData.email} is no longer part of the organization`);
     }
 
+    if (userData.authProvider === AuthProvider.EMAIL && !orgMember?.passwordHash && !userData.passwordHash) {
+      throw new Error('Guest invitation password has expired. Please ask the sender to re-invite you.');
+    }
+
     const activeOrgMember = orgMember ?? await tx.orgMember.create({
       data: {
         orgId: invitation.orgId!,
         email: userData.email.toLowerCase(),
         role: OrgRole.GUEST,
+        ...(userData.passwordHash ? { passwordHash: userData.passwordHash } : {}),
       },
     });
 
     if (!orgMember) {
       logger.info(`[DEBUG] [handleGuestAcceptance] Created new orgMember with GUEST role id=${activeOrgMember.memberId}`);
+    } else if (!orgMember.passwordHash && userData.passwordHash) {
+      await tx.orgMember.update({
+        where: { memberId: activeOrgMember.memberId },
+        data: { passwordHash: userData.passwordHash, leftAt: null },
+      });
     }
 
     const newWorkspaceUser = await tx.user.create({
@@ -645,6 +746,7 @@ export class InvitationService {
       name: string;
       providerUserId: string;
       authProvider: string;
+      passwordHash?: string;
     };
   }): Promise<{ user: User; redirectPath: string | null }> {
     const { invitationId, userData } = params;
@@ -689,6 +791,13 @@ export class InvitationService {
 
     logger.info(`[DEBUG] [acceptInvitation] resolvedOrgId=${resolvedOrgId ?? 'null'} (from invitation.orgId=${invitation.orgId ?? 'null'})`);
 
+    const guestInvitationTempPassword = invitation.role === 'GUEST' && userData.authProvider === AuthProvider.EMAIL
+      ? await this.readGuestInvitationTempPassword(invitationId)
+      : null;
+    const guestUserData = guestInvitationTempPassword
+      ? { ...userData, passwordHash: guestInvitationTempPassword.passwordHash }
+      : userData;
+
     // Check if user already exists in this workspace (duplicate accept guard)
     const existingWorkspaceUser = await this.prisma.user.findFirst({
       where: {
@@ -709,7 +818,7 @@ export class InvitationService {
     if (!existingWorkspaceUser && invitation.role === 'GUEST') {
       const guestResult = await this.prisma.$transaction(async (tx) => {
         await this.markInvitationAccepted(tx, invitationId);
-        const result = await this.handleGuestAcceptance(invitation, userData, tx);
+        const result = await this.handleGuestAcceptance(invitation, guestUserData, tx);
         return result;
       });
       newWorkspaceUser = guestResult.user;
@@ -737,6 +846,12 @@ export class InvitationService {
               status: UserStatus.ACTIVE,
             },
           });
+          if (guestInvitationTempPassword) {
+            await tx.orgMember.update({
+              where: { email: userData.email.toLowerCase() },
+              data: { passwordHash: guestInvitationTempPassword.passwordHash, leftAt: null },
+            });
+          }
           const path = await this.grantGuestEntityAccess(reactivatedUser.id, invitation, tx);
           return { user: reactivatedUser, redirectPath: path };
         });
@@ -885,6 +1000,10 @@ export class InvitationService {
         newWorkspaceUser.id,
         ChannelRole.MEMBER,
       );
+    }
+
+    if (guestInvitationTempPassword) {
+      await redisService.del(this.getGuestInvitationTempPasswordKey(invitationId));
     }
 
     return { user: newWorkspaceUser, redirectPath };
