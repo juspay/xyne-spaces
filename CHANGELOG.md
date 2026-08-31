@@ -1,3 +1,10 @@
+## [1.248.9](https://github.com/juspay/xyne-spaces/compare/v1.248.8...v1.248.9) (2026-08-31)
+
+
+### Bug Fixes
+
+* related ticket not coming in desk ([#1145](https://github.com/juspay/xyne-spaces/issues/1145)) ([508ba37](https://github.com/juspay/xyne-spaces/commit/508ba37a2f3e581953aa096eec54ac23a8724152))
+
 ## [1.248.8](https://github.com/juspay/xyne-spaces/compare/v1.248.7...v1.248.8) (2026-08-31)
 
 
