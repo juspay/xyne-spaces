@@ -239,6 +239,24 @@ class GlobalClickTracker {
     return result;
   }
 
+  // For surfaces the DOM listener cannot reach (portalled toasts, native
+  // notification actions, third-party modals that drop data-* attributes).
+  trackManualEvent(
+    eventCategory: string,
+    eventName: string,
+    eventLabel?: string,
+    contextMetadata?: Record<string, unknown>,
+  ): void {
+    const data: ParsedTrackingData = { eventCategory, eventName };
+    if (eventLabel !== undefined) {
+      data.eventLabel = eventLabel;
+    }
+    if (contextMetadata !== undefined) {
+      data.contextMetadata = contextMetadata;
+    }
+    this.trackEvent(data, TriggerType.CLICK);
+  }
+
   private trackEvent(
     data: ParsedTrackingData,
     triggerType: TriggerType = TriggerType.CLICK,

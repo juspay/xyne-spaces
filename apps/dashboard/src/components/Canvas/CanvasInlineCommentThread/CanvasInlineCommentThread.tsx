@@ -455,6 +455,8 @@ export function CanvasInlineCommentThread({
           size='iconSm'
           className='size-6 text-muted-foreground hover:text-emerald-600'
           onClick={() => setThreadStatus(CanvasCommentThreadStatus.RESOLVED)}
+          data-track-category='CANVAS'
+          data-track-name='RESOLVE_INLINE_COMMENT_THREAD'
           aria-label='Resolve comment'
           title='Resolve comment'
         >
@@ -467,6 +469,8 @@ export function CanvasInlineCommentThread({
           size='iconSm'
           className='size-6 text-muted-foreground'
           onClick={() => setThreadStatus(CanvasCommentThreadStatus.OPEN)}
+          data-track-category='CANVAS'
+          data-track-name='REOPEN_INLINE_COMMENT_THREAD'
           aria-label='Reopen comment'
           title='Reopen comment'
         >
@@ -478,6 +482,8 @@ export function CanvasInlineCommentThread({
         size='iconSm'
         className='size-6 text-muted-foreground'
         onClick={onClose}
+        data-track-category='CANVAS'
+        data-track-name='CLOSE_INLINE_COMMENT_THREAD'
         aria-label='Close comment'
       >
         <X className='size-[15px]' />

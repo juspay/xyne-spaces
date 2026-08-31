@@ -262,6 +262,8 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
                       {citation.url ? (
                         <Link
                           to={citation.url}
+                          data-track-category='xyne-ai'
+                          data-track-name='inline-citation-link-click'
                           className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                         >
                           <Link2 size={10} />
@@ -279,6 +281,8 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
               ) : citation.url ? (
                 <Link
                   to={citation.url}
+                  data-track-category='xyne-ai'
+                  data-track-name='inline-citation-link-click'
                   className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                 >
                   <Link2 size={10} />
@@ -1333,6 +1337,8 @@ export const MessageItem = React.memo(
                               href={href}
                               target='_blank'
                               rel='noopener noreferrer'
+                              data-track-category='xyne-ai'
+                              data-track-name='open-external-link'
                               className='text-blue-500 hover:text-blue-600 underline'
                               {...props}
                             >
@@ -1362,6 +1368,8 @@ export const MessageItem = React.memo(
                         return (
                           <a
                             href={href}
+                            data-track-category='xyne-ai'
+                            data-track-name='open-internal-link'
                             className='text-blue-500 hover:text-blue-600 underline'
                             {...props}
                           >
@@ -1757,7 +1765,14 @@ const MessageContent = ({
         // Add target="_blank" for external links
         if (isExternal) {
           return (
-            <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+            <a
+              href={href}
+              target='_blank'
+              rel='noopener noreferrer'
+              data-track-category='xyne-ai'
+              data-track-name='open-external-link'
+              {...props}
+            >
               {children}
             </a>
           );
@@ -1781,7 +1796,12 @@ const MessageContent = ({
         }
 
         return (
-          <a href={href} {...props}>
+          <a
+            href={href}
+            data-track-category='xyne-ai'
+            data-track-name='open-internal-link'
+            {...props}
+          >
             {children}
           </a>
         );
@@ -2107,7 +2127,14 @@ const SummarizerContent = ({
                   // Add target="_blank" for external links
                   if (isExternal) {
                     return (
-                      <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                      <a
+                        href={href}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        data-track-category='xyne-ai'
+                        data-track-name='open-external-link'
+                        {...props}
+                      >
                         {children}
                       </a>
                     );
@@ -2131,7 +2158,12 @@ const SummarizerContent = ({
                   }
 
                   return (
-                    <a href={href} {...props}>
+                    <a
+                      href={href}
+                      data-track-category='xyne-ai'
+                      data-track-name='open-internal-link'
+                      {...props}
+                    >
                       {children}
                     </a>
                   );
@@ -2216,7 +2248,14 @@ const SummarizerContent = ({
 
                             if (isExternal) {
                               return (
-                                <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                                <a
+                                  href={href}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  data-track-category='xyne-ai'
+                                  data-track-name='open-external-link'
+                                  {...props}
+                                >
                                   {children}
                                 </a>
                               );
@@ -2240,7 +2279,12 @@ const SummarizerContent = ({
                             }
 
                             return (
-                              <a href={href} {...props}>
+                              <a
+                                href={href}
+                                data-track-category='xyne-ai'
+                                data-track-name='open-internal-link'
+                                {...props}
+                              >
                                 {children}
                               </a>
                             );
@@ -2335,7 +2379,14 @@ const GeniusKeyPoints = ({
 
                     if (isExternal) {
                       return (
-                        <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                        <a
+                          href={href}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          data-track-category='xyne-ai'
+                          data-track-name='open-external-link'
+                          {...props}
+                        >
                           {children}
                         </a>
                       );
@@ -2359,7 +2410,12 @@ const GeniusKeyPoints = ({
                     }
 
                     return (
-                      <a href={href} {...props}>
+                      <a
+                        href={href}
+                        data-track-category='xyne-ai'
+                        data-track-name='open-internal-link'
+                        {...props}
+                      >
                         {children}
                       </a>
                     );
@@ -2658,6 +2714,8 @@ const MessageActions = ({
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'
+          data-track-category='xyne-ai'
+          data-track-name='open-searxng-attribution'
           className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
         >
           <Globe className='w-2 h-2 text-primary-foreground' />

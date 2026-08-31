@@ -10,6 +10,8 @@ interface ActionButton {
   className?: string;
   testId?: string;
   disabled?: boolean;
+  /** Distinct analytics event name; falls back to the generic Action_Modal_Button. */
+  trackName?: string;
 }
 
 interface ActionModalProps {
@@ -86,7 +88,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({
               className={button.className}
               data-testid={button.testId}
               data-track-category='Calls'
-              data-track-name='Action_Modal_Button'
+              data-track-name={button.trackName ?? 'Action_Modal_Button'}
               data-track-metadata={JSON.stringify({ buttonLabel: button.label, modalTitle: title })}
             >
               {button.label}

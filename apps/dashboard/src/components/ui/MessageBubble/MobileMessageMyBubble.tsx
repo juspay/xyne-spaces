@@ -180,6 +180,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               isMobile ? 'flex-col-reverse gap-1' : 'flex-col',
             )}
             onClick={onClick}
+            data-track-category='MESSAGE'
+            data-track-name='OPEN_MY_MESSAGE_BUBBLE_MOBILE'
             onKeyDown={
               onClick
                 ? e => {

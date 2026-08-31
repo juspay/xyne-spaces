@@ -325,6 +325,8 @@ export function MiniCallView({
         aria-label='Resize width'
         className='absolute top-0 right-0 w-1 h-full cursor-ew-resize z-20'
         onMouseDown={e => handleResizeStart(e, 'right')}
+        data-track-category='CALLS'
+        data-track-name='RESIZE_MINI_CALL_WIDTH'
         onPointerDown={(e): void => e.stopPropagation()}
         onKeyDown={(e): void => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -341,6 +343,8 @@ export function MiniCallView({
           aria-label='Resize width and height'
           className='absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-30'
           onMouseDown={e => handleResizeStart(e, 'corner')}
+          data-track-category='CALLS'
+          data-track-name='RESIZE_MINI_CALL_CORNER'
           onPointerDown={(e): void => e.stopPropagation()}
           onKeyDown={(e): void => {
             if (e.key === 'Enter' || e.key === ' ') {

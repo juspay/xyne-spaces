@@ -69,7 +69,12 @@ const ArtifactAppScreen = (): ReactElement => {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-2'>
         <p className='text-sm font-medium text-foreground'>Could not open this app</p>
-        <Button variant='secondary' onClick={() => void refetch()}>
+        <Button
+          variant='secondary'
+          onClick={() => void refetch()}
+          data-track-category='AskAI'
+          data-track-name='ArtifactAppRetryLoad'
+        >
           Try again
         </Button>
       </div>

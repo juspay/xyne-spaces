@@ -1,15 +1,18 @@
 import { ButtonType, Modal } from '@juspay/blend-design-system';
 import React from 'react';
 import { useEditContext } from '../../../providers/EditProvider';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 
 export const EditWarningModal = (): React.ReactElement => {
   const { pendingAction, stopEditing, clearPendingAction } = useEditContext();
 
   const handleKeepEditing = (): void => {
+    globalClickTracker.trackManualEvent('MESSAGE', 'EDIT_WARNING_KEEP_EDITING');
     clearPendingAction(); // just dismiss modal
   };
 
   const handleContinue = (): void => {
+    globalClickTracker.trackManualEvent('MESSAGE', 'EDIT_WARNING_CONTINUE');
     const next = pendingAction;
     stopEditing(); // clear current editingMessageId ONLY
     next?.(); // run the new action

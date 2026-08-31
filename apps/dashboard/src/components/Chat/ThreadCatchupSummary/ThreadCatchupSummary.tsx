@@ -97,6 +97,8 @@ export function ThreadCatchupSummaryPanel({
           variant='ghost'
           className='h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-muted-foreground'
           onClick={onClose}
+          data-track-category='THREAD_PANEL'
+          data-track-name='DISMISS_CATCHUP_SUMMARY'
           aria-label='Dismiss summary'
         >
           <X size={14} />

@@ -363,7 +363,13 @@ const BoardConfigCopyScreen = ({
         <header className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
           <div className='flex items-center gap-2 min-w-0'>
             {step === 'remap' && (
-              <Button variant='ghost' size='sm' onClick={() => setStep('select')}>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => setStep('select')}
+                data-track-category='BOARD_CONFIG_COPY'
+                data-track-name='BACK_TO_SELECT_STEP'
+              >
                 <ArrowLeft size={15} /> Back
               </Button>
             )}
@@ -372,7 +378,14 @@ const BoardConfigCopyScreen = ({
             </span>
             {targetBoardName && <Badge variant='secondary'>into {targetBoardName}</Badge>}
           </div>
-          <Button variant='ghost' size='iconSm' onClick={handleClose} aria-label='Close'>
+          <Button
+            variant='ghost'
+            size='iconSm'
+            onClick={handleClose}
+            data-track-category='BOARD_CONFIG_COPY'
+            data-track-name='CLOSE_MODAL'
+            aria-label='Close'
+          >
             <X size={16} />
           </Button>
         </header>
@@ -502,18 +515,27 @@ const BoardConfigCopyScreen = ({
                 onDone?.();
                 handleClose();
               }}
+              data-track-category='BOARD_CONFIG_COPY'
+              data-track-name='CLOSE_AFTER_COPY'
             >
               Close
             </Button>
           ) : (
             <>
-              <Button variant='secondary' onClick={handleClose}>
+              <Button
+                variant='secondary'
+                onClick={handleClose}
+                data-track-category='BOARD_CONFIG_COPY'
+                data-track-name='CANCEL_COPY'
+              >
                 Cancel
               </Button>
               {step === 'select' && (
                 <Button
                   className='bg-[#185FA5] hover:bg-[#0C447C] text-white'
                   onClick={() => void handleContinueFromSelect()}
+                  data-track-category='BOARD_CONFIG_COPY'
+                  data-track-name='CONTINUE_FROM_SELECT'
                   disabled={planLoading || executing}
                 >
                   {planLoading || executing ? 'Working…' : 'Continue'}
@@ -523,6 +545,8 @@ const BoardConfigCopyScreen = ({
                 <Button
                   className='bg-[#185FA5] hover:bg-[#0C447C] text-white'
                   onClick={() => void handleContinueFromRemap()}
+                  data-track-category='BOARD_CONFIG_COPY'
+                  data-track-name='CONFIRM_COPY_CONFIG'
                   disabled={!remapComplete || executing}
                 >
                   {executing ? 'Working…' : 'Copy configuration'}

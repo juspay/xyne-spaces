@@ -118,6 +118,8 @@ function CitationList({ citations }: CitationListProps): ReactElement {
                   to={url}
                   className='break-all text-[10px] text-blue-500 hover:text-blue-600 hover:underline'
                   onClick={e => e.stopPropagation()}
+                  data-track-category='xyne-ai'
+                  data-track-name='open-citation-link'
                 >
                   {label}
                 </Link>

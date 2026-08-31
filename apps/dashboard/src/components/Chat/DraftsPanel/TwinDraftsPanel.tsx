@@ -52,6 +52,8 @@ const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
       timestamp={timestamp}
       className='rounded-xl'
       onClick={handleClick}
+      trackCategory='twin-dock'
+      trackName='open-twin-draft'
       actions={null}
     />
   );

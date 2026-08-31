@@ -12,6 +12,7 @@ import { useAllChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useUsers } from '../../../hooks/useUsers';
 import { IncomingCallCard } from '../IncomingCall/IncomingCallCard';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   buildIncomingCallViewModel,
   isRingableCall,
@@ -287,8 +288,10 @@ export function IncomingCallModal(): React.ReactElement | null {
         if (!callInQueue) return;
 
         if (data.action === 'accept') {
+          globalClickTracker.trackManualEvent('CALLS', 'ACCEPT_INCOMING_CALL_NATIVE');
           handleAcceptCall(data.callId);
         } else if (data.action === 'reject') {
+          globalClickTracker.trackManualEvent('CALLS', 'REJECT_INCOMING_CALL_NATIVE');
           handleRejectCall(data.callId);
         }
       },
