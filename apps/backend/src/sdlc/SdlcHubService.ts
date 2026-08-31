@@ -852,9 +852,7 @@ export class SdlcHubService implements SdlcHub {
     }
 
     if (input.trackId) {
-      const inHub =
-        Boolean(repo.channelId) &&
-        (await isTrackInChannel(this.prisma, input.trackId, repo.channelId!));
+      const inHub = await isTrackInChannel(this.prisma, input.trackId, repo.channelId);
       if (!inHub) throw new AppError('SDLC track not found for this repository', 404);
     }
 
@@ -946,7 +944,7 @@ export class SdlcHubService implements SdlcHub {
           );
           if (relatedIds.length > 0) {
             const validRelated = await tx.canvas.findMany({
-              where: { id: { in: relatedIds }, channelId: repo.channelId! },
+              where: { id: { in: relatedIds }, channelId: repo.channelId },
               select: { id: true },
             });
             for (const related of validRelated) {
@@ -1501,7 +1499,7 @@ export class SdlcHubService implements SdlcHub {
       throw new AppError('SDLC discussions must be created with their conversation', 400);
     }
     const repo = await this.requireRepositoryRole(actor, repoId, false, channelId);
-    await this.requireLinkSource(repoId, repo.channelId!, input.sourceType, input.sourceId);
+    await this.requireLinkSource(repoId, repo.channelId, input.sourceType, input.sourceId);
     await this.requireAccessibleEntity(actor, input.targetType, input.targetId);
     try {
       const link = await this.prisma.sdlcEntityLink.create({

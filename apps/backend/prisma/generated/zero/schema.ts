@@ -1997,7 +1997,7 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
     id: string(),
     workspaceId: string(),
     repoId: string().optional(),
-    channelId: string().optional(),
+    channelId: string(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
