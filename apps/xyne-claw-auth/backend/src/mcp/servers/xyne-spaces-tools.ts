@@ -7608,7 +7608,7 @@ const onyxBenchSearch: ToolDef = {
     // channelRef.docId on all 4 schemas. This is the ONLY reliable way to
     // narrow by source type — docType doesn't distinguish (e.g. gmail→"mail",
     // jira→"ticket", fireflies→"file").
-    const targetHits = Math.max(hits, 50);
+    const targetHits = Math.max(hits, 20);
     const nnClauses = [
       `({targetHits:${targetHits}} nearestNeighbor(text_embeddings, e))`,
       `({targetHits:${targetHits}} nearestNeighbor(chunk_embeddings, e))`,
