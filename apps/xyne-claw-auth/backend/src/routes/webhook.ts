@@ -37,6 +37,7 @@ import {
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
@@ -2516,9 +2517,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ? await userAgentConfigRepository.findByUserAndAgent(targetUserId, agent.orgId, agent.slug).catch(() => null)
       : null;
     const rawPersonalProvider = userAgentConfig?.provider;
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
+    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider)
+      ? undefined
+      : selectedPersonalProvider;
 
     // Agent-level fallback: shared keys the agent's owner/admin configured.
     // Anurag's framing: "If someone configures codex at xyne doctor level then
@@ -3289,21 +3293,70 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       return lastRes!;
     };
 
-    let runRes: Awaited<ReturnType<typeof fetchRun>>;
-    try {
-      runRes = await fetchRunWithRetry();
-    } catch (err) {
-      // Dispatch never happened — free the global twin slot, and drain/free the
-      // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
-      // that never started.
-      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-      if (twinConvSlotToken !== null && payload.conversationId) {
-        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
-      }
-      throw err;
-    }
+    // Local-harness routing: only mention-driven runs are eligible. If the user
+    // has an online authenticated local device for a preferred provider, the run
+    // is dispatched there; otherwise we fall through to the server run below.
+    const localHarnessEligible = eventType === "USER_MENTIONED" || eventType === "APP_MENTIONED";
+    const rawAgentOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const localTarget = localHarnessEligible
+      ? await resolveLocalHarnessTarget({
+          userId: targetUserId,
+          orgId: agent.orgId,
+          providerOrder: Array.isArray(rawAgentOrder)
+            ? rawAgentOrder.filter((p): p is string => typeof p === "string")
+            : [],
+          personalProvider: rawPersonalProvider,
+        }).catch((err: unknown) => {
+          log.warn("Local-harness resolution failed — using server run", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
 
-    const body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
+    let body: { success: boolean; sessionId?: string; error?: string };
+    let runRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
+    if (localTarget) {
+      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
+      try {
+        dispatched = await dispatchLocalHarnessRun({
+          target: localTarget,
+          userId: targetUserId,
+          orgId: agent.orgId,
+          conversationId: payload.conversationId,
+          agentSlug: runAgentSlug,
+          agentName: agentRow?.name ?? agent.slug,
+          systemPrompt: agentRow?.systemPrompt ?? "",
+          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
+          task,
+          context: dispatchContext || null,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          serverFallbackBody: dispatchPayload as unknown as Record<string, unknown>,
+        });
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = { success: true, sessionId: dispatched.sessionId };
+    } else {
+      try {
+        runRes = await fetchRunWithRetry();
+      } catch (err) {
+        // Dispatch never happened — free the global twin slot, and drain/free the
+        // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
+        // that never started.
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
+      body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
+    }
 
     // Re-key the GLOBAL twin slot to the real sessionId (released by
     // /webhook/result); free it immediately if the dispatch didn't produce a run.
@@ -3358,15 +3411,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
       // Run-recovery / goal-replay reuses the SAME dispatchPayload that was
       // dispatched above (built once before the per-user gate) — byte-identical
-      // replay, no mention-note drift.
-      await registerRunRecovery({
-        rootSessionId: body.sessionId,
-        maxRetries: CONFIG.runRecoveryMaxRetries,
-        timeoutMs: CONFIG.runRecoveryTimeoutMs,
-        retryBackoffMs: CONFIG.runRecoveryBackoffMs,
-        dispatchPayload,
-        sessionContext,
-      });
+      // replay, no mention-note drift. Skipped on the local-harness path: the
+      // run lives in the user's Electron app, so a server-side retry can't
+      // recover it.
+      if (!localTarget) {
+        await registerRunRecovery({
+          rootSessionId: body.sessionId,
+          maxRetries: CONFIG.runRecoveryMaxRetries,
+          timeoutMs: CONFIG.runRecoveryTimeoutMs,
+          retryBackoffMs: CONFIG.runRecoveryBackoffMs,
+          dispatchPayload,
+          sessionContext,
+        });
+      }
 
       // /goal turn-0 persistence: same dispatchPayload is replayed by the
       // relooper for each subsequent turn (task is overwritten with the
@@ -3421,7 +3478,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // reads as an agent fault and tells the user nothing actionable.
       const notice = /disabled/i.test(refusal)
         ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : isTransientUpstream(runRes.status, refusal)
+        : runRes && isTransientUpstream(runRes.status, refusal)
           ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
           : `⚠️ I couldn't start this request: ${refusal}`;
       await spacesAppFetch("/chat/postMessage", {
@@ -4672,6 +4729,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
+    localHarness?: {
+      provider: string;
+      harnessName: string;
+      label: string;
+      ownerName: string;
+      deviceName?: string;
+    };
+    localHarnessUnreachable?: boolean;
+    localHarnessProvider?: string;
     fastMode?: boolean;
     // Conversation identity claw ships on every callback (see
     // xyne-claw/src/routes/run.ts:1040-1046). Used by the conv-keyed
@@ -5476,9 +5542,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ctx.responseMode === "conversation"
     ) {
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
-      const notice = isQuota
-        ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-        : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+      const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
+      const notice = payload.localHarnessUnreachable
+        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+        : isQuota
+          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
       await spacesAppFetch("/chat/postMessage", {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
@@ -6625,8 +6694,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // buildThreadCitationMeta). Used by the copilot/pendingResponses posts
     // below, which deliver the answer via a different path than the normal
     // conversation branch (convMetadata) and would otherwise ship no citations.
+    const runOriginMeta: Record<string, unknown> = payload.localHarness
+      ? { clawRunOrigin: { kind: "local-harness", ...payload.localHarness } }
+      : {};
+
     const buildPostMetadata = (text: string): Record<string, unknown> => {
-      const meta: Record<string, unknown> = { contentFormat: "markdown" };
+      const meta: Record<string, unknown> = { contentFormat: "markdown", ...runOriginMeta };
       const tc = buildThreadCitationMeta(citationInvocations, text);
       if (tc) {
         meta["clawCitations"] = tc.clawCitations;
@@ -6815,6 +6888,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       );
       const convMetadata = {
         contentFormat: "markdown",
+        ...runOriginMeta,
         ...(threadCitationMeta
           ? {
               clawCitations: threadCitationMeta.clawCitations,

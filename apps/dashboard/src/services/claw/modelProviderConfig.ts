@@ -5,9 +5,18 @@
 // updateAgent(slug, { config }); only non-model keys (tools, behaviour) are left
 // untouched on save.
 
-/** Providers an agent can be routed through, in canonical order. */
-export const ALL_PROVIDERS = ['codex', 'claude', 'copilot', 'openrouter', 'spaces'] as const;
+export const HOSTED_PROVIDERS = ['codex', 'claude', 'copilot', 'openrouter', 'spaces'] as const;
+
+export const LOCAL_HARNESS_PROVIDERS = ['claude-code', 'codex-cli'] as const;
+export type LocalHarnessProviderKey = (typeof LOCAL_HARNESS_PROVIDERS)[number];
+
+export const ALL_PROVIDERS = [...HOSTED_PROVIDERS, ...LOCAL_HARNESS_PROVIDERS] as const;
 export type ProviderKey = (typeof ALL_PROVIDERS)[number];
+
+export const isLocalHarnessProvider = (p: string): p is LocalHarnessProviderKey =>
+  (LOCAL_HARNESS_PROVIDERS as readonly string[]).includes(p);
+
+/* eslint-disable @typescript-eslint/naming-convention */
 
 /** User-facing labels for the wire-level provider keys. */
 export const PROVIDER_DISPLAY: Record<string, string> = {
@@ -16,7 +25,29 @@ export const PROVIDER_DISPLAY: Record<string, string> = {
   claude: 'Anthropic Claude',
   codex: 'OpenAI Codex',
   openrouter: 'OpenRouter',
+  'claude-code': 'Claude Code (this device)',
+  'codex-cli': 'Codex CLI (this device)',
 };
+
+export const LOCAL_HARNESS_MODEL_OPTIONS: Record<
+  LocalHarnessProviderKey,
+  ReadonlyArray<{ value: string; label: string }>
+> = {
+  'claude-code': [
+    { value: '', label: 'CLI default' },
+    { value: 'opus', label: 'Opus — most capable' },
+    { value: 'sonnet', label: 'Sonnet — balanced' },
+    { value: 'haiku', label: 'Haiku — fastest' },
+  ],
+  'codex-cli': [
+    { value: '', label: 'CLI default' },
+    { value: 'gpt-5.5', label: 'gpt-5.5' },
+    { value: 'gpt-5.4', label: 'gpt-5.4' },
+    { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
+  ],
+};
+
+/* eslint-enable @typescript-eslint/naming-convention */
 
 /** Extended-thinking levels for the model settings. '' = platform default. */
 export const THINKING_OPTIONS = [
@@ -41,6 +72,7 @@ export interface ModelProviderDraft {
   temperature: string;
   maxTokens: string;
   thinkingLevel: string;
+  localHarnessModels: Record<string, string>;
 }
 
 type ConfigBag = Record<string, unknown> | undefined | null;
@@ -51,12 +83,23 @@ interface ProviderConfigShape {
   providerOrder?: unknown;
   providerAlwaysOn?: unknown;
   subagentProviderMode?: unknown;
+  localHarnessModels?: unknown;
   modelSettings?: {
     model?: unknown;
     temperature?: unknown;
     maxTokens?: unknown;
     thinkingLevel?: unknown;
   };
+}
+
+function readLocalHarnessModels(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const harness of LOCAL_HARNESS_PROVIDERS) {
+    const value = (raw as Record<string, unknown>)[harness];
+    if (typeof value === 'string' && value) out[harness] = value;
+  }
+  return out;
 }
 
 /** Reads the model/provider draft out of an agent's config bag. */
@@ -75,6 +118,7 @@ export function readModelProviderDraft(config: ConfigBag): ModelProviderDraft {
     temperature: typeof ms.temperature === 'number' ? String(ms.temperature) : '',
     maxTokens: typeof ms.maxTokens === 'number' ? String(ms.maxTokens) : '',
     thinkingLevel: typeof ms.thinkingLevel === 'string' ? ms.thinkingLevel : '',
+    localHarnessModels: readLocalHarnessModels(c.localHarnessModels),
   };
 }
 
@@ -133,8 +177,14 @@ export function applyModelProvider(
   if (draft.subagentMode === 'parent') next['subagentProviderMode'] = 'parent';
   else delete next['subagentProviderMode'];
 
-  // Model run params. The Spaces model is fixed — preserve any out-of-band model
-  // value rather than wiping it.
+  const harnessModels: Record<string, string> = {};
+  for (const harness of draft.providerOrder.filter(isLocalHarnessProvider)) {
+    const model = draft.localHarnessModels[harness]?.trim();
+    if (model) harnessModels[harness] = model;
+  }
+  if (Object.keys(harnessModels).length > 0) next['localHarnessModels'] = harnessModels;
+  else delete next['localHarnessModels'];
+
   const existing = (config ?? {}) as ProviderConfigShape;
   const existingMs = existing.modelSettings ?? {};
   const settings: Record<string, unknown> = {};
