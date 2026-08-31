@@ -1087,7 +1087,17 @@ export const router = createBrowserRouter(
                   ),
                   children: [
                     { index: true, element: <Navigate to='chat/new' replace /> },
-                    { path: 'chat/new', element: <AIScreen /> },
+                    // ONE route, with `new` as an ordinary value of :sessionId.
+                    //
+                    // Declaring `chat/new` separately looks harmless but makes two
+                    // DISTINCT routes out of the same component, so moving between
+                    // them unmounts and remounts AIScreen — wiping activeSessionId,
+                    // chatKey and showChatView. The remount re-seeds from
+                    // sessionStorage, which can still hold the previous thread, so
+                    // the URL effect navigates back to it and remounts again: the
+                    // screen visibly bounces between routes on every thread switch.
+                    // With a single route, changing the param re-renders in place.
+                    { path: 'chat/:sessionId', element: <AIScreen /> },
                     { path: 'daily-brief', element: <AIDailyBriefScreen /> },
                     { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                     { path: 'library', element: <AILibraryScreen /> },

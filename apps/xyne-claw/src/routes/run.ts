@@ -1685,8 +1685,25 @@ async function processTask(
         : []),
     ];
 
-    // Use provided cwd, repo workspace, or create an ephemeral workspace
-    const workspaceDir = requestCwd ?? (await createWorkspace(sessionId));
+    // Key the workspace by the CONVERSATION, not the run.
+    //
+    // pi resolves a resumable session with SessionManager.continueRecent(cwd,
+    // sessionDir), and when an explicit sessionDir is passed it ALSO filters
+    // candidates by cwd. Naming the workspace after `sessionId` gave every turn
+    // a brand-new cwd, so that filter never matched: the session directory was
+    // correct and shared, `hasSession()` was true, we logged "Resuming" — and pi
+    // silently handed back an empty session. Every turn started from zero, and
+    // the agent would answer follow-ups with "I don't have any record of that in
+    // this conversation" (2026-08-30).
+    //
+    // Same identifier as the session store below, so cwd is stable exactly when
+    // the session is. Runs with no conversation (one-shots, automations) keep a
+    // per-run ephemeral workspace.
+    const workspaceStoreKey =
+      buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+      (piSessionConversationId ?? conversationId);
+    const workspaceDir =
+      requestCwd ?? (await createWorkspace(workspaceStoreKey ?? sessionId));
     if (mergedContextFiles.length > 0) {
       const written = await writeWorkspaceTextFiles(
         workspaceDir,

@@ -69,6 +69,7 @@ import {
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts } from './ReactArtifact';
+import { TOP_BAR_HEIGHT_CLASS } from '../AppNavigator/topBarHeight';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -107,6 +108,10 @@ interface AIChatThreadProps {
   initialExtras?: ComposerContext | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
   onConversationChange?: ((sessionId: string) => void) | undefined;
+  /** App Creation mode: the id of the app this thread is building, or null.
+   *  A conversation owns exactly one app (Step 1), so the last artifact's
+   *  appId identifies it unambiguously. */
+  onAppChange?: ((appId: string | null, latestVersionId: string | null) => void) | undefined;
   /** Forwarded to the composer's AIAgentSelector — fires when the user picks
    *  a different agent from inside an active chat, so the parent can open a
    *  fresh conversation scoped to that agent. Carries the current composer
@@ -205,7 +210,9 @@ function ChatTopbar({
   onOpenSidebar?: () => void;
 }): ReactElement {
   return (
-    <header className='ai-chat-topbar flex h-12 shrink-0 items-center gap-1 border-b border-[#e5e2dc] bg-transparent px-3 backdrop-blur-md sm:px-4'>
+    <header
+      className={`ai-chat-topbar flex ${TOP_BAR_HEIGHT_CLASS} shrink-0 items-center gap-1 border-b border-sidebar-border-muted bg-transparent px-3 backdrop-blur-md sm:px-4`}
+    >
       <button
         type='button'
         onClick={onOpenSidebar}
@@ -1329,6 +1336,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialExtras,
     onSetMobileSidebarOpen,
     onConversationChange,
+    onAppChange,
     onAgentChange,
     onContextChange,
     onInitialQueryConsumed,
@@ -1818,6 +1826,31 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       onConversationChange(conversationId);
     }
   }, [conversationId, onConversationChange]);
+
+  // Surface this thread's app to the shell, so App Creation mode can render it
+  // in the right-hand pane. Scanned newest-first: a thread owns ONE app, so the
+  // most recent artifact carrying an appId names it, and older turns of the
+  // same app agree. Attachments that predate session-scoping have no appId and
+  // are correctly ignored — they never became apps.
+  useEffect(() => {
+    if (!onAppChange) return;
+    let foundApp: string | null = null;
+    let foundVersion: string | null = null;
+    for (let i = displayMessages.length - 1; i >= 0 && !foundApp; i--) {
+      for (const att of displayMessages[i]?.attachments ?? []) {
+        const artifact = att.metadata?.reactArtifact;
+        if (artifact?.appId) {
+          foundApp = artifact.appId;
+          // The newest generation's build. The pane's app query is cached, so
+          // this is the freshness signal: a versionId the loaded version list
+          // does not contain means "a generation just landed — refetch".
+          foundVersion = artifact.versionId ?? null;
+          break;
+        }
+      }
+    }
+    onAppChange(foundApp, foundVersion);
+  }, [displayMessages, onAppChange]);
 
   // Reset stick-to-bottom + hide the jump pill whenever the conversation
   // identity changes (draft → real session, or sidebar session swap that

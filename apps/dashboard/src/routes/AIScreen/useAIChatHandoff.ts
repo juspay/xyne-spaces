@@ -18,11 +18,17 @@ export function useAIChatHandoff(): {
 
   const onSelectSession = useCallback(
     (sessionId: string): void => {
+      // The thread lives in the URL now — navigate to it directly. The old
+      // write-to-storage-then-open-chat/new dance depended on AIScreen
+      // restoring the id on mount, which is gone (it made "new" mean "most
+      // recent"). The storage writes remain only as a mirror for anything
+      // still reading them.
       sessionStorage.setItem(AI_ACTIVE_SESSION_KEY, sessionId);
       sessionStorage.setItem(AI_SHOW_CHAT_VIEW_KEY, '1');
-      void navigate(chatPath);
+      const base = workspaceId ? `/${workspaceId}/ai/chat` : '/ai/chat';
+      void navigate(`${base}/${encodeURIComponent(sessionId)}`);
     },
-    [navigate, chatPath],
+    [navigate, workspaceId],
   );
 
   return { onCreateChat, onSelectSession };
