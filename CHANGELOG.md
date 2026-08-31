@@ -1,3 +1,10 @@
+## [1.249.3](https://github.com/juspay/xyne-spaces/compare/v1.249.2...v1.249.3) (2026-08-31)
+
+
+### Bug Fixes
+
+* use shared date picker for status expiry ([#992](https://github.com/juspay/xyne-spaces/issues/992)) ([77e563c](https://github.com/juspay/xyne-spaces/commit/77e563c1292ee0fe338ea44e3cbc789379babe48))
+
 ## [1.249.2](https://github.com/juspay/xyne-spaces/compare/v1.249.1...v1.249.2) (2026-08-31)
 
 
