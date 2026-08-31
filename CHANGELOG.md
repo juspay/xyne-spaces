@@ -1,3 +1,10 @@
+## [1.219.0-release-20260825.22](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.21...v1.219.0-release-20260825.22) (2026-08-31)
+
+
+### Reverts
+
+* Revert "feat: XYNE-60825 add PPTX viewer, KB UI polish, and workspace toolbar admin control (#1209)" (#1235) ([df3b8ea](https://github.com/juspay/xyne-spaces/commit/df3b8ea9f7eac3a269d0273fbb9d20779a2b08b1)), closes [#1209](https://github.com/juspay/xyne-spaces/issues/1209) [#1235](https://github.com/juspay/xyne-spaces/issues/1235)
+
 ## [1.219.0-release-20260825.21](https://github.com/juspay/xyne-spaces/compare/v1.219.0-release-20260825.20...v1.219.0-release-20260825.21) (2026-08-31)
 
 
