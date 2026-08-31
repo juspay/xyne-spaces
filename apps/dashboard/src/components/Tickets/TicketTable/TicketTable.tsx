@@ -229,6 +229,14 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const userGroups = useUserGroups();
 
   const theme = themeQuartz.withParams({
+    // Keep AG Grid tied to Spaces theme tokens. Without these body-level params,
+    // Quartz keeps its default light row/pagination surfaces while the Support
+    // screen is in midnight mode.
+    backgroundColor: 'hsl(var(--background))',
+    foregroundColor: 'hsl(var(--foreground))',
+    chromeBackgroundColor: 'hsl(var(--card))',
+    oddRowBackgroundColor: 'hsl(var(--background))',
+    rowHoverColor: 'hsl(var(--accent))',
     headerBackgroundColor: 'hsl(var(--card))',
     headerTextColor: 'hsl(var(--muted-foreground))',
     headerFontWeight: '600',
