@@ -99,6 +99,18 @@ interface UserInfo {
   picture?: string;
 }
 
+/**
+ * App-desk source binding for an ingested message. When set, the ExternalMessage
+ * link row binding (externalSourceId, externalId) → Email is written inside the
+ * same DB transaction as the Email write, so a crash cannot leave an Email
+ * without the link that per-source thread continuation and reply routing rely on.
+ */
+export interface ExternalSourceLink {
+  externalSourceId: string;
+  externalId: string;
+  externalThreadId: string;
+}
+
 export interface CreateConversationWithEmailParams {
   channelId: string;
   boardId?: string; // @deprecated - Target board for ticket creation. Now fetched from EmailChannelPreference table. Kept for backward compatibility.
@@ -115,6 +127,7 @@ export interface CreateConversationWithEmailParams {
   rfcMessageId?: string | null;
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
+  externalSourceLink?: ExternalSourceLink;
   receivedAt?: Date;
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
@@ -145,6 +158,7 @@ export interface AddEmailToConversationParams {
   clientVersionCode?: string;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
+  externalSourceLink?: ExternalSourceLink;
 }
 
 export interface UpdateExternalInteractionParams {
@@ -245,6 +259,52 @@ function derivePriorityFromSubject(subject: string): TicketPriority {
   }
 
   return TicketPriority.LOW;
+}
+
+/**
+ * Write the ExternalMessage link row inside an existing transaction.
+ *
+ * The (externalSourceId, externalId) pair being already linked means the same
+ * app re-posted an id it already linked — that is a no-op, not an error.
+ * `createMany` + `skipDuplicates` covers the concurrent-repost race without
+ * raising P2002, which would poison the surrounding interactive transaction.
+ */
+async function linkExternalMessageInTx(
+  tx: Prisma.TransactionClient,
+  link: ExternalSourceLink,
+  emailId: string,
+  workspaceId: string,
+): Promise<void> {
+  const existing = await tx.externalMessage.findUnique({
+    where: {
+      externalSourceId_externalId: {
+        externalSourceId: link.externalSourceId,
+        externalId: link.externalId,
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    logger.warn('[EmailService] ExternalMessage link already exists, skipping', {
+      externalSourceId: link.externalSourceId,
+      externalId: link.externalId,
+      emailId,
+    });
+    return;
+  }
+  await tx.externalMessage.createMany({
+    data: [{
+      externalSourceId: link.externalSourceId,
+      externalId: link.externalId,
+      externalThreadId: link.externalThreadId,
+      messageId: emailId,
+      entityId: emailId,
+      direction: MessageDirection.INCOMING,
+      entityType: ExternalEntityType.EMAIL,
+      workspaceId,
+    }],
+    skipDuplicates: true,
+  });
 }
 
 export class EmailService {
@@ -1061,6 +1121,7 @@ export class EmailService {
       rfcMessageId,
       ticketMetadata,
       uploadedFiles = [],
+      externalSourceLink,
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
@@ -1189,6 +1250,11 @@ export class EmailService {
           ...(receivedAt && { createdAt: receivedAt }),
         } as Prisma.EmailUncheckedCreateInput,
       });
+
+      // App-desk source link shares this transaction so it can't be lost to a crash.
+      if (externalSourceLink) {
+        await linkExternalMessageInTx(tx, externalSourceLink, createdEmail.id, channel.workspaceId);
+      }
 
       // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
@@ -1439,6 +1505,7 @@ export class EmailService {
         clientVersionCode,
         uploadedFiles = [],
         receivedAt,
+        externalSourceLink,
       } = params;
 
       // Validate conversation exists
@@ -1477,7 +1544,15 @@ export class EmailService {
         ...(receivedAt && { createdAt: receivedAt }),
       };
 
-      const email = await this.emailRepository.create(emailData);
+      // When an app-desk source link is requested, the Email upsert and the
+      // link write share one transaction so neither can be lost on its own.
+      const email = externalSourceLink
+        ? await this.prisma.$transaction(async (tx) => {
+            const created = await this.emailRepository.create(emailData, tx);
+            await linkExternalMessageInTx(tx, externalSourceLink, created.id, created.workspaceId);
+            return created;
+          })
+        : await this.emailRepository.create(emailData);
       void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.

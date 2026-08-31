@@ -1,34 +1,40 @@
 import express, { Request, Response } from 'express';
-import { AppPermissionStatus, AppPermissionType, ChannelType } from '@xyne/shared';
+import { AppPermissionStatus, AppPermissionType, ChannelRole, ChannelType, isDeskChannelType } from '@xyne/shared';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { appDeskService } from '@/services/appDeskService';
 import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 
 const TAG = '[AppDesk]';
 const APPROVED_STATUSES = [AppPermissionStatus.APPROVED, AppPermissionStatus.PENDINGDELETE];
 
 const router = express.Router();
+const externalSourceRepository = new ExternalSourceRepository();
+const channelParticipantRepository = new ChannelParticipantRepository();
 
 router.use(express.json());
 
 async function authorizeAppDeskManager(
   channelId: string,
   userId: string,
+  workspaceId: string,
   res: Response,
-): Promise<string | null> {
+): Promise<{ id: string; name: string; type: string } | null> {
   const channel = await db.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, createdBy: true, type: true },
+    select: { id: true, name: true, createdBy: true, type: true, workspaceId: true },
   });
 
-  if (!channel) {
+  // 404 on workspace mismatch too — don't leak cross-workspace channel existence.
+  if (!channel || channel.workspaceId !== workspaceId) {
     res.status(404).json({ error: 'Channel not found' });
     return null;
   }
-  if (channel.type !== ChannelType.APP) {
-    res.status(400).json({ error: 'Channel is not a Xyne App desk' });
+  if (!isDeskChannelType(channel.type)) {
+    res.status(400).json({ error: 'Channel is not a desk channel' });
     return null;
   }
 
@@ -42,7 +48,62 @@ async function authorizeAppDeskManager(
       return null;
     }
   }
-  return channel.id;
+  return channel;
+}
+
+/**
+ * Guards the two whole-channel legacy routes (`/:channelId/disconnect`,
+ * `/:channelId/reconnect`), which pick "the" app-desk source with an unordered
+ * findFirst. That was unambiguous when a channel could hold exactly one app on
+ * an APP-typed channel. Now that any desk channel can hold several, they must
+ * refuse anything they cannot resolve deterministically and defer to the
+ * per-app `/channels/:channelId/apps/:installedAppId` endpoints.
+ */
+async function assertLegacySingleAppDesk(
+  channel: { id: string; type: string },
+  res: Response,
+): Promise<boolean> {
+  if (channel.type !== ChannelType.APP) {
+    res.status(400).json({
+      error: 'This channel is not an App desk. Manage its connected apps per app instead.',
+    });
+    return false;
+  }
+  const appSourceCount = await db.externalSource.count({
+    where: { channelId: channel.id, sourceType: 'app-desk' },
+  });
+  if (appSourceCount > 1) {
+    res.status(409).json({
+      error: 'This desk has multiple connected apps. Disconnect or reconnect a specific app instead.',
+    });
+    return false;
+  }
+  return true;
+}
+
+/** Mirrors channelController's APP-channel validation: workspace-local install + effective desk:WRITE grant. */
+async function findDeskWritableInstall(installedAppId: string, workspaceId: string) {
+  const installedApp = await db.installedApps.findUnique({
+    where: { id: installedAppId },
+    select: { id: true, userId: true, app: { select: { name: true } }, user: { select: { workspaceId: true } } },
+  });
+  if (!installedApp || installedApp.user.workspaceId !== workspaceId) {
+    return { error: { status: 404, message: 'App is not installed in this workspace' } };
+  }
+  const hasDeskWrite = await db.installedAppPermission.findFirst({
+    where: {
+      installedAppId,
+      status: { in: APPROVED_STATUSES },
+      permission: { name: 'desk', type: AppPermissionType.WRITE },
+    },
+    select: { id: true },
+  });
+  if (!hasDeskWrite) {
+    return {
+      error: { status: 403, message: 'App must have the desk:write permission to back a desk' },
+    };
+  }
+  return { installedApp };
 }
 
 router.get('/apps', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
@@ -105,6 +166,26 @@ router.post('/:conversationId/reply', authV2Middleware.authenticate, async (req:
       return;
     }
 
+    // This route delivers agent-authored content to a third-party webhook, and it
+    // now reaches conversations on any desk channel — so it must prove the caller
+    // belongs to the conversation's workspace and channel before routing anything.
+    const conversation = await db.conversation.findFirst({
+      where: { conversationId, channel: { workspaceId: req.user!.workspaceId! } },
+      select: { channelId: true },
+    });
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+    const participant = await db.channelParticipant.findFirst({
+      where: { channelId: conversation.channelId, userId },
+      select: { id: true },
+    });
+    if (!participant) {
+      res.status(403).json({ error: 'You do not have access to this channel' });
+      return;
+    }
+
     const result = await appDeskService.sendAppReply({
       conversationId,
       body: (body ?? '').trim(),
@@ -120,6 +201,163 @@ router.post('/:conversationId/reply', authV2Middleware.authenticate, async (req:
   }
 });
 
+interface ConnectedAppEntry {
+  sourceId: string;
+  installedAppId: string;
+  appName: string | null;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+async function listConnectedApps(channelId: string): Promise<ConnectedAppEntry[]> {
+  const sources = await externalSourceRepository.listChannelAppSources(channelId);
+  const installedAppIds = sources
+    .map(resolveAppDeskInstalledAppId)
+    .filter((id): id is string => Boolean(id));
+
+  const installedApps = installedAppIds.length
+    ? await db.installedApps.findMany({
+        where: { id: { in: installedAppIds } },
+        select: { id: true, app: { select: { name: true } } },
+      })
+    : [];
+  const appNameByInstallId = new Map(installedApps.map(a => [a.id, a.app.name]));
+
+  return sources.flatMap(source => {
+    const installedAppId = resolveAppDeskInstalledAppId(source);
+    if (!installedAppId) return [];
+    return [{
+      sourceId: source.id,
+      installedAppId,
+      appName: appNameByInstallId.get(installedAppId) ?? null,
+      isActive: source.isActive,
+      createdAt: source.createdAt,
+    }];
+  });
+}
+
+router.get(
+  '/channels/:channelId/apps',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { channelId } = req.params;
+      const channel = await authorizeAppDeskManager(
+        channelId, req.user!.id, req.user!.workspaceId!, res,
+      );
+      if (!channel) return;
+
+      res.json({ success: true, apps: await listConnectedApps(channelId) });
+    } catch (error) {
+      logger.error(`${TAG} Error listing connected apps`, { error });
+      res.status(500).json({ success: false, error: 'Failed to list connected apps' });
+    }
+  },
+);
+
+router.post(
+  '/channels/:channelId/apps',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { channelId } = req.params;
+      const { installedAppId } = req.body as { installedAppId?: string };
+      if (!installedAppId || typeof installedAppId !== 'string') {
+        res.status(400).json({ success: false, error: 'installedAppId is required' });
+        return;
+      }
+
+      const channel = await authorizeAppDeskManager(
+        channelId, req.user!.id, req.user!.workspaceId!, res,
+      );
+      if (!channel) return;
+
+      const validation = await findDeskWritableInstall(installedAppId, req.user!.workspaceId!);
+      if ('error' in validation && validation.error) {
+        res.status(validation.error.status).json({ success: false, error: validation.error.message });
+        return;
+      }
+
+      const { source, outcome } = await externalSourceRepository.connectAppToChannel({
+        channelId,
+        installedAppId,
+        workspaceId: req.user!.workspaceId!,
+        displayName: channel.name,
+      });
+
+      // The binding alone is not enough to let the app post. Inbound runs through
+      // validateChannelAccessForPost, and ChannelsACL only exposes a channel that
+      // is PUBLIC or that the caller participates in — so without this the app's
+      // bot user cannot even see a private desk and every push 404s. Mirrors the
+      // legacy APP-channel creation path (channelController.ts). Idempotent, and
+      // deliberately runs before the already-connected check so that re-POSTing
+      // repairs bindings created before this was added.
+      await channelParticipantRepository.addParticipant(
+        channelId,
+        validation.installedApp.userId,
+        ChannelRole.MEMBER,
+      );
+
+      if (outcome === 'already-connected') {
+        res.status(409).json({ success: false, error: 'App is already connected to this channel' });
+        return;
+      }
+
+      logger.info(`${TAG} App connected to desk channel`, {
+        channelId, installedAppId, sourceId: source.id, outcome,
+      });
+      res.status(outcome === 'created' ? 201 : 200).json({
+        success: true,
+        app: {
+          sourceId: source.id,
+          installedAppId,
+          appName: validation.installedApp.app.name,
+          isActive: true,
+          createdAt: source.createdAt,
+        },
+      });
+    } catch (error) {
+      // Concurrent connect raced the unique name — treat as an existing binding.
+      if ((error as { code?: string })?.code === 'P2002') {
+        res.status(409).json({ success: false, error: 'App is already connected to this channel' });
+        return;
+      }
+      logger.error(`${TAG} Error connecting app to channel`, { error });
+      res.status(500).json({ success: false, error: 'Failed to connect app to channel' });
+    }
+  },
+);
+
+router.delete(
+  '/channels/:channelId/apps/:installedAppId',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { channelId, installedAppId } = req.params;
+      const channel = await authorizeAppDeskManager(
+        channelId, req.user!.id, req.user!.workspaceId!, res,
+      );
+      if (!channel) return;
+
+      const source = await externalSourceRepository.findChannelAppSource(channelId, installedAppId);
+      if (!source || !source.isActive) {
+        res.status(404).json({ success: false, error: 'App is not connected to this channel' });
+        return;
+      }
+
+      // Soft disconnect — the row (and its ExternalMessage history) is preserved.
+      await db.externalSource.update({ where: { id: source.id }, data: { isActive: false } });
+      logger.info(`${TAG} App disconnected from desk channel`, {
+        channelId, installedAppId, sourceId: source.id,
+      });
+      res.json({ success: true, message: 'App disconnected from channel' });
+    } catch (error) {
+      logger.error(`${TAG} Error disconnecting app from channel`, { error });
+      res.status(500).json({ success: false, error: 'Failed to disconnect app from channel' });
+    }
+  },
+);
+
 router.post(
   '/:channelId/disconnect',
   authV2Middleware.authenticate,
@@ -128,8 +366,9 @@ router.post(
       const { channelId } = req.params;
       const userId = req.user!.id;
 
-      const authorized = await authorizeAppDeskManager(channelId, userId, res);
+      const authorized = await authorizeAppDeskManager(channelId, userId, req.user!.workspaceId!, res);
       if (!authorized) return;
+      if (!(await assertLegacySingleAppDesk(authorized, res))) return;
 
       const source = await db.externalSource.findFirst({
         where: { channelId, sourceType: 'app-desk', isActive: true },
@@ -158,8 +397,9 @@ router.post(
       const { channelId } = req.params;
       const userId = req.user!.id;
 
-      const authorized = await authorizeAppDeskManager(channelId, userId, res);
+      const authorized = await authorizeAppDeskManager(channelId, userId, req.user!.workspaceId!, res);
       if (!authorized) return;
+      if (!(await assertLegacySingleAppDesk(authorized, res))) return;
 
       const source = await db.externalSource.findFirst({
         where: { channelId, sourceType: 'app-desk', isActive: false },

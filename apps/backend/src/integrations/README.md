@@ -7,6 +7,7 @@ A modular, platform-agnostic system for integrating external ticketing/messaging
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [How It Works](#how-it-works)
+- [App Desk (Xyne Apps → Desk Channels)](#app-desk-xyne-apps--desk-channels)
 - [Adding a New Adapter](#adding-a-new-adapter)
 - [API Reference](#api-reference)
 - [Security](#security)
@@ -200,6 +201,45 @@ await externalMessageRepo.create({
   direction: 'INCOMING'
 });
 ```
+
+---
+
+## App Desk (Xyne Apps → Desk Channels)
+
+Installed Xyne Apps with the `desk:write` permission can push tickets into desk channels (`POST /api/apps/tickets/appDeskInbound`) and receive agent replies back through their webhook. The **app↔channel binding** is an `ExternalSource` row with `sourceType='app-desk'` and `externalIdentifier=<installedAppId>` — there is no separate join table.
+
+### Multi-app model
+
+A desk channel of **any** type (EMAIL, DL, SLACK, CALL, SOCIAL_MEDIA, APP) can carry **multiple** connected apps: one `app-desk` source row per (app, channel). A channel stays 1:1 per email/slack source; only app bindings fan out. The app's binding is channel-bound even for DL channels, whose email source is workspace-level.
+
+**Source naming** (`integrations/core/deskSources.ts`):
+
+| Shape | Who uses it |
+| --- | --- |
+| `app-desk-<channelId>` | Legacy rows (pre-multi-app APP channels) — kept for back-compat |
+| `app-desk-<installedAppId>-<channelId>` | All bindings created via the management API |
+
+`name` is globally unique; `resolveAppDeskInstalledAppId(source)` parses both shapes (preferring `externalIdentifier`).
+
+### Management API (`routes/app-desk.ts`)
+
+Mounted at `/api/integrations/app-desk`. All three require the caller to be the channel creator or the desk owner (`EmailChannelPreference.ownerUserId`), scoped to the caller's workspace.
+
+| Method & Path | Behavior |
+| --- | --- |
+| `GET /channels/:channelId/apps` | Lists the channel's app bindings: `{ success: true, apps: [{ sourceId, installedAppId, appName, isActive, createdAt }] }`. `appName` is `null` when the backing install is gone. |
+| `POST /channels/:channelId/apps` | Connects an app. Body `{ installedAppId }`. Validates the install is in the caller's workspace and holds `desk:write` (APPROVED or PENDINGDELETE), else `404`/`403`. Active duplicate → `409`; an inactive binding is reactivated in place (`200`), otherwise the source row is created (`201`). |
+| `DELETE /channels/:channelId/apps/:installedAppId` | Soft disconnect: sets `isActive=false`, never deletes the row (preserves `ExternalMessage` history, so threads and reply routing survive a reconnect). No active binding → `404`. |
+
+Both connect paths — this API and the legacy APP-channel creation flow — go through one repository method: `ExternalSourceRepository.connectAppToChannel({ channelId, installedAppId, workspaceId, displayName, legacyName? })` (returns `{ source, outcome: 'created' | 'reactivated' | 'already-connected' }`). The legacy flow passes `legacyName` to keep the old naming.
+
+### Inbound authorization change
+
+`appDeskInbound` no longer requires `deskType === APP`; it accepts any desk channel. The channel-wide gate is replaced by a **per-app binding check**: the caller's `installedAppId` must have an `app-desk` source on the channel — no binding → `403 APP_NOT_CONNECTED` (this closes the pre-existing gap where any `desk:write` app could push into any APP desk), inactive binding → `409 DESK_DISCONNECTED`. Note the permission itself is still enforced per request (`requirePermission('desk:write')` re-reads grants on every call) — the binding is about *which channel* the app may write to, not whether it may write at all.
+
+### Orphan handling
+
+When an install's `desk:write` grant is revoked (`activateInstalledPermissions` or app update via `syncFromAppApproved`), its `app-desk` sources are set `isActive=false` (hook: `AppPermissionRepository.deactivateAppDeskSourcesIfDeskWriteLost`), so the UI shows the desk as disconnected. There is no app-uninstall flow to hook — none exists in the API surface today; inbound remains protected per call by `requirePermission`.
 
 ---
 

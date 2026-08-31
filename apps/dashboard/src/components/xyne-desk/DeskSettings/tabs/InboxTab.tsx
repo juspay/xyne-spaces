@@ -8,6 +8,7 @@ import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCa
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
+import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
 import { Button } from '../../../ui/Button/Button';
@@ -49,6 +50,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     isSlack,
     isApp,
     isSocial,
+    isDeskChannel,
     ownerId,
     setOwner,
     sendAsAlias,
@@ -96,6 +98,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isApp && <AppDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isDeskChannel && <ConnectedAppsSection channelId={channelId} canManage={canManage} />}
 
       <div className='flex flex-col gap-[16px]'>
         <div className='flex flex-col gap-[4px]'>

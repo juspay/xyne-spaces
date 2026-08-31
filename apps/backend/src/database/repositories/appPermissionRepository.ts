@@ -5,6 +5,7 @@ import { type Prisma, type AvailableAppPermission } from '@prisma/client';
 // ─── Prisma transaction client type ──────────────────────────────────────────
 import { PrismaClient } from '@prisma/client';
 import { AppPermissionStatus, AppPermissionType } from '@xyne/shared';
+import { logger } from '@/utils/logger';
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 // ─── Typed row shapes from Prisma includes ────────────────────────────────────
@@ -268,6 +269,7 @@ export class AppPermissionRepository extends BaseRepository<
         data: { status: AppPermissionStatus.APPROVED },
       });
     });
+    await this.deactivateAppDeskSourcesIfDeskWriteLost(installedAppId);
   }
 
 
@@ -342,6 +344,33 @@ export class AppPermissionRepository extends BaseRepository<
         });
       }
     });
+    await this.deactivateAppDeskSourcesIfDeskWriteLost(installedAppId);
+  }
+
+  /**
+   * When an install loses its effective desk:WRITE grant, its app-desk channel
+   * bindings (ExternalSource rows keyed by externalIdentifier=installedAppId) go
+   * inactive. Revocation alone blocks inbound (requirePermission re-reads grants
+   * per call); this additionally flips the management-UI state to disconnected.
+   */
+  private async deactivateAppDeskSourcesIfDeskWriteLost(installedAppId: string): Promise<void> {
+    const deskWrite = await this.db.installedAppPermission.findFirst({
+      where: {
+        installedAppId,
+        status: { in: [AppPermissionStatus.APPROVED, AppPermissionStatus.PENDINGDELETE] },
+        permission: { name: 'desk', type: AppPermissionType.WRITE },
+      },
+      select: { id: true },
+    });
+    if (deskWrite) return;
+
+    const { count } = await this.db.externalSource.updateMany({
+      where: { sourceType: 'app-desk', externalIdentifier: installedAppId, isActive: true },
+      data: { isActive: false },
+    });
+    if (count > 0) {
+      logger.info(`[AppPermissions] desk:write revoked for install ${installedAppId} — deactivated ${count} app-desk source(s)`);
+    }
   }
 }
 
