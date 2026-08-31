@@ -20,6 +20,7 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/kata-sdk/package.json           packages/kata-sdk/
 COPY packages/storage/package.json            packages/storage/
+COPY packages/shared/package.json             packages/shared/
 COPY packages/xyne-claw-shared/package.json   packages/xyne-claw-shared/
 COPY apps/xyne-claw-auth/backend/package.json apps/xyne-claw-auth/backend/
 
@@ -30,6 +31,7 @@ RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-c
 
 COPY packages/kata-sdk         packages/kata-sdk
 COPY packages/storage          packages/storage
+COPY packages/shared           packages/shared
 COPY packages/xyne-claw-shared packages/xyne-claw-shared
 COPY apps/xyne-claw-auth/backend/prisma        apps/xyne-claw-auth/backend/prisma
 COPY apps/xyne-claw-auth/backend/tsconfig.json apps/xyne-claw-auth/backend/
@@ -41,6 +43,7 @@ RUN npx prisma generate
 # @xyne/storage ships built output (main: dist/index.js); --ignore-scripts
 # skipped its prepare hook, so build it explicitly before the typecheck.
 RUN pnpm --filter @xyne/storage run build
+RUN pnpm --filter @xyne/shared run build
 RUN npx tsc --noEmit
 
 # Production image

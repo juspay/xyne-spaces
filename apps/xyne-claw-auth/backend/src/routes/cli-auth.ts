@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
+import { asyncHandler, ok, badRequest, unauthorized, notFound, conflict, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
@@ -255,96 +256,75 @@ router.post("/auth/token", requireCliTokensEnabled, async (req: Request, res: Re
   }
 });
 
-router.post("/auth/approve", requireCliTokensEnabled, requireApproveAuth, async (req: Request, res: Response) => {
-  try {
-    if (!(await rateLimit(req, res, "approve", 20, 60))) return;
+router.post("/auth/approve", requireCliTokensEnabled, requireApproveAuth, asyncHandler(async (req: Request, res: Response) => {
+  if (!(await rateLimit(req, res, "approve", 20, 60))) return;
 
-    const userCode = parseUserCode(req);
-    if (!userCode) {
-      res.status(400).json({ success: false, error: "userCode is required" });
-      return;
-    }
-
-    const redis = redisService.getConnection();
-    const deviceCode = await redis.getdel(userCodeKey(userCode));
-    if (!deviceCode) {
-      res.status(404).json({ success: false, error: "Code not found or expired" });
-      return;
-    }
-
-    const pending = await loadPendingByDevice(deviceCode);
-    if (!pending || pending.status !== "pending" || new Date(pending.expiresAt).getTime() <= Date.now()) {
-      res.status(400).json({ success: false, error: "Code already used or expired" });
-      return;
-    }
-
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "User session required" });
-      return;
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { orgId: true, email: true },
-    });
-    if (!user?.orgId) {
-      res.status(400).json({ success: false, error: "User organization is required" });
-      return;
-    }
-
-    const approved: PendingDeviceAuth = {
-      ...pending,
-      status: "approved",
-      userId,
-      orgId: user.orgId,
-      email: user.email,
-    };
-    await writePending(approved);
-    res.json({ success: true });
-  } catch (err) {
-    log.error("[cli-auth] approve failed:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const userCode = parseUserCode(req);
+  if (!userCode) {
+    throw badRequest("userCode is required");
   }
-});
 
-router.get("/tokens", requireApproveAuth, async (req: Request, res: Response) => {
-  try {
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "User session required" });
-      return;
-    }
-
-    const tokens = await prisma.surfaceAccessToken.findMany({
-      where: { userId, surface: { key: "cli" }, revokedAt: null },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, prefix: true, name: true, client: true, lastUsedAt: true, createdAt: true, expiresAt: true },
-    });
-    res.json({ success: true, data: tokens });
-  } catch (err) {
-    log.error("[cli-auth] list tokens failed:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const redis = redisService.getConnection();
+  const deviceCode = await redis.getdel(userCodeKey(userCode));
+  if (!deviceCode) {
+    throw notFound("Code not found or expired");
   }
-});
 
-router.delete("/tokens/:id", requireApproveAuth, async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "User session required" });
-      return;
-    }
-
-    await prisma.surfaceAccessToken.updateMany({
-      where: { id: req.params.id, userId, surface: { key: "cli" }, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    res.json({ success: true });
-  } catch (err) {
-    log.error("[cli-auth] revoke token failed:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const pending = await loadPendingByDevice(deviceCode);
+  if (!pending || pending.status !== "pending" || new Date(pending.expiresAt).getTime() <= Date.now()) {
+    throw badRequest("Code already used or expired");
   }
-});
+
+  const userId = getRequesterId(req);
+  if (!userId) {
+    throw unauthorized("User session required");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { orgId: true, email: true },
+  });
+  if (!user?.orgId) {
+    throw badRequest("User organization is required");
+  }
+
+  const approved: PendingDeviceAuth = {
+    ...pending,
+    status: "approved",
+    userId,
+    orgId: user.orgId,
+    email: user.email,
+  };
+  await writePending(approved);
+  ok(res);
+}));
+
+router.get("/tokens", requireApproveAuth, asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    throw unauthorized("User session required");
+  }
+
+  const tokens = await prisma.surfaceAccessToken.findMany({
+    where: { userId, surface: { key: "cli" }, revokedAt: null },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, prefix: true, name: true, client: true, lastUsedAt: true, createdAt: true, expiresAt: true },
+  });
+  ok(res, tokens);
+}));
+
+router.delete("/tokens/:id", requireApproveAuth, asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    throw unauthorized("User session required");
+  }
+
+  const id = (req.params as { id: string }).id;
+  await prisma.surfaceAccessToken.updateMany({
+    where: { id, userId, surface: { key: "cli" }, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  ok(res);
+}));
 
 export { router as cliAuthRouter };

@@ -51,6 +51,7 @@ import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
 import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
+import SdlcWindow from './SdlcScreen/SdlcWindow';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
@@ -110,6 +111,7 @@ import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
 import { RecapPanel } from '../components/RecapPanel';
+import { RadarPanel } from '../components/RadarPanel';
 import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
@@ -1234,6 +1236,28 @@ export const router = createBrowserRouter(
                             },
                           ],
                         },
+                        // Radar (must come before :channelId). The route stays
+                        // registered because the router is built at module scope;
+                        // the CAC rollout gate lives inside RadarPanel itself.
+                        {
+                          path: 'radar',
+                          children: [
+                            {
+                              index: true,
+                              element: <RadarPanel />,
+                            },
+                            {
+                              path: ':channelId',
+                              element: <RadarPanel />,
+                              children: [
+                                {
+                                  path: ':conversationId',
+                                  element: <ThreadMessages />,
+                                },
+                              ],
+                            },
+                          ],
+                        },
                         // My Tickets (must come before :channelId)
                         {
                           path: 'my-tickets',
@@ -1912,6 +1936,24 @@ export const router = createBrowserRouter(
               element: <ThreadMessages />,
             },
           ],
+        },
+        {
+          path: '/newWindow/sdlc/:workspaceId/:repoId/:section',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <ZeroFallbackProvider>
+                  <InitialStateLoader>
+                    <div className='h-full bg-background'>
+                      <SdlcWindow />
+                    </div>
+                    {/* roomActor is a module singleton, so this window needs its own. */}
+                    <GlobalCallOverlay autoJoinOnAccept={false} />
+                  </InitialStateLoader>
+                </ZeroFallbackProvider>
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
         },
         {
           path: '/newWindow/create-ticket',

@@ -53,7 +53,12 @@ export const createSkillTool: ToolDefinition = {
     "On approval the skill is created as a PERSONAL skill owned by the approving user. " +
     "Provide: name (human title), slug (optional — auto-derived from name if omitted), description (one line shown in the skill picker), and content (the full SKILL.md markdown body). " +
     "Use this when the user asks you to 'create a skill', 'save this as a skill', or 'turn these instructions into a skill'.",
-  source: "custom:skill",
+  // Grouped with the other authoring tools. NOTE: for a write tool the source
+  // also determines the signed action's serverType (custom-tools.ts strips the
+  // "custom:" prefix), so this moved create-skill from serverType "skill" to
+  // "agent-tools". flow-action keeps the old "skill" branch alive for actions
+  // signed before this shipped.
+  source: "custom:agent-tools",
   isWriteTool: true,
   inputSchema: {
     type: "object",
@@ -84,7 +89,10 @@ export const updateSkillTool: ToolDefinition = {
     "SMALL SKILLS ONLY: `content` (full replacement) is a convenience for skills under ~8K chars, where a whole-body rewrite is cheaper than quoting old+new via edits. The server REJECTS full replacements of larger skills — a large body does not survive as a tool argument (it gets truncated and destroys the skill). " +
     "Always read the current skill first so your oldText anchors are exact. " +
     "Re-proposing is safe: a new proposal automatically replaces your earlier still-pending one for the same skill.",
-  source: "custom:skill-update",
+  // Grouped with the other authoring tools. Safe to move: update-skill is not a
+  // write tool, so its source is purely the catalog group — it posts to
+  // claw-auth's /skills/:slug/propose-update itself.
+  source: "custom:agent-tools",
   inputSchema: {
     type: "object",
     properties: {

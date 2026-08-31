@@ -13,6 +13,7 @@ import {
   Power,
   Save as SaveIcon,
   Send,
+  Trash2,
   Undo2,
   X,
 } from 'lucide-react';
@@ -192,6 +193,7 @@ export function AutomationBuilder({
   const [editMode, setEditMode] = useState<boolean>(!automation);
   const [editConfirmOpen, setEditConfirmOpen] = useState(false);
   const [proposeChangeConfirmOpen, setProposeChangeConfirmOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     if (automation?.id) setSavedId(automation.id);
@@ -423,6 +425,22 @@ export function AutomationBuilder({
         message: String('[automations] save failed'),
         error: err,
       });
+      toast.error(message);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string): Promise<void> => {
+      zero.mutate(mutators.automations.delete({ id }));
+      return Promise.resolve();
+    },
+    onSuccess: () => {
+      toast.success('Automation deleted');
+      onBack();
+    },
+    onError: err => {
+      const message = err instanceof Error ? err.message : 'Delete failed';
+      setErrorMessage(message);
       toast.error(message);
     },
   });
@@ -850,6 +868,27 @@ export function AutomationBuilder({
               </button>
             </Tooltip>
           )}
+          {!editMode &&
+          !readOnlyPreview &&
+          savedId &&
+          savedStatus === AutomationStatusValues.DRAFT ? (
+            <Tooltip content='Delete draft' side='bottom'>
+              <button
+                type='button'
+                onClick={() => setDeleteDialogOpen(true)}
+                aria-label={`Delete draft automation ${name || 'Untitled automation'}`}
+                data-track-category='automation-builder'
+                data-track-name='header-delete-draft'
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
+                  'hover:bg-red-500/10 hover:text-red-600',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40',
+                )}
+              >
+                <Trash2 className='size-4' aria-hidden='true' />
+              </button>
+            </Tooltip>
+          ) : null}
 
           {readOnlyPreview ? null : editMode ? (
             <>
@@ -1279,6 +1318,45 @@ export function AutomationBuilder({
           errorMessage={errorMessage}
         />
       </div>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title='Delete draft automation?'
+        className='sm:max-w-md'
+      >
+        <div className='flex flex-col gap-4 px-5 py-4 text-sm text-foreground'>
+          <p>
+            Delete <strong>{name || 'this draft automation'}</strong>? This can&apos;t be undone.
+          </p>
+          <div className='flex justify-end gap-2 pt-2'>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => setDeleteDialogOpen(false)}
+              data-track-category='automation-builder'
+              data-track-name='delete-draft-cancel'
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              size='sm'
+              disabled={deleteMutation.isPending}
+              loading={deleteMutation.isPending}
+              onClick={() => {
+                if (!savedId) return;
+                deleteMutation.mutate(savedId);
+                setDeleteDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='delete-draft-confirm'
+            >
+              Delete draft
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog
         open={editConfirmOpen}
