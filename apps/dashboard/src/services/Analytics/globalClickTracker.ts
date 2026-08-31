@@ -19,16 +19,6 @@ class GlobalClickTracker {
   private isInitialized = false;
   private sessionId: string;
   private platform: Platform;
-  private lastViewedUrl: string | null = null;
-  private originalPushState: History['pushState'] | null = null;
-  private originalReplaceState: History['replaceState'] | null = null;
-  private authSubscription: { unsubscribe: () => void } | null = null;
-  // Events captured before the websocket handshake completes (the landing
-  // PAGE_VIEW always is — auth resolves before connect() finishes) are held
-  // here and drained on connect instead of being dropped.
-  private pendingEvents: ActivityEventPayload[] = [];
-  private static readonly MAX_PENDING_EVENTS = 50;
-  private unsubscribeConnect: (() => void) | null = null;
 
   constructor() {
     this.sessionId = uuidv4();
@@ -61,8 +51,6 @@ class GlobalClickTracker {
     this.setupClickListener();
     this.setupChangeListener();
     this.setupBlurListener();
-    this.setupPageViewListener();
-    this.unsubscribeConnect = websocketService.onConnect(this.flushPendingEvents);
     this.isInitialized = true;
   }
 
@@ -74,21 +62,6 @@ class GlobalClickTracker {
     document.removeEventListener('click', this.handleClick, true);
     document.removeEventListener('change', this.handleChange, true);
     document.removeEventListener('blur', this.handleBlur, true);
-    window.removeEventListener('popstate', this.handlePageView);
-    window.removeEventListener('hashchange', this.handlePageView);
-    if (this.originalPushState) {
-      history.pushState = this.originalPushState;
-      this.originalPushState = null;
-    }
-    if (this.originalReplaceState) {
-      history.replaceState = this.originalReplaceState;
-      this.originalReplaceState = null;
-    }
-    this.authSubscription?.unsubscribe();
-    this.authSubscription = null;
-    this.unsubscribeConnect?.();
-    this.unsubscribeConnect = null;
-    this.pendingEvents = [];
     this.isInitialized = false;
   }
 
@@ -103,56 +76,6 @@ class GlobalClickTracker {
   private setupBlurListener(): void {
     document.addEventListener('blur', this.handleBlur, true);
   }
-
-  // Route changes in the SPA never reload the document, so page views are
-  // captured by intercepting the history API rather than any router hook.
-  private setupPageViewListener(): void {
-    this.originalPushState = history.pushState.bind(history);
-    this.originalReplaceState = history.replaceState.bind(history);
-
-    history.pushState = (...args: Parameters<History['pushState']>) => {
-      this.originalPushState?.(...args);
-      this.handlePageView();
-    };
-    history.replaceState = (...args: Parameters<History['replaceState']>) => {
-      this.originalReplaceState?.(...args);
-      this.handlePageView();
-    };
-    window.addEventListener('popstate', this.handlePageView);
-    window.addEventListener('hashchange', this.handlePageView);
-
-    // The landing view: trackEvent drops events with no user id, so if auth
-    // has not resolved yet, hold the first emission until it does.
-    if (this.getCurrentUserId()) {
-      this.handlePageView();
-    } else {
-      this.authSubscription = authActor.subscribe(snapshot => {
-        if (snapshot.context.user?.id) {
-          this.authSubscription?.unsubscribe();
-          this.authSubscription = null;
-          this.handlePageView();
-        }
-      });
-    }
-  }
-
-  private handlePageView = (): void => {
-    const url = window.location.pathname + window.location.hash;
-    if (url === this.lastViewedUrl) {
-      return;
-    }
-    const previousUrl = this.lastViewedUrl;
-    this.lastViewedUrl = url;
-
-    const data: ParsedTrackingData = {
-      eventCategory: 'NAVIGATION',
-      eventName: 'PAGE_VIEW',
-    };
-    if (previousUrl !== null) {
-      data.contextMetadata = { from: previousUrl };
-    }
-    this.trackEvent(data, TriggerType.PAGE_VIEW);
-  };
 
   private handleClick = (event: MouseEvent): void => {
     const target = event.target as HTMLElement;
@@ -319,19 +242,6 @@ class GlobalClickTracker {
     return result;
   }
 
-  private flushPendingEvents = (): void => {
-    if (this.pendingEvents.length === 0) return;
-    // Original capture timestamps are preserved on the queued payloads.
-    const events = this.pendingEvents.splice(0, this.pendingEvents.length);
-    for (const event of events) {
-      if (websocketService.isConnectedToServer()) {
-        websocketService.emit(WS_ACTIVITY_EVENT, event);
-      } else {
-        this.pendingEvents.push(event);
-      }
-    }
-  };
-
   // For surfaces the DOM listener cannot reach (portalled toasts, native
   // notification actions, third-party modals that drop data-* attributes).
   trackManualEvent(
@@ -386,12 +296,6 @@ class GlobalClickTracker {
 
       if (websocketService.isConnectedToServer()) {
         websocketService.emit(WS_ACTIVITY_EVENT, event);
-      } else {
-        // Queue instead of dropping; drained by flushPendingEvents on connect.
-        if (this.pendingEvents.length >= GlobalClickTracker.MAX_PENDING_EVENTS) {
-          this.pendingEvents.shift();
-        }
-        this.pendingEvents.push(event);
       }
     } catch (error) {
       logger.error(LogEvent.FRONTEND_ERROR, {

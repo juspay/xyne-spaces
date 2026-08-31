@@ -36,8 +36,6 @@ class ActivityTrackingService {
         // Click events get it from the url instead and rarely set this key.
         ...(typeof meta.channelId === 'string' && { channelId: meta.channelId }),
         ...(typeof meta.path === 'string' && { path: meta.path }),
-        // Previous URL on PAGE_VIEW events — lets navigation flows be queried.
-        ...(typeof meta.from === 'string' && { from: meta.from }),
         // Target URL on ELECTRON_NAVIGATE events.
         ...(typeof meta.to === 'string' && { to: meta.to }),
         ...(typeof meta.label === 'string' && { label: meta.label }),
