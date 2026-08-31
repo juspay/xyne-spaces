@@ -3,29 +3,29 @@ import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
+import { Archive } from 'lucide-react';
+import { KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Tag,
-  Plus,
-  X,
-  Check,
+  PlusDefault as Plus,
+  MultipleCrossCancelDefault as X,
+  CheckTickSingle as Check,
   FileText,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  LinkIcon,
-  Minimize2,
-  Sparkles,
-  Calendar,
-  SquareKanban,
-  Clock,
-  Eye,
+  LinkChainHorizontal as LinkIcon,
+  MinimizeTwoArrow as Minimize2,
+  SparkleAi02 as Sparkles,
+  CalendarDefault as Calendar,
+  ClockDefault as Clock,
+  EyeOn as Eye,
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
-  Archive,
   GitBranch,
-  Lock,
-} from 'lucide-react';
+  LockClose as Lock,
+} from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
   SubTicket,

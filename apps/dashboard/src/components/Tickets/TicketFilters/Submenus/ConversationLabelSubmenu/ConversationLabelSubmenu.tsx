@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check, Tag } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check, Tag } from '@xyne/icons';
 import { queries } from '../../../../../zero/queries';
 import { useCachedQuery } from '../../../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../../../hooks/usePlatform';
