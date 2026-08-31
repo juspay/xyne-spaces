@@ -1006,7 +1006,7 @@ export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null
       if (existing) {
         const isSameTableRegistration =
           existing.table === table && existing.blockContent === blockContent;
-        const isMountAttached = existing.mount.parentElement === wrapper;
+        const isMountAttached = existing.mount.parentElement === blockContent;
 
         if (isSameTableRegistration && isMountAttached) continue;
 
@@ -1014,9 +1014,11 @@ export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null
         registrationsRef.current.delete(wrapper);
       }
 
+      // On the block, not the wrapper: the wrapper scrolls sideways for a wide
+      // table and would carry the button off with it.
       const mount = document.createElement('div');
       mount.className = TABLE_FILTER_MOUNT_CLASS;
-      wrapper.appendChild(mount);
+      blockContent.appendChild(mount);
 
       const reactRoot = createRoot(mount);
       reactRoot.render(
