@@ -122,6 +122,7 @@ export interface CreateConversationWithEmailParams {
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
   emailType?: EmailType;
+  detectDuplicates?: boolean;
   // User who sent this email, for outbound-new flows. Null/undefined for inbound.
   sentByUserId?: string;
   rating?: number;
@@ -1068,6 +1069,7 @@ export class EmailService {
       sourceName,
       receivedAt,
       emailType = EmailType.DEFAULT,
+      detectDuplicates = emailType === EmailType.DEFAULT,
       sentByUserId,
       rating,
       clientVersionName,
@@ -1311,8 +1313,8 @@ export class EmailService {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
-    // Inbound mail only — an agent-composed thread has no duplicate to find.
-    if (emailType === EmailType.DEFAULT) {
+    // Inbound mail, plus COMPOSE flows whose body is the reporter's own request.
+    if (detectDuplicates) {
       ticketDuplicateService.persistDuplicateReferences({
         ticketId: ticket.id,
         ticketCreatedBy: ticket.createdBy,
@@ -2577,8 +2579,8 @@ export class EmailService {
         );
       });
 
-      // projectId is only assigned on the !existingFirstEmail branch, which is the
-      // same precondition as isNew — guard anyway so a future change can't slip through.
+      // isNew implies !existingFirstEmail, where projectId is resolved — so this is always
+      // truthy here; the guard is what narrows string | undefined for TS.
       if (projectId) {
         ticketDuplicateService.persistDuplicateReferences({
           ticketId: txResult.ticketId,
