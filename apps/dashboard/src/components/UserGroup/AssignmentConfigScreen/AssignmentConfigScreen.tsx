@@ -1134,7 +1134,6 @@ export const AssignmentConfigScreen = ({
 
           {activeTab === 'availability' && (
             <>
-              {/* Assignment strategy — how this group picks among its eligible members */}
               <div className='rounded-2xl border border-border bg-card p-4'>
                 <div className='mb-4'>
                   <h2 className='text-sm font-semibold text-foreground'>Assignment method</h2>
@@ -1603,8 +1602,7 @@ export const AssignmentConfigScreen = ({
               boardComplexityScores={boardComplexityScores}
               expertiseMappings={expertiseMappings}
               assignmentStates={userAssignmentStates}
-              // Local, not persisted: every other control on this screen previews
-              // unsaved edits, so switching method must re-rank this tab immediately.
+              // Local, not persisted: switching method re-ranks this tab before save.
               assignmentStrategy={localAssignmentStrategy}
               isCurrentUserGroupMember={isCurrentUserGroupMember}
               userGroupMappings={userGroupMembers}

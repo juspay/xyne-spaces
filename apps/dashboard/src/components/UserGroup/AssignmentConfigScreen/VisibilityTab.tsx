@@ -33,7 +33,6 @@ interface VisibilityTabProps {
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
   assignmentStates: readonly AssignmentStateLike[] | null | undefined;
-  /** The group's assignment method — decides how these rows are ranked. */
   assignmentStrategy: AssignmentStrategy;
   isCurrentUserGroupMember: boolean;
   userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
@@ -43,9 +42,8 @@ interface VisibilityTabProps {
 
 /**
  * "Visibility" tab of the Assignment Configuration screen: per-user open tickets
- * ranked by the group's assignment method, first row assigned next. Read-only;
- * shares the selected board with the Availability tab via `selectedBoardId` /
- * `onSelectBoard`.
+ * ranked by the assignment method (first = next). Read-only; shares the selected
+ * board with the Availability tab via `selectedBoardId` / `onSelectBoard`.
  */
 export function VisibilityTab({
   users,
@@ -92,7 +90,6 @@ export function VisibilityTab({
     ],
   );
 
-  /** Only the Workload method ranks by score, and only with a board selected. */
   const showScoreColumn = !isRoundRobin && Boolean(selectedBoardId);
 
   const selectedBoardName = boards.find(b => b.id === selectedBoardId)?.name;

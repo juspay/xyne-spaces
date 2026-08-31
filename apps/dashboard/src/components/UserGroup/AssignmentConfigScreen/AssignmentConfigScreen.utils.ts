@@ -3,8 +3,6 @@
 // already-synced Zero data — no backend call:
 //   effectiveActiveTasks = weightedActiveTasks + (startOffset ?? 0)
 //   score = effectiveActiveTasks − expertiseBonus − (percentage − currentPct)
-// Rows are then ordered the way the group's assignment method ranks them, so the
-// first row is the one the engine would pick next.
 //
 // startOffset is the cold-start fairness offset (see cold-start-fairness-design.md):
 // a one-time, persisted value on user_group_mappings that keeps a brand-new member's
@@ -13,9 +11,6 @@
 // unconditionally regardless of which board is selected.
 
 import { AssignmentStrategy } from '@xyne/shared';
-
-/** Never-picked members sort ahead of everyone holding a real timestamp. */
-const NEVER_ASSIGNED = -1;
 
 export interface AssignmentStateLike {
   userId: string;
@@ -80,7 +75,6 @@ export interface AssignmentScoreRow<U> {
    * member is skipped for new assignments. Always false when no cap is set.
    */
   isAtCapacity: boolean;
-  /** When the engine last picked this member; null if never picked. */
   lastAssignedAt: number | null;
 }
 
@@ -131,8 +125,8 @@ export function computeTotalTicketsOnBoard(
 }
 
 /**
- * Per-user tickets + engine score, ordered by `strategy` so the row the engine
- * would assign next comes first.
+ * Per-user tickets + engine score, ordered so the row assigned next comes first.
+ * When no board is selected, `score` is null and rows sort by weightedActiveTasks.
  */
 export function computeAssignmentScores<U extends { id: string }>(params: {
   users: readonly U[];
@@ -215,16 +209,12 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         lastAssignedAt,
       };
     })
-    // Mirrors the engine's ranking (assignmentEngine.ts). Round-robin cursor ties
-    // are the common case — everyone never picked, or a batch sharing a timestamp
-    // — so they break on lighter load before falling back to a stable id order.
-    .sort((a, b) =>
-      strategy === AssignmentStrategy.ROUND_ROBIN
-        ? (a.lastAssignedAt ?? NEVER_ASSIGNED) - (b.lastAssignedAt ?? NEVER_ASSIGNED) ||
-          a.weightedActiveTasks - b.weightedActiveTasks ||
-          a.user.id.localeCompare(b.user.id)
-        : (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks),
-    );
+    .sort((a, b) => (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks));
+
+  // Mirrors the engine: cursor only, relying on sort stability for the tiebreak.
+  if (strategy === AssignmentStrategy.ROUND_ROBIN) {
+    rows.sort((a, b) => (a.lastAssignedAt ?? -1) - (b.lastAssignedAt ?? -1));
+  }
 
   const realScores = rows.map(r => r.score).filter((s): s is number => s !== null);
   const minScore = realScores.length > 0 ? Math.min(...realScores) : 0;
