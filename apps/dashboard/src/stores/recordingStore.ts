@@ -140,6 +140,19 @@ const initialContext: RecordingState = {
 
 const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
 
+/**
+ * Whether a recording session exists at all — including one still spinning up or
+ * winding down, where the mic is live or about to be.
+ *
+ * Broader than `ACTIVE_STATUSES`, which is about a session that has *started*.
+ * This is the test the start sites already use inline to refuse a second
+ * recording (ThreadPannel, ChatBubble, RecordingsV2Screen, useSlashCommands);
+ * named here so callers that need it stop re-spelling it.
+ */
+export function isRecordingSessionActive(status: RecordingStatus): boolean {
+  return status !== 'idle' && status !== 'error';
+}
+
 export const recordingStore = createStore({
   context: initialContext,
   on: {

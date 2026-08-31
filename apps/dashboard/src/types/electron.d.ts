@@ -42,6 +42,8 @@ export interface ElectronAPI {
     callType: CallType;
     callerPicture?: string;
     body?: string;
+    /** Suppresses the OS notification sound; the dock still bounces. */
+    silent?: boolean;
   }) => void;
   closeCallNotification: (callId: string) => void;
   onCallNotificationClicked: (callback: (data: { callId: string }) => void) => () => void;
@@ -126,6 +128,12 @@ export interface ElectronAPI {
     onStartRecordingFromMeeting: (callback: () => void) => () => void;
     onStopRecordingFromMeeting: (callback: () => void) => () => void;
     setEnabled: (enabled: boolean) => void;
+    /** Fires with the meeting on detection and with null when it ends. */
+    onMeetingStateChanged: (
+      callback: (meeting: { app: string; startedAt: string } | null) => void,
+    ) => () => void;
+    /** Seeds state on mount — detection broadcasts are not replayed. */
+    getCurrentMeeting: () => Promise<{ app: string; startedAt: string } | null>;
   };
   meetingPopup?: {
     onShow: (callback: (data: { app: string; startedAt: string }) => void) => () => void;

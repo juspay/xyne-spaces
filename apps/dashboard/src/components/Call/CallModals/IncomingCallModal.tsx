@@ -16,10 +16,15 @@ import { globalClickTracker } from '../../../services/Analytics/globalClickTrack
 import { buildCallNotificationBody } from '../IncomingCall/callNotificationBody';
 import {
   buildIncomingCallViewModel,
+  getRingSilenceReason,
   isRingableCall,
   type IncomingCallRow,
+  type RingSilenceReason,
 } from '../IncomingCall/IncomingCallCard.utils';
 import type { IncomingCallViewModel } from '../IncomingCall/IncomingCallCard.types';
+import { useRecordingStore } from '../../../hooks/useRecordingStore';
+import { useExternalMeeting } from '../../../stores/externalMeetingStore';
+import { logger, Event } from '../../../utils/logger';
 
 type CallWithRelations = QueryResultType<typeof queries.userActiveCalls>[number];
 
@@ -34,6 +39,7 @@ export function IncomingCallModal(): React.ReactElement | null {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastViewModelRef = useRef<IncomingCallViewModel | null>(null);
+  const silenceRef = useRef<{ callId: string; reason: RingSilenceReason | null } | null>(null);
 
   // Get active calls from roomActor context and filter for incoming calls (where user is invited)
   const allActiveCalls = useSelector(roomActor, state => state.context.activeCalls);
@@ -56,6 +62,9 @@ export function IncomingCallModal(): React.ReactElement | null {
   // Only allow incoming call notifications in stable states (idle or connected)
   const canShowIncomingCalls =
     roomState === 'idle' || (typeof roomState === 'object' && 'connected' in roomState);
+
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const externalMeeting = useExternalMeeting();
 
   const allChannels = useAllChannels();
   const channelMap = useMemo(() => {
@@ -176,9 +185,44 @@ export function IncomingCallModal(): React.ReactElement | null {
   // Get the first call in the queue (active incoming call)
   const incomingCallData = incomingCallQueue[0];
 
+  // Whether the user is busy enough that this call should arrive quietly. The
+  // meeting half is Electron/macOS only; on web it is always null and the other
+  // two carry the feature on their own.
+  const liveSilenceReason = getRingSilenceReason({
+    isInActiveCall,
+    recordingStatus,
+    externalMeetingActive: externalMeeting !== null,
+  });
+
+  // Decided once per call and then held. Recomputing live would mean hanging up
+  // on your first call sends the second one into a full-volume ringtone
+  // mid-ring — the loudest possible moment for a surprise — and would re-fire
+  // the notification effect below, stacking a second OS banner. Same
+  // write-during-render shape as lastViewModelRef further down.
+  if (!incomingCallData) {
+    // Released once nothing is ringing, so a callId that somehow comes back
+    // around is decided afresh rather than inheriting an old answer.
+    silenceRef.current = null;
+  } else if (silenceRef.current?.callId !== incomingCallData.callId) {
+    silenceRef.current = { callId: incomingCallData.callId, reason: liveSilenceReason };
+    if (liveSilenceReason) {
+      logger.info(Event.LIVEKIT_ROOM_EVENT, {
+        callId: incomingCallData.callId,
+        eventName: 'incoming_call_silenced',
+        reason: liveSilenceReason,
+        // Carried separately because 'recording' outranks it: this is what
+        // distinguishes a meeting the user chose to record from one they only
+        // dismissed, and it is the only way to spot a browser-meeting false
+        // positive from the outside.
+        externalMeetingApp: externalMeeting?.app ?? null,
+      });
+    }
+  }
+  const silenceReason = incomingCallData ? (silenceRef.current?.reason ?? null) : null;
+
   // Play notification sound when incoming call appears
   useEffect(() => {
-    const shouldPlay = isRinging && incomingCallData;
+    const shouldPlay = isRinging && incomingCallData && !silenceReason;
 
     if (shouldPlay && audioRef.current) {
       audioRef.current.currentTime = 0;
@@ -189,7 +233,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-  }, [isRinging, incomingCallData]);
+  }, [isRinging, incomingCallData, silenceReason]);
 
   const handleAcceptCall = useCallback(
     (callIdToAccept?: string): void => {
@@ -267,9 +311,18 @@ export function IncomingCallModal(): React.ReactElement | null {
       usersById,
       currentUserId: user?.id,
       isInActiveCall,
+      isSilenced: silenceReason !== null,
     });
     return buildCallNotificationBody(vm, incomingCallData.caller.name);
-  }, [incomingCallData, allActiveCalls, channelMap, usersById, user?.id, isInActiveCall]);
+  }, [
+    incomingCallData,
+    allActiveCalls,
+    channelMap,
+    usersById,
+    user?.id,
+    isInActiveCall,
+    silenceReason,
+  ]);
 
   // Show native Electron notification when app is in background. Keyed on the
   // ring state, the (reference-stable) incoming call, and the derived body, so
@@ -293,6 +346,9 @@ export function IncomingCallModal(): React.ReactElement | null {
       callerEmail: incomingCallData.caller.email,
       callType: incomingCallData.callType,
       body: notificationBody,
+      // Muting the ringtone alone leaves the OS chime, which is the louder half
+      // when the app is in the background — exactly the busy case.
+      silent: silenceReason !== null,
       ...(incomingCallData.caller.picture && { callerPicture: incomingCallData.caller.picture }),
     });
 
@@ -301,7 +357,7 @@ export function IncomingCallModal(): React.ReactElement | null {
         window.electronAPI.closeCallNotification(incomingCallData.callId);
       }
     };
-  }, [isRinging, incomingCallData, notificationBody]);
+  }, [isRinging, incomingCallData, notificationBody, silenceReason]);
 
   // Handle Electron notification action callbacks (accept/reject from notification)
   useEffect(() => {
@@ -356,6 +412,7 @@ export function IncomingCallModal(): React.ReactElement | null {
       usersById,
       currentUserId: user?.id,
       isInActiveCall,
+      isSilenced: silenceReason !== null,
     });
 
     // Two things happen in the beat between the caller hanging up and this
