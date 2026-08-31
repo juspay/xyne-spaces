@@ -18,6 +18,7 @@ jest.mock('@/bitbucket/apis', () => ({
 }));
 jest.mock('@/git-providers/github/apis', () => ({
   githubManager: { postCommitStatus: mockPostCommitStatus },
+  sanitizeForLog: (value: string) => value,
 }));
 const mockIsReady = jest.fn(() => false);
 const mockGetBooleanValue = jest.fn();

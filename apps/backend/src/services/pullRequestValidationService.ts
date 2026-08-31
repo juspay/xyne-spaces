@@ -1,7 +1,7 @@
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
 import { BitbucketManager } from '@/bitbucket/apis';
-import { githubManager } from '@/git-providers/github/apis';
+import { githubManager, sanitizeForLog } from '@/git-providers/github/apis';
 import { config } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { logger } from '@/utils/logger';
@@ -468,7 +468,8 @@ export class PullRequestValidationService {
           formatMissingSections(spec.missing),
         );
     logger.info(
-      `[PR-Validation] Spec check failed for ${ticketId}: missing ${spec.missing.join(', ')}`
+      `[PR-Validation] Spec check failed for ${sanitizeForLog(ticketId)}: ` +
+        `missing ${sanitizeForLog(spec.missing.join(', '))}`
     );
     await this.postBuildStatus(target, commitHash, 'failure', errorMessage, specStatus);
   }
