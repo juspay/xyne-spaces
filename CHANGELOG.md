@@ -1,3 +1,10 @@
+## [1.248.5](https://github.com/juspay/xyne-spaces/compare/v1.248.4...v1.248.5) (2026-08-31)
+
+
+### Bug Fixes
+
+* UI feedback ([#1101](https://github.com/juspay/xyne-spaces/issues/1101)) ([385cb5c](https://github.com/juspay/xyne-spaces/commit/385cb5c9173f79e730cce608c1cd9d9e6ead68af))
+
 ## [1.248.4](https://github.com/juspay/xyne-spaces/compare/v1.248.3...v1.248.4) (2026-08-31)
 
 
