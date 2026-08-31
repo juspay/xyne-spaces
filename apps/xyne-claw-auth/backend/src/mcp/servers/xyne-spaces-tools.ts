@@ -7180,68 +7180,6 @@ const userSendMessage: ToolDef = {
   },
 };
 
-// ── spaces-vespa-schema ──────────────────────────────────────────────────────
-
-const spacesVespaSchema: ToolDef = {
-  name: "spaces-vespa-schema",
-  description:
-    "Returns the field definitions for Vespa search schemas. " +
-    "Use this BEFORE building a direct YQL query to discover " +
-    "the exact field names, types, and whether each field is filterable (usable in WHERE) or searchable (usable in userInput/contains). " +
-    "Pass a schema name to get that schema's fields.\n\n" +
-    "## Schema name → YQL source name mapping\n" +
-    "The schema name you pass here (the .sd filename) is DIFFERENT from the source name used in `from sources` in YQL:\n" +
-    "- chat_message     → `from sources message`\n" +
-    "- chat_attachment  → `from sources attachment`\n" +
-    "- chat_container   → `from sources channel`\n" +
-    "- ticket           → `from sources ticket`\n" +
-    "- user             → `from sources user`\n" +
-    "- file             → `from sources file`\n" +
-    "- sam_transcript   → `from sources sam_transcript`\n\n" +
-    "Key fields by use case:\n" +
-    "- Filter by sender: chat_message.userId, ticket.createdBy\n" +
-    "- Filter by channel: chat_message.channelId, ticket.channelId\n" +
-    "- Filter by time: chat_message.createdAtTimestamp, ticket.createdAtTimestamp, file.createdAtTimestamp, sam_transcript.dateTime (all in ms)\n" +
-    '- Access control: always include permissions contains "<userId>" for chat/ticket/file unless scoping by channelId\n' +
-    "- Ticket status: ticket.status (TODO|STARTED|PAUSED|CANCELLED|COMPLETED)\n" +
-    "- File sub-type: file.subApp (CANVAS|TRANSCRIPT|CHAT_ATTACHMENT|TICKET_ATTACHMENT|RCA)",
-  inputSchema: {
-    type: "object",
-    properties: {
-      schema: {
-        type: "string",
-        enum: [
-          "chat_message",
-          "chat_attachment",
-          "chat_container",
-          "attachment",
-          "ticket",
-          "user",
-          "file",
-          "sam_transcript",
-          "mail",
-          "mail_attachment",
-          "project",
-          "memory",
-        ],
-        description: "Schema name to fetch field definitions for.",
-      },
-    },
-    required: ["schema"],
-  },
-  handler: withToolErrors("vespa-schema error", async (args) => {
-      const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
-
-      // The /claw mount is dual-auth (authenticateUserOrApp) so this works for
-      // both user and app tokens (the bare /api/vespaSearch mount is
-      // user-session-only and 401s app-mode runs).
-      const text = await spacesFetchText(`/api/vespaSearch/claw/schema${qs}`);
-      if (!text || !text.trim())
-        return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
-      return ok(text);
-    }),
-};
-
 /**
  * Entity ids for the DIRECT-VESPA tools only.
  *
@@ -7667,16 +7605,22 @@ const spacesVespaQuery: ToolDef = {
     "Execute a raw YQL query directly against Vespa. " +
     "Use this when spaces-search doesn't support the exact filter combination you need.\n\n" +
     "## Workflow\n" +
-    "1. Call **spaces-vespa-schema** with the schema name to discover exact field names and types.\n" +
-    "2. Write your YQL using those field names.\n" +
+    "1. Pick the source for the surface you want (see **YQL source names** below).\n" +
+    "2. Write your YQL using the field names in **Key fields** below.\n" +
     "3. Call this tool with the YQL.\n\n" +
+    "## Key fields\n" +
+    "- Filter by sender: message.userId, ticket.createdBy\n" +
+    "- Filter by channel: message.channelId, ticket.channelId\n" +
+    "- Filter by time: message.createdAtTimestamp, ticket.createdAtTimestamp, file.createdAtTimestamp, sam_transcript.dateTime (all in ms)\n" +
+    "- Ticket status: ticket.status (TODO|STARTED|PAUSED|CANCELLED|COMPLETED)\n" +
+    "- File sub-type: file.subApp (CANVAS|TRANSCRIPT|CHAT_ATTACHMENT|TICKET_ATTACHMENT|RCA)\n\n" +
     "## ACL — include the correct guard per schema\n" +
     "Always include the access control condition for the schema you query. ACL is auto-injected if omitted, but you should write it explicitly.\n" +
     '- message / attachment / ticket / sam_transcript / mail / mail_attachment / memory: `permissions contains "<userId>"`\n' +
     '- file: `(ownerId contains "<userId>" or permissions contains "<userId>" or isPrivate contains "false")` for CANVAS; `(ownerId contains "<userId>" or channelPermissions contains "<userId>" or isPrivate contains "false")` for CHAT_ATTACHMENT/TRANSCRIPT; no guard for RCA\n' +
     "- user / channel: no ACL needed (public)\n" +
     "Use the `userId` field from **spaces-whoami** if you need your own id.\n\n" +
-    "## YQL examples (use the YQL source name, NOT the schema name from spaces-vespa-schema)\n" +
+    "## YQL examples (use the YQL source name, NOT the .sd schema name)\n" +
     "```\n" +
     "-- tickets assigned to a user, open only (source: ticket)\n" +
     'select * from sources ticket where userInput(@query) and status contains "OPEN" and assignedTo contains "<userId>" and permissions contains "<userId>"\n\n' +
@@ -7689,11 +7633,11 @@ const spacesVespaQuery: ToolDef = {
     "```\n\n" +
     "## YQL source names\n" +
     "message, attachment, channel, ticket, user, file, sam_transcript\n" +
-    "(These differ from the schema names passed to spaces-vespa-schema — see that tool's description for the mapping.)\n\n" +
+    "(These differ from the underlying .sd schema names: chat_message → `message`, chat_attachment → `attachment`, chat_container → `channel`; ticket / user / file / sam_transcript are the same in both.)\n\n" +
     "## Ranking (rankProfile / rankInputs)\n" +
     "Relevance scoring is driven by a Vespa rank profile that must EXIST in every schema your YQL touches.\n" +
     "- For a filter-only or grouping/count query (no relevance order needed) leave both unset — the tool uses the built-in `unranked` profile.\n" +
-    "- For free-text relevance, read the target schema's .sd `rank-profile <name> { ... }` blocks and pass `rankProfile` (e.g. `default_native` for general relevance, `default_fuzzy` for typo-tolerant, `semantic_ranking` for vector-only). If unset, free-text defaults to `default_native`.\n" +
+    "- For free-text relevance, pass a `rankProfile` the target schema declares — `default_native` for general relevance, `default_fuzzy` for typo-tolerant, `semantic_ranking` for vector-only. If unset, free-text defaults to `default_native`.\n" +
     "- When you set a scoring `rankProfile`, also pass `rankInputs` taken from that profile's `inputs { query(...) }` block. If unset, the standard default_native inputs are used.\n\n" +
     "## Notes\n" +
     "- Only available when DIRECT_VESPA_SEARCH is enabled.\n" +
@@ -7705,7 +7649,7 @@ const spacesVespaQuery: ToolDef = {
     properties: {
       yql: {
         type: "string",
-        description: "Raw Vespa YQL query string. Use field names from spaces-vespa-schema.",
+        description: "Raw Vespa YQL query string. Use the field names listed in this tool's description.",
       },
       query: {
         type: "string",
@@ -9193,7 +9137,7 @@ const spacesDeskMetrics: ToolDef = {
 
 export const tools: ToolDef[] = [
   spacesWhoami,
-  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
+  ...(CONFIG.directVespaSearch ? [spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
   onyxBenchSearch,
   spacesSearch,
   spacesSearchV2,
