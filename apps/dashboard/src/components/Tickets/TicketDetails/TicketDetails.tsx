@@ -128,6 +128,7 @@ import {
   type ResolvedBoardAdditionalField,
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
+import { AddToStreamButton } from '../../../routes/StreamsScreen/AddToStreamMenu';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -3284,6 +3285,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
           <div className='flex items-center gap-x-2'>
             <BoardTicketNav ticketId={ticketId} />
+            {/* A control of its own rather than an item in an overflow menu,
+                because this header has no overflow menu to put it in. Carries
+                the channel and conversation so the column has a way across to
+                the discussion under the ticket — a ticket column without them
+                renders fine and dead-ends, which is the thing a stream exists
+                not to be. */}
+            <AddToStreamButton
+              source={{
+                kind: 'ticket',
+                ticketId,
+                ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
+                ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
+              }}
+              className='h-8 w-8 rounded-lg border border-border'
+            />
             <Tooltip content='Copy Ticket Link'>
               <Button
                 className='p-2 border border-border rounded-lg h-8 w-8'

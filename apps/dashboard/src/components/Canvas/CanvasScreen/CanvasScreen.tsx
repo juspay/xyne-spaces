@@ -25,6 +25,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '../../ui/dropdown-menu';
+import { AddToStreamMenuItem } from '../../../routes/StreamsScreen/AddToStreamMenu';
 import { Dialog } from '../../ui/Dialog';
 import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
@@ -1437,6 +1438,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='min-w-[180px]'>
+                              {canvasId && (
+                                <AddToStreamMenuItem source={{ kind: 'document', canvasId }} />
+                              )}
                               <DropdownMenuItem
                                 className='gap-2'
                                 onClick={() => setShowVersionHistory(true)}
