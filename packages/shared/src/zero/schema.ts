@@ -164,6 +164,7 @@ export const ticketTable = table('tickets')
     description: string(),
     status: enumeration<TicketStatus>(),  // Deprecated - use statusV2
     statusV2: enumeration<TicketStatusV2>(),
+    messageId: string().optional(), // Source message this ticket was created from
     createdBy: string(),
     updatedBy: string(),
     assignedTo: string().optional(),
@@ -894,6 +895,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(), // Markdown format ticket card data
     initial_message_md: string().optional(), // Markdown format initial message data
     parent_message_md: string().optional(), // Markdown format parent message data
+    sub_tickets_md: string().optional(), // Markdown format sub-ticket card snapshots
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
     threadType: string().optional(),
