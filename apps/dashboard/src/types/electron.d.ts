@@ -52,6 +52,7 @@ export interface ElectronAPI {
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
+  onAppWindowLimitReached: (callback: (limit: number) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;

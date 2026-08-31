@@ -175,6 +175,18 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'summaryTemplate':
       return new BaseQueryACL(ctx, prisma)
+    // Radar execution engine: non_zero derived data, workspace-scoped; the
+    // feed API layers thread-membership checks in its own queries.
+    case 'executionItem':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionThreadState':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionItemMutation':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionRunLog':
+      return new BaseQueryACL(ctx, prisma)
+    case 'radarTeam':
+      return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':

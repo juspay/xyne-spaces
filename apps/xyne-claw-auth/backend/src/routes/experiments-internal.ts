@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { experimentRepository } from "../repositories/index.js";
 import { proofWasDelivered } from "../repositories/experimentRepository.js";
 import { buildLedgerMarkdown, postExperimentNotice } from "../lib/experiment.js";
@@ -193,7 +194,7 @@ experimentsInternalRouter.post("/:id/complete", async (req: Request<{ id: string
   }
   const updated = await experimentRepository.update(run.id, { finalReport: body.report.slice(0, 20000), status: "done" });
   void postExperimentNotice(updated).catch((err) => {
-    log.warn(`[experiment] complete notice failed id=${updated.id}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[experiment] complete notice failed id=${updated.id}: ${errMsg(err)}`);
   });
   res.json({ success: true });
 });

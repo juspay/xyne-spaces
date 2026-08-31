@@ -72,14 +72,13 @@ async function fetchAuthToken(
   // Check cache first
   const cached = await tokenCache.getToken(tenantId, serviceName, authEmail);
   if (cached) {
-    console.log(`[auth] Token retrieved from cache for service=${serviceName} email=${authEmail}`);
     return cached;
   }
 
   // Call token endpoint with JWT for verification
   const tokenUrl = `${backendUrl}${tokenEndpointUrl}`;
   
-  console.log(`[auth] Fetching new token from ${tokenUrl} for service=${serviceName} email=${authEmail}`);
+  console.log(`[auth] Fetching new token from ${tokenUrl} for service=${serviceName}`);
 
   const tokenRequestHeaders: Record<string, string> = {
     "Content-Type": "application/json",

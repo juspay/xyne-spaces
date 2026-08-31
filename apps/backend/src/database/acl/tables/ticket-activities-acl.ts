@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
+import { accessibleTicketWhere, getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
 export class TicketActivitiesACL extends BaseQueryACL<
   Prisma.TicketActivityWhereInput,
@@ -20,12 +20,25 @@ export class TicketActivitiesACL extends BaseQueryACL<
     }
 
     return {
-      ticket: { workspaceId: this.ctx.workspaceId },
+      ticket: await accessibleTicketWhere(this.prisma, this.ctx),
     }
   }
 
+  /** Mirrors the read clause: a no-op update returns the row, so a wider mutate scope leaks it. */
   async getMutateWhere(): Promise<Prisma.TicketActivityWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    if (isGuestContext(this.ctx)) {
+      const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        workspaceId: this.ctx.workspaceId,
+        ticketId: { in: ticketIds },
+      }
+    }
+
+    return {
+      workspaceId: this.ctx.workspaceId,
+      ticket: await accessibleTicketWhere(this.prisma, this.ctx),
+    }
   }
 
   async canCreate(data: Prisma.TicketActivityUncheckedCreateInput): Promise<boolean> {

@@ -144,6 +144,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('open-xyne-ai-with-context', listener);
   },
 
+  onAppWindowLimitReached: (callback: (limit: number) => void) => {
+    const listener = (_event: unknown, limit: number) => callback(limit);
+    ipcRenderer.on('app-window-limit-reached', listener);
+    return () => ipcRenderer.removeListener('app-window-limit-reached', listener);
+  },
+
   onOpenInBrowserPanel: (callback: (url: string) => void) => {
     const listener = (_event: unknown, url: string) => callback(url);
     ipcRenderer.on('open-in-browser-panel', listener);

@@ -15,6 +15,7 @@
  */
 
 import type { Citation } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
@@ -584,7 +585,22 @@ function buildVespaScope(
   ctx: KbResolution,
   explicitCollectionId: string | undefined,
 ): VespaScopeFilter | { error: string } {
-  if (explicitCollectionId) return { kind: "collection", ids: [explicitCollectionId] };
+  if (explicitCollectionId) {
+    const meta = ctx.collectionsById.get(explicitCollectionId);
+    // A non-root folder: Vespa's collectionId filter only ever matches a
+    // doc's ROOT collection, so this has to expand to explicit docIds
+    // instead (see collectAllowedVespaDocIds). Applies equally to a
+    // folder-picked attachedContext item and to the model passing a
+    // sub-folder id as kb-search's collectionId arg directly.
+    if (meta && meta.rootCollectionId !== explicitCollectionId) {
+      const docIds = collectAllowedVespaDocIds(ctx, explicitCollectionId);
+      if (docIds.length === 0) {
+        return { error: `Folder \`${explicitCollectionId}\` has no accessible files.` };
+      }
+      return { kind: "file", docIds };
+    }
+    return { kind: "collection", ids: [explicitCollectionId] };
+  }
   if (ctx.scope === "USER") return { kind: "none" };
 
   const hasWholeCollectionGrant = ctx.grants.some(g => g.fileId === null);
@@ -703,7 +719,7 @@ export async function handleKbSearch(args: {
       workspaceId: auth.workspaceId,
     });
   } catch (err) {
-    log.warn(`[kb-search] vespa call failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-search] vespa call failed: ${errMsg(err)}`);
     return { content: `KB search failed: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 
@@ -728,7 +744,7 @@ export async function handleKbSearch(args: {
       }) : "none"}`
     );
   } catch (e) {
-    log.warn(`[kb-search] DEBUG log of response shape failed: ${e instanceof Error ? e.message : String(e)}`);
+    log.warn(`[kb-search] DEBUG log of response shape failed: ${errMsg(e)}`);
   }
 
   // Capture for attachment to the result below. Spaces returns the YQL +
@@ -847,6 +863,29 @@ function countAllowedChildFolders(ctx: KbResolution, n: KbCollectionNode): numbe
   let total = 0;
   for (const c of n.children ?? []) if (collectionAllowed(ctx, c.id)) total++;
   return total;
+}
+
+/**
+ * Every allowed file's Vespa docId under `folderId`, recursively — used to
+ * scope a kb-search call to a non-root folder. Vespa's `collectionId` filter
+ * only ever matches a doc's ROOT collection (see buildVespaScope), so a
+ * folder id can't be filtered on directly; this expands it to explicit
+ * docIds instead, walking the tree already fetched for ACL checks (no extra
+ * network call). Re-applies fileAllowed() per file so a COLLECTIONS-scoped
+ * agent whose grant only covers part of this subtree doesn't leak the rest.
+ */
+function collectAllowedVespaDocIds(ctx: KbResolution, folderId: string): string[] {
+  const start = ctx.nodesById.get(folderId);
+  if (!start) return [];
+  const docIds: string[] = [];
+  const walk = (n: KbCollectionNode): void => {
+    for (const f of n.items ?? []) {
+      if (f.fileId && fileAllowed(ctx, f.id)) docIds.push(f.fileId);
+    }
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(start);
+  return docIds;
 }
 
 /**
@@ -1028,7 +1067,7 @@ export async function handleKbReadFile(args: {
     const body = text.length > 100_000 ? text.slice(0, 100_000) + "\n\n…(truncated to 100k characters)" : text;
     return { content: header + body, citations: [citation] };
   } catch (err) {
-    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${errMsg(err)}`);
     return { content: `Failed to read file \`${args.fileId}\`: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 }
@@ -1169,7 +1208,7 @@ export async function handleKbGetChunks(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-get-chunks failed: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -1305,7 +1344,7 @@ export async function handleKbSearchWithinDoc(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-search-within-doc failed: ${err instanceof Error ? err.message : "unknown error"}`,

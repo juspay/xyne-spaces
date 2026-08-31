@@ -61,6 +61,7 @@ import { FileBubble } from '../ui/FileBubble/FileBubble';
 import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
+import { ShortcutTooltip } from '../ui/ShortcutTooltip';
 import { mixpanelService } from '../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
@@ -1766,7 +1767,7 @@ export const ThreadMessages = ({
 
                   {/* Close Button */}
                   {(!simpleView || resolvedOnClose) && (
-                    <Tooltip content='Close'>
+                    <ShortcutTooltip label='Close' shortcut='global.toggleRightSidebar'>
                       <Button
                         variant='ghost'
                         size='sm'
@@ -1779,7 +1780,7 @@ export const ThreadMessages = ({
                       >
                         <MultipleCrossCancelDefault size={16} />
                       </Button>
-                    </Tooltip>
+                    </ShortcutTooltip>
                   )}
                 </div>
               </div>

@@ -11,15 +11,18 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../../lib/mention-transform.js";
 import { buildSpacesMentionLookupsDb } from "../../lib/mention-lookups.js";
 import { spacesDbAvailable } from "../../lib/spaces-db.js";
+import { tools as spacesTools } from "./xyne-spaces-tools.js";
 
 const APP_TOKEN = process.env["XYNE_SPACES_APP_TOKEN"] ?? "";
 const SPACES_URL = process.env["XYNE_SPACES_URL"] ?? "";
 const WORKSPACE_ID = process.env["XYNE_SPACES_WORKSPACE_ID"]?.trim() ?? "";
+const USER_ID = process.env["XYNE_USER_ID"] ?? "";
 
 const COUNT_USER_MENTION_RE =
   /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]/g;
@@ -55,7 +58,7 @@ async function prepareMessageContent(rawContent: string): Promise<string> {
     } catch (err) {
       resolved = rawContent;
       console.warn(
-        `[apps-send-message] mention resolution skipped reason=error err=${err instanceof Error ? err.message : String(err)}`,
+        `[apps-send-message] mention resolution skipped reason=error err=${errMsg(err)}`,
       );
     }
   }
@@ -141,8 +144,27 @@ const SEND_MESSAGE_TOOL = {
   },
 };
 
+// The app-tools server is the SOLE Spaces MCP for automation/app-user runs
+// (routes/mcp.ts injects it INSTEAD of the user `xyne-spaces` server for those
+// runs). So it must surface the full Spaces toolset — reuse the SAME shared
+// registry the user server uses, running every tool in app mode. Local `ping`
+// + `apps-send-message` are app-tools-only and are appended. For every other
+// run, routes/mcp.ts reduces this server's listing to the app-only tools —
+// so nothing changes for interactive users.
+//
+// `userOnly` tools are excluded here: this server ALWAYS runs in app mode, and
+// those tools either act as the human or hit user-session-only routes — they
+// could only 401. Never list a tool that cannot succeed.
+const REGISTRY_TOOL_DEFS = spacesTools
+  .filter((t) => !t.userOnly)
+  .map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: t.inputSchema,
+  }));
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [PING_TOOL, SEND_MESSAGE_TOOL],
+  tools: [...REGISTRY_TOOL_DEFS, PING_TOOL, SEND_MESSAGE_TOOL],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
@@ -199,8 +221,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
         const joinRes = (await spacesAppFetch(`/channel/${targetChannelId}/join`, {})) as { channelName?: string };
         channelName = joinRes.channelName ?? targetChannelId;
       } catch (e) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        if (errMsg.includes("private")) {
+        const errText = errMsg(e);
+        if (errText.includes("private")) {
           const failMsg = `❌ I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
           if (sourceConversationId) {
             await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }).catch(() => {});
@@ -220,9 +242,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
       return { content: [{ type: "text", text: confirmMsg }] };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errMsg(e);
       return { content: [{ type: "text", text: `apps-send-message error: ${msg}` }], isError: true };
     }
+  }
+
+  // Any other tool name → the shared Spaces registry, run in APP MODE: prefer a
+  // tool's dedicated app-token implementation (`appHandler`, the /api/apps/*
+  // route) and otherwise fall through to its regular `handler`, which hits the
+  // app-token-capable /api/*/claw endpoints. This is the same dispatch the user
+  // `xyne-spaces` server uses in app mode — kept identical so behaviour matches.
+  const registryTool = spacesTools.find((t) => t.name === name);
+  if (registryTool) {
+    if (registryTool.userOnly) {
+      return {
+        content: [{
+          type: "text",
+          text: `${name} requires the human user's session and is not available in app mode (automation runs act as the bot).`,
+        }],
+        isError: true,
+      };
+    }
+    const ctx = { userId: USER_ID, authMode: "app" as const };
+    const result = registryTool.appHandler
+      ? await registryTool.appHandler(args ?? {}, ctx)
+      : await registryTool.handler(args ?? {}, ctx);
+    return result as CallToolResult;
   }
 
   return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };

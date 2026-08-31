@@ -124,5 +124,8 @@ export const slackMigrationApi = {
   stopIngestion: async (): Promise<{ running: boolean }> =>
     unwrap((await apiInstance.post<Envelope<{ running: boolean }>>(`${BASE}/ingestion/stop`)).data),
 
-  exportUrl: `${BASE}/migration-jobs/export`,
+  exportHistory: async (): Promise<MigrationJobView[]> =>
+    unwrap(
+      (await apiInstance.get<Envelope<MigrationJobView[]>>(`${BASE}/migration-jobs/export`)).data,
+    ),
 };

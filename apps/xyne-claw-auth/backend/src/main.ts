@@ -7,9 +7,15 @@ process.env.SERVICE_NAME ||= "xyne-claw-auth";
 import express, { type Request, type Response } from "express";
 import { CONFIG } from "./config.js";
 import { requestLogger } from "./middleware/requestLogger.js";
+import { errorMiddleware } from "./lib/http.js";
 import { serversRouter } from "./routes/servers.js";
 import { connectionsRouter } from "./routes/connections.js";
 import { mcpRouter } from "./routes/mcp.js";
+import { awakeningRouter } from "./routes/awakening.js";
+import { ensureTickScheduler, closeAwakeningQueues } from "./queue/awakening-queue.js";
+import { initAwakeningTickWorker, closeAwakeningTickWorker } from "./queue/awakening-tick-worker.js";
+import { initAwakeningWindowWorker, closeAwakeningWindowWorker } from "./queue/awakening-window-worker.js";
+import { initAwakeningReflexWorker, closeAwakeningReflexWorker } from "./queue/awakening-reflex-worker.js";
 import { runRouter } from "./routes/run.js";
 import { runStreamRouter, runStreamInternalRouter } from "./routes/run-stream.js";
 import { usersRouter } from "./routes/users.js";
@@ -277,6 +283,9 @@ app.use(`${BASE}/internal`, requireStrictS2S, runRouter);
 app.use(`${BASE}/run/stream`, runStreamRouter);
 app.use(`${BASE}/internal/run-stream`, requireStrictS2S, runStreamInternalRouter);
 app.use(BASE, runRouter);
+// Awakening: the result callback self-protects with requireStrictS2S and the
+// status route carries its own admin gate, so no mount-level auth here.
+app.use(BASE, awakeningRouter);
 // No mount-level auth on /webhook by design: it mixes auth schemes per route.
 // POST / , /result and /progress are S2S callbacks; POST /:agentSlug is hit
 // directly by Spaces and self-protects via verifySpacesSignature (per-agent
@@ -318,6 +327,7 @@ app.use(`${BASE}/entity-extraction`, requireAuth, requireNoAccessToken, requireC
 // routes authenticate per-route with gatewayTenantAuth + gatewayRegistrationAuth
 // (mcpgateway/middleware/gateway-auth.ts) against the registration API key.
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
+app.use(errorMiddleware);
 
 initializeOpenTelemetry();
 registerDailyBriefGauges();
@@ -371,6 +381,16 @@ listen(CONFIG.port, () => {
     initDailyBriefCron();
     initFailureCuratorWorker();
     initOrphanFinalizerWorker();
+    // Awakened agents: one fleet-wide tick fans out to per-agent window jobs.
+    // ensureTickScheduler is idempotent, so every pod calling it converges on
+    // a single scheduler — which is also what makes a Redis wipe self-heal on
+    // the next boot instead of silently stopping every awakened agent.
+    initAwakeningTickWorker();
+    initAwakeningWindowWorker();
+    initAwakeningReflexWorker();
+    void ensureTickScheduler().catch((err) =>
+      log.error("[boot] awakening tick scheduler registration failed:", err),
+    );
   // Upsert custom tools from the shared registry so newly added tools (e.g.
     // google-sheets-create, google-forms-create) show up in the agent UI on
     // restart without needing a manual POST /tools/sync call.
@@ -403,6 +423,10 @@ async function shutdown(signal: string): Promise<void> {
     await closeEntityExtractionQueue().catch(() => {});
     closeFailureCuratorWorker();
     closeOrphanFinalizerWorker();
+    await closeAwakeningTickWorker().catch(() => {});
+    await closeAwakeningWindowWorker().catch(() => {});
+    await closeAwakeningReflexWorker().catch(() => {});
+    await closeAwakeningQueues().catch(() => {});
     await closeQueue().catch(() => {});
     await closeDailyBriefWorker().catch(() => {});
     await closeDailyBriefQueue().catch(() => {});

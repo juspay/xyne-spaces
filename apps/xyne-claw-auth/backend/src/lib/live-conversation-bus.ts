@@ -30,7 +30,11 @@ const channelFor = (conversationId: string) => CHANNEL_PREFIX + conversationId;
 
 export type LiveEvent =
   | { type: "label"; conversationId: string; agentSlug?: string | undefined; userId: string; toolLabel: string; ts: number }
-  | { type: "invocation"; conversationId: string; agentSlug?: string | undefined; userId: string; toolInvocation: unknown; ts: number }
+  // `triggerSource` rides along so the SSE viewer can apply the SAME redaction
+  // rule to a live tool call that it applies to a stored one — an agent-owned
+  // run (heartbeat / reflex) has no private user data to protect, so its
+  // results stay readable to admins instead of arriving pre-redacted.
+  | { type: "invocation"; conversationId: string; agentSlug?: string | undefined; userId: string; toolInvocation: unknown; triggerSource?: string | undefined; ts: number }
   // Coalesced assistant text/reasoning fragments (one event per ~250ms batch) so
   // VIEWERS (reloaded tabs, Spaces) stream the answer live instead of seeing it
   // appear all-at-once on `done`. Either/both fields may be present per batch.

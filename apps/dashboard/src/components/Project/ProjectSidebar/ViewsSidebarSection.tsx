@@ -1,6 +1,13 @@
 import { ReactElement, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
-import { ChevronDown, Plus, Star, Share2, Pencil, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  PlusDefault as Plus,
+  Star,
+  Share02 as Share2,
+  PencilEdit as Pencil,
+  DeleteDustbin01 as Trash2,
+} from '@xyne/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { SavedConfigEntityName } from '@xyne/shared';

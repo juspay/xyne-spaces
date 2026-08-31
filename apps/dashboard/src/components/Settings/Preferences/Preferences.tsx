@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
+  AudioLines,
   Monitor,
   Smartphone,
   LayoutGrid,
@@ -85,6 +86,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
   { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
+  { id: 'recordings', label: 'Recordings', icon: <AudioLines className='size-4' /> },
   {
     id: 'messaging',
     label: 'Messaging',
@@ -673,6 +675,34 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
   );
 };
 
+const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
+  <div className='space-y-6'>
+    <SectionHeader
+      title='Recordings'
+      subtitle='Configure how your recording summaries are generated'
+    />
+
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>LLM summary generation model</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Which model tier generates your recording summaries and titles. Fast is quicker; Thinking
+          is higher quality but slower.
+        </p>
+      </div>
+      <RadioGroup
+        value={state.summaryModelPreference}
+        onChange={value =>
+          state.setSummaryModelPreference(value === 'thinking' ? 'thinking' : 'fast')
+        }
+      >
+        <Radio value='fast'>Fast (default)</Radio>
+        <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
+      </RadioGroup>
+    </div>
+  </div>
+);
+
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
 const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
@@ -1067,6 +1097,7 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   availability: AvailabilitySection,
   voice: VoiceSection,
   calls: CallsSection,
+  recordings: RecordingsSection,
   messaging: MessagingSection,
   launch: LaunchSection,
   toolbar: ToolbarSection,

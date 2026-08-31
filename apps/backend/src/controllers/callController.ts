@@ -69,6 +69,9 @@ const UpdateHeadlessRecordingSchema = z
 
 const RegenerateHeadlessSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
+  // Optional explicit model tier (e.g. the "Try the thinking model" button).
+  // Omitted → the creator's saved preference is used.
+  modelType: z.enum(['fast', 'thinking']).optional(),
 });
 
 export class CallController {
@@ -405,7 +408,14 @@ export class CallController {
         conversationId,
         artifactMessageId,
         sdlcLink,
+        summaryModelPreference,
       } = req.body;
+      // Recording summary LLM tier the client carried from its localStorage;
+      // stamped onto the detailed summary canvas so headless call-end
+      // auto-generation can honour a 'thinking' default. Anything but explicit
+      // 'thinking' is 'fast'.
+      const summaryModelPref: 'fast' | 'thinking' =
+        summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
       const userId = req.user?.id;
       const userName = req.user?.displayName || req.user?.name;
       const userEmail = req.user?.email;
@@ -459,6 +469,7 @@ export class CallController {
           undefined,
           undefined,
           req.user!.workspaceId,
+          { summaryModelPreference: summaryModelPref },
         );
         if (!detailedSummaryCanvasId) {
           throw new Error('Failed to create detailed summary canvas');
@@ -1474,6 +1485,13 @@ export class CallController {
               : null,
           // Google Docs exported from this recording's summary, newest first.
           googleDocs: readRecordingGoogleDocLinks(call.metadata),
+          // Which model tier produced the current summary. `null` for recordings
+          // generated before this feature — the frontend treats null as "offer the
+          // thinking-model upgrade" (only an explicit 'thinking' hides it).
+          summaryModelUsed:
+            callMetadata?.summaryModelUsed === 'fast' || callMetadata?.summaryModelUsed === 'thinking'
+              ? (callMetadata.summaryModelUsed as 'fast' | 'thinking')
+              : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
         },
@@ -1662,6 +1680,7 @@ export class CallController {
       const result = await noteTakerTranscriptService.regenerateSummary(
         call,
         input.summaryTemplateId,
+        input.modelType,
       );
       if (!result) {
         res.status(404).json({

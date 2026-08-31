@@ -1,5 +1,5 @@
 import { ReactElement, useMemo } from 'react';
-import { Check } from 'lucide-react';
+import { CheckTickSingle as Check } from '@xyne/icons';
 import { TicketPriority } from '@xyne/shared';
 import { PRIORITY_CONFIG } from '../../Utils/filterConstants';
 import { getPriorityIcon } from '../../../TicketCard/TicketCard.utils';

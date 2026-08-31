@@ -961,6 +961,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const isKnowledgeCanvas =
     selectedCanvas?.metadata &&
     (selectedCanvas.metadata as KnowledgeCanvasMetadata).source === 'workflow_knowledge';
+  const isCallDetailedSummaryCanvas =
+    selectedCanvas?.metadata &&
+    typeof selectedCanvas.metadata === 'object' &&
+    !Array.isArray(selectedCanvas.metadata) &&
+    selectedCanvas.metadata.source === 'call_detailed_summary';
 
   // Handle knowledge approval
   const handleApproveKnowledge = async (): Promise<void> => {
@@ -1690,6 +1695,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   title={currentTitle}
                   editable={canEdit}
                   placeholder='Start writing your canvas...'
+                  className={cn(isCallDetailedSummaryCanvas && 'recording-summary-canvas-editor')}
+                  trackEditedRecordingSummaryBlocks={Boolean(isCallDetailedSummaryCanvas)}
                   onFileUpload={handleFileUpload}
                   onChange={handleCollaborativeContentChange}
                   onCollaboratorsChange={handleCollaboratorsChange}

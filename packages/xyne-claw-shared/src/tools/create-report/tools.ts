@@ -30,6 +30,123 @@ import { buildHtmlDocument, sanitizeHtmlBody } from "./template.js";
 import { createLogger } from "../../logger.js";
 const log = createLogger("tools");
 
+// ---------------------------------------------------------------------------
+// Server-side chart renderer — converts ```chart JSON blocks to inline SVG/HTML
+// ---------------------------------------------------------------------------
+
+const CHART_COLORS = ["#00C951","#2B7FFF","#C27AFF","#FF8904","#FCC800","#FB2C36","#51A2FF","#FF6467","#00D492","#AD46FF"];
+
+function esc(s: unknown): string {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderKpiSvg(payload: { title?: string; visualType: string; data: Record<string, unknown> }): string {
+  const d = payload.data;
+  const val = payload.visualType === "KPI_COMPARE" ? d["current"] : d["value"];
+  const prev = payload.visualType === "KPI_COMPARE" ? (d["previous"] as number) : null;
+  const pct = prev !== null && prev !== 0 ? Math.round(((val as number) - prev) / Math.abs(prev) * 100) : null;
+  const arrow = pct === null ? "" : (pct >= 0 ? "▲ " : "▼ ") + Math.abs(pct) + "%";
+  const arrowColor = pct === null ? "" : (pct >= 0 ? "#00C951" : "#FB2C36");
+  const label = String(payload.title || d["label"] || "");
+  return `<div style="display:inline-block;min-width:160px;padding:16px 20px;background:#1a1a1c;border:1px solid #2a2a2c;border-radius:10px;margin:6px 8px 6px 0;vertical-align:top;">` +
+    `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;margin-bottom:6px;">${esc(label)}</div>` +
+    `<div style="font-size:36px;font-weight:700;font-family:ui-monospace,monospace;line-height:1;color:#e5e7eb;">${esc(val)}</div>` +
+    (d["label"] && payload.visualType === "KPI" ? `<div style="font-size:12px;color:#9ca3af;margin-top:4px;">${esc(d["label"])}</div>` : "") +
+    (arrow ? `<div style="font-size:12px;color:${arrowColor};margin-top:4px;">${esc(arrow)}${prev !== null ? ` (prev ${esc(prev)})` : ""}</div>` : "") +
+    `</div>`;
+}
+
+function renderBarSvg(payload: { title?: string; data: Array<{ label: string | number; value: number }> }): string {
+  const rows = [...(payload.data || [])].sort((a, b) => b.value - a.value);
+  if (!rows.length) return "<p>No data.</p>";
+  const max = Math.max(...rows.map(r => r.value));
+  const W = 520, barH = 22, gap = 8, labelW = 160, padding = 8;
+  const h = rows.length * (barH + gap) + padding * 2;
+  const barMax = W - labelW - 60;
+  const lines = rows.map((r, i) => {
+    const bw = max > 0 ? Math.round(r.value / max * barMax) : 0;
+    const y = padding + i * (barH + gap);
+    const cy = y + barH / 2 + 4;
+    return `<text x="${labelW - 6}" y="${cy}" text-anchor="end" font-size="11" fill="#9ca3af" font-family="ui-monospace,monospace">${esc(r.label)}</text>` +
+      `<rect x="${labelW}" y="${y}" width="${bw}" height="${barH}" rx="3" fill="${CHART_COLORS[i % CHART_COLORS.length]}"></rect>` +
+      `<text x="${labelW + bw + 6}" y="${cy}" font-size="11" font-weight="600" fill="#e5e7eb" font-family="ui-monospace,monospace">${esc(r.value)}</text>`;
+  }).join("");
+  return `<svg width="100%" viewBox="0 0 ${W} ${h}" style="max-width:${W}px;display:block;">${lines}</svg>`;
+}
+
+function renderDonutSvg(payload: { data: Array<{ label: string | number; value: number }> }): string {
+  const rows = payload.data || [];
+  if (!rows.length) return "<p>No data.</p>";
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  if (!total) return "<p>No data.</p>";
+  const cx = 110, cy = 110, R = 80, r = 50;
+  let angle = -Math.PI / 2;
+  const slices = rows.map((row, i) => {
+    const sweep = (row.value / total) * 2 * Math.PI;
+    const x1 = cx + R * Math.cos(angle), y1 = cy + R * Math.sin(angle);
+    angle += sweep;
+    const x2 = cx + R * Math.cos(angle), y2 = cy + R * Math.sin(angle);
+    const xi1 = cx + r * Math.cos(angle - sweep), yi1 = cy + r * Math.sin(angle - sweep);
+    const xi2 = cx + r * Math.cos(angle), yi2 = cy + r * Math.sin(angle);
+    const large = sweep > Math.PI ? 1 : 0;
+    const d = `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${r} ${r} 0 ${large} 0 ${xi1} ${yi1} Z`;
+    return `<path d="${d}" fill="${CHART_COLORS[i % CHART_COLORS.length]}" stroke="#0f0f10" stroke-width="2"></path>`;
+  }).join("");
+  const legendX = 235;
+  const legend = rows.map((row, i) => {
+    const pct = Math.round(row.value / total * 100);
+    const ly = 30 + i * 22;
+    return `<rect x="${legendX}" y="${ly - 9}" width="10" height="10" rx="5" fill="${CHART_COLORS[i % CHART_COLORS.length]}"></rect>` +
+      `<text x="${legendX + 16}" y="${ly}" font-size="11" fill="#e5e7eb" font-family="ui-monospace,monospace">${esc(row.label)} — ${esc(row.value)} (${pct}%)</text>`;
+  }).join("");
+  const svgH = Math.max(220, rows.length * 22 + 40);
+  return `<svg width="100%" viewBox="0 0 520 ${svgH}" style="max-width:520px;display:block;">${slices}${legend}</svg>`;
+}
+
+function renderTableHtml(payload: { data: { columns: Array<{ key: string; label: string }>; rows: Array<Record<string, unknown>> } }): string {
+  const cols = payload.data.columns || [];
+  const rows = payload.data.rows || [];
+  const th = cols.map(c => `<th style="text-align:left;padding:8px 10px;border-bottom:1px solid #2a2a2c;font-size:12px;color:#9ca3af;font-weight:500;">${esc(c.label)}</th>`).join("");
+  const tb = rows.map((r, i) => {
+    const bg = i % 2 === 1 ? "background:#18181a;" : "";
+    return `<tr style="${bg}">` + cols.map(c => `<td style="padding:8px 10px;border-bottom:1px solid #2a2a2c;font-size:13px;color:#e5e7eb;">${esc(r[c.key] != null ? r[c.key] : "—")}</td>`).join("") + `</tr>`;
+  }).join("");
+  return `<table style="width:100%;border-collapse:collapse;"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table>`;
+}
+
+/** Pre-process markdown: replace ```chart JSON blocks with inline SVG/HTML. */
+function preRenderCharts(md: string): string {
+  return md.replace(/^```chart\n([\s\S]*?)^```/gm, (_match, json: string) => {
+    try {
+      const payload = JSON.parse(json.trim()) as {
+        title?: string;
+        visualType: string;
+        data: unknown;
+      };
+      const vt = payload.visualType;
+      const titleHtml = payload.title
+        ? `<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#e5e7eb;">${esc(payload.title)}</div>`
+        : "";
+
+      if (vt === "KPI" || vt === "KPI_COMPARE") {
+        return `\n<div style="margin:16px 0;">${renderKpiSvg(payload as Parameters<typeof renderKpiSvg>[0])}</div>\n`;
+      } else if (vt === "BAR_CHART") {
+        const inner = renderBarSvg(payload as Parameters<typeof renderBarSvg>[0]);
+        return `\n<div style="margin:16px 0;padding:16px 20px;background:#1a1a1c;border:1px solid #2a2a2c;border-radius:10px;overflow-x:auto;">${titleHtml}${inner}</div>\n`;
+      } else if (vt === "PIE_CHART" || vt === "DONUT_CHART") {
+        const inner = renderDonutSvg(payload as Parameters<typeof renderDonutSvg>[0]);
+        return `\n<div style="margin:16px 0;padding:16px 20px;background:#1a1a1c;border:1px solid #2a2a2c;border-radius:10px;overflow-x:auto;">${titleHtml}${inner}</div>\n`;
+      } else if (vt === "DATA_TABLE") {
+        const inner = renderTableHtml(payload as Parameters<typeof renderTableHtml>[0]);
+        return `\n<div style="margin:16px 0;padding:16px 20px;background:#1a1a1c;border:1px solid #2a2a2c;border-radius:10px;overflow-x:auto;">${titleHtml}${inner}</div>\n`;
+      }
+    } catch {
+      // leave as-is on parse error
+    }
+    return _match;
+  });
+}
+
 const HTML_MIME = "text/html";
 
 /** Cap input markdown to bound server memory + downstream rendering cost.
@@ -114,11 +231,10 @@ export const createHtmlReportTool: ToolDefinition = {
         : summary;
 
     try {
-      // marked.parse is synchronous when given a string + no options object.
-      // We pass no options because the defaults (gfm: true, breaks: false,
-      // mangle: false in v18) match what we want: tables + code fences yes,
-      // forced single-line-breaks no.
-      const rawHtml = await Promise.resolve(marked.parse(detailsMarkdown));
+      // Pre-render chart blocks to inline SVG/HTML before markdown parsing
+      // so charts display in JS-disabled viewers (Spaces file viewer, etc.)
+      const processedMarkdown = preRenderCharts(detailsMarkdown);
+      const rawHtml = await Promise.resolve(marked.parse(processedMarkdown));
       const safeBodyHtml = sanitizeHtmlBody(
         typeof rawHtml === "string" ? rawHtml : String(rawHtml),
       );

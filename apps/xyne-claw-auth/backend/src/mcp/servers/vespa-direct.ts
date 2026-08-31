@@ -128,9 +128,16 @@ export function convertDateLiteralsToMs(yql: string): string {
 // Referenced by injectAclGuard()/aclConditionForSchema() to harden agent-written
 // raw YQL. Mirrors the per-schema ACL in backend/src/vespa/src/utils/YqlBuilder.ts.
 
+/** Bench lane (onyx-ask-ai child spawned with ONYX_BENCH_VESPA=true): the
+ *  benchmark ingest marks its channels `permissions: ["*"]` = everyone in the
+ *  workspace can read */
+const isBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true";
+
 export const ACL = {
   simple: (userId: string) =>
-    `permissions contains "${esc(userId)}"`,
+    isBenchLane()
+      ? `(permissions contains "${esc(userId)}" or permissions contains "*")`
+      : `permissions contains "${esc(userId)}"`,
 
   // Member-or-public guard, shared by channel (chat_container) AND ticket:
   // visible if the user is in `permissions` (member list) OR the (owning) channel
@@ -741,8 +748,6 @@ export async function queryDirect(
       : {};
     Object.assign(payload, Object.keys(explicit).length > 0 ? explicit : defaultNativeInputs(query));
   }
-
-  console.error("[vespa-direct] raw YQL:", safeYql, "| profile:", profile);
 
   const debug = { payloads: [{ stage: "direct", yql: safeYql, vespaParams: {} as Record<string, unknown> }] };
 

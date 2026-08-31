@@ -16,6 +16,7 @@
  */
 
 import { hostname } from "node:os";
+import { errMsg } from "./errors.js";
 import { redisService } from "../redis.js";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
@@ -55,7 +56,7 @@ async function tryAcquire(cap: number, token: string): Promise<boolean> {
     const r = await redis.eval(ACQUIRE_LUA, 1, KEY, String(Date.now()), String(cap), String(SLOT_TTL_MS), token);
     return r === 1;
   } catch (err) {
-    log.warn(`[daily-brief-slot] redis acquire failed — failing OPEN: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[daily-brief-slot] redis acquire failed — failing OPEN: ${errMsg(err)}`);
     return true; // don't block briefs during a Redis outage
   }
 }

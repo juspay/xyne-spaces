@@ -1,6 +1,6 @@
 import { apiInstance } from './clients/apiClient';
 import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
-
+import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
 /**
  * Sanitizes search query by removing potentially harmful characters
  */
@@ -26,6 +26,7 @@ export class SearchService {
   async vespaSearch(
     filters: VespaSearchFilters,
     signal?: AbortSignal,
+    opts?: { cache?: boolean },
   ): Promise<{
     results: DisplaySearchResult[];
     totalCount: number;
@@ -42,6 +43,16 @@ export class SearchService {
 
       const params = this.buildVespaSearchParams(sanitizedFilters);
 
+      // Opt-in handoff cache: serve the most recent identical cmd+K search (see cachedVespaSearch).
+      const cacheKey = opts?.cache ? buildVespaSearchCacheKey(params) : null;
+      if (
+        cacheKey &&
+        cachedVespaSearch?.key === cacheKey &&
+        cachedVespaSearch.expiresAt > Date.now()
+      ) {
+        return cachedVespaSearch.value;
+      }
+
       const response = await apiInstance.get<VespaSearchResponse>(this.vespaBaseUrl, {
         params,
         ...(signal ? { signal } : {}),
@@ -54,28 +65,40 @@ export class SearchService {
       const data = response.data.data;
 
       // Handle grouped results - flatten them for backward compatibility
+      let vespaResult: VespaSearchResult;
       if (data.grouped && data.groups) {
         const flattenedResults: DisplaySearchResult[] = [];
         for (const group of data.groups) {
           flattenedResults.push(...group.results);
         }
 
-        return {
+        vespaResult = {
           results: flattenedResults.filter(result => result.relevanceScore > 0),
           totalCount: data.totalCount,
           offset: data.offset,
           limit: data.limit,
           grouped: true,
         };
+      } else {
+        // Handle flat results (backward compatible)
+        vespaResult = {
+          results: data.results || [],
+          totalCount: data.totalCount,
+          offset: data.offset,
+          limit: data.limit,
+          grouped: false,
+        };
       }
-      // Handle flat results (backward compatible)
-      return {
-        results: data.results || [],
-        totalCount: data.totalCount,
-        offset: data.offset,
-        limit: data.limit,
-        grouped: false,
-      };
+
+      // Store on success only; a new text/toggle/tab/offset yields a new key and overwrites.
+      if (cacheKey) {
+        cachedVespaSearch = {
+          key: cacheKey,
+          value: vespaResult,
+          expiresAt: Date.now() + VESPA_SEARCH_CACHE_TTL_MS,
+        };
+      }
+      return vespaResult;
     } catch (error) {
       if (error instanceof Error) {
         throw error;
@@ -258,6 +281,27 @@ export class SearchService {
 
     return params;
   }
+}
+
+// 30s: gives the popup → full-screen handoff headroom to reuse the popup's search even if
+// the results page is slow to mount, while still bounding how stale a reused result can be.
+const VESPA_SEARCH_CACHE_TTL_MS = 30_000;
+
+type VespaSearchResult = Awaited<ReturnType<SearchService['vespaSearch']>>;
+
+// Single-slot handoff cache. Lets ONLY the cmd+K popup → full-screen results navigation (and
+// the full-screen → back → popup return) reuse the popup's last search instead of re-hitting
+// Vespa. Opt-in only (the `cache` option), so other vespaSearch callers stay always-fresh.
+// A fresh cmd+K open invalidates it (see clearVespaSearchCache), so re-opening the palette
+// always fetches fresh — only the in-flight handoff survives. Module state is also wiped on
+// the hard reload a workspace switch triggers, so there is no cross-workspace leak.
+let cachedVespaSearch: { key: string; value: VespaSearchResult; expiresAt: number } | null = null;
+
+// Drop the handoff entry so the next search fetches fresh. Called when the cmd+K palette is
+// opened anew (not on the back-navigation restore), so a reopened palette never serves a
+// result cached by an earlier session.
+export function clearVespaSearchCache(): void {
+  cachedVespaSearch = null;
 }
 
 // Export singleton instance

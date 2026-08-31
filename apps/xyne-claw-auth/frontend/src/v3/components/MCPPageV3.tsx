@@ -495,7 +495,22 @@ export function MCPPageV3({ userId }: Props) {
 
   const handleCreateServer = useCallback(
     async (payload: Parameters<typeof createServer>[0]) => {
-      const created = await createServer(payload, userId);
+      const result = await createServer(payload, userId);
+      // Shared (scope=global) connector: the edit was queued for admin approval,
+      // the live definition is unchanged. Tell the user explicitly instead of
+      // letting the form silently revert to the old content.
+      if (result.kind === "editRequest") {
+        showSnackbar({
+          variant: "success",
+          title: "Sent to admin for approval",
+          description:
+            result.message ||
+            "This is a shared connector, so your changes were submitted for admin review.",
+        });
+        reload();
+        return result;
+      }
+      const created = result.server;
       // Make a newly-created connector's form immediately available to the
       // reconnect dialog instead of waiting for the page-level credential map
       // (which is fetched only on mount).
@@ -504,9 +519,9 @@ export function MCPPageV3({ userId }: Props) {
         [created.type]: created.credentialForm?.fields ?? payload.credentialForm?.fields ?? [],
       }));
       reload();
-      return created;
+      return result;
     },
-    [userId, reload]
+    [userId, reload, showSnackbar]
   );
 
   const handleRequestPublish = useCallback(

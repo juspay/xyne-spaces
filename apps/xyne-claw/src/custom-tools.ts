@@ -147,7 +147,7 @@ export function loadCustomTools(
   sessionToken?: string,
   parentToolCallId?: string,
   providerConfig?: ToolExecutionContext["providerConfig"],
-  emitPlan?: ToolExecutionContext["emitPlan"],
+  emitUiWidget?: ToolExecutionContext["emitUiWidget"],
   forcedCustomSlugs: readonly string[] = [],
 ): CustomToolsResult {
   const agentSlug = meta?.["agentSlug"];
@@ -206,6 +206,36 @@ export function loadCustomTools(
   const allPendingActions: Array<Record<string, unknown>> = [];
   const allPendingResponses: PendingResponse[] = [];
 
+  // One widget publisher for every custom tool. Legacy runs POST the same
+  // typed envelope to progressUrl; SSE runs inject an in-process emitter from
+  // routes/run.ts. Widget implementations never need to know which transport
+  // is active, and future widgets do not require more plumbing here.
+  const publishUiWidget: ToolExecutionContext["emitUiWidget"] = emitUiWidget ?? (
+    progressUrl && sessionId
+      ? async (widget) => {
+          const response = await fetch(progressUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+            },
+            body: JSON.stringify({
+              sessionId,
+              kind: "ui-widget",
+              widget,
+              ...(meta?.["conversationId"] ? { conversationId: meta["conversationId"] } : {}),
+              ...(meta?.["agentSlug"] ? { agentSlug: meta["agentSlug"] } : {}),
+            }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!response.ok) {
+            const detail = await response.text().catch(() => "");
+            throw new Error(`UI widget delivery failed: HTTP ${response.status}${detail ? ` ${detail.slice(0, 160)}` : ""}`);
+          }
+        }
+      : undefined
+  );
+
   // Captures the user-visible summary text emitted alongside each
   // [ATTACHMENT:...] block. When the agent's final assistant turn comes back
   // empty AND we delivered an attachment, the run.ts result handler promotes
@@ -243,7 +273,7 @@ export function loadCustomTools(
       pendingQuestions: allPendingQuestions,
       pendingResponses: allPendingResponses,
       ...(progressUrl ? { progressUrl } : {}),
-      ...(emitPlan ? { emitPlan } : {}),
+      ...(publishUiWidget ? { emitUiWidget: publishUiWidget } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(s2sKey ? { s2sKey } : {}),
       ...(sessionToken ? { sessionToken } : {}),
@@ -299,7 +329,6 @@ export function loadCustomTools(
           log.error(`[custom-tool] ${ct.slug} threw:`, errMsg);
           result = `Error: ${errMsg}`;
         }
-        log.info(`[custom-tool] ${ct.slug} result: ${result.slice(0, 300)}`);
 
         // Sandbox-capacity deferral (flag-gated, default off): the inner catch
         // above stringifies every tool throw and hands it to the LLM, which for a
