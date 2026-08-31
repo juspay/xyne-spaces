@@ -2029,7 +2029,24 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       const sessionDirPath = await ensureSessionDir(conversationId);
       if (isResume) {
         sessionManager = SessionManager.continueRecent(workingDir, sessionDirPath);
-        log.info(`[agent] Resuming session in ${sessionDirPath} (cwd=${workingDir})`);
+        // continueRecent NEVER fails loudly: when it finds no match it returns a
+        // valid, EMPTY SessionManager, so "resuming" and "silently started over"
+        // look identical from here. That cost a day of debugging when a per-run
+        // cwd made its internal cwd filter miss every time (see the workspace
+        // key note in routes/run.ts). Assert we actually got history back.
+        const resumedEntries = sessionManager.getEntries().length;
+        if (resumedEntries === 0) {
+          log.error(
+            `[agent] RESUME FOUND NO HISTORY for ${sessionDirPath} (cwd=${workingDir}) — ` +
+              `the session dir exists but pi matched no prior session, so this turn starts ` +
+              `with no context. Usually means cwd differs from the turn that created it.`,
+          );
+          metric.count("session_resume_empty", {});
+        } else {
+          log.info(
+            `[agent] Resuming session in ${sessionDirPath} (cwd=${workingDir}, ${resumedEntries} entries)`,
+          );
+        }
       } else {
         sessionManager = SessionManager.create(workingDir, sessionDirPath);
         log.info(`[agent] Created persistent session in ${sessionDirPath} (cwd=${workingDir})`);
