@@ -214,6 +214,26 @@ export interface StreamsLayout {
  */
 export const DEFAULT_WIDTH = 640;
 /** Hard floor and ceiling for a dragged column, whatever the surface asks for. */
+/**
+ * The narrowest each surface stays usable at.
+ *
+ * Data rather than a lookup on the surface registry, and deliberately so: the
+ * registry imports every surface component, so anything importing it to read one
+ * number drags the whole component graph in with it. `useAddToStream` is mounted
+ * from a ticket page and a canvas, both of which the registry itself imports —
+ * reading the width from there closed an import cycle and left the registry
+ * holding `undefined` components at module-init.
+ */
+export const SURFACE_MIN_WIDTHS: Record<SurfaceKind, number> = {
+  channel: 320,
+  board: 600,
+  agent: 420,
+  ticket: 400,
+  thread: 340,
+  document: 420,
+  file: 320,
+};
+
 export const MIN_WIDTH = 280;
 export const MAX_WIDTH = 1600;
 export const COLUMN_GAP = 10;

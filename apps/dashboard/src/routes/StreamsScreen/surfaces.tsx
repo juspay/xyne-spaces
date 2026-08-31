@@ -22,6 +22,7 @@ import { useAuthContextValues } from '../../hooks/useAuth';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import type { StreamItem } from './streamsDnd';
+import { SURFACE_MIN_WIDTHS } from './Streams.types';
 import type { ColumnSeed, ColumnSource, SurfaceKind } from './Streams.types';
 
 /**
@@ -366,7 +367,7 @@ const FileBody = ({ source }: BodyProps): ReactElement => {
 export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
   channel: {
     icon: Hashtag,
-    minWidth: 320,
+    minWidth: SURFACE_MIN_WIDTHS.channel,
     Title: ChannelTitle,
     Body: ChannelBody,
     needsRouterScope: true,
@@ -383,7 +384,7 @@ export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
   board: {
     icon: KanbanBoard,
     // A kanban board narrower than this shows one and a half stage columns.
-    minWidth: 600,
+    minWidth: SURFACE_MIN_WIDTHS.board,
     Title: BoardTitle,
     Body: BoardBody,
     needsRouterScope: true,
@@ -397,7 +398,7 @@ export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
   agent: {
     icon: SparkleAi,
     // The composer control row and citation panel need more than a third.
-    minWidth: 420,
+    minWidth: SURFACE_MIN_WIDTHS.agent,
     Title: AgentTitle,
     Body: AgentBody,
     needsRouterScope: true,
@@ -418,7 +419,7 @@ export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
     icon: TicketToken,
     // Below this the details pane's two-column field rows collapse into a list
     // of orphaned labels.
-    minWidth: 400,
+    minWidth: SURFACE_MIN_WIDTHS.ticket,
     Title: TicketTitle,
     Body: TicketBody,
     needsRouterScope: true,
@@ -443,7 +444,7 @@ export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
 
   thread: {
     icon: ChatChatting,
-    minWidth: 340,
+    minWidth: SURFACE_MIN_WIDTHS.thread,
     Title: ThreadTitle,
     Body: ThreadBody,
     needsRouterScope: true,
@@ -471,7 +472,7 @@ export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
     icon: FileText,
     // The editor's block controls and slash menu are laid out for prose; much
     // narrower and every paragraph wraps every four words.
-    minWidth: 420,
+    minWidth: SURFACE_MIN_WIDTHS.document,
     Title: DocumentTitle,
     Body: DocumentBody,
     needsRouterScope: true,
@@ -487,7 +488,7 @@ export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
 
   file: {
     icon: PaperclipSlant,
-    minWidth: 320,
+    minWidth: SURFACE_MIN_WIDTHS.file,
     Title: FileTitle,
     Body: FileBody,
     // Renders one attachment from its own props and navigates nowhere.

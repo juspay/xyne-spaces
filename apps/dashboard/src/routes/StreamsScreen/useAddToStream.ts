@@ -1,10 +1,9 @@
 import { useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { DEFAULT_WIDTH, type ColumnSource, type Stream } from './Streams.types';
+import { DEFAULT_WIDTH, SURFACE_MIN_WIDTHS, type ColumnSource, type Stream } from './Streams.types';
 import { allowsDuplicates, sourceKey } from './Streams.utils';
 import { createStream, liveStreams, loadLayout, makeColumn, saveLayout } from './streamsLayout';
-import { surfaceFor } from './surfaces';
 
 /** A stream as the picker needs it: something to name and something to add to. */
 export interface StreamTarget {
@@ -109,7 +108,7 @@ export const useAddToStream = (): AddToStream => {
       // floored at what the surface needs. Not the dev dial: that is a Streams
       // context which does not reach this far, and a column added from a ticket
       // page should not silently differ from the same column added in the strip.
-      const column = makeColumn(source, Math.max(DEFAULT_WIDTH, surfaceFor(source).minWidth));
+      const column = makeColumn(source, Math.max(DEFAULT_WIDTH, SURFACE_MIN_WIDTHS[source.kind]));
       const next = {
         ...stream,
         columns: [...stream.columns, column],
