@@ -7,7 +7,6 @@ import {
   forwardRef,
   useImperativeHandle,
   type FormEvent,
-  type KeyboardEvent,
   type ClipboardEvent,
   type ChangeEvent,
   type ReactElement,
@@ -48,6 +47,10 @@ import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext'
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import useMeasure from '../../hooks/useMeasure';
+import { InputBox } from '../ui/InputBox';
+import type { InputBoxHandle } from '../../hooks/useDragAndDropAreaRef';
+import { useMentionSearch } from '../../hooks/useMentionSearch';
+import type { UserTag } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 
 export interface AIComposerAttachment {
   id: string;
@@ -77,6 +80,7 @@ interface AIComposerProps {
     text: string,
     attachments?: AIComposerAttachment[],
     context?: ComposerContext,
+    userTags?: Record<string, UserTag>,
   ) => void;
   placeholder?: string;
   hideDisclaimer?: boolean;
@@ -223,8 +227,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const inputBoxRef = useRef<InputBoxHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { results: mentionResults, searchMentions } = useMentionSearch();
 
   // Measured off the composer box rather than the viewport: the same window can
   // hold a full-width composer or a squeezed one depending on whether the
@@ -359,19 +364,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     onContextChangeRef.current?.(buildContext());
   }, [buildContext]);
 
-  useEffect((): void => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = '0px';
-    el.style.height = `${String(Math.min(el.scrollHeight, 200))}px`;
-  }, [value]);
-
-  useEffect((): void => {
-    if (autoFocus) {
-      textareaRef.current?.focus();
-    }
-  }, [autoFocus]);
-
   const handleFilesAdded = useCallback(
     async (files: File[]): Promise<void> => {
       if (files.length === 0) return;
@@ -484,11 +476,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setAttachments([]);
       },
       focus: (): void => {
-        textareaRef.current?.focus();
+        inputBoxRef.current?.focus();
       },
       setPrompt: (nextValue: string): void => {
         setValue(nextValue);
-        window.setTimeout(() => textareaRef.current?.focus(), 0);
+        window.setTimeout(() => inputBoxRef.current?.focus(), 0);
       },
       setContext: (items: AttachedContextItem[]): void => {
         const next = attachedContextToSelections(items);
@@ -507,12 +499,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     [handleFilesAdded],
   );
 
-  const submit = (): void => {
+  const submit = (nextValue = value): void => {
     if (pending) return;
-    const trimmed = value.trim();
+    const trimmed = nextValue.trim();
     if (!trimmed) return;
-    onSubmit?.(trimmed, attachments.length > 0 ? attachments : undefined, buildContext());
+    const userTags = inputBoxRef.current?.getUserTags?.();
+    onSubmit?.(
+      trimmed,
+      attachments.length > 0 ? attachments : undefined,
+      buildContext(),
+      userTags && Object.keys(userTags).length > 0 ? userTags : undefined,
+    );
     setValue('');
+    inputBoxRef.current?.clearTextOnly();
     setAttachments([]);
     // Toggles/context persist across turns (mirrors the sidebar), so they are
     // intentionally NOT reset here.
@@ -523,14 +522,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     submit();
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      submit();
-    }
-  };
-
-  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>): void => {
+  const handlePaste = (e: ClipboardEvent<HTMLDivElement>): void => {
     const clipboard = e.clipboardData;
     const files = clipboard?.files;
     if (files && files.length > 0) {
@@ -580,15 +572,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     setAttachments(prev => prev.filter(att => att.id !== attachmentId));
   };
 
-  // Append a voice transcript to the current textarea value.
+  // Append a voice transcript to the canonical chat editor value.
   const handleTranscript = useCallback((text: string): void => {
     setValue(prev => (prev.trim().length > 0 ? `${prev.trimEnd()} ${text}` : text));
-    textareaRef.current?.focus();
+    inputBoxRef.current?.focus();
   }, []);
 
   const closeContextModal = useCallback((): void => {
     setShowContextModal(false);
-    setTimeout(() => textareaRef.current?.focus(), 0);
+    setTimeout(() => inputBoxRef.current?.focus(), 0);
   }, []);
 
   const removeChannel = (id: string): void =>
@@ -803,21 +795,36 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             </div>
           )}
 
-          <div className='relative'>
-            <textarea
-              ref={textareaRef}
+          <div
+            className='relative'
+            onPasteCapture={handlePaste}
+            data-track-category='XyneAI'
+            data-track-name='ComposerInput'
+          >
+            <InputBox
+              ref={inputBoxRef}
+              id='ask-ai-composer'
               value={value}
-              onChange={e => setValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
+              autoFocus={autoFocus ? 'end' : null}
               placeholder={placeholder}
-              rows={1}
-              className={cn(
-                'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-[15px] leading-6 placeholder:text-muted-foreground/80 focus:outline-none',
-                isVoiceRecording && !value && 'invisible',
-              )}
-              data-track-category='XyneAI'
-              data-track-name='ComposerInput'
+              mentionItems={mentionResults}
+              onMentionSearch={searchMentions}
+              onTextChange={setValue}
+              onSendMessage={text => submit(text)}
+              features={{
+                richText: false,
+                mentions: true,
+                commands: false,
+                fileAttachments: false,
+                emojiPicker: false,
+              }}
+              editorOnly
+              hideComposerTools
+              hideVoiceInput
+              hideSendButton
+              sendDisabled={pending}
+              disabled={pending}
+              className={cn(isVoiceRecording && !value && 'invisible')}
             />
             {isVoiceRecording && !value && (
               <div className='pointer-events-none absolute inset-0 flex select-none items-center gap-3 px-2 py-1'>

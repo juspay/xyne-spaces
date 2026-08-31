@@ -33,6 +33,7 @@ import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
+  UserTag,
   Message,
   MessageAttachment,
   ToolInvocation as ToolInvocationType,
@@ -104,6 +105,7 @@ interface AIChatThreadProps {
   sessionId?: string | undefined;
   initialQuery?: string | undefined;
   initialAttachments?: AIComposerAttachment[] | undefined;
+  initialUserTags?: Record<string, UserTag> | undefined;
   /** Context/toggles chosen on the landing composer — applied to the first
    *  auto-submitted turn and used to seed the chat composer. */
   initialExtras?: ComposerContext | undefined;
@@ -1342,6 +1344,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     sessionId,
     initialQuery,
     initialAttachments,
+    initialUserTags,
     initialExtras,
     onSetMobileSidebarOpen,
     onConversationChange,
@@ -1826,7 +1829,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         toMessageAttachments(initialAttachments ?? []),
         undefined,
         undefined,
-        undefined,
+        initialUserTags,
         undefined,
         undefined,
         undefined,
@@ -1838,7 +1841,14 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       // attachments above are read before the parent drops them.
       onInitialQueryConsumed?.();
     }
-  }, [initialQuery, initialAttachments, initialExtras, submitQuery, onInitialQueryConsumed]);
+  }, [
+    initialQuery,
+    initialAttachments,
+    initialUserTags,
+    initialExtras,
+    submitQuery,
+    onInitialQueryConsumed,
+  ]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -1970,6 +1980,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       text: string,
       attachments?: AIComposerAttachment[],
       context?: ComposerContext,
+      userTags?: Record<string, UserTag>,
     ): Promise<void> => {
       const hasAttachments = (attachments?.length ?? 0) > 0;
       if (!text.trim() && !hasAttachments) return;
@@ -2011,7 +2022,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         toMessageAttachments(attachments ?? []),
         undefined,
         undefined,
-        undefined,
+        userTags,
         parentMessageId,
         undefined,
         undefined,
@@ -2280,8 +2291,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             <AIComposer
               ref={composerRef}
               autoFocus
-              onSubmit={(text, attachments, context): void => {
-                void handleSubmit(text, attachments, context);
+              onSubmit={(text, attachments, context, userTags): void => {
+                void handleSubmit(text, attachments, context, userTags);
               }}
               onAgentChange={onAgentChange}
               showAgentSelector={isV2}

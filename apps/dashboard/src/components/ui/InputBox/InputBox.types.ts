@@ -28,6 +28,8 @@ export interface InputBoxProps {
     videoThumbnails?: Map<File, Blob>,
   ) => void | Promise<void>;
   onContentChange?: (html: string, text: string) => void;
+  /** Immediate plain-text updates for hosts that render their own send controls. */
+  onTextChange?: (text: string) => void;
   onCancel?: () => void;
   mentionItems?: import('@xyne/shared').MentionResult[];
   voiceMentionItems?: import('@xyne/shared').MentionResult[];
@@ -70,6 +72,8 @@ export interface InputBoxProps {
   hideComposerTools?: boolean;
   hideVoiceInput?: boolean;
   compact?: boolean;
+  /** Render only the canonical TipTap editor and its suggestion popovers. */
+  editorOnly?: boolean;
   sendDisabled?: boolean;
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
