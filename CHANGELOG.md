@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.8](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.7...v1.239.0-release-20260827.8) (2026-08-31)
+
+
+### Reverts
+
+* Revert "feat: add ordered encryption key rotation (#764)" (#1266) ([9b1f9a4](https://github.com/juspay/xyne-spaces/commit/9b1f9a4c05139e87603b9d4da1680011808aae72)), closes [#764](https://github.com/juspay/xyne-spaces/issues/764) [#1266](https://github.com/juspay/xyne-spaces/issues/1266)
+
 ## [1.239.0-release-20260827.7](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.6...v1.239.0-release-20260827.7) (2026-08-31)
 
 
