@@ -1,3 +1,10 @@
+## [1.248.8](https://github.com/juspay/xyne-spaces/compare/v1.248.7...v1.248.8) (2026-08-31)
+
+
+### Bug Fixes
+
+* add artifacts for agent discovery, mcp suggest ([#886](https://github.com/juspay/xyne-spaces/issues/886)) ([b08ad9a](https://github.com/juspay/xyne-spaces/commit/b08ad9a4093ec6452747efd968671d5552881ff1))
+
 ## [1.248.7](https://github.com/juspay/xyne-spaces/compare/v1.248.6...v1.248.7) (2026-08-31)
 
 
