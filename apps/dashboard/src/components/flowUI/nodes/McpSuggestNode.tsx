@@ -33,6 +33,10 @@ interface McpSuggestItem {
   connected?: boolean;
 }
 
+// global.css paints every anchor inside message content link-blue and
+// underlined; these are buttons by intent, not links in prose.
+const LINK_BUTTON = '!text-foreground !no-underline hover:!text-foreground';
+
 interface McpSuggestProps {
   title?: string;
   reason?: string;
@@ -110,7 +114,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
           )}
         </div>
 
-        <div className='flex flex-col gap-2'>
+        <div className='flex flex-col'>
           {connectors.map(item => {
             const server = serverFor(item.serverType);
             const isConnected = server
@@ -119,8 +123,16 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
             const entry = entries.find(e => e.server?.type === item.serverType);
 
             return (
-              <div key={item.serverType} className='flex items-start gap-3 rounded-xl py-1.5 pl-1'>
-                <div className='flex min-w-0 flex-1 items-start gap-2'>
+              <div
+                key={item.serverType}
+                className='-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-foreground/[0.04]'
+              >
+                <Link
+                  to={`/ai/library/mcp/${encodeURIComponent(item.serverType)}`}
+                  className={cn('flex min-w-0 flex-1 items-start gap-2', LINK_BUTTON)}
+                  data-track-category='Claw MCP'
+                  data-track-name='ViewMcpFromCard'
+                >
                   <McpLogo type={entry?.iconType ?? item.serverType} name={item.name} size='sm' />
                   <div className='flex min-w-0 flex-1 flex-col'>
                     <span className='truncate text-sm font-medium leading-5 text-foreground'>
@@ -137,7 +149,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
                       </span>
                     )}
                   </div>
-                </div>
+                </Link>
 
                 {isConnected ? (
                   <span className='shrink-0 rounded-lg px-2 py-1 text-xs font-medium leading-5 text-muted-foreground'>
@@ -174,9 +186,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
             className={cn(
               buttonVariants({ variant: 'ghost', size: 'sm' }),
               'h-7 shrink-0 rounded-[10px] px-2.5 text-sm font-medium',
-              // global.css paints every anchor inside message content link-blue
-              // and underlined; this is a button by intent, not a link in prose.
-              '!text-foreground !no-underline hover:!text-foreground',
+              LINK_BUTTON,
             )}
             data-track-category='Claw MCP'
             data-track-name='BrowseMcpLibrary'
