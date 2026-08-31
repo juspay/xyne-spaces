@@ -1,0 +1,144 @@
+/**
+ * Theme bridge for @xyne/workflow-ui.
+ *
+ * The package is fully tokenised — every surface, border and text colour reads a
+ * `--wui-*` custom property — but it ships one light palette built on slate/indigo and
+ * never redefines those tokens for dark. Two consequences:
+ *
+ *  1. Out of the box it renders slate-and-indigo beside xyne's coral, on Tailwind's
+ *     default system font rather than Inter.
+ *  2. Under `midnight` it would paint that light palette on a dark ground — light text
+ *     on light surfaces, effectively unusable.
+ *
+ * So instead of restyling components we re-point its tokens at the dashboard's own
+ * shadcn variables. Everything below is derived, never copied hex, so a new theme or a
+ * rebrand flows through without touching this file.
+ *
+ * ATTACHMENT POINT. The package declares its palette on `:root, [data-workflow-ui]` and
+ * stamps `data-workflow-ui` on inner component roots as well as the outer one — so every
+ * sub-view re-declares the defaults. Overriding on an ancestor (our own wrapper class) is
+ * therefore not enough: the inner element's own declaration wins over anything inherited,
+ * and the run viewer comes back indigo-on-white.
+ *
+ * So the tokens below target `[data-workflow-ui]` — the same hook, same specificity, and
+ * our stylesheet is imported second, so ours wins. `.xyne-workflow-ui` stays for the
+ * things that genuinely are ours: the font, the height fix and the canvas chrome.
+ *
+ * Import AFTER `@xyne/workflow-ui/styles.css`.
+ */
+
+[data-workflow-ui] {
+  /* ── Structure ──────────────────────────────────────────────────────────── */
+  --wui-radius: var(--radius);
+  --wui-radius-sm: calc(var(--radius) - 0.125rem);
+  --wui-radius-lg: calc(var(--radius) + 0.25rem);
+  --wui-control-radius: var(--radius);
+  --wui-pill-radius: 9999px;
+
+  /* ── Surfaces ───────────────────────────────────────────────────────────── */
+  --wui-bg: hsl(var(--background));
+  --wui-surface: hsl(var(--card));
+  --wui-bg-subtle: hsl(var(--muted));
+  --wui-bg-muted: hsl(var(--secondary));
+
+  /* ── Text ───────────────────────────────────────────────────────────────── */
+  --wui-fg: hsl(var(--foreground));
+  --wui-fg-muted: hsl(var(--muted-foreground));
+  /* The host has no third text tier, so this is derived rather than invented. */
+  --wui-fg-subtle: hsl(var(--muted-foreground) / 0.7);
+
+  /* ── Lines ──────────────────────────────────────────────────────────────── */
+  --wui-border: hsl(var(--border));
+  --wui-border-strong: hsl(var(--ring));
+
+  /* ── Brand ──────────────────────────────────────────────────────────────── */
+  --wui-primary: hsl(var(--primary));
+  --wui-primary-fg: hsl(var(--primary-foreground));
+  --wui-primary-hover: hsl(var(--primary) / 0.88);
+  --wui-primary-light: hsl(var(--primary) / 0.12);
+  --wui-primary-muted: hsl(var(--primary) / 0.35);
+  --wui-danger: hsl(var(--destructive));
+
+  /* ── Controls ───────────────────────────────────────────────────────────── */
+  --wui-control-bg: hsl(var(--background));
+  --wui-control-bg-hover: hsl(var(--accent));
+  --wui-control-border: hsl(var(--input));
+  --wui-control-fg: hsl(var(--foreground));
+
+  /* ── Execution status ───────────────────────────────────────────────────────
+     Deliberately NOT mapped to the brand. Completed / failed / paused are semantic
+     state, and green/red/amber are read faster than any palette — mapping
+     `completed` to coral would make a healthy run look alarming. `running` is the
+     exception: "happening now" should read as the product's own accent. */
+  --wui-status-completed: #16a34a;
+  --wui-status-failed: hsl(var(--destructive));
+  --wui-status-paused: #d97706;
+  --wui-status-pending: hsl(var(--muted-foreground));
+  --wui-status-running: hsl(var(--primary));
+  --wui-status-skipped: hsl(var(--border));
+}
+
+/* WorkflowUIProvider renders an unstyled wrapper between the app shell's <main> and
+   WorkflowApp, so the app's own `h-full` resolves against a parent that has collapsed to
+   content height — leaving the pane floating above the wallpaper. Give that wrapper the
+   height instead of fighting it from inside. */
+:where(div):has(> .xyne-workflow-ui) {
+  height: 100%;
+}
+
+/* The package's Tailwind preflight pins `font-family: ui-sans-serif, system-ui`, so
+   Inter has to be reasserted — including on form controls, which never inherit it. */
+.xyne-workflow-ui,
+.xyne-workflow-ui button,
+.xyne-workflow-ui input,
+.xyne-workflow-ui select,
+.xyne-workflow-ui textarea {
+  font-family: "Inter", sans-serif;
+}
+
+/* ── Midnight ─────────────────────────────────────────────────────────────────
+   The gap the package cannot cover alone. Surfaces come from the host's dark tokens;
+   only what needs lifting for contrast is restated. */
+[data-theme="midnight"] [data-workflow-ui] {
+  /* A flat --card on a dark ground loses every panel edge, so the subtle/muted steps
+     are translucent white rather than another opaque grey. */
+  --wui-bg-subtle: hsl(var(--foreground) / 0.04);
+  --wui-bg-muted: hsl(var(--foreground) / 0.08);
+  --wui-fg-subtle: hsl(var(--muted-foreground) / 0.65);
+  --wui-control-bg-hover: hsl(var(--foreground) / 0.06);
+
+  /* Mid-tones that read on white go muddy on near-black. These are the lighter
+     400/500 variants, not the same hues dimmed. */
+  --wui-status-completed: #22c55e;
+  --wui-status-paused: #fbbf24;
+  --wui-status-skipped: hsl(var(--foreground) / 0.22);
+
+  /* Its shadows are rgba-slate tuned for light surfaces and simply vanish here;
+     depth on a dark ground has to come from a darker, larger cast. */
+  --wui-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --wui-shadow-md: 0 4px 10px rgb(0 0 0 / 0.45);
+  --wui-shadow-lg: 0 10px 28px rgb(0 0 0 / 0.55);
+}
+
+/* ── Canvas ───────────────────────────────────────────────────────────────────
+   @xyflow paints its background and controls outside the --wui-* system, so the graph
+   would keep a white canvas and light chrome under a dark theme. */
+.xyne-workflow-ui .react-flow__background {
+  background-color: hsl(var(--background));
+}
+
+.xyne-workflow-ui .react-flow__controls-button {
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  fill: currentColor;
+}
+
+.xyne-workflow-ui .react-flow__controls-button:hover {
+  background: hsl(var(--accent));
+}
+
+.xyne-workflow-ui .react-flow__attribution {
+  background: transparent;
+  color: hsl(var(--muted-foreground) / 0.5);
+}

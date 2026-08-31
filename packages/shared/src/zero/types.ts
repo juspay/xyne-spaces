@@ -1151,6 +1151,10 @@ export enum WorkflowEventType {
   MESSAGE_RECEIVED = 'MESSAGE_RECEIVED',
   CALL_EVENT = 'CALL_EVENT',
   TAG_GENERATED = 'TAG_GENERATED',
+  MANUAL = 'MANUAL',
+  CRON = 'CRON',
+  EVENT = 'EVENT',
+  WEBHOOK_V2 = 'WEBHOOK_V2',
 }
 
 // @ts-ignore TS1294

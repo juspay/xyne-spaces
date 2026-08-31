@@ -491,6 +491,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'vespaInsertionLogs':
       return new UnscopedACL(ctx, prisma)
+    case 'workflowCredential':
+      return new BaseQueryACL(ctx, prisma)
+    case 'workflowFolder':
+      return new BaseQueryACL(ctx, prisma)
     case 'workflowExecutionLock':
       return new BaseQueryACL(ctx, prisma)
     case 'workflowExecutionState':

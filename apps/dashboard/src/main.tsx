@@ -1,6 +1,9 @@
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './global.css';
+// Package stylesheet first, then our token bridge — order matters, ours must win.
+import '@xyne/workflow-ui/styles.css';
+import './styles/workflow-ui-theme.css';
 import { mixpanelService } from './services/Analytics/mixpanelService';
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
