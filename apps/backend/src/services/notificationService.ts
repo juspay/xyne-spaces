@@ -22,7 +22,8 @@ import { serializeInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus } from '@xyne/shared';
+  NotificationType, MessageType, NotificationStatus, UserStatus,
+  ChannelType } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -848,6 +849,17 @@ class NotificationService {
   ): Promise<{ deliveredViaApp: boolean }> {
     let deliveredViaApp = false;
 
+    // No actionUrl builder knows the SDLC routes. Builders already put the entity
+    // ids in metadata, so drop the URL and add the one key they lack — which hub.
+    const sdlcChannelId = await this.sdlcChannelId(data);
+    if (sdlcChannelId) {
+      data = {
+        ...data,
+        actionUrl: undefined,
+        metadata: { ...(data.metadata ?? {}), sdlcChannelId },
+      };
+    }
+
     try {
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
@@ -955,6 +967,39 @@ class NotificationService {
     }
 
     return { deliveredViaApp };
+  }
+
+  /** The SDLC hub a notification belongs to, or null everywhere else. */
+  private async sdlcChannelId(data: NotificationData): Promise<string | null> {
+    const metadata = (data.metadata ?? {}) as Record<string, unknown>;
+    const asId = (value: unknown): string | undefined =>
+      typeof value === 'string' && value.length > 0 ? value : undefined;
+    const related = (type: string): string | undefined =>
+      data.relatedEntityType === type ? asId(data.relatedEntityId) : undefined;
+
+    try {
+      const canvasId = asId(metadata['canvasId']) ?? related('canvas');
+      const ticketId = asId(metadata['ticketId']) ?? related('ticket');
+      const channelId =
+        asId(metadata['channelId']) ??
+        (canvasId
+          ? (await prisma.canvas.findUnique({ where: { id: canvasId }, select: { channelId: true } }))
+              ?.channelId
+          : ticketId
+            ? (await prisma.ticket.findUnique({ where: { id: ticketId }, select: { channelId: true } }))
+                ?.channelId
+            : undefined);
+      if (!channelId) return null;
+      const channel = await prisma.channel.findUnique({
+        where: { id: channelId },
+        select: { type: true },
+      });
+      return channel?.type === ChannelType.SDLC ? channelId : null;
+    } catch (error) {
+      // Routing must never take a notification down; fall back to the actionUrl.
+      logger.warn('[SDLC] failed to resolve notification channel', { error });
+      return null;
+    }
   }
 
   async createChannelMessageNotifications(
