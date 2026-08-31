@@ -37,6 +37,16 @@ const SECTION_LABEL_CLASS =
 /** Row action sized for the popover rather than the old full-width dialog. */
 const INLINE_ACTION_CLASS = 'h-7 gap-1.5 rounded-lg px-2.5 text-xs font-medium';
 
+/** Success copy per publication action; keyed so the union stays exhaustive. */
+const PUBLICATION_TOAST: Record<SummaryTemplatePublicationAction, string> = {
+  request: 'Sent to Scribe admins for review',
+  publish: 'Template published',
+  withdraw: 'Publication request withdrawn',
+  approve: 'Template published',
+  deny: 'Publication request denied',
+  unpublish: 'Template is now private',
+};
+
 export function SummaryTemplateShareModal({
   template,
   onTemplateChange,
@@ -164,17 +174,7 @@ export function SummaryTemplateShareModal({
     try {
       const updated = await recordingService.manageSummaryTemplatePublication(template.id, action);
       onTemplateChange?.(updated);
-      toast.success(
-        action === 'request'
-          ? 'Sent to Scribe admins for review'
-          : action === 'publish'
-            ? 'Template published'
-            : action === 'withdraw'
-              ? 'Publication request withdrawn'
-              : action === 'approve'
-                ? 'Template published'
-                : 'Publication request denied',
-      );
+      toast.success(PUBLICATION_TOAST[action]);
     } catch (error) {
       toast.error('Unable to update publication status', {
         description: getApiErrorMessage(error, 'Please try again.'),
@@ -185,8 +185,9 @@ export function SummaryTemplateShareModal({
   };
 
   const canReview = isAdmin && template.visibility === 'WAITING_FOR_APPROVAL';
+  const canUnpublish = template.visibility === 'PUBLIC' && (isOwner || isAdmin);
 
-  if (!currentUser || (!isOwner && !canReview)) {
+  if (!currentUser || (!isOwner && !canReview && !canUnpublish)) {
     return (
       <p className='px-0.5 py-1 text-xs text-muted-foreground'>
         Only the template creator or a Scribe admin can manage this template.
@@ -415,6 +416,26 @@ export function SummaryTemplateShareModal({
             <p className='mt-px text-xs leading-normal text-muted-foreground'>
               Anyone in this workspace can see and use this template.
             </p>
+            {canUnpublish && (
+              <>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  className={`mt-2 ${INLINE_ACTION_CLASS} text-muted-foreground`}
+                  loading={publicationAction === 'unpublish'}
+                  disabled={loading}
+                  onClick={() => void handlePublication('unpublish')}
+                  data-track-category='SummaryTemplates'
+                  data-track-name='UnpublishTemplate'
+                >
+                  Make private
+                </Button>
+                <p className='mt-1.5 text-xs text-muted-foreground'>
+                  The owner and anyone it is explicitly shared with keep access.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
