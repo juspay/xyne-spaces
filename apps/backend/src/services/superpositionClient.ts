@@ -48,8 +48,10 @@ export interface SuperpositionConfig {
   token: string;
   org_id: string;
   workspace_id: string;
-  polling_interval?: number; // Polling interval in milliseconds (default: 60000)
-  timeout?: number; // Request timeout in milliseconds (default: 30000)
+  refreshStrategy?: {
+    interval: number;
+    timeout?: number;
+  };
 }
 
 /**
@@ -98,8 +100,10 @@ export class SuperpositionClient {
       token: encodeBase64(config.superposition.token), // Use the encoded base64 token
       org_id: config.superposition.orgId,
       workspace_id: config.superposition.workspaceId,
-      polling_interval: config.superposition.pollingInterval,
-      timeout: config.superposition.timeout,
+      refreshStrategy: {
+        interval: config.superposition.pollingInterval ?? 60000,
+        timeout: config.superposition.timeout ?? 30000,
+      },
     };
 
     try {
