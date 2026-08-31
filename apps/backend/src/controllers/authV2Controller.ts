@@ -1568,32 +1568,33 @@ export class AuthV2Controller {
       });
 
       let sessionId = null;
+      if (pendingRefreshToken || provider==AuthProvider.EMAIL) {
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
 
-      try {
-        const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          const deviceInfo = JSON.stringify({
+            userAgent: req.headers['user-agent'],
+            acceptLanguage: req.headers['accept-language'],
+            timestamp: new Date().toISOString(),
+            appVersion: req.headers['x-app-version'],
+          });
 
-        const deviceInfo = JSON.stringify({
-          userAgent: req.headers['user-agent'],
-          acceptLanguage: req.headers['accept-language'],
-          timestamp: new Date().toISOString(),
-          appVersion: req.headers['x-app-version'],
-        });
+          const session = await this.userSessionService.createSession({
+            userId: workspaceUser.id,
+            refreshToken: pendingRefreshToken || randomUUID(),
+            refreshTokenExpiry,
+            accessToken: pendingAccessToken,
+            accessTokenExpiry: pendingAccessTokenExpiry,
+            deviceInfo,
+            ipAddress: req.ip || req.connection.remoteAddress || undefined,
+          });
 
-        const session = await this.userSessionService.createSession({
-          userId: workspaceUser.id,
-          refreshToken: pendingRefreshToken || randomUUID(),
-          refreshTokenExpiry,
-          accessToken: pendingAccessToken,
-          accessTokenExpiry: pendingAccessTokenExpiry,
-          deviceInfo,
-          ipAddress: req.ip || req.connection.remoteAddress || undefined,
-        });
-
-        sessionId = session.id;
-        logger.info(`[LOGIN-WORKSPACE] Session created`);
-      } catch (sessionError) {
-        logger.error(`[LOGIN-WORKSPACE] Session creation failed:`, sessionError);
+          sessionId = session.id;
+          logger.info(`[LOGIN-WORKSPACE] Session created`);
+        } catch (sessionError) {
+          logger.error(`[LOGIN-WORKSPACE] Session creation failed:`, sessionError);
+        }
       }
 
       const token = jwtService.generateToken({
