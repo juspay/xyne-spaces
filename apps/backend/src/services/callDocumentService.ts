@@ -13,7 +13,7 @@ import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisi
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
-import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -651,8 +651,7 @@ async function convertMarkdownToBlockNote(
   citationCtx?: CitationContext,
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   try {
-    const editor = ServerBlockNoteEditor.create();
-    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+    const parsed = await withServerEditor((editor) => editor.tryParseMarkdownToBlocks(markdown));
 
     // Collect mentioned IDs during the mention-processing pass
     const mentionedIds = new Set<string>();

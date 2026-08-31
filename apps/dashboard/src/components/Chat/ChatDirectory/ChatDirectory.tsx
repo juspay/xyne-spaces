@@ -9,6 +9,8 @@ import {
   type ComponentType,
 } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { Radar as RadarIcon } from 'lucide-react';
+import { useRadarEnabled } from '../../../hooks/radarCacConfig';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById } from '../../../shortcuts';
@@ -92,6 +94,7 @@ import SectionSettingsMenu, { MENU_ROW } from './SectionSettingsMenu';
 import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
@@ -224,6 +227,10 @@ const ChatDirectory = ({
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
+  // Radar rollout is runtime CAC (radar_config), not a build-time flag:
+  // enabling it must not need a dashboard rebuild, and the pilot runs on an
+  // allowedEmails subset first.
+  const radarEnabled = useRadarEnabled(auth.user?.email);
   const { selfDmChannelId, landingChannelId } = auth;
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
@@ -673,6 +680,7 @@ const ChatDirectory = ({
                 <ChatPlus className='size-4' />
               </span>
               <span className='flex-1 min-w-0 text-left truncate block'>New Message</span>
+              <ShortcutHint shortcut='global.composeMessage' />
             </button>
             <button
               className={cn(
@@ -692,6 +700,7 @@ const ChatDirectory = ({
                 <Subtask className='size-4' />
               </span>
               <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
+              <ShortcutHint shortcut='global.openThreads' />
               {threadCount > 0 && (
                 <span className='size-5 flex items-center justify-center shrink-0'>
                   <Badge
@@ -819,6 +828,26 @@ const ChatDirectory = ({
                 </span>
               )}
             </button>
+            {radarEnabled && (
+              <button
+                className={cn(
+                  'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                  location.pathname.includes('/chat/dir/radar')
+                    ? 'text-sidebar-accent-foreground font-semibold bg-sidebar-accent'
+                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
+                )}
+                onClick={() => {
+                  void navigate('/chat/dir/radar');
+                }}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_RADAR'
+              >
+                <span className='size-4 flex items-center justify-center shrink-0'>
+                  <RadarIcon className='size-4' />
+                </span>
+                <span className='flex-1 min-w-0 text-left truncate block'>Radar</span>
+              </button>
+            )}
           </div>
 
           <div className='py-3 w-full hidden md:block' />

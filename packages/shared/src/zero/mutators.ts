@@ -3601,12 +3601,9 @@ export const mutators = defineMutators({
     ),
     approveLobbyRequest: defineMutator(
       z.object({ callId: z.string(), participantId: z.string() }),
-      async ({ tx, ctx, args: { callId, participantId } }) => {
+      async ({ tx, args: { callId, participantId } }) => {
         const call = await tx.run(zql.calls.where('id', callId).one());
         if (!call) throw new Error('Call not found');
-        if (call.createdByUserId !== ctx.userID) {
-          throw new Error('Only the call creator can admit participants');
-        }
         await tx.mutate.call_participants.update({
           id: participantId,
           response: InvitationResponse.ACCEPTED,
@@ -3616,12 +3613,9 @@ export const mutators = defineMutators({
     ),
     rejectLobbyRequest: defineMutator(
       z.object({ callId: z.string(), participantId: z.string() }),
-      async ({ tx, ctx, args: { callId, participantId } }) => {
+      async ({ tx, args: { callId, participantId } }) => {
         const call = await tx.run(zql.calls.where('id', callId).one());
         if (!call) throw new Error('Call not found');
-        if (call.createdByUserId !== ctx.userID) {
-          throw new Error('Only the call creator can decline participants');
-        }
         await tx.mutate.call_participants.update({
           id: participantId,
           response: InvitationResponse.DECLINED,

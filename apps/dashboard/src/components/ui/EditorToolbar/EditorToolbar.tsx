@@ -16,6 +16,7 @@ import {
   TextQuote,
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
+import { Highlighter } from 'lucide-react';
 import type { EditorToolbarProps } from './EditorToolbar.types';
 import Dialog from '../Dialog';
 import Button from '../Button';
@@ -31,6 +32,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     italic: false,
     strike: false,
     underline: false,
+    highlight: false,
     code: false,
     codeBlock: false,
     link: false,
@@ -59,6 +61,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         italic: editor.isActive('italic'),
         strike: editor.isActive('strike'),
         underline: editor.isActive('underline'),
+        highlight: editor.isActive('highlight'),
         code: editor.isActive('code'),
         codeBlock: editor.isActive('codeBlock'),
         link: editor.isActive('link'),
@@ -107,6 +110,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   const handleUnderline = useCallback(() => {
     editor?.chain().focus().toggleUnderline().run();
+  }, [editor]);
+
+  const handleHighlight = useCallback(() => {
+    editor?.chain().focus().toggleHighlight().run();
   }, [editor]);
 
   const handleCode = useCallback(() => {
@@ -263,6 +270,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   if (!editor) return null;
 
+  const supportsHighlight = editor.extensionManager.extensions.some(
+    extension => extension.name === 'highlight',
+  );
+
   const buttonClass = (active: boolean): string =>
     variant === 'compact'
       ? `pt-[6px] pr-[8px] pb-[7px] pl-[8px] rounded transition-all duration-200 ease-in-out ${
@@ -339,6 +350,23 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
               <StrikeThrough className='h-4 w-4' />
             </button>
           </Tooltip>
+
+          {supportsHighlight && (
+            <Tooltip content='Highlight (⌘⇧H)' delayDuration={1000} skipDelayDuration={1000}>
+              <button
+                type='button'
+                onClick={handleHighlight}
+                data-track-category='EDITOR_TOOLBAR'
+                data-track-name='FORMAT_HIGHLIGHT'
+                onMouseDown={e => e.preventDefault()}
+                className={buttonClass(isActive.highlight)}
+                aria-label='Highlight'
+                aria-pressed={isActive.highlight}
+              >
+                <Highlighter className='h-4 w-4' />
+              </button>
+            </Tooltip>
+          )}
 
           <Tooltip content='Clear Formatting (⌘\\)' delayDuration={1000} skipDelayDuration={1000}>
             <button

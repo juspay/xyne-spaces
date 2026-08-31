@@ -2287,22 +2287,7 @@ export class TicketController {
         );
       }
 
-      // Check for duplicate tickets and persist references
-      if (ticket?.id) {
-        ticketDuplicateService.persistDuplicateReferences({
-          ticketId: ticket.id,
-          ticketCreatedBy: userId,
-          title: subject,
-          description: body,
-          projectId: ticket.projectId,
-          userId,
-        }).catch(error => {
-          logger.error('[Apps Email Ticket Creation] Failed to persist duplicate references for ticket', {
-            ticketId: ticket.id,
-            error,
-          });
-        });
-      }
+      // Duplicate detection runs inside emailService.createConversationWithEmail.
 
       // Apply optional fields to the created ticket
       if (priority !== undefined || resolvedAssignedTo !== undefined || userGroupId !== undefined || stageName !== undefined || ticketType !== undefined) {

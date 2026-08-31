@@ -12,7 +12,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
-import { Download } from 'lucide-react';
+import { DownloadDown as Download } from '@xyne/icons';
 
 const ProjectsListView = (): ReactElement => {
   const zero = useZero();

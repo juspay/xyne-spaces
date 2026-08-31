@@ -199,9 +199,17 @@ const SearchResults = (): ReactElement => {
     const mentionsParam = searchParams.get('mentions') ?? '';
     const channelMentionsParam = searchParams.get('channelMentions') ?? '';
     const tabParam = parseDocTypeParam(searchParams.get('tab'));
+    // Toggles come from cmd+K (see buildSearchParams). Absent for deep links / other entry
+    // points → fall back to DEFAULT_SEARCH_FILTERS.
+    const onlyMyChannelsParam = searchParams.get('onlyMyChannels');
+    const includeBotMessagesParam = searchParams.get('includeBotMessages');
     return {
       ...DEFAULT_SEARCH_FILTERS,
       ...(tabParam ? { docType: tabParam } : {}),
+      ...(onlyMyChannelsParam !== null ? { onlyMyChannels: onlyMyChannelsParam === 'true' } : {}),
+      ...(includeBotMessagesParam !== null
+        ? { includeBotMessages: includeBotMessagesParam === 'true' }
+        : {}),
       fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
       fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
       toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
@@ -300,6 +308,7 @@ const SearchResults = (): ReactElement => {
     searchResults: backendResults,
     isGrouped,
     isSearching: isLoading,
+    isSearchPending,
     searchError: error,
     text: searchedText,
     setText,
@@ -597,9 +606,6 @@ const SearchResults = (): ReactElement => {
     });
   }, [baseResults, filters.sortBy, isChannelsMode]);
 
-  // Track whether a search has been initiated for the current query/filters to avoid
-  // showing "No results" before the first search fires (300ms debounce window)
-  const hasEverLoadedRef = useRef(false);
   const autoOpenedResultKeyRef = useRef<string | null>(null);
   const hasManualPanelSelectionRef = useRef(false);
   const filterKey = JSON.stringify([
@@ -616,23 +622,6 @@ const SearchResults = (): ReactElement => {
   ]);
   const searchRequestKey = JSON.stringify([query, filterKey]);
   const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
-  const prevSearchKeyRef = useRef(searchRequestKey);
-  const prevFilterKeyRef = useRef(filterKey);
-  if (searchRequestKey !== prevSearchKeyRef.current) {
-    prevSearchKeyRef.current = searchRequestKey;
-    // Only show the loading bridge when a new API call will actually run: a filter change,
-    // or a query the search hook hasn't fetched yet. Since results now update live while
-    // typing, pressing Enter commits the already-searched query to the URL but fires no API
-    // call (the hook duplicate-suppresses it) — so resetting here would leave `isLoading`
-    // false forever and spin the screen indefinitely. Guard against that.
-    // `query` is already both-ends trimmed (line ~183); the hook dedupes on text.trimEnd()
-    // (useSearchMetrics), so normalize the same way here or a leading-space edit would
-    // disagree with whether the hook actually re-fetches.
-    const willFetch = filterKey !== prevFilterKeyRef.current || query !== searchedText.trimEnd();
-    if (willFetch) hasEverLoadedRef.current = false; // reset for new search
-    prevFilterKeyRef.current = filterKey;
-  }
-  if (isLoading) hasEverLoadedRef.current = true;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
@@ -860,7 +849,7 @@ const SearchResults = (): ReactElement => {
             query={query}
             displayQuery={displayQuery}
             hasActiveFilters={filtersActive}
-            hasEverLoaded={hasEverLoadedRef.current}
+            isSearchPending={isSearchPending}
             isLoading={isLoading}
             error={error}
             results={results}
@@ -963,7 +952,7 @@ interface ResultsBodyProps {
    *  query). Drives empty-state copy and local-section gating so they track live typing. */
   displayQuery: string;
   hasActiveFilters: boolean;
-  hasEverLoaded: boolean;
+  isSearchPending: boolean;
   isLoading: boolean;
   error: string | null;
   results: DisplaySearchResult[];
@@ -1107,7 +1096,7 @@ function ResultsBody({
   query,
   displayQuery,
   hasActiveFilters,
-  hasEverLoaded,
+  isSearchPending,
   isLoading,
   error,
   results,
@@ -1505,7 +1494,8 @@ function ResultsBody({
           <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
         );
       }
-      if (isLoading || !hasEverLoaded) {
+      // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
+      if (isLoading || isSearchPending) {
         return (
           <div className='flex items-center justify-center h-full'>
             <Loader2 className='animate-spin text-muted-foreground' size={32} />
@@ -1571,7 +1561,8 @@ function ResultsBody({
         <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
       );
     }
-    if (isLoading || !hasEverLoaded) {
+    // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
+    if (isLoading || isSearchPending) {
       return (
         <div className='flex items-center justify-center h-full'>
           <Loader2 className='animate-spin text-muted-foreground' size={32} />

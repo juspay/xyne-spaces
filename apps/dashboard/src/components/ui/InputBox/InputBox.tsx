@@ -10,6 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
+import Highlight from '@tiptap/extension-highlight';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
@@ -586,6 +587,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }).configure({
           HTMLAttributes: {
             class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
+          },
+        }),
+        Highlight.configure({
+          HTMLAttributes: {
+            class: 'chat-text-highlight',
           },
         }),
         MaxListDepthPlugin,
@@ -1496,7 +1502,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
           <div
-            className='flex items-center min-w-0'
+            className='flex items-center min-w-0 h-5 w-full bg-background px-[var(--composer-px)] pb-0.5'
             style={{ display: agentVisible ? 'flex' : 'none' }}
           >
             {agentSlot}

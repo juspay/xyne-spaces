@@ -63,6 +63,9 @@ export interface UploadToPathOptions {
   resumable?: boolean;
   /** GCS only: per-request timeout in ms (SDK default when omitted). */
   timeoutMs?: number;
+  /** GCS only: resumable upload chunk size in bytes (multiple of 256 KiB). Bounds buffering and avoids
+   *  single-request timeouts when the source stream is slow. No effect on S3 (already multipart). */
+  chunkSize?: number;
 }
 
 export interface StorageService {

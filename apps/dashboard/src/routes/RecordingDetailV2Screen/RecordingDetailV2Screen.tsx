@@ -1633,6 +1633,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       editable={true}
       placeholder='Detailed summary'
       autoFocus={false}
+      trackEditedRecordingSummaryBlocks={true}
       className={`w-full ${CANVAS_POPOVER_LAYER_CLASS}
         detailed-summary-canvas-editor
         [&_.bn-side-menu]:!hidden

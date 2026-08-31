@@ -3,6 +3,7 @@ import { ReactElement, useMemo, useState } from 'react';
 import { Edit2, Copy, Check, Rocket, CornerDownRight } from 'lucide-react';
 import { BoardType } from '@xyne/shared';
 import { EmptyState } from '../EmptyState';
+import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import { Button } from '../../ui/Button';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
@@ -37,6 +38,9 @@ interface BoardsTableProps {
   // Fired on row click (outside the action buttons). Rows are styled
   // cursor-pointer, so without a handler they look clickable but do nothing.
   onBoardClick?: (board: BoardWithStages) => void;
+  // True while the boards query is still resolving. Distinguishes
+  // "still loading" from "genuinely no boards" so we don't flash the empty state.
+  loading?: boolean;
 }
 
 type RowKind =
@@ -53,6 +57,7 @@ export const BoardsTable = ({
   applicationBoardIds,
   applicationByBoardId,
   onBoardClick,
+  loading = false,
 }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
@@ -131,6 +136,10 @@ export const BoardsTable = ({
 
     return out;
   }, [boards, applicationByBoardId]);
+
+  if (loading) {
+    return <DelayedSpinner className='flex min-h-40 items-center justify-center py-8' />;
+  }
 
   if (boards?.length === 0) {
     return (

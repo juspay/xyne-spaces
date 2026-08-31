@@ -36,6 +36,7 @@ import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
 import conversationLabelRoutes from '@/routes/conversationLabels';
+import radarExecutionRoutes from '@/routes/radarExecution';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
@@ -92,6 +93,7 @@ import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
+import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
@@ -478,6 +480,7 @@ export class App {
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
+    this.app.use('/api/radar', authMiddleware.authenticate, radarExecutionRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
@@ -629,6 +632,7 @@ export class App {
 
     // Board routes (auth and ACL required)
     this.app.use('/api/boards', authMiddleware.authenticate, boardRoutes);
+    this.app.use('/api/sub-tickets', authMiddleware.authenticate, subTicketRoutes);
 
     // Knowledge routes (auth required)
     this.app.use('/api/knowledge', authMiddleware.authenticate, knowledgeRoutes);
@@ -1029,6 +1033,12 @@ export class App {
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
 
+    const { radarExecutionQueue, isRadarExecutionEnabled } = await import('@/queues/radarExecutionQueue');
+    if (isRadarExecutionEnabled()) {
+      logger.info('Initializing radar execution queue (producer)...');
+      await radarExecutionQueue.initialize();
+    }
+
     logger.info('Initializing message classification queue (producer)...');
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
@@ -1099,6 +1109,10 @@ export class App {
 
       // Close SDLC producer queue
       await sdlcQueue.close();
+
+      // Close radar execution producer queue (initialized above when enabled)
+      const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
+      await radarQueue.close();
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();
