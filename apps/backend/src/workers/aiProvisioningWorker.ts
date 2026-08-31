@@ -175,12 +175,6 @@ class AIProvisioningWorker {
         await this.provisionWorkspace(subjectId);
         return;
       case AIProvisioningSubjectType.USER:
-        if (!config.aiProvisioning.enableUserProvisioning) {
-          logger.info('[AI-PROVISIONING-WORKER] User provisioning is disabled, skipping', {
-            subjectId,
-          });
-          return;
-        }
         await this.provisionUser(subjectId);
         return;
       default:
@@ -237,6 +231,14 @@ class AIProvisioningWorker {
     await clawSpacesSyncClient.syncOrg(orgPayload);
     await clawSpacesSyncClient.syncWorkspace(workspacePayload);
     await clawSpacesSyncClient.syncUser(clawUserPayload);
+
+    // LiteLLM KEY creation stays behind the env flag: orgs without managed
+    if (!config.aiProvisioning.enableUserProvisioning) {
+      logger.info('[AI-PROVISIONING-WORKER] User key provisioning disabled — skipping LiteLLM key creation', {
+        subjectId: orgMemberId,
+      });
+      return;
+    }
 
     const teamId = await this.ensureLiteLLMTeamForOrg(orgPayload);
     await this.ensureOrgLiteLLMServiceAccountCredentials(orgPayload, teamId);
