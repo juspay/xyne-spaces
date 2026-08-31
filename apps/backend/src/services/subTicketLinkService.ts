@@ -1,16 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import {
   ActivityClassification,
   ActivityType,
   BoardType,
-  ChannelVisibility,
   GuestEntity,
   isManualSubTicketBoard,
   linkedSubTicketId,
   MessageType,
   WorkspaceRole,
 } from '@xyne/shared';
+import { ACLFactory } from '@/database/acl';
 import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -70,10 +70,20 @@ async function hasGuestTicketAccess(
   return Boolean(participant);
 }
 
-/**
- * "Can this user see this ticket": channel is PUBLIC, or they participate in it.
- * Mirrors TicketsACL.canSelect, with the guest allow-list applied first.
- */
+/** Table ACL built from the re-resolved workspace role, not req.user.role (the API key's role). */
+function aclFor(
+  model: 'ticket' | 'ticketSubTicketMapping',
+  tx: PrismaTx,
+  actor: SubTicketLinkActor,
+): ReturnType<typeof ACLFactory.getACL> {
+  return ACLFactory.getACL(
+    model,
+    { userId: actor.userId, workspaceId: actor.workspaceId, role: actor.role },
+    tx as unknown as PrismaClient,
+  );
+}
+
+/** Read gate: member rule from TicketsACL; guests keep their own allow-list. */
 async function canReadTicket(
   tx: PrismaTx,
   actor: SubTicketLinkActor,
@@ -87,76 +97,81 @@ async function canReadTicket(
     return hasGuestTicketAccess(tx, actor, ticket);
   }
 
-  const channel = await tx.channel.findUnique({
-    where: { id: ticket.channelId },
-    select: { visibility: true },
-  });
-  if (channel?.visibility === ChannelVisibility.PUBLIC) {
-    return true;
+  const where = (await aclFor('ticket', tx, actor).getWhereClause()) as Prisma.TicketWhereInput | null;
+  if (!where) {
+    return false;
   }
-
-  const participant = await tx.channelParticipant.findFirst({
-    where: { channelId: ticket.channelId, userId: actor.userId },
-    select: { id: true },
-  });
-  return Boolean(participant);
+  return (await tx.ticket.count({ where: { AND: [{ id: ticket.id }, where] } })) > 0;
 }
 
-/**
- * Writing to a ticket's sub-ticket edges needs more than read access: a PUBLIC channel
- * also requires participation in some PUBLIC channel of its project. Port of
- * TicketSubTicketMappingsACL.canInsert/canDelete, which gate these writes today.
- */
-async function canWriteTicketMappings(
+/** Guest and archived-channel rules the table ACL does not express; 'defer' hands over to it. */
+async function sharedWriteGuards(
   tx: PrismaTx,
   actor: SubTicketLinkActor,
   ticket: TicketScope,
-): Promise<boolean> {
+): Promise<'allow' | 'deny' | 'defer'> {
   if (ticket.workspaceId !== actor.workspaceId) {
-    return false;
+    return 'deny';
   }
 
+  // The table ACL has no guest branch, so a grant-only guest must be decided here.
   if (actor.role === WorkspaceRole.GUEST) {
-    return hasGuestTicketAccess(tx, actor, ticket);
+    return (await hasGuestTicketAccess(tx, actor, ticket)) ? 'allow' : 'deny';
   }
 
   const channel = await tx.channel.findUnique({
     where: { id: ticket.channelId },
-    select: { visibility: true, projectId: true, workspaceId: true, isArchived: true },
+    select: { workspaceId: true, isArchived: true },
   });
   if (!channel || channel.workspaceId !== actor.workspaceId) {
-    return false;
+    return 'deny';
   }
   // MessagesACL refused the SYSTEM message in an archived channel; keep that boundary.
   if (channel.isArchived) {
     throw new SubTicketLinkError('This channel is archived', 409);
   }
 
-  if (channel.visibility === ChannelVisibility.PRIVATE) {
-    const participant = await tx.channelParticipant.findFirst({
-      where: { channelId: ticket.channelId, userId: actor.userId },
-      select: { id: true },
-    });
-    return Boolean(participant);
-  }
-  if (channel.visibility !== ChannelVisibility.PUBLIC) {
-    return false;
+  return 'defer';
+}
+
+/** Create gate: the shared guards, then TicketSubTicketMappingsACL.canCreate. */
+async function canCreateTicketMapping(
+  tx: PrismaTx,
+  actor: SubTicketLinkActor,
+  ticket: TicketScope,
+  subTicketId: string,
+): Promise<boolean> {
+  const guard = await sharedWriteGuards(tx, actor, ticket);
+  if (guard !== 'defer') {
+    return guard === 'allow';
   }
 
-  // The ACL navigated channel -> project. ticket.projectId is the BOARD's project, which
-  // differs whenever a channel is mapped to a board in another project.
-  const projectChannelParticipant = await tx.channelParticipant.findFirst({
-    where: {
-      userId: actor.userId,
-      channel: {
-        projectId: channel.projectId,
-        workspaceId: actor.workspaceId,
-        visibility: ChannelVisibility.PUBLIC,
-      },
-    },
-    select: { id: true },
+  return aclFor('ticketSubTicketMapping', tx, actor).canCreate({
+    workspaceId: actor.workspaceId,
+    ticketId: ticket.id,
+    subTicketId,
   });
-  return Boolean(projectChannelParticipant);
+}
+
+/** Delete gate: the shared guards, then TicketSubTicketMappingsACL.getMutateWhere. */
+async function canDeleteTicketMapping(
+  tx: PrismaTx,
+  actor: SubTicketLinkActor,
+  ticket: TicketScope,
+  mappingId: string,
+): Promise<boolean> {
+  const guard = await sharedWriteGuards(tx, actor, ticket);
+  if (guard !== 'defer') {
+    return guard === 'allow';
+  }
+
+  const where = (await aclFor('ticketSubTicketMapping', tx, actor).getMutateWhere()) as
+    | Prisma.TicketSubTicketMappingWhereInput
+    | null;
+  if (!where) {
+    return false;
+  }
+  return (await tx.ticketSubTicketMapping.count({ where: { AND: [{ id: mappingId }, where] } })) > 0;
 }
 
 /**
@@ -331,7 +346,7 @@ export async function linkExistingSubTicket({
       if (!parentTicket || parentTicket.workspaceId !== actor.workspaceId) {
         throw new SubTicketLinkError('Parent ticket not found', 404);
       }
-      if (!(await canWriteTicketMappings(tx, actor, parentTicket))) {
+      if (!(await canCreateTicketMapping(tx, actor, parentTicket, subTicketId))) {
         throw new SubTicketLinkError('You do not have access to the parent ticket', 403);
       }
       await assertManualBoard(
@@ -501,7 +516,7 @@ export async function unlinkSubTicket({
       if (!parentTicket || parentTicket.workspaceId !== actor.workspaceId) {
         throw new SubTicketLinkError('Parent ticket not found', 404);
       }
-      if (!(await canWriteTicketMappings(tx, actor, parentTicket))) {
+      if (!(await canDeleteTicketMapping(tx, actor, parentTicket, mappingId))) {
         throw new SubTicketLinkError('You do not have access to the parent ticket', 403);
       }
 
