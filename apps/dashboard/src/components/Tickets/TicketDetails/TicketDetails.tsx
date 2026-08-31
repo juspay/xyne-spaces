@@ -71,7 +71,8 @@ import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
 import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
-import { useChannel } from '../../../hooks/useChannels';
+import { useChannel, useAllChannels } from '../../../hooks/useChannels';
+import { isDeskChannelType } from '@xyne/shared';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
@@ -1073,6 +1074,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Query channel if ticket has conversation with channelId
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
+  const allChannels = useAllChannels();
+  const channelTypeMap = useMemo(
+    () => new Map(allChannels.map(c => [c.id, c.type])),
+    [allChannels],
+  );
 
   // Detect if ticket belongs to an email/desk channel — title changes also update email subject
   // ticket.channelId is the direct field; ticket.conversation.channelId is the linked conversation's channel
@@ -2899,12 +2905,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
 
     const handleRowClick = (): void => {
-      if (mappedTicketId) {
-        if (isFlowBoard) {
-          openMappedSubTicket(mappedTicketId);
-          return;
+      if (mappedTicketId && mappedTicket) {
+        const channelType = channelTypeMap.get(mappedTicket.channelId);
+        if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
+          const pathParts = location.pathname.split('/');
+          const workspaceId = pathParts[1];
+          void navigate(
+            `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+          );
+        } else {
+          const base = buildChannelRoute(
+            `${mappedTicket.channelId}/${mappedTicket.conversationId}/${mappedTicket.id}`,
+            { selectedTab: 'thread' },
+          );
+          void navigate(`${base}#origin=${mappedTicket.conversationId}`);
         }
-        toggleSubTicketBranch(mappedTicketId);
         return;
       }
 
@@ -4456,6 +4471,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
                 const displayProgress = stageProgress === 0 ? 1 : stageProgress;
                 const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+                const navigateToParentTicket = (): void => {
+                  const channelType = channelTypeMap.get(parentTicket.channelId);
+                  if (isDeskChannelType(channelType) && parentTicket.xyneId) {
+                    const workspaceId = location.pathname.split('/')[1];
+                    void navigate(
+                      `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
+                    );
+                  } else {
+                    const base = buildChannelRoute(
+                      `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
+                      { selectedTab: 'thread' },
+                    );
+                    void navigate(`${base}#origin=${parentTicket.conversationId}`);
+                  }
+                };
+
                 const openParentTicket = (): void => {
                   if (onNavigateToTicket) {
                     onNavigateToTicket(parentTicket.id);
@@ -4469,11 +4500,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     key={parentTicket.id}
                     role='button'
                     tabIndex={0}
-                    onClick={openParentTicket}
+                    onClick={navigateToParentTicket}
                     onKeyDown={event => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        openParentTicket();
+                        navigateToParentTicket();
                       }
                     }}
                     className='flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80'

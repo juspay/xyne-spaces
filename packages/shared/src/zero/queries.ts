@@ -1,5 +1,5 @@
 import { createBuilder, defineQueries } from '@rocicorp/zero';
-import { BaseTicketType } from './types.js';
+import { BaseTicketType, SavedConfigVisibility } from './types.js';
 import { flowStepVisibilitySchemaShape } from '../tickets/flow.js';
 import { defineQuery } from './acl/define-query.js';
 import {
@@ -1169,6 +1169,7 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
       lastEmailAtEnd: z.number().optional(),
@@ -1181,7 +1182,7 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1216,6 +1217,12 @@ export const queries = defineQueries({
       if (hasAiDraft) {
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+        );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) =>
+          exists('subTicketMappings', (m) => m.where('subTicketId', 'IS NOT', null)),
         );
       }
 
@@ -1255,7 +1262,8 @@ export const queries = defineQueries({
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('formEntityValues', fev =>
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
-        );
+        )
+        .related('subTicketMappings');
     },
   ),
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
@@ -1363,6 +1371,7 @@ export const queries = defineQueries({
       aiCategory: z.array(z.string()).optional(),
       conversationIds: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
       mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
       userGroups: z.array(z.string()).optional(),
       lastEmailAtStart: z.number().optional(),
@@ -1378,7 +1387,7 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -1409,6 +1418,12 @@ export const queries = defineQueries({
       if (hasAiDraft) {
         query = query.where(({ exists }) =>
           exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+        );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) =>
+          exists('subTicketMappings', (m) => m.where('subTicketId', 'IS NOT', null)),
         );
       }
 
@@ -1510,6 +1525,7 @@ export const queries = defineQueries({
           .related('formEntityValues', fev =>
             relateSupportDynamicFieldValues(fev, dynamicFieldFilters),
           )
+          .related('subTicketMappings')
       );
     },
   ),
@@ -4325,6 +4341,23 @@ export const queries = defineQueries({
       .related('values')
       .orderBy('createdAt', 'desc');
   }),
+
+  savedDeskMetricsConfigsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.saved_user_configurations
+        .where('contextType', SavedConfigContextType.DESK_METRICS)
+        .where('contextId', channelId)
+        .where(({ or, cmp }) =>
+          or(
+            cmp('userId', ctx.userID),
+            cmp('visibility', SavedConfigVisibility.PUBLIC),
+          ),
+        )
+        .related('values')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   getWorkspaceById: defineQuery(
     z.object({ workspaceId: z.string() }),

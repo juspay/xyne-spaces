@@ -1,4 +1,4 @@
-import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { ReactElement, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePersistedDeskMetricsFilters } from '../../../hooks/usePersistedDeskMetricsFilters';
 import {
@@ -6,6 +6,9 @@ import {
   X,
   BarChart3,
   BarChart4,
+  Bookmark,
+  BookmarkCheck,
+  List,
   AlertCircle,
   Check,
   Sparkles,
@@ -66,6 +69,10 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
+import { toast } from 'sonner';
+import { useDeskMetricsSavedViews } from '../../../hooks/useDeskMetricsSavedViews';
+import { SavedConfigVisibility } from '@xyne/shared';
+import { valuesToDeskMetricsFilters } from '../../../utils/deskMetricsViewSerialization';
 import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/constants';
 
 export interface DeskMetricsSelectableDesk {
@@ -986,7 +993,71 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     setChartView,
     activeTab,
     setActiveTab,
+    activeViewId,
+    setActiveViewId,
+    applyView,
+    storedFilters,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
+
+  const { savedViews, saveView, deleteView } = useDeskMetricsSavedViews(channelId);
+
+  // Restore active view once savedViews loads (useCachedQuery starts empty)
+  const hasRestoredView = useRef(false);
+  useEffect(() => {
+    if (hasRestoredView.current) return;
+    if (!activeViewId || savedViews.length === 0) return;
+    const view = savedViews.find(v => v.id === activeViewId);
+    if (view) {
+      hasRestoredView.current = true;
+      applyView(valuesToDeskMetricsFilters(view.values), view.id);
+    } else {
+      // View was deleted externally — clear the stale id
+      setActiveViewId(null);
+      hasRestoredView.current = true;
+    }
+  }, [savedViews, activeViewId, applyView, setActiveViewId]);
+
+  // Save-view popover state
+  const [saveViewPopoverOpen, setSaveViewPopoverOpen] = useState(false);
+  const [saveViewName, setSaveViewName] = useState('');
+  const [saveViewLoading, setSaveViewLoading] = useState(false);
+  const [saveViewError, setSaveViewError] = useState<string | null>(null);
+  const [saveViewIsPublic, setSaveViewIsPublic] = useState(false);
+
+  // Saved-views list popover state
+  const [savedViewsPopoverOpen, setSavedViewsPopoverOpen] = useState(false);
+
+  const handleSaveView = useCallback(async () => {
+    if (!saveViewName.trim()) return;
+    setSaveViewLoading(true);
+    setSaveViewError(null);
+    try {
+      const id = await saveView(
+        saveViewName.trim(),
+        storedFilters,
+        saveViewIsPublic ? SavedConfigVisibility.PUBLIC : SavedConfigVisibility.PRIVATE,
+      );
+      setActiveViewId(id);
+      setSaveViewPopoverOpen(false);
+      setSaveViewName('');
+      setSaveViewIsPublic(false);
+      toast.success('View saved');
+    } catch (err) {
+      setSaveViewError(err instanceof Error ? err.message : 'Failed to save view');
+    } finally {
+      setSaveViewLoading(false);
+    }
+  }, [saveViewName, saveViewIsPublic, saveView, storedFilters, setActiveViewId]);
+
+  const handleApplySavedView = useCallback(
+    (viewId: string) => {
+      const view = savedViews.find(v => v.id === viewId);
+      if (!view) return;
+      applyView(valuesToDeskMetricsFilters(view.values), view.id);
+      setSavedViewsPopoverOpen(false);
+    },
+    [savedViews, applyView],
+  );
 
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
@@ -1390,7 +1461,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
         <div className='isolate flex h-full w-full flex-col overflow-hidden rounded-l-[16px] border border-desk-border bg-popover shadow-2xl dark:border-border'>
           {/* Header */}
           <div className='grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-desk-border px-6 pt-4 dark:border-border'>
-            <div className='flex min-w-0 items-center gap-4 pr-12'>
+            <div className='flex min-w-0 items-center gap-3 pr-24'>
               <div className='flex items-center gap-2'>
                 <BarChart3 size={18} className='text-desk-accent' />
                 <span className='text-base font-semibold text-foreground'>
@@ -1401,6 +1472,24 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       : 'Desk Metrics'}
                 </span>
               </div>
+              {activeViewId && savedViews.find(v => v.id === activeViewId) && (
+                <div className='flex items-center gap-1 rounded-full border border-desk-border bg-accent px-2.5 py-0.5 text-xs font-medium text-foreground'>
+                  <BookmarkCheck size={11} className='shrink-0 text-primary' />
+                  <span className='max-w-[120px] truncate'>
+                    {savedViews.find(v => v.id === activeViewId)?.name}
+                  </span>
+                  <button
+                    type='button'
+                    onClick={() => setActiveViewId(null)}
+                    className='ml-0.5 text-muted-foreground hover:text-foreground'
+                    aria-label='Dismiss saved view'
+                    data-track-category='DeskMetrics'
+                    data-track-name='DismissSavedView'
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              )}
               <div
                 role='tablist'
                 aria-label='Metrics view'
@@ -1444,6 +1533,166 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     {label}
                   </button>
                 ))}
+              </div>
+
+              {/* Save view + Saved views buttons */}
+              <div className='ml-auto flex items-center gap-1.5'>
+                {/* Saved views list */}
+                <Popover
+                  open={savedViewsPopoverOpen}
+                  onOpenChange={setSavedViewsPopoverOpen}
+                  align='end'
+                  sideOffset={6}
+                  className='p-0'
+                  trigger={
+                    <button
+                      type='button'
+                      className={cn(
+                        'flex h-7 items-center gap-1.5 rounded-[8px] px-2.5 text-xs font-medium transition-colors',
+                        savedViewsPopoverOpen
+                          ? 'bg-accent text-foreground'
+                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                      )}
+                      aria-label='Saved views'
+                      data-track-category='DeskMetrics'
+                      data-track-name='OpenSavedViews'
+                    >
+                      <List size={14} />
+                      <span>Views{savedViews.length > 0 ? ` (${savedViews.length})` : ''}</span>
+                    </button>
+                  }
+                >
+                  <div className='w-64'>
+                    <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                      Saved views
+                    </div>
+                    {savedViews.length === 0 ? (
+                      <div className='p-4 text-center text-sm text-muted-foreground'>
+                        No saved views yet
+                      </div>
+                    ) : (
+                      <div className='max-h-64 overflow-y-auto p-1'>
+                        {savedViews.map(view => (
+                          <div
+                            key={view.id}
+                            className={cn(
+                              'flex items-center justify-between rounded-[6px] px-3 py-1.5 text-sm transition-colors',
+                              activeViewId === view.id
+                                ? 'bg-accent text-accent-foreground'
+                                : 'text-foreground hover:bg-muted',
+                            )}
+                          >
+                            <button
+                              type='button'
+                              className='flex flex-1 items-center gap-2 truncate text-left'
+                              onClick={() => handleApplySavedView(view.id)}
+                              data-track-category='DeskMetrics'
+                              data-track-name='ApplySavedView'
+                            >
+                              {view.visibility === SavedConfigVisibility.PUBLIC ? (
+                                <Users size={13} className='shrink-0 text-muted-foreground' />
+                              ) : (
+                                <Bookmark size={13} className='shrink-0 text-muted-foreground' />
+                              )}
+                              <span className='truncate'>{view.name}</span>
+                              {activeViewId === view.id && (
+                                <Check size={13} className='shrink-0 ml-auto text-primary' />
+                              )}
+                            </button>
+                            <button
+                              type='button'
+                              onClick={() => {
+                                void deleteView(view.id);
+                                if (activeViewId === view.id) setActiveViewId(null);
+                              }}
+                              className='ml-1 shrink-0 text-muted-foreground hover:text-destructive'
+                              aria-label={`Delete ${view.name}`}
+                              data-track-category='DeskMetrics'
+                              data-track-name='DeleteSavedView'
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </Popover>
+
+                {/* Save current filters as a new view */}
+                <Popover
+                  open={saveViewPopoverOpen}
+                  onOpenChange={open => {
+                    setSaveViewPopoverOpen(open);
+                    if (!open) {
+                      setSaveViewName('');
+                      setSaveViewError(null);
+                      setSaveViewIsPublic(false);
+                    }
+                  }}
+                  align='end'
+                  sideOffset={6}
+                  className='p-0'
+                  trigger={
+                    <button
+                      type='button'
+                      className={cn(
+                        'flex h-7 items-center gap-1.5 rounded-[8px] px-2.5 text-xs font-medium transition-colors',
+                        saveViewPopoverOpen
+                          ? 'bg-accent text-foreground'
+                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                      )}
+                      aria-label='Save current filters as a view'
+                      data-track-category='DeskMetrics'
+                      data-track-name='OpenSaveView'
+                    >
+                      <Bookmark size={14} />
+                      <span>Save view</span>
+                    </button>
+                  }
+                >
+                  <div className='w-72 p-3'>
+                    <p className='mb-2 text-sm font-medium text-foreground'>Save current filters</p>
+                    <input
+                      type='text'
+                      placeholder='View name…'
+                      value={saveViewName}
+                      onChange={e => setSaveViewName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && saveViewName.trim() && !saveViewLoading)
+                          void handleSaveView();
+                      }}
+                      className='mb-2 w-full rounded-[6px] border border-border bg-background px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary'
+                      data-track-category='DeskMetrics'
+                      data-track-name='SaveViewNameInput'
+                      autoFocus
+                    />
+                    <label className='mb-3 flex cursor-pointer items-center gap-2 text-sm text-foreground'>
+                      <input
+                        type='checkbox'
+                        checked={saveViewIsPublic}
+                        onChange={e => setSaveViewIsPublic(e.target.checked)}
+                        className='rounded'
+                        data-track-category='DeskMetrics'
+                        data-track-name='ToggleShareWithTeam'
+                      />
+                      Share with team (admins only)
+                    </label>
+                    {saveViewError && (
+                      <p className='mb-2 text-xs text-destructive'>{saveViewError}</p>
+                    )}
+                    <button
+                      type='button'
+                      disabled={!saveViewName.trim() || saveViewLoading}
+                      onClick={() => void handleSaveView()}
+                      className='w-full rounded-[6px] bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                      data-track-category='DeskMetrics'
+                      data-track-name='SaveView'
+                    >
+                      {saveViewLoading ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </Popover>
               </div>
             </div>
             <div className='contents'>

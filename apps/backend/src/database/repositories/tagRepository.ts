@@ -178,7 +178,7 @@ export class TagRepository {
   }
 
   /**
-   * Returns all distinct (tagCategory, tag) pairs for a configKey (capped at 500).
+   * Returns all distinct (tagCategory, tag) pairs for a configKey.
    * Used by the "AI Tags" filter submenu to list all tags that actually exist for a channel.
    */
   async findDistinctTagsByConfigKey(
@@ -189,7 +189,7 @@ export class TagRepository {
       distinct: ['tagCategory', 'tag'],
       select: { tagCategory: true, tag: true },
       orderBy: [{ tagCategory: 'asc' }, { tag: 'asc' }],
-      take: 500,
+      take: 5000,
     });
   }
 

@@ -964,6 +964,7 @@ export enum ProjectType {
 // @ts-ignore TS1294
 export enum SavedConfigContextType {
   BOARD = 'BOARD',
+  DESK_METRICS = 'DESK_METRICS',
 }
 
 // @ts-ignore TS1294
@@ -976,6 +977,7 @@ export enum SavedConfigVisibility {
 export enum SavedConfigEntityName {
   TICKET = 'TICKET',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
+  DESK_METRICS = 'DESK_METRICS',
 }
 
 // @ts-ignore TS1294

@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, SavedConfigVisibility, Schema } from '@xyne/shared';
+import { ChannelRole, SavedConfigContextType, SavedConfigVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema, type QueryContext } from '../core/types';
 import { zql } from '../../queries';
@@ -62,12 +62,28 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
     }
 
     if (args.visibility === SavedConfigVisibility.PUBLIC) {
-      const allowed = await canMakePublicView(tx, this.ctx.userID, args.contextId);
-      if (!allowed) {
-        throw new MutationACLError(
-          'Saved view insert failed: you do not have permission to create a public view',
-          'saved_user_configurations',
+      if (args.contextType === SavedConfigContextType.DESK_METRICS) {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.contextId)
+            .where('userId', this.ctx.userID)
+            .where('role', ChannelRole.ADMIN)
+            .one(),
         );
+        if (!participant) {
+          throw new MutationACLError(
+            'Saved view insert failed: only channel admins can create public desk metrics views',
+            'saved_user_configurations',
+          );
+        }
+      } else {
+        const allowed = await canMakePublicView(tx, this.ctx.userID, args.contextId);
+        if (!allowed) {
+          throw new MutationACLError(
+            'Saved view insert failed: you do not have permission to create a public view',
+            'saved_user_configurations',
+          );
+        }
       }
     }
   }
@@ -97,12 +113,28 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
       args.visibility === SavedConfigVisibility.PUBLIC &&
       config.visibility !== SavedConfigVisibility.PUBLIC
     ) {
-      const allowed = await canMakePublicView(tx, this.ctx.userID, config.contextId);
-      if (!allowed) {
-        throw new MutationACLError(
-          'Saved view update failed: you do not have permission to make this view public',
-          'saved_user_configurations',
+      if (config.contextType === SavedConfigContextType.DESK_METRICS) {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', config.contextId)
+            .where('userId', this.ctx.userID)
+            .where('role', ChannelRole.ADMIN)
+            .one(),
         );
+        if (!participant) {
+          throw new MutationACLError(
+            'Saved view update failed: only channel admins can make desk metrics views public',
+            'saved_user_configurations',
+          );
+        }
+      } else {
+        const allowed = await canMakePublicView(tx, this.ctx.userID, config.contextId);
+        if (!allowed) {
+          throw new MutationACLError(
+            'Saved view update failed: you do not have permission to make this view public',
+            'saved_user_configurations',
+          );
+        }
       }
     }
   }

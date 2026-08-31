@@ -202,6 +202,35 @@ async function validateFormEntityValue(
   }
 }
 
+const DESK_METRICS_FIELD_WHITELIST = new Set([
+  'rangeLabel',
+  'customStart',
+  'customEnd',
+  'startTime',
+  'endTime',
+  'selectedAssigneeIds',
+  'selectedStageNames',
+  'selectedPriorities',
+  'selectedUserGroupIds',
+  'selectedTagCategory',
+  'selectedTagValues',
+  'selectedAiCategories',
+  'comparedChannelIds',
+  'chartView',
+  'activeTab',
+]);
+
+function validateDeskMetricsValue(fieldName: string): void {
+  // Custom field values are serialized as "selectedCustomFieldValues.<fieldId>"
+  if (fieldName.startsWith('selectedCustomFieldValues.')) return;
+  if (!DESK_METRICS_FIELD_WHITELIST.has(fieldName)) {
+    throw new MutationACLError(
+      `Invalid desk metrics field: ${fieldName}`,
+      'saved_user_configuration_values',
+    );
+  }
+}
+
 export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configuration_values'> {
   constructor(ctx: QueryContext) {
     super(ctx, 'saved_user_configuration_values');
@@ -238,6 +267,9 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
       case SavedConfigEntityName.FORM_ENTITY_VALUE:
         await validateFormEntityValue(args.fieldName, args.fieldValue, tx);
         break;
+      case SavedConfigEntityName.DESK_METRICS:
+        validateDeskMetricsValue(args.fieldName);
+        break;
       default:
         throw new MutationACLError(
           `Unsupported entity name: ${args.entityName}`,
@@ -267,6 +299,9 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
           break;
         case SavedConfigEntityName.FORM_ENTITY_VALUE:
           await validateFormEntityValue(args.fieldName, args.fieldValue, tx);
+          break;
+        case SavedConfigEntityName.DESK_METRICS:
+          validateDeskMetricsValue(args.fieldName);
           break;
         default:
           throw new MutationACLError(
