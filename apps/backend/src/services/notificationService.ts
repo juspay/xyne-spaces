@@ -1337,6 +1337,8 @@ class NotificationService {
         senderId,
         ...(!isCommentMention ? { senderName } : {}),
         workspaceId,
+        // Every other builder sends it; the client routes on the channel's type.
+        ...(channelId ? { channelId } : {}),
         mentionContext,
         ...(blockId ? { blockId } : {}),
         ...(commentThreadId ? { commentThreadId } : {}),

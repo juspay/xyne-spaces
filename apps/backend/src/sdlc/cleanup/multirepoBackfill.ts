@@ -68,6 +68,24 @@ async function readHubs(limit: number, afterId: string | null): Promise<LegacySd
   return rows.map(row => ({ ...row, channelId: row.channelId! }));
 }
 
+// Raw because the column is required in Prisma and nullable only for these rows,
+// so the typed filters cannot name them.
+function countLegacyLinks(repoId: string): Promise<number> {
+  return db
+    .$queryRaw<Array<{ count: bigint }>>`
+      SELECT count(*) FROM "public"."sdlc_entity_links"
+      WHERE "repoId" = ${repoId} AND "channelId" IS NULL
+    `
+    .then(rows => Number(rows[0]?.count ?? 0));
+}
+
+function stampLegacyLinks(repoId: string, channelId: string): Promise<number> {
+  return db.$executeRaw`
+    UPDATE "public"."sdlc_entity_links" SET "channelId" = ${channelId}
+    WHERE "repoId" = ${repoId} AND "channelId" IS NULL
+  `;
+}
+
 /** A hub's tracks, by the repository column they were scoped by. */
 function readTracks(repoId: string) {
   return db.sdlcTrack.findMany({
@@ -123,7 +141,7 @@ export async function backfillSdlcMultirepo(
                     targetId: { in: trackRows.map(row => row.targetId) },
                   },
                 }),
-            db.sdlcEntityLink.count({ where: { repoId: hub.id, channelId: null } }),
+            countLegacyLinks(hub.id),
           ]);
           trackEdgesCreated += trackRows.length - existingTrackEdges;
           linksStamped += stampableLinks;
@@ -132,13 +150,10 @@ export async function backfillSdlcMultirepo(
             trackRows.length === 0
               ? Promise.resolve({ count: 0 })
               : db.sdlcEntityLink.createMany({ data: trackRows, skipDuplicates: true }),
-            db.sdlcEntityLink.updateMany({
-              where: { repoId: hub.id, channelId: null },
-              data: { channelId: hub.channelId },
-            }),
+            stampLegacyLinks(hub.id, hub.channelId),
           ]);
           trackEdgesCreated += trackEdges.count;
-          linksStamped += links.count;
+          linksStamped += links;
         }
       }
 

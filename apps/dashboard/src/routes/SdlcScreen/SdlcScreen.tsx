@@ -93,6 +93,7 @@ import {
 } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import { useExternalDebuggerStore } from '../../store/useExternalDebuggerStore';
 import CanvasScreen from '../../components/Canvas/CanvasScreen';
+import ThreadMessages from '../../components/Chat/ThreadPannel';
 import {
   isElectronApp,
   openStandaloneWindow,
@@ -605,6 +606,18 @@ export default function SdlcScreen(): ReactElement {
     [selectedCanvasRelatedConversations],
   );
   const selectedTicketId = routeSearchParams.get('ticket');
+  // ThreadMessages keys off the conversation, so a `?ticket=` deep link has to
+  // read the row to find one.
+  const [selectedTicketRow] = useCachedQuery(
+    queries.ticketRowById({ ticketId: selectedTicketId ?? '' }),
+    { enabled: Boolean(selectedTicketId) },
+  );
+  const closeTicketPanel = useCallback((): void => {
+    const next = new URLSearchParams(location.search);
+    next.delete('ticket');
+    const search = next.toString();
+    void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
+  }, [location.pathname, location.search, navigate]);
   const chatLayout = sdlcChatLayout({
     chatParam: routeSearchParams.get('chat'),
     discussionParam: routeSearchParams.get('discussion'),
@@ -640,14 +653,101 @@ export default function SdlcScreen(): ReactElement {
     ],
   );
 
+  // Converting a discussion to a ticket leaves the artifact link on the
+  // conversation, not on the ticket, so the ticket alone resolves to nothing.
+  const ticketDiscussion = useMemo(() => {
+    const conversationId = selectedTicketRow?.conversationId;
+    if (!selectedTicketId || !conversationId) return null;
+    const canvasId = links.find(
+      link =>
+        link.sourceType === 'CANVAS' &&
+        link.targetType === 'CONVERSATION' &&
+        link.relationType === 'DISCUSSION' &&
+        link.targetId === conversationId,
+    )?.sourceId;
+    return canvasId ? { canvasId, conversationId } : null;
+  }, [links, selectedTicketId, selectedTicketRow]);
+
+  // A deep link names a conversation or a ticket, not a place. Both hang off an
+  // artifact, so open that one — a ticket with none stays on the board.
+  const canvasSectionFix = useMemo(() => {
+    const canvasId =
+      selectedCanvasId ?? discussionContext?.owner.canvasId ?? ticketDiscussion?.canvasId ?? null;
+    if (!canvasId) return null;
+    const canvas = canvases.find(item => item.id === canvasId);
+    if (!canvas) return null;
+    const artifactType = canvas.sdlcArtifact?.artifactType;
+    const target = isBaselineCanvasType(artifactType)
+      ? { section: 'baseline', type: null }
+      : artifactType === 'WIKI'
+        ? { section: 'wiki', type: null }
+        : { section: 'artifacts', type: canvas.folderId ?? null };
+    const settled =
+      section === target.section &&
+      selectedCanvasId === canvasId &&
+      (target.type === null || activeTypeFolderId === target.type);
+    return settled ? null : { ...target, canvasId, discussion: ticketDiscussion };
+  }, [
+    activeTypeFolderId,
+    canvases,
+    discussionContext,
+    section,
+    selectedCanvasId,
+    ticketDiscussion,
+  ]);
+
+  useEffect(() => {
+    if (!canvasSectionFix) return;
+    const search = new URLSearchParams(location.search);
+    search.set('canvas', canvasSectionFix.canvasId);
+    if (canvasSectionFix.type) search.set('type', canvasSectionFix.type);
+    else search.delete('type');
+    if (canvasSectionFix.discussion) {
+      // The ticket has served its purpose; its thread is what to show.
+      search.delete('ticket');
+      search.set('discussion', '1');
+      search.set('chat', 'conversations');
+      search.set('conversation', canvasSectionFix.discussion.conversationId);
+    }
+    void navigate(
+      `/sdlc/${channelId}/${canvasSectionFix.section}?${search.toString()}${location.hash}`,
+      { replace: true },
+    );
+  }, [canvasSectionFix, channelId, location.hash, location.search, navigate]);
+
+  // A track discussion has no canvas owner, so it would be stripped below.
+  const deepLinkedTrackId = useMemo(() => {
+    if (!selectedDiscussionConversationId || discussionContext) return null;
+    return (
+      links.find(
+        link =>
+          link.sourceType === 'TRACK' &&
+          link.targetType === 'CONVERSATION' &&
+          link.relationType === 'DISCUSSION' &&
+          link.targetId === selectedDiscussionConversationId,
+      )?.sourceId ?? null
+    );
+  }, [links, selectedDiscussionConversationId, discussionContext]);
+
+  useEffect(() => {
+    if (!deepLinkedTrackId || deepLinkedTrackId === selectedTrackId) return;
+    const search = new URLSearchParams(location.search);
+    search.set('track', deepLinkedTrackId);
+    void navigate(`/sdlc/${channelId}/tracks?${search.toString()}${location.hash}`, {
+      replace: true,
+    });
+  }, [channelId, deepLinkedTrackId, location.hash, location.search, navigate, selectedTrackId]);
+
   useEffect(() => {
     if (
       !shouldCloseInvalidSdlcConversationDeepLink({
-        repoQueryComplete: repoQueryDetails.type === 'complete',
+        dataLoaded: repoQueryDetails.type === 'complete' && linkRows !== undefined,
         discussionOpen,
         selectedConversationId: selectedDiscussionConversationId,
         discussionContextResolved:
-          Boolean(discussionContext) || Boolean(section === 'tracks' && selectedTrackId),
+          Boolean(discussionContext) ||
+          Boolean(deepLinkedTrackId) ||
+          Boolean(section === 'tracks' && selectedTrackId),
       })
     ) {
       return;
@@ -665,9 +765,11 @@ export default function SdlcScreen(): ReactElement {
     location.search,
     navigate,
     repoQueryDetails.type,
+    linkRows,
     section,
     selectedDiscussionConversationId,
     selectedTrackId,
+    deepLinkedTrackId,
   ]);
   const discussionOwner = discussionContext?.owner ?? null;
   const discussionSurface = discussionContext?.surface ?? null;
@@ -2385,8 +2487,19 @@ export default function SdlcScreen(): ReactElement {
                   ))}
                 {section === 'tracks' && renderTracks()}
                 {section === 'tickets' && repo.channelId && (
-                  <div className='h-[calc(100vh-8rem)] min-h-[36rem]'>
+                  <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
                     <KanbanBoardScreen channelId={repo.channelId} />
+                    {selectedTicketRow?.conversationId && (
+                      <div className='absolute bottom-4 right-4 top-4 z-20 flex w-[480px] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl'>
+                        <ThreadMessages
+                          ticketId={selectedTicketRow.id}
+                          channelId={selectedTicketRow.channelId ?? repo.channelId}
+                          conversationId={selectedTicketRow.conversationId}
+                          skipInputAutoFocus
+                          onClose={closeTicketPanel}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
