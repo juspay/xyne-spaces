@@ -419,6 +419,8 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
+    // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 

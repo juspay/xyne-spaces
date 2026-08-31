@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -368,9 +369,28 @@ export class XyneAIControllerV2 {
       }
 
       let sdlcDashboardContext: string | undefined;
-      const sdlcRepo = effectiveChannelIds[0]
+      // Honour the caller's pinned repository; otherwise the hub's oldest membership,
+      // which is exact whenever the hub covers one.
+      const sdlcChannelId = effectiveChannelIds[0];
+      const pinnedRepoId =
+        effectiveResearchContext?.type === 'repository' ? effectiveResearchContext.id : null;
+      const sdlcRepoId = sdlcChannelId
+        ? ((
+            await db.sdlcEntityLink.findFirst({
+              where: {
+                channelId: sdlcChannelId,
+                targetType: 'REPOSITORY',
+                relationType: SDLC_MEMBERSHIP_RELATION,
+                ...(pinnedRepoId ? { targetId: pinnedRepoId } : {}),
+              },
+              orderBy: { createdAt: 'asc' },
+              select: { targetId: true },
+            })
+          )?.targetId ?? null)
+        : null;
+      const sdlcRepo = sdlcRepoId
         ? await db.repo.findFirst({
-            where: { channelId: effectiveChannelIds[0] },
+            where: { id: sdlcRepoId },
             select: {
               id: true,
               name: true,
@@ -390,7 +410,7 @@ export class XyneAIControllerV2 {
           };
         }
         const contextLinks = await db.sdlcEntityLink.findMany({
-          where: { repoId: sdlcRepo.id, relationType: 'CONTEXT' },
+          where: { channelId: sdlcChannelId, relationType: 'CONTEXT' },
           orderBy: { createdAt: 'desc' },
           take: 50,
           select: { targetType: true, targetId: true },
@@ -424,7 +444,6 @@ export class XyneAIControllerV2 {
           sdlcVcs.resolveBaseBranchHead(sdlcRepo.id).catch(() => null),
           db.sdlcEntityLink.findMany({
             where: {
-              repoId: sdlcRepo.id,
               sourceType: 'REPOSITORY',
               sourceId: sdlcRepo.id,
               targetType: 'WORKFLOW_EXECUTION',
@@ -455,12 +474,35 @@ export class XyneAIControllerV2 {
             wikiCommitSha = null;
           }
         }
+        // Membership points at the repository through the polymorphic targetId, so
+        // no relation covers it: read the edges, then the repositories they name.
+        const siblingLinks = await db.sdlcEntityLink.findMany({
+          where: {
+            channelId: sdlcChannelId,
+            targetType: 'REPOSITORY',
+            relationType: SDLC_MEMBERSHIP_RELATION,
+            targetId: { not: sdlcRepo.id },
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { targetId: true },
+        });
+        const siblingRepos = siblingLinks.length
+          ? await db.repo.findMany({
+              where: { id: { in: siblingLinks.map((link) => link.targetId) } },
+              select: { id: true, name: true, url: true, canonicalUrl: true },
+            })
+          : [];
         sdlcDashboardContext = buildSdlcAskAiContext({
           repo: {
             id: sdlcRepo.id,
             name: sdlcRepo.name,
             url: sdlcRepo.canonicalUrl || sdlcRepo.url,
           },
+          otherRepos: siblingRepos.map((sibling) => ({
+            id: sibling.id,
+            name: sibling.name,
+            url: sibling.canonicalUrl || sibling.url,
+          })),
           channelId: effectiveChannelIds[0],
           baselineDocuments: approvedBaseline,
           linkedContext,
@@ -958,7 +1000,7 @@ export class XyneAIControllerV2 {
 
   /**
    * GET /api/xyne-ai/v2/conversations/:convId/live
-   * SSE proxy to claw-auth's live stream so a Spaces AI tab that reloaded
+   * SSE proxy to claw-auth's live stream so a Hubs AI tab that reloaded
    * mid-run can re-attach and stream the in-flight answer (snapshot + deltas)
    * instead of waiting for the run to finish. Verbatim frame passthrough.
    */

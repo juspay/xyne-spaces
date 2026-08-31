@@ -94,6 +94,9 @@ import {
   isDeskChannelType,
   deskTypeForChannelType,
   Platform,
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
   sdlcDiscussionSchema,
 } from '@xyne/shared';
@@ -2478,31 +2481,43 @@ export function createMutators(
           }
 
           if (sdlcDiscussion) {
-            const [repo, existingDiscussion] = await Promise.all([
+            const [repo, membership, existingDiscussion] = await Promise.all([
               tx.run(zql.repos.where('id', sdlcDiscussion.repoId).one()),
+              // The repository has to be part of this hub; it may be part of
+              // others too, which is why membership is the check.
               tx.run(
                 zql.sdlc_entity_links
-                  .where('repoId', sdlcDiscussion.repoId)
+                  .where('channelId', channelId)
+                  .where('targetType', 'REPOSITORY')
+                  .where('targetId', sdlcDiscussion.repoId)
+                  .where('relationType', SDLC_MEMBERSHIP_RELATION)
+                  .one(),
+              ),
+              tx.run(
+                zql.sdlc_entity_links
+                  .where('channelId', channelId)
                   .where('targetType', 'CONVERSATION')
                   .where('targetId', conversationId)
                   .where('relationType', 'DISCUSSION'),
               ),
             ]);
-            if (
-              !repo ||
-              repo.workspaceId !== authData.workspaceId ||
-              repo.channelId !== channelId
-            ) {
+            if (!repo || repo.workspaceId !== authData.workspaceId || !membership) {
               throw new Error('Invalid SDLC discussion owner');
             }
             if (existingDiscussion.length > 0) {
               throw new Error('Conversation already has an SDLC discussion owner');
             }
             if (sdlcDiscussion.ownerType === 'TRACK') {
-              const track = await tx.run(
-                zql.sdlc_tracks.where('id', sdlcDiscussion.ownerId).one(),
+              // A track has no scope column: its CHANNEL -> TRACK edge is the check.
+              const trackEdge = await tx.run(
+                zql.sdlc_entity_links
+                  .where('channelId', channelId)
+                  .where('targetType', 'TRACK')
+                  .where('targetId', sdlcDiscussion.ownerId)
+                  .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+                  .one(),
               );
-              if (!track || track.repoId !== repo.id) {
+              if (!trackEdge) {
                 throw new Error('Invalid SDLC discussion owner');
               }
             } else {
@@ -2512,7 +2527,6 @@ export function createMutators(
             const canonicalOwnerCanvasId = await resolveSdlcDiscussionOwnerId(
               {
                 workspaceId: authData.workspaceId,
-                repoId: repo.id,
                 channelId,
                 surfaceType: sdlcDiscussion.surfaceType,
                 surfaceId: sdlcDiscussion.surfaceId,
@@ -2537,7 +2551,7 @@ export function createMutators(
                 findLinkSource: async input => {
                   const link = await tx.run(
                     zql.sdlc_entity_links
-                      .where('repoId', input.repoId)
+                      .where('channelId', input.channelId)
                       .where('targetType', input.targetType)
                       .where('targetId', input.targetId)
                       .where('relationType', input.relationType)
@@ -2576,7 +2590,7 @@ export function createMutators(
             await tx.mutate.sdlc_entity_links.insert({
               id: sdlcDiscussion.linkId,
               workspaceId: authData.workspaceId,
-              repoId: sdlcDiscussion.repoId,
+              channelId,
               sourceType: sdlcDiscussion.ownerType,
               sourceId: sdlcDiscussion.ownerId,
               targetType: 'CONVERSATION',
@@ -7052,8 +7066,14 @@ export function createMutators(
             throw new Error('Project not found');
           }
 
+          // Only repositories that are in a hub block deletion: one registered
+          // and never added to a hub has nothing to detach.
           const attachedSdlcRepository = await tx.run(
-            zql.repos.where('projectId', projectId).where('channelId', 'IS NOT', null).one(),
+            zql.sdlc_entity_links
+              .where('relationType', SDLC_MEMBERSHIP_RELATION)
+              .where('targetType', 'REPOSITORY')
+              .whereExists('channel', channel => channel.where('projectId', projectId))
+              .one(),
           );
           if (attachedSdlcRepository) {
             throw new Error('Detach SDLC repositories before deleting their project');
@@ -10915,49 +10935,44 @@ export function createMutators(
       createLink: defineMutator(
         createSdlcLinkSchema.extend({
           id: z.string(),
-          repoId: z.string(),
+          channelId: z.string(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+          // Links belong to the hub. createSdlcLinkSchema already excludes the
+          // membership relation, so this cannot forge a CHANNEL -> REPOSITORY edge.
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', args.channelId)
               .where('userId', authData.sub)
-              .one()
+              .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           const sourceExists =
             args.sourceType === 'CANVAS'
               ? Boolean(
                   await tx.run(
-                    zql.canvases.where('id', args.sourceId).where('channelId', repo.channelId).one()
-                  )
+                    zql.canvases.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                  ),
                 )
               : args.sourceType === 'TICKET'
                 ? Boolean(
                     await tx.run(
-                      zql.tickets
-                        .where('id', args.sourceId)
-                        .where('channelId', repo.channelId)
-                        .one()
-                    )
+                      zql.tickets.where('id', args.sourceId).where('channelId', args.channelId).one(),
+                    ),
                   )
                 : args.sourceType === 'CHANNEL'
-                  ? args.sourceId === repo.channelId
+                  ? args.sourceId === args.channelId
                   : false;
           if (!sourceExists) {
-            throw new Error('Relationship source does not belong to this SDLC repository');
+            throw new Error('Relationship source does not belong to this SDLC hub');
           }
           await tx.mutate.sdlc_entity_links.insert({
             id: args.id,
             workspaceId: authData.workspaceId,
-            repoId: args.repoId,
+            channelId: args.channelId,
             sourceType: args.sourceType,
             sourceId: args.sourceId,
             targetType: args.targetType,
@@ -10966,66 +10981,77 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
-        }
+        },
       ),
       deleteLink: defineMutator(
-        z.object({ repoId: z.string(), linkId: z.string() }),
-        async ({ tx, args: { repoId, linkId } }) => {
-          const repo = await tx.run(zql.repos.where('id', repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+        z.object({ channelId: z.string(), linkId: z.string() }),
+        async ({ tx, args: { channelId, linkId } }) => {
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', channelId)
               .where('userId', authData.sub)
-              .one()
+              .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           const link = await tx.run(
-            zql.sdlc_entity_links.where('id', linkId).where('repoId', repoId).one()
+            zql.sdlc_entity_links.where('id', linkId).where('channelId', channelId).one(),
           );
           if (!link) {
             throw new Error('SDLC relationship not found');
           }
+          // Structural edges are not content: repository membership is detached through
+          // the hub API, track membership only with the track. The mutation ACL agrees.
+          if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(link.relationType)) {
+            throw new Error('Structural SDLC edges are not deleted through the link API');
+          }
           await tx.mutate.sdlc_entity_links.delete({ id: linkId });
-        }
+        },
       ),
 
       createTrack: defineMutator(
         z.object({
           id: z.string(),
-          repoId: z.string(),
+          linkId: z.string(),
+          channelId: z.string(),
           name: z.string().trim().min(1).max(120),
           description: z.string().trim().max(2000).optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          const repo = await tx.run(zql.repos.where('id', args.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
-          }
+          // Tracks belong to the hub, never to one repository in it.
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', args.channelId)
               .where('userId', authData.sub)
               .one(),
           );
           if (!participant) {
-            throw new Error('Repository membership required');
+            throw new Error('Hub membership required');
           }
           await tx.mutate.sdlc_tracks.insert({
             id: args.id,
             workspaceId: authData.workspaceId,
-            repoId: args.repoId,
             name: args.name,
             description: args.description,
             status: 'ACTIVE',
             createdBy: authData.sub,
             createdAt: args.timestamp,
             updatedAt: args.timestamp,
+          });
+          // The track carries no scope column; this edge is what places it in the hub.
+          await tx.mutate.sdlc_entity_links.insert({
+            id: args.linkId,
+            workspaceId: authData.workspaceId,
+            channelId: args.channelId,
+            sourceType: 'CHANNEL',
+            sourceId: args.channelId,
+            targetType: 'TRACK',
+            targetId: args.id,
+            relationType: SDLC_TRACK_MEMBERSHIP_RELATION,
+            createdBy: authData.sub,
+            createdAt: args.timestamp,
           });
         },
       ),
@@ -11042,13 +11068,20 @@ export function createMutators(
           if (!track) {
             throw new Error('SDLC track not found');
           }
-          const repo = await tx.run(zql.repos.where('id', track.repoId).one());
-          if (!repo?.channelId) {
-            throw new Error('SDLC repository not found');
+          const membership = await tx.run(
+            zql.sdlc_entity_links
+              .where('targetType', 'TRACK')
+              .where('targetId', args.trackId)
+              .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+              .one(),
+          );
+          if (!membership?.channelId) {
+            throw new Error('SDLC channel not found');
           }
+          const channelId = membership.channelId;
           const participant = await tx.run(
             zql.channel_participants
-              .where('channelId', repo.channelId)
+              .where('channelId', channelId)
               .where('userId', authData.sub)
               .one(),
           );
