@@ -69,6 +69,17 @@ describe('scopeQueryToTenant', () => {
     assert.match(comments, /"value":"ws-1"/);
   });
 
+  it('covers every Zero table — none is served unscoped or throws (guards against a new table missing a scope rule)', () => {
+    const uncovered: string[] = [];
+    for (const table of Object.keys(schema.tables)) {
+      const q = (zql as Record<string, unknown>)[table];
+      if (!q) continue;
+      try { scopeQueryToTenant(q, ctx, table); }
+      catch { uncovered.push(table); }
+    }
+    assert.deepEqual(uncovered, [], `Zero tables missing a tenant scope rule: ${uncovered.join(', ')}`);
+  });
+
   it('refuses a table with no tenant scope rather than serving it unscoped', () => {
     // resources IS listed as global; assert the throw path exists for a truly unknown table.
     assert.throws(() => scopeQueryToTenant({}, ctx, 'bogus'));
