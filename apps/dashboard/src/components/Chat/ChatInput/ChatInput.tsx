@@ -22,6 +22,7 @@ import {
   Conversation,
   ChannelType,
   BaseTicketType,
+  BulkTicketMode,
   CommandAccessibility,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
@@ -44,6 +45,8 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
+import { BulkCreateTicketsModal } from '../../Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
+import { parseTicketsFromText } from '../../Tickets/BulkCreateTicketsModal/parseTicketsFromText';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
 import { getSlashCommandArtifactDefinition } from '@xyne/shared';
@@ -330,6 +333,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       openAddPeople: () => setAddPeopleOpen(true),
     });
     const [ticketDescription, setTicketDescription] = useState('');
+    const [isBulkCreateTicketsModalOpen, setIsBulkCreateTicketsModalOpen] = useState(false);
+    const [bulkParentTitle, setBulkParentTitle] = useState('');
+    const [bulkSubTitles, setBulkSubTitles] = useState<string[]>([]);
     const [recentScheduledFor, setRecentScheduledFor] = useState<number | null>(null);
 
     const {
@@ -1218,6 +1224,16 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 !conversationId && {
                   onCreateTicket: (description: string | undefined) => {
                     void (async () => {
+                      if (!isSupportChannel) {
+                        const titles = parseTicketsFromText(description || '');
+                        if (titles.length >= 2) {
+                          setBulkParentTitle(titles[0] ?? '');
+                          setBulkSubTitles(titles.slice(1));
+                          setIsBulkCreateTicketsModalOpen(true);
+                          inputBoxRef.current?.clearContent();
+                          return;
+                        }
+                      }
                       if (isSupportChannel && user) {
                         const messageContent = description || 'Support request';
                         try {
@@ -1339,6 +1355,23 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               onCancel={() => setAddPeopleOpen(false)}
             />
           </Dialog>
+        ) : null}
+        {channel && isBulkCreateTicketsModalOpen ? (
+          <BulkCreateTicketsModal
+            isOpen={isBulkCreateTicketsModalOpen}
+            onClose={() => {
+              setIsBulkCreateTicketsModalOpen(false);
+              setBulkParentTitle('');
+              setBulkSubTitles([]);
+            }}
+            channelId={channelId}
+            projectId={(channel.projectId as string | null) || ''}
+            mode={BulkTicketMode.PARENT_SUB}
+            parentTitle={bulkParentTitle}
+            subTitleTitles={bulkSubTitles}
+            sourceConversationId={conversationId ?? undefined}
+            onTicketCreated={handleTicketCreated}
+          />
         ) : null}
       </>
     );

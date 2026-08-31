@@ -21,22 +21,28 @@ export enum BulkTicketMode {
 export interface BulkTicketItemInput {
   title: string;
   description?: string;
-  channelId: string;
-  projectId: string;
-  boardId: string;
+  channelId?: string;
+  projectId?: string;
+  boardId?: string;
   assignedTo?: string;
+  userGroupId?: string;
   priority?: string;
   statusV2?: string;
-  /** Stable client-supplied id used for idempotency by the background worker. */
+  eta?: string | Date;
+  tags?: string[];
+  ticketType?: string;
+  stageName?: string;
+  dynamicFields?: Record<string, string>;
+  merchantId?: string;
   clientRowId?: string;
 }
 
 /** Dashboard → backend payload for POST /api/tickets/bulk-from-message. */
 export interface CreateBulkTicketRequest {
   mode?: BulkTicketMode;
-  /** Parent ticket details when {@link mode} is {@link BulkTicketMode.PARENT_SUB}. */
+  /** Parent ticket details when mode is PARENT_SUB. */
   parent?: BulkTicketItemInput;
-  /** Alias used by some UIs; treated the same as {@link subTickets}. */
+  /** Alias used by some UIs; treated the same as subTickets. */
   tickets?: BulkTicketItemInput[];
   /** Child tickets to create. */
   subTickets?: BulkTicketItemInput[];
@@ -44,12 +50,25 @@ export interface CreateBulkTicketRequest {
   existingParentTicketId?: string;
   /** Optional source conversation for a completion summary. */
   sourceConversationId?: string;
+  /** Optional source message for failure nudge tracking. */
+  sourceMessageId?: string;
+  /** Top-level fields for all-parents mode (from table draft rows). */
+  projectId?: string;
+  channelId?: string;
+  boardId?: string;
 }
 
 /** Backend → dashboard response for a successfully enqueued batch. */
 export interface CreateBulkTicketResponse {
-  success: boolean;
   parentTicketId?: string;
-  queued: number;
-  jobKey: string;
+  enqueuedSubTickets: number;
+  failedSubTickets?: number;
+  failedTitles?: string[];
+}
+
+/** Existing parent ticket reference (for retry flows). */
+export interface ExistingParentTicket {
+  id: string;
+  xyneId?: string;
+  conversationId: string;
 }
