@@ -77,6 +77,7 @@ import { PrismaClient } from '@prisma/client';
        stageName?: string;
        projectId?: string;
        createdAtTimestamp?: number;
+       updatedAtTimestamp?: number;
        ticketType?: string;
        userGroupId?: string;
        tags?: string[];
@@ -795,6 +796,7 @@ function transformCollection(
    ): TransformedSearchResult {
      // Handle potentially invalid createdAt timestamp
      let timestamp = '';
+     let updatedAtTimestamp: number | undefined;
      try {
        if (doc.createdAtTimestamp) {
          const date = new Date(doc.createdAtTimestamp);
@@ -804,6 +806,16 @@ function transformCollection(
        }
      } catch (error) {
        logger.warn('Invalid createdAt for ticket:', doc.docId, doc.createdAtTimestamp);
+     }
+     try {
+       if (doc.updatedAt) {
+         const date = new Date(doc.updatedAt);
+         if (!isNaN(date.getTime())) {
+           updatedAtTimestamp = date.getTime();
+         }
+       }
+     } catch (error) {
+       logger.warn('Invalid updatedAt for ticket:', doc.docId, doc.updatedAt);
      }
    
      // Get creator and assignee names from userMap
@@ -856,6 +868,7 @@ function transformCollection(
          projectId: doc.projectRef,
          projectName: doc.projectName,
          createdAtTimestamp: doc.createdAtTimestamp,
+         updatedAtTimestamp,
          ticketType: doc.ticketType,
          userGroupId: doc.userGroupId,
          tags: doc.tags,

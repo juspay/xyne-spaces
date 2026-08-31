@@ -58,6 +58,7 @@ import {
   groupChannelsByScope,
 } from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { formatFileSize } from '../MessageAttachment/utils';
 import {
   TabType,
   MentionType,
@@ -858,6 +859,7 @@ const SearchResults = (): ReactElement => {
             onSelectUser={handleSelectUser}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
+            usersById={usersById}
             compareMode={compareMode}
             isGrouped={isGrouped}
             selectedIds={selectedIds}
@@ -965,6 +967,7 @@ interface ResultsBodyProps {
     category: ChannelCategory;
     searchableNames?: string[];
   }>;
+  usersById: Map<string, Parameters<typeof getUserDisplayName>[0]>;
   compareMode: boolean;
   isGrouped: boolean;
   selectedIds: Set<string>;
@@ -1105,6 +1108,7 @@ function ResultsBody({
   onSelectUser,
   channelData,
   searchableChannels,
+  usersById,
   compareMode,
   isGrouped,
   selectedIds,
@@ -1185,7 +1189,20 @@ function ResultsBody({
       const icon = getAttachmentResultIcon(result);
       const channelId = result.searchContext?.channelId;
       const channelName = channelId ? channelLabelsById.get(channelId) : undefined;
-      const subtitle = channelName ? `File uploaded in ${channelName}` : result.subtitle;
+      const uploaderId = result.avatar;
+      const uploader = uploaderId ? usersById.get(uploaderId) : undefined;
+      const uploaderName = uploader ? getUserDisplayName(uploader) : '';
+      const shouldShowUploader = !!uploader && uploaderName !== 'Unknown';
+      const rawTs = result.metadata.timestamp;
+      const uploadedAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+      const fileSize = result.searchContext?.fileSize;
+      const fileSizeLabel = typeof fileSize === 'number' ? formatFileSize(fileSize) : '';
+      const infoParts = [
+        shouldShowUploader ? `Uploaded by ${uploaderName}` : '',
+        channelName ? `in ${channelName}` : '',
+      ].filter(Boolean);
+      const infoLine = infoParts.join(' ');
+
       return (
         <button
           key={key}
@@ -1202,15 +1219,13 @@ function ResultsBody({
               <RenderMessageWithHTML message={result.title} />
             </p>
             <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              {subtitle && (
-                <span className='truncate'>
-                  {channelName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
-                </span>
-              )}
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
-                </span>
+              <span className='min-w-0 truncate'>
+                {infoLine || (result.subtitle ? <RenderMessageWithHTML message={result.subtitle} /> : null)}
+                {uploadedAt && (infoLine || result.subtitle) && ' · '}
+                {uploadedAt}
+              </span>
+              {fileSizeLabel && (
+                <span className='shrink-0 whitespace-nowrap'>{fileSizeLabel}</span>
               )}
             </div>
           </div>
@@ -1295,7 +1310,10 @@ function ResultsBody({
           createdAt: ctx.createdAtTimestamp ?? null,
           ticketType: ctx.ticketType ?? null,
           channelId: ctx.channelId,
+          boardId: ctx.boardId ?? null,
+          boardName: ctx.boardName ?? null,
           conversationId: ctx.conversationId,
+          updatedAt: ctx.updatedAtTimestamp ?? ctx.createdAtTimestamp ?? null,
           statusV2: (ctx.ticketStatus as TicketStatusV2 | undefined) ?? null,
           priority: (ctx.priority as TicketPriority | undefined) ?? null,
         }
