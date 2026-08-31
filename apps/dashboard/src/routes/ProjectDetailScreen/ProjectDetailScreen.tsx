@@ -805,8 +805,9 @@ const ProjectDetailScreen = (): ReactElement => {
         open={showEditProjectModal}
         onOpenChange={setShowEditProjectModal}
         title='Edit Project'
+        className='debug'
       >
-        <div className='p-6'>
+        <div>
           <ProjectForm
             project={project}
             onSubmit={data => handleUpdateProject(project.id, data)}
