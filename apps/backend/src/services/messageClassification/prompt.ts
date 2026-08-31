@@ -35,6 +35,13 @@ You will receive a JSON object with:
 - thread_messages: [{ id, text, author_display_name, timestamp_iso }] — the ENTIRE thread
   in chronological order, starting with the message that opened it.
 - root_is_bot: boolean — true when a bot or automated system posted the opening message.
+- preceding_messages: optional — [{ text, author_display_name, timestamp_iso }] — earlier
+  messages from the same direct message conversation, in chronological order, ending just
+  before thread_messages begins. Present only for DMs, where people rarely reply in threads
+  and a message therefore arrives with no visible thread around it. Read them to understand
+  what thread_messages is about — "can you check this?" means nothing on its own. They have
+  NO ids and are NOT part of the thread: never cite them, and never classify them. Classify
+  thread_messages, using these only to understand it.
 - ticket: optional — { title, description } when this thread was turned into a ticket.
   Someone wrote these deliberately, so they state the thread's purpose more reliably than
   the conversation does, so weigh them heavily. thread_messages may be EMPTY when a thread

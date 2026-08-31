@@ -34,6 +34,21 @@ export const MIN_THREAD_SIZE = Number(
 /** Upper bound on messages sent to the model in one pass. */
 const MAX_THREAD_CONTEXT = 60;
 
+/**
+ * How many earlier messages from the same DM to send as background.
+ *
+ * People do not reply in threads in a DM — they just keep typing — so a DM "thread" is
+ * usually one message with nothing under it. Classifying that in isolation is guessing: "can
+ * you check this?" is a REQUEST or a QUESTION depending entirely on what came before it.
+ *
+ * Channels do not get this. There a thread is a real thread and its own replies are the
+ * context; pulling in unrelated channel chatter would add noise, not signal.
+ */
+const DM_CONTEXT_MESSAGES = Number(process.env['MESSAGE_CLASSIFICATION_DM_CONTEXT'] ?? 5);
+
+/** scopeType values that mean "no one uses threads here". */
+const DM_SCOPES = new Set(['DM', 'GROUP_DM']);
+
 /** A ticket description can be pages long; the opening is where the intent lives. */
 const TICKET_DESCRIPTION_LIMIT = 1000;
 
@@ -126,7 +141,7 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
 
   const channel = await db.channel.findUnique({
     where: { id: conversation.channelId },
-    select: { id: true, workspaceId: true },
+    select: { id: true, workspaceId: true, scopeType: true },
   });
   if (!channel) {
     return { tagged: 0, skipped: 'no-channel' };
@@ -182,6 +197,31 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
 
   messages.reverse(); // back to chronological — the model is told the thread is in order
 
+  // In a DM, everything before this message in the same conversation window is the context a
+  // reader would have had. Fetched from the CHANNEL rather than the conversation, because
+  // each top-level DM message opens a conversation of its own.
+  const precedingMessages =
+    DM_SCOPES.has(channel.scopeType) && DM_CONTEXT_MESSAGES > 0
+      ? await db.message.findMany({
+          where: {
+            // A message has no channel of its own — it reaches one through its conversation.
+            conversation: { channelId: channel.id },
+            conversationId: { not: conversationId },
+            isDeleted: false,
+            msgType: { not: 'SYSTEM' },
+            createdAt: { lt: messages[0]?.createdAt ?? conversation.createdAt },
+          },
+          select: {
+            content: true,
+            createdAt: true,
+            sender: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: DM_CONTEXT_MESSAGES,
+        })
+      : [];
+  precedingMessages.reverse();
+
   // Every message is offered as context: the model is classifying the thread, and it needs
   // the whole thing to pick which messages are the evidence for each type.
   const threadMessages: ClassifierMessage[] = messages
@@ -223,6 +263,18 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     {
       thread_messages: threadMessages,
       root_is_bot: rootIsBot,
+      // Deliberately WITHOUT ids. These are not part of the thread and must never be cited
+      // as evidence — a citation is written back onto the message, and tagging someone
+      // else's unrelated DM line would be wrong and would surface as a stray evidence chip.
+      ...(precedingMessages.length > 0 && {
+        preceding_messages: precedingMessages
+          .map(m => ({
+            text: stripHtml(m.content ?? ''),
+            author_display_name: m.sender?.name ?? 'Unknown',
+            timestamp_iso: m.createdAt.toISOString(),
+          }))
+          .filter(m => m.text.length > 0),
+      }),
       ...(ticket && {
         ticket: {
           title: ticket.title,
@@ -242,21 +294,45 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   // message still counts for the thread — a type derived from the ticket has no message
   // behind it.
   //
-  // Additive, and existing entries are kept untouched. Two reasons: a tag that survives a
-  // re-run keeps its ORIGINAL timestamp and cited message, so the tooltip goes on meaning
-  // "first tagged" rather than silently becoming "last classified"; and a type the model
-  // happens not to repeat this time is not removed, so chips do not flicker with model
-  // variance between runs.
+  // The classifier's answer REPLACES its own previous answer; anything a person touched is
+  // kept exactly as it is.
+  //
+  // Additive-only was wrong, and wrong in the direction that decays: a pass can misread a
+  // thread — "what is hydration here?" is a question, not an explanation — and under an
+  // additive merge that mistake was permanent, because nothing else ever removes a tag. Every
+  // re-read was another chance to add one and never a chance to correct one, so on a long
+  // thread precision could only fall. Superseding lets the model take a tag back when the
+  // thread turns out not to be that after all.
+  //
+  // A tag that survives a re-run keeps its ORIGINAL timestamp, so the tooltip goes on meaning
+  // "first tagged" rather than silently becoming "last classified".
+  //
+  // Dropped tags are DELETED rather than tombstoned. A tombstone means "a person took this
+  // off", which isCurated reads as "stop classifying this thread" — so tombstoning here would
+  // let the classifier freeze a thread by correcting itself.
+  //
   // No evidence pointer on the thread. The model's citations decide which MESSAGES get the
   // tag, and that is the whole record: to see why a thread is an ISSUE you look at which of
   // its messages carry ISSUE — messages the thread view has already loaded. A pointer here
   // would duplicate that into a column replicated to every client, and nothing read it.
-  const byName = new Map(existingTags.map(tag => [tag.name, tag]));
-  for (const type of threadTypes) {
-    if (byName.has(type.name)) continue;
-    byName.set(type.name, { name: type.name, at: now });
+  const returned = new Map(threadTypes.map(type => [type.name, type]));
+  const threadTags: AppliedTag[] = [];
+  for (const tag of existingTags) {
+    // Human decisions — an added tag, or a tombstone for one someone removed — outrank the
+    // model and are never superseded by it.
+    if (isHumanApplied(tag) || tag.removed) {
+      threadTags.push(tag);
+      continue;
+    }
+    // Its own earlier tag: kept only if it still stands this time, and kept with the
+    // timestamp it was first applied.
+    if (returned.has(tag.name)) threadTags.push(tag);
   }
-  const threadTags: AppliedTag[] = [...byName.values()];
+  const already = new Set(threadTags.map(tag => tag.name));
+  for (const type of threadTypes) {
+    if (already.has(type.name)) continue;
+    threadTags.push({ name: type.name, at: now });
+  }
 
   // Inverted: messageId -> the types it is the evidence for. A message can justify several
   // types, and a type can cite several messages, so this is many-to-many.
@@ -272,10 +348,17 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     }
   }
 
+  // Every message in the thread is reconciled, not only the newly cited ones. A message that
+  // was evidence last time and is not cited now must LOSE that tag, or clicking a thread's
+  // chip would still surface it — the thread would say it is not a WHAT_IS while one of its
+  // messages went on claiming to be the proof that it is.
   let tagged = 0;
-  for (const [messageId, tags] of byMessage) {
-    await writeMessageTags(messageId, tags);
-    await refeedToVespa(messageId, conversation.workspaceId);
+  for (const message of messages) {
+    const tags = byMessage.get(message.messageId) ?? [];
+    const changed = await writeMessageTags(message.messageId, tags);
+    // Only re-feed what actually moved: a thread of sixty messages would otherwise queue
+    // sixty Vespa writes on every pass to change two of them.
+    if (changed) await refeedToVespa(message.messageId, conversation.workspaceId);
     tagged += tags.length;
   }
 
@@ -314,30 +397,46 @@ async function refeedToVespa(messageId: string, workspaceId: string | null): Pro
 }
 
 /**
- * Add the classifier's tags to a message, keeping whatever is already there.
+ * Set the classifier's evidence tags on a message to `tags`, leaving human ones alone.
  *
- * A merge, not an overwrite: a person may have tagged this message by hand, and a later pass
- * must not erase that. Existing names win — a tag someone deactivated stays deactivated
- * rather than being re-applied by the next run.
+ * The same supersede rule the thread uses, for the same reason: the model's previous answer
+ * about this message is replaced by its current one, so a citation it no longer stands behind
+ * stops claiming to be evidence. What a PERSON put on the message — or took off it — outranks
+ * the model and survives untouched.
+ *
+ * `tags` may be empty, which is how a message that is no longer cited is cleared.
+ *
+ * Returns whether anything actually changed, so the caller can skip re-feeding Vespa for the
+ * messages this pass did not move.
  */
-async function writeMessageTags(messageId: string, tags: AppliedTag[]): Promise<void> {
+async function writeMessageTags(messageId: string, tags: AppliedTag[]): Promise<boolean> {
   const message = await db.message.findUnique({
     where: { messageId },
     select: { messageActs: true },
   });
   if (!message) {
     logger.warn(`${TAG} Model cited a message that no longer exists`, { messageId });
-    return;
+    return false;
   }
 
   const existing = parseAppliedTags(message.messageActs);
-  const known = new Set(existing.map(tag => tag.name));
-  const merged = [...existing, ...tags.filter((tag: AppliedTag) => !known.has(tag.name))];
+  // Nothing to do, and nothing was ever done: skip the write rather than rewrite '[]' onto
+  // every untagged message in the thread on every pass.
+  if (existing.length === 0 && tags.length === 0) return false;
+
+  const returned = new Set(tags.map(tag => tag.name));
+  const kept = existing.filter(tag => isHumanApplied(tag) || tag.removed || returned.has(tag.name));
+  const already = new Set(kept.map(tag => tag.name));
+  const merged = [...kept, ...tags.filter(tag => !already.has(tag.name))];
+
+  const next = serializeAppliedTags(merged);
+  if (next === serializeAppliedTags(existing)) return false;
 
   await db.message.update({
     where: { messageId },
-    data: { messageActs: serializeAppliedTags(merged) },
+    data: { messageActs: next },
   });
+  return true;
 }
 
 // ─── LLM invocation ──────────────────────────────────────────────────────────────
@@ -426,6 +525,11 @@ interface ClassifierInput {
   thread_messages: ClassifierMessage[];
   /** True when a bot or automated system opened the thread. Gates the ALERT type. */
   root_is_bot: boolean;
+  /**
+   * Earlier DM messages, for context only. No ids, so they cannot be cited — see where this
+   * is built. Absent for channel threads.
+   */
+  preceding_messages?: Omit<ClassifierMessage, 'id'>[];
   /** Present when the thread was turned into a ticket. */
   ticket?: { title: string; description: string };
 }

@@ -4,6 +4,13 @@ import { apiInstance } from '../services/clients/apiClient';
 export type VocabularyStatus = 'APPROVED' | 'UNDER_REVIEW' | 'REJECTED';
 
 export interface VocabularyEntry extends ThreadTypeEntry {
+  /**
+   * Row id. Absent from the picker's read, present on every review row.
+   *
+   * `name` is not unique in the review queue — two people can propose the same one — so this
+   * is what a key or a selection has to use.
+   */
+  id?: string;
   /** Only APPROVED entries are offered in the picker or given to the classifier. */
   status?: VocabularyStatus;
   /** Who proposed it. Null for entries resolved from the built-in list. */

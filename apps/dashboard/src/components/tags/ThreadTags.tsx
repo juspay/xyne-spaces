@@ -95,12 +95,10 @@ const TagTooltip = ({
   return (
     <span className='block max-w-[260px] text-left'>
       <span className='block font-medium'>{entry?.label ?? tag.name}</span>
-      {/* Straight from the vocabulary, so an admin's edit lands here immediately. A
-          free-form tag resolves to its candidate entry, whose description is the note its
-          inventor typed — which is why nothing carries a definition on the thread itself. */}
-      {entry?.description ? (
-        <span className='block mt-0.5 opacity-80'>{entry.description}</span>
-      ) : null}
+      {/* The SUMMARY, not the description. The description is the classifier's instruction —
+          long, and mostly "NOT" clauses that exist to stop the model on near-misses. Every
+          one of them is noise to someone hovering a chip. */}
+      {entry?.summary ? <span className='block mt-0.5 opacity-80'>{entry.summary}</span> : null}
       <span className='block mt-1 opacity-70'>
         {who}
         {when && ` · ${when}`}
@@ -108,9 +106,7 @@ const TagTooltip = ({
       {/* Only the author of a name sees this, and only until an admin decides it. The tag is
           on the thread for everyone either way — what is pending is whether the NAME joins
           the picker. */}
-      {pending && (
-        <span className='block mt-1 opacity-70'>Name under review — not in the picker yet</span>
-      )}
+      {pending && <span className='block mt-1 opacity-70'>Under review</span>}
     </span>
   );
 };

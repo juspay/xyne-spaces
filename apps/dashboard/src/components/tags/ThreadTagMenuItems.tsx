@@ -1,6 +1,7 @@
 import { JSX, useMemo, useState } from 'react';
 import { Check, Plus } from 'lucide-react';
 import { DropdownMenuItem, DropdownMenuSeparator } from '../ui/dropdown-menu';
+import { normalizeThreadTypeName } from '@xyne/shared';
 import { useThreadTypeVocabulary } from '../../hooks/useThreadTypeVocabulary';
 
 /** Matches the server's cap, so the UI cannot offer something the API will reject. */
@@ -39,14 +40,19 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
       .filter(name => !query || normalize(name).includes(query));
   }, [applied, entries, query]);
 
-  const trimmed = search.trim().slice(0, MAX_TAG_LENGTH);
+  // What typing this would actually create. Shown rather than applied to the input itself,
+  // because the same box is the SEARCH box — forcing the field to uppercase would fight
+  // someone typing "feature" to find "Feature request".
+  const proposed = normalizeThreadTypeName(search).slice(0, MAX_TAG_LENGTH);
+  // Compared in normalised form, so "vespa latency" does not offer to create a second tag
+  // when VESPA_LATENCY already exists.
   const alreadyExists = [...entries.map(e => e.name), ...applied].some(
-    name => normalize(name) === query,
+    name => normalizeThreadTypeName(name) === proposed,
   );
-  const canCreate = trimmed.length > 0 && !alreadyExists;
+  const canCreate = proposed.length > 0 && !alreadyExists;
 
   const create = (): void => {
-    onToggle(trimmed);
+    onToggle(proposed);
     setSearch('');
   };
 
@@ -112,7 +118,12 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
             data-track-name='CreateThreadTag'
           >
             <Plus size={14} className='shrink-0 text-muted-foreground' />
-            <span className='flex-1 truncate'>Add “{trimmed}”</span>
+            {/* The NORMALISED name, not what was typed: this is the string that lands on the
+                thread, gets indexed, and goes into the review queue, so it is the string to
+                show before anyone commits to it. */}
+            <span className='flex-1 truncate'>
+              Add <span className='font-mono'>{proposed}</span>
+            </span>
           </DropdownMenuItem>
         </>
       )}

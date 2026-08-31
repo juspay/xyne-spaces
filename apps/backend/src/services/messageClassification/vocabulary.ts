@@ -4,12 +4,15 @@
  * One source for three things that must never disagree: the classifier prompt, the
  * validation that filters the model's output, and the picker the dashboard renders.
  *
- * Layered. The built-ins in packages/shared/src/tags/vocabularies.ts ship with the product
- * and are the base; table rows override or extend them at a narrower scope, most specific
- * winning by name. ORG and USER scopes are not resolved yet but need no schema change to
- * slot in — that is what `scope` is for.
+ * The table is the whole truth. A workspace's vocabulary is its rows in
+ * non_zero.thread_type_vocabulary — there is no fallback to code, so a workspace with no
+ * rows has no types and classification skips it until an admin installs some. THREAD_TYPES
+ * is a template `seedWorkspaceVocabulary` copies in on request; nothing else reads it.
+ *
+ * ORG and USER scopes are not resolved yet but need no schema change to slot in — that is
+ * what `scope` is for.
  */
-import { THREAD_TYPES, type ThreadTypeEntry } from '@xyne/shared';
+import { normalizeThreadTypeName, THREAD_TYPES, type ThreadTypeEntry } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 
@@ -34,8 +37,8 @@ export type VocabularyScope = (typeof VOCABULARY_SCOPES)[number];
  * them. UNDER_REVIEW is a free-form tag someone invented — recorded so an admin can promote
  * it, but withheld from both until they do. REJECTED is one an admin turned down.
  *
- * Rejection is a status, not `isDeleted`: on this table that flag already means "suppress the
- * built-in of this name", and a boolean has nowhere to record WHY a name was turned down.
+ * Rejection is a status, not `isDeleted`: that flag already means "this workspace removed
+ * this type", and a boolean has nowhere to record WHY a name was turned down.
  *
  * A rejected name keeps everything it already had — the tag stays on its threads and stays
  * searchable. All the status governs is whether the NAME spreads: whether the picker offers
@@ -75,22 +78,33 @@ const inDisplayOrder = (entries: ThreadTypeEntry[]): ThreadTypeEntry[] =>
 const toEntry = (row: {
   name: string;
   label: string;
+  summary: string;
   color: string;
   description: string;
 }): ThreadTypeEntry => ({
   name: row.name,
   label: row.label,
+  summary: row.summary,
   color: row.color,
   description: row.description,
 });
 
 /**
- * The name a candidate would take once approved: UPPER_SNAKE, which is what EntrySchema
- * requires. Shared by the retire match and by the rename preview an admin is shown, so the
- * two can never disagree about which proposal an approval answers.
+ * The approved names, read straight from the database.
+ *
+ * `getThreadTypeVocabulary` is fine to serve a minute-old answer to a prompt or a picker. It
+ * is NOT fine to diff a destructive write against: the cache is per process, so on a second
+ * instance a PUT can compute "this type is already gone" from a stale list and skip the
+ * removal, and the must-keep-one guard can pass on a vocabulary that is no longer there.
+ * Taken inside the caller's transaction so the decision and the write see the same rows.
  */
-export const promotedForm = (name: string): string =>
-  name.trim().toUpperCase().replace(/[\s-]+/g, '_');
+const approvedNames = async (tx: Tx, workspaceId: string): Promise<Set<string>> => {
+  const rows = await tx.threadTypeVocabulary.findMany({
+    where: { ...scopeKey(workspaceId), status: 'APPROVED', isDeleted: false },
+    select: { name: true },
+  });
+  return new Set(rows.map(row => row.name));
+};
 
 const scopeKey = (workspaceId: string): { scope: string; scopeId: string } => ({
   scope: 'WORKSPACE',
@@ -119,25 +133,62 @@ export const seedWorkspaceVocabulary = async (
   workspaceId: string,
   userId: string,
 ): Promise<{ added: number }> => {
-  const result = await db.threadTypeVocabulary.createMany({
-    data: THREAD_TYPES.map(entry => ({
-      ...scopeKey(workspaceId),
-      workspaceId,
-      name: entry.name,
-      label: entry.label,
-      color: entry.color,
-      description: entry.description,
-      status: 'APPROVED',
-      // The admin who ran the seed. They chose to add these, so they own them like any other
-      // entry — there is no "built in" author, because nothing is built in any more.
-      createdBy: userId,
-      updatedBy: userId,
-    })),
-    skipDuplicates: true,
-  });
+  const key = scopeKey(workspaceId);
+  let added = 0;
+
+  for (const entry of THREAD_TYPES) {
+    const existing = await db.threadTypeVocabulary.findUnique({
+      where: { scope_scopeId_name: { ...key, name: entry.name } },
+      select: { id: true, isDeleted: true },
+    });
+
+    // Already live: left exactly as it is. An admin may have renamed it, recoloured it or
+    // rewritten its instruction, and "add the standard types" must not quietly undo that.
+    if (existing && !existing.isDeleted) continue;
+
+    if (existing) {
+      // Suppressed. Reviving is the whole point of running this again — skipping it (which is
+      // what createMany's skipDuplicates did) left a workspace that had removed the standard
+      // types unable to ever get them back, because the tombstone still holds the unique key.
+      await db.threadTypeVocabulary.update({
+        where: { id: existing.id },
+        data: {
+          label: entry.label,
+          summary: entry.summary,
+          color: entry.color,
+          description: entry.description,
+          status: 'APPROVED',
+          isDeleted: false,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        },
+      });
+      added += 1;
+      continue;
+    }
+
+    await db.threadTypeVocabulary.create({
+      data: {
+        ...key,
+        workspaceId,
+        name: entry.name,
+        label: entry.label,
+        summary: entry.summary,
+        color: entry.color,
+        description: entry.description,
+        status: 'APPROVED',
+        // The admin who installed the set. They own these like any other entry: there is no
+        // authorless row, so "Proposed by" never has to show a bucket for nobody.
+        createdBy: userId,
+        updatedBy: userId,
+      },
+    });
+    added += 1;
+  }
+
   clearVocabularyCache(workspaceId);
-  logger.info(`${TAG} Seeded starting vocabulary`, { workspaceId, added: result.count });
-  return { added: result.count };
+  logger.info(`${TAG} Installed standard vocabulary`, { workspaceId, added, userId });
+  return { added };
 };
 
 /**
@@ -187,14 +238,16 @@ export async function setThreadTypeVocabulary(
   const now = new Date();
   const key = scopeKey(workspaceId);
   const keep = new Set(entries.map(entry => entry.name));
-  const current = await getThreadTypeVocabulary(workspaceId);
 
   await db.$transaction(async tx => {
-    for (const entry of current) {
-      if (keep.has(entry.name)) continue;
+    // Read inside the transaction: what is removed is everything currently approved that the
+    // caller did not resend, and that set has to be the one this write is about to act on.
+    const current = await approvedNames(tx, workspaceId);
+    for (const name of current) {
+      if (keep.has(name)) continue;
       await tx.threadTypeVocabulary.upsert({
-        where: { scope_scopeId_name: { ...key, name: entry.name } },
-        create: { ...key, workspaceId, ...suppression(entry.name), createdBy: userId, updatedBy: userId },
+        where: { scope_scopeId_name: { ...key, name } },
+        create: { ...key, workspaceId, ...suppression(name), createdBy: userId, updatedBy: userId },
         update: { isDeleted: true, updatedBy: userId, updatedAt: now },
       });
     }
@@ -235,6 +288,7 @@ export async function setThreadTypeVocabulary(
 const suppression = (name: string) => ({
   name,
   label: name,
+  summary: '',
   color: '#6b7280',
   description: '',
   isDeleted: true,
@@ -264,22 +318,28 @@ export async function patchThreadTypeVocabulary(
   const remove = patch.remove ?? [];
   const now = new Date();
   const key = scopeKey(workspaceId);
-  const effective = new Set((await getThreadTypeVocabulary(workspaceId)).map(entry => entry.name));
-
-  // Refuse to empty the vocabulary: a workspace with nothing to pick from cannot classify.
-  const surviving = new Set(effective);
-  for (const name of remove) surviving.delete(name);
-  for (const entry of add) surviving.add(entry.name);
-  if (surviving.size === 0) {
-    throw new Error('A workspace must keep at least one thread type');
-  }
-
-  const removed = remove.filter(name => effective.has(name));
-  const ignored = remove.filter(name => !effective.has(name));
   const added: string[] = [];
   const updated: string[] = [];
+  let removed: string[] = [];
+  let ignored: string[] = [];
 
   await db.$transaction(async tx => {
+    // Read inside the transaction rather than through the cache. Both the guard below and the
+    // removed/ignored split are DECISIONS taken on this list, and a per-process cache means a
+    // second instance can decide them on a vocabulary that no longer exists.
+    const effective = await approvedNames(tx, workspaceId);
+
+    // Refuse to empty the vocabulary: a workspace with nothing to pick from cannot classify.
+    const surviving = new Set(effective);
+    for (const name of remove) surviving.delete(name);
+    for (const entry of add) surviving.add(entry.name);
+    if (surviving.size === 0) {
+      throw new Error('A workspace must keep at least one thread type');
+    }
+
+    removed = remove.filter(name => effective.has(name));
+    ignored = remove.filter(name => !effective.has(name));
+
     for (const name of removed) {
       await tx.threadTypeVocabulary.upsert({
         where: { scope_scopeId_name: { ...key, name } },
@@ -321,11 +381,19 @@ export async function patchThreadTypeVocabulary(
 
 /** A vocabulary row as an admin sees it — including the ones awaiting a decision. */
 export interface VocabularyRow extends ThreadTypeEntry {
+  /**
+   * The row id, and the only unique thing about a row.
+   *
+   * `name` is NOT unique here: candidates are USER-scoped, so two people inventing `p0`
+   * produce two rows with the same name, both in this list. Anything keying on name — a
+   * React key, a selection — collides and makes the second proposer's row unreachable.
+   */
+  id: string;
   scope: VocabularyScope;
   status: VocabularyStatus;
-  /** Who invented it. Null for entries resolved from the built-ins. */
+  /** Who invented it, or who installed it with the standard set. */
   createdBy: string | null;
-  /** When it was proposed, epoch ms. Null for entries resolved from the built-ins. */
+  /** When the row was written, epoch ms. */
   proposedAt: number | null;
 }
 
@@ -341,7 +409,7 @@ export interface VocabularyRow extends ThreadTypeEntry {
  */
 export interface VocabularyQuery {
   statuses?: readonly VocabularyStatus[];
-  /** User ids. The empty string selects the built-ins, which nobody proposed. */
+  /** User ids. The empty string selects rows with no recorded author. */
   proposedBy?: readonly string[];
   limit?: number;
   offset?: number;
@@ -424,6 +492,7 @@ export async function listThreadTypeVocabulary(
   return {
     rows: rows.map(row => ({
       ...toEntry(row),
+      id: row.id,
       scope: isScope(row.scope) ? row.scope : ('USER' as VocabularyScope),
       status: isStatus(row.status) ? row.status : ('UNDER_REVIEW' as VocabularyStatus),
       createdBy: row.createdBy,
@@ -511,6 +580,7 @@ export async function listTagsCreatedBy(
   });
   return rows.map(row => ({
     ...toEntry(row),
+    id: row.id,
     scope: isScope(row.scope) ? row.scope : ('USER' as VocabularyScope),
     // Read the stored value rather than collapsing "not under review" to approved — that
     // would report a name this person proposed and had turned down as though it had been
@@ -634,18 +704,17 @@ export async function reconsiderVocabularyCandidates(
 const retireCandidates = async (tx: Tx, workspaceId: string, names: string[]): Promise<void> => {
   if (names.length === 0) return;
 
-  // Match on the PROMOTED form, not on an identical string. An approved name must be
-  // UPPER_SNAKE and a candidate is whatever the proposer typed, so promoting one always
-  // renames it — `vespa-latency` becomes `VESPA_LATENCY`. Comparing raw names would retire
-  // nothing on the only path that actually happens, and the queue would keep offering a
-  // proposal that had already been accepted.
-  const promoted = new Set(names.map(promotedForm));
+  // Names are normalised where they are INVENTED, so a proposal and the entry that approves
+  // it are already the same string and this is an exact match. It is still routed through
+  // normalizeThreadTypeName rather than compared raw, so that rows written before that rule
+  // existed still retire instead of sitting in the queue forever.
+  const promoted = new Set(names.map(normalizeThreadTypeName));
   const outstanding = await tx.threadTypeVocabulary.findMany({
     where: { workspaceId, scope: 'USER', status: 'UNDER_REVIEW' },
     select: { id: true, name: true },
   });
   const resolved = outstanding
-    .filter(row => promoted.has(promotedForm(row.name)))
+    .filter(row => promoted.has(normalizeThreadTypeName(row.name)))
     .map(row => row.id);
   if (resolved.length === 0) return;
 

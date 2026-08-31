@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { THREAD_TYPES, type ThreadTypeEntry } from '@xyne/shared';
+import { type ThreadTypeEntry } from '@xyne/shared';
 import { threadTypeVocabularyApi, type VocabularyEntry } from '../api/threadTypeVocabularyApi';
 import { useShowThreadTags } from './useShowThreadTags';
 
@@ -13,14 +13,14 @@ export const THREAD_TYPE_VOCABULARY_KEY = ['thread-type-vocabulary'];
  * One request per session, shared by every picker and chip: it changes only when an admin
  * edits it, so a long staleTime is right and refetching per thread would be waste.
  *
- * Falls back to the built-ins whenever the fetch has not landed — still loading, request
- * failed, or the endpoint is not there at all. That last case is the one that matters: a
- * dashboard deployed ahead of its backend would 404 and, without this, offer an empty picker
- * for as long as the skew lasts. The built-ins are what the server would have returned for an
- * uncustomised workspace anyway, so degrading to them is degrading to the truth.
+ * There is NO fallback to the list in code, and there must not be. A workspace's vocabulary
+ * is its rows and nothing else, so an empty answer is a real answer: it means an admin has
+ * not installed any types yet. Filling the picker from code would offer types the workspace
+ * does not have — and picking one would send a name the server has never heard of, which
+ * lands as a free-form PROPOSAL for a type nobody chose to install.
  *
- * The cost is a workspace that RENAMED a type sees the built-in label for the few hundred ms
- * before the real vocabulary arrives. A brief wrong label is the cheaper failure.
+ * While the request is in flight the picker is briefly empty and chips render from their
+ * stored name without label or colour. That is the honest reading of "we do not know yet".
  */
 export const useThreadTypeVocabulary = (): {
   entries: ThreadTypeEntry[];
@@ -40,7 +40,7 @@ export const useThreadTypeVocabulary = (): {
     staleTime: 15 * 60 * 1000,
   });
 
-  const entries = useMemo<VocabularyEntry[]>(() => data ?? [...THREAD_TYPES], [data]);
+  const entries = useMemo<VocabularyEntry[]>(() => data ?? [], [data]);
 
   const rank = useMemo(() => {
     const order = new Map(entries.map((entry, index) => [entry.name, index]));

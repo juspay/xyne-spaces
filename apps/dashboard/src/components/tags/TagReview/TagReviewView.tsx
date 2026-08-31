@@ -48,7 +48,9 @@ const isDefault = (filters: TagReviewFilters): boolean =>
 export const TagReviewView = (): JSX.Element => {
   const [filters, setFilters] = useState<TagReviewFilters>(initialFilters);
   const [offset, setOffset] = useState(0);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+  // Held by ROW ID, not by name: two people proposing the same name give two rows, and
+  // selecting by name would open the first and leave the second unreachable.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const {
     entries,
@@ -83,14 +85,14 @@ export const TagReviewView = (): JSX.Element => {
     setOffset(0);
   };
 
-  // The pane is keyed by name, and a name that is no longer on this page has nothing to show.
+  // A row that has left this page has nothing to show in the pane.
   useEffect(() => {
-    if (selectedName && !entries.some(entry => entry.name === selectedName)) setSelectedName(null);
-  }, [entries, selectedName]);
+    if (selectedId && !entries.some(entry => entry.id === selectedId)) setSelectedId(null);
+  }, [entries, selectedId]);
 
   const selected = useMemo(
-    () => entries.find(entry => entry.name === selectedName) ?? null,
-    [entries, selectedName],
+    () => entries.find(entry => entry.id === selectedId) ?? null,
+    [entries, selectedId],
   );
 
   const filtered = !isDefault(filters);
@@ -194,10 +196,10 @@ export const TagReviewView = (): JSX.Element => {
           ) : (
             entries.map(entry => (
               <TagReviewRow
-                key={entry.name}
+                key={entry.id ?? entry.name}
                 entry={entry}
-                isSelected={entry.name === selectedName}
-                onSelect={name => setSelectedName(current => (current === name ? null : name))}
+                isSelected={entry.id === selectedId}
+                onSelect={id => setSelectedId(current => (current === id ? null : id))}
               />
             ))
           )}
@@ -239,7 +241,7 @@ export const TagReviewView = (): JSX.Element => {
       {selected && (
         <TagDecisionPane
           entry={selected}
-          onClose={() => setSelectedName(null)}
+          onClose={() => setSelectedId(null)}
           onReject={() => reject([selected.name])}
           onReconsider={() => reconsider([selected.name])}
           onSave={save}

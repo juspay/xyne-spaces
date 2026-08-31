@@ -134,3 +134,32 @@ export const indexableTagNames = (tags: AppliedTag[]): string[] =>
  * has been curated and should no longer be re-classified.
  */
 export const isHumanApplied = (tag: AppliedTag): boolean => Boolean(tag.by);
+
+/**
+ * The stored form of a tag name, applied the moment someone invents one.
+ *
+ * Normalising at CREATION rather than at approval is what keeps a tag matching itself. If a
+ * name were rewritten later, the threads already carrying it would keep the old spelling: the
+ * chips would stop resolving to the vocabulary entry, the usage count would read zero, and a
+ * search for the approved name would find none of them.
+ *
+ * There is exactly one copy of this rule and every writer imports it — the two Zero mutator
+ * copies, the picker, and the promotion path. Two copies of it either side of a network
+ * boundary is how a proposal ends up approved under a name the server never retires.
+ *
+ * Returns '' when nothing usable survives (punctuation only); callers refuse rather than
+ * store a blank.
+ *
+ * NOT to be confused with `normalizeTagName` in this package's index, which is the Desk tag
+ * system's rule and produces the opposite shape — lowercase, hyphen-separated.
+ */
+export const normalizeThreadTypeName = (raw: string): string =>
+  raw
+    .trim()
+    .toUpperCase()
+    // Every RUN of non-alphanumerics becomes one underscore, so "vespa latency",
+    // "vespa-latency" and "Vespa/Latency" are one tag rather than three near-duplicates.
+    // Underscore is itself non-alphanumeric, so existing ones are absorbed by the same run:
+    // "VESPA__LATENCY" collapses here too, and nothing downstream can see a doubled one.
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_|_$/g, '');

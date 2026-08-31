@@ -7,7 +7,7 @@
  */
 import { JSX, useEffect, useMemo, useState } from 'react';
 import { Check, RotateCcw, Trash2, X } from 'lucide-react';
-import type { ThreadTypeEntry } from '@xyne/shared';
+import { normalizeThreadTypeName, type ThreadTypeEntry } from '@xyne/shared';
 import type { VocabularyEntry } from '../../../api/threadTypeVocabularyApi';
 import { useUser } from '../../../hooks/useUsers';
 import { Button } from '../../ui/Button/Button';
@@ -18,19 +18,6 @@ import { colorForTagName } from '../tagColors';
 /** The API's floor. It is a prompt, not a tooltip: under twenty characters cannot define a type. */
 const MIN_DESCRIPTION = 20;
 const MAX_DESCRIPTION = 1200;
-
-/**
- * Must match `promotedForm` in the backend's vocabulary service exactly.
- *
- * Approving under a name the server does not derive the same way leaves every proposal for
- * the original name sitting in the queue forever, because retirement matches on this. That is
- * also why the field is shown and not edited.
- */
-const promotedForm = (name: string): string =>
-  name
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, '_');
 
 const VALID_NAME = /^[A-Z][A-Z0-9_]*$/;
 
@@ -99,9 +86,13 @@ export const TagDecisionPane = ({
   const isRejected = status === 'REJECTED';
   const proposer = useUser(entry.createdBy ?? '');
 
-  const promoted = useMemo(() => promotedForm(entry.name), [entry.name]);
+  // Normally identical to entry.name: names are normalised where they are invented, so
+  // approval renames nothing. It differs only for rows written before that rule existed,
+  // which is exactly when the reader needs to be shown the rename.
+  const promoted = useMemo(() => normalizeThreadTypeName(entry.name), [entry.name]);
 
   const [label, setLabel] = useState('');
+  const [summary, setSummary] = useState('');
   const [color, setColor] = useState('#0891b2');
   const [description, setDescription] = useState('');
 
@@ -113,11 +104,12 @@ export const TagDecisionPane = ({
         // A proposal has no authored label; the name is the only thing the proposer gave.
         entry.name.replace(/[-_]+/g, ' ').replace(/\b\w/g, character => character.toUpperCase()),
     );
+    setSummary(entry.summary ?? '');
     setColor(entry.color || colorForTagName(entry.name));
     // For a proposal this is the note its author typed — the only thing to judge on, and the
     // right starting point for the prompt copy.
     setDescription(entry.description ?? '');
-  }, [entry.name, entry.label, entry.color, entry.description]);
+  }, [entry.name, entry.label, entry.summary, entry.color, entry.description]);
 
   const targetName = isProposal ? promoted : entry.name;
   const nameValid = VALID_NAME.test(targetName);
@@ -136,7 +128,7 @@ export const TagDecisionPane = ({
     : !label.trim()
       ? 'Give it a label.'
       : trimmed.length < MIN_DESCRIPTION
-        ? `The definition needs ${MIN_DESCRIPTION - trimmed.length} more character${
+        ? `The classifier instruction needs ${MIN_DESCRIPTION - trimmed.length} more character${
             MIN_DESCRIPTION - trimmed.length === 1 ? '' : 's'
           } — it is what the classifier is told about this type.`
         : null;
@@ -145,7 +137,16 @@ export const TagDecisionPane = ({
   const counted = typeof total === 'number';
 
   const save = (): void =>
-    onSave({ name: targetName, label: label.trim(), color, description: trimmed }, isProposal);
+    onSave(
+      {
+        name: targetName,
+        label: label.trim(),
+        summary: summary.trim(),
+        color,
+        description: trimmed,
+      },
+      isProposal,
+    );
 
   return (
     <aside className='flex w-[420px] shrink-0 flex-col border-l border-border bg-background'>
@@ -209,7 +210,7 @@ export const TagDecisionPane = ({
           </div>
         ) : (
           <div className='flex flex-col gap-4'>
-            {isProposal && (
+            {isProposal && promoted !== entry.name && (
               <Field label='Will be stored as'>
                 <div className='flex items-center gap-2 text-sm'>
                   <span className='font-mono text-muted-foreground'>{entry.name}</span>
@@ -232,6 +233,16 @@ export const TagDecisionPane = ({
                 maxLength={60}
                 onChange={event => setLabel(event.target.value)}
                 placeholder='Feature request'
+              />
+            </Field>
+
+            <Field label='Summary' hint='One line, shown on the chip'>
+              <Input
+                variant='flat'
+                value={summary}
+                maxLength={160}
+                onChange={event => setSummary(event.target.value)}
+                placeholder='Something is broken. Done when it is fixed and verified.'
               />
             </Field>
 
@@ -258,7 +269,7 @@ export const TagDecisionPane = ({
             </Field>
 
             <Field
-              label='Definition'
+              label='Classifier instruction'
               hint={
                 trimmed.length < MIN_DESCRIPTION ? (
                   <span className='text-destructive'>
@@ -286,10 +297,11 @@ export const TagDecisionPane = ({
                 )}
               />
             </Field>
-            {/* Not a tooltip. Saying so where the field is stops descriptions being written as
-                one, which is how a classifier ends up guessing. */}
+            {/* Saying whose it is, where the field is. This one is read by the model and by
+                nobody else — the human-facing line is Summary, above. */}
             <p className='-mt-2 text-[11px] text-muted-foreground'>
-              This is the instruction the classifier is given for this type.
+              Given to the model, not shown to anyone. Say what it covers AND what it does not —
+              near-misses are what gets mistagged.
             </p>
 
             <Field label='Preview'>

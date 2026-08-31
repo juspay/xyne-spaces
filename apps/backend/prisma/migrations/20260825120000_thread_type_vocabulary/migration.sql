@@ -5,6 +5,7 @@ CREATE TABLE "non_zero"."thread_type_vocabulary" (
     "workspaceId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "label" TEXT NOT NULL,
+    "summary" TEXT NOT NULL DEFAULT '',
     "color" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'APPROVED',

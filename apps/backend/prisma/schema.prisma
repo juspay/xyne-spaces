@@ -4530,6 +4530,7 @@ model ThreadTypeVocabulary {
   workspaceId String
   name        String
   label       String
+  summary     String   @default("")
   color       String
   description String
   status      String   @default("APPROVED")

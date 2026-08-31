@@ -98,6 +98,7 @@ import {
   sdlcDiscussionSchema,
 } from '@xyne/shared';
 import {
+  normalizeThreadTypeName,
   parseAppliedTags,
   serializeAppliedTags,
   type AppliedTag,
@@ -12259,9 +12260,24 @@ export function createMutators(
           );
           if (!conversation) throw new Error('Conversation not found');
 
-          const desired = [...new Set(types.map(t => t.trim()).filter(Boolean))];
           const existing = parseAppliedTags(conversation.threadType);
           const byName = new Map(existing.map(tag => [tag.name, tag]));
+
+          // Normalise the names being ADDED, and only those. A name already on this thread is
+          // passed through untouched: the caller resends the full set on every edit, so
+          // normalising indiscriminately would silently rewrite tags applied long ago, on an
+          // edit that had nothing to do with them, leaving the same tag spelled two ways
+          // across the workspace.
+          const desired = [
+            ...new Set(
+              types
+                .map(raw => {
+                  const trimmed = raw.trim();
+                  return byName.has(trimmed) ? trimmed : normalizeThreadTypeName(trimmed);
+                })
+                .filter(Boolean),
+            ),
+          ];
 
           // A merge, never a replace. The caller sends the full desired set, but each tag
           // already there keeps its own provenance — who applied it and when. Rewriting them all

@@ -22,7 +22,20 @@ export interface ThreadTypeEntry {
   name: string;
   label: string;
   color: string;
-  /** One-line definition. Generates the classifier prompt AND the chip's hover tooltip. */
+  /**
+   * One line, for people. The chip's tooltip and the review row.
+   *
+   * Separate from `description` because the two are written for different readers and pull in
+   * opposite directions: prompt copy earns its length from the "NOT" clauses that stop the
+   * model on near-misses, and every one of those is noise to someone hovering a chip.
+   */
+  summary: string;
+  /**
+   * The classifier's instruction for this type — prompt copy, not a tooltip.
+   *
+   * Long on purpose. The NOT clauses matter as much as the definition: near-misses are what
+   * the model gets wrong, and each one is there because something was mistagged without it.
+   */
   description: string;
 }
 
@@ -44,6 +57,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'ISSUE',
     label: 'Issue',
+    summary: 'Something is broken. Done when it is fixed and verified.',
     color: '#ef4444',
     description:
       'Something that should work is broken or degraded. Done = fixed and verified.',
@@ -51,6 +65,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'ALERT',
     label: 'Alert',
+    summary: 'A bot or monitoring check reported a problem.',
     color: '#f59e0b',
     description:
       'A bot or automated check (monitoring, QA, CI) opened the thread to report a problem. Done = acknowledged and resolved or deliberately suppressed.',
@@ -58,6 +73,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'QUESTION',
     label: 'Question',
+    summary: 'Someone wants information. Done when it is answered.',
     color: '#f97316',
     description:
       'The thread exists to get information; no defect, no action on a system. Done = answered.',
@@ -65,6 +81,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'REQUEST',
     label: 'Request',
+    summary: 'Asks someone to do something the system already supports.',
     color: '#3b82f6',
     description:
       'Asks someone to perform an action the system already supports. Done = action performed and confirmed.',
@@ -72,6 +89,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'FEATURE_REQUEST',
     label: 'Feature request',
+    summary: 'Asks for something that does not exist yet.',
     color: '#8b5cf6',
     description:
       'Asks for capability that does not exist; requires product evaluation. Done = accepted onto the roadmap or declined with reason.',
@@ -79,6 +97,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'DISCUSSION',
     label: 'Discussion',
+    summary: 'An open-ended exchange with no finish line.',
     color: '#6b7280',
     description:
       'Open-ended exchange with no inherent done state. The default when no other type fits.',
@@ -86,6 +105,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'ANNOUNCEMENT',
     label: 'Announcement',
+    summary: 'A broadcast — a release, deprecation or planned maintenance.',
     color: '#14b8a6',
     description:
       'One-to-many broadcast; nothing is owed by anyone. No done state. Covers dated ' +
@@ -97,6 +117,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'HOW_TO',
     label: 'How-to',
+    summary: 'Explains how to do something, completely enough to follow.',
     color: '#0891b2',
     description:
       'Contains an actionable procedure — ordered steps, or a complete instruction a reader ' +
@@ -109,6 +130,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'WHAT_HAPPENED',
     label: 'What happened',
+    summary: 'An account of a specific past event, such as an incident.',
     color: '#b45309',
     description:
       'A narrative of a specific past event — incident recap, sequence of events, impact, ' +
@@ -120,6 +142,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'WHY_DECISION',
     label: 'Why (decision)',
+    summary: 'A decision and the reasoning behind it.',
     color: '#4f46e5',
     description:
       'States a decision AND the reasoning behind it. Fires on "we chose X over Y because…", ' +
@@ -130,17 +153,21 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'WHAT_IS',
     label: 'What is',
+    summary: 'Explains what something is — a term, feature or system.',
     color: '#059669',
     description:
       'Explains a concept, term, feature or system — a definition or explainer a newcomer ' +
       'could learn from. Answers a vocabulary question, not a task question. Fires on "X is…", ' +
       '"X means…", capability descriptions, jargon explanations, architecture explainers. NOT ' +
-      'when the term is merely USED rather than explained, NOT a one-word or purely contextual ' +
-      'reply.',
+      'when someone ASKS what something is and no one answers — a question is not an answer, ' +
+      'and an unanswered "what is X?" is the clearest case of what this must never fire on. ' +
+      'NOT when the term is merely USED rather than explained, NOT a one-word or purely ' +
+      'contextual reply.',
   },
   {
     name: 'KNOWN_ISSUE',
     label: 'Known issue',
+    summary: 'An acknowledged bug or limitation, and any workaround.',
     color: '#be123c',
     description:
       'An acknowledged bug or limitation, its status, and any workaround. Fires when the ' +
@@ -151,6 +178,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'REFERENCE',
     label: 'Reference',
+    summary: 'Exact values to look up: fields, error codes, formats.',
     color: '#334155',
     description:
       'Exact technical facts meant to be looked up: field lists, parameter names and types, ' +
@@ -162,6 +190,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'EXAMPLE',
     label: 'Example',
+    summary: 'A concrete, working instance you could copy and use.',
     color: '#65a30d',
     description:
       'A concrete, complete instance whose value is that it can be copied and used: a working ' +
@@ -172,6 +201,7 @@ export const THREAD_TYPES: readonly ThreadTypeEntry[] = [
   {
     name: 'POLICY_LIMIT',
     label: 'Policy / limit',
+    summary: 'A rule or limit, stated with its actual value.',
     color: '#c026d3',
     description:
       'States an operative constraint together with its value: transaction limits, SLA ' +

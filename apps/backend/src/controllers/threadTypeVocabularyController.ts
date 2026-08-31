@@ -19,7 +19,7 @@ import {
 
 /**
  * Names are the value stored in Vespa and echoed back to the model, so they are constrained
- * to the shape the built-ins use: UPPER_SNAKE, deliberately unlike the lowercase-hyphenated
+ * to the shape the standard set uses: UPPER_SNAKE, deliberately unlike the lowercase-hyphenated
  * shape people type for free-form thread tags, so the two stay distinguishable at a glance.
  */
 const EntrySchema = z.object({
@@ -30,6 +30,10 @@ const EntrySchema = z.object({
     .max(MAX_NAME_LENGTH)
     .regex(/^[A-Z][A-Z0-9_]*$/, 'name must be UPPER_SNAKE, e.g. FEATURE_REQUEST'),
   label: z.string().trim().min(1).max(60),
+  // What a person reads on the chip's tooltip. Optional — an entry is usable without one,
+  // and forcing a second piece of prose at approval time is how the field ends up filled
+  // with a copy of the label.
+  summary: z.string().trim().max(160).optional().default(''),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'color must be a hex value, e.g. #0891b2'),
   // Prompt copy, not a tooltip: this is what tells the model when the type applies, so a
   // one-word description produces a classifier that guesses.
@@ -334,9 +338,10 @@ export class ThreadTypeVocabularyController {
         return;
       }
 
-      // An empty vocabulary is not "no types" — it silently falls back to the built-ins on
-      // the next read, which is not what an admin who just cleared the list would expect.
-      // Refusing is the honest answer; removing the feature is a flag, not a config edit.
+      // An empty vocabulary really is no types: nothing falls back, so the picker empties and
+      // the classifier skips every thread in the workspace. That is a big enough switch that
+      // it should not be reachable by PUTting an empty array — turning the feature off is a
+      // flag, not a config edit.
       if (parsed.data.entries.length === 0) {
         res.status(400).json({ error: 'A workspace must keep at least one thread type' });
         return;

@@ -8,7 +8,8 @@ import { tagReviewAlignClass, tagReviewGridTemplate } from './tagReviewColumns';
 interface TagReviewRowProps {
   entry: VocabularyEntry;
   isSelected: boolean;
-  onSelect: (name: string) => void;
+  /** Receives the ROW id — names collide when two people propose the same one. */
+  onSelect: (id: string) => void;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -47,11 +48,11 @@ export const TagReviewRow = ({ entry, isSelected, onSelect }: TagReviewRowProps)
     <div
       role='row'
       tabIndex={0}
-      onClick={() => onSelect(entry.name)}
+      onClick={() => onSelect(entry.id ?? entry.name)}
       onKeyDown={event => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
-        onSelect(entry.name);
+        onSelect(entry.id ?? entry.name);
       }}
       data-track-category='TagReview'
       data-track-name='SelectTag'
@@ -71,14 +72,15 @@ export const TagReviewRow = ({ entry, isSelected, onSelect }: TagReviewRowProps)
               {entry.name}
             </span>
           </div>
-          {/* The proposer's note. It is the only thing an admin has to judge on, so it gets a
-              line of its own rather than a tooltip. */}
-          {entry.description ? (
+          {/* The human-facing line, falling back to the classifier instruction for entries
+              written before the two were separated. A proposal has neither until it is
+              approved — nobody writes prose to invent a tag. */}
+          {entry.summary || entry.description ? (
             <span className='min-w-0 truncate text-xs text-muted-foreground'>
-              {entry.description}
+              {entry.summary || entry.description}
             </span>
           ) : (
-            <span className='text-xs italic text-muted-foreground/60'>No note given</span>
+            <span className='text-xs italic text-muted-foreground/60'>No summary yet</span>
           )}
         </div>,
       )}
