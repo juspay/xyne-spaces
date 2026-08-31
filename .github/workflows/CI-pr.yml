@@ -20,4 +20,6 @@ concurrency:
 
 jobs:
   ci:
-    uses: ./.github/workflows/ci.yml
+    uses: juspay/xyne-spaces/.github/workflows/ci.yml@main
+    permissions:
+      contents: read

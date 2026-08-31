@@ -1508,12 +1508,14 @@ model Skill {
   @@map("skills")
 }
 
-// Sibling files that ship alongside a skill's main SKILL.md (which lives in
-// Skill.content). Materialized into the session workspace under
-// `data/session-skills/<scope>/<slug>/<relativePath>` so pi's resource
-// loader sees the whole directory.
-// relativePath is always a normalized POSIX path inside the skill dir —
-// no leading slash, no "..", no absolute paths. Enforced at write time.
+/**
+ * Sibling files that ship alongside a skill's main SKILL.md (which lives in
+ * Skill.content). Materialized into the session workspace under
+ * `data/session-skills/<scope>/<slug>/<relativePath>` so pi's resource
+ * loader sees the whole directory.
+ * relativePath is always a normalized POSIX path inside the skill dir —
+ * no leading slash, no "..", no absolute paths. Enforced at write time.
+ */
 model SkillFile {
   id           String   @id @default(cuid())
   skillId      String

@@ -3256,7 +3256,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // A dispatch that dies on a TRANSIENT upstream failure (envoy 502/503/504
     // "no healthy upstream" during a claw rollout, a connection refusal against
     // a terminating pod) is retryable — the run never started, so nothing is
-    // duplicated by trying again. Mirrors routes/run.ts fetchClawRunWithRetry.
+    // duplicated by trying again. Without this, a routine claw deploy turns
+    // every in-flight mention into a user-visible "I couldn't start this
+    // request: no healthy upstream" (observed prod 2026-08-05) even though a
+    // retry two seconds later would have succeeded. Mirrors the retry the /run
+    // proxy already does (routes/run.ts fetchClawRunWithRetry).
+    //
+    // The ladder must OUTLAST a claw rollout, not just a blip: envoy keeps
+    // returning 503 for the full pod-boot window (image pull + boot +
+    // readiness, 1–3 min observed prod 2026-08-06 — a 2s×2 ladder exhausted in
+    // 4.5s and still posted the "briefly unavailable" notice for every mention
+    // landing mid-deploy). This runs after the webhook was ack'd, so waiting
+    // here blocks no caller; the message is already acked and the queue slot
+    // is held for this conversation.
     const DISPATCH_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
     const isTransientUpstream = (status: number, body: string): boolean =>
       status === 502 || status === 503 || status === 504 ||
@@ -3269,6 +3281,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAYS_MS[attempt - 1]));
         const res = await fetchRun();
         if (res.ok) return res;
+        // Peek at the body WITHOUT consuming the caller's copy.
         const peek = await res.clone().text().catch(() => "");
         if (!isTransientUpstream(res.status, peek)) return res;
         lastRes = res;
