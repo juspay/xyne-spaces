@@ -1139,6 +1139,7 @@ const ChannelCommandMenu = ({
     fileUrl: string;
     mimeType: string;
     fileSize: number;
+    attachmentId?: string;
   } | null>(null);
   const [previewTicket, setPreviewTicket] = useState<DisplaySearchResult | null>(null);
   const [hoveredResult, setHoveredResult] = useState<DisplaySearchResult | null>(null);
@@ -1994,15 +1995,27 @@ const ChannelCommandMenu = ({
   const handleFilePreview = useCallback(
     (result: DisplaySearchResult): void => {
       // Handle attachment preview - show file preview modal
-      if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
+      if (result.type !== 'attachment' || !result.searchContext) {
+        return;
+      }
+
+      const { attachmentId, internalUrl, subApp } = result.searchContext;
+      const normalizedSubApp = subApp?.toUpperCase();
+      const isMessageAttachment =
+        normalizedSubApp === 'CHAT_ATTACHMENT' || normalizedSubApp === 'TICKET_ATTACHMENT';
+      const fileUrl =
+        isMessageAttachment && attachmentId ? `/attachments/${attachmentId}/download` : internalUrl;
+
+      if (!fileUrl) {
         return;
       }
 
       setPreviewFile({
         fileName: result.title,
-        fileUrl: result.searchContext.internalUrl,
+        fileUrl,
         mimeType: result.searchContext.mimeType || 'application/octet-stream',
         fileSize: result.searchContext.fileSize || 0,
+        ...(isMessageAttachment && attachmentId ? { attachmentId } : {}),
       });
       onOpenChange(false);
     },
@@ -2944,6 +2957,7 @@ const ChannelCommandMenu = ({
           fileUrl={previewFile.fileUrl}
           mimeType={previewFile.mimeType}
           fileSize={previewFile.fileSize}
+          {...(previewFile.attachmentId ? { attachmentId: previewFile.attachmentId } : {})}
         />
       )}
     </>
