@@ -964,7 +964,7 @@ const spacesSearch: ToolDef = {
       // spaces-search ALWAYS goes through the Spaces backend /api/vespaSearch
       // (the canonical YqlBuilder). DIRECT_VESPA_SEARCH deliberately does NOT
       // reroute this tool through the hand-maintained vespa-direct.ts copy — that
-      // flag now only gates the spaces-vespa-query escape-hatch tool (registered
+      // flag now only gates the structured direct-Vespa tools (registered
       // below). The direct copy lagged the backend (no mail, no fuzzy fallback,
       // no personalization/threshold ranking, single-surface grouping dropped,
       // weaker workspace isolation), so routing the primary search tool through
@@ -7207,8 +7207,8 @@ function directEntityIdLines(r: SearchResult): string {
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
-// Shared renderer for the direct-Vespa tools (spaces-vespa-query raw YQL and
-// spaces-vespa-search structured). Builds a routable Citation per result row —
+// Shared renderer for the direct-Vespa tools (spaces-vespa-search and the
+// bench search). Builds a routable Citation per result row —
 // mirrors spaces-search's harvest() so hits render as CLICKABLE chips instead of
 // dead tokens. harvest() returns whether it pushed a citation; the caller gates
 // the inline token on that (formatSearchResult(r, null) → no token), so a
@@ -7595,139 +7595,6 @@ const onyxBenchSearch: ToolDef = {
       return directError("onyx-bench-search error", e);
     }
   }),
-};
-
-// ── spaces-vespa-query ───────────────────────────────────────────────────────
-
-const spacesVespaQuery: ToolDef = {
-  name: "spaces-vespa-query",
-  description:
-    "Execute a raw YQL query directly against Vespa. " +
-    "Use this when spaces-search doesn't support the exact filter combination you need.\n\n" +
-    "## Workflow\n" +
-    "1. Pick the source for the surface you want (see **YQL source names** below).\n" +
-    "2. Write your YQL using the field names in **Key fields** below.\n" +
-    "3. Call this tool with the YQL.\n\n" +
-    "## Key fields\n" +
-    "- Filter by sender: message.userId, ticket.createdBy\n" +
-    "- Filter by channel: message.channelId, ticket.channelId\n" +
-    "- Filter by time: message.createdAtTimestamp, ticket.createdAtTimestamp, file.createdAtTimestamp, sam_transcript.dateTime (all in ms)\n" +
-    "- Ticket status: ticket.status (TODO|STARTED|PAUSED|CANCELLED|COMPLETED)\n" +
-    "- File sub-type: file.subApp (CANVAS|TRANSCRIPT|CHAT_ATTACHMENT|TICKET_ATTACHMENT|RCA)\n\n" +
-    "## ACL — include the correct guard per schema\n" +
-    "Always include the access control condition for the schema you query. ACL is auto-injected if omitted, but you should write it explicitly.\n" +
-    '- message / attachment / ticket / sam_transcript / mail / mail_attachment / memory: `permissions contains "<userId>"`\n' +
-    '- file: `(ownerId contains "<userId>" or permissions contains "<userId>" or isPrivate contains "false")` for CANVAS; `(ownerId contains "<userId>" or channelPermissions contains "<userId>" or isPrivate contains "false")` for CHAT_ATTACHMENT/TRANSCRIPT; no guard for RCA\n' +
-    "- user / channel: no ACL needed (public)\n" +
-    "Use the `userId` field from **spaces-whoami** if you need your own id.\n\n" +
-    "## YQL examples (use the YQL source name, NOT the .sd schema name)\n" +
-    "```\n" +
-    "-- tickets assigned to a user, open only (source: ticket)\n" +
-    'select * from sources ticket where userInput(@query) and status contains "OPEN" and assignedTo contains "<userId>" and permissions contains "<userId>"\n\n' +
-    "-- messages in a channel since a date (source: message) — write dates as dd/mm/yy, NOT epoch ms\n" +
-    'select * from sources message where channelId contains "<channelId>" and createdAtTimestamp > 01/06/26 and permissions contains "<userId>"\n\n' +
-    "-- files of subApp CANVAS owned by user (source: file)\n" +
-    'select * from sources file where subApp contains "CANVAS" and ownerId contains "<userId>"\n\n' +
-    "-- channels by name (source: channel, no ACL needed)\n" +
-    "select * from sources channel where userInput(@query)\n" +
-    "```\n\n" +
-    "## YQL source names\n" +
-    "message, attachment, channel, ticket, user, file, sam_transcript\n" +
-    "(These differ from the underlying .sd schema names: chat_message → `message`, chat_attachment → `attachment`, chat_container → `channel`; ticket / user / file / sam_transcript are the same in both.)\n\n" +
-    "## Ranking (rankProfile / rankInputs)\n" +
-    "Relevance scoring is driven by a Vespa rank profile that must EXIST in every schema your YQL touches.\n" +
-    "- For a filter-only or grouping/count query (no relevance order needed) leave both unset — the tool uses the built-in `unranked` profile.\n" +
-    "- For free-text relevance, pass a `rankProfile` the target schema declares — `default_native` for general relevance, `default_fuzzy` for typo-tolerant, `semantic_ranking` for vector-only. If unset, free-text defaults to `default_native`.\n" +
-    "- When you set a scoring `rankProfile`, also pass `rankInputs` taken from that profile's `inputs { query(...) }` block. If unset, the standard default_native inputs are used.\n\n" +
-    "## Notes\n" +
-    "- Only available when DIRECT_VESPA_SEARCH is enabled.\n" +
-    "- Pass free-text as `query` (bound to `@query` in YQL via `userInput(@query)`), not embedded in the YQL string.\n" +
-    '- Write date filters as dd/mm/yy (e.g. `createdAtTimestamp > 01/06/26`) — do NOT compute epoch ms yourself. The tool converts each literal to milliseconds before running the query. A bare date is treated as IST midnight of that day; to filter on a specific IST time add `HH:MM` (or `HH:MM:SS`), e.g. `createdAtTimestamp > "01/06/26 14:30"`. dd/mm/yyyy is also accepted. Dates are only converted when they follow a comparison operator (> < >= <=), so a date inside a text match stays literal.\n' +
-    "- Result rows come back citation-ready: each routable row (message/thread, ticket, channel, canvas, chat file, desk mail, RCA) is auto-tagged with a clickable source token. You do NOT need to project specific columns for this — the tool normalizes your `select` list to `select *` and returns a curated field set, so just write the `from`/`where`/`order by` you need.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      yql: {
-        type: "string",
-        description: "Raw Vespa YQL query string. Use the field names listed in this tool's description.",
-      },
-      query: {
-        type: "string",
-        description:
-          "Free-text query bound to @query in the YQL. Pass this separately — do not embed it in the yql string.",
-      },
-      hits: {
-        type: "number",
-        minimum: 0,
-        maximum: 100,
-        default: 20,
-        description:
-          "Max document hits to return (default 20, max 100). Pass 0 for grouping/count queries that only need the group aggregation, not the documents themselves.",
-      },
-      offset: {
-        type: "number",
-        minimum: 0,
-        default: 0,
-        description: "Pagination offset.",
-      },
-      rankProfile: {
-        type: "string",
-        description:
-          "Optional Vespa rank profile to score with, read from the schema's .sd `rank-profile` blocks. Must exist in EVERY source in your YQL. " +
-          "Common: `default_native` (general relevance), `default_fuzzy` (typo-tolerant), `semantic_ranking` (vector-only), `unranked` (no scoring). " +
-          "If omitted: `unranked` for grouping/count or no-text queries, `default_native` otherwise.",
-      },
-      rankInputs: {
-        type: "object",
-        additionalProperties: true,
-        description:
-          "Optional inputs for the chosen rank profile, read from its `inputs { query(...) }` block in the .sd. " +
-          "Keys may be bare (`alpha`) or wrapped (`query(alpha)`); each is sent as `input.query(<name>)`. " +
-          'For an embedding input use `{ "e": "embed(hf-embedder, @query)" }` (the embedder id is required — the cluster defines more than one). Ignored when the profile is `unranked`; if omitted with a scoring profile, the standard default_native inputs are used.',
-      },
-    },
-    required: ["yql"],
-  },
-  async handler(args, ctx) {
-    if (!CONFIG.directVespaSearch) {
-      return err("spaces-vespa-query requires DIRECT_VESPA_SEARCH=true.");
-    }
-    try {
-      const yql = String(args["yql"] ?? "").trim();
-      if (!yql) return err("yql is required.");
-      const query = String(args["query"] ?? "").trim();
-      const hits = Math.min(Math.max(Number(args["hits"] ?? 20), 0), 100);
-      const offset = Math.max(Number(args["offset"] ?? 0), 0);
-      const rankProfile = args["rankProfile"] != null ? String(args["rankProfile"]) : undefined;
-      const rankInputs =
-        args["rankInputs"] && typeof args["rankInputs"] === "object" && !Array.isArray(args["rankInputs"])
-          ? (args["rankInputs"] as Record<string, unknown>)
-          : undefined;
-
-      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
-      if (!workspaceId) {
-        log.error(
-          `[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`,
-        );
-        return err("Could not resolve your workspaceId — cannot run a workspace-scoped raw Vespa query.");
-      }
-
-      const data = await queryDirect(
-        yql,
-        query,
-        aclUserId,
-        hits,
-        offset,
-        CONFIG.vespaQueryEndpoint,
-        rankProfile,
-        rankInputs,
-        workspaceId,
-      );
-      return renderDirectResult(data, hits, offset, workspaceId);
-    } catch (e) {
-      return directError("vespa-query error", e);
-    }
-  },
 };
 
 /**
@@ -9137,7 +9004,7 @@ const spacesDeskMetrics: ToolDef = {
 
 export const tools: ToolDef[] = [
   spacesWhoami,
-  ...(CONFIG.directVespaSearch ? [spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
+  ...(CONFIG.directVespaSearch ? [spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
   onyxBenchSearch,
   spacesSearch,
   spacesSearchV2,
