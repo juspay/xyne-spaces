@@ -43,6 +43,7 @@ import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
@@ -1015,6 +1016,8 @@ function ChatMessageBubble({
 
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
+  const hasAttachedContext =
+    isUser && !!message.attachedContext && message.attachedContext.length > 0;
   if (isUser && !hasUserContent && !hasUserAttachments) {
     return null as unknown as ReactElement;
   }
@@ -1132,6 +1135,12 @@ function ChatMessageBubble({
               )}
             </div>
           </div>
+          {/* Read-only context pills the user attached to this turn — persisted
+              per message so they survive a reload (see ReadonlyContextPills).
+              Rendered BELOW the message bubble. */}
+          {hasAttachedContext && !isEditing && (
+            <ReadonlyContextPills items={message.attachedContext!} />
+          )}
           {/* Branch switcher for user-message versions (created via edit). */}
           {branchInfo && onBranchNavigate && !isEditing && (
             <BranchNavigator
@@ -1686,6 +1695,15 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     let cancelled = false;
     const loadSession = async (): Promise<void> => {
       isLoadingSession.current = true;
+      // Carry the opened conversation's last user-turn context into the composer,
+      // so switching chats pre-fills the input with the context you last used
+      // there. Context is chat-wise: REPLACE the composer with this chat's
+      // last-turn context, and CLEAR it when that turn had none — so a chat's
+      // context never leaks into another chat.
+      const seedComposerFromLastUserTurn = (msgs: Message[]): void => {
+        const lastUser = [...msgs].reverse().find(m => m.type === 'user');
+        composerRef.current?.setContext(lastUser?.attachedContext ?? []);
+      };
       // Clear stale branch selections from any previously-viewed session; the
       // freshly-loaded tree defaults to its latest branch via resolveActivePath.
       setBranchSelections({});
@@ -1705,6 +1723,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             live.status === 'completed' && m.isStreaming ? { ...m, isStreaming: false } : m,
           );
           setMessages(normalized);
+          seedComposerFromLastUserTurn(normalized);
           setConversationId(live.sessionId || sessionId);
           setDebugEvents(live.debugEvents);
           setDebugArtifactsReadyVersion(live.debugArtifactsReadyVersion);
@@ -1743,6 +1762,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           }
 
           setMessages(loadedMessages);
+          seedComposerFromLastUserTurn(loadedMessages);
           setConversationId(sessionId);
           onConversationChange?.(sessionId);
           // Reload mid-run: no in-memory stream was adopted above, so attach a

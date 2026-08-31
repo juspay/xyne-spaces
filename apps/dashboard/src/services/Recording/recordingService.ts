@@ -7,6 +7,7 @@ import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
 import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
 import { CallType, CallVisibility } from '@xyne/shared';
+import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
 export interface RecordingSession {
   /** Public Call ID used by the recording routes (same value as externalId). */
@@ -135,6 +136,7 @@ export interface RegenerateRecordingSummaryResult {
   summaryTemplateId: string;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean;
+  summaryModelUsed?: 'fast' | 'thinking';
 }
 
 /** A Google Doc created from this recording's summary, as stored on call metadata. */
@@ -200,6 +202,7 @@ export interface RecordingDetail extends Recording {
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
+  summaryModelUsed: 'fast' | 'thinking' | null;
   citationSegments: CitationSegment[];
   visibility?: CallVisibility;
   /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
@@ -284,6 +287,10 @@ class RecordingService {
         isHeadless: true,
         callType: CallType.AUDIO,
         sttModel: params?.sttModel || 'google',
+        // Ferry the browser-local summary tier onto the recording so the
+        // headless call-end auto-generation can honour a 'thinking' default;
+        // the server can't read localStorage itself.
+        summaryModelPreference: getSummaryModelPreference(),
         ...(params?.conversationId && { conversationId: params.conversationId }),
         ...(params?.channelId && { channelId: params.channelId }),
       },
@@ -346,12 +353,22 @@ class RecordingService {
   async regenerateSummary(
     callId: string,
     summaryTemplateId: string,
+    modelType?: 'fast' | 'thinking',
   ): Promise<RegenerateRecordingSummaryResult> {
     const response: AxiosResponse<{ success: true } & RegenerateRecordingSummaryResult> =
       await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
         summaryTemplateId,
+        ...(modelType ? { modelType } : {}),
       });
     return response.data;
+  }
+
+  /** Generate topical labels for a recording that has none yet. Returns the new tag ids. */
+  async generateLabels(callId: string): Promise<string[]> {
+    const response: AxiosResponse<{ success: true; labelIds: string[] }> = await apiInstance.post(
+      `/calls/recordings/${callId}/generate-labels`,
+    );
+    return response.data.labelIds;
   }
 
   /** `title` names the new doc; omitted, the backend falls back to the recording title. */

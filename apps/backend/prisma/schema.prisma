@@ -2212,6 +2212,9 @@ model EmailChannelPreference {
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
   appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
+  deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
+  deskReportAgentSlug    String?
+  deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -4641,5 +4644,131 @@ model EntityAlias {
   @@unique([workspaceId, type, normalizedForm])
   @@index([entityId])
   @@map("entity_aliases")
+  @@schema("non_zero")
+}
+
+// ─── Radar execution engine (Part A) ─────────────────────────────────────────
+// Execution items: one row per actionable ask, carrying the ownership tuple
+// (requestedBy, pendingOn). Written only by the transactional applier (LLM
+// parser output post-validation, or manual CTAs); read by the feed queries.
+model ExecutionItem {
+  workspaceId     String // denormalized tenant key (stamped on insert)
+  id              String    @id @default(cuid())
+  conversationId  String // thread this item lives in (no FK constraint)
+  channelId       String // denormalized for ACL joins (no FK constraint)
+  sourceMessageId String // message that created the ask; >1 item per source = split
+  title           String
+  contextSummary  String?
+  status          String    @default("open") // open | resolved (String: no new PG enums)
+  requestedBy     String[]  @default([]) // who asked (userIds); NOT NULL — see migration
+  pendingOn       String[]  @default([]) // whose turn it is; [] = ownerless or resolved
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  resolvedAt      DateTime?
+
+  // Only indexes an actual query drives off. workspaceId is never the selective
+  // predicate here — every read pairs it with a GIN array match, a
+  // conversationId, or an id, so the planner drives off that and applies
+  // workspaceId as a filter. Leading with it produced write cost for nothing.
+  @@index([conversationId, status]) // gate: tracked-thread check + resolve-all
+  @@index([pendingOn], type: Gin) // feed: Pending Me membership
+  @@index([requestedBy], type: Gin) // feed: Waiting On membership
+  @@map("execution_items")
+  @@schema("non_zero")
+}
+
+// Per-thread parse watermark ("bookmark"): the last message the parser has
+// consumed. messageId is a cuid (not monotonic), so ordering is the composite
+// (createdAt, messageId) compared lexicographically — the same comparator the
+// window query and the advance use. Separate from items so it survives
+// all-resolved threads.
+model ExecutionThreadState {
+  workspaceId        String // denormalized tenant key (stamped on insert)
+  conversationId     String   @id
+  watermarkCreatedAt DateTime
+  watermarkMsgId     String
+  // Circuit breaker for a window the parser cannot handle. A failed parse
+  // leaves the watermark where it is (that is what makes retries safe), so a
+  // window that fails DETERMINISTICALLY would be re-parsed by every later
+  // message forever, billing a shared LLM quota with no upper bound. Counting
+  // consecutive failures lets the drain give up on that window and move on.
+  consecutiveFailures Int      @default(0)
+  updatedAt          DateTime @updatedAt
+
+  // No secondary index: every access is a lookup by the conversationId PK.
+  @@map("execution_thread_states")
+  @@schema("non_zero")
+}
+
+// Radar execution engine: append-only audit of every ledger mutation — who/what
+// changed an item and from which message. The watermark arbitration between the
+// LLM parser and manual CTAs is only auditable because every write lands here
+// in the same transaction as the item change.
+model ExecutionItemMutation {
+  workspaceId     String // denormalized tenant key (stamped on insert)
+  id              String   @id @default(cuid())
+  itemId          String
+  conversationId  String
+  op              String // create | resolve | reassign | reopen (String: no new PG enums)
+  actorType       String // llm | manual
+  actorId         String? // userId for manual CTAs, null for the parser
+  sourceMessageId String?
+  payload         Json? // op fields as proposed (title, pendingOn, ...) for replay/debug
+  createdAt       DateTime @default(now())
+
+  // The only reader is the debug trail, which fetches one item's history.
+  @@index([itemId, createdAt])
+  @@map("execution_item_mutations")
+  @@schema("non_zero")
+}
+
+// Radar execution engine: one row per worker drain pass — the debug trail the
+// Radar debug panel reads. Captures the gate decision, the parser's proposed
+// operations, what the validator dropped and what was applied, so "did it
+// process and what did the LLM say" is answerable without grepping logs.
+model ExecutionRunLog {
+  workspaceId    String // denormalized tenant key (stamped on insert)
+  id             String   @id @default(cuid())
+  conversationId String
+  gatePassed     Boolean
+  gateReason     String // tracked-thread | new-mention | skip
+  windowSize     Int
+  parserRan      Boolean  @default(false)
+  proposedOps    Json? // parser output post schema-validation
+  validOps       Json? // survivors of the validator
+  droppedOps     Json? // validator rejects, with reasons
+  applied        Json? // applier counts { created, resolved, reassigned }
+  assessment     String? // model's one-sentence read of the window (why ops / why none)
+  error          String?
+  durationMs     Int?
+  createdAt      DateTime @default(now())
+
+  // Debug is thread-scoped only, so a workspace-led index has no reader.
+  @@index([conversationId, createdAt])
+  // The retention sweep filters on createdAt alone, which neither composite
+  // above can serve (wrong leading column) — without this, every hourly sweep
+  // seq-scans the whole table, including the majority that delete nothing.
+  // Near-free to maintain: createdAt only increases, so inserts always land on
+  // the rightmost leaf.
+  @@index([createdAt])
+  @@map("execution_run_logs")
+  @@schema("non_zero")
+}
+
+// Radar execution engine: viewer-defined team lenses. A team is a personal,
+// named set of users; the team feed shows open items involving those members,
+// filtered by the VIEWER's channel access (DMs / private channels the viewer
+// is not in stay invisible — the lens never widens ACL).
+model RadarTeam {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  ownerId     String // creator — teams are private to the viewer who made them
+  name        String
+  memberIds   String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId, ownerId])
+  @@map("radar_teams")
   @@schema("non_zero")
 }

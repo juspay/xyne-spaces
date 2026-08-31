@@ -91,6 +91,7 @@ export async function generateLlmTags(
       },
     },
     defaultModel: modelName,
+    retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
   });
 
   logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');

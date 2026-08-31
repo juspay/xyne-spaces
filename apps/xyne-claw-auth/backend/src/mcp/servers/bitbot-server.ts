@@ -15,6 +15,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -70,7 +71,7 @@ const postJsonTool = async (
     // re-call with a narrower date range / repo list.
     return { content: [{ type: "text", text: parseResponseText(text) }] };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errMsg(error);
     const cause = (error as { cause?: unknown })?.cause;
     const causeStr = cause
       ? JSON.stringify(cause, Object.getOwnPropertyNames(cause as object))

@@ -1,6 +1,13 @@
 import { ReactElement, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
-import { ChevronDown, Plus, Star, Share2, Pencil, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  PlusDefault as Plus,
+  Star,
+  Share02 as Share2,
+  PencilEdit as Pencil,
+  DeleteDustbin01 as Trash2,
+} from '@xyne/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { SavedConfigEntityName } from '@xyne/shared';
@@ -357,10 +364,22 @@ const ViewsSidebarSection = (): ReactElement => {
             )}
           />
           <div className='flex justify-end gap-2'>
-            <Button variant='ghost' size='sm' onClick={() => setRenameTarget(null)}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setRenameTarget(null)}
+              data-track-category='Projects'
+              data-track-name='CANCEL_RENAME_VIEW'
+            >
               Cancel
             </Button>
-            <Button size='sm' onClick={() => void submitRename()} disabled={!renameDraft.trim()}>
+            <Button
+              size='sm'
+              onClick={() => void submitRename()}
+              data-track-category='Projects'
+              data-track-name='CONFIRM_RENAME_VIEW'
+              disabled={!renameDraft.trim()}
+            >
               Save
             </Button>
           </div>
@@ -389,10 +408,22 @@ const ViewsSidebarSection = (): ReactElement => {
             </div>
           </div>
           <div className='flex justify-end gap-2'>
-            <Button variant='ghost' size='sm' onClick={() => setDeleteTarget(null)}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setDeleteTarget(null)}
+              data-track-category='Projects'
+              data-track-name='CANCEL_DELETE_VIEW'
+            >
               Cancel
             </Button>
-            <Button variant='destructive' size='sm' onClick={() => void confirmDelete()}>
+            <Button
+              variant='destructive'
+              size='sm'
+              onClick={() => void confirmDelete()}
+              data-track-category='Projects'
+              data-track-name='CONFIRM_DELETE_VIEW'
+            >
               Delete
             </Button>
           </div>

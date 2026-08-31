@@ -739,6 +739,8 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             {isActive.link && (
               <Button
                 onClick={removeLink}
+                data-track-category='email-editor'
+                data-track-name='REMOVE_LINK'
                 className='rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-300'
                 variant='ghost'
               >
@@ -748,6 +750,8 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             <div className='flex gap-2 ml-auto'>
               <Button
                 onClick={() => setLinkDialogOpen(false)}
+                data-track-category='email-editor'
+                data-track-name='CANCEL_LINK'
                 variant='secondary'
                 className='rounded px-3 py-1.5 text-xs text-foreground'
               >
@@ -755,6 +759,8 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               </Button>
               <Button
                 onClick={applyLink}
+                data-track-category='email-editor'
+                data-track-name='APPLY_LINK'
                 disabled={!linkUrl.trim()}
                 className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
               >

@@ -220,7 +220,14 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
           <h2 className='text-[15px] font-semibold text-foreground leading-5'>
             Start an Instant Call
           </h2>
-          <Button variant='outline' size='icon' className='size-7 rounded-lg' onClick={handleClose}>
+          <Button
+            variant='outline'
+            size='icon'
+            className='size-7 rounded-lg'
+            onClick={handleClose}
+            data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+            data-track-name='CLOSE_PARTICIPANTS_MODAL'
+          >
             <X className='size-4' />
           </Button>
         </div>
@@ -313,12 +320,16 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               size='sm'
               className='rounded-lg text-[13px]'
               onClick={handleClose}
+              data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+              data-track-name='CANCEL_PARTICIPANTS_SELECTION'
             >
               Cancel
             </Button>
             <Button
               size='sm'
               onClick={handleSubmit}
+              data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+              data-track-name='CONFIRM_PARTICIPANTS_SELECTION'
               disabled={selectedParticipants.length === 0}
               className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
             >

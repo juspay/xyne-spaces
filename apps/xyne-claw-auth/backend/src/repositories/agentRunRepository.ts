@@ -92,7 +92,7 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "app";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app";
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
@@ -664,7 +664,9 @@ export const agentRunRepository = {
   listSessionAclForConversation: (conversationId: string) =>
     prisma.agentRun.findMany({
       where: { conversationId },
-      select: { sessionId: true, userId: true, usedUserToken: true },
+      // triggerSource: an awakened run (heartbeat / reflex) has no human owner,
+      // so the cross-user tool-result redaction must not apply to it.
+      select: { sessionId: true, userId: true, usedUserToken: true, triggerSource: true },
     }),
 
   /**

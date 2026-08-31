@@ -523,6 +523,7 @@ export class EmailClassificationService {
       },
       defaultModel: modelName,
       temperature: 0.1,
+      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
     });
 
     logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
@@ -611,6 +612,7 @@ export class EmailClassificationService {
       },
       defaultModel: modelName,
       temperature: 0.1,
+      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
     });
 
     logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');

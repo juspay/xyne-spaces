@@ -1,5 +1,9 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
-import { Calendar, X, ChevronDown } from 'lucide-react';
+import {
+  CalendarDefault as Calendar,
+  MultipleCrossCancelDefault as X,
+  ChevronDown,
+} from '@xyne/icons';
 import { DateRangeFilterProps } from '../types';
 import { Button } from '../../../ui/Button/Button';
 

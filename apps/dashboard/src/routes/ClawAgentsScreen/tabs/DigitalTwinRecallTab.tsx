@@ -34,7 +34,14 @@ const DigitalTwinRecallTab = (): ReactElement => {
           className='w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
         />
         <div className='flex items-center justify-end'>
-          <Button size='sm' disabled={!query.trim()} loading={recall.isPending} onClick={submit}>
+          <Button
+            size='sm'
+            disabled={!query.trim()}
+            loading={recall.isPending}
+            onClick={submit}
+            data-track-category='Claw Agents'
+            data-track-name='SUBMIT_DIGITAL_TWIN_RECALL'
+          >
             <Search className='size-3.5' />
             {recall.isPending ? 'Recalling…' : 'Test recall'}
           </Button>

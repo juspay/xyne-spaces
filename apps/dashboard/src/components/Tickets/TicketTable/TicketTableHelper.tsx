@@ -3,14 +3,14 @@ import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { TicketStatusIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import {
-  CircleCheck,
+  CheckTickCircle as CircleCheck,
   CircleDashed,
   CircleDot,
-  CircleX,
-  Signature,
+  MultipleCrossCancelCircle as CircleX,
   Tag,
-  UserIcon,
-} from 'lucide-react';
+  UserDefault as UserIcon,
+  PauseCircle,
+} from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { useMemo } from 'react';
 import type { User, UserGroup } from '../../../machines/stateMachine';
@@ -47,7 +47,7 @@ export const StatusOptions: StatusEntityOption[] = [
   {
     label: 'Paused',
     value: TicketStatusV2.PAUSED,
-    icon: <Signature strokeWidth={2.5} className='w-3.5 h-3.5 text-teal-500' />,
+    icon: <PauseCircle strokeWidth={2.5} className='w-3.5 h-3.5 text-teal-500' />,
     bgColor: 'bg-teal-500/15',
     textColor: 'text-teal-600',
   },

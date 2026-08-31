@@ -49,6 +49,7 @@ import {
   resolveCitationIconUrl,
 } from '../utils/clawCitationUrl';
 import { CitationLink } from './CitationLink';
+import { ReadonlyContextPills } from '../../../AIScreen/ReadonlyContextPills';
 import { genericInstance } from '../../../../services/clients/genericClient';
 import { showDownloadCompleteToast } from '../../../../utils/downloadToast';
 import type { Components } from 'react-markdown';
@@ -1214,7 +1215,7 @@ export const MessageItem = React.memo(
             message.type === 'user'
               ? isEditing
                 ? 'max-w-[90%] w-full overflow-hidden'
-                : 'max-w-[80%] overflow-hidden'
+                : 'flex max-w-[80%] flex-col items-end gap-1'
               : 'flex-1 max-w-full overflow-hidden'
           }
         >
@@ -1228,7 +1229,7 @@ export const MessageItem = React.memo(
               message.type === 'user'
                 ? isEditing
                   ? 'rounded-2xl bg-accent p-3'
-                  : 'flex flex-col items-start gap-3 px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
+                  : 'flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
                 : 'bg-transparent text-foreground max-w-full'
             }`}
           >
@@ -1387,6 +1388,19 @@ export const MessageItem = React.memo(
               />
             )}
           </div>
+
+          {/* Read-only context chip the user attached to this turn — sits BELOW
+              the bubble. Collapsed by default; click to reveal the list. Kept
+              OUTSIDE the bubble's overflow-hidden so the popover isn't clipped. */}
+          {message.type === 'user' &&
+            !isEditing &&
+            message.attachedContext &&
+            message.attachedContext.length > 0 && (
+              <ReadonlyContextPills
+                items={message.attachedContext}
+                expandedWidthClass='max-w-[15rem]'
+              />
+            )}
 
           {/* Error display for bot messages */}
           {message.type === 'bot' && message.errorInfo && (

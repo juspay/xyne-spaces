@@ -18,6 +18,7 @@
  *   unmatched/notes.md     — delivered in-thread but not cited by any finding
  */
 import JSZip from "jszip";
+import { errMsg } from "./errors.js";
 import type { ExperimentFinding, ExperimentRun } from "@prisma/client";
 import { interact, spacesFetchBuffer, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { createLogger } from "../logger.js";
@@ -127,7 +128,7 @@ export async function buildExperimentProofBundle(args: {
   try {
     attachments = await listThreadAttachments(conversationId, auth);
   } catch (err) {
-    log.warn(`[experiment] bundle: attachment listing failed id=${run.id}: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[experiment] bundle: attachment listing failed id=${run.id}: ${errMsg(err)}`);
     return null;
   }
   if (attachments.length === 0) return null;
@@ -174,7 +175,7 @@ export async function buildExperimentProofBundle(args: {
         downloaded.set(attachment.id, buf);
         totalBytes += buf.length;
       } catch (err) {
-        log.warn(`[experiment] bundle: download failed attachment=${attachment.id}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[experiment] bundle: download failed attachment=${attachment.id}: ${errMsg(err)}`);
         entries.push({ ...base, zipPath: null, status: "download-failed" });
         continue;
       }

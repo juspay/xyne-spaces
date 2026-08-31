@@ -13,15 +13,17 @@
  */
 
 import { Router, type NextFunction, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { executeTwinApprovalDelivery } from "../lib/twin-delivery.js";
+import { fetchTicketForCard, parseXyneIdFromToolResult } from "../lib/ticket-card.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, PLAN_COMPONENT_ID, buildAgentCardFlow, AGENT_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -32,6 +34,12 @@ import {
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
 import { redisService } from "../redis.js";
+import {
+  findPlanBindingByMessageId,
+  readPlanBindingData,
+  consumePlanBinding,
+  type PlanBindingStatus,
+} from "../lib/agent-widget-binding.js";
 import {
   QUEUE_CAP,
   QUEUE_ENABLED,
@@ -44,6 +52,7 @@ import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
+import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
 
@@ -111,13 +120,13 @@ function flagUserTokenRun(conversationId: string | undefined, agentSlug: string 
     .catch((e) =>
       log.warn(
         `[flow-action] markUsedUserToken failed for conv ${conversationId}:`,
-        e instanceof Error ? e.message : String(e),
+        errMsg(e),
       ),
     );
 }
 
 function sanitizeApprovalToolError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
+  const raw = errMsg(err);
   return raw
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/\{[^{}]{20,}\}/g, "{...}")
@@ -173,6 +182,33 @@ async function consumePlanAction(messageId: string): Promise<boolean> {
   const key = `flow-action:plan:${messageId}`;
   const result = await redisService.getConnection().set(key, "1", "EX", PLAN_ACTION_CONSUMED_TTL_SEC, "NX");
   return result === "OK";
+}
+
+/**
+ * Single-use gate for a plan card — durable whenever the card has a binding.
+ * The Redis NX key above expires in PLAN_ACTION_CONSUMED_TTL_SEC while the card
+ * itself never does, so for a bound card the authoritative gate is the row's
+ * atomic 'proposed' → terminal transition; without it a plan approved once could
+ * be approved again after the key lapsed. Cards posted before bindings existed
+ * keep the Redis behaviour. Fails CLOSED (a DB error refuses the action) — a
+ * blocked approve is recoverable, a double-dispatched plan is not.
+ */
+async function consumePlanCard(
+  messageId: string,
+  binding: { screenId: string } | null,
+  next: PlanBindingStatus,
+): Promise<boolean> {
+  if (!messageId) return false;
+  if (!binding) return consumePlanAction(messageId);
+  try {
+    return await consumePlanBinding(binding.screenId, next);
+  } catch (err) {
+    log.error(
+      `[flow-action] plan-approval: durable consume failed screenId=${binding.screenId}:`,
+      errMsg(err),
+    );
+    return false;
+  }
 }
 
 // ── Spaces signature re-verification ─────────────────────────────────────────
@@ -236,7 +272,7 @@ async function replaceFlowCardWithText(
       log.warn(`[flow-action] updateMessage HTTP ${res.status} for message ${messageId}: ${body.slice(0, 200)}`);
     }
   } catch (err) {
-    log.warn(`[flow-action] Failed to replace flow card for message ${messageId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[flow-action] Failed to replace flow card for message ${messageId}:`, errMsg(err));
   }
 }
 
@@ -369,7 +405,9 @@ function summarizeToolResult(
   return { heading, details };
 }
 
-/** Replace a flow card with a NEW flow (rich result card). Mirrors replaceFlowCardWithText. */
+/** Replace a flow card with a NEW flow (rich result card). Mirrors replaceFlowCardWithText.
+ *  Returns "flow-schema-400" when Spaces rejected the flow's component schema (a
+ *  400 "Invalid flowJSON") so the caller can retry with a generic-component card. */
 async function replaceFlowCardWithFlow(
   messageId: string,
   agentSlug: string | undefined,
@@ -377,12 +415,12 @@ async function replaceFlowCardWithFlow(
   conversationId?: string,
   channelId?: string,
   spacesAppId?: string,
-): Promise<void> {
-  if (!messageId) return;
+): Promise<"ok" | "flow-schema-400" | "failed"> {
+  if (!messageId) return "failed";
   const agent = await getAgentTokenAndUserId(agentSlug, spacesAppId);
   if (!agent) {
     log.warn(`[flow-action] replaceFlowCardWithFlow: no agent token/userId for slug=${agentSlug ?? "(default)"}`);
-    return;
+    return "failed";
   }
   try {
     const spacesBase = `${CONFIG.spacesInternalUrl}/api/apps`;
@@ -399,12 +437,16 @@ async function replaceFlowCardWithFlow(
       }),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      log.warn(`[flow-action] updateMessage(flowJSON) HTTP ${res.status} for message ${messageId}: ${body.slice(0, 200)}`);
+    if (res.ok) return "ok";
+    const body = await res.text().catch(() => "");
+    log.warn(`[flow-action] updateMessage(flowJSON) HTTP ${res.status} for message ${messageId}: ${body.slice(0, 200)}`);
+    if (res.status === 400 && /invalid\s*flowjson|flowjson|discriminator/i.test(body)) {
+      return "flow-schema-400";
     }
+    return "failed";
   } catch (err) {
-    log.warn(`[flow-action] Failed to replace flow card (flowJSON) for message ${messageId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[flow-action] Failed to replace flow card (flowJSON) for message ${messageId}:`, errMsg(err));
+    return "failed";
   }
 }
 
@@ -494,9 +536,33 @@ async function finishWriteSuccess(opts: {
   channelId?: string | undefined;
   resultText: string;
 }): Promise<void> {
-  const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
-  const flow = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
-  await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, flow, opts.conversationId, opts.channelId, opts.spacesAppId);
+  let flow: FlowDefinition | null = null;
+  let usedTicketFlow = false;
+  if (opts.tool === "spaces-create-ticket") {
+    const xyneId = parseXyneIdFromToolResult(opts.resultText);
+    const agent = xyneId ? await getAgentTokenAndUserId(opts.agentSlug, opts.spacesAppId) : null;
+    if (xyneId && agent) {
+      const ticket = await fetchTicketForCard(xyneId, agent.token);
+      if (ticket) {
+        flow = buildTicketFlow(ticket);
+        usedTicketFlow = true;
+      }
+    }
+  }
+  if (!flow) {
+    const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
+    flow = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
+  }
+  const status = await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, flow, opts.conversationId, opts.channelId, opts.spacesAppId);
+  if (status === "flow-schema-400" && usedTicketFlow) {
+    // The rich `ticket` component isn't supported by this Spaces backend, so the
+    // update was rejected and the approval card would stay stuck on Approve/
+    // Decline. Fall back to the generic result card (supported components) so the
+    // card still flips to a completed state; the write itself already succeeded.
+    const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
+    const fallback = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
+    await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, fallback, opts.conversationId, opts.channelId, opts.spacesAppId);
+  }
   if (opts.actionId === "approve-continue" || opts.actionId === "retry-continue") {
     await dispatchContinuationRun({
       writeUserId: opts.writeUserId,
@@ -574,9 +640,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       // Verify caller is the intended user. Fail closed: a missing callerUserId
-      // must not skip the check (it previously did, allowing impersonation).
-      if (!callerUserId || callerUserId !== writeUserId) {
-        log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${writeUserId}`);
+      // must not skip the check (it previously did, allowing impersonation). The
+      // intended-user (normal) vs same-org (automation) decision runs after the
+      // signature is verified below, since an automation card is owner-signed and
+      // approvable by anyone in the automation's org.
+      if (!callerUserId) {
+        log.error(`[flow-action] Unauthorized: no caller identity`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
       }
@@ -600,17 +669,32 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         params,
         userId: writeUserId,
       };
-      const signatureOk = verifyActionSignatureAny([actionPayload, legacyActionPayload], signature);
+      const automationActionPayload = { ...actionPayload, automation: true };
+      const isAutomationCard = verifyActionSignatureAny([automationActionPayload], signature);
+      const signatureOk = isAutomationCard || verifyActionSignatureAny([actionPayload, legacyActionPayload], signature);
       if (!signatureOk) {
         log.error("[flow-action] HMAC verification failed");
         res.json({ type: "error", message: "HMAC verification failed — action may have been tampered with" } satisfies AppActionResponse);
         return;
       }
-      const legacyWriteCard = !verifyActionSignatureAny([actionPayload], signature);
+      const legacyWriteCard = !verifyActionSignatureAny([actionPayload, automationActionPayload], signature);
 
       const writeUser = await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } });
       if (!writeUser?.orgId) {
         res.status(403).json({ type: "error", message: "Unable to resolve approving user's organization" } satisfies AppActionResponse);
+        return;
+      }
+      if (isAutomationCard) {
+        const caller = await prisma.user.findUnique({ where: { id: callerUserId }, select: { orgId: true, name: true } });
+        if (!caller?.orgId || caller.orgId !== writeUser.orgId) {
+          log.error(`[flow-action] automation approval denied: caller ${callerUserId} org ${caller?.orgId ?? "(none)"} != automation org ${writeUser.orgId}`);
+          res.status(403).json({ type: "error", message: "You must be in the automation's workspace to approve this action." } satisfies AppActionResponse);
+          return;
+        }
+        log.info(`[flow-action] automation write approved by ${callerUserId} (${caller.name?.trim() ?? ""}) — automation owner ${writeUserId} tool=${tool}`);
+      } else if (callerUserId !== writeUserId) {
+        log.error(`[flow-action] Unauthorized: caller ${callerUserId} != expected ${writeUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
       }
       if (legacyWriteCard && !(await consumeLegacyWriteCard(messageId, actionId))) {
@@ -667,8 +751,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             const joinRes = (await spacesPost(`/channel/${targetChannelId}/join`, {})) as { channelName?: string };
             channelName = joinRes.channelName ?? targetChannelId;
           } catch (e) {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            if (errMsg.includes("private")) {
+            const errText = errMsg(e);
+            if (errText.includes("private")) {
               resp = { type: "close_screen", finalMessage: `❌ Cannot post to #${targetChannelId} — private channel. Add me first.` };
               res.json(resp);
               void replaceFlowCardWithText(messageId, agentSlug, `❌ Cannot post to #${targetChannelId} — private channel.`, conversationId, undefined, spacesAppId);
@@ -717,12 +801,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         });
 
         if (!execution.success) {
-          const errMsg = sanitizeApprovalToolError(
+          const errText = sanitizeApprovalToolError(
             formatGatewayApprovalExecutionError(execution, gatewayTarget.serviceName, tool),
           );
-          const userMessage = approvalToolFailureMessage(errMsg);
+          const userMessage = approvalToolFailureMessage(errText);
           log.error(
-            `[flow-action] gateway approval tool failed server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errMsg}`,
+            `[flow-action] gateway approval tool failed server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
           );
           res.status(422).json({
             type: "error",
@@ -855,12 +939,37 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
+      // ── agent-authoring writes: agents, subagents, MCP servers ─────────────
+      // serverType "agent-tools" has no MCP connector — the row is written
+      // directly, by the approving user (writeUserId, already verified ===
+      // callerUserId above), in lib/agent-tools-apply.ts. Permission on UPDATE
+      // targets is re-checked there against the row, since a signed action
+      // carries no authority of its own. create-skill also routes here now that
+      // it shares the group's source; the legacy "skill" branch below still
+      // handles actions signed before that change shipped.
+      if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
+        const outcome = await applyAgentToolAction(tool, params, writeUserId);
+        if (!outcome.ok) {
+          resp = { type: "close_screen", finalMessage: `⚠️ ${outcome.error}` };
+          res.json(resp);
+          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${outcome.error}`, conversationId, undefined, spacesAppId);
+          return;
+        }
+        const suffix = outcome.note ? `\n\n_${outcome.note}_` : "";
+        resp = { type: "close_screen", finalMessage: `✅ ${outcome.message}` };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${outcome.message}**${suffix}`, conversationId, undefined, spacesAppId);
+        return;
+      }
+
       // ── create-skill: persist an agent-authored skill on approval ──────────
       // serverType "skill" has no MCP connector; the write is applied directly
       // via skillRepository, owned by the approving user (writeUserId, already
       // verified === callerUserId above) in their org. HMAC over {serverType,
       // tool, params, userId} was verified above, so params are trusted here.
-      if (serverType === "skill") {
+      // "agent-tools" is create-skill's CURRENT serverType (it moved groups);
+      // "skill" is kept so actions signed before that deploy still apply.
+      if (serverType === "skill" || (serverType === "agent-tools" && tool === "create-skill")) {
         const { skillRepository } = await import("../repositories/index.js");
         const name = String(params["name"] ?? "").trim();
         const description = String(params["description"] ?? "").trim();
@@ -927,10 +1036,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       try {
         toolResult = await callTool(writeUserId, serverType, effective.credentials, tool, params);
       } catch (err) {
-        const errMsg = sanitizeApprovalToolError(err);
-        const userMessage = approvalToolFailureMessage(errMsg);
+        const errText = sanitizeApprovalToolError(err);
+        const userMessage = approvalToolFailureMessage(errText);
         log.error(
-          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errMsg}`,
+          `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
         );
         res.status(422).json({
           type: "error",
@@ -1038,16 +1147,18 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
     // ── 3. User question answer ───────────────────────────────────────────────
     if (actionType === "user-answer") {
+      const isQuestionDismissal = actionId === "dismiss-user-question";
       const questionId = data["questionId"] as string;
       const answerAgentSlug = data["agentSlug"] as string;
       const answerSpacesAppId = data["spacesAppId"] as string | undefined;
       const answerChannelId = data["channelId"] as string;
       const answerConversationId = data["conversationId"] as string;
       const answerUserId = data["userId"] as string;
-      const answer = values["answer"] as string | undefined;
       const signature = data["signature"] as string | undefined;
+      const rawAnswers = values["answers"];
+      const rawNotes = values["notes"];
 
-      if (!questionId || !answer || !answerUserId || !signature) {
+      if (!questionId || !answerUserId || !signature) {
         res.status(400).json({ type: "error", message: "Missing user-answer fields" } satisfies AppActionResponse);
         return;
       }
@@ -1079,37 +1190,106 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      // Atomically consume the stored question BEFORE acknowledging: idempotency
-      // (a second click gets null), existence (an unknown/expired id never
-      // dispatches a run), and the trusted source for ownership + option checks.
-      const { consumeQuestion } = await import("./pending-questions.js");
-      const question = await consumeQuestion(questionId);
-      if (!question) {
-        res.json({ type: "close_screen", finalMessage: "This question was already answered or has expired." } satisfies AppActionResponse);
-        return;
-      }
-      if (question.userId !== answerUserId) {
-        log.error(`[flow-action] user-answer ownership mismatch: stored ${question.userId} != answerer ${answerUserId}`);
-        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
-        return;
-      }
-      if (!question.options.includes(answer)) {
-        log.error(`[flow-action] user-answer invalid option for question ${questionId}`);
-        res.status(400).json({ type: "error", message: "Invalid answer option" } satisfies AppActionResponse);
-        return;
-      }
-
-      // Acknowledge now that the answer is validated so the widget closes.
-      resp = { type: "close_screen", finalMessage: `✅ You answered: "${answer}"` };
-      res.json(resp);
-      void replaceFlowCardWithText(messageId, answerAgentSlug, `✅ You answered: **"${answer}"**`, answerConversationId);
-
-      // Fire-and-forget: start new /run with the answer as context
       try {
+        const { getQuestion, consumeQuestion } = await import("./pending-questions.js");
         const { setSession } = await import("./webhook.js");
 
-        const questionText = question.question;
-        const optionsList = question.options.join(", ");
+        const questionSet = await getQuestion(questionId);
+        if (!questionSet) {
+          res.status(404).json({ type: "error", message: "This question set has expired." } satisfies AppActionResponse);
+          return;
+        }
+        if (questionSet.userId !== answerUserId) {
+          log.error(`[flow-action] user-answer ownership mismatch: stored ${questionSet.userId} != answerer ${answerUserId}`);
+          res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+          return;
+        }
+        if (isQuestionDismissal) {
+          const consumedQuestionSet = await consumeQuestion(questionId);
+          if (!consumedQuestionSet) {
+            res.json({ type: "close_screen", finalMessage: "This question set was already answered or has expired." } satisfies AppActionResponse);
+            return;
+          }
+          resp = { type: "close_screen", finalMessage: "Question dismissed." };
+          res.json(resp);
+          void replaceFlowCardWithFlow(messageId, answerAgentSlug, buildUserQuestionFlow(consumedQuestionSet.questions, {
+            questionId,
+            agentSlug: answerAgentSlug,
+            channelId: answerChannelId,
+            conversationId: answerConversationId,
+            userId: answerUserId,
+          }, { phase: "declined", decidedAt: new Date().toISOString() }), answerConversationId, undefined, answerSpacesAppId);
+          return;
+        }
+        const answers = rawAnswers && typeof rawAnswers === "object" && !Array.isArray(rawAnswers)
+          ? rawAnswers as Record<string, unknown>
+          : {};
+        const persistedAnswers: Record<string, string | string[]> = {};
+        const persistedNotes: Record<string, string> = {};
+        const renderedAnswers: string[] = [];
+        for (const prompt of questionSet.questions) {
+          const answer = answers[prompt.id];
+          const required = prompt.required !== false;
+          const note = rawNotes && typeof rawNotes === "object" && !Array.isArray(rawNotes)
+            ? (rawNotes as Record<string, unknown>)[prompt.id]
+            : undefined;
+          const noteText = typeof note === "string" ? note.trim() : "";
+          const hasNote = noteText.length > 0;
+          if (prompt.type === "open_ended") {
+            if ((typeof answer !== "string" || !answer.trim()) && required && !hasNote) {
+              res.status(400).json({ type: "error", message: `Please answer: ${prompt.question}` } satisfies AppActionResponse);
+              return;
+            }
+            if (typeof answer === "string" && answer.trim()) {
+              persistedAnswers[prompt.id] = answer.trim();
+              renderedAnswers.push(`${prompt.question}: ${answer.trim()}`);
+            }
+            if (hasNote) {
+              persistedNotes[prompt.id] = noteText;
+              renderedAnswers.push(`${prompt.question} — Notes: ${noteText}`);
+            }
+            continue;
+          }
+          const selected = prompt.type === "multiple_choice" ? (Array.isArray(answer) ? answer : []) : (typeof answer === "string" ? [answer] : []);
+          if ((required && selected.length === 0 && !hasNote) || selected.some(value => typeof value !== "string" || !prompt.options?.some(option => userQuestionOptionLabel(option) === value))) {
+            res.status(400).json({ type: "error", message: `Please choose a valid answer for: ${prompt.question}` } satisfies AppActionResponse);
+            return;
+          }
+          if (selected.length) {
+            const validSelected = selected as string[];
+            persistedAnswers[prompt.id] = prompt.type === "multiple_choice" ? validSelected : validSelected[0]!;
+            renderedAnswers.push(`${prompt.question}: ${validSelected.join(", ")}`);
+          }
+          if (hasNote) {
+            persistedNotes[prompt.id] = noteText;
+            renderedAnswers.push(`${prompt.question} — Notes: ${noteText}`);
+          }
+        }
+
+        // Consume only after validation, but before acknowledging or dispatching.
+        // GETDEL keeps submissions idempotent without expiring the card when a
+        // user first sends an invalid or incomplete response.
+        const consumedQuestionSet = await consumeQuestion(questionId);
+        if (!consumedQuestionSet) {
+          res.json({ type: "close_screen", finalMessage: "This question set was already answered or has expired." } satisfies AppActionResponse);
+          return;
+        }
+
+        const answerSummary = renderedAnswers.join("\n");
+        resp = { type: "close_screen", finalMessage: "✅ Answers submitted" };
+        res.json(resp);
+        void replaceFlowCardWithFlow(messageId, answerAgentSlug, buildUserQuestionFlow(consumedQuestionSet.questions, {
+          questionId,
+          agentSlug: answerAgentSlug,
+          channelId: answerChannelId,
+          conversationId: answerConversationId,
+          userId: answerUserId,
+        }, {
+          phase: "answered",
+          answers: persistedAnswers,
+          ...(Object.keys(persistedNotes).length ? { notes: persistedNotes } : {}),
+          decidedAt: new Date().toISOString(),
+        }), answerConversationId, undefined, answerSpacesAppId);
 
         const agent = await findAgentForFlow(answerAgentSlug, answerSpacesAppId);
         const appToken = agent?.spacesAppToken
@@ -1130,8 +1310,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           },
           body: JSON.stringify({
             userId: answerUserId,
-            task: `The user answered "${answer}" to your question: "${questionText}". Continue the task based on this answer.`,
-            context: `Previous question: ${questionText}\nOptions: ${optionsList}\nUser's answer: ${answer}`,
+            task: `The user answered your questions. Continue the task based on these answers:\n${answerSummary}`,
+            context: `User answers:\n${answerSummary}`,
             conversationId: answerConversationId,
             channelId: answerChannelId,
             agentSlug: answerAgentSlug,
@@ -1142,6 +1322,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
         const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
         if (runBody.success && runBody.sessionId && agent) {
+          // Like plan approval, this direct /internal/run dispatch skips the
+          // mention path that ordinarily lights the thread's working pill.
+          void emitAgentWorkingSignal({
+            conversationId: answerConversationId,
+            channelId: answerChannelId,
+            agentSlug: answerAgentSlug,
+            spacesAppUserId: agent.spacesAppUserId ?? undefined,
+            appToken,
+            toolLabel: "Working on your answers…",
+          });
           await setSession(runBody.sessionId, {
             mentionedUserId: agent.spacesAppUserId ?? "",
             senderId: answerUserId,
@@ -1149,7 +1339,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             channelId: answerChannelId,
             channelName: answerChannelId,
             conversationId: answerConversationId,
-            task: `User answered: ${answer}`,
+            task: `User answers:\n${answerSummary}`,
             agentId: agent.id,
             agentOrgId: agent.orgId,
             agentSlug: answerAgentSlug,
@@ -1160,7 +1350,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           });
         }
 
-        log.info(`[flow-action] User answered "${answer}" → new /run (session=${runBody.sessionId})`);
+        log.info(`[flow-action] User answered question set ${questionId} → new /run (session=${runBody.sessionId})`);
       } catch (err) {
         log.error("[flow-action] Failed to start new run with answer:", err);
       }
@@ -1391,7 +1581,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           sessionContext,
         }).catch((err) => {
           log.warn("[flow-action] agent-call: registerRunRecovery failed", {
-            error: err instanceof Error ? err.message : String(err),
+            error: errMsg(err),
           });
         });
       }
@@ -1839,7 +2029,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               runPayload: dispatchPayload as Parameters<typeof persistGoalStart>[0]["runPayload"],
             }).catch((err) => {
               log.warn("[flow-action] start-goal: persistGoalStart failed — loop will not auto-continue", {
-                error: err instanceof Error ? err.message : String(err),
+                error: errMsg(err),
               });
             });
 
@@ -1848,7 +2038,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             log.error("[flow-action] start-goal: /run dispatch failed", { runBody });
           }
         } catch (err) {
-          log.error("[flow-action] start-goal: dispatch errored:", err instanceof Error ? err.message : String(err));
+          log.error("[flow-action] start-goal: dispatch errored:", errMsg(err));
         }
       })();
       return;
@@ -1875,31 +2065,80 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       const { getSessionByConv } = await import("./webhook.js");
-      const [priorCtx, activePlan] = await Promise.all([
+      const [priorCtx, activePlan, planBinding] = await Promise.all([
         getSessionByConv(flowConversationId, flowAgentSlug),
         getActivePlanCard(flowConversationId, flowAgentSlug),
+        findPlanBindingByMessageId(messageId).catch(() => null),
       ]);
-      // A plan action must target the exact outstanding server-created card.
-      // This rejects stale/replayed cards and a flow body with substituted plan
-      // text even when the transport itself was validly signed.
-      if (
-        !priorCtx ||
-        !activePlan ||
-        activePlan.messageId !== messageId ||
-        priorCtx.planMessageId !== messageId ||
-        !priorCtx.pendingPlan?.todos?.length
-      ) {
+      const bindingData = planBinding ? readPlanBindingData(planBinding) : null;
+
+      // A plan action must target the exact outstanding server-created card, and
+      // every todo it runs must come from server state — never from the submitted
+      // flow body, which is user-mutable even when the transport was validly
+      // signed. Two server sources, in priority order:
+      //
+      //   1. Redis `plan-active-card:` — the live fast path (24h TTL).
+      //   2. The durable AgentWidgetBinding row ('plan') — the same facts with no
+      //      expiry. This is what makes a card posted days ago still approvable:
+      //      by then the Redis pointer AND the SessionContext are both gone.
+      //
+      // NOTE: ctx.pendingPlan is deliberately NOT part of this gate. Turn 1 never
+      // writes it (it is only set when Turn 2 is dispatched), so requiring it
+      // 409'd EVERY non-trivial plan approval — prod 2026-08-19, "App backend
+      // error 409" on all Approve clicks since the 2026-08-18 sync deploy. The
+      // todos the dispatch trusts come from the card record, never the session.
+      //
+      // A binding is the AUTHORITY on liveness. Anything but 'proposed' —
+      // superseded by a re-plan, or already approved/rejected — is refused
+      // outright, which is also what makes the single-use gate durable.
+      if (planBinding && planBinding.status !== "proposed") {
+        log.warn(`[flow-action] plan-approval: plan is '${planBinding.status}' conv=${flowConversationId} agent=${flowAgentSlug}`);
+        res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
+        return;
+      }
+      // Redis still holds a DIFFERENT live card for this thread ⇒ this one was
+      // superseded by a re-plan. Refuse even if the binding still reads
+      // 'proposed', since the binding's supersede write is best-effort.
+      if (activePlan && activePlan.messageId !== messageId) {
+        log.warn(`[flow-action] plan-approval: superseded card conv=${flowConversationId} agent=${flowAgentSlug}`);
+        res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
+        return;
+      }
+      const serverPlan =
+        activePlan?.todos?.length
+          ? {
+              todos: activePlan.todos,
+              title: activePlan.title ?? "Plan",
+              desc: activePlan.desc,
+              document: activePlan.document,
+            }
+          : bindingData
+            ? {
+                todos: bindingData.todos,
+                title: bindingData.title ?? "Plan",
+                desc: bindingData.desc,
+                document: bindingData.document,
+              }
+            : null;
+
+      // Card-scoped facts come from the binding first: it was written when THIS
+      // card was posted, whereas the session is conversation-scoped and any later
+      // turn overwrites it (a different sender's mention would otherwise hand us
+      // the wrong plan owner). The session is the fallback for cards proposed
+      // before bindings existed.
+      const planAgentSlug = planBinding?.agentSlug ?? priorCtx?.agentSlug ?? flowAgentSlug;
+      const planSpacesAppId = planBinding?.spacesAppId ?? priorCtx?.spacesAppId;
+      const planChannelId = planBinding?.channelId ?? priorCtx?.channelId;
+      const planConversationId = planBinding?.conversationId ?? priorCtx?.conversationId ?? flowConversationId;
+      const planUserId = bindingData?.ownerUserId ?? priorCtx?.senderId;
+
+      if (!serverPlan || !planUserId) {
         log.warn(`[flow-action] plan-approval: stale or missing server plan conv=${flowConversationId} agent=${flowAgentSlug}`);
         res.status(409).json({ type: "error", message: "This plan is no longer active. Ask the agent to create a new plan." } satisfies AppActionResponse);
         return;
       }
 
-      const planAgentSlug = priorCtx.agentSlug ?? flowAgentSlug;
-      const planSpacesAppId = priorCtx.spacesAppId;
-      const planChannelId = priorCtx.channelId;
-      const planConversationId = priorCtx.conversationId ?? flowConversationId;
-      const planUserId = priorCtx.senderId;
-      const serverTodos = activePlan.todos;
+      const serverTodos = serverPlan.todos;
 
       // Only the user the server recorded for this plan can approve/reject it.
       if (!callerUserId || callerUserId !== planUserId) {
@@ -1913,14 +2152,14 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // a "Rejected by <name>" audit. NO Turn 2, NO plan-mode/config change, no
       // follow-ups — if they want a new plan they mention the agent again.
       if (actionId === "plan-reject") {
-        if (!(await consumePlanAction(messageId))) {
+        if (!(await consumePlanCard(messageId, planBinding, "rejected"))) {
           res.status(409).json({ type: "error", message: "This plan has already been acted on." } satisfies AppActionResponse);
           return;
         }
         const rejectedTodos = serverTodos;
-        const rejectTitle = activePlan.title ?? "Plan";
-        const rejectDesc = activePlan.desc;
-        const rejectDoc = activePlan.document;
+        const rejectTitle = serverPlan.title;
+        const rejectDesc = serverPlan.desc;
+        const rejectDoc = serverPlan.document;
         const rejecterName = await prisma.user
           .findUnique({ where: { id: callerUserId }, select: { name: true } })
           .then((u) => u?.name?.trim() ?? "")
@@ -1989,7 +2228,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      if (!(await consumePlanAction(messageId))) {
+      if (!(await consumePlanCard(messageId, planBinding, "approved"))) {
         res.status(409).json({ type: "error", message: "This plan has already been acted on." } satisfies AppActionResponse);
         return;
       }
@@ -2001,9 +2240,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // because the whole flow is replaced.
       resp = { type: "close_screen", finalMessage: `▶ Approved — running ${approved.length} step(s)…` };
       res.json(resp);
-      const planTitleForCard = activePlan.title ?? "Plan";
-      const planDescForCard = activePlan.desc;
-      const planDocForCard = activePlan.document;
+      const planTitleForCard = serverPlan.title;
+      const planDescForCard = serverPlan.desc;
+      const planDocForCard = serverPlan.document;
       // Who approved (already authz-checked === planUserId) — resolved once here
       // and reused for BOTH the immediate executing card and the durable exec
       // meta, so the card shows "Approved by <name>" with no flicker. Response is
@@ -2155,7 +2394,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             log.error("[flow-action] plan-approval: /run dispatch failed", { runBody });
           }
         } catch (err) {
-          log.error("[flow-action] plan-approval: dispatch errored:", err instanceof Error ? err.message : String(err));
+          log.error("[flow-action] plan-approval: dispatch errored:", errMsg(err));
         }
       })();
       return;
@@ -2307,7 +2546,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             });
           }
         } catch (err) {
-          log.error("[flow-action] promote-provider: dispatch errored:", err instanceof Error ? err.message : String(err));
+          log.error("[flow-action] promote-provider: dispatch errored:", errMsg(err));
         }
       })();
       return;

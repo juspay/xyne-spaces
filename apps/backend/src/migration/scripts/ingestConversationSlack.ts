@@ -376,8 +376,8 @@ export async function ingestConversationSlack(
           externalSourceName,
           externalAttachments,
           {
-            maxFileSize: 800 * 1024 * 1024, // 800MB
-            timeout: 200000, // 200 seconds
+            maxFileSize: 1024 * 1024 * 1024, // 1GB (Slack's max file size)
+            timeout: 600000, // 10 minutes (enough to move a 1GB file)
             scopeType: 'EXTERNAL_MESSAGE',
             scopeId: externalSourceName,
             overrideToken: userToken, // Use user token for DM attachments

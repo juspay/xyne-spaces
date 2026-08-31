@@ -1,16 +1,15 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
+import { Archive } from 'lucide-react';
+import { SwapArrowVertical as ArrowUpDown, KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Activity,
-  ArrowUpDown,
-  Calendar,
-  CircleCheck,
+  CalendarDefault as Calendar,
+  CheckTickCircle as CircleCheck,
   FileText,
-  SquareKanban,
   Tag,
-  Archive,
-  GitMerge,
-  Mail,
-} from 'lucide-react';
+  Merge as GitMerge,
+  EnvelopeDefault as Mail,
+} from '@xyne/icons';
 import {
   ActivityType,
   TicketReferenceRelation,

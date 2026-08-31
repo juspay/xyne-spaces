@@ -13,6 +13,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 import type { UserMemoryRecord, TwinDelivery } from "xyne-claw-shared";
 
@@ -65,7 +66,7 @@ export async function recordTwinApprovalPending(row: {
     log.warn("[twin-feedback] pending write failed", {
       userId: row.userId,
       sourceMessageId: row.sourceMessageId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }
@@ -126,7 +127,7 @@ export async function recordTwinApprovalOutcome(
       userId,
       sourceMessageId: sourceMessageId || "(none)",
       status,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }
@@ -221,6 +222,6 @@ export async function markTwinFeedbackLearned(ids: string[]): Promise<void> {
       data: { learnedAt: new Date() },
     });
   } catch (err) {
-    log.warn("[twin-feedback] mark-learned failed", { count: ids.length, err: err instanceof Error ? err.message : String(err) });
+    log.warn("[twin-feedback] mark-learned failed", { count: ids.length, err: errMsg(err) });
   }
 }

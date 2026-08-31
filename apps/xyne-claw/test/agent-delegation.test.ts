@@ -8,6 +8,8 @@ import { describe, it, expect } from "vitest";
 import {
   AgentDelegationGovernor,
   buildCallableAgentTools,
+  clampMaxDelegationsPerRun,
+  MAX_DELEGATIONS_PER_RUN_BOUNDS,
   type CallableAgentSpec,
   type NestedAgentRunner,
 } from "../src/agent-delegation.js";
@@ -72,5 +74,43 @@ describe("A2A delegation governor", () => {
     const res = await tool.execute("s", { task: "loop" });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/cycle guard/);
+  });
+});
+
+
+describe("clampMaxDelegationsPerRun (config → budget)", () => {
+  const { MIN, MAX, DEFAULT } = MAX_DELEGATIONS_PER_RUN_BOUNDS;
+
+  it("falls back to DEFAULT for unset / invalid values", () => {
+    for (const v of [undefined, null, "", "abc", NaN, 2.5, {}, [], true]) {
+      expect(clampMaxDelegationsPerRun(v as unknown)).toBe(DEFAULT);
+    }
+  });
+
+  it("passes through valid in-range integers, including numeric strings", () => {
+    expect(clampMaxDelegationsPerRun(6)).toBe(6);
+    expect(clampMaxDelegationsPerRun(10)).toBe(10);
+    expect(clampMaxDelegationsPerRun("8")).toBe(8);
+  });
+
+  it("clamps out-of-range values to [MIN, MAX]", () => {
+    expect(clampMaxDelegationsPerRun(0)).toBe(MIN);
+    expect(clampMaxDelegationsPerRun(-4)).toBe(MIN);
+    expect(clampMaxDelegationsPerRun(9999)).toBe(MAX);
+  });
+
+  it("a configured budget actually raises the governor cap", async () => {
+    const g = new AgentDelegationGovernor({
+      ownerSlug: "orchestrator",
+      maxDelegationsPerRun: clampMaxDelegationsPerRun("6"),
+    });
+    const [tool] = buildCallableAgentTools([infra], g, runner([]));
+    for (let i = 0; i < 6; i++) {
+      const ok = await tool.execute(`c${i}`, { task: `t${i}` });
+      expect(ok.isError).toBeFalsy();
+    }
+    const refused = await tool.execute("c6", { task: "t6" });
+    expect(refused.isError).toBeTruthy();
+    expect(refused.content[0].text).toMatch(/budget exhausted/);
   });
 });

@@ -6,6 +6,7 @@ import {
   CalendarIcon,
   FlowArrowIcon,
   PlugsConnectedIcon,
+  LockIcon,
   CaretLeftIcon,
   CaretRightIcon,
   CheckCircleIcon,
@@ -13,6 +14,7 @@ import {
   CircleDashedIcon,
   CpuIcon,
   CopyIcon,
+  PulseIcon,
 } from "@phosphor-icons/react";
 import type { Agent } from "../../../lib/types";
 import type { ScheduledJob } from "../../../lib/types";
@@ -27,11 +29,14 @@ import {
   revokeDelegationRequest,
 } from "../../../lib/api";
 import { withAdminRequestAlert } from "../../../lib/admin-request-notice";
+import { AwakeningTab } from "./tabs/AwakeningTab";
+import { readAwakening, summarize as summarizeAwakening } from "../../lib/awakeningBounds";
 import type { AgentPermissions } from "../../lib/agentPermissions";
 import { useSnackbar } from "../ui/Snackbar";
 import { RunHistoryTab } from "./tabs/RunHistoryTab";
 import { ContributorsTab } from "./tabs/ContributorsTab";
 import { MemoryTab } from "./tabs/MemoryTab";
+import { PrivacyTab } from "./tabs/PrivacyTab";
 import { ScheduledJobsTab } from "./tabs/ScheduledJobsTab";
 import { WorkflowsTab } from "./tabs/WorkflowsTab";
 import { AgentMcpTabV3 } from "./tabs/AgentMcpTabV3";
@@ -50,11 +55,13 @@ export type TabId =
   | "overview"
   | "run-history"
   | "contributors"
+  | "privacy"
   | "memory"
   | "scheduled-jobs"
   | "workflows"
   | "mcp"
   | "model"
+  | "awakening"
   | "requests";
 
 function fmtNum(n: number): string {
@@ -69,6 +76,9 @@ interface Props {
   permissions: AgentPermissions;
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  /** Sync an updated agent back to the parent (used by the Privacy panel's
+   *  immediate save so config stays current). */
+  onAgentUpdated?: (agent: Agent) => void;
   scheduledJobs: ScheduledJob[];
   onJobsChange: (jobs: ScheduledJob[]) => void;
   agentStats: DashboardAgentRow | null;
@@ -99,6 +109,7 @@ export function AgentDetailRightColumn({
   permissions,
   activeTab,
   onTabChange,
+  onAgentUpdated,
   scheduledJobs,
   onJobsChange,
   agentStats,
@@ -259,11 +270,25 @@ export function AgentDetailRightColumn({
       : "This agent hasn't been used yet — it'll show activity here once it runs.";
 
   const peopleStatus = shareCount > 0 ? `You + ${shareCount} ${shareCount === 1 ? "person" : "people"}` : "Just you";
+  // Invocation privacy (config.privacy) — mirrors isAgentInvocableBy.
+  const privacyRaw = (agent.config?.["privacy"] as { mode?: unknown; whitelist?: unknown } | undefined);
+  const privacyWhitelisted = privacyRaw?.mode === "whitelist";
+  const privacyCount = privacyWhitelisted && Array.isArray(privacyRaw?.whitelist) ? privacyRaw.whitelist.length : 0;
+  const privacyStatus = privacyWhitelisted
+    ? `Whitelist · ${privacyCount} ${privacyCount === 1 ? "person" : "people"}`
+    : "Everyone can call it";
+  // Awakening (config.awakening) — whether this agent acts unattended.
+  const awakeningStatus = summarizeAwakening(readAwakening(agent.config));
   const pendingRequestCount = cloneRequests.length + delegationRequests.length;
+  const activeDelegationCount = activeDelegations.length;
   const requestStatus =
-    pendingRequestCount > 0
-      ? `${pendingRequestCount} pending ${pendingRequestCount === 1 ? "request" : "requests"}`
-      : "No pending requests";
+    activeDelegationCount > 0 && pendingRequestCount > 0
+      ? `${activeDelegationCount} can call · ${pendingRequestCount} pending`
+      : activeDelegationCount > 0
+        ? `${activeDelegationCount} ${activeDelegationCount === 1 ? "agent can" : "agents can"} call it`
+        : pendingRequestCount > 0
+          ? `${pendingRequestCount} pending ${pendingRequestCount === 1 ? "request" : "requests"}`
+          : "No agents can call it";
 
   const cards: CardDef[] = [
     {
@@ -296,6 +321,22 @@ export function AgentDetailRightColumn({
       show: true,
     },
     {
+      id: "awakening",
+      label: "Awakening",
+      status: awakeningStatus,
+      icon: PulseIcon,
+      // Editor-only: it governs whether the agent acts unattended.
+      show: permissions.canEdit,
+    },
+    {
+      id: "privacy",
+      label: "Privacy",
+      status: privacyStatus,
+      icon: LockIcon,
+      badge: privacyCount || undefined,
+      show: true,
+    },
+    {
       id: "mcp",
       label: "Connections",
       status: "MCP servers",
@@ -322,14 +363,12 @@ export function AgentDetailRightColumn({
     },
     {
       id: "requests",
-      label: "Requests",
+      label: "Call graph",
       status: requestStatus,
       icon: CopyIcon,
-      badge: pendingRequestCount || undefined,
-      // Owner-only inbox. Always visible to the owner so there's a persistent
-      // place to check for clone requests — the badge appears only when some
-      // are pending, and the panel shows an empty state otherwise. Kept last so
-      // it sits at the end of the dashboard grid.
+      badge: pendingRequestCount || activeDelegationCount || undefined,
+      // Owner-only call graph + inbox. Shows who can call this agent and pending
+      // clone/delegation approvals.
       show: canManageRequests,
     },
   ];
@@ -382,6 +421,17 @@ export function AgentDetailRightColumn({
             <ContributorsTab agent={agent} userId={userId} permissions={permissions} />
           )}
           {activeTab === "memory" && <MemoryTab agent={agent} canDelete={permissions.canEdit} />}
+          {activeTab === "awakening" && (
+            <AwakeningTab agent={agent} canEdit={permissions.canEdit} onAgentUpdated={onAgentUpdated} />
+          )}
+          {activeTab === "privacy" && (
+            <PrivacyTab
+              agent={agent}
+              userId={userId}
+              canEdit={permissions.canEdit}
+              onAgentUpdated={onAgentUpdated}
+            />
+          )}
           {activeTab === "scheduled-jobs" && (
             <ScheduledJobsTab jobs={scheduledJobs} onJobsChange={onJobsChange} />
           )}

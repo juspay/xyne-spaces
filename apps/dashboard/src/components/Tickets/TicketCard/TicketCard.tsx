@@ -1,5 +1,10 @@
 import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
-import { Calendar, User, Tag, Timer } from 'lucide-react';
+import {
+  CalendarDefault as Calendar,
+  UserDefault as User,
+  Tag,
+  TimerDefault as Timer,
+} from '@xyne/icons';
 import {
   BaseTicketType,
   isReleaseTicket,

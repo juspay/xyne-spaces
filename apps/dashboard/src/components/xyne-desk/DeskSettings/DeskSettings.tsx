@@ -42,11 +42,17 @@ export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.Element
   { id: 'metrics', label: 'Metrics', icon: BarChart3 },
 ];
 
-export type AIFeaturesSubTabId = 'ai-draft' | 'knowledge' | 'attribution' | 'ai-sync';
+export type AIFeaturesSubTabId =
+  | 'ai-draft'
+  | 'knowledge'
+  | 'desk-report'
+  | 'attribution'
+  | 'ai-sync';
 
 export const AI_FEATURES_SUB_TABS: { id: AIFeaturesSubTabId; label: string }[] = [
   { id: 'ai-draft', label: 'AI Draft' },
   { id: 'knowledge', label: 'Knowledge' },
+  { id: 'desk-report', label: 'Desk Report' },
   { id: 'attribution', label: 'Attribution' },
   { id: 'ai-sync', label: 'AI Sync' },
 ];

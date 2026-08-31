@@ -8,6 +8,14 @@ export function isFramedSdlcSurface(): boolean {
   return isSdlcSurface && typeof window !== 'undefined' && window.parent !== window;
 }
 
+/** Frame name SdlcWindow gives its iframe; survives the lane's own navigations. */
+export const SDLC_WINDOW_FRAME_NAME = 'xyne-sdlc-window';
+
+/** True in a popped-out document window, where the lane hides its hub sidebar. */
+export function isSdlcDocumentWindow(): boolean {
+  return isFramedSdlcSurface() && window.name === SDLC_WINDOW_FRAME_NAME;
+}
+
 /**
  * Escape hatch for a wedged frame. It is long-lived by design, so without this
  * the only way to a clean one is reloading the whole dashboard.

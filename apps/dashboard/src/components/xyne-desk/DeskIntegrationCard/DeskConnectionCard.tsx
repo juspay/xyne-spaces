@@ -119,6 +119,8 @@ export const DeskConnectionCard = ({
               variant='secondary'
               size='sm'
               onClick={() => setShowDisconnectConfirm(false)}
+              data-track-category='desk-integration'
+              data-track-name='CANCEL_DISCONNECT'
               disabled={isDisconnecting}
             >
               Cancel

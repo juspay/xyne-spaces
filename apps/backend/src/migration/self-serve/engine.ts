@@ -31,10 +31,14 @@ import { runWithSlackOfflineReference, type SlackOfflineReference } from '@/inte
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
 import { ChannelInput, MigrationJob, MigrationType } from './types';
 
-const PAGE = 200;
+const PAGE = 1000;
+const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+const FILE_CONCURRENCY = 5;
+const PUBLIC_CHANNELS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 // Timing knobs (validated in config/env.ts): pageDelayMs (throttle paged Slack calls),
 // fileTimeoutMs (per-attachment), requestTimeoutMs (per Slack request), ingestMessageDelayMs (per-message DB/Vespa upper bound).
 const PAGE_DELAY_MS = config.slackMigration.pageDelayMs;
+const LIST_PAGE_DELAY_MS = config.slackMigration.listDelayMs;
 const FILE_TIMEOUT_MS = config.slackMigration.fileTimeoutMs;
 const REQUEST_TIMEOUT_MS = config.slackMigration.requestTimeoutMs;
 const INGEST_MESSAGE_DELAY_MS = config.slackMigration.ingestMessageDelayMs;
@@ -86,9 +90,11 @@ const paths = {
   usergroups: (p: string) => `${p}/usergroups.json`,
   channels: (p: string) => `${p}/channels.json`,
   file: (p: string, fileId: string) => `${p}/files/${fileId}`,
+  publicChannelsCache: (root: string, teamId: string) => `${root}/_public-channels/${teamId}.json`,
 };
 
 export interface CollectedConversation { id: string; isMpim: boolean; members: string[]; }
+export interface ChannelMeta { id: string; name: string; isPrivate: boolean; }
 
 export interface DirUser { id: string; email?: string; real_name?: string; display_name?: string; is_bot?: boolean; deleted?: boolean; bot_id?: string; }
 
@@ -150,7 +156,7 @@ export class SlackMigrationEngine {
         };
       }
       cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-      if (cursor && PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
+      if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
     } while (cursor);
     await this.writeJson(paths.users(gcsPrefix), users);
     return users;
@@ -175,7 +181,7 @@ export class SlackMigrationEngine {
         out.push({ id: cc.id, isMpim: !!cc.is_mpim, members });
       }
       cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-      if (cursor && PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
+      if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
     } while (cursor);
     return out;
   }
@@ -206,7 +212,7 @@ export class SlackMigrationEngine {
     const pinned = await fetchPinnedMessageTimestamps(client, conv.id).catch(() => new Set<string>());
     const stream = new PassThrough();
     const done = this.storage.uploadStreamToPath(encryptStream(stream), {
-      path: paths.conversation(gcsPrefix, conv.id), contentType: 'application/octet-stream',
+      path: paths.conversation(gcsPrefix, conv.id), contentType: 'application/octet-stream', chunkSize: UPLOAD_CHUNK_SIZE,
     });
     let count = 0;
     let outcome: 'ok' | 'truncated' | 'skipped' = 'ok';
@@ -275,34 +281,79 @@ export class SlackMigrationEngine {
     await this.writeJson(paths.usergroups(gcsPrefix), groups);
   }
 
-  async collectChannels(token: string, gcsPrefix: string): Promise<void> {
+  async collectChannels(token: string, gcsPrefix: string, teamId: string): Promise<void> {
     const client = slackClient(token);
-    const channels: Record<string, { id: string; name: string; isPrivate: boolean }> = {};
-    let cursor: string | undefined;
+    const channels: Record<string, ChannelMeta> = {};
+
     try {
+      let cursor: string | undefined;
       do {
-        const r = await client.conversations.list({ types: 'public_channel,private_channel', limit: 1000, cursor, exclude_archived: false });
+        const r = await client.conversations.list({ types: 'private_channel', limit: 1000, cursor, exclude_archived: false });
         for (const c of r.channels ?? []) {
-          const cc = c as { id: string; name?: string; is_private?: boolean };
-          channels[cc.id] = { id: cc.id, name: cc.name || cc.id, isPrivate: !!cc.is_private };
+          const cc = c as { id: string; name?: string };
+          channels[cc.id] = { id: cc.id, name: cc.name || cc.id, isPrivate: true };
         }
         cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-        if (cursor && PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
+        if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
       } while (cursor);
     } catch (e) {
-      logger.warn('[SlackMigration] conversations.list (channels) failed — channel mentions may be unresolved', {
+      logger.warn('[SlackMigration] conversations.list (private channels) failed — some channel mentions may be unresolved', {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+
+    const root = gcsPrefix.replace(/\/[^/]+$/, '');
+    const publicChannels = await this.publicChannels(client, paths.publicChannelsCache(root, teamId), teamId);
+    for (const [id, meta] of Object.entries(publicChannels)) channels[id] = meta;
+
     await this.writeJson(paths.channels(gcsPrefix), channels);
   }
 
-  /** Stream every Slack-hosted file on a message (top-level or reply) → storage. */
+  private async publicChannels(client: WebClient, cachePath: string, teamId: string): Promise<Record<string, ChannelMeta>> {
+    const cached = (await this.storage.fileExists(cachePath))
+      ? await this.readJson<{ fetchedAt: number; channels: Record<string, ChannelMeta> }>(cachePath).catch(() => null)
+      : null;
+    if (cached && Date.now() - cached.fetchedAt < PUBLIC_CHANNELS_CACHE_TTL_MS) {
+      logger.info('[SlackMigration] reusing cached public channels', { teamId, count: Object.keys(cached.channels).length });
+      return cached.channels;
+    }
+    const channels: Record<string, ChannelMeta> = {};
+    let cursor: string | undefined;
+    let complete = false;
+    try {
+      do {
+        const r = await client.conversations.list({ types: 'public_channel', limit: 1000, cursor, exclude_archived: false });
+        for (const c of r.channels ?? []) {
+          const cc = c as { id: string; name?: string };
+          channels[cc.id] = { id: cc.id, name: cc.name || cc.id, isPrivate: false };
+        }
+        cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
+        if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
+      } while (cursor);
+      complete = true;
+    } catch (e) {
+      logger.warn('[SlackMigration] conversations.list (public channels) failed — using stale cache if present', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+    if (complete) {
+      logger.info('[SlackMigration] refreshed public channels cache', { teamId, count: Object.keys(channels).length });
+      await this.writeJson(cachePath, { fetchedAt: Date.now(), channels }).catch(() => undefined);
+      return channels;
+    }
+    return cached?.channels ?? channels;
+  }
+
+  /** Stream every Slack-hosted file on a message (top-level or reply) → storage, in bounded-concurrency batches. */
   private async prefetchFiles(token: string, m: unknown, gcsPrefix: string): Promise<void> {
-    for (const f of collectRawFiles(m)) {
-      if (!isDownloadableSlackFile(f)) continue;
-      const uri = await this.streamFileToGcs(token, f, gcsPrefix);
-      if (uri) f.prefetchedStoragePath = uri;
+    const files = collectRawFiles(m).filter((f) => isDownloadableSlackFile(f));
+    for (let i = 0; i < files.length; i += FILE_CONCURRENCY) {
+      await Promise.all(
+        files.slice(i, i + FILE_CONCURRENCY).map(async (f) => {
+          const uri = await this.streamFileToGcs(token, f, gcsPrefix);
+          if (uri) f.prefetchedStoragePath = uri;
+        }),
+      );
     }
   }
 
@@ -534,6 +585,10 @@ export class SlackMigrationEngine {
 
   readManifest(gcsPrefix: string): Promise<CollectedConversation[]> {
     return this.readJson<CollectedConversation[]>(paths.manifest(gcsPrefix));
+  }
+
+  manifestExists(gcsPrefix: string): Promise<boolean> {
+    return this.storage.fileExists(paths.manifest(gcsPrefix));
   }
 
   private async writeJson(path: string, data: unknown): Promise<void> {
