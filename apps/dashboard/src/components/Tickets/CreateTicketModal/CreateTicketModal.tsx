@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
@@ -21,27 +22,25 @@ import {
   toSelectOptions,
   type User as UserType,
 } from '@xyne/shared';
+import { KanbanBoard as SquareKanban, TicketToken as Ticket, PauseCircle } from '@xyne/icons';
 import {
-  CircleCheck,
+  CheckTickCircle as CircleCheck,
   CircleDashed,
   CircleDot,
-  CircleX,
-  Copy,
-  Ellipsis,
-  Hash,
-  Link as LinkIcon,
-  Loader2,
-  Paperclip,
-  Signature,
-  SquareArrowOutUpRight,
-  SquareKanban,
+  MultipleCrossCancelCircle as CircleX,
+  CopyDefault as Copy,
+  ThreeDotsMenuHorizontal as Ellipsis,
+  Hashtag as Hash,
+  LinkChainHorizontal as LinkIcon,
+  Spinner as Loader2,
+  PaperclipSlant as Paperclip,
+  ExternalLink as SquareArrowOutUpRight,
   Tag,
-  Ticket,
-  Trash2,
-  User,
-  Users,
-  X,
-} from 'lucide-react';
+  DeleteDustbin01 as Trash2,
+  UserDefault as User,
+  UserTwo as Users,
+  MultipleCrossCancelDefault as X,
+} from '@xyne/icons';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -100,7 +99,7 @@ import { isReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
-import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel, matchesUserQuery } from '../../../utils/userDisplayName';
 import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
@@ -116,7 +115,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
   selectedBoardName?: string | undefined;
@@ -330,7 +329,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             baselineAttachmentCountRef.current = map.size;
           }
         } catch (error) {
-          console.error('Failed to load attachments:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to load attachments:'),
+            error: error,
+          });
         }
       } else {
         // For tickets tab, local state only
@@ -398,7 +401,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useTitleGenerator({
     maxLength: 100,
     onError: error => {
-      console.error('Title generation error:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Title generation error:'),
+        error: error,
+      });
     },
   });
 
@@ -460,9 +467,46 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     (isFromSubTicket || isFromAI) && selectedChannel?.projectId
       ? selectedChannel.projectId
       : projectId;
-  const [boards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId }),
+  const effectiveChannelId =
+    isFromSubTicket || isFromAI ? (selectedChannelId ?? channelId) : channelId;
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: effectiveChannelId }),
+    { enabled: !!effectiveChannelId },
   );
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
+    { enabled: !!selectedChannelProjectId },
+  );
+  const boards = useMemo(() => {
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'CreateTicketModal',
+        resolution: 'channel-board-mapping',
+        channelId: effectiveChannelId,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    // Only fall back to project boards once the mapping query has fully synced —
+    // an empty result before that is just the zero cache warming up, not a truly
+    // unmapped channel.
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'CreateTicketModal',
+      resolution: 'project-boards-fallback',
+      channelId: effectiveChannelId,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId]);
 
   // Get selected board's metadata for ticket form configuration
   const selectedBoard = useMemo(
@@ -566,7 +610,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           hasPopulatedDeployedCommitId.current = true;
         }
       } catch (error) {
-        console.error('Failed to fetch latest deployed commit ID:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to fetch latest deployed commit ID:'),
+          error: error,
+        });
       }
     };
 
@@ -582,7 +630,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useDuplicateTicketCheck({
     title: titleValue,
     description: descriptionValue,
-    projectId: selectedChannelProjectId,
+    projectId: selectedBoard?.projectId ?? '',
     boardId: formValues?.boardId,
     isOpen,
     debounceMs: 2000,
@@ -612,7 +660,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const { boardSuggestion, isCheckingBoard, resetBoardSuggestionState } = useBoardSuggestion({
     title: titleValue,
     description: descriptionValue,
-    projectId: selectedChannelProjectId,
+    projectId: selectedChannelProjectId ?? '',
     currentBoardId: formValues?.boardId || '',
     isOpen: isOpen && !boardAISuggestionSuppressed && !selectedBoardId,
     debounceMs: 2000,
@@ -621,8 +669,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
   const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: selectedChannelProjectId }),
-    { enabled: tagsQueried },
+    queries.projectTagsByProjectId({ projectId: selectedBoard?.projectId ?? '' }),
+    { enabled: tagsQueried && !!selectedBoard?.projectId },
   );
 
   const userGroupOptions = useUserGroups();
@@ -1174,8 +1222,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           'channelId',
           isFromSubTicket || isFromAI ? formData.channelId : channelId,
         );
-        if (selectedChannelProjectId) {
-          formDataPayload.append('projectId', selectedChannelProjectId);
+        if (selectedBoard?.projectId) {
+          formDataPayload.append('projectId', selectedBoard.projectId);
         }
 
         if (assignedTo) {
@@ -1277,7 +1325,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
           channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
           fromTicketsTab: isFromTicketsTab,
-          ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
+          ...(selectedBoard?.projectId && { projectId: selectedBoard.projectId }),
           ticketType: formData.ticketType,
           ...(draftAttachmentIds.length > 0 && { draftAttachmentIds }),
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),
@@ -1326,7 +1374,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
     } catch (error) {
       // Handle file upload failures and other API errors
-      console.error('Failed to create ticket:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to create ticket:'),
+        error: error,
+      });
 
       toast.error('Ticket Creation Failed', {
         description:
@@ -1406,7 +1458,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       popoutId,
       workspaceId: user?.workspaceId,
       channelId,
-      projectId,
+      ...(projectId ? { projectId } : {}),
       tab: tab || undefined,
       sourceConversationId: sourceConversation?.conversationId,
       initialMessageId: sourceConversation?.initialMessageId,
@@ -1559,7 +1611,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     {
       label: 'Paused',
       value: 'PAUSED',
-      icon: <Signature strokeWidth={2.5} className='size-3.5 text-teal-500' />,
+      icon: <PauseCircle strokeWidth={2.5} className='size-3.5 text-teal-500' />,
     },
     {
       label: 'Cancelled',
@@ -1589,11 +1641,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const query = assigneeSearchValue.trim().toLowerCase();
     const matchedUsers = !query
       ? activeUsers
-      : activeUsers.filter(
-          user =>
-            getUserDisplayName(user).toLowerCase().includes(query) ||
-            (user.email ?? '').toLowerCase().includes(query),
-        );
+      : activeUsers.filter(user => matchesUserQuery(user, assigneeSearchValue));
     // You first, then channel members, then cap the rows (this list isn't
     // virtualized). Deactivated users aren't shown here — the source is active-only.
     const membersFirst = channelMembersFirst(matchedUsers, user => user.id, assigneeMemberIds);
@@ -2383,6 +2431,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     variant='ghost'
                     size='icon'
                     onClick={resetDuplicateState}
+                    data-track-category='TICKETS'
+                    data-track-name='RESET_DUPLICATE_STATE'
                     className='size-6 '
                   >
                     <X strokeWidth={2.33} className='size-3.5' />
@@ -2476,7 +2526,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       // Exclude this chat attachment from the ticket
                       setExcludedChatAttachmentIds(prev => new Set([...prev, attachmentId]));
                     }}
-                    onPreview={() => {}}
+                    onPreview={() => undefined}
                     isUploading={form.state.isSubmitting}
                     variant='detailed'
                   />

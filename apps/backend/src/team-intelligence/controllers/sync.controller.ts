@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
-import { TeamIntelligenceSyncRequestSchema } from '../validation';
+import {
+  formatTeamIntelligenceValidationErrors,
+  TeamIntelligenceSyncRequestSchema,
+} from '../validation';
 import {
   teamIntelligenceService,
   TeamIntelligenceIdempotencyConflictError,
@@ -20,9 +23,19 @@ export class TeamIntelligenceSyncController {
       const validationResult = TeamIntelligenceSyncRequestSchema.safeParse(req.body);
 
       if (!validationResult.success) {
+        const validationErrors = formatTeamIntelligenceValidationErrors(
+          validationResult.error.issues
+        );
         logger.warn('[TeamIntelligenceSyncController] Invalid ingestion payload received', {
           path: req.path,
-          errors: validationResult.error.flatten(),
+          source:
+            extractHeaderValue(req.headers['x-source']) ??
+            (typeof req.body?.source === 'string' ? req.body.source : 'mettle'),
+          requestId:
+            extractHeaderValue(req.headers['x-request-id']) ??
+            (typeof req.body?.requestId === 'string' ? req.body.requestId : undefined),
+          mismatchedFields: [...new Set(validationErrors.map((error) => error.fieldPath))],
+          validationErrors,
         });
 
         res.status(400).json({

@@ -113,23 +113,8 @@ export const isEtaUrgent = (eta?: number | null, status?: TicketStatusV2): boole
   return isOverdue && !isTerminalState;
 };
 
-export const isStageEtaOverdue = (
-  ticket: Ticket & {
-    stageEtaEntries?: Array<{
-      stageLeftAt: number | null;
-      stageEta: number | null;
-    }> | null;
-  },
-): boolean => {
-  const currentStageEntry = ticket.stageEtaEntries?.find(entry => entry.stageLeftAt === null);
-
-  if (!currentStageEntry?.stageEta) return false;
-
-  const now = Date.now();
-  const isOverdue = now > currentStageEntry.stageEta;
+export const isStageOverdue = (ticket: Ticket & { isStageOverdue?: boolean | null }): boolean => {
   const isTerminalState =
-    ticket.statusV2 === TicketStatusV2.COMPLETED || ticket.statusV2 === TicketStatusV2.CANCELLED;
-
-  // Only show as overdue if stage ETA has passed AND ticket is NOT in a terminal state
-  return isOverdue && !isTerminalState;
+    ticket.statusV2 === TicketStatusV2.CANCELLED || ticket.statusV2 === TicketStatusV2.COMPLETED;
+  return Boolean(ticket.isStageOverdue) && !isTerminalState;
 };

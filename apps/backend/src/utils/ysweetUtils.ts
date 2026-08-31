@@ -4,7 +4,7 @@
  * Common utilities for Y-Sweet document operations.
  */
 
-import { DocConnection, DocumentManager } from '@y-sweet/sdk';
+import { DocumentManager, type ClientToken } from '@y-sweet/sdk';
 import * as Y from 'yjs';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import {
@@ -60,6 +60,19 @@ function createServerSchema() {
   });
 }
 
+function createServerEditor() {
+  return ServerBlockNoteEditor.create({ schema: createServerSchema() });
+}
+type ServerEditor = ReturnType<typeof createServerEditor>;
+
+let sharedServerEditor: ServerEditor | null = null;
+function getServerEditor(): ServerEditor {
+  if (!sharedServerEditor) {
+    sharedServerEditor = createServerEditor();
+  }
+  return sharedServerEditor;
+}
+
 /**
  * Y-Sweet XML fragment name used by the frontend collaborative editor
  */
@@ -90,6 +103,88 @@ function overrideTokenUrls(
   logger.debug(`[YSweetUtils] URL override: "${originalBaseUrl}" -> "${clientToken.baseUrl}"`);
 }
 
+export class YSweetHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly path: string,
+  ) {
+    super(`y-sweet ${path} responded ${status}`);
+    this.name = 'YSweetHttpError';
+  }
+}
+
+export interface YSweetAuthRequest {
+  authorization: 'full' | 'read-only';
+  validForSeconds?: number;
+}
+
+function withDocId(base: string, path: string, docId: string): string {
+  return `${base.replace(/\/$/, '')}/${path}?docId=${encodeURIComponent(docId)}&z=${Date.now().toString(36)}`;
+}
+
+async function ysweetRequest(url: string, path: string, init: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    throw new YSweetHttpError(res.status, path);
+  }
+  return res;
+}
+
+async function ysweetJson<T>(base: string, path: string, docId: string, body: unknown): Promise<T> {
+  const res = await ysweetRequest(withDocId(base, path, docId), path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return (await res.json()) as T;
+}
+
+/** POST /doc/new */
+export async function ysweetCreateDoc(docId: string): Promise<void> {
+  await ysweetJson(config.ysweet.url, 'doc/new', docId, { docId });
+}
+
+export function ysweetGetClientToken(docId: string, auth: YSweetAuthRequest): Promise<ClientToken> {
+  return ysweetJson<ClientToken>(config.ysweet.url, `doc/${encodeURIComponent(docId)}/auth`, docId, auth);
+}
+
+export async function ysweetGetOrCreateDocAndToken(
+  docId: string,
+  auth: YSweetAuthRequest,
+): Promise<ClientToken> {
+  try {
+    return await ysweetGetClientToken(docId, auth);
+  } catch (error) {
+    if (!(error instanceof YSweetHttpError) || error.status !== 404) {
+      throw error;
+    }
+    await ysweetCreateDoc(docId);
+    return ysweetGetClientToken(docId, auth);
+  }
+}
+
+function tokenHeaders(clientToken: ClientToken): Record<string, string> {
+  return clientToken.token ? { Authorization: `Bearer ${clientToken.token}` } : {};
+}
+
+export async function ysweetGetAsUpdate(clientToken: ClientToken): Promise<Uint8Array> {
+  const path = 'as-update';
+  const res = await ysweetRequest(withDocId(clientToken.baseUrl, path, clientToken.docId), path, {
+    method: 'GET',
+    headers: tokenHeaders(clientToken),
+  });
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+export async function ysweetUpdateDoc(clientToken: ClientToken, update: Uint8Array): Promise<void> {
+  const path = 'update';
+  await ysweetRequest(withDocId(clientToken.baseUrl, path, clientToken.docId), path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', ...tokenHeaders(clientToken) },
+    body: update,
+  });
+}
+
 /**
  * Initialize a Y-Sweet document with BlockNote content.
  * This ensures the collaborative editor has content when first opened.
@@ -109,17 +204,14 @@ export async function initializeYSweetDoc(
       return false;
     }
 
-    const manager = new DocumentManager(ysweetUrl);
-
-    // Step 1: Create the document first using getOrCreateDocAndToken
-    // This ensures the document exists before we try to update it
-    const clientToken = await manager.getOrCreateDocAndToken(canvasId, {
+    // Step 1: Make sure the document exists and get a write token for it
+    const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
     });
     logger.debug(`[YSweetUtils] Created/retrieved Y-Sweet document for canvas ${canvasId}`);
 
     // Step 2: Convert BlockNote blocks to Y.Doc format
-    const editor = ServerBlockNoteEditor.create({ schema: createServerSchema() });
+    const editor = getServerEditor();
     const ydoc = editor.blocksToYDoc(blocks as any, YSWEET_XML_FRAGMENT);
 
     // Step 3: Encode the state as an update
@@ -129,8 +221,7 @@ export async function initializeYSweetDoc(
     overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
 
     // Step 5: Update the document with initial content
-    const connection = new DocConnection(clientToken);
-    await connection.updateDoc(update);
+    await ysweetUpdateDoc(clientToken, update);
 
     logger.info(`[YSweetUtils] Successfully initialized Y-Sweet document for canvas ${canvasId} with ${blocks.length} blocks`);
     return true;
@@ -164,24 +255,20 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
       return false;
     }
 
-    const manager = new DocumentManager(ysweetUrl);
-
     // Get a client token with full authorization for write operations
-    const clientToken = await manager.getClientToken(canvasId, {
+    const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
     });
 
     // Override URLs before both read and write so backend uses the internal Y-Sweet service.
     overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
 
-    const connection = new DocConnection(clientToken);
-
     // Create a new Y.Doc to work with
     const ydoc = new Y.Doc();
 
     // Get the existing document state from Y-Sweet
     try {
-      const existingUpdate = await connection.getAsUpdate();
+      const existingUpdate = await ysweetGetAsUpdate(clientToken);
       if (existingUpdate && existingUpdate.length > 0) {
         // Apply existing state to our doc
         Y.applyUpdate(ydoc, existingUpdate);
@@ -197,7 +284,7 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
 
     // Use ServerBlockNoteEditor.blocksToYXmlFragment to directly populate the fragment
     // This is more efficient than creating an intermediate Y.Doc and cloning elements
-    const editor = ServerBlockNoteEditor.create({ schema: createServerSchema() });
+    const editor = getServerEditor();
     
     ydoc.transact(() => {
       // Clear existing content
@@ -209,8 +296,8 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
     // Encode the state diff as an update
     const update = Y.encodeStateAsUpdate(ydoc);
 
-    // Push the update to Y-Sweet using DocConnection with full authorization
-    await connection.updateDoc(update);
+    // Push the update to Y-Sweet with full authorization
+    await ysweetUpdateDoc(clientToken, update);
 
     logger.info(`[YSweetUtils] Successfully synced content to Y-Sweet for canvas ${canvasId}`);
     return true;
@@ -236,19 +323,15 @@ export async function readFromYSweet(canvasId: string): Promise<BlockNoteBlock[]
       return [];
     }
 
-    const manager = new DocumentManager(ysweetUrl);
-
     // Get a client token with read-only authorization
-    const clientToken = await manager.getClientToken(canvasId, {
+    const clientToken = await ysweetGetClientToken(canvasId, {
       authorization: 'read-only',
     });
 
     // Override URLs to use direct Y-Sweet URL instead of proxy URL
     overrideTokenUrls(clientToken, ysweetUrl, clientToken.baseUrl);
 
-    // Use DocConnection to get the document state
-    const connection = new DocConnection(clientToken);
-    const existingUpdate = await connection.getAsUpdate();
+    const existingUpdate = await ysweetGetAsUpdate(clientToken);
 
     if (!existingUpdate || existingUpdate.length === 0) {
       logger.debug(`[YSweetUtils] No existing Y-Sweet state for canvas ${canvasId}`);
@@ -260,7 +343,7 @@ export async function readFromYSweet(canvasId: string): Promise<BlockNoteBlock[]
     Y.applyUpdate(ydoc, existingUpdate);
 
     // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
-    const editor = ServerBlockNoteEditor.create({ schema: createServerSchema() });
+    const editor = getServerEditor();
     const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
 
     logger.info(`[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`);

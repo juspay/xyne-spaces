@@ -14,6 +14,10 @@ export interface CommandItem {
   name: string;
   description: string;
   category?: string;
+  kind?: 'app' | 'slash-command-artifact';
+  /** Registry command id when kind is 'slash-command-artifact'. */
+  slashCommandArtifactCommand?: string;
+  badge?: string;
 }
 
 export interface CommandSelectorProps {

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 /**
  * Document Thumbnail Generation Service
  *
@@ -306,10 +307,13 @@ export async function generateDocumentThumbnail(file: File): Promise<Blob | null
     if (isCsvFile(file.type)) return await generateCsvThumbnail(file);
     return null;
   } catch (error) {
-    console.warn(
-      `[documentThumbnailService] Failed to generate thumbnail for "${file.name}":`,
-      error,
-    );
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String(
+        `[documentThumbnailService] Failed to generate thumbnail for "${file.name}":`,
+      ),
+      context: [error],
+    });
     return null;
   }
 }

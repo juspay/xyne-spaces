@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
   useEffect,
@@ -42,6 +43,7 @@ import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
@@ -67,6 +69,7 @@ import {
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
+import { MessageReactArtifacts } from './ReactArtifact';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -113,6 +116,12 @@ interface AIChatThreadProps {
   /** Bubbled up from the composer so the parent can preserve the user's
    *  selections when switching to a recent chat. */
   onContextChange?: ((context: ComposerContext) => void) | undefined;
+  /** Fired once the landing query has actually been submitted, so the parent can
+   *  drop it. The in-component guard is a `useRef`, which resets on remount — if
+   *  the parent keeps handing the same `initialQuery` back, ANY remount re-sends
+   *  it and opens yet another conversation. Clearing it at the source is the
+   *  guard that survives a remount. */
+  onInitialQueryConsumed?: (() => void) | undefined;
 }
 
 export interface AIChatThreadHandle {
@@ -425,6 +434,9 @@ const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
   }
   if (citation.kind === 'canvas') {
     return citation.label ? `Canvas — ${citation.label}` : 'Canvas';
+  }
+  if (citation.kind === 'recording') {
+    return citation.label ? `Recording — ${citation.label}` : 'Recording';
   }
   if (citation.kind === 'external') {
     return citation.label || citation.url || 'External link';
@@ -1004,6 +1016,8 @@ function ChatMessageBubble({
 
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
+  const hasAttachedContext =
+    isUser && !!message.attachedContext && message.attachedContext.length > 0;
   if (isUser && !hasUserContent && !hasUserAttachments) {
     return null as unknown as ReactElement;
   }
@@ -1121,6 +1135,12 @@ function ChatMessageBubble({
               )}
             </div>
           </div>
+          {/* Read-only context pills the user attached to this turn — persisted
+              per message so they survive a reload (see ReadonlyContextPills).
+              Rendered BELOW the message bubble. */}
+          {hasAttachedContext && !isEditing && (
+            <ReadonlyContextPills items={message.attachedContext!} />
+          )}
           {/* Branch switcher for user-message versions (created via edit). */}
           {branchInfo && onBranchNavigate && !isEditing && (
             <BranchNavigator
@@ -1162,6 +1182,17 @@ function ChatMessageBubble({
               ) : (
                 renderAnswerBlock(displayContent)
               )}
+            </div>
+          )}
+
+          {!isUser && <MessageReactArtifacts message={message} />}
+
+          {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool) */}
+          {!isUser && message.attachments && message.attachments.length > 0 && (
+            <div className='mt-2 space-y-2'>
+              {message.attachments.map((attachment, index) => (
+                <AttachmentPreview key={index} attachment={attachment} />
+              ))}
             </div>
           )}
 
@@ -1309,6 +1340,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     onConversationChange,
     onAgentChange,
     onContextChange,
+    onInitialQueryConsumed,
   },
   ref,
 ): ReactElement {
@@ -1663,6 +1695,15 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     let cancelled = false;
     const loadSession = async (): Promise<void> => {
       isLoadingSession.current = true;
+      // Carry the opened conversation's last user-turn context into the composer,
+      // so switching chats pre-fills the input with the context you last used
+      // there. Context is chat-wise: REPLACE the composer with this chat's
+      // last-turn context, and CLEAR it when that turn had none — so a chat's
+      // context never leaks into another chat.
+      const seedComposerFromLastUserTurn = (msgs: Message[]): void => {
+        const lastUser = [...msgs].reverse().find(m => m.type === 'user');
+        composerRef.current?.setContext(lastUser?.attachedContext ?? []);
+      };
       // Clear stale branch selections from any previously-viewed session; the
       // freshly-loaded tree defaults to its latest branch via resolveActivePath.
       setBranchSelections({});
@@ -1682,6 +1723,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             live.status === 'completed' && m.isStreaming ? { ...m, isStreaming: false } : m,
           );
           setMessages(normalized);
+          seedComposerFromLastUserTurn(normalized);
           setConversationId(live.sessionId || sessionId);
           setDebugEvents(live.debugEvents);
           setDebugArtifactsReadyVersion(live.debugArtifactsReadyVersion);
@@ -1720,6 +1762,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           }
 
           setMessages(loadedMessages);
+          seedComposerFromLastUserTurn(loadedMessages);
           setConversationId(sessionId);
           onConversationChange?.(sessionId);
           // Reload mid-run: no in-memory stream was adopted above, so attach a
@@ -1743,7 +1786,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           return;
         }
       } catch (error) {
-        console.error('[AIChatThread] Failed to load session:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AIChatThread] Failed to load session:'),
+          error: error,
+        });
       } finally {
         isLoadingSession.current = false;
       }
@@ -1760,8 +1807,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     };
   }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
 
-  // Auto-submit initialQuery once on mount, applying the landing composer's
-  // chosen context/toggles to this first turn.
+  // Auto-submit initialQuery once, applying the landing composer's chosen
+  // context/toggles to this first turn. The ref guard resets on remount, so the
+  // parent is told to drop the query too — see `onInitialQueryConsumed`.
   useEffect(() => {
     if (initialQuery && !hasAutoSubmitted.current) {
       hasAutoSubmitted.current = true;
@@ -1778,8 +1826,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         initialExtras ? toStreamOverrides(initialExtras) : undefined,
       );
+      // After the call, so "consumed" means "actually submitted" and the
+      // attachments above are read before the parent drops them.
+      onInitialQueryConsumed?.();
     }
-  }, [initialQuery, initialAttachments, initialExtras, submitQuery]);
+  }, [initialQuery, initialAttachments, initialExtras, submitQuery, onInitialQueryConsumed]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -1984,7 +2035,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         });
         if (!res.ok) throw new Error(`Feedback request failed: ${res.status}`);
       } catch (error) {
-        console.error('[AIChatThread] Failed to submit feedback:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AIChatThread] Failed to submit feedback:'),
+          error: error,
+        });
         // Revert to the previous feedback on failure
         setMessages(prevMessages =>
           prevMessages.map(msg =>

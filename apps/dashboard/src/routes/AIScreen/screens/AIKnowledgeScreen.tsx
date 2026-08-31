@@ -1,10 +1,13 @@
 import { type ReactElement } from 'react';
+import { Outlet } from 'react-router-dom';
 import { AIShell } from '../../../components/AIScreen/AIShell';
-import KnowledgeBaseV2Screen from '../../../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
-import { GlobalCollectionsProvider } from '../../../components/knowledgeBaseV2/hooks/useGlobalCollections';
-import { CollectionTreeDataSync } from '../../../components/knowledgeBase/hooks/CollectionTreeDataSync';
+import { KbContentsShell } from '../../../components/knowledgeBaseV2/KbContentsShell';
 import { useAIChatHandoff } from '../useAIChatHandoff';
 
+// Layout for the /ai/knowledge subtree — wraps both the folder browser
+// (index route) and the file viewer (nested route, same as /knowledge-base's
+// own file-viewer path) so opening a file from here stays under /ai/knowledge
+// instead of hopping to the standalone KB screen.
 const AIKnowledgeScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
@@ -14,11 +17,9 @@ const AIKnowledgeScreen = (): ReactElement => {
       onSelectSession={onSelectSession}
       mainClassName='ai-page-bg'
     >
-      <GlobalCollectionsProvider>
-        <CollectionTreeDataSync>
-          <KnowledgeBaseV2Screen />
-        </CollectionTreeDataSync>
-      </GlobalCollectionsProvider>
+      <KbContentsShell>
+        <Outlet />
+      </KbContentsShell>
     </AIShell>
   );
 };

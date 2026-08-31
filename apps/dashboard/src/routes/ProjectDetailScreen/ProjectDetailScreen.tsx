@@ -1,13 +1,28 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { BoardType, deserializeFlowPlan, type FlowPlan } from '@xyne/shared';
-import { ArrowLeft, Edit2, LayoutGrid, Rocket } from 'lucide-react';
+import {
+  BoardType,
+  deserializeFlowPlan,
+  inferRepositoryNameFromUrl,
+  normalizeChannelName,
+  validateChannelName,
+  type FlowPlan,
+} from '@xyne/shared';
+import { useQuery } from '@tanstack/react-query';
+import {
+  ArrowLeft,
+  PencilEdit as Edit2,
+  GitBranch,
+  Grid01 as LayoutGrid,
+  RocketShip as Rocket,
+} from '@xyne/icons';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
 import BoardEditScreen from '../../components/Board/BoardEditScreen/BoardEditScreen';
 import BoardStageConfigScreen from '../../components/Board/BoardStageConfigScreen/BoardStageConfigScreen';
 import { BoardRolesConfigScreen } from '../../components/Board/BoardRolesConfigScreen';
+import { BoardConfigCopyScreen } from '../../components/Board/BoardConfigCopyScreen';
 import BoardCreateScreen from '../../components/Board/BoardCreateScreen/BoardCreateScreen';
 import { BoardTypeChooserDialog } from '../../components/Board/BoardTypeChooserDialog/BoardTypeChooserDialog';
 import { FlowBoardCreateScreen } from '../../components/Board/FlowBoardCreateScreen/FlowBoardCreateScreen';
@@ -22,6 +37,9 @@ import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { cn } from '../../utils/classNames';
+import { apiInstance } from '../../services/clients/apiClient';
+import { channelService } from '../../services/Chat/channelService';
+import { ProjectRepositoriesSection } from './ProjectRepositoriesSection';
 
 // Type for board data passed from BoardEditScreen to BoardStageConfigScreen
 interface BoardData {
@@ -30,7 +48,7 @@ interface BoardData {
   [key: string]: unknown;
 }
 
-type TabValue = 'boards' | 'release';
+type TabValue = 'boards' | 'repos' | 'release';
 type ReleaseBoardFlow =
   | { kind: 'create'; projectId: string }
   | { kind: 'edit-main'; mainBoardId: string }
@@ -55,7 +73,7 @@ const getNextClonedBoardName = (
 };
 
 const ProjectDetailScreen = (): ReactElement => {
-  const { projectId } = useParams<{ projectId: string }>();
+  const { workspaceId, projectId } = useParams<{ workspaceId: string; projectId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -67,6 +85,14 @@ const ProjectDetailScreen = (): ReactElement => {
   const initialTab = (location.state as { tab?: TabValue } | null)?.tab ?? 'boards';
   const [activeTab, setActiveTab] = useState<TabValue>(initialTab);
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
+  const [showAddRepositoryModal, setShowAddRepositoryModal] = useState(false);
+  const [repositoryUrl, setRepositoryUrl] = useState('');
+  const [repositoryName, setRepositoryName] = useState('');
+  const [repositoryNameEdited, setRepositoryNameEdited] = useState(false);
+  const [debouncedRepositoryName, setDebouncedRepositoryName] = useState('');
+  const [repositoryBranch, setRepositoryBranch] = useState('main');
+  const [addingRepository, setAddingRepository] = useState(false);
+  const [repositoryRefreshKey, setRepositoryRefreshKey] = useState(0);
   const [showCreateBoardModal, setShowCreateBoardModal] = useState(false);
   const [showBoardTypeChooser, setShowBoardTypeChooser] = useState(false);
   const [showFlowBoardCreate, setShowFlowBoardCreate] = useState(false);
@@ -83,6 +109,7 @@ const ProjectDetailScreen = (): ReactElement => {
     useState<BoardWithStages | null>(null);
   const [configuringRolesForBoardId, setConfiguringRolesForBoardId] = useState<string | null>(null);
   const [boardIdToEdit, setBoardIdToEdit] = useState<string | null>(null);
+  const [copyConfigTargetBoard, setCopyConfigTargetBoard] = useState<BoardWithStages | null>(null);
 
   // Fetch project details
   const [project] = useCachedQuery(queries.projectById({ projectId: projectId || '' }), {
@@ -90,9 +117,12 @@ const ProjectDetailScreen = (): ReactElement => {
   });
 
   // Fetch boards for this project (lightweight list without stages)
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId || '' }), {
-    enabled: !!projectId,
-  });
+  const [boards, boardsDetails] = useCachedQuery(
+    queries.boardsListByProject({ projectId: projectId || '' }),
+    {
+      enabled: !!projectId,
+    },
+  );
 
   // Consume the Ticket view's edit-board intent once.
   const requestedEditBoardId = searchParams.get('editBoard');
@@ -201,6 +231,21 @@ const ProjectDetailScreen = (): ReactElement => {
     fullBoardDetailsStatus.type,
   ]);
 
+  useEffect(() => {
+    const timeoutId = setTimeout(() => setDebouncedRepositoryName(repositoryName), 500);
+    return (): void => clearTimeout(timeoutId);
+  }, [repositoryName]);
+
+  const { data: channelDuplicateCheck } = useQuery({
+    queryKey: ['checkDuplicateChannel', debouncedRepositoryName, 'default'],
+    queryFn: () => channelService.checkDuplicateChannel(debouncedRepositoryName),
+    enabled:
+      Boolean(debouncedRepositoryName) && validateChannelName(debouncedRepositoryName) === null,
+    staleTime: 0,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
   const loading = project === undefined || boards === undefined;
 
   // Early return if no projectId
@@ -252,6 +297,45 @@ const ProjectDetailScreen = (): ReactElement => {
       });
     } else {
       setShowEditProjectModal(false);
+    }
+  };
+
+  const repositoryNameError = repositoryName
+    ? (validateChannelName(repositoryName) ??
+      (channelDuplicateCheck?.isDuplicate ? 'Channel name already exists' : null))
+    : null;
+
+  const handleRepositoryUrlChange = (value: string): void => {
+    setRepositoryUrl(value);
+    if (repositoryNameEdited) return;
+    setRepositoryName(normalizeChannelName(inferRepositoryNameFromUrl(value) ?? ''));
+  };
+
+  const closeAddRepositoryModal = (): void => {
+    setShowAddRepositoryModal(false);
+    setRepositoryUrl('');
+    setRepositoryName('');
+    setRepositoryNameEdited(false);
+  };
+
+  const handleAddRepository = async (): Promise<void> => {
+    if (!repositoryUrl.trim() || repositoryNameError || !repositoryName) return;
+    setAddingRepository(true);
+    try {
+      await apiInstance.post('/sdlc/repositories', {
+        projectId,
+        url: repositoryUrl.trim(),
+        name: repositoryName,
+        baseBranch: repositoryBranch.trim() || 'main',
+      });
+      toast.success('Repository attached');
+      closeAddRepositoryModal();
+      setActiveTab('repos');
+      setRepositoryRefreshKey(value => value + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to attach repository');
+    } finally {
+      setAddingRepository(false);
     }
   };
 
@@ -309,16 +393,18 @@ const ProjectDetailScreen = (): ReactElement => {
                   Created: {new Date(project.createdAt).toLocaleDateString()}
                 </div>
               </div>
-              <Button
-                variant='secondary'
-                onClick={() => setShowEditProjectModal(true)}
-                data-track-category='ProjectDetail'
-                data-track-name='EditProject'
-                data-track-metadata={JSON.stringify({ projectId: project.id })}
-              >
-                <Edit2 size={16} />
-                Edit Project
-              </Button>
+              <div className='flex gap-2'>
+                <Button
+                  variant='secondary'
+                  onClick={() => setShowEditProjectModal(true)}
+                  data-track-category='ProjectDetail'
+                  data-track-name='EditProject'
+                  data-track-metadata={JSON.stringify({ projectId: project.id })}
+                >
+                  <Edit2 size={16} />
+                  Edit Project
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -327,6 +413,7 @@ const ProjectDetailScreen = (): ReactElement => {
             <Tabs.Root value={activeTab} onValueChange={value => setActiveTab(value as TabValue)}>
               <Tabs.List className='flex gap-0 px-6'>
                 <TabTrigger value='boards' icon={LayoutGrid} label='Boards' />
+                <TabTrigger value='repos' icon={GitBranch} label='Repos' />
                 <TabTrigger value='release' icon={Rocket} label='Release' />
               </Tabs.List>
             </Tabs.Root>
@@ -337,7 +424,11 @@ const ProjectDetailScreen = (): ReactElement => {
             <Tabs.Root value={activeTab} onValueChange={value => setActiveTab(value as TabValue)}>
               <div className='mb-6 flex items-center justify-between'>
                 <h2 className='text-2xl font-bold text-foreground'>
-                  {activeTab === 'boards' ? 'Boards' : 'Releases'}
+                  {activeTab === 'boards'
+                    ? 'Boards'
+                    : activeTab === 'repos'
+                      ? 'Repositories'
+                      : 'Releases'}
                 </h2>
                 {activeTab === 'boards' && (
                   <Button
@@ -350,20 +441,41 @@ const ProjectDetailScreen = (): ReactElement => {
                     Create Board
                   </Button>
                 )}
+                {activeTab === 'repos' && (
+                  <Button onClick={() => setShowAddRepositoryModal(true)}>
+                    <GitBranch size={16} /> Add Repository
+                  </Button>
+                )}
               </div>
 
               {/* Boards Tab Content */}
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
                   boards={boards}
+                  loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
+                  onCopyConfig={board => setCopyConfigTargetBoard(board)}
                   applicationBoardIds={applicationBoardIds}
+                  applicationByBoardId={applicationByBoardId}
+                  {...(workspaceId && projectId
+                    ? {
+                        onBoardClick: (board: BoardWithStages) =>
+                          void navigate(`/${workspaceId}/projects/${projectId}/${board.id}`),
+                      }
+                    : {})}
                 />
               </Tabs.Content>
 
               <Tabs.Content value='release' className='outline-none'>
                 <ReleasesSection projectId={projectId} />
+              </Tabs.Content>
+              <Tabs.Content value='repos' className='outline-none'>
+                <ProjectRepositoriesSection
+                  projectId={projectId}
+                  refreshKey={repositoryRefreshKey}
+                  onAdd={() => setShowAddRepositoryModal(true)}
+                />
               </Tabs.Content>
             </Tabs.Root>
           </div>
@@ -640,6 +752,18 @@ const ProjectDetailScreen = (): ReactElement => {
         />
       )}
 
+      {/* Copy Board Configuration Modal */}
+      {copyConfigTargetBoard && projectId && (
+        <BoardConfigCopyScreen
+          targetBoardId={copyConfigTargetBoard.id}
+          targetBoardName={copyConfigTargetBoard.name}
+          projectId={projectId}
+          isOpen={true}
+          onClose={() => setCopyConfigTargetBoard(null)}
+          onDone={() => setCopyConfigTargetBoard(null)}
+        />
+      )}
+
       {/* Release-board creation begins here, then continues through the existing
           board fields/ticket preview and stage configuration screens. */}
       {showReleaseConfigModal && projectId && releaseBoardFlow && (
@@ -690,32 +814,121 @@ const ProjectDetailScreen = (): ReactElement => {
           />
         </div>
       </Dialog>
+
+      <Dialog
+        open={showAddRepositoryModal}
+        onOpenChange={open => (open ? setShowAddRepositoryModal(true) : closeAddRepositoryModal())}
+        title='Add Repository'
+        description='Create a private SDLC hub for this repository'
+      >
+        <form
+          className='p-6'
+          onSubmit={event => {
+            event.preventDefault();
+            void handleAddRepository();
+          }}
+        >
+          <h2 className='text-lg font-semibold'>Add Repository</h2>
+          <p className='mt-1 text-sm text-muted-foreground'>
+            Creates the hub, then runs a non-mutating access check. Baseline generation starts only
+            after you click Next.
+          </p>
+          <label htmlFor='sdlc-repository-url' className='mt-5 block text-sm font-medium'>
+            Repository URL
+          </label>
+          <input
+            id='sdlc-repository-url'
+            autoFocus
+            required
+            value={repositoryUrl}
+            onChange={event => handleRepositoryUrlChange(event.target.value)}
+            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
+            placeholder='https://github.com/org/repository.git'
+            data-track-category='ProjectDetail'
+            data-track-name='RepositoryUrlChanged'
+          />
+          <label htmlFor='sdlc-repository-name' className='mt-4 block text-sm font-medium'>
+            Channel name
+          </label>
+          <input
+            id='sdlc-repository-name'
+            required
+            value={repositoryName}
+            onChange={event => {
+              setRepositoryNameEdited(true);
+              setRepositoryName(normalizeChannelName(event.target.value));
+            }}
+            className={cn(
+              'mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring',
+              repositoryNameError && 'border-destructive focus:ring-destructive',
+            )}
+            data-track-category='ProjectDetail'
+            data-track-name='RepositoryNameChanged'
+          />
+          <p
+            className={cn(
+              'mt-1 text-xs',
+              repositoryNameError ? 'text-destructive' : 'text-muted-foreground',
+            )}
+          >
+            {repositoryNameError ?? "Names this repository's SDLC channel."}
+          </p>
+          <div className='mt-4'>
+            <label htmlFor='sdlc-repository-branch' className='block text-sm font-medium'>
+              Base branch
+            </label>
+            <input
+              id='sdlc-repository-branch'
+              value={repositoryBranch}
+              onChange={event => setRepositoryBranch(event.target.value)}
+              className='mt-2 h-10 w-full rounded-md border bg-background px-3'
+              data-track-category='ProjectDetail'
+              data-track-name='RepositoryBranchChanged'
+            />
+          </div>
+          <div className='mt-6 flex justify-end gap-2'>
+            <Button type='button' variant='outline' onClick={closeAddRepositoryModal}>
+              Cancel
+            </Button>
+            <Button
+              type='submit'
+              loading={addingRepository}
+              disabled={!repositoryUrl.trim() || !repositoryName || Boolean(repositoryNameError)}
+            >
+              Attach repository
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 };
 
 const TabTrigger = ({
   value,
-  icon: Icon,
+  icon,
   label,
 }: {
   value: TabValue;
   icon: React.ElementType;
   label: string;
-}): ReactElement => (
-  <Tabs.Trigger
-    value={value}
-    className={cn(
-      'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
-      'text-muted-foreground border-transparent hover:text-foreground hover:border-muted',
-      'data-[state=active]:text-primary data-[state=active]:border-primary',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-    )}
-  >
-    <Icon size={16} />
-    {label}
-  </Tabs.Trigger>
-);
+}): ReactElement => {
+  const Icon = icon;
+  return (
+    <Tabs.Trigger
+      value={value}
+      className={cn(
+        'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+        'text-muted-foreground border-transparent hover:text-foreground hover:border-muted',
+        'data-[state=active]:text-primary data-[state=active]:border-primary',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+      )}
+    >
+      <Icon size={16} />
+      {label}
+    </Tabs.Trigger>
+  );
+};
 
 ProjectDetailScreen.displayName = 'ProjectDetailScreen';
 

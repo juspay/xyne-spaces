@@ -69,8 +69,19 @@ export function buildClawCitationUrl(citation: ClawCitation): string | null {
     return `/chat/dir/${citation.channelId}`;
   }
 
-  if (citation.kind === 'canvas' && citation.canvasId) {
-    return `/chat/canvas/${citation.canvasId}`;
+  // Canvas citations key on `viewAccessId` (what claw emits); `canvasId` is a
+  // legacy fallback and is normally unset for kind="canvas".
+  const canvasKey =
+    citation.kind === 'canvas' ? citation.viewAccessId || citation.canvasId : undefined;
+  if (citation.kind === 'canvas' && canvasKey) {
+    return `/chat/canvas/${canvasKey}`;
+  }
+
+  // Note-taker recordings have no channel and no thread, so they can't be cited
+  // as one. `recordingId` is the call's externalId — the segment the
+  // `recordings/:recordingId` route reads.
+  if (citation.kind === 'recording' && citation.recordingId) {
+    return `/recordings/${citation.recordingId}`;
   }
 
   if (
@@ -144,6 +155,7 @@ export function getClawCitationLabel(citation: ClawCitation): string {
     return citation.channelName ? `Thread in #${citation.channelName}` : 'Spaces thread';
   }
   if (citation.kind === 'canvas') return 'Canvas';
+  if (citation.kind === 'recording') return 'Recording';
   if (citation.kind === 'ticket') return `Ticket ${citation.ticketId || ''}`.trim();
   if (citation.kind === 'external') return 'Source link';
   if (citation.kind === 'collection-item') return citation.fileName || 'Knowledge base file';

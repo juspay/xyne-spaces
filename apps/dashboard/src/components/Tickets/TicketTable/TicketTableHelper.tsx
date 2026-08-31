@@ -3,14 +3,14 @@ import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { TicketStatusIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import {
-  CircleCheck,
+  CheckTickCircle as CircleCheck,
   CircleDashed,
   CircleDot,
-  CircleX,
-  Signature,
+  MultipleCrossCancelCircle as CircleX,
   Tag,
-  UserIcon,
-} from 'lucide-react';
+  UserDefault as UserIcon,
+  PauseCircle,
+} from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { useMemo } from 'react';
 import type { User, UserGroup } from '../../../machines/stateMachine';
@@ -47,7 +47,7 @@ export const StatusOptions: StatusEntityOption[] = [
   {
     label: 'Paused',
     value: TicketStatusV2.PAUSED,
-    icon: <Signature strokeWidth={2.5} className='w-3.5 h-3.5 text-teal-500' />,
+    icon: <PauseCircle strokeWidth={2.5} className='w-3.5 h-3.5 text-teal-500' />,
     bgColor: 'bg-teal-500/15',
     textColor: 'text-teal-600',
   },
@@ -123,6 +123,26 @@ export const getAssigneeOptions = (
   }));
 
   return [...userOptions, ...groupOptions];
+};
+
+/** The columns an assignee pick actually writes. */
+export interface AssigneeTicketUpdate {
+  assignedTo: string | null;
+  userGroupId?: string;
+}
+
+/**
+ * Inverse of `getAssigneeOptions`. Its `user:<id>` / `group:<id>` values map onto a
+ * bare id in `assignedTo` and a group in `userGroupId` — writing the encoded value
+ * back is rejected ("assignee must be an active user"). Unassign clears the agent,
+ * not the team, which outlives it on autoassignment boards.
+ */
+export const assigneeOptionToTicketUpdate = (value: string | null): AssigneeTicketUpdate => {
+  if (value?.startsWith('group:')) {
+    return { assignedTo: null, userGroupId: value.slice('group:'.length) };
+  }
+  if (value) return { assignedTo: value.replace(/^user:/, '') };
+  return { assignedTo: null };
 };
 
 export const UNASSIGNED_OPTION: EntityOption = {

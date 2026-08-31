@@ -1,8 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { Users } from 'lucide-react';
+import { UserTwo as Users } from '@xyne/icons';
 import { useUserGroups } from '../../../hooks/useUserGroup';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+
+const NO_ONE_AVAILABLE = 'No one available for assignment';
 
 /**
  * Props for UserGroupSelector component
@@ -21,6 +25,7 @@ interface UserGroupSelectorProps {
  * Features:
  * - Displays active user groups (deactivated groups are hidden)
  * - Client-side search by group name
+ * - Flags groups that currently have nobody available to receive tickets
  * - Built on top of the generic EntitySelector
  *
  * @example
@@ -43,7 +48,48 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
    */
   const allGroups = useUserGroups();
 
+  const activeGroups = useMemo(
+    () => (allGroups ?? []).filter(group => group.isActive !== false),
+    [allGroups],
+  );
+
+  const groupIds = useMemo(() => activeGroups.map(group => group.id), [activeGroups]);
+
+  const [groupMembers, groupMembersDetails] = useCachedQuery(
+    queries.getUserGroupMembersByGroupIds({ userGroupIds: groupIds }),
+  );
+  const [assignmentStates, assignmentStatesDetails] = useCachedQuery(
+    queries.getUserAssignmentStatesByGroupIds({ userGroupIds: groupIds }),
+  );
+
   // ==================== DATA TRANSFORMATION ====================
+
+  const unavailableGroupIds = useMemo(() => {
+    if (groupMembersDetails.type !== 'complete' || assignmentStatesDetails.type !== 'complete') {
+      return new Set<string>();
+    }
+
+    const activeMemberKeys = new Set(
+      (assignmentStates ?? [])
+        .filter(state => state.isActiveForAssignment === true)
+        .map(state => `${state.userGroupId}#${state.userId}`),
+    );
+
+    const groupsWithSomeoneActive = new Set(
+      (groupMembers ?? [])
+        .filter(member => activeMemberKeys.has(`${member.userGroupId}#${member.userId}`))
+        .map(member => member.userGroupId),
+    );
+
+    // An empty group has nobody active either, so it lands here too.
+    return new Set(groupIds.filter(id => !groupsWithSomeoneActive.has(id)));
+  }, [
+    groupIds,
+    groupMembers,
+    groupMembersDetails.type,
+    assignmentStates,
+    assignmentStatesDetails.type,
+  ]);
 
   /**
    * Filter groups client-side based on search value
@@ -51,11 +97,6 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
    * Only show active groups (isActive !== false)
    */
   const groupOptions: SelectorOption[] = useMemo(() => {
-    if (!allGroups) return [];
-
-    // Filter out deactivated groups
-    const activeGroups = allGroups.filter(group => group.isActive !== false);
-
     // Filter groups by search value (case-insensitive)
     const filteredGroups = searchValue.trim()
       ? activeGroups.filter(group => group.name.toLowerCase().includes(searchValue.toLowerCase()))
@@ -65,10 +106,11 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
     return filteredGroups.map(group => ({
       value: group.id,
       label: group.name,
-      // No subtitle for groups (unlike users who have email)
+      // Groups have no email-style subtitle, so the slot is free for the availability hint
+      subtitle: unavailableGroupIds.has(group.id) ? NO_ONE_AVAILABLE : null,
       icon: <Users className='w-4 h-4 text-muted-foreground' />,
     }));
-  }, [allGroups, searchValue]);
+  }, [activeGroups, searchValue, unavailableGroupIds]);
 
   // ==================== RENDER ====================
 

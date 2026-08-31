@@ -511,6 +511,8 @@ export const COEForm = ({
                     });
                   })()
             }
+            data-track-category='RCA'
+            data-track-name='DELETE_COE'
             loading={isDeleting}
             disabled={isSubmitting || deletingCoeId !== null}
             aria-label={isExisting ? `Delete COE ${index + 1}` : 'Remove COE'}
@@ -663,7 +665,13 @@ export const COEForm = ({
               </p>
             </div>
           </div>
-          <Button variant='outline' size='sm' onClick={() => onPhaseChange('impact')}>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => onPhaseChange('impact')}
+            data-track-category='RCA'
+            data-track-name='GO_TO_IMPACT_PHASE'
+          >
             Review Previous Phase
           </Button>
         </div>
@@ -783,6 +791,8 @@ export const COEForm = ({
                     status: COEStatus.OPEN,
                   });
                 }}
+                data-track-category='RCA'
+                data-track-name='ADD_COE_ACTION'
                 disabled={isSubmitting}
               >
                 <Plus className='h-3.5 w-3.5' />
@@ -805,6 +815,8 @@ export const COEForm = ({
                   type='button'
                   variant='outline'
                   onClick={() => onPhaseChange('impact')}
+                  data-track-category='RCA'
+                  data-track-name='BACK_TO_IMPACT_PHASE'
                   disabled={isSubmitting}
                 >
                   Go Back
@@ -812,6 +824,8 @@ export const COEForm = ({
                 <Button
                   type='button'
                   onClick={() => void handleSaveAll()}
+                  data-track-category='RCA'
+                  data-track-name='SAVE_ALL_COES'
                   loading={isSubmitting}
                   disabled={isSubmitting}
                 >

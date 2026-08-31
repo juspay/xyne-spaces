@@ -13,22 +13,22 @@ import {
   BaseTicketType,
 } from '@xyne/shared';
 import {
-  ListFilter,
+  FilterLines as ListFilter,
   ChevronRight,
-  BarChart3,
-  User,
-  Users,
-  Calendar,
+  BarchartDefault as BarChart3,
+  UserDefault as User,
+  UserTwo as Users,
+  CalendarDefault as Calendar,
   ChevronDown,
-  BarChart4Icon,
-  Search,
+  BarchartDefault as BarChart4Icon,
+  SearchDefault as Search,
   Tag,
-  Hash,
-  X,
+  Hashtag as Hash,
+  MultipleCrossCancelDefault as X,
   Circle,
-  Loader2,
-  Layers,
-} from 'lucide-react';
+  Spinner as Loader2,
+  LayerTwo as Layers,
+} from '@xyne/icons';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { Button } from '../../ui/Button';
@@ -438,8 +438,8 @@ export const TicketFiltersDropdown = ({
   const hasAssigneeFilter = getFilterAssigneeCount() > 0;
 
   const handleClearAllFilters = useCallback((): void => {
-    onFiltersChange({});
-  }, [onFiltersChange]);
+    onFiltersChange(filters.boards?.length ? { boards: filters.boards } : {});
+  }, [onFiltersChange, filters.boards]);
 
   // Serialize current filters (excluding boards) into config values rows
   const filtersToValues = useCallback((): {
@@ -845,7 +845,10 @@ export const TicketFiltersDropdown = ({
                       (item.id !== 'boards' || showBoardsFilter) &&
                       (item.id !== 'stages' || selectedBoards.length > 0) &&
                       (item.id !== 'prReviewers' || hasPrReviewers === true) &&
-                      (item.id !== 'qaAssigned' || hasQaAssigned === true),
+                      (item.id !== 'qaAssigned' || hasQaAssigned === true) &&
+                      // A channel view is already scoped to a single channel, so a
+                      // "Source channels" filter is meaningless there.
+                      (item.id !== 'sourceChannels' || !channelId),
                   )
                   .map(item => {
                     const Icon = item.icon;

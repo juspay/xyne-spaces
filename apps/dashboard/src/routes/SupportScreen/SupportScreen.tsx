@@ -1,55 +1,4 @@
-import {
-  ChevronDown,
-  ChevronUp,
-  ChevronLeft,
-  ChevronRight,
-  RefreshCw,
-  X,
-  PanelRight,
-  ReplyAll,
-  ArrowLeft,
-  ArrowUp,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  LayoutGrid,
-  List,
-  Table2,
-  Columns3,
-  Check,
-  Tag,
-  Split,
-  Paperclip,
-  Link as LinkIcon,
-  Settings,
-  Plug,
-  Plus,
-  Wand2,
-  Sparkles,
-  Loader2,
-  Pencil,
-  Archive,
-  AlertCircle,
-  Users2,
-  Users,
-  Lock,
-  Hash,
-  Inbox,
-  CheckCheck,
-  Search,
-  GitMerge,
-  Mail,
-  MailOpen,
-  User,
-  ListFilter,
-  BarChart4Icon,
-  CalendarDays,
-  BarChart3,
-  Circle,
-  UserPlus,
-  Info as InfoIcon,
-  Ticket as TicketIcon,
-  Tag as TagIcon,
-} from 'lucide-react';
+import { ReplyAll, Split, Wand2, Archive, Plug, MailOpen } from 'lucide-react';
 import {
   ChannelVisibility,
   ChannelType,
@@ -72,7 +21,56 @@ import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
-import { Hashtag, Star } from '@xyne/icons';
+import {
+  LayoutGridTwoVertical as Columns3,
+  TicketToken as TicketIcon,
+  Hashtag,
+  Star,
+  ChevronRight,
+  Circle,
+  Tag,
+  CalendarDefault as CalendarRange,
+  MultipleCrossCancelDefault as X,
+  SidebarRightOpen as PanelRight,
+  KanbanBoard as LayoutGrid,
+  ListDefault as List,
+  GridTable as Table2,
+  CheckTickSingle as Check,
+  SparkleAi02 as Sparkles,
+  PencilEdit as Pencil,
+  UserTwo as Users,
+  SearchDefault as Search,
+  UserDefault as User,
+  FilterLines as ListFilter,
+  BarchartDefault as BarChart4Icon,
+  CalendarDefault as CalendarDays,
+  Tag as TagIcon,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  Refresh as RefreshCw,
+  ArrowLeft,
+  ArrowUp,
+  DoubleChevronUp as ChevronsDownUp,
+  DoubleChevronDown as ChevronsUpDown,
+  PaperclipSlant as Paperclip,
+  LinkChainHorizontal as LinkIcon,
+  Settings02 as Settings,
+  PlusDefault as Plus,
+  Spinner as Loader2,
+  AlertCircle,
+  UserThree as Users2,
+  LockClose as Lock,
+  Hashtag as Hash,
+  InboxDefault as Inbox,
+  CheckTickDouble as CheckCheck,
+  Merge as GitMerge,
+  EnvelopeDefault as Mail,
+  BarchartDefault as BarChart3,
+  UserPlus,
+  InformationCircle as InfoIcon,
+  FileText,
+} from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
@@ -111,6 +109,7 @@ import {
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
+import { classificationApi } from '../../api/classificationApi';
 import {
   CalendarView,
   PRESETS,
@@ -137,11 +136,20 @@ import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
-import { TicketPriority, parseFieldOptionValues } from '@xyne/shared';
+import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
 import { useUser } from '../../hooks/useUsers';
+import { BulkActionToolbar } from '../../components/Tickets/TicketTable/BulkActionToolbar';
+import { assigneeOptionToTicketUpdate } from '../../components/Tickets/TicketTable/TicketTableHelper';
+import {
+  dueDateToEta,
+  sharedChannelId,
+  useBulkAssignableUsers,
+  useBulkTicketActions,
+  type BulkTicketUpdates,
+} from '../../components/Tickets/TicketTable/useBulkTicketActions';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { AssigneePicker } from '../../components/Tickets/TicketListView/AssigneePicker';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
@@ -159,6 +167,7 @@ import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyCo
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
+import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
 import { useEmailDrafts } from '../../hooks/useEmailDraft';
@@ -183,6 +192,8 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
+import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
+import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -200,7 +211,16 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
+import {
+  COLLAPSIBLE_FILTER_IDS,
+  COLLAPSIBLE_FILTER_META,
+  DeskFilterTrigger,
+  type CollapsibleFilterId,
+} from './DeskFilterTrigger';
+import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
 import {
   channelService,
   CreateChannelFormData,
@@ -532,7 +552,7 @@ interface DemergeEmailResponse {
   };
 }
 
-type ViewMode = 'kanban' | 'list' | 'table';
+type ViewMode = 'kanban' | 'list' | 'table' | 'calendar';
 
 const SupportScreen = (): ReactElement => {
   const {
@@ -646,7 +666,7 @@ const SupportScreen = (): ReactElement => {
   );
   const channelPreference = channelPreferenceList?.[0];
   const deskBoardId = channelPreference?.boardId || channelBoardId;
-  const [channelBoardDetail] = useCachedQuery(
+  const [channelBoardDetail, channelBoardDetailDetails] = useCachedQuery(
     queries.boardDetailById({ boardId: deskBoardId || '' }),
     { enabled: !!deskBoardId },
   );
@@ -718,6 +738,7 @@ const SupportScreen = (): ReactElement => {
           : filters.assigned
             ? [userID]
             : undefined,
+      createdBy: filters.createdBy && filters.createdBy.length > 0 ? filters.createdBy : undefined,
       priority: filters.priority && filters.priority.length > 0 ? filters.priority : undefined,
       stageName: filters.stages && filters.stages.length > 0 ? filters.stages : undefined,
       aiCategory:
@@ -731,6 +752,8 @@ const SupportScreen = (): ReactElement => {
         filters.userGroups && filters.userGroups.length > 0 ? filters.userGroups : undefined,
       lastEmailAtStart: filters.lastEmailAtStart,
       lastEmailAtEnd: filters.lastEmailAtEnd,
+      createdAtStart: filters.createdDateStart,
+      createdAtEnd: filters.createdDateEnd,
       dynamicFieldFilters: toDynamicFieldQueryFilters(dynamicFieldEntries),
       // Sidebar label view (selectedLabel) takes precedence over the More-Filters label pick.
       conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
@@ -744,10 +767,17 @@ const SupportScreen = (): ReactElement => {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [stagesOpen, setStagesOpen] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [autoLabelWizardOpen, setAutoLabelWizardOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Radix replays outside-dismissal on `click` with the original pointerdown target, which is
+  // already detached when a submenu button unmounts itself (AI Tags category drill-down), so the
+  // `closest('[data-filter-submenu]')` guard below misses it. Remember the exact node the
+  // pointerdown started on — matching on identity means a pointerdown that never leads to a
+  // dismissal (touch scroll, Escape) can't latch and swallow a later, genuine outside click.
+  const submenuPointerDownTargetRef = useRef<EventTarget | null>(null);
 
   useEffect(() => {
     if (!moreFiltersOpen) {
@@ -768,52 +798,107 @@ const SupportScreen = (): ReactElement => {
       enabled: filterOptionsEnabled && !!selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID,
     },
   );
-  const availableAiCategories = useMemo(() => {
-    const fromMappings = [
-      ...new Set(
-        (classificationMappings ?? []).map(m => m.category).filter((c): c is string => Boolean(c)),
-      ),
-    ];
-    if (fromMappings.length === 0) return [];
-    if (!fromMappings.includes('Other')) {
-      fromMappings.push('Other');
-    }
-    return fromMappings;
-  }, [classificationMappings]);
+  // Categories the AI actually assigned to tickets. The AI emits free-form values, so the
+  // configured mappings only cover the subset that has an assignment rule — without this the
+  // filter hides every unmapped category that is visibly labelled on the list.
+  const [ticketAiCategories, setTicketAiCategories] = useState<string[]>([]);
+  const aiCategoriesChannelId =
+    filterOptionsEnabled && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null;
 
-  // deskBoardId (channel preference first) rather than the row-derived
-  // channelBoardId, so stage options load on first visit before any ticket row.
-  const [boardStages, boardStagesDetails] = useCachedQuery(
-    queries.stagesByBoard({ boardId: deskBoardId ?? '' }),
-    {
-      enabled: !!deskBoardId,
-    },
-  );
+  useEffect(() => {
+    if (!aiCategoriesChannelId) {
+      setTicketAiCategories([]);
+      return;
+    }
+    let cancelled = false;
+    classificationApi
+      .getAiCategories(aiCategoriesChannelId)
+      .then(categories => {
+        if (!cancelled) setTicketAiCategories(categories);
+      })
+      .catch(() => {
+        if (!cancelled) setTicketAiCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [aiCategoriesChannelId]);
+
+  const availableAiCategories = useMemo(() => {
+    const merged = [
+      ...new Set([
+        ...(classificationMappings ?? [])
+          .map(m => m.category)
+          .filter((c): c is string => Boolean(c)),
+        ...ticketAiCategories,
+      ]),
+    ];
+    if (merged.length === 0) return [];
+    if (!merged.includes('Other')) {
+      merged.push('Other');
+    }
+    return merged;
+  }, [classificationMappings, ticketAiCategories]);
+
   const availableStages = useMemo(
     () =>
-      boardStages?.map(s => ({
+      channelBoardDetail?.stages.map(s => ({
         name: s.name,
         status: s.defaultTicketStatusV2,
       })) ?? [],
-    [boardStages],
+    [channelBoardDetail?.stages],
   );
 
   const hasAssigneeFilter = !!(filters.assignee && filters.assignee.length > 0);
   const hasPriorityFilter = !!(filters.priority && filters.priority.length > 0);
   const hasStagesFilter = !!(filters.stages && filters.stages.length > 0);
-  const hasMoreFiltersActive = !!(
-    filters.assigned ||
-    filters.hasAiDraft === true ||
-    (filters.aiCategory && filters.aiCategory.length > 0) ||
-    (filters.generatedTags && filters.generatedTags.length > 0) ||
-    (filters.userGroups && filters.userGroups.length > 0) ||
-    filters.lastEmailAtStart !== undefined ||
-    filters.lastEmailAtEnd !== undefined ||
-    (filters.dynamicFields && Object.keys(filters.dynamicFields).length > 0) ||
-    (!selectedLabel && !!filters.conversationLabelId)
-  );
+  const moreFiltersActiveCount =
+    (filters.assigned ? 1 : 0) +
+    (filters.hasAiDraft === true ? 1 : 0) +
+    (filters.aiCategory && filters.aiCategory.length > 0 ? 1 : 0) +
+    (filters.generatedTags && filters.generatedTags.length > 0 ? 1 : 0) +
+    (filters.userGroups && filters.userGroups.length > 0 ? 1 : 0) +
+    (filters.createdBy && filters.createdBy.length > 0 ? 1 : 0) +
+    (filters.lastEmailAtStart !== undefined || filters.lastEmailAtEnd !== undefined ? 1 : 0) +
+    (filters.createdDateStart !== undefined || filters.createdDateEnd !== undefined ? 1 : 0) +
+    (filters.dynamicFields ? Object.keys(filters.dynamicFields).length : 0) +
+    (!selectedLabel && filters.conversationLabelId ? 1 : 0);
+  const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+
+  const {
+    rowRef: filterRowRef,
+    filterTwinRef,
+    staticLeftRef: filterStaticLeftRef,
+    actionsRestRef,
+    columnsWideTwinRef,
+    columnsNarrowTwinRef,
+    isColumnsLabelled,
+    collapsedFilterIds,
+    hasCollapsedFilters,
+    isFilterVisibleOnBar,
+  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' });
+
+  // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
+  // still announces itself instead of silently disappearing.
+  const collapsedActiveFilterCount = useMemo(() => {
+    const activeById: Record<CollapsibleFilterId, boolean> = {
+      assignee: hasAssigneeFilter,
+      priority: hasPriorityFilter,
+      stages: hasStagesFilter,
+    };
+    const foldedActive = collapsedFilterIds.filter(id => activeById[id]).length;
+    return foldedActive + moreFiltersActiveCount;
+  }, [
+    collapsedFilterIds,
+    hasAssigneeFilter,
+    hasPriorityFilter,
+    hasStagesFilter,
+    moreFiltersActiveCount,
+  ]);
 
   const handleFilterChange = useCallback(
     (key: keyof TicketFilters, value: unknown): void => {
@@ -858,6 +943,29 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
+  const handleCreatedDateRangeChange = useCallback(
+    (range: DateRangeValue): void => {
+      const newFilters = {
+        ...filters,
+        createdDateStart: range.startDate.getTime(),
+        createdDateEnd: range.endDate.getTime(),
+      };
+      Object.keys(newFilters).forEach((filterKey: string) => {
+        const k = filterKey as keyof TicketFilters;
+        const filterValue = newFilters[k];
+        if (
+          filterValue === undefined ||
+          filterValue === null ||
+          (Array.isArray(filterValue) && filterValue.length === 0)
+        ) {
+          delete newFilters[k];
+        }
+      });
+      setFilters(newFilters);
+    },
+    [filters, setFilters],
+  );
+
   const handleMenuItemClick = useCallback((category: string): void => {
     setActiveSubmenu(prev => (prev === category ? null : category));
   }, []);
@@ -882,16 +990,24 @@ const SupportScreen = (): ReactElement => {
     [filters, setFilters],
   );
 
-  // Priority and Stages/Status are their own top-level popover buttons; the More-Filters
-  // menu carries the rest. The "Label" filter is hidden while a sidebar label view is
-  // active (`selectedLabel`): the whole list is already scoped to that label, so a second
-  // label picker is redundant.
+  // Assignee, Priority and Stages/Status are top-level popover buttons while the row has
+  // room for them, and fold in here (highest-priority first) once it doesn't — see
+  // `collapsedFilterIds`. The rest of the filters always live in this menu. The "Label"
+  // filter is hidden while a sidebar label view is active (`selectedLabel`): the whole list
+  // is already scoped to that label, so a second label picker is redundant.
   const filterMenuItems = useMemo(() => {
     const items = [
+      ...collapsedFilterIds.map(id => ({
+        id: id as string,
+        label: COLLAPSIBLE_FILTER_META[id].label,
+        icon: COLLAPSIBLE_FILTER_META[id].icon,
+      })),
       { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
       { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
-      { id: 'date', label: 'Date', icon: CalendarDays },
+      { id: 'createdBy', label: 'Created by', icon: User },
+      { id: 'date', label: 'Last updated', icon: CalendarDays },
+      { id: 'createdDate', label: 'Created at', icon: CalendarDays },
       ...deskDynamicFields.map(field => ({
         id: `dynamic-${field.id}`,
         label: field.fieldName,
@@ -903,7 +1019,7 @@ const SupportScreen = (): ReactElement => {
       items.push({ id: 'conversationLabel', label: 'Label', icon: TagIcon });
     }
     return items;
-  }, [deskDynamicFields, selectedLabel]);
+  }, [collapsedFilterIds, deskDynamicFields, selectedLabel]);
 
   const renderSubmenu = useCallback((): ReactElement | null => {
     if (!activeSubmenu) return null;
@@ -923,6 +1039,32 @@ const SupportScreen = (): ReactElement => {
       );
     }
     switch (activeSubmenu) {
+      case 'assignee':
+        return (
+          <UserSubmenu
+            key='assignee-submenu'
+            selectedUsers={filters.assignee || []}
+            onChange={(users: string[]) => handleFilterChange('assignee', users)}
+            label='Assignee'
+          />
+        );
+      case 'priority':
+        return (
+          <PrioritySubmenu
+            selectedPriorities={filters.priority || []}
+            onChange={(priorities: TicketPriority[]) => handleFilterChange('priority', priorities)}
+            availablePriorities={availablePriorities}
+          />
+        );
+      case 'stages':
+        return (
+          <StagesSubmenu
+            selectedStages={filters.stages || []}
+            onChange={(stages: string[]) => handleFilterChange('stages', stages)}
+            availableStages={availableStages}
+            isLoading={!!deskBoardId && channelBoardDetailDetails.type !== 'complete'}
+          />
+        );
       case 'aiCategory':
         return (
           <AICategorySubmenu
@@ -945,6 +1087,16 @@ const SupportScreen = (): ReactElement => {
             selectedGroups={filters.userGroups || []}
             onChange={(groups: string[]) => handleFilterChange('userGroups', groups)}
             onClose={() => setActiveSubmenu(null)}
+          />
+        );
+      case 'createdBy':
+        return (
+          <UserSubmenu
+            key='created-by-submenu'
+            selectedUsers={filters.createdBy || []}
+            onChange={(users: string[]) => handleFilterChange('createdBy', users)}
+            label='Created by'
+            channelId={selectedChannelId ?? undefined}
           />
         );
       case 'date': {
@@ -987,9 +1139,59 @@ const SupportScreen = (): ReactElement => {
               })}
             </div>
             <CalendarView
+              key='last-email-calendar'
               range={currentRange}
               onSelect={(range: DateRangeValue) => {
                 handleDateRangeChange(range);
+              }}
+            />
+          </div>
+        );
+      }
+      case 'createdDate': {
+        const currentCreatedRange: DateRangeValue | null =
+          filters.createdDateStart !== undefined && filters.createdDateEnd !== undefined
+            ? {
+                startDate: new Date(filters.createdDateStart),
+                endDate: new Date(filters.createdDateEnd),
+              }
+            : null;
+        return (
+          <div className='w-[252px] bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
+            <div className='p-1 border-b border-border'>
+              {PRESETS.map(preset => {
+                const v = preset.getValue();
+                const isActive =
+                  filters.createdDateStart !== undefined &&
+                  filters.createdDateEnd !== undefined &&
+                  Math.abs(filters.createdDateStart - v.startDate.getTime()) < 1000 &&
+                  Math.abs(filters.createdDateEnd - v.endDate.getTime()) < 1000;
+                return (
+                  <button
+                    key={preset.label}
+                    type='button'
+                    data-track-category='Support'
+                    data-track-name='SelectCreatedAtPreset'
+                    onClick={() => {
+                      handleCreatedDateRangeChange(v);
+                    }}
+                    className={cn(
+                      'flex w-full items-center rounded-sm px-2 py-1.5 text-sm select-none',
+                      isActive
+                        ? 'bg-accent text-foreground font-medium'
+                        : 'hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            <CalendarView
+              key='created-at-calendar'
+              range={currentCreatedRange}
+              onSelect={(range: DateRangeValue) => {
+                handleCreatedDateRangeChange(range);
               }}
             />
           </div>
@@ -1011,16 +1213,33 @@ const SupportScreen = (): ReactElement => {
     filters,
     handleFilterChange,
     handleDateRangeChange,
+    handleCreatedDateRangeChange,
     handleDynamicFieldChange,
     availableAiCategories,
+    availablePriorities,
+    availableStages,
+    deskBoardId,
+    channelBoardDetailDetails.type,
     deskDynamicFields,
+    selectedChannelId,
   ]);
+
+  useEffect(() => {
+    if (
+      activeSubmenu &&
+      COLLAPSIBLE_FILTER_IDS.includes(activeSubmenu as CollapsibleFilterId) &&
+      !collapsedFilterIds.includes(activeSubmenu as CollapsibleFilterId)
+    ) {
+      setActiveSubmenu(null);
+    }
+  }, [activeSubmenu, collapsedFilterIds]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1291,6 +1510,10 @@ const SupportScreen = (): ReactElement => {
   }, [searchParams]);
 
   useEffect(() => {
+    setIsReportOpen(searchParams.get('report') === 'open');
+  }, [searchParams]);
+
+  useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
   }, [viewMode]);
 
@@ -1298,8 +1521,9 @@ const SupportScreen = (): ReactElement => {
     localStorage.setItem('support-sidebar-open', isSidebarOpen.toString());
   }, [isSidebarOpen]);
 
-  // Fetch EMAIL channels using hook (from state machine, already loaded)
-  const emailChannels = useEmailChannels(!ticketId);
+  // Derive EMAIL channels from already-loaded state (no extra Zero query).
+  // channelStats are fetched inside the hook and merged onto each channel.
+  const emailChannels = useEmailChannels();
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
@@ -1419,6 +1643,10 @@ const SupportScreen = (): ReactElement => {
     priority?: string | null | undefined;
     assignedTo?: string | null | undefined;
     userGroupId?: string | null | undefined;
+    // The bulk bar routes stage changes by board type and creates labels under the
+    // ticket's project, so both ids are captured with the selection.
+    boardId?: string | null | undefined;
+    projectId?: string | null | undefined;
   };
   const [selectedTickets, setSelectedTickets] = useState<Map<string, SelectedTicket>>(
     () => new Map(),
@@ -1444,6 +1672,8 @@ const SupportScreen = (): ReactElement => {
       priority?: string | null | undefined;
       assignedTo?: string | null | undefined;
       userGroupId?: string | null | undefined;
+      boardId?: string | null | undefined;
+      projectId?: string | null | undefined;
     }): void => {
       setSelectedTickets(prev => {
         const next = new Map(prev);
@@ -1463,6 +1693,8 @@ const SupportScreen = (): ReactElement => {
             priority: row.priority,
             assignedTo: row.assignedTo,
             userGroupId: row.userGroupId,
+            boardId: row.boardId,
+            projectId: row.projectId,
           });
         }
         return next;
@@ -1502,6 +1734,8 @@ const SupportScreen = (): ReactElement => {
         priority?: string | null | undefined;
         assignedTo?: string | null | undefined;
         userGroupId?: string | null | undefined;
+        boardId?: string | null | undefined;
+        projectId?: string | null | undefined;
       }>,
       select: boolean,
     ): void => {
@@ -1522,6 +1756,8 @@ const SupportScreen = (): ReactElement => {
               priority: row.priority,
               assignedTo: row.assignedTo,
               userGroupId: row.userGroupId,
+              boardId: row.boardId,
+              projectId: row.projectId,
             });
           } else {
             next.delete(row.id);
@@ -1556,11 +1792,88 @@ const SupportScreen = (): ReactElement => {
             priority: ticket.priority,
             assignedTo: ticket.assignedTo,
             userGroupId: ticket.userGroupId,
+            boardId: ticket.boardId,
+            projectId: ticket.projectId,
           },
         ]),
       ),
     );
   }, []);
+
+  // --- Bulk field edits over the current selection ---------------------------
+  // The list view has no grid of its own, so the shared bulk bar is driven from
+  // here; the table view renders the same bar from inside TicketTable.
+  const { applyUpdates: applyBulkUpdates, applyTags: applyBulkTags } = useBulkTicketActions();
+
+  const selectedTicketList = useMemo(() => Array.from(selectedTickets.values()), [selectedTickets]);
+
+  // Active users in the selection's channel — see useBulkAssignableUsers.
+  const bulkChannelId = useMemo(() => sharedChannelId(selectedTicketList), [selectedTicketList]);
+  const deskUsers = useBulkAssignableUsers(bulkChannelId);
+
+  // Every desk ticket lives on the channel's board, so the label catalog can be
+  // read off whichever page of tickets is currently loaded.
+  const deskProjectId = kanbanTickets[0]?.projectId;
+  const [deskProjectTags] = useCachedQuery(
+    queries.projectTagsByProjectId({ projectId: deskProjectId ?? '' }),
+    { enabled: !!deskProjectId },
+  );
+  const deskAvailableTags = useMemo(
+    () => Array.from(new Set((deskProjectTags ?? []).map(tag => tag.name))).sort(),
+    [deskProjectTags],
+  );
+  // No Stage control on boards that gate moves client-side (evaluateLinearStageGate) —
+  // a bulk bar can't run per-ticket forms/approvals. NON_LINEAR is server-enforced.
+  const deskBoardGatesStageMoves = useMemo(() => {
+    if (channelBoardDetail?.boardType === BoardType.NON_LINEAR) return false;
+    return (channelBoardDetail?.stages ?? []).some(
+      stage =>
+        (stage.approvers?.length ?? 0) > 0 ||
+        (stage.formContextMappings ?? []).some(
+          mapping => mapping.contextType === FormContextType.STAGE,
+        ),
+    );
+  }, [channelBoardDetail?.boardType, channelBoardDetail?.stages]);
+
+  const deskBulkStages = useMemo(
+    () =>
+      deskBoardGatesStageMoves
+        ? []
+        : availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+    [availableStages, deskBoardGatesStageMoves],
+  );
+
+  // A stage's default status must ride along in the same write — see BulkTicketUpdates.stage.
+  const deskStageStatusByName = useMemo(
+    () => new Map(availableStages.map(stage => [stage.name, stage.status])),
+    [availableStages],
+  );
+
+  const handleBulkFieldUpdate = useCallback(
+    (updates: BulkTicketUpdates): void => {
+      if (selectedTicketList.length === 0) return;
+      applyBulkUpdates(selectedTicketList, updates);
+      clearTicketSelection();
+    },
+    [applyBulkUpdates, selectedTicketList, clearTicketSelection],
+  );
+
+  const handleBulkStageChange = useCallback(
+    (name: string): void => {
+      const statusV2 = deskStageStatusByName.get(name);
+      handleBulkFieldUpdate({ stage: { name, ...(statusV2 ? { statusV2 } : {}) } });
+    },
+    [deskStageStatusByName, handleBulkFieldUpdate],
+  );
+
+  const handleBulkTagsChange = useCallback(
+    (tags: string[]): void => {
+      if (selectedTicketList.length === 0 || tags.length === 0) return;
+      applyBulkTags(selectedTicketList, tags);
+      clearTicketSelection();
+    },
+    [applyBulkTags, selectedTicketList, clearTicketSelection],
+  );
 
   const handleMergeSelectedTickets = useCallback(
     async (parentTicketId: string, ticketIds: string[]): Promise<void> => {
@@ -1962,6 +2275,15 @@ const SupportScreen = (): ReactElement => {
     [setSelectedChannelId, filters.conversationLabelId, handleFilterChange],
   );
 
+  const handleDeletedLabel = useCallback(
+    (labelId: string): void => {
+      if (selectedLabel?.id !== labelId) return;
+      setSelectedLabel(null);
+      setViewMode('list');
+    },
+    [selectedLabel?.id],
+  );
+
   const openMailbox = useCallback(
     (channelId: string, folder: MailboxFolder, label: string): void => {
       setSelectedChannelId(channelId);
@@ -2112,8 +2434,10 @@ const SupportScreen = (): ReactElement => {
             />
             <DeskLabelsSidebar
               channelId={c.id}
+              isMember={isJoined}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
+              onDeletedLabel={handleDeletedLabel}
             />
           </div>
         )}
@@ -2389,7 +2713,11 @@ const SupportScreen = (): ReactElement => {
                               </span>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
-                              <DropdownMenuItem onClick={() => setShowRefetchDialog(true)}>
+                              <DropdownMenuItem
+                                onClick={() => setShowRefetchDialog(true)}
+                                data-track-category='Support'
+                                data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
+                              >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
                                   <span className='truncate'>Fetch latest emails</span>
@@ -2410,6 +2738,8 @@ const SupportScreen = (): ReactElement => {
                                 onClick={() => {
                                   if (!isDlMemberSyncing) setShowDlMemberSyncDialog(true);
                                 }}
+                                data-track-category='Support'
+                                data-track-name='OPEN_DL_MEMBER_SYNC_DIALOG'
                                 disabled={isDlMemberSyncing}
                               >
                                 <UserPlus size={14} className='mr-2 shrink-0' />
@@ -2462,6 +2792,25 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
+                      {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
+                        <Tooltip content='Ask AI' side='bottom'>
+                          <button
+                            onClick={() => {
+                              if (!selectedChannelId) return;
+                              trackAskAIOpened(
+                                emailChannels?.find(c => c.id === selectedChannelId)?.scopeType,
+                              );
+                              xyneAIActor.send({ type: 'OPEN', channelId: selectedChannelId });
+                            }}
+                            className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
+                            data-track-category='Support'
+                            data-track-name='OPEN_XYNE_AI'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <XyneAIStar />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         channelPreference?.metricsEnabled && (
@@ -2488,6 +2837,35 @@ const SupportScreen = (): ReactElement => {
                               data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                             >
                               <BarChart3 size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
+                      {isSelectedChannelJoined &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
+                        channelPreference?.deskReportEnabled && (
+                          <Tooltip content='Desk report' side='bottom'>
+                            <button
+                              onClick={() => {
+                                const base = selectedChannelId
+                                  ? `${supportBase}/${selectedChannelId}`
+                                  : supportBase;
+                                if (isReportOpen) {
+                                  void navigate(base, { replace: true });
+                                } else {
+                                  void navigate(`${base}?report=open`);
+                                }
+                              }}
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isReportOpen
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='OpenDeskReport'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <FileText size={16} />
                             </button>
                           </Tooltip>
                         )}
@@ -2518,8 +2896,80 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                   </div>
-                  <div className='flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'>
-                    <div className='flex items-center gap-2 min-w-0 flex-1'>
+                  <div
+                    ref={filterRowRef}
+                    className='relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'
+                  >
+                    {isSelectedChannelJoined && (
+                      <div
+                        aria-hidden
+                        className='pointer-events-none invisible absolute left-0 top-0 -z-10 flex items-center gap-2'
+                      >
+                        <div ref={filterTwinRef} className='flex items-center gap-2'>
+                          <DeskFilterTrigger id='assignee' active={hasAssigneeFilter} />
+                          <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
+                          <DeskFilterTrigger id='stages' active={hasStagesFilter} />
+                        </div>
+                        {viewMode === 'table' && (
+                          <>
+                            <div ref={columnsWideTwinRef} className='flex items-center'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <Columns3 className='w-3.5 h-3.5' />
+                                  <span className='font-medium'>Columns</span>
+                                </div>
+                              </Button>
+                            </div>
+                            <div ref={columnsNarrowTwinRef} className='flex items-center'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='rounded-[10px] border-border text-muted-foreground'
+                              >
+                                <div className='flex items-center gap-1.5'>
+                                  <Columns3 className='w-3.5 h-3.5' />
+                                </div>
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                        <div ref={filterStaticLeftRef} className='flex items-center gap-2'>
+                          {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                            <span className='p-1.5'>
+                              <Search size={16} />
+                            </span>
+                          )}
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            className='rounded-[10px] border-border text-muted-foreground'
+                          >
+                            <div className='flex items-center gap-1.5'>
+                              <ListFilter className='w-3 h-3 font-medium' />
+                              <span className='font-medium'>More Filters</span>
+                              <span className='w-1.5 h-1.5 rounded-full' />
+                            </div>
+                          </Button>
+                          {hasAnyFilterActive && (
+                            <Button
+                              variant='outline'
+                              size='sm'
+                              className='rounded-[10px] border-border text-muted-foreground'
+                            >
+                              <div className='flex items-center gap-1.5'>
+                                <X className='w-3 h-3' />
+                                <span className='font-medium'>Clear</span>
+                              </div>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className='flex items-center gap-2 min-w-0 flex-1 overflow-hidden'>
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Search emails' side='bottom'>
                           <button
@@ -2535,121 +2985,87 @@ const SupportScreen = (): ReactElement => {
                       )}
                       {isSelectedChannelJoined && (
                         <>
-                          <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('assignee') && (
+                            <Popover.Root open={assigneeOpen} onOpenChange={setAssigneeOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='assignee'
+                                  active={hasAssigneeFilter}
+                                  open={assigneeOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <User className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Assignee</span>
-                                  {hasAssigneeFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      assigneeOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
-                            >
-                              <UserSubmenu
-                                key='assignee-popover-submenu'
-                                selectedUsers={filters.assignee || []}
-                                onChange={(users: string[]) =>
-                                  handleFilterChange('assignee', users)
-                                }
-                                label='Assignee'
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <UserSubmenu
+                                  key='assignee-popover-submenu'
+                                  selectedUsers={filters.assignee || []}
+                                  onChange={(users: string[]) =>
+                                    handleFilterChange('assignee', users)
+                                  }
+                                  label='Assignee'
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
-                          <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('priority') && (
+                            <Popover.Root open={priorityOpen} onOpenChange={setPriorityOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='priority'
+                                  active={hasPriorityFilter}
+                                  open={priorityOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60]'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <BarChart4Icon className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Priority</span>
-                                  {hasPriorityFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      priorityOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60]'
-                            >
-                              <PrioritySubmenu
-                                selectedPriorities={filters.priority || []}
-                                onChange={(priorities: TicketPriority[]) =>
-                                  handleFilterChange('priority', priorities)
-                                }
-                                availablePriorities={availablePriorities}
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <PrioritySubmenu
+                                  selectedPriorities={filters.priority || []}
+                                  onChange={(priorities: TicketPriority[]) =>
+                                    handleFilterChange('priority', priorities)
+                                  }
+                                  availablePriorities={availablePriorities}
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
-                          <Popover.Root open={stagesOpen} onOpenChange={setStagesOpen}>
-                            <Popover.Trigger asChild>
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                          {isFilterVisibleOnBar('stages') && (
+                            <Popover.Root open={stagesOpen} onOpenChange={setStagesOpen}>
+                              <Popover.Trigger asChild>
+                                <DeskFilterTrigger
+                                  id='stages'
+                                  active={hasStagesFilter}
+                                  open={stagesOpen}
+                                />
+                              </Popover.Trigger>
+                              <Popover.Content
+                                side='bottom'
+                                align='start'
+                                sideOffset={6}
+                                className='z-[60]'
                               >
-                                <div className='flex items-center gap-1.5'>
-                                  <Circle className='w-3 h-3 p-px font-medium' />
-                                  <span className='font-medium'>Status</span>
-                                  {hasStagesFilter && (
-                                    <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
-                                  <ChevronDown
-                                    className={cn(
-                                      'w-3 h-3 ml-1 transition-transform',
-                                      stagesOpen && 'rotate-180',
-                                    )}
-                                  />
-                                </div>
-                              </Button>
-                            </Popover.Trigger>
-                            <Popover.Content
-                              side='bottom'
-                              align='start'
-                              sideOffset={6}
-                              className='z-[60]'
-                            >
-                              <StagesSubmenu
-                                selectedStages={filters.stages || []}
-                                onChange={(stages: string[]) =>
-                                  handleFilterChange('stages', stages)
-                                }
-                                availableStages={availableStages}
-                                isLoading={!!deskBoardId && boardStagesDetails.type !== 'complete'}
-                              />
-                            </Popover.Content>
-                          </Popover.Root>
+                                <StagesSubmenu
+                                  selectedStages={filters.stages || []}
+                                  onChange={(stages: string[]) =>
+                                    handleFilterChange('stages', stages)
+                                  }
+                                  availableStages={availableStages}
+                                  isLoading={
+                                    !!deskBoardId && channelBoardDetailDetails.type !== 'complete'
+                                  }
+                                />
+                              </Popover.Content>
+                            </Popover.Root>
+                          )}
 
                           <Popover.Root open={moreFiltersOpen} onOpenChange={setMoreFiltersOpen}>
                             <Popover.Trigger asChild>
@@ -2663,10 +3079,18 @@ const SupportScreen = (): ReactElement => {
                               >
                                 <div className='flex items-center gap-1.5'>
                                   <ListFilter className='w-3 h-3 font-medium' />
-                                  <span className='font-medium'>More Filters</span>
-                                  {hasMoreFiltersActive && (
+                                  <span className='font-medium'>
+                                    {hasCollapsedFilters ? 'Filters' : 'More Filters'}
+                                  </span>
+                                  {hasCollapsedFilters ? (
+                                    collapsedActiveFilterCount > 0 && (
+                                      <span className='ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-semibold leading-none text-white'>
+                                        {collapsedActiveFilterCount}
+                                      </span>
+                                    )
+                                  ) : hasMoreFiltersActive ? (
                                     <span className='w-1.5 h-1.5 rounded-full bg-blue-500' />
-                                  )}
+                                  ) : null}
                                 </div>
                               </Button>
                             </Popover.Trigger>
@@ -2677,6 +3101,11 @@ const SupportScreen = (): ReactElement => {
                               sideOffset={6}
                               className='w-56 bg-background border border-border rounded-lg shadow-lg z-50 max-h-[400px] overflow-y-auto'
                               onInteractOutside={e => {
+                                if (e.target === submenuPointerDownTargetRef.current) {
+                                  submenuPointerDownTargetRef.current = null;
+                                  e.preventDefault();
+                                  return;
+                                }
                                 const target = e.target;
                                 if (
                                   target instanceof Element &&
@@ -2689,6 +3118,19 @@ const SupportScreen = (): ReactElement => {
                               }}
                             >
                               <div className='px-4 py-3 flex flex-col gap-3 border-b border-border'>
+                                <button
+                                  type='button'
+                                  onClick={() => {
+                                    setMoreFiltersOpen(false);
+                                    setAutoLabelWizardOpen(true);
+                                  }}
+                                  className='flex w-full items-center gap-2 rounded-md px-0 py-0.5 text-left text-sm text-foreground hover:text-foreground'
+                                  data-track-category='Support'
+                                  data-track-name='OpenAutoLabelWizard'
+                                >
+                                  <Tag className='size-3.5 text-muted-foreground' />
+                                  <span className='font-medium'>Auto-label…</span>
+                                </button>
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleMyTickets'
@@ -2727,6 +3169,9 @@ const SupportScreen = (): ReactElement => {
                                   const Icon = item.icon;
                                   const isActive = activeSubmenu === item.id;
                                   const isFilterActive =
+                                    (item.id === 'assignee' && hasAssigneeFilter) ||
+                                    (item.id === 'priority' && hasPriorityFilter) ||
+                                    (item.id === 'stages' && hasStagesFilter) ||
                                     (item.id === 'aiCategory' &&
                                       !!(filters.aiCategory && filters.aiCategory.length > 0)) ||
                                     (item.id === 'generatedTags' &&
@@ -2735,6 +3180,14 @@ const SupportScreen = (): ReactElement => {
                                       )) ||
                                     (item.id === 'userGroups' &&
                                       !!(filters.userGroups && filters.userGroups.length > 0)) ||
+                                    (item.id === 'createdBy' &&
+                                      !!(filters.createdBy && filters.createdBy.length > 0)) ||
+                                    (item.id === 'date' &&
+                                      (filters.lastEmailAtStart !== undefined ||
+                                        filters.lastEmailAtEnd !== undefined)) ||
+                                    (item.id === 'createdDate' &&
+                                      (filters.createdDateStart !== undefined ||
+                                        filters.createdDateEnd !== undefined)) ||
                                     ('dynamicFieldId' in item &&
                                       !!filters.dynamicFields?.[item.dynamicFieldId]) ||
                                     (item.id === 'conversationLabel' &&
@@ -2779,6 +3232,9 @@ const SupportScreen = (): ReactElement => {
                               <div
                                 ref={submenuRef}
                                 data-filter-submenu='true'
+                                onPointerDownCapture={e => {
+                                  submenuPointerDownTargetRef.current = e.target;
+                                }}
                                 className='fixed z-[60]'
                                 style={{
                                   left:
@@ -2800,6 +3256,8 @@ const SupportScreen = (): ReactElement => {
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
                               onClick={() => setFilters({})}
+                              data-track-category='Support'
+                              data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
@@ -2811,7 +3269,6 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
-                      {/* Table column picker — built-in columns + the board's custom fields */}
                       {viewMode === 'table' && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
                           <Popover.Trigger asChild>
@@ -2819,10 +3276,14 @@ const SupportScreen = (): ReactElement => {
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
+                              title={isColumnsLabelled ? undefined : 'Columns'}
+                              aria-label='Columns'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                <span className='font-medium'>Columns</span>
+                                {/* Label yields before any filter folds — this is secondary
+                                    chrome, and the icon plus tooltip carries it fine. */}
+                                {isColumnsLabelled && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
                           </Popover.Trigger>
@@ -2904,89 +3365,107 @@ const SupportScreen = (): ReactElement => {
                           </Popover.Content>
                         </Popover.Root>
                       )}
-                      {/* View Toggle */}
-                      <div className='flex items-center border border-border rounded-lg overflow-hidden'>
-                        <button
-                          onClick={() => setViewMode('kanban')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'kanban'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Kanban View'
-                          data-track-category='Support'
-                          data-track-name='SetKanbanView'
-                        >
-                          <LayoutGrid size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('list')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'list'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='List View'
-                          data-track-category='Support'
-                          data-track-name='SetListView'
-                        >
-                          <List size={16} />
-                        </button>
-                        <button
-                          onClick={() => setViewMode('table')}
-                          className={cn(
-                            'p-1.5 transition-colors',
-                            viewMode === 'table'
-                              ? 'bg-muted text-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                          )}
-                          title='Table View'
-                          data-track-category='Support'
-                          data-track-name='SetTableView'
-                        >
-                          <Table2 size={16} />
-                        </button>
-                      </div>
-                      {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
-                      {isSelectedChannelJoined && selectedChannelFull && (
-                        <CloudAgentDock buttonBehavior='floating' />
-                      )}
-                      {isSelectedChannelJoined &&
-                        selectedChannelId &&
-                        !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
-                          <Tooltip content='Compose new email' side='bottom'>
-                            <Button
-                              variant='default'
-                              size='sm'
-                              className='rounded-[10px] bg-primary hover:bg-primary/90 text-white'
-                              onClick={() => openNewCompose(selectedChannelId)}
-                              data-track-category='Support'
-                              data-track-name='OpenComposeEmail'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <Pencil size={14} />
-                              <span>Compose</span>
-                            </Button>
-                          </Tooltip>
+                      <div ref={actionsRestRef} className='flex items-center gap-2'>
+                        {/* View Toggle */}
+                        <div className='flex items-center border border-border rounded-lg overflow-hidden'>
+                          <button
+                            onClick={() => setViewMode('kanban')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'kanban'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Kanban View'
+                            data-track-category='Support'
+                            data-track-name='SetKanbanView'
+                          >
+                            <LayoutGrid size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('list')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'list'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='List View'
+                            data-track-category='Support'
+                            data-track-name='SetListView'
+                          >
+                            <List size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('table')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'table'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Table View'
+                            data-track-category='Support'
+                            data-track-name='SetTableView'
+                          >
+                            <Table2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => setViewMode('calendar')}
+                            className={cn(
+                              'p-1.5 transition-colors',
+                              viewMode === 'calendar'
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+                            )}
+                            title='Calendar View'
+                            data-track-category='Support'
+                            data-track-name='SetCalendarView'
+                          >
+                            <CalendarRange size={16} />
+                          </button>
+                        </div>
+                        {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
+                        {isSelectedChannelJoined && selectedChannelFull && (
+                          <CloudAgentDock buttonBehavior='floating' />
                         )}
-                      {ticketId && (
-                        <Button
-                          size='sm'
-                          variant='ghost'
-                          onClick={() => {
-                            const back = selectedChannelId
-                              ? `${supportBase}/${selectedChannelId}`
-                              : supportBase;
-                            void navigate(back);
-                          }}
-                          data-track-category='Support'
-                          data-track-name='CloseTicketPanel'
-                        >
-                          <PanelRight size={16} />
-                        </Button>
-                      )}
+                        {isSelectedChannelJoined &&
+                          selectedChannelId &&
+                          !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
+                            <Tooltip content='Compose new email' side='bottom'>
+                              <Button
+                                variant='default'
+                                size='sm'
+                                className='rounded-[10px] bg-primary hover:bg-primary/90 text-white'
+                                onClick={() => openNewCompose(selectedChannelId)}
+                                data-track-category='Support'
+                                data-track-name='OpenComposeEmail'
+                                data-track-metadata={JSON.stringify({
+                                  channelId: selectedChannelId,
+                                })}
+                              >
+                                <Pencil size={14} />
+                                <span>Compose</span>
+                              </Button>
+                            </Tooltip>
+                          )}
+                        {ticketId && (
+                          <Button
+                            size='sm'
+                            variant='ghost'
+                            onClick={() => {
+                              const back = selectedChannelId
+                                ? `${supportBase}/${selectedChannelId}`
+                                : supportBase;
+                              void navigate(back);
+                            }}
+                            data-track-category='Support'
+                            data-track-name='CloseTicketPanel'
+                          >
+                            <PanelRight size={16} />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3085,6 +3564,24 @@ const SupportScreen = (): ReactElement => {
                   availableDesks={metricsSelectableDesks}
                   customFieldDefinitions={deskDynamicFields}
                   availableStages={availableStages}
+                  onTicketClick={ticket => {
+                    void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                      state: { ticketId: ticket.ticketId },
+                    });
+                  }}
+                />
+              )}
+              {isReportOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+                <DeskReportPanel
+                  open
+                  onClose={() => {
+                    const base = selectedChannelId
+                      ? `${supportBase}/${selectedChannelId}`
+                      : supportBase;
+                    void navigate(base, { replace: true });
+                  }}
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -3172,6 +3669,21 @@ const SupportScreen = (): ReactElement => {
                         onTicketsLoaded={setKanbanTickets}
                         {...(ticketId !== undefined && { activeTicketId: ticketId })}
                       />
+                    ) : viewMode === 'calendar' && selectedChannelId ? (
+                      <DeskCalendarView
+                        channelId={selectedChannelId}
+                        isMember={isSelectedChannelJoined}
+                        ticketFilter={ticketFilter}
+                        onTicketClick={ticket => {
+                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                            state: {
+                              conversationId: ticket.conversationId,
+                              ticketId: ticket.id,
+                            },
+                          });
+                        }}
+                        onTicketsLoaded={setKanbanTickets}
+                      />
                     ) : viewMode === 'table' ? (
                       <SupportTicketTable
                         channelId={selectedChannelId}
@@ -3222,6 +3734,29 @@ const SupportScreen = (): ReactElement => {
                   </>
                 )}
               </div>
+              {/* Bulk field actions for the list view — the table view already gets
+                  the same bar from TicketTable, driven by its own grid selection. */}
+              {viewMode === 'list' && selectedTicketIds.size > 0 && (
+                <BulkActionToolbar
+                  selectedCount={selectedTicketIds.size}
+                  users={deskUsers}
+                  stages={deskBulkStages}
+                  onAssigneeChange={value =>
+                    handleBulkFieldUpdate(assigneeOptionToTicketUpdate(value))
+                  }
+                  onStatusChange={value => handleBulkFieldUpdate({ statusV2: value })}
+                  onPriorityChange={value => {
+                    if (value) handleBulkFieldUpdate({ priority: value });
+                  }}
+                  onStageChange={handleBulkStageChange}
+                  onDueDateChange={date => {
+                    if (date) handleBulkFieldUpdate({ eta: dueDateToEta(date) });
+                  }}
+                  onClearSelection={clearTicketSelection}
+                  availableTags={deskAvailableTags}
+                  onTagsChange={handleBulkTagsChange}
+                />
+              )}
             </div>
           </Panel>
         )}
@@ -3353,6 +3888,15 @@ const SupportScreen = (): ReactElement => {
         onMerge={handleMergeSelectedTickets}
       />
 
+      {selectedChannelId && (
+        <AutoLabelWizard
+          open={autoLabelWizardOpen}
+          onOpenChange={setAutoLabelWizardOpen}
+          channelId={selectedChannelId}
+          isMember={isSelectedChannelJoined}
+        />
+      )}
+
       {/* Multi-compose scrollable strip — fixed at the bottom, spans full width.
           Windows are laid out right-to-left (flex-row-reverse) so the newest
           window always sits at the right edge. When there are more windows than
@@ -3449,6 +3993,7 @@ const TicketMetaRow = ({
 type SupportTicketDetailProps = {
   ticketFilter: {
     assignedTo: string[] | undefined;
+    createdBy: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
@@ -3457,6 +4002,8 @@ type SupportTicketDetailProps = {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    createdAtStart: number | undefined;
+    createdAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
   };
   isMember: boolean;
@@ -3571,7 +4118,7 @@ export const SupportTicketDetail = ({
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
-  const ticketEmailDrafts = useEmailDrafts(detailConversationId);
+  const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
   // then include any merged-ticket conversations once the detail query resolves.
@@ -3628,7 +4175,11 @@ export const SupportTicketDetail = ({
   );
 
   const [allEmails] = useCachedQuery(
-    queries.getEmailsForConversations({ conversationIds: allConversationIds }),
+    queries.getEmailsForConversationsV2({
+      conversationIds: allConversationIds,
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: allConversationIds.length > 0 },
   );
 
@@ -3636,11 +4187,10 @@ export const SupportTicketDetail = ({
   const emailCollapseState = useEmailCollapseState(emails);
 
   const initiator = useMemo(() => {
-    if (emails.length === 0) return null;
-    const first = [...emails].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))[0];
+    const first = emailCollapseState.sortedEmails[0];
     if (!first?.from) return null;
     return parseFromField(first.from);
-  }, [emails]);
+  }, [emailCollapseState.sortedEmails]);
 
   // When arriving via a mail deep-link (`?mail=<id>`), un-collapse the target
   // email so it's visible, then scroll to it with a brief yellow flash.
@@ -3671,21 +4221,9 @@ export const SupportTicketDetail = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetMailId, emails]);
 
-  const channelId = ticket?.channelId || '';
+  const channelId = ticket?.channelId || routeChannelId;
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
-  const [threadConversation] = useCachedQuery(
-    queries.threadConversationV2({
-      conversationId: conversationId || '',
-      channelId: channelId || undefined,
-      isMember,
-    }),
-    { enabled: !!conversationId && !!channelId },
-  );
-  const messages = useMemo(
-    () => [...(threadConversation?.messages ?? [])],
-    [threadConversation?.messages],
-  );
   // DB ticket id (not the xyneId) for per-user mailbox actions; router state carries it
   // on list navigation, else it comes from the fetched ticket row.
   const mailboxTicketId = ticket?.id ?? ticketId ?? null;
@@ -3749,7 +4287,6 @@ export const SupportTicketDetail = ({
 
   const channelIntegrationInfo = useChannelIntegrationInfo(channelId || null);
   const deskEmail = channelIntegrationInfo.email ?? '';
-  const { outboundConfigured } = channelIntegrationInfo;
 
   useAskAiTicketContext({
     channelId: channelId || null,
@@ -4067,33 +4604,24 @@ export const SupportTicketDetail = ({
   );
 
   const targetMessageId = searchParams.get('messageId');
-  useEffect(() => {
-    if (!targetMessageId || !conversationId) return;
-    if (!messages || messages.length === 0) return;
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const target = document.getElementById(
-          `thread-message-${conversationId}-${targetMessageId}`,
-        );
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.classList.add('bg-yellow-50');
-          setTimeout(() => target.classList.remove('bg-yellow-50'), 2500);
-        }
-      });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [targetMessageId, conversationId, messages]);
 
   // Get channel info and user status
   const channel = useChannel(channelId);
   const [mailboxRows] = useCachedQuery(
-    queries.myTicketMailbox({ ticketId: mailboxTicketId ?? '' }),
+    queries.myTicketMailboxV2({
+      ticketId: mailboxTicketId ?? '',
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: channel?.type === ChannelType.EMAIL && !!mailboxTicketId },
   );
   const mailboxOverlay = mailboxRows?.[0];
   const [conversationLabelMappings] = useCachedQuery(
-    queries.conversationLabelMappingsByConversationId({ conversationId: conversationId || '' }),
+    queries.conversationLabelMappingsByConversationIdV2({
+      conversationId: conversationId || '',
+      channelId: routeChannelId,
+      isMember,
+    }),
     { enabled: !!conversationId },
   );
   // Subscribe to channel for real-time updates
@@ -4176,6 +4704,7 @@ export const SupportTicketDetail = ({
                       <ConversationLabels
                         conversationId={conversationId}
                         channelId={channelId}
+                        isMember={isMember}
                         slot='picker'
                         appliedMappings={conversationLabelMappings ?? []}
                       />
@@ -4430,6 +4959,7 @@ export const SupportTicketDetail = ({
                         <ConversationLabels
                           conversationId={conversationId}
                           channelId={channelId}
+                          isMember={isMember}
                           slot='chips'
                           appliedMappings={conversationLabelMappings ?? []}
                         />
@@ -4686,7 +5216,10 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
-                    recordOnly={channel.type === ChannelType.APP && !outboundConfigured}
+                    recordOnly={
+                      channel.type === ChannelType.APP &&
+                      channelPreference?.appWebhookDeliveryEnabled === false
+                    }
                   />
                 ) : null
               ) : channel?.type === ChannelType.EMAIL ? (
@@ -4839,11 +5372,15 @@ export const SupportTicketDetail = ({
                         <Button
                           variant='secondary'
                           onClick={() => setShowArchiveConfirmDialog(false)}
+                          data-track-category='Support'
+                          data-track-name='CANCEL_ARCHIVE_TICKET'
                         >
                           Cancel
                         </Button>
                         <Button
                           onClick={() => handleArchiveTicket()}
+                          data-track-category='Support'
+                          data-track-name='CONFIRM_ARCHIVE_TICKET'
                           disabled={!ticket || !!ticket.isArchived || isArchivingTicket}
                           loading={isArchivingTicket}
                           className='bg-destructive text-destructive-foreground hover:bg-destructive/90'

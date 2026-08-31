@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 import {
   ReactElement,
   useState,
@@ -25,6 +26,7 @@ import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import rehypeHighlight from 'rehype-highlight';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import {
   StreamingMarkdownBlocks,
@@ -47,7 +49,9 @@ import {
   resolveCitationIconUrl,
 } from '../utils/clawCitationUrl';
 import { CitationLink } from './CitationLink';
+import { ReadonlyContextPills } from '../../../AIScreen/ReadonlyContextPills';
 import { genericInstance } from '../../../../services/clients/genericClient';
+import { showDownloadCompleteToast } from '../../../../utils/downloadToast';
 import type { Components } from 'react-markdown';
 import {
   SingleStat,
@@ -134,6 +138,9 @@ const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
   }
   if (citation.kind === 'canvas') {
     return citation.label ? `Canvas — ${citation.label}` : 'Canvas';
+  }
+  if (citation.kind === 'recording') {
+    return citation.label ? `Recording — ${citation.label}` : 'Recording';
   }
   if (citation.kind === 'external') {
     return citation.label || citation.url || 'External link';
@@ -326,7 +333,11 @@ const ImageWithDownload = ({
         setDownloaded(true);
         setTimeout(() => setDownloaded(false), 2000);
       } catch (error) {
-        console.error('Failed to download image:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to download image:'),
+          error: error,
+        });
         // Fallback: try direct download
         const link = document.createElement('a');
         link.href = src;
@@ -723,7 +734,11 @@ const AttachmentImagePreview = ({
           setImageUrl(blobUrl);
           setIsLoading(false);
         } catch (err) {
-          console.error('[AttachmentImagePreview] Failed to load image:', err);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[AttachmentImagePreview] Failed to load image:'),
+            error: err,
+          });
           if (isMounted) {
             setError('Failed to load image');
             setIsLoading(false);
@@ -819,6 +834,7 @@ export const AttachmentPreview = ({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(blobUrl);
+        showDownloadCompleteToast(displayName);
         return;
       }
 
@@ -850,8 +866,13 @@ export const AttachmentPreview = ({
       document.body.removeChild(link);
 
       URL.revokeObjectURL(blobUrl);
+      showDownloadCompleteToast(displayName);
     } catch (error) {
-      console.error('[AttachmentPreview] Download failed:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[AttachmentPreview] Download failed:'),
+        error: error,
+      });
       const { toast } = await import('sonner');
       toast.error('Download failed', {
         description: error instanceof Error ? error.message : 'Failed to download file',
@@ -1194,7 +1215,7 @@ export const MessageItem = React.memo(
             message.type === 'user'
               ? isEditing
                 ? 'max-w-[90%] w-full overflow-hidden'
-                : 'max-w-[80%] overflow-hidden'
+                : 'flex max-w-[80%] flex-col items-end gap-1'
               : 'flex-1 max-w-full overflow-hidden'
           }
         >
@@ -1208,7 +1229,7 @@ export const MessageItem = React.memo(
               message.type === 'user'
                 ? isEditing
                   ? 'rounded-2xl bg-accent p-3'
-                  : 'flex flex-col items-start gap-3 px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
+                  : 'flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
                 : 'bg-transparent text-foreground max-w-full'
             }`}
           >
@@ -1367,6 +1388,19 @@ export const MessageItem = React.memo(
               />
             )}
           </div>
+
+          {/* Read-only context chip the user attached to this turn — sits BELOW
+              the bubble. Collapsed by default; click to reveal the list. Kept
+              OUTSIDE the bubble's overflow-hidden so the popover isn't clipped. */}
+          {message.type === 'user' &&
+            !isEditing &&
+            message.attachedContext &&
+            message.attachedContext.length > 0 && (
+              <ReadonlyContextPills
+                items={message.attachedContext}
+                expandedWidthClass='max-w-[15rem]'
+              />
+            )}
 
           {/* Error display for bot messages */}
           {message.type === 'bot' && message.errorInfo && (
@@ -1577,9 +1611,10 @@ MessageItem.displayName = 'MessageItem';
 // types, discard the real DOM nodes and rebuild them (re-firing the mount fade
 // = the blink). Hoisted to module scope so identity can never change.
 const ANSWER_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const STATIC_ANSWER_REHYPE_PLUGINS = [rehypeHighlight];
 // Word-fade spans for live-streamed answers (see rehypeStreamWordFade). Only
 // applied on the everStreamed path so history messages carry no extra spans.
-const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
+const ANSWER_REHYPE_PLUGINS = [rehypeHighlight, rehypeStreamWordFade];
 // Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer strips
 // non-http(s) schemes, which would erase the href before the `a` override can
 // intercept it and substitute a ClawCitationChip. Same fix as v3
@@ -1766,7 +1801,7 @@ const MessageContent = ({
     (markdown: string): ReactElement => (
       <ReactMarkdown
         remarkPlugins={ANSWER_REMARK_PLUGINS}
-        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : undefined}
+        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : STATIC_ANSWER_REHYPE_PLUGINS}
         urlTransform={preserveUrlTransform}
         components={answerComponents}
       >
@@ -2036,6 +2071,7 @@ const SummarizerContent = ({
           <div className="bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBreaks]}
+              rehypePlugins={STATIC_ANSWER_REHYPE_PLUGINS}
               components={{
                 ...sidebarMarkdownComponents,
                 p: ({ children }) => {
@@ -2387,7 +2423,11 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
 }: {
   participants: Participant[];
 }) => {
-  console.log('[ParticipantsAvatars] Rendering:', { participants, count: participants?.length });
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[ParticipantsAvatars] Rendering:'),
+    context: [{ participants, count: participants?.length }],
+  });
 
   // Deduplicate participants by ID
   const uniqueParticipants = React.useMemo(() => {
@@ -2399,9 +2439,15 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
     });
   }, [participants]);
 
-  console.log('[ParticipantsAvatars] Unique participants:', {
-    uniqueParticipants,
-    count: uniqueParticipants.length,
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[ParticipantsAvatars] Unique participants:'),
+    context: [
+      {
+        uniqueParticipants,
+        count: uniqueParticipants.length,
+      },
+    ],
   });
 
   // Get top 3 unique participants

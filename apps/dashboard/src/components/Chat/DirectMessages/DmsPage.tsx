@@ -38,6 +38,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Channel, ChannelScopeType } from '@xyne/shared';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { FilterPills, type FilterPillOption } from '../../ui/FilterPills';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 // Simple component for DM search results (no message preview)
 const DmSearchResultItem = ({
@@ -78,7 +79,9 @@ const DmSearchResultItem = ({
 interface DmUserSearchResultItemProps {
   user: {
     id: string;
-    name: string;
+    name?: string | null;
+    email?: string | null;
+    displayName?: string | null;
   };
   isSelected: boolean;
   isCurrentUser?: boolean;
@@ -93,7 +96,7 @@ const DmUserSearchResultItem = ({
     <div className={`flex items-center gap-3 px-2 py-2 ${isSelected ? 'bg-accent' : ''}`}>
       <Avatar userId={user.id} size='md' showActiveStatus className='rounded-lg' />
       <span className='text-sm font-medium text-foreground truncate'>
-        {user.name}
+        {getUserDisplayName(user)}
         {isCurrentUser ? ' (you)' : ''}
       </span>
     </div>
@@ -179,7 +182,6 @@ const DmsPage = (): ReactElement => {
     userChannelStatuses,
     loadMore,
     firstItemIndex,
-    selectedChannelMovedVersion,
     jumpToChannel,
   } = useDmsPaginatedMessages({ selectedChannelId: channelId });
 
@@ -231,6 +233,8 @@ const DmsPage = (): ReactElement => {
     dmSearchQuery,
     setDmSearchQuery,
     dmChannelResults,
+    oneToOneDmResults,
+    groupDmResults,
     userResults,
     showDmSearchDropdown,
     setShowDmSearchDropdown,
@@ -325,21 +329,10 @@ const DmsPage = (): ReactElement => {
     return (): void => cancelAnimationFrame(raf);
   }, [directMessages]);
 
-  // Scroll to top when the selected channel receives a new message and moves to top.
-  // Only fires in live mode (the hook guards this internally).
-  useEffect(() => {
-    if (
-      activeTab === 'all' &&
-      !isMobile &&
-      selectedChannelMovedVersion > 0 &&
-      virtuosoRef.current
-    ) {
-      virtuosoRef.current.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
-    }
-  }, [activeTab, selectedChannelMovedVersion, isMobile]);
-
   const handleAddDirectMessage = (): void => {
-    setShowAddDmForm(true);
+    if (isMobile) {
+      setShowAddDmForm(true);
+    } else void navigate('/chat/search?mode=dm', { replace: true });
   };
 
   const handleAddDmSubmit = (data: CreateDmFormData): void => {
@@ -406,9 +399,43 @@ const DmsPage = (): ReactElement => {
   const renderSearchDropdown = (): ReactElement | null => {
     if (!showDmSearchDropdown || !dmSearchQuery.trim()) return null;
 
-    const hasChannels = dmChannelResults.length > 0;
+    const hasOneToOne = oneToOneDmResults.length > 0;
+    const hasGroupDms = groupDmResults.length > 0;
     const hasUsers = userResults.length > 0;
-    const noResults = !hasChannels && !hasUsers;
+    const noResults = !hasOneToOne && !hasGroupDms && !hasUsers;
+
+    // Render a labeled DM-channel section. `indexOffset` is the section's start position within the
+    // flat `dmChannelResults` list so the highlight lines up with `selectedDmSearchIndex` nav.
+    const renderChannelSection = (
+      label: string,
+      channels: Channel[],
+      indexOffset: number,
+    ): ReactElement | false =>
+      channels.length > 0 && (
+        <>
+          <div className='px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+            {label}
+          </div>
+          {channels.map((channel, index) => {
+            const absoluteIndex = indexOffset + index;
+            const isSelected = absoluteIndex === selectedDmSearchIndex;
+            return (
+              <button
+                key={channel.id}
+                type='button'
+                className={`w-full text-left cursor-pointer hover:bg-accent ${
+                  isSelected ? 'bg-accent' : ''
+                }`}
+                onClick={() => void handleDmSelect(channel.id)}
+                data-track-category='DM'
+                data-track-name='SELECT_DM_SEARCH_RESULT'
+              >
+                <DmSearchResultItem channel={channel} isSelected={isSelected} />
+              </button>
+            );
+          })}
+        </>
+      );
 
     return (
       <div className='absolute top-full left-0 right-0 mt-2 bg-background rounded-xl border border-border shadow-lg z-50 max-h-80 overflow-y-auto'>
@@ -416,30 +443,9 @@ const DmsPage = (): ReactElement => {
           <div className='px-4 py-3 text-sm text-muted-foreground'>No results found</div>
         ) : (
           <>
-            {hasChannels && (
-              <>
-                <div className='px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
-                  Conversations
-                </div>
-                {dmChannelResults.map((channel, index) => (
-                  <button
-                    key={channel.id}
-                    type='button'
-                    className={`w-full text-left cursor-pointer hover:bg-accent ${
-                      index === selectedDmSearchIndex ? 'bg-accent' : ''
-                    }`}
-                    onClick={() => void handleDmSelect(channel.id)}
-                    data-track-category='DM'
-                    data-track-name='SELECT_DM_SEARCH_RESULT'
-                  >
-                    <DmSearchResultItem
-                      channel={channel}
-                      isSelected={index === selectedDmSearchIndex}
-                    />
-                  </button>
-                ))}
-              </>
-            )}
+            {/* Order: Direct Messages (1:1) → Group DMs → Start new conversation */}
+            {renderChannelSection('Conversations', oneToOneDmResults, 0)}
+            {renderChannelSection('Group DMs', groupDmResults, oneToOneDmResults.length)}
             {hasUsers && (
               <>
                 <div className='px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
@@ -544,6 +550,8 @@ const DmsPage = (): ReactElement => {
                   setDmSearchQuery('');
                   setShowDmSearchDropdown(false);
                 }}
+                data-track-category='DM'
+                data-track-name='CLEAR_DM_SEARCH'
                 aria-label='Clear search'
                 variant='link'
                 size='icon'
@@ -716,6 +724,8 @@ const DmsPage = (): ReactElement => {
                       setDmSearchQuery('');
                       setShowDmSearchDropdown(false);
                     }}
+                    data-track-category='DM'
+                    data-track-name='CLEAR_DM_SEARCH'
                     aria-label='Clear search'
                     variant='link'
                     size='icon'

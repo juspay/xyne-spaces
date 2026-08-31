@@ -1,6 +1,7 @@
 import {
   type VespaSchema,
   VespaDocType,
+  RankProfile,
   ticketSchema,
   messageSchema,
   attachmentSchema,
@@ -200,6 +201,8 @@ export class YqlBuilder {
     workspaceId?: string,
     sort?: string,
     useExactMatch: boolean = false,
+    rankProfile?: string,
+    userEmail?: string,
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -262,6 +265,40 @@ export class YqlBuilder {
         )`);
         } else {
           whereConditions.push(userInputClause());
+        }
+      }
+
+      // `personalized` only: caller as rank-only terms so each profile's involvement tier can
+      // read matches(<field>). rank()'s extra args never change what matches; each group is
+      // gated on its schema being selected (Vespa rejects fields absent from every source).
+      if (rankProfile === RankProfile.personalizedRank && userId) {
+        const rankTerms = new Set<string>();
+        let meId: string | undefined;
+        const me = () => (meId ??= params.bind('involvedUser', userId));
+        if (schemas.includes(messageSchema)) {
+          rankTerms.add(`userId contains ${me()}`);
+          rankTerms.add(`mentions contains ${me()}`);
+          rankTerms.add(`threadSenders contains ${me()}`);
+        }
+        if (schemas.includes(ticketSchema)) {
+          rankTerms.add(`createdBy contains ${me()}`);
+          rankTerms.add(`assignedTo contains ${me()}`);
+          rankTerms.add(`ticketMentions contains ${me()}`);
+          rankTerms.add(`threadMentions contains ${me()}`);
+          rankTerms.add(`threadSenders contains ${me()}`);
+        }
+        if (schemas.includes(fileSchema)) {
+          rankTerms.add(`ownerId contains ${me()}`);
+          rankTerms.add(`createdBy contains ${me()}`);
+        }
+        if (schemas.includes(mailSchema) && userEmail) {
+          // mail matches by email; `from` is a YQL keyword and must be quoted
+          const meEmail = params.bind('involvedEmail', userEmail);
+          rankTerms.add(`"from" contains ${meEmail}`);
+          rankTerms.add(`to contains ${meEmail}`);
+        }
+        if (rankTerms.size > 0) {
+          whereConditions[0] = `rank(${whereConditions[0]}, ${[...rankTerms].join(', ')})`;
         }
       }
     }

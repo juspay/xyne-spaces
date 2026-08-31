@@ -11,6 +11,7 @@ import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/s
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { getAutomationsBotUserId } from './automations-bot';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 const MAX_CALL_INVITEES = 499;
 
@@ -224,20 +225,13 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       );
     }
 
-    // Fetch channel details for room metadata (projectId is needed by the
-    // transcription agent and by the webhook when re-hydrating call context).
-    const channel = await db.channel.findUnique({
-      where: { id: channelId },
-      select: { projectId: true, scopeType: true },
-    });
-
     // uuidv4() is synchronous and CPU-local; sequential generation is
     // intentional and avoids pretending there is useful async work to parallelize.
     const externalId = uuidv4();
     const callId = uuidv4();
     const conversationId = uuidv4();
     const messageId = uuidv4();
-    const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${callType}`;
+    const roomLink = buildCallInviteUrl(externalId);
     const now = new Date();
 
     // Create the LiveKit room BEFORE committing the DB transaction. This removes
@@ -247,7 +241,6 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     // transaction rolls back; it auto-expires via LiveKit's emptyTimeout.
     const roomMetadata = JSON.stringify({
       channelId,
-      projectId: channel?.projectId,
       callOrigin: CallOrigin.CHANNEL,
       callType,
       sttModel: 'azure',

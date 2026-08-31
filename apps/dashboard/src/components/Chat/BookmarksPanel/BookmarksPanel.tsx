@@ -5,6 +5,9 @@ import { Bookmark } from 'lucide-react';
 import { useShortcut } from '../../../shortcuts';
 import { BookmarkItem } from '../BookmarkItem/BookmarkItem';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
+import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import {
   getReminderFromMetadata,
   isBookmarkMarkedDone,
@@ -102,6 +105,10 @@ const BookmarksPanel = (): ReactElement => {
   const bookmarkListRef = useRef<HTMLDivElement>(null);
 
   const { bookmarks } = useUserBookmarks();
+  // Track the underlying query's completion so an in-flight load shows a
+  // loader rather than the "No bookmarks yet" empty state. Zero dedupes this
+  // against the same subscription in InitialStateLoader, so it's not a 2nd fetch.
+  const [, bookmarksQueryDetails] = useCachedQuery(queries.userBookmarks());
   const [optimisticCompletedBookmarks, setOptimisticCompletedBookmarks] = useState<BookmarkRow[]>(
     [],
   );
@@ -311,7 +318,9 @@ const BookmarksPanel = (): ReactElement => {
 
         {/* Bookmarks List */}
         <div ref={bookmarkListRef} className='flex-1 overflow-y-auto no-scrollbar'>
-          {visibleBookmarks.length === 0 ? (
+          {bookmarksQueryDetails.type !== 'complete' && visibleBookmarks.length === 0 ? (
+            <DelayedSpinner className='flex h-full items-center justify-center' />
+          ) : visibleBookmarks.length === 0 ? (
             <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
               <Bookmark className='text-muted-foreground mb-4' size={48} />
               <p className='text-muted-foreground text-lg font-medium mb-2'>

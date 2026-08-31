@@ -46,6 +46,28 @@ describe("isInternalCallbackOrigin", () => {
     expect(isInternalCallbackOrigin("http://127.0.0.1:9999/result", { ...config, nodeEnv: "development" })).toBe(true);
     expect(isInternalCallbackOrigin("http://[::1]:9999/result", { ...config, nodeEnv: "development" })).toBe(true);
   });
+
+  it("trusts any in-cluster host, covering Spaces backend service-name drift", () => {
+    // The prod regression: the automation callback origin was
+    // xyne-backend.svc.cluster.local while SPACES_INTERNAL_URL pointed at
+    // xyne-backend-02 — a configured origin alone would miss it. Cluster
+    // hosts are never external integrators, so both resolve internal.
+    expect(isInternalCallbackOrigin("http://xyne-backend.xyne-apps.svc.cluster.local:3001/api/internal/automations/claw-callback/x/y", config)).toBe(true);
+    expect(isInternalCallbackOrigin("http://xyne-backend-02.xyne-apps.svc.cluster.local:3001/api/internal/automations/claw-callback/x/y", config)).toBe(true);
+    expect(isInternalCallbackOrigin("http://10.4.2.9:3001/callback", config)).toBe(true);
+  });
+
+  it("still refuses a public integrator host even in production", () => {
+    // The .svc.cluster.local suffix is required — a lookalike public host
+    // that merely CONTAINS the substring must not slip through.
+    expect(isInternalCallbackOrigin("https://svc.cluster.local.evil.test/result", config)).toBe(false);
+    expect(isInternalCallbackOrigin("https://integrator.example/result", config)).toBe(false);
+  });
+
+  it("matches the configured Spaces backend origins", () => {
+    const withSpaces = { ...config, spacesInternalUrl: "http://xyne-backend-02.xyne-apps.svc.cluster.local:3001", spacesBackendUrl: "https://spaces.example.net" };
+    expect(isInternalCallbackOrigin("https://spaces.example.net/api/agent/result", withSpaces)).toBe(true);
+  });
 });
 
 describe("external result delivery", () => {

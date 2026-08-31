@@ -184,6 +184,19 @@ export function getPreviewParticipantUserIds(
   return displayUserIds;
 }
 
+/**
+ * Preview entries with their `hasJoined` flag intact — the id-only variant above
+ * drops it, but the roster needs per-user join state for participants that only
+ * exist in the preview payload.
+ */
+export function getPreviewParticipantEntries(
+  participantPreviewUserIds: CallParticipantPreviewInput,
+  currentUserId: string | undefined,
+): CallParticipantPreviewEntry[] {
+  const previewEntries = parseParticipantPreviewEntries(participantPreviewUserIds) ?? [];
+  return previewEntries.filter(entry => entry.userId !== currentUserId);
+}
+
 export function getPreviewParticipantUsers(
   participantPreviewUserIds: CallParticipantPreviewInput,
   allUsers: User[],
@@ -326,6 +339,14 @@ export function isScheduledCallJoinable(call: Call, now = Date.now()): boolean {
   if (call.status !== CallStatus.SCHEDULED || !call.startsAt) return false;
 
   return now >= new Date(call.startsAt).getTime();
+}
+
+export function canJoinCall(call: Call): boolean {
+  return (
+    call.status === CallStatus.SCHEDULED ||
+    call.status === CallStatus.ACTIVE ||
+    call.status === CallStatus.IN_PROGRESS
+  );
 }
 
 export function isScheduledCallManageable(call: Call, currentUserId: string | undefined): boolean {

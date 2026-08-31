@@ -314,7 +314,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
                         customEmojis={customEmojis || []}
-                        previewConfig={{ showPreview: false }}
+                        previewConfig={{ showPreview: true }}
                       />
                     </div>
                   </Popover.Content>
@@ -434,7 +434,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
                         customEmojis={customEmojis || []}
-                        previewConfig={{ showPreview: false }}
+                        previewConfig={{ showPreview: true }}
                       />
                     </div>
                   </Popover.Content>

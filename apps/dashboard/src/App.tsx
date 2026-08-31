@@ -23,6 +23,8 @@ import Wallpaper from './components/Wallpaper/Wallpaper';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
+import { RecordingInterruptGuard } from './components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
+import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { DEFAULT_WORKSPACE_ID } from './config';
 import {
@@ -36,22 +38,6 @@ import {
 const App = (): ReactElement => {
   // Initialize theme on app load
   const { theme } = useTheme();
-
-  // Listen for Electron logs
-  useEffect(() => {
-    if (window.electronAPI?.onLog) {
-      return window.electronAPI.onLog(message => {
-        // Extract message content
-        const data = message.data || [];
-        const text = Array.isArray(data) ? data.join(' ') : String(data);
-
-        // Log to console with distinct color but without extra prefix
-        console.log(`%c${text}`, 'color: #00bcd4');
-      });
-    }
-    // Return undefined explicitly when condition is not met
-    return undefined;
-  }, []);
 
   useEffect(() => {
     initializeTelemetry();
@@ -126,6 +112,8 @@ const App = (): ReactElement => {
                       <RouterProvider router={router}></RouterProvider>
                     </main>
                     <SwitchLoadingOverlay />
+                    <RecordingInterruptGuard />
+                    <WorkspaceSwitchToastListener />
                     <Toaster
                       position='top-right'
                       richColors

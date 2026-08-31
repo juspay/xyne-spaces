@@ -4,7 +4,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
-import { API_BASE_URL, isTestEnv } from '../config';
+import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -14,6 +14,12 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+import { clearAllSessionKeys } from '../services/sessionKeyStore';
+import { indexedDBService } from '../services/indexedDBService';
+import { resetEncryption } from './encryptionMachine';
+import { decryptionCache } from '@xyne/shared';
+import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
+import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
 
 export interface User {
   id: string;
@@ -1163,6 +1169,10 @@ export const authMachine = createMachine(
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         clearOnboardingCookie();
+        decryptionCache.clear();
+        resetEncryption();
+        resetGlobalEncryptionBootstrap();
+        void clearAllSessionKeys();
       },
       clearOnboardingCookie: () => {
         clearOnboardingCookie();
@@ -1327,6 +1337,11 @@ export const authMachine = createMachine(
         } catch {
           /* empty */
         }
+
+        // Logout is the one place a cross-lane drop is right: both bundles are going
+        // away. The lane must not take out its host's store, so it only drops its own.
+        await (isSdlcSurface ? dropZeroDatabases() : dropAllZeroDatabases());
+        await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
         const urlParams = new URLSearchParams(window.location.search);

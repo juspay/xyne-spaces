@@ -1,6 +1,8 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { ShortcutHint } from '../ui/ShortcutHint';
+import { useShortcutById } from '../../shortcuts';
 import { useAuth } from '../../hooks/useAuth';
 import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
 import { useCanViewAnalytics } from '../../hooks/usePermissions';
@@ -22,11 +24,14 @@ import {
   InformationCircle,
   AlertCircle,
   TicketToken,
+  UserPlus,
 } from '@xyne/icons';
+import { WorkspaceType } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
 import SettingsContent from '../Settings/Settings';
+import ProfileModal from '../ProfileSidebar/ProfileModal';
 import Preferences, { type PreferenceSection } from '../Settings/Preferences';
 import { useSelf } from '../../hooks/useUsers';
 import { isStatusExpired } from '../../utils/statusUtils';
@@ -40,18 +45,26 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { usePinnedArtifactApps } from '../../hooks/usePinnedArtifactApps';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import type { NavigationItem } from './navigationConfig';
+import {
+  RAIL_SHORTCUT_LIMIT,
+  railItemIndexFromEvent,
+  railShortcutsAvailable,
+} from './navigationConfig';
 import { useKeyboard } from '../../contexts/KeyboardContext';
-import { useAILandingDefault } from '../../hooks/useAILandingDefault';
-import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
 import { cn } from '../../utils/classNames';
-import { APP_DRAG_STYLE, isElectronApp } from '../../utils/electronApp';
+import { APP_DRAG_STYLE, isElectronApp, openInAppWindow } from '../../utils/electronApp';
+import { toast } from 'sonner';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
+import WorkspaceInviteDialog from './WorkspaceInviteDialog';
 
 const mobileNavigationItems = [
   {
@@ -142,16 +155,20 @@ const AppSidebar = (): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
-  const { aiLandingDefault } = useAILandingDefault();
   const currentUser = useSelf();
   const visibleNavigationItems = useVisibleNavigationItems();
   const { toolbarPaths } = useToolbarItems();
+  const { pinnedApps } = usePinnedArtifactApps();
   const missedCallCount = useMissedCallCount();
   const unreadActivityCount = useUnreadActivitiesCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
   const visibleChannels = useAllVisibleChannels();
   const unreadCounts = useAllUnreadCount();
+  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
+    enabled: !!workspaceId,
+  });
+  const isCommunityWorkspace = workspace?.workspaceType === WorkspaceType.COMMUNITY;
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -192,9 +209,11 @@ const AppSidebar = (): ReactElement => {
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [profileModalUserId, setProfileModalUserId] = useState<string | null>(null);
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
     PreferenceSection | undefined
   >(undefined);
@@ -281,19 +300,39 @@ const AppSidebar = (): ReactElement => {
     );
   }, [visibleChannels, unreadCounts]);
 
-  const handleNavigationClick = (label: string): void => {
-    mixpanelService.track(EVENTS.NAVIGATION, { item: label });
+  const handleNavigationClick = (label: string, openedInNewWindow = false): void => {
+    mixpanelService.track(EVENTS.NAVIGATION, { item: label, openedInNewWindow });
   };
 
-  const handleMoreNavigate = (label: string): void => {
+  const railShortcuts = railShortcutsAvailable();
+
+  useShortcutById(
+    'global.goToRailItem',
+    event => {
+      const item = toolbarItems[railItemIndexFromEvent(event)];
+      if (!item) return;
+      handleNavigationClick(item.label);
+      void navigate(prefixWs(item.path));
+    },
+    { enabled: railShortcuts && !isSupportContext },
+  );
+
+  const handleMoreNavigate = (label: string, openedInNewWindow = false): void => {
     setIsMoreOpen(false);
-    handleNavigationClick(label);
+    handleNavigationClick(label, openedInNewWindow);
   };
 
   // Keep focus on the trigger when the menu opens so no item shows a focus ring.
   const handleMorePopoverAutoFocus = (e: Event): void => {
     e.preventDefault();
   };
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onAppWindowLimitReached?.(limit => {
+      toast.info(`You can have up to ${limit} extra windows open. Close one to open another.`);
+    });
+    return (): void => unsubscribe?.();
+  }, []);
 
   useEffect(() => {
     const handleResize = (): void => {
@@ -337,31 +376,9 @@ const AppSidebar = (): ReactElement => {
           ) : (
             <nav>
               <ul className='relative flex flex-col gap-4'>
-                {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
-                {aiLandingDefault && (
-                  <li key='/ai' className='relative'>
-                    <Tooltip content='Xyne AI' side='right' delayDuration={0}>
-                      <Link
-                        to={prefixWs('/ai')}
-                        onClick={() => handleNavigationClick('Xyne AI')}
-                        data-testid='nav-xyne-ai'
-                        data-track-category='App_Sidebar'
-                        data-track-name='Sidebar_Nav_Item'
-                        data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
-                        className={cn(
-                          'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
-                          activeRoute === '/ai'
-                            ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                            : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                        )}
-                      >
-                        <XyneAISidebarIcon size={16} />
-                      </Link>
-                    </Tooltip>
-                  </li>
-                )}
-
-                {toolbarItems.map(item => {
+                {toolbarItems.map((item, index) => {
+                  const shortcutIndex =
+                    railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
                   const isActive = activeRoute === item.path;
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
                   const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
@@ -373,10 +390,30 @@ const AppSidebar = (): ReactElement => {
 
                   return (
                     <li key={item.path} className='relative'>
-                      <Tooltip content={item.label} side='right' delayDuration={0}>
+                      <Tooltip
+                        content={
+                          shortcutIndex ? (
+                            <span className='flex items-center gap-2'>
+                              {item.label}
+                              <ShortcutHint keys={`mod+${shortcutIndex}`} />
+                            </span>
+                          ) : (
+                            item.label
+                          )
+                        }
+                        side='right'
+                        delayDuration={0}
+                      >
                         <Link
                           to={prefixWs(item.path)}
-                          onClick={() => handleNavigationClick(item.label)}
+                          onClick={event => {
+                            const openedInNewWindow =
+                              !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                            handleNavigationClick(item.label, openedInNewWindow);
+                            if (openedInNewWindow) {
+                              event.preventDefault();
+                            }
+                          }}
                           aria-label={showPendingDmDot ? 'DMs unread' : item.label}
                           data-testid={testId}
                           data-track-category='App_Sidebar'
@@ -412,6 +449,37 @@ const AppSidebar = (): ReactElement => {
                               {unreadActivityCount > 99 ? '99+' : unreadActivityCount}
                             </span>
                           )}
+                        </Link>
+                      </Tooltip>
+                    </li>
+                  );
+                })}
+
+                {/* Pinned artifact apps — user-generated apps promoted to the
+                    rail from the AI Library. Stored per-device in localStorage. */}
+                {pinnedApps.map(app => {
+                  const path = `/ai/library/app/${app.id}`;
+                  const isActive = activeRoute === path;
+                  const initial = app.title.trim().charAt(0).toUpperCase() || '?';
+                  return (
+                    <li key={app.id} className='relative'>
+                      <Tooltip content={app.title} side='right' delayDuration={0}>
+                        <Link
+                          to={prefixWs(path)}
+                          onClick={() => handleNavigationClick(app.title)}
+                          aria-label={app.title}
+                          data-testid={`nav-artifact-app-${app.id}`}
+                          data-track-category='App_Sidebar'
+                          data-track-name='Sidebar_Pinned_App'
+                          data-track-metadata={JSON.stringify({ appId: app.id })}
+                          className={cn(
+                            'relative size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors text-[11px] font-semibold',
+                            isActive
+                              ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                              : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                          )}
+                        >
+                          {initial}
                         </Link>
                       </Tooltip>
                     </li>
@@ -466,6 +534,28 @@ const AppSidebar = (): ReactElement => {
         >
           <ZeroConnectionStatus className='mb-2' />
 
+          {isCommunityWorkspace && (
+            <Tooltip content='Invite people' side='right' delayDuration={0}>
+              <button
+                type='button'
+                aria-label='Invite people to workspace'
+                title='Invite people'
+                onClick={() => setIsInviteDialogOpen(true)}
+                data-testid='nav-invite-people'
+                data-track-category='App_Sidebar'
+                data-track-name='Sidebar_InvitePeople_Open'
+                className={cn(
+                  'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                  isInviteDialogOpen
+                    ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                )}
+              >
+                <UserPlus size={18} variant='Solid' className='text-black' />
+              </button>
+            </Tooltip>
+          )}
+
           <Popover
             open={isSupportOpen}
             onOpenChange={setIsSupportOpen}
@@ -511,11 +601,12 @@ const AppSidebar = (): ReactElement => {
               hasValidStatus ? (
                 <div
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
-                  style={{ backgroundColor: 'var(--sidebar-border)' }}
                   data-testid='profile-icon'
                 >
+                  <div className='absolute inset-x-0 top-0 bottom-2 rounded-lg bg-sidebar-border' />
+
                   {/* Status Emoji at Top Center */}
-                  <div className='absolute top-0 left-1/2 -translate-x-1/2'>
+                  <div className='absolute top-0 left-1/2 -translate-x-1/2 z-10'>
                     <StatusIndicator
                       statusEmoji={currentUser?.statusEmoji}
                       statusContent={currentUser?.statusContent}
@@ -526,7 +617,7 @@ const AppSidebar = (): ReactElement => {
                   </div>
 
                   {/* Avatar at Bottom - overlaps container slightly */}
-                  <div className='relative flex'>
+                  <div className='relative z-10 flex'>
                     {user ? (
                       <Avatar userId={user.id} size='md' className='rounded-lg' />
                     ) : (
@@ -567,6 +658,7 @@ const AppSidebar = (): ReactElement => {
               onClose={() => setIsSettingsPopoverOpen(false)}
               onOpenPreferences={handleOpenPreferences}
               onOpenStatusModal={handleStatusClick}
+              onOpenProfileModal={userId => setProfileModalUserId(userId)}
             />
           </Popover>
 
@@ -575,10 +667,24 @@ const AppSidebar = (): ReactElement => {
             onClose={() => setIsPreferencesOpen(false)}
             {...(preferencesInitialSection && { initialSection: preferencesInitialSection })}
           />
+
+          {/* Profile modal — used on non-chat pages where the routed profile
+              sidebar (`/chat/dir/.../profile/...`) is not mounted. */}
+          <ProfileModal
+            userId={profileModalUserId}
+            isOpen={profileModalUserId !== null}
+            onClose={() => setProfileModalUserId(null)}
+          />
         </div>
 
         {/* Error Report Modal — opened from the Support rail button */}
         <ErrorReportModal isOpen={isErrorReportOpen} onClose={() => setIsErrorReportOpen(false)} />
+
+        <WorkspaceInviteDialog
+          open={isInviteDialogOpen}
+          onOpenChange={setIsInviteDialogOpen}
+          workspaceId={workspaceId}
+        />
 
         {/* Status Update Modal */}
         <UpdateStatusModal
@@ -609,7 +715,7 @@ const SidebarMoreMenu = ({
   items: NavigationItem[];
   activeRoute: string;
   prefixWs: (path: string) => string;
-  onNavigate: (label: string) => void;
+  onNavigate: (label: string, openedInNewWindow?: boolean) => void;
   onCustomize: () => void;
 }): ReactElement => {
   return (
@@ -624,7 +730,14 @@ const SidebarMoreMenu = ({
               <li key={item.path}>
                 <Link
                   to={prefixWs(item.path)}
-                  onClick={() => onNavigate(item.label)}
+                  onClick={event => {
+                    const openedInNewWindow =
+                      !!item.popout && openInAppWindow(prefixWs(item.path), event);
+                    onNavigate(item.label, openedInNewWindow);
+                    if (openedInNewWindow) {
+                      event.preventDefault();
+                    }
+                  }}
                   data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                   data-track-category='App_Sidebar'
                   data-track-name='Sidebar_More_Item'

@@ -9,6 +9,7 @@ import { notificationService } from '@/services/notificationService';
 import { slackService } from '@/services/slackService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { radarExecutionQueue } from '@/queues/radarExecutionQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
@@ -35,10 +36,11 @@ import { Platform,
   NotificationDeliveryMethod,
   NotificationType,
   UserStatus,
-  UserType, MessageType } from '@xyne/shared';
+  UserType, MessageType, parseSlashCommandArtifactMessage } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { syncMessageArtifact } from '@/database/repositories/messageArtifactRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
@@ -73,7 +75,10 @@ function extractTextFromFlowJson(content: string): string {
     const json = attrMatch[1]
       .replace(/&quot;/g, '"')
       .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r');
+      .replace(/&#13;/g, '\r')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
     const flow = JSON.parse(json) as { components?: unknown[] };
 
     const texts: string[] = [];
@@ -109,6 +114,11 @@ function extractTextFromFlowJson(content: string): string {
  */
 function extractCleanTextFromFlowJson(content: string): string {
   const raw = extractTextFromFlowJson(content);
+  return cleanNotificationText(raw);
+}
+
+/** Strip Flow mrkdwn tokens without exposing internal entity identifiers. */
+function cleanNotificationText(raw: string): string {
   if (!raw) return '';
   return raw
     .replace(/<userid:[^>]+>/g, '')
@@ -126,7 +136,7 @@ function extractCleanTextFromFlowJson(content: string): string {
  * component tree (suitable for mention scanning and notification preview).
  * Returns null for non-flow-json content.
  */
-function getFlowJsonContentForNotification(content: string): string | null {
+export function getFlowJsonContentForNotification(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
   return extractCleanTextFromFlowJson(content) || null;
 }
@@ -138,32 +148,92 @@ function getFlowJsonRawTextForMentions(content: string): string | null {
 }
 
 /**
- * Friendly notification label for a flow CARD (plan, etc.) whose todos/title
- * don't live in text `content` props — so extractTextFromFlowJson returns ''
- * and the preview would otherwise fall back to the meaningless "Flow JSON" text
- * node. Currently handles the `plan` component; returns null for other flows so
+ * Friendly notification label for a flow CARD whose title/content doesn't live
+ * in text `content` props — so extractTextFromFlowJson returns '' and the
+ * preview would otherwise fall back to the meaningless "Flow JSON" text node.
+ *
+ * Handles slash-command artifacts (matched first, via the shared registry, so
+ * callers never inspect command-specific markers) plus the plan, diff, code,
+ * ticket, chart and user-question artifacts. Returns null for other flows so
  * the caller keeps its existing extraction.
  */
 function getFlowCardNotificationLabel(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
+
+  const slashCommandArtifact = parseSlashCommandArtifactMessage(content);
+  if (slashCommandArtifact) {
+    const label = slashCommandArtifact.definition.badge;
+    const body = cleanNotificationText(slashCommandArtifact.body);
+    return body ? `${label}: ${body}` : `${label} slash command posted`;
+  }
+
   const attrMatch = content.match(/data-flow-json="([^"]+)"/);
   if (!attrMatch) return null;
   try {
     const json = attrMatch[1]
       .replace(/&quot;/g, '"')
       .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r');
+      .replace(/&#13;/g, '\r')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
     const flow = JSON.parse(json) as {
       components?: Array<{ type?: string; props?: Record<string, unknown> }>;
     };
     const plan = Array.isArray(flow.components)
       ? flow.components.find((c) => c?.type === 'plan')
       : undefined;
-    if (!plan) return null;
-    const rawTitle = plan.props?.['title'];
-    const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
-    const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
-    return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
+    if (plan) {
+      const rawTitle = plan.props?.['title'];
+      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+      const verb = plan.props?.['phase'] === 'proposed' ? 'Proposed a plan' : 'Shared a plan';
+      return title ? `📋 ${verb}: ${title}` : `📋 ${verb}`;
+    }
+    const diff = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'diff')
+      : undefined;
+    if (diff) {
+      const rawPath = diff.props?.['path'];
+      const path = typeof rawPath === 'string' ? rawPath.trim() : '';
+      return path ? `📝 Shared a diff: ${path}` : '📝 Shared a diff';
+    }
+    const code = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'code')
+      : undefined;
+    if (code) {
+      const rawLanguage = code.props?.['language'];
+      const language = typeof rawLanguage === 'string' ? rawLanguage.trim() : '';
+      return language ? `💻 Shared ${language} code` : '💻 Shared a code snippet';
+    }
+    const ticket = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'ticket')
+      : undefined;
+    if (ticket) {
+      const rawXyneId = ticket.props?.['xyneId'];
+      const rawTitle = ticket.props?.['title'];
+      const xyneId = typeof rawXyneId === 'string' ? rawXyneId.trim() : '';
+      const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+      if (xyneId && title) return `🎫 Filed ${xyneId}: ${title}`;
+      return xyneId ? `🎫 Filed ${xyneId}` : '🎫 Filed a ticket';
+    }
+    const chart = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'chart')
+      : undefined;
+    if (chart) {
+      const rawCaption = chart.props?.['caption'];
+      const caption = typeof rawCaption === 'string' ? rawCaption.trim() : '';
+      return caption ? `📊 ${caption}` : '📊 Shared a chart';
+    }
+    const questionSet = Array.isArray(flow.components)
+      ? flow.components.find((c) => c?.type === 'user_question')
+      : undefined;
+    if (!questionSet) return null;
+    const questions = questionSet.props?.['questions'];
+    const count = Array.isArray(questions) ? questions.length : 0;
+    const phase = questionSet.props?.['phase'];
+    if (phase === 'answered') return `✅ Answered ${count || 'agent'} question${count === 1 ? '' : 's'}`;
+    if (phase === 'declined') return 'Question request declined';
+    return count > 1 ? `💬 Agent wants to ask you ${count} questions` : '💬 Agent wants to ask you a question';
   } catch {
     return null;
   }
@@ -288,6 +358,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
+    // Radar execution engine: fire-and-forget thread signal. enqueueThread
+    // never throws and no-ops unless ENABLE_RADAR_EXECUTION=true, so this can
+    // never block or fail the message path.
+    void radarExecutionQueue.enqueueThread(message.conversationId);
+
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
     if (message.content && message.msgType === MessageType.USER) {
@@ -309,6 +384,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {
       messageId,
+      ...(conversation?.channelId && { channelId: conversation.channelId }),
       hasAttachment: message.hasAttachment,
     }).catch(error => {
       logger.error('[UserActivityTracking] Failed to track message sent activity:', {
@@ -337,7 +413,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
         where: { id: channelId },
-        select: { name: true, scopeType: true, projectId: true }
+        select: { name: true, scopeType: true }
       }),
       db.user.findUnique({
         where: { id: senderId },
@@ -353,13 +429,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         select: { allowThreadBroadcastMentions: true },
       })),
     ]);
-
-    const channelProject = channel?.projectId
-      ? await db.project.findUnique({
-          where: { id: channel.projectId },
-          select: { name: true },
-        })
-      : null;
 
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({
@@ -412,6 +481,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const channelName = channel?.name || 'Unknown Channel';
     const senderName = sender?.displayName || sender?.name || 'Someone';
     const cleanContent = getNotificationPreviewContent(content, message.msgType, message.hasAttachment);
+    // Which commands may address the whole channel is decided by the server-side
+    // registry keyed on the command id — never by anything the sending client
+    // wrote into message content.
+    const artifactDefinition = parseSlashCommandArtifactMessage(content)?.definition ?? null;
+    const artifactBroadcastsToChannel = artifactDefinition?.notifiesChannel ?? false;
+    if (artifactDefinition) {
+      await syncMessageArtifact(db, messageId);
+    }
     const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
     const isOneToOneDM = channel?.scopeType === ChannelScopeType.DM;
     const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
@@ -420,13 +497,23 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // For FlowJSON, scan raw flow text (tokens intact) not the HTML wrapper.
     const flowRawText = getFlowJsonRawTextForMentions(content);
     const contentForMentions = flowRawText ?? content;
-    const specialMentions =
-      isReply && !allowThreadBroadcastMentions
-        ? { hasChannel: false, hasHere: false }
-        : extractSpecialMentions(contentForMentions);
-    const mentionType = specialMentions.hasChannel ? '@channel' : specialMentions.hasHere ? '@here' : undefined;
+    // Channel-addressing artifacts reach the channel from inside a thread too:
+    // an incident is the case the thread-broadcast restriction exists to allow.
+    const allowBroadcastExpansion =
+      artifactBroadcastsToChannel || !isReply || allowThreadBroadcastMentions;
+    const specialMentions = allowBroadcastExpansion
+      ? extractSpecialMentions(contentForMentions)
+      : { hasChannel: false, hasHere: false };
+    // Reuses the @channel pipeline wholesale: mention-tier notification
+    // filtering, per-user activities, and thread-aware action URLs all follow.
+    const mentionType =
+      artifactBroadcastsToChannel || specialMentions.hasChannel
+        ? '@channel'
+        : specialMentions.hasHere
+          ? '@here'
+          : undefined;
 
-    if (channel?.projectId && !isDMChannel) {
+    if (!isDMChannel) {
       // Emit a synthetic MESSAGE/SENT activity event.
       // This flows through activityTrackingService -> nudge framework.
       // Fires for both parent messages and replies to enable link-paste detection.
@@ -443,7 +530,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           messageId,
           conversationId,
           channelId,
-          projectId: channel.projectId,
           senderId,
         },
       });
@@ -478,7 +564,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
               originalMessageId,
               conversationId,
               channelId,
-              projectId: channel.projectId,
               senderId,
             },
           });
@@ -547,7 +632,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const mentionedUsers = await extractAllUsersForNotification(
       contentForMentions,
       workspaceId,
-      isReply && !allowThreadBroadcastMentions ? undefined : channelId
+      allowBroadcastExpansion ? channelId : undefined,
+      artifactBroadcastsToChannel
     );
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
 
@@ -576,8 +662,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
-        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-        ...(channelProject?.name ? { projectName: channelProject.name } : {}),
         ...(attachments.length > 0 && {
           attachments: attachments.map(att => ({
             attachmentId: att.id,
@@ -606,8 +690,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       senderName,
       channelId,
       channelName: channel?.name ?? channelId,
-      ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-      ...(channelProject?.name ? { projectName: channelProject.name } : {}),
       mentionedUserIds: nonAppMentionedUserIds,
     };
 
@@ -848,6 +930,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       mentionType,
       finalMentionedUserIds,
       conversation.initialMessageId !== messageId,
+      // Artifacts render their own activity card, so they claim a distinct
+      // action and skip audience classification — the audience is the command's
+      // by definition, not something to infer.
+      artifactBroadcastsToChannel
+        ? { actorAction: 'slash_command_artifact', classification: ActivityClassification.FYI }
+        : undefined,
     );
 
     // Handle bot mentions in channels - trigger bot execution when @mentioned
@@ -1906,6 +1994,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     mentionType: '@channel' | '@here' | undefined,
     mentionedUserIds: string[] = [],
     isThreadActivity: boolean = false,
+    /**
+     * Lets a message that reaches the channel through this path render its own
+     * activity card (slash-command artifacts) instead of the generic group
+     * mention. Omitted for ordinary @channel/@here mentions.
+     */
+    activityOverride?: { actorAction: string; classification: ActivityClassification },
   ): Promise<void> {
     if (!mentionType) {
       return;
@@ -1924,15 +2018,18 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         id: uuidv4(),
         userId,
         actorId: senderId,
-        actorAction: 'group_mention' as const,
+        actorAction: activityOverride?.actorAction ?? ('group_mention' as const),
         // Dual-write: populate both old and new columns
         actionSource: 'message' as const,
         actionSourceId: messageId,
         messageId: messageId,
         channelId,
         isThreadActivity,
-        classification: ActivityClassification.PENDING,
-        classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE,
+        classification: activityOverride?.classification ?? ActivityClassification.PENDING,
+        // Audience classification only applies to inferred broadcast audiences.
+        ...(activityOverride
+          ? {}
+          : { classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE }),
       }));
       await activityService.createActivities(activities);
     };
@@ -1954,6 +2051,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
     const previousValue = job.previousValue as MessagePreviousValue | undefined;
+    if (!previousValue || parseSlashCommandArtifactMessage(previousValue.content)) {
+      await syncMessageArtifact(db, messageId);
+    }
     // Emit MESSAGE.DELETED to trigger cleanup of surface links and nudges.
     // We need conversation/channel/project context; fetch what's still available.
     try {
@@ -1965,12 +2065,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
 
       const channelId = conversation?.channelId;
-      const channel = channelId
-        ? await db.channel.findUnique({
-            where: { id: channelId },
-            select: { projectId: true },
-          })
-        : null;
 
       void activityTrackingService.saveActivityEvent({
         user_id: this.ctx.userID,
@@ -1985,7 +2079,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           messageId,
           conversationId: conversation?.conversationId,
           channelId,
-          projectId: channel?.projectId,
         },
       });
     } catch (error) {
@@ -2137,7 +2230,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     });
     if (!currentMessage) return;
 
+    const touchesArtifact =
+      !!parseSlashCommandArtifactMessage(currentMessage.content) ||
+      !!parseSlashCommandArtifactMessage(previousValue.content);
+
     if (!previousValue.isDeleted && currentMessage.isDeleted) {
+      if (touchesArtifact) await syncMessageArtifact(db, previousValue.messageId);
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_DELETED,
         previousValue.messageId,
@@ -2146,6 +2244,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         previousValue.isThreadReply,
       );
     } else if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
+      if (touchesArtifact) await syncMessageArtifact(db, previousValue.messageId);
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_EDITED,
         previousValue.messageId,

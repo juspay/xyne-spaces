@@ -1,4 +1,5 @@
 import { apiInstance } from '../clients/apiClient';
+import type { SdlcCallLink } from '@xyne/shared';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
 import { CallType, MeetingStatus, type HostControls, CalendarVisibility } from '@xyne/shared';
@@ -14,6 +15,8 @@ export interface InitiateCallRequest {
   callType: CallType;
   isHeadless?: boolean; // For recordings without a specific channel
   conversationId?: string; // Optional: for thread-initiated calls
+  artifactMessageId?: string; // Exact slash-command artifact that owns this call
+  sdlcLink?: SdlcCallLink; // Optional: SDLC entity to link the call + its conversation to
 }
 
 export interface InitiateCallResponse {
@@ -225,6 +228,8 @@ export class CallService {
         callType: data.callType,
         isHeadless: data.isHeadless,
         ...(data.conversationId && { conversationId: data.conversationId }),
+        ...(data.artifactMessageId && { artifactMessageId: data.artifactMessageId }),
+        ...(data.sdlcLink && { sdlcLink: data.sdlcLink }),
       });
 
       return response.data;
@@ -324,6 +329,44 @@ export class CallService {
 
       // Re-throw unknown errors
       throw error;
+    }
+  }
+  /**
+   * Record the host's end-of-call transcript disposition (host only).
+   * Throws on failure so the caller can handle it. The discard path is
+   * safety-critical: the backend defaults to KEEP if this never arrives, which
+   * would persist a transcript the host explicitly discarded — so callers must
+   * confirm success before ending the call rather than firing-and-forgetting.
+   */
+  async setTranscriptDisposition(callId: string, disposition: 'keep' | 'discard'): Promise<void> {
+    try {
+      await apiInstance.post(`/calls/${callId}/transcript-disposition`, { disposition });
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Mirror the host's mid-call transcription on/off state into room metadata so
+   * participants who join later stay in sync. Best-effort: present participants
+   * already got the live data-channel toggle, so a failure here only affects
+   * late-joiner sync.
+   */
+  async setTranscriptionState(callId: string, enabled: boolean): Promise<void> {
+    try {
+      await apiInstance.patch(`/calls/${callId}/transcription-state`, { enabled });
+    } catch {
+      // Swallow: late-joiner sync is best-effort.
     }
   }
   /**

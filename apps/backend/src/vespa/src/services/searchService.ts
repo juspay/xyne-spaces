@@ -26,6 +26,7 @@ import {
 } from '../utils/responseProcessor';
 import { executeFuzzyFallback } from '../utils/fallback';
 import { highlightText } from '../utils/highlight';
+import { config as appConfig } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
@@ -378,12 +379,18 @@ export class SearchService {
       // Fetch personalization weights if using personalized rank profile
       let channelWeights = {};
       let userWeights = {};
+      // For mail's involvement rank terms (from/to hold email addresses)
+      let personalizationUserEmail: string | undefined;
 
       if (rankProfile === RankProfile.personalizedRank) {
         try {
           const userDoc = await this.vespa.getDocument({docId:userId,schema:userSchema,namespace:config.namespace});
           channelWeights = userDoc?.fields?.channelWeights || {};
           userWeights = userDoc?.fields?.userWeights || {};
+          personalizationUserEmail = userDoc?.fields?.email || undefined;
+          if (!personalizationUserEmail) {
+            this.logger.warn(`No email on Vespa user doc ${userId}; mail involvement rank terms skipped`);
+          }
           this.logger.info(`Fetched personalization weights for user ${userId}`);
         } catch (error) {
           this.logger.warn(
@@ -414,6 +421,8 @@ export class SearchService {
           wsId,
           sort,
           isExactMatch,
+          rankProfile,
+          personalizationUserEmail,
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
@@ -465,12 +474,15 @@ export class SearchService {
         false,
         {}
       );
-      // When enabled, effectiveWorkspaceId is passed to YqlBuilder so the top-level
-      // `workspaceId contains @ws` guard scopes the `user`/`transcript` branches to the
-      // caller's workspace. The flag is controlled remotely via Superposition.
+      // Passes effectiveWorkspaceId to YqlBuilder, so the top-level `workspaceId contains
+      // @ws` guard bounds the `user`/`transcript` branches to the caller's workspace.
+      // Those two branches carry no per-app guard of their own, so this is the only thing
+      // scoping them; it defaults on and the Superposition flag exists to turn it off, not
+      // to turn it on. A document ingested without a workspaceId will not match while this
+      // is enabled, so the schema has to be backfilled before the results are complete.
       const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
         'enableWorkSpaceFiltering',
-        false,
+        true,
         {}
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
@@ -491,17 +503,29 @@ export class SearchService {
        // Filter by nativerank if enabled
        // Skip nativeRank filtering for filter-only searches (no query text)
        // nativeRank is based on text matching - meaningless without a query
+      let textMatchRescuedIds = new Set<string>();
        if (nativeRankThreshold > 0 && searchQuery?.trim()) {
-        response = filterByNativeRank(response, nativeRankThreshold , this.logger);
+        const filtered = filterByNativeRank(response, nativeRankThreshold , this.logger, {
+          query: searchQuery,
+        });
+        response = filtered.response;
+        textMatchRescuedIds = filtered.rescuedIds;
       }
 
       const exactResultCount = response.root?.children?.length || 0;
       const expectedCount = limit - offset;
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
-      
+
+      // Hits kept only by the ticket text-match rescue scored below the nativeRank threshold,
+      // so they are not evidence that the exact pass did well. Counting them would push
+      // exactResultCount over expectedCount and silently skip the 3-gram fuzzy fallback that
+      // recovers typo and prefix queries. Clamped because root.children are group nodes when
+      // grouping is on, while rescued ids are collected from the hits nested inside them.
+      const strongExactResultCount = Math.max(0, exactResultCount - textMatchRescuedIds.size);
+
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
       const isFileSearch = app.some(a => a.toLowerCase() === 'file');
-      const oldFallback = exactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
+      const oldFallback = strongExactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
 
       const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
         'vespa_fallback_score_threshold',
@@ -513,8 +537,13 @@ export class SearchService {
         5,
         {}
       );
+      // Same reasoning as strongExactResultCount: a rescued hit can carry a passable
+      // relevance from the vector half of the profile despite a zero nativeRank, so it must
+      // not count toward "we already have enough good results".
       const goodResults = response.root?.children?.filter(
-        child => (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
+        child =>
+          !textMatchRescuedIds.has(String(child.id ?? '')) &&
+          (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
       ) ?? [];
 
       const newFallback =
@@ -573,7 +602,40 @@ export class SearchService {
         });
       }
 
-       if (process.env.NODE_ENV === 'development') {
+      
+      if (appConfig.deskTicketDebug) {
+        const hitIdentities = response.root?.children?.filter((child: any) =>
+          !String(child.id ?? '').startsWith('group:')
+        ).map((child: any) => {
+          const [, , hitSchema, , hitDocId] = String(child.id ?? '').split(':');
+        
+          const matchFeatures = (child.fields?.matchfeatures ?? {}) as Record<string, unknown>;
+          const scores = Object.fromEntries(
+            Object.entries(matchFeatures).filter(([, v]) => typeof v === 'number')
+          );
+          return {
+            docId: child.fields?.docId ?? hitDocId,
+            schema: hitSchema ?? child.fields?.sddocname,
+            xyneId: child.fields?.xyneId,
+            threadId: child.fields?.threadId,
+            relevance: child.relevance,
+            scores,
+          };
+        }) || [];
+
+        this.logger.info(
+          `[DESK_DEBUG_SEARCH] ${JSON.stringify({
+            searchId,
+            userId,
+            apps: app.join(','),
+            rankProfile,
+            hitCount: hitIdentities.length,
+            hits: hitIdentities,
+          })}`
+        );
+      }
+
+      if (process.env.NODE_ENV === 'development') {
         // Log only specific fields
         const simplifiedResults = response.root?.children?.map((child: any) => ({
           id: child.fields?.docId,

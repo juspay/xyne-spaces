@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
 import { IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
 import {logger} from '@/utils/logger';
-import { AttachmentEntityType, ChannelScopeType, UserType } from '@xyne/shared';
+import { AttachmentEntityType, CallType, ChannelScopeType, UserType } from '@xyne/shared';
 
 export interface AnalyticsFilters {
   timeRange?: string; // 'today', '7d', '30d', '90d', 'custom'
@@ -14,6 +14,18 @@ export interface AnalyticsFilters {
   endDate?: string; // ISO date string for custom range end
   repoName?: string; // Repository filter
   userId?: string; // User filter - 'all' or specific user ID
+}
+
+// Calls and recordings are the same table, split by callType (HEADLESS = recording)
+export interface CallsBreakdown {
+  calls: number;      // Regular calls (every callType except HEADLESS)
+  recordings: number; // Recordings (HEADLESS)
+}
+
+export interface CallsTimeSeriesPoint {
+  date: string;
+  calls: number;      // Call count for the bucket (recordings excluded)
+  recordings: number; // Recording count for the bucket
 }
 
 // New optimized types for execution stats
@@ -114,6 +126,8 @@ type FilteredMessage = {
   messageId: string;
   senderId: string;
   conversationId: string;
+  channelId: string;
+  channelScopeType: string;
   createdAt: Date;
 };
 const MINUTE_MS = 60 * 1000;
@@ -252,6 +266,8 @@ export class AnalyticsRepository {
         m."messageId", 
         m."senderId", 
         m."conversationId", 
+        c."channelId",
+        ch."scopeType" AS "channelScopeType",
         m."createdAt"
       FROM "public"."messages_without_content" m
       INNER JOIN "public"."conversations" c 
@@ -1305,7 +1321,8 @@ export class AnalyticsRepository {
     const scopedWorkspaceId = this.requireWorkspaceId(workspaceId);
 
     // 1. Get distinct user IDs from tickets with their counts
-    const ticketCreators = await this.prisma.ticket.groupBy({
+    // Workspace-wide: the dropdown lists every ticket author, not the admin's reachable set.
+    const ticketCreators = await withWorkspaceScope(async () => await this.prisma.ticket.groupBy({
       by: ['createdBy'],
       where: {
         workspaceId: scopedWorkspaceId
@@ -1313,7 +1330,7 @@ export class AnalyticsRepository {
       _count: {
         createdBy: true
       }
-    });
+    }));
 
     // Filter out null values and extract user IDs
     const userIds = ticketCreators
@@ -1516,7 +1533,7 @@ export class AnalyticsRepository {
     // Get all user IDs from different activity types using Promise.all for parallel execution
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
       // Users who posted reactions
-      withWorkspaceScope(() => this.prisma.reaction.findMany({
+      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
         where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true },
         distinct: ['userId'],
@@ -1529,29 +1546,30 @@ export class AnalyticsRepository {
         distinct: ['createdBy'],
       }),
 
-      // Users who created tickets
-      this.prisma.ticket.findMany({
+      // Users who created tickets. Workspace-wide metric; TicketsACL is now per-user.
+      withWorkspaceScope(async () => await this.prisma.ticket.findMany({
         where: { createdAt: dateCondition, workspaceId },
         select: { createdBy: true},
         distinct: ['createdBy'],
-      }),
+      })),
 
       // Users who update ticket_activities
-      this.prisma.ticketActivity.findMany({
+      withWorkspaceScope(async () => await this.prisma.ticketActivity.findMany({
         where: { timestamp: dateCondition, ticket: { workspaceId } },
         select: { updatedBy: true},
         distinct: ['updatedBy'],
-      }),
+      })),
 
-      // Users who created canvas
-      this.prisma.canvas.findMany({
+      // Users who created canvas. Workspace-wide metric: CanvasesACL is now a per-user
+      // clause and this query carries no workspaceId of its own. Same as the sibling below.
+      withWorkspaceScope(async () => await this.prisma.canvas.findMany({
         where: { createdAt: dateCondition, createdBy: { in: userIds } },
         select: { createdBy: true},
         distinct: ['createdBy'],
-      }),
+      })),
 
       // Users who edited canvas
-      withWorkspaceScope(() => this.prisma.canvasParticipant.findMany({
+      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
         where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true},
         distinct: ['userId'],
@@ -1682,16 +1700,22 @@ export class AnalyticsRepository {
 
     if (validMessageIds.length === 0) return 0;
 
-    const filesSharedCount = await this.prisma.messageAttachment.count({
-      where: {
-        entityId: { in: validMessageIds },
-        entityType: AttachmentEntityType.CHAT,
-        workspaceId,
-        createdBy: { notIn: ['Unified Alerts', 'system'] }
-      }
-    });
+    const [{ count }] = await this.prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS count
+      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
+    `);
 
-    return filesSharedCount;
+    return count;
+  }
+
+  private chatAttachmentsFrom(messageIds: string[], workspaceId: string): Prisma.Sql {
+    return Prisma.sql`
+      FROM "public"."message_attachments" a
+      WHERE a."entityId" = ANY(${messageIds}::text[])
+        AND a."entityType" = ${AttachmentEntityType.CHAT}
+        AND a."workspaceId" = ${workspaceId}
+        AND a."createdBy" NOT IN ('Unified Alerts', 'system')
+    `;
   }
 
   /**
@@ -1704,25 +1728,9 @@ export class AnalyticsRepository {
     const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter ? dateFilter : { gte: dateFilter };
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Use centralized helper for filtering
+    // Use centralized helper for filtering. Channel + scopeType ride along on each
+    // message, so no per-conversation follow-up query (and no unbounded IN list).
     const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-
-    // Get all channelIds from valid messages
-    const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    const conversations = await withWorkspaceScope(() => this.prisma.conversation.findMany({
-      where: { conversationId: { in: conversationIds } },
-      select: { conversationId: true, channelId: true }
-    }));
-
-    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    const channels = await this.prisma.channel.findMany({
-      where: { id: { in: channelIds }, workspaceId },
-      select: { id: true, scopeType: true }
-    });
-
-    // Create lookup maps for efficient processing
-    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
-    const channelToScopeMap = new Map(channels.map(c => [c.id, c.scopeType]));
 
     // Generate complete time buckets for the date range based on groupBy
     const timeBuckets = groupBy === 'hour' 
@@ -1737,10 +1745,8 @@ export class AnalyticsRepository {
 
     // Aggregate valid messages
     validMessages.forEach(message => {
-      const channelId = conversationToChannelMap.get(message.conversationId);
-      if (!channelId) return;
       const dateKey = this.getBucketKey(message.createdAt, groupBy);
-      const scopeType = channelToScopeMap.get(channelId);
+      const scopeType = message.channelScopeType;
       if (bucketData.has(dateKey)) {
         const bucket = bucketData.get(dateKey)!;
         bucket.total += 1;
@@ -1838,7 +1844,7 @@ export class AnalyticsRepository {
 
     // Get other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
-      withWorkspaceScope(() => this.prisma.reaction.findMany({
+      withWorkspaceScope(async () => await this.prisma.reaction.findMany({
         where: { createdAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, createdAt: true },
       })),
@@ -1847,26 +1853,26 @@ export class AnalyticsRepository {
         select: { createdBy: true, createdAt: true },
       }),
 
-      // Users who created tickets
-      this.prisma.ticket.findMany({
+      // Users who created tickets. Workspace-wide metric; TicketsACL is now per-user.
+      withWorkspaceScope(async () => await this.prisma.ticket.findMany({
         where: { createdAt: dateCondition, workspaceId },
         select: { createdBy: true, createdAt: true },
-      }),
+      })),
 
       // Users who update ticket_activities
-      this.prisma.ticketActivity.findMany({
+      withWorkspaceScope(async () => await this.prisma.ticketActivity.findMany({
         where: { timestamp: dateCondition, ticket: { workspaceId } },
         select: { updatedBy: true, timestamp: true },
-      }),
+      })),
 
-      // Users who created canvas
-      this.prisma.canvas.findMany({
+      // Users who created canvas. withWorkspaceScope for the same reason as getActiveUsers.
+      withWorkspaceScope(async () => await this.prisma.canvas.findMany({
         where: { createdAt: dateCondition, createdBy: { in: userIds } },
         select: { createdBy: true, createdAt: true },
-      }),
+      })),
 
       // Users who edited canvas
-      withWorkspaceScope(() => this.prisma.canvasParticipant.findMany({
+      withWorkspaceScope(async () => await this.prisma.canvasParticipant.findMany({
         where: { updatedAt: dateCondition, userId: { in: userIds } },
         select: { userId: true, updatedAt: true },
       }))
@@ -2011,33 +2017,16 @@ export class AnalyticsRepository {
     if (validMessages.length === 0) {
       return 0;
     }
-    // Get unique conversationIds
-    const validConversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    // Get channels for valid conversations
-    const conversations = await withWorkspaceScope(() => this.prisma.conversation.findMany({
-      where: {
-        conversationId: { in: validConversationIds }
-      },
-      select: { conversationId: true, channelId: true }
-    }));
-    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    if (channelIds.length === 0) {
-      return 0;
-    }
 
-    // Get channels with DEFAULT scope type
-    const channels = await this.prisma.channel.findMany({
-      where: {
-        id: { in: channelIds },
-        scopeType: ChannelScopeType.DEFAULT,
-        workspaceId
-      },
-      select: {
-        id: true
-      }
-    });
+    // Count the distinct DEFAULT-scope channels the messages belong to. The scope
+    // rides along on each message, so no conversation/channel lookups by id list.
+    const activeChannelIds = new Set(
+      validMessages
+        .filter(m => m.channelScopeType === ChannelScopeType.DEFAULT)
+        .map(m => m.channelId)
+    );
 
-    return channels.length;
+    return activeChannelIds.size;
   }
 
   /**
@@ -2055,22 +2044,9 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Use centralized helper for filtering
+    // Use centralized helper for filtering. Channel + scopeType ride along on each
+    // message, so no per-conversation follow-up query (and no unbounded IN list).
     const validMessages = await this.getFilteredMessages(dateCondition, workspaceId);
-
-    // Get all channelIds from valid messages
-    const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
-    const conversations = await withWorkspaceScope(() => this.prisma.conversation.findMany({
-      where: { conversationId: { in: conversationIds } },
-      select: { conversationId: true, channelId: true }
-    }));
-    const conversationToChannelMap = new Map(conversations.map(c => [c.conversationId, c.channelId]));
-    const channelIds = Array.from(new Set(conversations.map(c => c.channelId)));
-    const channels = await this.prisma.channel.findMany({
-      where: { id: { in: channelIds }, scopeType: ChannelScopeType.DEFAULT, workspaceId },
-      select: { id: true }
-    });
-    const defaultChannelIds = new Set(channels.map(c => c.id));
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
@@ -2085,11 +2061,10 @@ export class AnalyticsRepository {
 
     // Group valid channels by time buckets based on valid message activity
     validMessages.forEach(message => {
-      const channelId = conversationToChannelMap.get(message.conversationId);
-      if (!channelId || !defaultChannelIds.has(channelId)) return;
+      if (message.channelScopeType !== ChannelScopeType.DEFAULT) return;
       const bucketKey = this.getBucketKey(message.createdAt, groupBy);
       if (bucketData.has(bucketKey)) {
-        bucketData.get(bucketKey)!.add(channelId);
+        bucketData.get(bucketKey)!.add(message.channelId);
       }
     });
 
@@ -2262,13 +2237,14 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Count tickets created in the selected time period by users only
-    const ticketsCount = await this.prisma.ticket.count({
+    // Workspace-wide metric, not "tickets the caller can reach".
+    const ticketsCount = await withWorkspaceScope(async () => await this.prisma.ticket.count({
       where: {
         createdAt: dateCondition,
         workspaceId,
         createdBy: { in: userIds }
       }
-    });
+    }));
 
     return ticketsCount;
   }
@@ -2292,14 +2268,15 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Get tickets created by real users only
-    const tickets = await this.prisma.ticket.findMany({
+    // Workspace-wide metric, as in the count above.
+    const tickets = await withWorkspaceScope(async () => await this.prisma.ticket.findMany({
       where: {
         createdAt: dateCondition,
         workspaceId,
         createdBy: { in: userIds }
       },
       select: { createdAt: true },
-    });
+    }));
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
@@ -2344,12 +2321,13 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Count canvases edited in the selected time period by real users only
-    const canvasesCount = await this.prisma.canvas.count({
+    // withWorkspaceScope: a workspace-wide metric, not "canvases the caller can reach".
+    const canvasesCount = await withWorkspaceScope(async () => await this.prisma.canvas.count({
       where: {
         lastEditedAt: dateCondition,
         createdBy: { in: userIds }
       }
-    });
+    }));
 
     return canvasesCount;
   }
@@ -2373,13 +2351,14 @@ export class AnalyticsRepository {
     const userIds = await this.getUsersId(workspaceId);
 
     // Get canvases created by real users only
-    const canvases = await this.prisma.canvas.findMany({
+    // withWorkspaceScope: workspace-wide metric, as in getNumberOfCanvases.
+    const canvases = await withWorkspaceScope(async () => await this.prisma.canvas.findMany({
       where: {
         lastEditedAt: dateCondition,
         createdBy: { in: userIds }
       },
       select: { lastEditedAt: true },
-    });
+    }));
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
@@ -2410,10 +2389,14 @@ export class AnalyticsRepository {
   }
 
   /**
-   * Get number of calls
-   * Counts the number of calls started in the selected time period
+   * Get the calls that lasted more than 60 seconds in the selected time period
+   * Calls and recordings live in the same table - HEADLESS calls are note taker recordings,
+   * every other call type is a regular call
    */
-  async getNumberOfCalls(filters: AnalyticsFilters): Promise<number> {
+  private async getValidCalls(filters: AnalyticsFilters): Promise<{
+    validCalls: { startedAt: Date; isRecording: boolean }[];
+    dateCondition: Date | { gte: Date; lte?: Date };
+  }> {
     const dateFilter = getDateFilter(filters);
     const workspaceId = this.requireWorkspaceId(filters.workspaceId);
     const userIds = await this.getUsersId(workspaceId);
@@ -2424,76 +2407,74 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Get all calls in the date range
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         ...this.getCallWorkspaceFilter(workspaceId, userIds)
       },
       select: {
         startedAt: true,
-        endedAt: true
+        endedAt: true,
+        callType: true
       }
     }));
 
     // Filter for calls that lasted more than 60 seconds
-    const validCalls = calls.filter(call => {
-      if (!call.endedAt) return false;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      return duration > 60;
-    });
+    const validCalls = calls
+      .filter(call => {
+        if (!call.endedAt) return false;
+        const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
+        return duration > 60;
+      })
+      .map(call => ({
+        startedAt: call.startedAt,
+        isRecording: call.callType === CallType.HEADLESS
+      }));
 
-    return validCalls.length;
+    return { validCalls, dateCondition };
+  }
+
+  /**
+   * Get number of calls and recordings
+   * Counts the calls started in the selected time period, split into regular calls
+   * and note taker recordings
+   */
+  async getNumberOfCalls(filters: AnalyticsFilters): Promise<CallsBreakdown> {
+    const { validCalls } = await this.getValidCalls(filters);
+
+    return {
+      calls: validCalls.filter(call => !call.isRecording).length,
+      recordings: validCalls.filter(call => call.isRecording).length
+    };
   }
 
   /**
    * Get number of calls time-series data
+   * Each point carries the call and recording counts for its bucket
    */
-  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<{ date: string; value: number }[]> {
-    const dateFilter = getDateFilter(filters);
-    const workspaceId = this.requireWorkspaceId(filters.workspaceId);
-    const userIds = await this.getUsersId(workspaceId);
-
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
+  async getNumberOfCallsTimeSeries(filters: AnalyticsFilters, groupBy: 'day' | 'hour'): Promise<CallsTimeSeriesPoint[]> {
+    const { validCalls, dateCondition } = await this.getValidCalls(filters);
 
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
-
-    // Get calls
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
-      where: {
-        startedAt: dateCondition,
-        ...this.getCallWorkspaceFilter(workspaceId, userIds)
-      },
-      select: {
-        startedAt: true,
-        endedAt: true
-      }
-    }));
-
-    // Filter for calls that lasted more than 60 seconds
-    const validCalls = calls.filter(call => {
-      if (!call.endedAt) return false;
-      const duration = (call.endedAt.getTime() - call.startedAt.getTime()) / 1000;
-      return duration > 60;
-    });
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'
       ? this.generateHourlyTimeBuckets(startDate, endDate)
       : this.generateDailyTimeBuckets(startDate, endDate);
-    const bucketData = new Map<string, number>();
+    const callBuckets = new Map<string, number>();
+    const recordingBuckets = new Map<string, number>();
 
     // Initialize buckets
     timeBuckets.forEach(bucket => {
-      bucketData.set(bucket, 0);
+      callBuckets.set(bucket, 0);
+      recordingBuckets.set(bucket, 0);
     });
 
     // Group calls by time buckets
     validCalls.forEach(call => {
       const bucketKey = this.getBucketKey(call.startedAt, groupBy);
+      const bucketData = call.isRecording ? recordingBuckets : callBuckets;
       if (bucketData.has(bucketKey)) {
         bucketData.set(bucketKey, bucketData.get(bucketKey)! + 1);
       }
@@ -2502,7 +2483,8 @@ export class AnalyticsRepository {
     // Convert to array format
     return timeBuckets.map(bucketKey => ({
       date: bucketKey,
-      value: bucketData.get(bucketKey) || 0
+      calls: callBuckets.get(bucketKey) || 0,
+      recordings: recordingBuckets.get(bucketKey) || 0
     })).sort((a, b) => a.date.localeCompare(b.date));
   }
 
@@ -2521,7 +2503,7 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Get calls that have both start and end times
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         endedAt: { not: null },
@@ -2565,7 +2547,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Get calls that have both start and end times
-    const calls = await withWorkspaceScope(() => this.prisma.call.findMany({
+    const calls = await withWorkspaceScope(async () => await this.prisma.call.findMany({
       where: {
         startedAt: dateCondition,
         endedAt: { not: null },
@@ -2681,15 +2663,10 @@ export class AnalyticsRepository {
     const validMessageIds = validMessages.map(m => m.messageId);
 
     // Get file attachments for valid (non-migrated) messages only
-    const attachments = validMessageIds.length === 0 ? [] : await this.prisma.messageAttachment.findMany({
-      where: {
-        entityId: { in: validMessageIds },
-        entityType: AttachmentEntityType.CHAT,
-        workspaceId,
-        createdBy: { notIn: ['Unified Alerts', 'system'] }
-      },
-      select: { createdAt: true },
-    });
+    const attachments = validMessageIds.length === 0 ? [] : await this.prisma.$queryRaw<{ createdAt: Date }[]>(Prisma.sql`
+      SELECT a."createdAt"
+      ${this.chatAttachmentsFrom(validMessageIds, workspaceId)}
+    `);
 
     // Generate time buckets based on groupBy
     const timeBuckets = groupBy === 'hour'

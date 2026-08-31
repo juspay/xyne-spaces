@@ -12,6 +12,7 @@
  */
 
 import { Agent } from "undici";
+import { errMsg } from "../lib/errors.js";
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { baseRecordId } from "./userMemoryBatcher.js";
 import { CONFIG } from "../config.js";
@@ -71,12 +72,37 @@ interface SourceRef {
   ts: string;
 }
 
+/**
+ * Named retain strategy for restoring an archive of ALREADY-EXTRACTED facts.
+ *
+ * `retain_extraction_mode: "chunks"` makes Hindsight skip the LLM entirely and
+ * store each chunk as-is (hindsight `_extract_facts_chunks`) — no fact
+ * extraction, no entity extraction. That is exactly right for re-importing
+ * memories Hindsight itself produced: re-extracting them would both burn the
+ * rate-limited extraction LLM and let the wording drift from what the user
+ * already reviewed and approved.
+ *
+ * `retain_chunk_size` is pinned above the import route's per-record character
+ * cap so one archived record stays ONE memory instead of being split.
+ */
+export const VERBATIM_IMPORT_STRATEGY = "xyne-verbatim-import";
+const TWIN_RETAIN_STRATEGIES: Record<string, Record<string, unknown>> = {
+  [VERBATIM_IMPORT_STRATEGY]: {
+    retain_extraction_mode: "chunks",
+    retain_chunk_size: 8_000,
+  },
+};
+
 /** Ensure the twin bank exists AND has observations enabled (Hindsight's
- *  evolution/temporal tracking). Cached per-pod in the provider, so calling
- *  before each retain is cheap. Best-effort — retain still works if it fails. */
+ *  evolution/temporal tracking) plus the verbatim-import strategy registered.
+ *  Cached per-pod in the provider, so calling before each retain is cheap.
+ *  Best-effort — retain still works if it fails. */
 export async function ensureTwinBank(): Promise<void> {
   try {
-    await memory.ensureBank(TWIN_BANK_ID, { enableObservations: true });
+    await memory.ensureBank(TWIN_BANK_ID, {
+      enableObservations: true,
+      retainStrategies: TWIN_RETAIN_STRATEGIES,
+    });
   } catch {
     /* non-fatal */
   }
@@ -181,7 +207,7 @@ export async function distillUserMemoryViaClaw(
       // batches. Retry with backoff; only give up after the last attempt.
       const isLast = attempt >= DISTILL_CLIENT_ATTEMPTS;
       logger.error("[user-memory-curator-client] call failed", {
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
         name: err instanceof Error ? err.name : "unknown",
         cause:
           err instanceof Error && (err as { cause?: unknown }).cause
@@ -197,7 +223,7 @@ export async function distillUserMemoryViaClaw(
         willRetry: !isLast,
       });
       if (!isLast) {
-        prevError = err instanceof Error ? err.message : String(err);
+        prevError = errMsg(err);
         await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
@@ -240,7 +266,7 @@ async function fetchExistingUserMemories(userId: string): Promise<ExistingUserMe
   } catch (err) {
     logger.warn("[user-memory-curator-client] fetchExistingUserMemories failed — curator will create-only", {
       userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }
@@ -430,7 +456,7 @@ export async function curateAndPersistBatch(args: {
   for (const row of writable) {
     if (autoApproveEnabled && row.signalScore >= minScore) {
       try {
-        const content = row.text.slice(0, 1500);
+        const content = row.text;
         const tags = [
           `user:${userId}`,
           `subsystem:${row.subsystem}`,
@@ -464,7 +490,7 @@ export async function curateAndPersistBatch(args: {
             source,
             subsystem: row.subsystem,
             signalScore: row.signalScore,
-            err: err instanceof Error ? err.message : String(err),
+            err: errMsg(err),
           },
         );
       }
@@ -571,7 +597,7 @@ export async function learnFromTwinReply(args: {
     logger.warn("[user-memory-curator-client] learnFromTwinReply failed", {
       userId: args.userId,
       conversationId: args.conversationId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }

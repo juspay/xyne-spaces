@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
-import { ChevronRight, Layers, Search } from 'lucide-react';
+import { ChevronRight, LayerTwo as Layers, SearchDefault as Search } from '@xyne/icons';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cn } from '../../../utils/classNames';

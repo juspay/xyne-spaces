@@ -20,6 +20,7 @@ import type {
   MemoryGraph,
   MemoryGraphEdge,
   MemoryGraphNode,
+  MemoryHistoryEntry,
   MemoryProvider,
   PaginatedMemories,
   ProviderCapabilities,
@@ -48,6 +49,9 @@ interface HindsightRetainItem {
   /** Per-item observation scoping (see RetainItem.observationScopes). A list of
    *  tag-lists → one consolidation pass per inner list. */
   observation_scopes?: string[][];
+  /** Named strategy registered on the bank; selects per-item config overrides. */
+  strategy?: string;
+  entities?: Array<{ text: string; type?: string }>;
 }
 
 interface HindsightRetainResponse {
@@ -126,7 +130,15 @@ export class HindsightProvider implements MemoryProvider {
   private readonly baseUrl: string;
   private readonly tenant: string;
   private readonly headers: Record<string, string>;
-  private readonly bankCache = new Set<string>();
+  /** bankId → the tuning we last applied in THIS process, serialized. Keyed on
+   *  the tuning (not just the id) because several call sites ensure the same
+   *  bank with DIFFERENT opts — the twin passes enableObservations + strategies,
+   *  generic callers pass neither. A plain id-keyed cache let whichever caller
+   *  ran first in a pod decide the bank's config and silently pinned it, so the
+   *  twin bank could sit on enable_observations:false with no strategies
+   *  registered. Re-tuning when the desired config differs fixes that and makes
+   *  newly-added settings take effect without hand-patching the bank. */
+  private readonly bankCache = new Map<string, string>();
 
   constructor(config: HindsightProviderConfig) {
     this.baseUrl = config.url.replace(/\/+$/, "");
@@ -144,7 +156,8 @@ export class HindsightProvider implements MemoryProvider {
 
   async ensureBank(bankId: string, opts: EnsureBankOpts = {}): Promise<void> {
     if (!this.enabled) return;
-    if (this.bankCache.has(bankId)) return;
+    const tuningKey = JSON.stringify(this.desiredTuning(opts));
+    if (this.bankCache.get(bankId) === tuningKey) return;
 
     try {
       // NOTE: 0.6.2 answers 405 to GET /banks/:id, so the exists-probe always
@@ -157,7 +170,7 @@ export class HindsightProvider implements MemoryProvider {
       if (res.ok) {
         // Already exists — make sure tuning matches what we want, then cache.
         await this.applyBankTuning(bankId, opts);
-        this.bankCache.add(bankId);
+        this.bankCache.set(bankId, tuningKey);
         return;
       }
       const createRes = await fetch(`${this.baseUrl}/v1/${this.tenant}/banks`, {
@@ -168,7 +181,7 @@ export class HindsightProvider implements MemoryProvider {
       });
       if (createRes.ok || createRes.status === 409) {
         await this.applyBankTuning(bankId, opts);
-        this.bankCache.add(bankId);
+        this.bankCache.set(bankId, tuningKey);
       }
     } catch (err) {
       log.warn(`[hindsight] ensureBank(${bankId}) failed: ${errMsg(err)}`);
@@ -194,14 +207,20 @@ export class HindsightProvider implements MemoryProvider {
    * set) and, when the bank is unmaterialized, fires a tiny warmup retain to
    * force materialization, then re-applies. Best-effort — never throws.
    */
-  private async applyBankTuning(bankId: string, opts: EnsureBankOpts = {}): Promise<void> {
-    const desired: Record<string, unknown> = {
+  /** The bank config this caller wants. Also the cache key — see bankCache. */
+  private desiredTuning(opts: EnsureBankOpts): Record<string, unknown> {
+    return {
       // Per-bank: the Digital Twin opts INTO observations (evolution tracking),
       // scoped per-user via observationScopes; every other bank stays OFF.
       enable_observations: opts.enableObservations === true,
       retain_extraction_mode: "verbose",
       ...(opts.retainMission ? { retain_mission: opts.retainMission } : {}),
+      ...(opts.retainStrategies ? { retain_strategies: opts.retainStrategies } : {}),
     };
+  }
+
+  private async applyBankTuning(bankId: string, opts: EnsureBankOpts = {}): Promise<void> {
+    const desired = this.desiredTuning(opts);
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
         await fetch(this.bankPath(bankId, "/config"), {
@@ -266,6 +285,8 @@ export class HindsightProvider implements MemoryProvider {
         ...(it.tags ? { tags: it.tags } : {}),
         ...(it.metadata ? { metadata: it.metadata } : {}),
         ...(it.observationScopes ? { observation_scopes: it.observationScopes } : {}),
+        ...(it.strategy ? { strategy: it.strategy } : {}),
+        ...(it.entities?.length ? { entities: it.entities } : {}),
       })),
       // Async retain: Hindsight queues the LLM extraction in the background
       // and returns an operation_id immediately. For long sessions the sync
@@ -417,6 +438,18 @@ export class HindsightProvider implements MemoryProvider {
     });
     if (!res.ok && res.status !== 404) {
       const txt = await res.text().catch(() => "");
+      // Observations are derived from world/experience facts and Hindsight
+      // deliberately refuses direct curation. Give callers a stable marker so
+      // they can return an actionable response instead of an opaque 500.
+      if (
+        res.status === 400 &&
+        (/\bis an observation\b/i.test(txt) || /only world\/experience facts can be curated/i.test(txt))
+      ) {
+        throw new Error(
+          "HINDSIGHT_DERIVED_OBSERVATION: derived observations cannot be deleted directly; " +
+            "invalidate their supporting world/experience facts instead",
+        );
+      }
       // 405 = this Hindsight deployment predates reversible curation (the PATCH
       // /memories/{id} invalidate endpoint, added upstream 2026-06-10 / PR #1976).
       // There is NO other per-memory delete/invalidate endpoint, so this can only
@@ -435,32 +468,28 @@ export class HindsightProvider implements MemoryProvider {
   }
 
   /**
-   * Hard-delete every memory in the bank carrying `tag`. Hindsight's list
-   * endpoint can't filter by tag, so we page the RAW list here (where we can
-   * see `items.length` vs the page size to know when to stop — something the
-   * listMemories abstraction can't expose), collect matching ids, then DELETE
-   * each. Best-effort per id; returns the count actually deleted.
+   * Soft-retire every raw world/experience memory carrying `tag`. Derived
+   * observations are reconciled asynchronously by Hindsight. Its list endpoint
+   * cannot filter by tag, so the shared sweep filters locally.
    */
   async deleteByTag(bankId: string, tag: string): Promise<number> {
     return this.sweepDelete(bankId, tag);
   }
 
   /**
-   * Hard-delete EVERY memory in the bank ("clear all memories" reset). The
-   * bank row and its config overrides survive — only memories go. Callers own
-   * the authorization; pair with a re-seed (backfill) when the user wants a
-   * fresh start rather than an empty brain.
+   * Soft-retire every raw world/experience memory in the bank. The bank row
+   * and its config overrides survive; derived observations are reconciled
+   * asynchronously by Hindsight. Callers own the authorization.
    */
   async clearAll(bankId: string): Promise<number> {
     return this.sweepDelete(bankId);
   }
 
   /**
-   * Shared sweep: page the RAW list (where `items.length` vs page size tells
-   * us when to stop — the listMemories abstraction can't expose that), collect
-   * ids (optionally only those carrying `tag` — Hindsight's list endpoint
-   * can't filter by tag server-side), then DELETE each. Best-effort per id;
-   * returns the count actually deleted.
+   * Shared sweep: page the RAW list, collect raw fact ids (optionally only
+   * those carrying `tag`), then invalidate each. Observations are deliberately
+   * skipped because Hindsight rebuilds them from the remaining valid sources.
+   * Best-effort per id; returns the count actually retired.
    */
   private async sweepDelete(bankId: string, tag?: string): Promise<number> {
     if (!this.enabled) return 0;
@@ -480,6 +509,11 @@ export class HindsightProvider implements MemoryProvider {
       for (const it of items) {
         const tags = (it["tags"] as string[] | undefined) ?? [];
         const id = String(it["id"] ?? "");
+        const factType = String(it["fact_type"] ?? it["type"] ?? "").toLowerCase();
+        // Observations cannot be invalidated directly. Invalidating the raw
+        // world/experience sources below makes Hindsight recompute (or remove)
+        // their derived observations asynchronously.
+        if (factType === "observation") continue;
         if (id && (!tag || tags.includes(tag))) ids.push(id);
       }
       if (items.length < PAGE) break; // last page
@@ -555,6 +589,82 @@ export class HindsightProvider implements MemoryProvider {
    * live on table_rows (joined by id here). `tags` are filtered SQL-side by
    * Hindsight (all_strict), so passing `["user:<id>"]` scopes to one user reliably.
    */
+  /**
+   * Prior versions of ONE memory, newest first.
+   *
+   * Hindsight's endpoint is `get_observation_history` despite the generic URL:
+   * it returns [] for anything whose fact_type isn't "observation", so raw
+   * world/experience facts always come back empty. There is no batch form —
+   * one call per memory id — which is why callers should only ask for memories
+   * that can actually have history.
+   */
+  async getMemoryHistory(bankId: string, memoryId: string): Promise<MemoryHistoryEntry[]> {
+    if (!this.enabled) return [];
+    const res = await fetch(
+      this.bankPath(bankId, `/memories/${encodeURIComponent(memoryId)}/history`),
+      { method: "GET", headers: this.headers, signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.list) },
+    );
+    // A memory with no history and a memory that vanished are both "nothing to
+    // show" as far as the UI is concerned — neither is worth an error.
+    if (res.status === 404) return [];
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Hindsight getMemoryHistory ${res.status}: ${txt.slice(0, 200)}`);
+    }
+    const body = (await res.json()) as unknown;
+    const rows = Array.isArray(body)
+      ? body
+      : ((body as { history?: unknown[] })?.history ?? []);
+    return (rows as Array<Record<string, unknown>>).map((r) => ({
+      previousText: String(r["previous_text"] ?? ""),
+      ...(Array.isArray(r["previous_tags"]) ? { previousTags: r["previous_tags"] as string[] } : {}),
+      ...(r["previous_mentioned_at"] ? { previousMentionedAt: String(r["previous_mentioned_at"]) } : {}),
+      changedAt: String(r["changed_at"] ?? ""),
+      ...(Array.isArray(r["source_facts"])
+        ? {
+            sourceFacts: (r["source_facts"] as Array<Record<string, unknown>>).map((f) => ({
+              id: String(f["id"] ?? ""),
+              text: String(f["text"] ?? ""),
+            })),
+          }
+        : {}),
+    }));
+  }
+
+  /**
+   * Queue a consolidation run. Hindsight normally schedules this itself after
+   * every retain (gated on the bank's enable_observations +
+   * enable_auto_consolidation), so this exists for the cases that gating leaves
+   * behind: a backlog built up while observations were disabled, facts stranded
+   * by a terminal failure, and deterministic testing.
+   *
+   * Scoped runs skip Hindsight's bank-level dedupe, so they are never merged
+   * into a pending full-bank sweep.
+   */
+  async consolidate(
+    bankId: string,
+    opts?: { observationScopes?: string[][] },
+  ): Promise<{ operationId: string; deduplicated: boolean }> {
+    if (!this.enabled) return { operationId: "", deduplicated: false };
+    const res = await fetch(this.bankPath(bankId, "/consolidate"), {
+      method: "POST",
+      headers: this.headers,
+      body: JSON.stringify(
+        opts?.observationScopes ? { observation_scopes: opts.observationScopes } : {},
+      ),
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Hindsight consolidate ${res.status}: ${txt.slice(0, 200)}`);
+    }
+    const body = (await res.json()) as { operation_id?: string; deduplicated?: boolean };
+    return {
+      operationId: String(body.operation_id ?? ""),
+      deduplicated: body.deduplicated === true,
+    };
+  }
+
   async getMemoryGraph(bankId: string, opts?: { tags?: string[]; limit?: number }): Promise<MemoryGraph> {
     if (!this.enabled) return { nodes: [], edges: [] };
     const params = new URLSearchParams();
@@ -655,6 +765,14 @@ function mapMemory(m: Record<string, unknown>): Memory {
   const createdAt = (m["date"] ?? m["created_at"] ?? m["mentioned_at"]) as
     | string
     | undefined;
+  // Hindsight serializes entities as one comma-joined string, "" when none.
+  const rawEntities = m["entities"];
+  const entities =
+    typeof rawEntities === "string"
+      ? rawEntities.split(",").map((e) => e.trim()).filter(Boolean)
+      : Array.isArray(rawEntities)
+        ? (rawEntities as unknown[]).map((e) => String(e)).filter(Boolean)
+        : [];
   return {
     id: String(m["id"] ?? ""),
     content: String(m["text"] ?? m["content"] ?? ""),
@@ -662,6 +780,8 @@ function mapMemory(m: Record<string, unknown>): Memory {
     ...(m["metadata"] ? { metadata: m["metadata"] as Record<string, string> } : {}),
     ...((m["fact_type"] ?? m["type"]) ? { factType: (m["fact_type"] ?? m["type"]) as string } : {}),
     ...(createdAt ? { createdAt } : {}),
+    ...(entities.length ? { entities } : {}),
+    ...(typeof m["proof_count"] === "number" ? { proofCount: m["proof_count"] as number } : {}),
   };
 }
 

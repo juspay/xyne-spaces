@@ -7,6 +7,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { all, createLowlight } from 'lowlight';
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AutoDraftStatus } from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
@@ -79,10 +80,6 @@ const SlackComposer = ({
       CodeBlockLowlight.configure({
         lowlight,
         defaultLanguage: 'plaintext',
-        HTMLAttributes: {
-          class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
-          style: 'padding: 0.75rem;',
-        },
       }),
       LinkExtension.extend({ inclusive: false }).configure({
         openOnClick: false,
@@ -177,8 +174,8 @@ const SlackComposer = ({
       setAttachments([]);
       lastLoadedDraftRef.current = '';
       deleteDraft();
-    } catch {
-      toast.error('Failed to send message');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to send message'));
     } finally {
       setSending(false);
     }

@@ -32,9 +32,10 @@ export interface TicketCommentedEventPayload {
   authorId: string;
 }
 
-/** EMAIL_RECEIVED + EMAIL_SENT share the same wire shape — only id. */
+/** EMAIL_RECEIVED + EMAIL_SENT share the same wire shape. */
 export interface EmailEventPayload {
   emailId: string;
+  channelId?: string;
 }
 
 export interface MessageReceivedEventPayload {

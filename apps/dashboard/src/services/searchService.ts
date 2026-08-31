@@ -23,7 +23,10 @@ export class SearchService {
   /**
    * Perform Vespa search across all indexed documents
    */
-  async vespaSearch(filters: VespaSearchFilters): Promise<{
+  async vespaSearch(
+    filters: VespaSearchFilters,
+    signal?: AbortSignal,
+  ): Promise<{
     results: DisplaySearchResult[];
     totalCount: number;
     offset: number;
@@ -41,6 +44,7 @@ export class SearchService {
 
       const response = await apiInstance.get<VespaSearchResponse>(this.vespaBaseUrl, {
         params,
+        ...(signal ? { signal } : {}),
       });
 
       if (!response.data.success || !response.data.data) {

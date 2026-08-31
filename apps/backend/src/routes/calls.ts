@@ -23,6 +23,7 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
 router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+router.post('/recordings/:callId/generate-labels', callController.regenerateRecordingLabels);
 router.get(
   '/recordings/:callId/email-compose-context',
   recordingEmailController.getComposeContext,
@@ -32,11 +33,26 @@ router.post('/recordings/:callId/export-google-doc', recordingGoogleDocControlle
 router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
+router.post('/recordings/:callId/participants', callController.manageRecordingParticipants);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
 router.post('/summary-templates', summaryTemplateController.create);
+router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
+router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
+router.post(
+  '/summary-templates/ai/generate-system-prompt',
+  summaryTemplateController.generateSystemPrompt
+);
+router.get('/summary-templates/publication/context', summaryTemplateController.publicationContext);
+router.get('/summary-templates/:templateId/shares', summaryTemplateController.listShares);
+router.post('/summary-templates/:templateId/sharing', summaryTemplateController.manageSharing);
+router.post(
+  '/summary-templates/:templateId/publication',
+  summaryTemplateController.managePublication
+);
 router.patch('/summary-templates/:templateId', summaryTemplateController.update);
+router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
 
@@ -118,6 +134,12 @@ router.post('/:callId/recording/stop', callController.stopCallRecording);
 
 // Host controls: turn off/allow audio, camera, screen-share for all non-host participants (host only)
 router.patch('/:callId/host-controls', callHostControlController.setHostControls);
+
+// End-of-call transcript disposition when transcription was toggled off (host only): keep | discard
+router.post('/:callId/transcript-disposition', callHostControlController.setTranscriptDisposition);
+
+// Mid-call transcription on/off state → room metadata so late joiners sync (host only)
+router.patch('/:callId/transcription-state', callHostControlController.setTranscriptionState);
 
 // Remove a participant from the call (host only); rejoin requires re-admission
 router.post('/:callId/remove-participant', callHostControlController.removeCallParticipant);

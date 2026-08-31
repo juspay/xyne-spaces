@@ -1,16 +1,15 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
+import { Archive } from 'lucide-react';
+import { SwapArrowVertical as ArrowUpDown, KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Activity,
-  ArrowUpDown,
-  Calendar,
-  CircleCheck,
+  CalendarDefault as Calendar,
+  CheckTickCircle as CircleCheck,
   FileText,
-  SquareKanban,
   Tag,
-  Archive,
-  GitMerge,
-  Mail,
-} from 'lucide-react';
+  Merge as GitMerge,
+  EnvelopeDefault as Mail,
+} from '@xyne/icons';
 import {
   ActivityType,
   TicketReferenceRelation,
@@ -68,6 +67,7 @@ type ActivityValue = Partial<
       rating?: string;
       score?: number | null;
       isAutomation?: boolean;
+      isAiClassification?: boolean;
     }
 >;
 
@@ -783,6 +783,7 @@ export const ActivityComponent = ({
 }) => {
   const activityUser = users?.find(u => u.id === activity.updatedBy);
   const isAutomationActivity = (activity.value as ActivityValue | null)?.isAutomation === true;
+  const isAiActivity = (activity.value as ActivityValue | null)?.isAiClassification === true;
   const { description, details, hideActorName } = getActivityDescription(
     activity,
     users,
@@ -831,9 +832,11 @@ export const ActivityComponent = ({
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
-              (isAutomationActivity
-                ? 'Automation'
-                : getUserDisplayName(activityUser) || 'Someone')}{' '}
+              (isAiActivity
+                ? 'AI classification'
+                : isAutomationActivity
+                  ? 'Automation'
+                  : getUserDisplayName(activityUser) || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>

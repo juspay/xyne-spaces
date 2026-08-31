@@ -47,6 +47,7 @@ import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import {
   DropdownMenu,
@@ -80,6 +81,7 @@ const ConversationHeader = ({
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
   const channelUserStatus = useGetChannelUserStatus(channelId);
+  useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
@@ -285,7 +287,7 @@ const ConversationHeader = ({
                 setInfoDefaultTab('about');
                 setIsInfoOpen(true);
               }}
-              className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 px-1.5 py-0.5 rounded-md hover:bg-muted transition-colors duration-100'
+              className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 h-7 px-1.5 rounded-md hover:bg-muted transition-colors duration-100'
               style={APP_NO_DRAG_STYLE}
               data-testid='channel-info-trigger'
               data-track-category='CHANNELS'
@@ -295,9 +297,7 @@ const ConversationHeader = ({
               <span className='shrink-0 inline-flex items-center leading-none'>
                 <ChannelIcon channel={channel} />
               </span>
-              <span className={cn('visual-regression-hide truncate', isChannelDM && 'pt-1')}>
-                {displayName}
-              </span>
+              <span className='visual-regression-hide truncate'>{displayName}</span>
               {isDM && (
                 <StatusIndicator
                   statusEmoji={dmUser?.statusEmoji}
@@ -347,6 +347,8 @@ const ConversationHeader = ({
                   setInfoDefaultTab('notifications');
                   setIsInfoOpen(true);
                 }}
+                data-track-category='CHANNELS'
+                data-track-name='OPEN_CHANNEL_NOTIFICATIONS'
                 className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               >
                 <span className='shrink-0'>
@@ -429,11 +431,18 @@ const ConversationHeader = ({
                     setInfoDefaultTab('about');
                     setIsInfoOpen(true);
                   }}
+                  data-track-category='CHANNELS'
+                  data-track-name='OPEN_CHANNEL_ABOUT'
                 >
                   <InformationCircle size={16} className='shrink-0' />
                   Channel details
                 </DropdownMenuItem>
-                <DropdownMenuItem className='gap-2' onClick={() => handleOpenAllLinks()}>
+                <DropdownMenuItem
+                  className='gap-2'
+                  onClick={() => handleOpenAllLinks()}
+                  data-track-category='CHANNELS'
+                  data-track-name='OPEN_ALL_CHANNEL_LINKS'
+                >
                   <ExternalLinkSquare size={16} className='shrink-0' />
                   Open all links
                 </DropdownMenuItem>
@@ -451,6 +460,8 @@ const ConversationHeader = ({
                           key={section.id}
                           className='gap-2'
                           onClick={() => handleMoveToSection(section.id)}
+                          data-track-category='CHANNELS'
+                          data-track-name='MOVE_CHANNEL_TO_SECTION'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -471,6 +482,8 @@ const ConversationHeader = ({
                     <DropdownMenuItem
                       className='gap-2 text-destructive focus:text-destructive'
                       onClick={handleLeaveChannel}
+                      data-track-category='CHANNELS'
+                      data-track-name='LEAVE_CHANNEL'
                     >
                       <UserArrowRight size={16} className='shrink-0' />
                       Leave channel
@@ -485,6 +498,8 @@ const ConversationHeader = ({
               variant='ghost'
               size='sm'
               onClick={onClose}
+              data-track-category='CHANNELS'
+              data-track-name='CLOSE_CONVERSATION_HEADER'
               className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               aria-label='Close'
             >

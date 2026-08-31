@@ -21,10 +21,14 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   selectedCanvasId,
   onDelete,
   onDuplicate,
+  onArchiveToggle,
   isPersonalSectionCollapsed,
   onSetPersonalSectionCollapsed,
   excludeCallGeneratedCanvases = true,
+  excludeRecordingGeneratedCanvases = true,
   showStarredOnly = false,
+  includeArchived = false,
+  onlyArchived = false,
   onToggleStar,
   searchQuery = '',
 }) => {
@@ -61,7 +65,10 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     currentUserId,
     collapsedProjects,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     showStarredOnly,
+    includeArchived,
+    onlyArchived,
     forceExpandProjects: isSearchActive,
   });
 
@@ -537,6 +544,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           adminChannelIds={activeAdminChannelIds}
           isPersonalSectionCollapsed={isPersonalSectionCollapsed}
           excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+          excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
           collapsedProjects={collapsedProjects}
           collapsedChannels={collapsedChannels}
           collapsedFolders={collapsedFolders}
@@ -549,8 +557,11 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           onToggleFolder={handleToggleFolder}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
+          onArchiveToggle={onArchiveToggle}
           onSetPersonalSectionCollapsed={onSetPersonalSectionCollapsed}
           showStarredOnly={showStarredOnly}
+          includeArchived={includeArchived}
+          onlyArchived={onlyArchived}
           onToggleStar={onToggleStar}
           onCreatePersonalCanvas={handleCreatePersonalCanvas}
           onCreateCanvasInProject={handleCreateCanvasInProject}

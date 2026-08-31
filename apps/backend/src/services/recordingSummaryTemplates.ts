@@ -6,9 +6,19 @@ BRAND NAME CORRECTION:
 - When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
 - Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
+INSUFFICIENT TRANSCRIPT (check this first, before anything else below):
+- Be VERY lenient here — only treat the transcript as insufficient if it is essentially empty: fewer than roughly 100 characters total, or just noise/silence/a single stray word with no real content.
+- If the TRANSCRIPT has more than that — even a short exchange or a brief conversation — treat it as enough content and generate a real summary as normal. Do not bail out just because a call was short.
+- Only when the transcript is truly that tiny, output ONLY the following and nothing else (no template sections, no other headings):
+    ### ⚠️ Not enough data
+    - There isn't enough transcript content to generate a summary for this recording.
+- Every other instruction below only applies once you've confirmed the transcript has enough real content to summarize.
+
 FORMATTING:
 - Use Markdown headings, short paragraphs, and bullet lists. DO NOT use markdown tables anywhere.
-- Preserve every section heading from the MARKDOWN TEMPLATE exactly, including its leading \`###\` marker and emoji.
+- Never leave a bare paragraph line as the last line of a section, directly above a \`---\` separator — Markdown turns it into a setext heading. Write such content as a bullet instead.
+- Preserve every section heading from the MARKDOWN TEMPLATE exactly, including its leading \`###\` marker and emoji, except for the Decisions and Action Items headings described below.
+- Render the Decisions heading with a yellow dot (\`### 🟡 Decisions\`) and the Action Items heading with an orange dot (\`### 🟠 Action Items\`), replacing any existing emoji on those two headings. Keep the dots on the headings, not on individual bullets.
 - Never convert a template heading into plain text, bold text, or a list item.
 - Keep bullets concise; put supporting detail inline after an em dash.
 
@@ -37,20 +47,67 @@ INSTRUCTIONS:
 - Include specific names, numbers, dates mentioned
 - Preserve chronological order where it matters
 - Keep all template section titles as level-three Markdown headings (\`###\`)
-- Skip sections that have no relevant content (write "Not discussed" rather than inventing detail)
+- Skip sections that have no relevant content — write the single bullet \`- Not discussed\` rather than inventing detail. It MUST be a bullet: a bare \`Not discussed\` line sits directly above the template's \`---\` separator, which Markdown then parses as a setext heading and renders in huge heading text.
 - Add Chapters ONLY for long calls, per the STRUCTURE rule above; never force chapters onto a short or medium call
 - In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
 
-CITATIONS:
-- Each transcript line may start with a segment number such as "[12] [03:24] Alice: ...".
-- After a specific claim, decision, action item, number, date, name, or quote, append the supporting token [clf-N].
-- Copy N exactly from the transcript. Never invent segment numbers or add a separate citations section.
+MARKED DECISIONS AND ACTIONS:
+- Prefix every concrete decision bullet with the exact private annotation \`[xyne-decision]\` immediately after the bullet marker.
+- Prefix every concrete action-item bullet with the exact private annotation \`[xyne-action]\` immediately after the bullet marker.
+- Every annotated bullet MUST end with at least one supporting transcript citation. The first citation must identify the moment most closely associated with that decision or action.
+- Never use these annotations for takeaways, discussion points, open questions, blockers, or other bullets.
+- The annotations are internal metadata and will be removed before the summary is displayed.
+- Examples:
+  - \`- [xyne-decision] The team approved the consolidated pipeline [clf-12]\`
+  - \`- [xyne-action] @Mayank Bansal will update the backend [clf-18]\`
+
+CITATIONS (ACCURACY IS CRITICAL):
+- Each transcript line is prefixed with its segment number: "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
+- A citation is a PROOF POINTER, not decoration. [clf-N] asserts: "the words that make this statement true are inside segment N." The reader clicks it and is taken to that exact moment in the transcript.
+- BEFORE writing [clf-N], find line N in the TRANSCRIPT below and confirm its text actually states what you just wrote. If you cannot point to the specific words in that line, do NOT cite it.
+- Topic proximity is NOT support. A segment that merely discusses the same subject, or sits near the moment you have in mind, does not support the claim. Never cite "roughly where it was discussed".
+- Never estimate, guess, round, shift, or reconstruct a segment number from memory of where something appeared. Read the number off the line itself. If you are not certain of the number, leave the statement uncited.
+- Attribution must match: if the statement says who said, wanted, offered, agreed to, or committed to something, the cited segment must be that person's line, or a line that explicitly states their position.
+- Each token in a group must independently support the statement. Never pad with extra numbers to look thorough — one exact citation beats three approximate ones. At most 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]", most direct evidence first.
+- For a roll-up statement that synthesises several moments (typical of Key Takeaways): cite only the 1-3 segments where that point is most explicitly stated. If no segment states it, RE-WORD the statement so it matches what a segment actually says — never attach an approximate citation just to satisfy the format.
+- An uncited statement is acceptable. A wrongly cited statement is a serious error, because it looks verified and is not.
+- Decision and action bullets MUST carry a citation (see MARKED DECISIONS AND ACTIONS). For those, pick the segment where the decision was actually made or the task actually assigned, and word the bullet to match that segment — do not fall back to a loose citation.
+- Copy N exactly. Never invent segment numbers, never use ranges like [clf-8-11], never cite a line that has no bracketed number. Write only the bare token — no links, URLs, footnotes, or a separate "Citations"/"Sources" section.
+- FINAL CHECK before you output: re-read every [clf-N] you wrote, look the segment up again, and delete or re-word any citation whose segment does not contain the claim it is attached to.
 
 Only output valid Markdown (headings, paragraphs, and bullet lists only — no tables).
 No extra text.
 
 TRANSCRIPT:
+{transcript}
+
+FINAL REMINDER — CITATIONS: every [clf-N] you write must point at a numbered segment above whose text actually states the claim it is attached to. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
+`;
+
+// AI Title prompt for headless recordings (Xyne Scribe) — separate from the
+// regular call title prompt (transcriptService.ts's CALL_TITLE_PROMPT) so the
+// two can be tuned independently, mirroring the summary prompt split above.
+export const RECORDING_TITLE_PROMPT = `
+You are summarizing the topic of a recording in exactly 1 line.
+
+CRITICAL RULES:
+- Output EXACTLY 1 line
+- One sentence summarizing the main topic (max 100 characters)
+- No quotes, no labels, no bullet points, no explanations
+- Write in plain, natural language
+
+INSUFFICIENT TRANSCRIPT:
+- Be VERY lenient here — only treat the transcript as insufficient if it is essentially empty: fewer than roughly 100 characters total, or just noise/silence/a single stray word with no real content.
+- If the TRANSCRIPT has more than that — even a short exchange — treat it as enough to identify a topic and generate a real title as normal. Do not bail out just because a recording was short.
+- Only when the transcript is truly that tiny, output EXACTLY this and nothing else: Not enough content
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
+
+Generate a 1-line description for this recording:
 {transcript}
 `;
 
@@ -68,10 +125,10 @@ export const DEFAULT_RECORDING_SUMMARY_FIELDS = `### 💡 Key Takeaways
 - [Main point discussed]
 - [Notable names, numbers, dates, or quotes]
 ---
-### ✅ Decisions
+### 🟡 Decisions
 - [Decision] — Owner: [Person] ([why / context])
 ---
-### 📋 Action Items
+### 🟠 Action Items
 - [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]
 ---
 ### 🔗 Open Items & Follow-up
@@ -79,242 +136,12 @@ export const DEFAULT_RECORDING_SUMMARY_FIELDS = `### 💡 Key Takeaways
 - Blockers: [Any blockers identified]
 - Next Meeting: [If mentioned]`;
 
-const PRODUCT_SYNC_FIELDS = `### 💡 Key Takeaways
-- [Most important outcome]
-- [Second most important]
-- [Third if applicable]
----
-### 🚀 Updates
-- [What moved / shipped / progressed since last time]
-- [Status on in-flight work — with specifics]
----
-### 🚧 Blockers & Risks
-- [What's stuck, why, and who owns unblocking it]
-- [Risk raised and its potential impact]
----
-### ❓ Open Questions
-- [Unresolved question] — needs: [who should answer]
----
-### ✅ Decisions
-- [Decision] — Owner: [Person] ([why / context])
----
-### 📋 Action Items
-- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]`;
 
-const CUSTOMER_DISCOVERY_FIELDS = `### 💰 Discovery Snapshot
-Company / Prospect: [Company + who was on the call and their roles]
-Primary Focus: [1-2 sentences: what they're trying to solve and why now]
-Deal Signal: [Warm / Neutral / Cold — one line on why]
----
-### 🎯 Their Context
-- [Company, industry, size, roles on the call]
-- [Current tools / setup relevant to what we sell]
-- [What's driving this now — trigger event, mandate, pain]
----
-### 🔥 Pain Points & Needs
-- [Problem they explicitly named — quote where impactful]
-- [Impact / cost of the problem, if they quantified it]
----
-### ✅ Requirements & Must-Haves
-- [Specific requirement, capability, or constraint they stated]
-- [Integrations, compliance, timelines, or volumes — with figures]
----
-### ⚠️ Objections & Concerns
-- [Concern, hesitation, or blocker they raised]
-- [Competitor or alternative they're weighing, if any]
----
-### 💹 Buying Signals
-Budget: [Anything on budget / pricing sensitivity, else "Not discussed"]
-Timeline: [Their timeline / urgency, else "Not discussed"]
-Decision process: [Who decides + next steps on their side, else "Not discussed"]
----
-### ✅ Decisions
-- [Decision or agreement reached] — Owner: [Person] ([why / context])
----
-### 📋 Action Items
-- [Follow-up task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]
----
-### 🔗 Next Steps
-- Agreed next step: [What both sides committed to]
-- To send them: [Anything we promised to share]
-- Next meeting: [If mentioned]`;
-
-const ONE_ON_ONE_FIELDS = `### 💡 Key Takeaways
-- [Most important point from this 1:1]
-- [Second most important]
-- [Third if applicable]
----
-### 🎯 Top of Mind
-- [What's most pressing or important for them right now]
----
-### 📈 Progress & Wins
-- [Recent progress, wins, or things going well]
----
-### 🚧 Challenges & Blockers
-- [Obstacles, frustrations, or things slowing them down]
----
-### 💬 Feedback & Growth
-- To them: [Feedback given to the report, if any]
-- From them: [Feedback / concerns they raised]
-- Development: [Growth or career topics discussed]
----
-### ✅ Decisions
-- [Decision or agreement reached] — Owner: [Person] ([why / context])
----
-### 📋 Action Items
-- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]`;
-
-const HIRING_FIELDS = `### 🧭 Candidate Snapshot
-Candidate: [Name]
-Role: [Role interviewed for]
-Recommendation: [Strong hire / Hire / Lean hire / Lean no / No hire]
----
-### 📋 Background
-- [Relevant experience, current situation, notable history]
----
-### 🧪 What We Assessed
-- [Skill / competency / exercise covered] — [how they did, with specifics]
----
-### ✅ Strengths
-- [Clear strength, backed by something they said or did]
----
-### ⚠️ Concerns / Gaps
-- [Gap, weakness, or open concern — be specific, not vague]
----
-### 🎯 Recommendation
-[Hire / no-hire / lean, with the reasoning. Tie it to the evidence above.]
----
-### 🔎 Suggested Follow-up Areas
-- [What the next round should probe further]
----
-### ✅ Decisions
-- [Decision reached — e.g. advance / reject / hold] — Owner: [Person] ([why / context])
----
-### 📋 Action Items
-- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]`;
-
-const STANDUP_FIELDS = `### 👤 Per-Person Updates
-- [Name] — Yesterday: [done]; Today: [doing]; Blocked: [blocker or "none"]
----
-### 🚧 Blockers Needing Help
-- [Who is blocked] on [what] — can be unblocked by [who]
----
-### ✅ Decisions
-- [Any decision made during stand-up] — Owner: [Person] ([why / context])
----
-### 📋 Action Items
-- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]`;
-
-const SPRINT_REVIEW_FIELDS = `### 💡 Key Takeaways
-- [Most important outcome of the review]
-- [Second most important]
-- [Third if applicable]
----
-### ✅ Shipped This Sprint
-- [What was completed and demoed]
----
-### ⏳ Not Completed
-- [What didn't land, why, and whether it carries over]
----
-### 💬 Demo Feedback
-- [Reaction / requested change raised during a demo]
----
-### ✅ Decisions
-- [Decision] — Owner: [Person] ([why / context])
----
-### 🎯 Next Sprint Focus
-- [What the team is prioritizing next]
----
-### 📋 Action Items
-- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]`;
-
-const CUSTOMER_FEEDBACK_FIELDS = `### 📌 Feedback Snapshot
-Customer: [Who + company]
-Overall Sentiment: [Positive / Neutral / Frustrated / At-risk]
-Summary: [1-2 sentences on the core of their feedback]
----
-### 🔥 Feedback & Pain Points
-- [Problem / issue raised] — impact: [severity or impact, if stated]
----
-### ✨ Feature Requests
-- [What they explicitly asked for]
----
-### 😀 Sentiment & Risk
-- [Overall tone; any churn / escalation risk signals]
----
-### 🎫 Suggested Follow-ups
-- [What to raise as a ticket or action, and to which team]
----
-### ✅ Decisions
-- [Any decision reached] — Owner: [Person] ([why / context])
----
-### 📋 Action Items
-- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]`;
-
-export const BUILTIN_RECORDING_SUMMARY_TEMPLATES = [
-  {
-    id: 'default',
-    name: 'Default summary',
-    icon: '⚡',
-    fields: DEFAULT_RECORDING_SUMMARY_FIELDS,
-    selectionCriteria: 'Use for general meetings that do not strongly match a specialized template.',
-  },
-  {
-    id: 'product_sync',
-    name: 'Product sync',
-    icon: '🔁',
-    fields: PRODUCT_SYNC_FIELDS,
-    selectionCriteria: 'Internal product or engineering working sessions about progress, blockers, risks, and decisions.',
-  },
-  {
-    id: 'customer_discovery',
-    name: 'Customer: Discovery',
-    icon: '💰',
-    fields: CUSTOMER_DISCOVERY_FIELDS,
-    selectionCriteria: 'Sales or discovery conversations with a prospect about needs, requirements, objections, budget, or buying process.',
-  },
-  {
-    id: 'one_on_one',
-    name: '1 to 1',
-    icon: '👥',
-    fields: ONE_ON_ONE_FIELDS,
-    selectionCriteria: 'A manager and direct report discussing progress, challenges, feedback, growth, or priorities.',
-  },
-  {
-    id: 'hiring',
-    name: 'Hiring',
-    icon: '💼',
-    fields: HIRING_FIELDS,
-    selectionCriteria: 'Candidate interview or hiring debrief assessing skills, strengths, concerns, and recommendation.',
-  },
-  {
-    id: 'standup',
-    name: 'Stand-Up',
-    icon: '🧍',
-    fields: STANDUP_FIELDS,
-    selectionCriteria: 'A daily or recurring stand-up with per-person updates and blockers.',
-  },
-  {
-    id: 'sprint_review',
-    name: 'Sprint review',
-    icon: '📈',
-    fields: SPRINT_REVIEW_FIELDS,
-    selectionCriteria: 'Sprint review or demo covering shipped work, incomplete work, feedback, and next-sprint focus.',
-  },
-  {
-    id: 'customer_feedback',
-    name: 'Customer feedback',
-    icon: '🔄',
-    fields: CUSTOMER_FEEDBACK_FIELDS,
-    selectionCriteria: 'Customer feedback, support, or voice-of-customer conversation focused on pain points, feature requests, or risk.',
-  },
-] as const;
-
-export type BuiltinRecordingSummaryTemplate = (typeof BUILTIN_RECORDING_SUMMARY_TEMPLATES)[number];
-export type BuiltinRecordingSummaryTemplateId = BuiltinRecordingSummaryTemplate['id'];
-
-export function getBuiltinRecordingSummaryTemplate(
-  templateId: string,
-): BuiltinRecordingSummaryTemplate | undefined {
-  return BUILTIN_RECORDING_SUMMARY_TEMPLATES.find(template => template.id === templateId);
-}
+// The only code-backed template. Every other template is created and stored in
+// summary_templates through the template system.
+export const DEFAULT_RECORDING_SUMMARY_TEMPLATE = {
+  id: 'default',
+  name: 'Default summary',
+  fields: DEFAULT_RECORDING_SUMMARY_FIELDS,
+  selectionCriteria: 'Use for general meetings that do not strongly match a specialized template.',
+} as const;

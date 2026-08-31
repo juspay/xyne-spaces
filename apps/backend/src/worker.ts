@@ -4,12 +4,16 @@ import { startDoclingSchedulerRole } from '@/services/ingestion/docling/workers/
 import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/config'
 import { DatabaseClient } from '@/database/client'
 import { CommonDatabaseClient } from '@/database/commonClient'
-import { logger } from '@/utils/logger'
+import { describeRejection, logger } from '@/utils/logger'
 import { pollingService } from './workflows/services/polling-service'
 import { eventPollingService } from './workflows/services/event-polling-service'
 import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
 import { vespaFileWorker } from './workers/vespaFileWorker'
+import {
+  startDriveImportWorker,
+  closeDriveImportQueue,
+} from '@/services/driveImport/driveImportWorker'
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
@@ -37,8 +41,12 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
+import { sdlcWorker } from '@/workers/sdlcWorker';
+import { sdlcClawExecutionService } from '@/sdlc/SdlcClawExecutionService';
+import { sdlcWikiExecutionService } from '@/sdlc/wiki/SdlcWikiExecutionService';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
@@ -46,9 +54,18 @@ import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 config()
 
+process.on('unhandledRejection', reason => {
+  logger.error('WORKER UNHANDLED REJECTION', { error: describeRejection(reason) });
+});
+
+process.on('uncaughtException', error => {
+  logger.error('WORKER UNCAUGHT EXCEPTION', { error });
+});
+
 class WorkerService {
   private isShuttingDown = false
   private automationTemplateCleanupTimer: NodeJS.Timeout | null = null
+  private sdlcReconciliationTimer: NodeJS.Timeout | null = null
 
   async start(): Promise<void> {
     try {
@@ -115,6 +132,13 @@ class WorkerService {
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.start()
+      }
+
+      // Google Drive import worker. When disabled, the API process runs imports
+      // in-process as a fallback (see collectionController.uploadFromDriveLink).
+      if (appConfig.enableDriveImportWorker) {
+        logger.info('Starting Drive import worker...')
+        startDriveImportWorker()
       }
 
       // Async OCR (Docling/LightOn) scheduler roles — fire-and-forget loops.
@@ -277,6 +301,21 @@ class WorkerService {
         await emailClassificationWorker.start();
       }
 
+      if (appConfig.radar.enabled) {
+        logger.info('Starting radar execution worker...');
+        // Guarded, unlike its neighbours: an unguarded throw reaches the outer
+        // catch, which exits the process — taking unrelated workers down with
+        // a dark-launched feature none of them depend on.
+        try {
+          await radarExecutionWorker.start();
+        } catch (error) {
+          logger.error(
+            '[RADAR-EXECUTION-WORKER] Failed to start; continuing without it',
+            error,
+          );
+        }
+      }
+
       if (appConfig.enableAiProvisioningWorker) {
         logger.info('Starting AI provisioning worker...');
         await aiProvisioningWorker.start();
@@ -290,6 +329,24 @@ class WorkerService {
         await entityExtractionWorker.start();
       } else {
         logger.info('Entity extraction is disabled; skipping worker startup');
+      }
+
+      if (appConfig.enableSdlcWorker) {
+        logger.info('Starting SDLC worker...');
+        await sdlcWorker.start();
+        const reconcileSdlc = (): void => {
+          void sdlcClawExecutionService.reconcileExecutions().catch(error => {
+            logger.error('[SDLC-CLAW] reconciliation failed', error);
+          });
+          void sdlcWikiExecutionService.reconcileExecutions().catch(error => {
+            logger.error('[SDLC-WIKI] reconciliation failed', error);
+          });
+        };
+        reconcileSdlc();
+        this.sdlcReconciliationTimer = setInterval(reconcileSdlc, 60_000);
+        this.sdlcReconciliationTimer.unref();
+      } else {
+        logger.info('SDLC worker is disabled (ENABLE_SDLC_WORKER=false)');
       }
 
       if (appConfig.enableTagGenerationPipeline) {
@@ -354,6 +411,10 @@ class WorkerService {
         clearInterval(this.automationTemplateCleanupTimer)
         this.automationTemplateCleanupTimer = null
       }
+      if (this.sdlcReconciliationTimer) {
+        clearInterval(this.sdlcReconciliationTimer)
+        this.sdlcReconciliationTimer = null
+      }
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
       const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
@@ -385,6 +446,9 @@ class WorkerService {
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.shutdown()
+      }
+      if (appConfig.enableDriveImportWorker) {
+        await closeDriveImportQueue()
       }
       if(workflowType){
         logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only stopping workers compatible with this workflow type.`)
@@ -456,11 +520,16 @@ class WorkerService {
         await emailClassificationWorker.shutdown();
       }
 
+      if (appConfig.radar.enabled) {
+        await radarExecutionWorker.shutdown();
+      }
+
       if (appConfig.enableAiProvisioningWorker) {
         await aiProvisioningWorker.shutdown();
       }
 
       await autoDraftWorker.shutdown();
+      if (appConfig.enableSdlcWorker) await sdlcWorker.stop();
 
       if (appConfig.enableTagGenerationPipeline) {
         await tagGenerationPipeline.close();

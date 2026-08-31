@@ -31,7 +31,7 @@ process TUI. Each step is also runnable on its own:
 | ---- | ------- | ------------ |
 | 1 | `pnpm run env:setup` | Copies each app's `.env.example` to the filename that app reads; never overwrites an existing file |
 | 2 | `pnpm run setup` | Installs the workspace and builds `@xyne/shared`, `@xyne/icons`, `agentic-framework` |
-| 3 | `pnpm run secrets` | Fills the `set-me` placeholders in `apps/backend/.env.local` (JWT, encryption, VAPID) |
+| 3 | `pnpm run secrets` | Fills the `set-me` placeholders in `apps/backend/.env.local` (JWT, encryption) |
 | 4 | `pnpm run services` | Asks which infrastructure features you need, checks their ports are free, starts the containers, waits for health checks |
 | 5 | `pnpm run dev` | Asks which apps to run, then opens them in a multi-pane TUI — one isolated pane per process, `r` to restart one, `q` to quit all |
 

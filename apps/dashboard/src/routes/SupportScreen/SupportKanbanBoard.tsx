@@ -70,6 +70,7 @@ export interface SupportKanbanBoardProps {
   onBoardIdResolved: (boardId: string) => void;
   ticketFilter: {
     assignedTo: string[] | undefined;
+    createdBy: string[] | undefined;
     priority: TicketPriority[] | undefined;
     stageName: string[] | undefined;
     aiCategory: string[] | undefined;
@@ -78,6 +79,8 @@ export interface SupportKanbanBoardProps {
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
+    createdAtStart: number | undefined;
+    createdAtEnd: number | undefined;
     dynamicFieldFilters?: DynamicFieldQueryFilter[] | undefined;
     conversationLabelId?: string | undefined;
   };
@@ -135,6 +138,7 @@ export const SupportKanbanBoard = ({
       JSON.stringify({
         c: channelId,
         a: ticketFilter.assignedTo ?? null,
+        cb: ticketFilter.createdBy ?? null,
         p: ticketFilter.priority ?? null,
         s: ticketFilter.stageName ?? null,
         ac: ticketFilter.aiCategory ?? null,
@@ -143,12 +147,15 @@ export const SupportKanbanBoard = ({
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
+        cs: ticketFilter.createdAtStart ?? null,
+        ce: ticketFilter.createdAtEnd ?? null,
         df: dynamicFieldEntries ?? null,
         l: ticketFilter.conversationLabelId ?? null,
       }),
     [
       channelId,
       ticketFilter.assignedTo,
+      ticketFilter.createdBy,
       ticketFilter.priority,
       ticketFilter.stageName,
       ticketFilter.aiCategory,
@@ -157,6 +164,8 @@ export const SupportKanbanBoard = ({
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
+      ticketFilter.createdAtStart,
+      ticketFilter.createdAtEnd,
       dynamicFieldEntries,
       ticketFilter.conversationLabelId,
     ],
@@ -324,10 +333,15 @@ export const SupportKanbanBoard = ({
   // drag-and-drop hook reads the live `localTickets` directly, so reordering is
   // unaffected — only the settled column layout is deferred a frame.
   const deferredLocalTickets = useDeferredValue(localTickets);
-  const ticketsByStage = useMemo(
-    () => groupTicketsByStage(deferredLocalTickets, stageColumns),
-    [deferredLocalTickets, stageColumns],
-  );
+  const ticketsByStage = useMemo(() => {
+    const grouped = groupTicketsByStage(deferredLocalTickets, stageColumns);
+    for (const stageId of Object.keys(grouped)) {
+      const stageTickets = grouped[stageId];
+      if (!stageTickets) continue;
+      grouped[stageId] = [...stageTickets].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    }
+    return grouped;
+  }, [deferredLocalTickets, stageColumns]);
 
   // Stage form modal state — shown when moving a ticket to a stage that has a form.
   const [stageFormModal, setStageFormModal] = useState<{

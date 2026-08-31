@@ -1,7 +1,14 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
+import { getUserGroupIds } from './user-group-helper'
 
+/**
+ * Non-guest reads are scoped to workspace + reachable canvases:
+ * creator, PUBLIC, or explicit user/group/channel share.
+ * Home-channel membership is intentionally excluded; private call/summary
+ * canvases must be shared through CanvasParticipant rows.
+ */
 export class CanvasesACL extends BaseQueryACL<
   Prisma.CanvasWhereInput,
   Prisma.CanvasUncheckedCreateInput
@@ -23,7 +30,31 @@ export class CanvasesACL extends BaseQueryACL<
       }
     }
 
-    return { workspaceId: this.ctx.workspaceId }
+    const userId = this.ctx.userId
+
+    // Parallel: this runs on every per-user canvas read. Zero's equivalent filter needs no
+    // lookups, but CanvasParticipant has no userGroup/channel relation to traverse here.
+    const [userGroupIds, channelParticipations] = await Promise.all([
+      getUserGroupIds(this.prisma, userId),
+      this.prisma.channelParticipant.findMany({
+        where: { userId },
+        select: { channelId: true },
+      }),
+    ])
+    const channelIds = channelParticipations.map((c) => c.channelId)
+
+    const participantMatchers: Prisma.CanvasParticipantWhereInput[] = [{ userId }]
+    if (userGroupIds.length) participantMatchers.push({ userGroupId: { in: userGroupIds } })
+    if (channelIds.length) participantMatchers.push({ channelId: { in: channelIds } })
+
+    return {
+      workspaceId: this.ctx.workspaceId,
+      OR: [
+        { createdBy: userId },
+        { visibility: 'PUBLIC' },
+        { participants: { some: { OR: participantMatchers } } },
+      ],
+    }
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasWhereInput> {

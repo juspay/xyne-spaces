@@ -5,7 +5,6 @@ import { CallStatus } from '@xyne/shared';
 import {
   getPreviewParticipantUserIds,
   getCallParticipantCount,
-  isScheduledCallJoinable,
   type Call,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import Button from '../../ui/Button';
@@ -32,7 +31,7 @@ export function CallRow({
   onEditCall,
   onCancelCall,
 }: CallRowProps): React.JSX.Element {
-  const joinable = isScheduledCallJoinable(call);
+  const isActive = call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS;
   const isEnded = call.status === CallStatus.ENDED;
   const title = call.title || 'Scheduled Call';
   const startTime = call.startsAt ? format(new Date(call.startsAt), 'h:mm a') : '';
@@ -68,7 +67,7 @@ export function CallRow({
         <div
           className={cn(
             'absolute left-0 top-0 bottom-0 w-1 rounded-full',
-            joinable ? 'bg-status-success' : 'bg-primary/40',
+            isActive ? 'bg-status-success' : 'bg-primary/40',
           )}
         />
         <p className='text-sm font-medium text-foreground truncate'>{title}</p>
@@ -85,9 +84,11 @@ export function CallRow({
             e.stopPropagation();
             onJoinCall(call);
           }}
+          data-track-category='Calls'
+          data-track-name='JOIN_UPCOMING_CALL'
           className={cn(
             'shrink-0 text-sm',
-            joinable
+            isActive
               ? 'border-status-success text-status-success hover:bg-accent'
               : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
           )}

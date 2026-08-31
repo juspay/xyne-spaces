@@ -21,6 +21,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { withRetry } from "../retry.js";
@@ -103,7 +104,7 @@ async function refreshSpacesAccessToken(sessionId: string, workspaceId: string):
     return null;
   } catch (err) {
     log.warn(
-      `[spaces-db] refresh-session sessionId=${sessionId} failed: ${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] refresh-session sessionId=${sessionId} failed: ${errMsg(err)}`,
     );
     return null;
   }
@@ -173,6 +174,9 @@ export type SpacesAuthCaller =
   | "write-action"
   | "clone-owner-dm"
   | "skill-update-owner-dm"
+  | "awakening"
+  | "artifact-apps"
+  | "artifact-app-agents"
   | "unknown";
 
 export async function getSpacesAuthForUser(
@@ -256,7 +260,7 @@ export async function getSpacesAuthForUser(
     // let the caller fall back to cached creds.
     const elapsed = Date.now() - started;
     log.warn(
-      `[spaces-db] read userId=${userId} caller=${caller} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] read userId=${userId} caller=${caller} result=error ms=${elapsed} err=${errMsg(err)}`,
     );
     return null;
   }
@@ -309,7 +313,7 @@ export async function getSpacesUserById(
   } catch (err) {
     const elapsed = Date.now() - started;
     log.warn(
-      `[spaces-db] user-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] user-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${errMsg(err)}`,
     );
     return null;
   }
@@ -352,7 +356,7 @@ export async function getWorkspaceIdForUser(
   } catch (err) {
     const elapsed = Date.now() - started;
     log.warn(
-      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${errMsg(err)}`,
     );
   }
 
@@ -385,7 +389,7 @@ export async function getWorkspaceIdForUser(
   } catch (err) {
     const elapsed = Date.now() - started;
     log.warn(
-      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=claw-link-error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] workspace-lookup userId=${userId} caller=${caller} result=claw-link-error ms=${elapsed} err=${errMsg(err)}`,
     );
     return null;
   }
@@ -451,7 +455,7 @@ export async function getDmChannelForUserAndApp(
   } catch (err) {
     const elapsed = Date.now() - started;
     log.warn(
-      `[spaces-db] dm-channel userId=${trimmedUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=error ms=${elapsed} err=${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] dm-channel userId=${trimmedUserId} spacesAppId=${trimmedAppId} workspaceId=${workspaceId} result=error ms=${elapsed} err=${errMsg(err)}`,
     );
     return null;
   }
@@ -492,7 +496,7 @@ export async function getInstalledAppSigningSecret(
     return blob;
   } catch (err) {
     log.warn(
-      `[spaces-db] installed-app-secret spacesAppId=${spacesAppId} result=error err=${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] installed-app-secret spacesAppId=${spacesAppId} result=error err=${errMsg(err)}`,
     );
     return null;
   }
@@ -531,7 +535,7 @@ export async function getSpacesGroupByAlias(
     return rows;
   } catch (err) {
     log.warn(
-      `[spaces-db] group-by-alias alias=${trimmed} result=error err=${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-db] group-by-alias alias=${trimmed} result=error err=${errMsg(err)}`,
     );
     return [];
   }
@@ -580,7 +584,7 @@ export async function getSpacesUsersByName(name: string, workspaceId?: string): 
       ...params,
     );
   } catch (err) {
-    log.warn(`[spaces-db] users-by-name name=${trimmed} err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[spaces-db] users-by-name name=${trimmed} err=${errMsg(err)}`);
     return [];
   }
 }
@@ -599,7 +603,7 @@ export async function getSpacesUserWorkspaceId(userId: string): Promise<string |
     );
     return rows[0]?.workspaceId ?? null;
   } catch (err) {
-    log.warn(`[spaces-db] user-workspace userId=${trimmed} err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[spaces-db] user-workspace userId=${trimmed} err=${errMsg(err)}`);
     return null;
   }
 }
@@ -626,7 +630,7 @@ export async function getSpacesUserByEmail(email: string, workspaceId?: string):
       ...params,
     );
   } catch (err) {
-    log.warn(`[spaces-db] user-by-email err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[spaces-db] user-by-email err=${errMsg(err)}`);
     return [];
   }
 }
@@ -651,7 +655,7 @@ export async function getSpacesUsersByHandle(handle: string, workspaceId?: strin
       ...params,
     );
   } catch (err) {
-    log.warn(`[spaces-db] users-by-handle err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[spaces-db] users-by-handle err=${errMsg(err)}`);
     return [];
   }
 }

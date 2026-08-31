@@ -122,6 +122,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           thumbnailUrl: null,
           isDeleted: false,
           uploadStatus: null,
+          position: null,
         },
       ];
     });

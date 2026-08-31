@@ -21,6 +21,7 @@ import {
   CanvasCommentsACL,
   CanvasCommentThreadsACL,
   ChannelParticipantsACL,
+  ChannelBoardMappingsACL,
   ChannelsACL,
   ChannelStatsACL,
   ChannelUserStatusACL,
@@ -177,8 +178,22 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'summaryTemplate':
       return new BaseQueryACL(ctx, prisma)
+    // Radar execution engine: non_zero derived data, workspace-scoped; the
+    // feed API layers thread-membership checks in its own queries.
+    case 'executionItem':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionThreadState':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionItemMutation':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionRunLog':
+      return new BaseQueryACL(ctx, prisma)
+    case 'radarTeam':
+      return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
+    case 'channelBoardMapping':
+      return new ChannelBoardMappingsACL(ctx, prisma)
     case 'channelParticipant':
       return new ChannelParticipantsACL(ctx, prisma)
     case 'channelStats':
@@ -231,6 +246,8 @@ export class ACLFactory {
       return new MerchantsACL(ctx, prisma)
     case 'message':
       return new MessagesACL(ctx, prisma)
+    case 'messageArtifact':
+      return new BaseQueryACL(ctx, prisma)
     case 'messageAttachment':
       return new MessageAttachmentsACL(ctx, prisma)
     case 'model':
@@ -271,6 +288,12 @@ export class ACLFactory {
       return new ReleaseEventsACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
+    case 'sdlcEntityLink':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcArtifact':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcTrack':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':
@@ -496,6 +519,8 @@ export class ACLFactory {
     case 'ticketExport':
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
+      return new BaseQueryACL(ctx, prisma)
+    case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
     }
   }

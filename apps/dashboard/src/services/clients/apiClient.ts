@@ -2,7 +2,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosE
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanelService';
-import { API_BASE_URL } from '../../config';
+import { API_BASE_URL, APP_BASE_PATH } from '../../config';
 import { logger, Logger } from '../../utils/logger';
 import {
   httpRequestDuration,
@@ -12,6 +12,10 @@ import {
   clearAuthTokenTotal,
 } from '../otel';
 import { getDynamicHeaders } from './dynamicHeaders';
+import {
+  encryptionRequestInterceptor,
+  encryptionResponseInterceptor,
+} from '../encryptionInterceptors';
 
 // Define the base URL
 export const BASE_URL = API_BASE_URL;
@@ -76,6 +80,9 @@ const apiConfig: AxiosInstance = axios.create({
   withCredentials: true,
 });
 
+// Add encryption request interceptor (must be first to encrypt before other transformations)
+apiConfig.interceptors.request.use(encryptionRequestInterceptor);
+
 // Add a request interceptor
 apiConfig.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -99,7 +106,11 @@ apiConfig.interceptors.request.use(
 
       // X-Workspace-Id for multi-workspace. Main routes are /:workspaceId/...; standalone
       // /newWindow/* windows carry it as a query param (then fall back to lastActiveWorkspaceId).
-      const firstPathSegment = window.location.pathname.match(/^\/([^/]+)/)?.[1];
+      // The lane serves under the /sdlc-app basename, whose segment would otherwise
+      // read as the workspace id. APP_BASE_PATH is '' in the main bundle.
+      const path = window.location.pathname;
+      const appPath = path.startsWith(APP_BASE_PATH) ? path.slice(APP_BASE_PATH.length) : path;
+      const firstPathSegment = appPath.match(/^\/([^/]+)/)?.[1];
       let workspaceId: string | undefined = firstPathSegment;
       if (firstPathSegment === 'newWindow') {
         const search = new URLSearchParams(window.location.search);
@@ -141,6 +152,8 @@ apiConfig.interceptors.request.use(
 );
 
 // Add a response interceptor
+apiConfig.interceptors.response.use(encryptionResponseInterceptor);
+
 apiConfig.interceptors.response.use(
   (response: AxiosResponse) => {
     // Token refresh is now handled by backend via HTTP-only cookies

@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react';
-import { Search, ChevronDown } from 'lucide-react';
+import { SearchDefault as Search, ChevronDown } from '@xyne/icons';
 import { ProjectSidebarProps } from './ProjectSidebar.types';
 import DirectorySectionHeader from '../../Chat/DirectorySectionHeader';
 import SidebarItem from './SidebarItem';

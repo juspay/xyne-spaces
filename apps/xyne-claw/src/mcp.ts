@@ -6,6 +6,7 @@ import { promoteIfOversized } from "./tool-output.js";
 import { writeAttachmentToContext } from "./attachment-write.js";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve as resolvePath, isAbsolute, sep } from "node:path";
+import crypto from "node:crypto";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("mcp");
@@ -17,7 +18,7 @@ const log = createLogger("mcp");
  * (multi-sheet markdown / unpdf), text gets utf-8 decoded, images and
  * unknown binaries are written as-is. Returns null if no marker is found.
  */
-async function persistSpacesAttachmentIfMarker(
+export async function persistSpacesAttachmentIfMarker(
   workspaceDir: string,
   content: string,
 ): Promise<string | null> {
@@ -35,7 +36,12 @@ async function persistSpacesAttachmentIfMarker(
       mimeType,
       buf,
     );
-    return `Saved attachment to \`${relPath}\` (${kind}, ${byteSize} bytes). Use the read tool to view it.`;
+    const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
+    return [
+      `Saved attachment to \`${relPath}\` (${kind}, ${byteSize} bytes). Use the read tool to view it.`,
+      `Workspace file marker: {{file:${relPath}}}`,
+      `Attachment metadata: ${JSON.stringify({ fileName, mimeType, sha256 })}`,
+    ].join("\n");
   } catch (err) {
     return `Failed to persist attachment ${fileName}: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -66,6 +72,28 @@ interface AuthResponse<T> {
   readonly success: boolean;
   readonly data?: T;
   readonly error?: string;
+}
+
+export type TrustedMcpToolBindings = Record<string, Record<string, unknown>>;
+
+export function schemaWithTrustedMcpBindings(
+  inputSchema: Record<string, unknown>,
+  bindings: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!bindings || Object.keys(bindings).length === 0) return inputSchema;
+  const required = Array.isArray(inputSchema["required"])
+    ? (inputSchema["required"] as unknown[]).filter(
+        (value) => typeof value !== "string" || !(value in bindings),
+      )
+    : undefined;
+  return required ? { ...inputSchema, required } : inputSchema;
+}
+
+export function applyTrustedMcpBindings(
+  params: Record<string, unknown>,
+  bindings: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  return bindings ? { ...params, ...bindings } : params;
 }
 
 async function authFetch<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
@@ -117,7 +145,7 @@ export interface McpToolGroup {
 // Allowlist source: the CLAW_FILE_INPUT_FORWARDING_SERVERS env var (comma-
 // separated serverTypes). Mirrors claw-auth's FILE_FORWARDING_SERVERS pattern.
 const FILE_INPUT_FORWARDING_SERVERS = new Set<string>(
-  (process.env["CLAW_FILE_INPUT_FORWARDING_SERVERS"] ?? "")
+  (process.env["CLAW_FILE_INPUT_FORWARDING_SERVERS"] ?? "github")
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean),
@@ -216,6 +244,10 @@ export async function loadMcpToolsForUser(
   // Streaming sink for files forwarded from MCP tools (FILE_FORWARDING_TOOLS in
   // claw-auth). Same callback custom-tools uses → pushes to the user mid-run.
   onAttachment?: (a: Attachment) => void,
+  // Server-owned values injected after model argument generation. This keeps
+  // execution identity stable across context compaction and prevents a model
+  // from omitting or replacing trusted run bindings.
+  trustedToolBindings?: TrustedMcpToolBindings,
 ): Promise<{
   groups: McpToolGroup[];
   cleanup: () => Promise<void>;
@@ -250,6 +282,7 @@ export async function loadMcpToolsForUser(
       // alphanumerics, underscores, and hyphens.
       const safeName = `${server.serverName}__${mcpTool.name}`.replace(/[^a-zA-Z0-9_\-]/g, "_");
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
+      const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
       const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string } = {
         name: safeName,
@@ -263,8 +296,12 @@ export async function loadMcpToolsForUser(
         ...(typeof mcpTool.selectionKey === "string" && mcpTool.selectionKey.length > 0
           ? { selectionKey: mcpTool.selectionKey }
           : {}),
-        description: acceptsFiles ? baseDescription + FILE_INPUT_HINT : baseDescription,
-        parameters: Type.Unsafe(mcpTool.inputSchema),
+        description:
+          (acceptsFiles ? baseDescription + FILE_INPUT_HINT : baseDescription) +
+          (trustedBindings
+            ? " Trusted SDLC identity is bound by the server; do not supply repository, execution, workspace, or actor identity fields."
+            : ""),
+        parameters: Type.Unsafe(schemaWithTrustedMcpBindings(mcpTool.inputSchema, trustedBindings)),
         async execute(_toolCallId, params) {
           // For allowlisted servers, replace any `{{file:<relpath>}}` markers in
           // the params with the base64 content of the referenced workspace file
@@ -285,6 +322,7 @@ export async function loadMcpToolsForUser(
               return { content: [{ type: "text" as const, text: `File forwarding failed: ${msg}` }], details: {} };
             }
           }
+          callParams = applyTrustedMcpBindings(callParams, trustedBindings);
           const result = await authFetch<{
             content: string;
             citations?: import("xyne-claw-shared").Citation[];

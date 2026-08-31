@@ -15,11 +15,13 @@
  */
 
 import type { Citation } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
 import { getSpacesAuthForUser } from "../lib/spaces-db.js";
 import { createLogger } from "../logger.js";
+import { extractXlsxText, isXlsxFile } from "./kb-xlsx.js";
 
 /**
  * Debug sidecar — the YQL spaces actually emitted to Vespa for this call.
@@ -38,6 +40,7 @@ export interface VespaDebugBlock {
 }
 
 const log = createLogger("kb-handlers");
+
 
 export interface KbHandlerResult {
   content: string;
@@ -88,6 +91,23 @@ interface KbResolution {
    */
   filesById: Map<string, {
     name: string;
+    /**
+     * Slash-separated path from the ROOT collection down to and including the
+     * file name (e.g. `services/release-deploy/service.md`). Files sitting
+     * directly in the root have a path equal to their name.
+     *
+     * Rendered by kb-list-files and kb-search: a convention-based KB layout
+     * produces dozens of identically-named files (`service.md`, `people.md`,
+     * `00-index.md`) and `name` alone makes them indistinguishable in tool
+     * output — the model can't tell which area a hit belongs to.
+     */
+    path: string;
+    /**
+     * Immediate parent collection's name. `collectionName` is deliberately the
+     * ROOT collection's name (citations want the top-level label), so this is
+     * the only place the containing folder's name survives.
+     */
+    folderName: string;
     collectionId: string;
     collectionName: string;
     vespaDocId: string;
@@ -96,8 +116,27 @@ interface KbResolution {
     rootCollectionId?: string;
     folderId: string;
   }>;
-  /** Flat lookup of every accessible collection: id → { name, root id }. */
-  collectionsById: Map<string, { name: string; rootCollectionId: string }>;
+  /**
+   * Flat lookup of every accessible collection: id → { name, root id, parent id }.
+   *
+   * `parentId` is the IMMEDIATE parent (null at a root) and is taken from the
+   * tree walk, not the payload's own `parentId` field, so it can't disagree
+   * with the structure we actually traversed. The grant checks below follow
+   * this chain link by link — see `ancestorChain`.
+   */
+  collectionsById: Map<string, { name: string; rootCollectionId: string; parentId: string | null }>;
+  /**
+   * Every accessible collection node — roots AND sub-folders — keyed by id,
+   * with `children`/`items` intact.
+   *
+   * kb-list-files walks this to render the folder tree. The flat `filesById`
+   * map can't express nesting: its `collectionId` is the file's IMMEDIATE
+   * parent, so an exact-match filter on a root collection id returns nothing
+   * for any KB that keeps its content in sub-folders, and no tool ever emitted
+   * the sub-folder ids the model would need to drill in. That dead end is what
+   * this map exists to close.
+   */
+  nodesById: Map<string, KbCollectionNode>;
   /**
    * Translation map for Vespa hits: Vespa's `docId` on the file schema is
    * `collectionItem.fileId` (see backend/src/zero/vespa-injection/core/mapper.ts),
@@ -143,6 +182,8 @@ async function resolveKbContext(
   // Build flat lookups for nice citations and file→collection backlinks.
   const filesById = new Map<string, {
     name: string;
+    path: string;
+    folderName: string;
     collectionId: string;
     collectionName: string;
     vespaDocId: string;
@@ -151,7 +192,8 @@ async function resolveKbContext(
     rootCollectionId?: string;
     folderId: string;
   }>();
-  const collectionsById = new Map<string, { name: string; rootCollectionId: string }>();
+  const collectionsById = new Map<string, { name: string; rootCollectionId: string; parentId: string | null }>();
+  const nodesById = new Map<string, KbCollectionNode>();
   const vespaDocIdToItemId = new Map<string, string>();
   const walk = (
     n: KbCollectionNode,
@@ -159,8 +201,15 @@ async function resolveKbContext(
     rootId: string,
     rootProjectId: string | undefined,
     rootChannelId: string | undefined,
+    // Slash-terminated path from the root collection down to `n`, EXCLUDING the
+    // root's own name ("" at the root, "services/release-deploy/" three levels in).
+    pathPrefix: string,
+    // Immediate parent's id — null at a root. Taken from the traversal rather
+    // than `n.parentId` so it always agrees with the tree we actually walked.
+    parentId: string | null,
   ): void => {
-    collectionsById.set(n.id, { name: n.name, rootCollectionId: rootId });
+    collectionsById.set(n.id, { name: n.name, rootCollectionId: rootId, parentId });
+    nodesById.set(n.id, n);
     // Files directly in the ROOT collection use the '_' sentinel for folder
     // (matches the v2 KB route convention — see dashboard/searchNavigation.ts).
     // Files in any sub-folder use that sub-folder's id as folderId.
@@ -168,6 +217,8 @@ async function resolveKbContext(
     for (const f of n.items ?? []) {
       filesById.set(f.id, {
         name: f.name,
+        path: `${pathPrefix}${f.name}`,
+        folderName: n.name,
         collectionId: n.id,
         collectionName: rootName,
         vespaDocId: f.fileId,
@@ -178,7 +229,9 @@ async function resolveKbContext(
       });
       if (f.fileId) vespaDocIdToItemId.set(f.fileId, f.id);
     }
-    for (const c of n.children ?? []) walk(c, rootName, rootId, rootProjectId, rootChannelId);
+    for (const c of n.children ?? []) {
+      walk(c, rootName, rootId, rootProjectId, rootChannelId, `${pathPrefix}${c.name}/`, n.id);
+    }
   };
   for (const root of tree) {
     // Channel-scoped collections store the channelId in `scopeId` when
@@ -186,7 +239,7 @@ async function resolveKbContext(
     // channel — the file viewer route still needs a placeholder so we treat
     // it as undefined and downstream link builders fall back gracefully.
     const channelId = root.scopeType === "CHANNEL" ? root.scopeId : undefined;
-    walk(root, root.name, root.id, root.projectId, channelId);
+    walk(root, root.name, root.id, root.projectId, channelId, "", null);
   }
 
   // Best-effort fetch of the user's workspaceId for citation deep-links. We
@@ -202,15 +255,46 @@ async function resolveKbContext(
     // retained in the DB by agents.ts (so flipping back to COLLECTIONS
     // restores the picker's previous selection) but dropped from the
     // runtime context. The accessibility layer is the only gate in USER mode.
-    grants: scope === "USER" ? [] : agent.collections.map(c => ({ collectionId: c.collectionId, fileId: c.fileId })),
+    grants: scope === "USER" ? [] : agent.collections.map((c: { collectionId: string; fileId: string | null }) => ({ collectionId: c.collectionId, fileId: c.fileId })),
     accessibleTree: tree,
     accessibleCollectionIds: collections,
     accessibleFileIds: files,
     filesById,
     collectionsById,
+    nodesById,
     vespaDocIdToItemId,
     ...(workspaceId ? { workspaceId } : {}),
   };
+}
+
+/**
+ * Every collection id from `startId` up to its root, INCLUDING `startId`.
+ *
+ * Follows the parent chain one link at a time. The previous implementation
+ * hopped straight from a collection to its `rootCollectionId`, skipping every
+ * level in between — so a grant on an intermediate folder (`services/`) never
+ * matched a file nested deeper (`services/release-deploy/service.md`), and the
+ * grant silently read as empty even though the KB picker had accepted it.
+ *
+ * `seen` guards against a cycle in the payload: a malformed parent chain would
+ * otherwise spin this loop forever and hang the request.
+ */
+function* ancestorChain(ctx: KbResolution, startId: string): Generator<string> {
+  const seen = new Set<string>();
+  let cursor: string | null = startId;
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    yield cursor;
+    cursor = ctx.collectionsById.get(cursor)?.parentId ?? null;
+  }
+}
+
+/** Does any whole-collection grant sit on `collectionId` or one of its ancestors? */
+function grantedViaAncestor(ctx: KbResolution, collectionId: string): boolean {
+  for (const id of ancestorChain(ctx, collectionId)) {
+    if (ctx.grants.some(g => g.fileId === null && g.collectionId === id)) return true;
+  }
+  return false;
 }
 
 /** Is `fileId` covered by the agent's grants AND still accessible to the user? */
@@ -221,22 +305,12 @@ function fileAllowed(ctx: KbResolution, fileId: string): boolean {
   if (ctx.scope === "USER") return true;
   const file = ctx.filesById.get(fileId);
   if (!file) return false;
-  // Walk up the collection tree to a root; check if any ancestor (incl. the
-  // immediate parent and the root) is granted as a whole-collection grant,
-  // OR if this specific fileId is granted as a single-file grant.
+  // Single-file grant on exactly this file.
   for (const g of ctx.grants) {
     if (g.fileId === fileId) return true;
   }
-  // Whole-collection grant: anywhere from the file's collection up to the root.
-  let cursor: string | undefined = file.collectionId;
-  while (cursor) {
-    const matched = ctx.grants.some(g => g.fileId === null && g.collectionId === cursor);
-    if (matched) return true;
-    const parent = ctx.collectionsById.get(cursor);
-    if (!parent) break;
-    cursor = parent.rootCollectionId === cursor ? undefined : parent.rootCollectionId;
-  }
-  return false;
+  // Whole-collection grant anywhere from the file's own folder up to the root.
+  return grantedViaAncestor(ctx, file.collectionId);
 }
 
 /** Is `collectionId` covered by the agent's grants? */
@@ -245,19 +319,19 @@ function collectionAllowed(ctx: KbResolution, collectionId: string): boolean {
   // USER scope: every collection the user can see in spaces is allowed.
   if (ctx.scope === "USER") return true;
   // Whole-collection grant on this id OR an ancestor.
-  let cursor: string | undefined = collectionId;
-  while (cursor) {
-    const matched = ctx.grants.some(g => g.fileId === null && g.collectionId === cursor);
-    if (matched) return true;
-    const node = ctx.collectionsById.get(cursor);
-    if (!node) break;
-    cursor = node.rootCollectionId === cursor ? undefined : node.rootCollectionId;
-  }
-  // Or a single-file grant whose file lives inside this collection.
+  if (grantedViaAncestor(ctx, collectionId)) return true;
+  // Or a single-file grant on a file somewhere BELOW this collection — the
+  // folders between the root and a granted file have to be listable or the
+  // grant is unreachable by navigation (kb-search would be the only way in).
+  // Listing one of these folders is not a leak: every row it renders is itself
+  // re-checked, so only the granted file and the folders on its path appear.
   for (const g of ctx.grants) {
     if (!g.fileId) continue;
     const f = ctx.filesById.get(g.fileId);
-    if (f?.collectionId === collectionId) return true;
+    if (!f) continue;
+    for (const id of ancestorChain(ctx, f.collectionId)) {
+      if (id === collectionId) return true;
+    }
   }
   return false;
 }
@@ -354,6 +428,9 @@ export async function handleKbListResources(args: { userId: string; agentSlug: s
       id: root.id,
       name: root.name,
       fileCount: countAccessibleFilesInTree(root),
+      // Surfaced so the model knows a collection whose files all live in
+      // sub-folders still has something to drill into.
+      folderCount: (root.children ?? []).length,
     }));
     if (rootRows.length === 0) {
       return { content: "You currently have no accessible collections in spaces — nothing for this agent to read." };
@@ -365,13 +442,17 @@ export async function handleKbListResources(args: { userId: string; agentSlug: s
     lines.push(`<resources scope="USER" count="${rootRows.length}">`);
     for (const r of rootRows) {
       lines.push(
-        `  <collection id="${escapeXmlAttr(r.id)}" name="${escapeXmlAttr(r.name)}" file_count="${r.fileCount}" />`,
+        `  <collection id="${escapeXmlAttr(r.id)}" name="${escapeXmlAttr(r.name)}" ` +
+          `file_count="${r.fileCount}" folder_count="${r.folderCount}" />`,
       );
     }
     lines.push(`</resources>`);
     lines.push(
       `\nThis agent is user-scoped: it can read anything you can read in spaces. ` +
-        `Use \`kb-list-files\` to enumerate a collection or \`kb-search\` to find a file by name.`,
+        `Use \`kb-list-files\` to enumerate a collection (it lists sub-folders too — pass ` +
+        `\`depth\` to expand them) or \`kb-search\` to find a file by name. ` +
+        `\`file_count\` is recursive, so a collection with 0 folders shown at the top level ` +
+        `may still hold everything one level down.`,
     );
     return { content: lines.join("\n") };
   }
@@ -406,8 +487,16 @@ export async function handleKbListResources(args: { userId: string; agentSlug: s
     if (r.kind === "collection") {
       // No cite token — Citation type has no "collection" kind. The LLM can
       // still reference the collection by id when calling kb-list-files.
+      // Counts are recursive/immediate respectively so a granted collection
+      // whose content all sits in sub-folders doesn't look empty here.
+      const node = ctx.nodesById.get(r.id);
       lines.push(
-        `  <collection id="${escapeXmlAttr(r.id)}" name="${escapeXmlAttr(r.name)}" />`,
+        `  <collection id="${escapeXmlAttr(r.id)}" name="${escapeXmlAttr(r.name)}"` +
+          (node
+            ? ` file_count="${countAllowedFilesInTree(ctx, node)}"` +
+              ` folder_count="${countAllowedChildFolders(ctx, node)}"`
+            : "") +
+          ` />`,
       );
     } else {
       // Citation token format: `[clf-<toolCallId>#<chunkIndex>]`. The literal
@@ -496,7 +585,22 @@ function buildVespaScope(
   ctx: KbResolution,
   explicitCollectionId: string | undefined,
 ): VespaScopeFilter | { error: string } {
-  if (explicitCollectionId) return { kind: "collection", ids: [explicitCollectionId] };
+  if (explicitCollectionId) {
+    const meta = ctx.collectionsById.get(explicitCollectionId);
+    // A non-root folder: Vespa's collectionId filter only ever matches a
+    // doc's ROOT collection, so this has to expand to explicit docIds
+    // instead (see collectAllowedVespaDocIds). Applies equally to a
+    // folder-picked attachedContext item and to the model passing a
+    // sub-folder id as kb-search's collectionId arg directly.
+    if (meta && meta.rootCollectionId !== explicitCollectionId) {
+      const docIds = collectAllowedVespaDocIds(ctx, explicitCollectionId);
+      if (docIds.length === 0) {
+        return { error: `Folder \`${explicitCollectionId}\` has no accessible files.` };
+      }
+      return { kind: "file", docIds };
+    }
+    return { kind: "collection", ids: [explicitCollectionId] };
+  }
   if (ctx.scope === "USER") return { kind: "none" };
 
   const hasWholeCollectionGrant = ctx.grants.some(g => g.fileId === null);
@@ -615,7 +719,7 @@ export async function handleKbSearch(args: {
       workspaceId: auth.workspaceId,
     });
   } catch (err) {
-    log.warn(`[kb-search] vespa call failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-search] vespa call failed: ${errMsg(err)}`);
     return { content: `KB search failed: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 
@@ -640,7 +744,7 @@ export async function handleKbSearch(args: {
       }) : "none"}`
     );
   } catch (e) {
-    log.warn(`[kb-search] DEBUG log of response shape failed: ${e instanceof Error ? e.message : String(e)}`);
+    log.warn(`[kb-search] DEBUG log of response shape failed: ${errMsg(e)}`);
   }
 
   // Capture for attachment to the result below. Spaces returns the YQL +
@@ -658,7 +762,7 @@ export async function handleKbSearch(args: {
     ? data.data.groups.flatMap(g => g.results ?? [])
     : (data.data.results ?? []);
 
-  type Hit = { fileId: string; name: string; collectionId: string; collectionName: string; snippet?: string };
+  type Hit = { fileId: string; name: string; path?: string; collectionId: string; collectionName: string; snippet?: string };
   const hits: Hit[] = [];
   const seen = new Set<string>();
   let droppedNoIds = 0;
@@ -692,6 +796,9 @@ export async function handleKbSearch(args: {
     hits.push({
       fileId: itemId,
       name: r.title || fileMeta?.name || itemId,
+      // Convention-based KBs repeat file names across folders (`service.md` in
+      // every area). Without the path the model can't tell the hits apart.
+      ...(fileMeta?.path ? { path: fileMeta.path } : {}),
       collectionId,
       collectionName: r.subtitle || fileMeta?.collectionName || collectionId,
       ...(typeof r.context === "string" && r.context.trim() ? { snippet: r.context.trim() } : {}),
@@ -723,6 +830,7 @@ export async function handleKbSearch(args: {
     const h = hits[i]!;
     lines.push(
       `  <hit rank="${i + 1}" id="${escapeXmlAttr(h.fileId)}" name="${escapeXmlAttr(h.name)}" ` +
+        (h.path ? `path="${escapeXmlAttr(h.path)}" ` : "") +
         `collection="${escapeXmlAttr(h.collectionName)}" cite="[clf-__TOOL_CALL_ID__#${i}]">`,
     );
     if (h.snippet) {
@@ -742,10 +850,57 @@ export async function handleKbSearch(args: {
 
 // ── kb-list-files ────────────────────────────────────────────────────────────
 
+/** Recursive count of files under `n` that this agent + user may actually read. */
+function countAllowedFilesInTree(ctx: KbResolution, n: KbCollectionNode): number {
+  let total = 0;
+  for (const f of n.items ?? []) if (fileAllowed(ctx, f.id)) total++;
+  for (const c of n.children ?? []) total += countAllowedFilesInTree(ctx, c);
+  return total;
+}
+
+/** Count of `n`'s IMMEDIATE sub-folders that are in scope. */
+function countAllowedChildFolders(ctx: KbResolution, n: KbCollectionNode): number {
+  let total = 0;
+  for (const c of n.children ?? []) if (collectionAllowed(ctx, c.id)) total++;
+  return total;
+}
+
+/**
+ * Every allowed file's Vespa docId under `folderId`, recursively — used to
+ * scope a kb-search call to a non-root folder. Vespa's `collectionId` filter
+ * only ever matches a doc's ROOT collection (see buildVespaScope), so a
+ * folder id can't be filtered on directly; this expands it to explicit
+ * docIds instead, walking the tree already fetched for ACL checks (no extra
+ * network call). Re-applies fileAllowed() per file so a COLLECTIONS-scoped
+ * agent whose grant only covers part of this subtree doesn't leak the rest.
+ */
+function collectAllowedVespaDocIds(ctx: KbResolution, folderId: string): string[] {
+  const start = ctx.nodesById.get(folderId);
+  if (!start) return [];
+  const docIds: string[] = [];
+  const walk = (n: KbCollectionNode): void => {
+    for (const f of n.items ?? []) {
+      if (f.fileId && fileAllowed(ctx, f.id)) docIds.push(f.fileId);
+    }
+    for (const c of n.children ?? []) walk(c);
+  };
+  walk(start);
+  return docIds;
+}
+
+/**
+ * Row cap for one kb-list-files call. A deep `depth: -1` on a large KB would
+ * otherwise dump thousands of rows into the model's context. When we hit it we
+ * say so explicitly — a silently truncated listing reads as "that's everything"
+ * and sends the agent down the same blind-search path this tool exists to avoid.
+ */
+const LIST_FILES_MAX_ROWS = 400;
+
 export async function handleKbListFiles(args: {
   userId: string;
   agentSlug: string;
   collectionId: string;
+  depth?: number;
 }): Promise<KbHandlerResult> {
   const ctx = await resolveKbContext(args.userId, args.agentSlug);
   if ("error" in ctx) return { content: ctx.error, isError: true };
@@ -753,36 +908,101 @@ export async function handleKbListFiles(args: {
   if (!collectionAllowed(ctx, args.collectionId)) {
     return { content: `Collection \`${args.collectionId}\` is not in this agent's allowed scope.`, isError: true };
   }
-
-  const matches: Array<{ fileId: string; name: string }> = [];
-  for (const [fileId, info] of ctx.filesById) {
-    if (info.collectionId !== args.collectionId) continue;
-    if (!fileAllowed(ctx, fileId)) continue;
-    matches.push({ fileId, name: info.name });
+  const root = ctx.nodesById.get(args.collectionId);
+  if (!root) {
+    return { content: `Collection \`${args.collectionId}\` is not in this agent's allowed scope.`, isError: true };
   }
-  if (matches.length === 0) return { content: `No accessible files in collection \`${args.collectionId}\`.` };
 
-  const c = ctx.collectionsById.get(args.collectionId);
-  // Same XML + inline `cite="[clf-__TOOL_CALL_ID__#N]"` pattern as
-  // kb-get-chunks — N matches each citation's chunkIndex so the dashboard
-  // resolves a clickable chip per file row.
+  // depth 1 (default) — this collection's own files, plus its immediate
+  // sub-folders as unexpanded <folder> rows. depth N expands N levels; depth -1
+  // walks the whole subtree. Sub-folders MUST be emitted at every depth: their
+  // ids are otherwise unobtainable (kb-list-resources only ever surfaces roots
+  // or granted rows), which left the model unable to reach anything not sitting
+  // directly in the collection it was pointed at.
+  const rawDepth =
+    typeof args.depth === "number" && Number.isFinite(args.depth) ? Math.trunc(args.depth) : 1;
+  const maxDepth = rawDepth < 0 ? Number.POSITIVE_INFINITY : Math.max(1, Math.min(rawDepth, 10));
+
+  const body: string[] = [];
+  const citations: Citation[] = [];
+  let fileRows = 0;
+  let folderRows = 0;
+  let unexpandedFolders = 0;
+  let truncated = false;
+
+  const indent = (level: number): string => "  ".repeat(level + 1);
+
+  const render = (node: KbCollectionNode, level: number): void => {
+    for (const f of node.items ?? []) {
+      if (!fileAllowed(ctx, f.id)) continue;
+      if (fileRows + folderRows >= LIST_FILES_MAX_ROWS) {
+        truncated = true;
+        return;
+      }
+      const meta = ctx.filesById.get(f.id);
+      // Same inline `cite="[clf-__TOOL_CALL_ID__#N]"` pattern as kb-get-chunks —
+      // N matches the citation's chunkIndex so the dashboard resolves a
+      // clickable chip per file row.
+      body.push(
+        `${indent(level)}<file id="${escapeXmlAttr(f.id)}" name="${escapeXmlAttr(f.name)}"` +
+          (meta?.path ? ` path="${escapeXmlAttr(meta.path)}"` : "") +
+          ` cite="[clf-__TOOL_CALL_ID__#${fileRows}]" />`,
+      );
+      citations.push(fileCitation(ctx, f.id, f.name, node.id, fileRows));
+      fileRows++;
+    }
+    for (const c of node.children ?? []) {
+      if (!collectionAllowed(ctx, c.id)) continue;
+      if (fileRows + folderRows >= LIST_FILES_MAX_ROWS) {
+        truncated = true;
+        return;
+      }
+      folderRows++;
+      const open =
+        `${indent(level)}<folder id="${escapeXmlAttr(c.id)}" name="${escapeXmlAttr(c.name)}" ` +
+        `file_count="${countAllowedFilesInTree(ctx, c)}" ` +
+        `folder_count="${countAllowedChildFolders(ctx, c)}"`;
+      if (level + 1 < maxDepth) {
+        body.push(`${open}>`);
+        render(c, level + 1);
+        body.push(`${indent(level)}</folder>`);
+      } else {
+        // Not expanded at this depth — the id is what the model needs to drill in.
+        body.push(`${open} />`);
+        unexpandedFolders++;
+      }
+    }
+  };
+
+  render(root, 0);
+
+  if (fileRows === 0 && folderRows === 0) {
+    return { content: `Collection \`${args.collectionId}\` has no files or sub-folders you can access.` };
+  }
+
   const lines: string[] = [];
   lines.push(
     `<files collection_id="${escapeXmlAttr(args.collectionId)}"` +
-      (c?.name ? ` collection_name="${escapeXmlAttr(c.name)}"` : "") +
-      ` count="${matches.length}">`,
+      (root.name ? ` collection_name="${escapeXmlAttr(root.name)}"` : "") +
+      ` depth="${rawDepth < 0 ? "all" : maxDepth}"` +
+      ` file_count="${fileRows}" folder_count="${folderRows}">`,
   );
-  const citations: Citation[] = [];
-  for (let i = 0; i < matches.length; i++) {
-    const m = matches[i]!;
-    lines.push(
-      `  <file id="${escapeXmlAttr(m.fileId)}" name="${escapeXmlAttr(m.name)}" ` +
-        `cite="[clf-__TOOL_CALL_ID__#${i}]" />`,
-    );
-    citations.push(fileCitation(ctx, m.fileId, m.name, args.collectionId, i));
-  }
+  lines.push(...body);
   lines.push(`</files>`);
-  return { content: lines.join("\n"), citations };
+
+  if (truncated) {
+    lines.push(
+      `\nTruncated at ${LIST_FILES_MAX_ROWS} rows — this is NOT the full listing. ` +
+        `Call \`kb-list-files\` on a specific folder id to narrow, or \`kb-search\` to jump straight to a file.`,
+    );
+  }
+  if (unexpandedFolders > 0) {
+    lines.push(
+      `\n${unexpandedFolders} folder(s) shown collapsed. Call \`kb-list-files\` with a folder's ` +
+        `id to open it, or re-run with \`depth\` (e.g. 3, or -1 for the whole tree).`,
+    );
+  }
+  return { content: lines.join("\n"), ...(citations.length > 0 ? { citations } : {}) };
 }
 
 // ── kb-read-file ─────────────────────────────────────────────────────────────
@@ -817,7 +1037,10 @@ export async function handleKbReadFile(args: {
     // search — out of scope for v1).
     const looksTextual = /^(text\/|application\/(json|xml|x-yaml|yaml|markdown))/.test(contentType);
     const text = buffer.toString("utf8");
-    const isLikelyBinary = text.includes(" ") || /[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 200));
+    // NB: match the NUL via the regex escape below, never a raw 0x00 byte in a
+    // string literal. A literal NUL lived here once and got silently stripped,
+    // leaving `includes("")` — always true, so every file reported as binary.
+    const isLikelyBinary = /\x00/.test(text) || /[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 200));
 
     // Single-result read still emits the same `[clf-__TOOL_CALL_ID__#0]` token
     // shape as kb-get-chunks so the dashboard chip resolves via the matching
@@ -826,6 +1049,12 @@ export async function handleKbReadFile(args: {
     const citeToken = `[clf-__TOOL_CALL_ID__#0]`;
 
     if (isLikelyBinary) {
+      if (isXlsxFile(contentType, fileMeta.name)) {
+        const body = await extractXlsxText(buffer, fileMeta.name);
+        const header = `## ${fileMeta.name} ${citeToken}\n\n_collection: ${fileMeta.collectionName}_\n\n---\n\n`;
+        return { content: header + body, citations: [citation] };
+      }
+
       return {
         content:
           `File \`${fileMeta.name}\` ${citeToken} is a binary type (PDF / image / office doc). ` +
@@ -838,7 +1067,7 @@ export async function handleKbReadFile(args: {
     const body = text.length > 100_000 ? text.slice(0, 100_000) + "\n\n…(truncated to 100k characters)" : text;
     return { content: header + body, citations: [citation] };
   } catch (err) {
-    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[kb-read-file] download failed fileId=${args.fileId} err=${errMsg(err)}`);
     return { content: `Failed to read file \`${args.fileId}\`: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
   }
 }
@@ -979,7 +1208,7 @@ export async function handleKbGetChunks(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-get-chunks failed: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -1115,7 +1344,7 @@ export async function handleKbSearchWithinDoc(args: {
     });
   } catch (err) {
     log.warn(
-      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${err instanceof Error ? err.message : String(err)}`,
+      `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
     );
     return {
       content: `kb-search-within-doc failed: ${err instanceof Error ? err.message : "unknown error"}`,

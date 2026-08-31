@@ -63,6 +63,10 @@ import {
   listMcpPublishRequests,
   approveServerPublish,
   rejectServerPublish,
+  listMcpEditRequests,
+  approveServerEdit,
+  rejectServerEdit,
+  type McpEditRequest,
   listAdminMcpServers,
   getAdminMcpGlobalCreds,
   setAdminMcpGlobalCreds,
@@ -152,6 +156,10 @@ export function AdminPageV3({ userId }: Props) {
   const [workflowRejectNote, setWorkflowRejectNote] = useState("");
   const [mcpRejectingId, setMcpRejectingId] = useState<string | null>(null);
   const [mcpRejectNote, setMcpRejectNote] = useState("");
+  const [mcpEditRequests, setMcpEditRequests] = useState<McpEditRequest[]>([]);
+  const [mcpEditRequestsLoading, setMcpEditRequestsLoading] = useState(false);
+  const [mcpEditRejectingId, setMcpEditRejectingId] = useState<string | null>(null);
+  const [mcpEditRejectNote, setMcpEditRejectNote] = useState("");
 
   /* Audit logs */
   const AUDIT_PAGE_SIZE = 50;
@@ -345,7 +353,25 @@ export function AdminPageV3({ userId }: Props) {
     }
   }, [userId, showSnackbar]);
 
-  useEffect(() => { if (tab === "connectors") loadMcpRequests(); }, [tab, loadMcpRequests]);
+  const loadMcpEditRequests = useCallback(async () => {
+    setMcpEditRequestsLoading(true);
+    try {
+      const rows = await listMcpEditRequests(userId);
+      setMcpEditRequests(rows);
+    } catch (err) {
+      console.error("[admin] mcp edit-requests load error:", err);
+      showSnackbar({ variant: "error", title: "Failed to load MCP edit requests" });
+    } finally {
+      setMcpEditRequestsLoading(false);
+    }
+  }, [userId, showSnackbar]);
+
+  useEffect(() => {
+    if (tab === "connectors") {
+      loadMcpRequests();
+      loadMcpEditRequests();
+    }
+  }, [tab, loadMcpRequests, loadMcpEditRequests]);
 
   const loadWorkflowRequests = useCallback(async () => {
     setWorkflowRequestsLoading(true);
@@ -463,6 +489,34 @@ export function AdminPageV3({ userId }: Props) {
       setMcpRejectNote("");
       showSnackbar({ variant: "success", title: "MCP connector rejected" });
       loadMcpRequests();
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: err instanceof Error ? err.message : "Failed to reject",
+      });
+    }
+  };
+
+  const handleApproveMcpEdit = async (id: string) => {
+    try {
+      await approveServerEdit(id, userId);
+      showSnackbar({ variant: "success", title: "MCP edit approved" });
+      loadMcpEditRequests();
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: err instanceof Error ? err.message : "Failed to approve",
+      });
+    }
+  };
+
+  const handleRejectMcpEdit = async (id: string) => {
+    try {
+      await rejectServerEdit(id, userId, mcpEditRejectNote.trim() || undefined);
+      setMcpEditRejectingId(null);
+      setMcpEditRejectNote("");
+      showSnackbar({ variant: "success", title: "MCP edit rejected" });
+      loadMcpEditRequests();
     } catch (err) {
       showSnackbar({
         variant: "error",
@@ -1098,7 +1152,7 @@ export function AdminPageV3({ userId }: Props) {
   const tabItems: TabItem<TabKey>[] = useMemo(
     () => [
       { id: "requests", label: requests.length > 0 ? `Requests (${requests.length})` : "Requests" },
-      { id: "connectors", label: mcpRequests.length > 0 ? `MCP Publish (${mcpRequests.length})` : "MCP Publish" },
+      { id: "connectors", label: (mcpRequests.length + mcpEditRequests.length) > 0 ? `MCP Publish (${mcpRequests.length + mcpEditRequests.length})` : "MCP Publish" },
       { id: "workflowreqs", label: workflowRequests.length > 0 ? `Workflow Requests (${workflowRequests.length})` : "Workflow Requests" },
       { id: "agents", label: `Agents (${agents.length})` },
       { id: "admins", label: `Admins (${admins.length})` },
@@ -1107,7 +1161,7 @@ export function AdminPageV3({ userId }: Props) {
       { id: "scheduled", label: scheduledTotal > 0 ? `Scheduled (${scheduledTotal})` : "Scheduled" },
       { id: "globalmcp", label: "Global MCP" },
     ],
-    [requests.length, mcpRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
+    [requests.length, mcpRequests.length, mcpEditRequests.length, workflowRequests.length, agents.length, admins.length, auditTotal, scheduledTotal],
   );
 
   /* ── Render ───────────────────────────────────────────────────── */
@@ -1216,6 +1270,21 @@ export function AdminPageV3({ userId }: Props) {
                     }}
                     onApprove={handleApproveMcp}
                     onConfirmReject={handleRejectMcp}
+                    editLoading={mcpEditRequestsLoading}
+                    editRequests={mcpEditRequests}
+                    editRejectingId={mcpEditRejectingId}
+                    editRejectNote={mcpEditRejectNote}
+                    onEditRejectNoteChange={setMcpEditRejectNote}
+                    onEditStartReject={(id) => {
+                      setMcpEditRejectingId(id);
+                      setMcpEditRejectNote("");
+                    }}
+                    onEditCancelReject={() => {
+                      setMcpEditRejectingId(null);
+                      setMcpEditRejectNote("");
+                    }}
+                    onEditApprove={handleApproveMcpEdit}
+                    onEditConfirmReject={handleRejectMcpEdit}
                   />
                 )}
 
@@ -2039,6 +2108,15 @@ function ConnectorsTab({
   onCancelReject,
   onApprove,
   onConfirmReject,
+  editLoading,
+  editRequests,
+  editRejectingId,
+  editRejectNote,
+  onEditRejectNoteChange,
+  onEditStartReject,
+  onEditCancelReject,
+  onEditApprove,
+  onEditConfirmReject,
 }: {
   loading: boolean;
   mcpRequests: McpServer[];
@@ -2049,13 +2127,91 @@ function ConnectorsTab({
   onCancelReject: () => void;
   onApprove: (id: string) => void | Promise<void>;
   onConfirmReject: (id: string) => void | Promise<void>;
+  editLoading: boolean;
+  editRequests: McpEditRequest[];
+  editRejectingId: string | null;
+  editRejectNote: string;
+  onEditRejectNoteChange: (v: string) => void;
+  onEditStartReject: (id: string) => void;
+  onEditCancelReject: () => void;
+  onEditApprove: (id: string) => void | Promise<void>;
+  onEditConfirmReject: (id: string) => void | Promise<void>;
 }) {
-  if (loading) return <Loading text="Loading…" />;
-  if (mcpRequests.length === 0)
-    return <EmptyHint>No pending MCP connector publish requests.</EmptyHint>;
+  if (loading || editLoading) return <Loading text="Loading…" />;
+  if (mcpRequests.length === 0 && editRequests.length === 0)
+    return <EmptyHint>No pending MCP connector publish or edit requests.</EmptyHint>;
 
   return (
     <div className="space-y-3 pt-4">
+      {editRequests.map((r) => (
+        <div
+          key={r.id}
+          className="rounded-xl border border-xyne-border bg-xyne-surface px-4 py-3"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[13px] font-medium text-xyne-fg-primary">
+                  {r.mcpServer.name}
+                </span>
+                <Badge as="span" size="sm" label={r.mcpServer.type} />
+                <Badge as="span" size="sm" label="edit" />
+              </div>
+              <p className="mt-1 text-[11px] text-xyne-fg-tertiary">
+                Proposed by <span className="text-xyne-fg-secondary">{r.proposedByUserId}</span>
+                {r.proposedAt && (
+                  <> · {new Date(r.proposedAt).toLocaleString()}</>
+                )}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="primary" onClick={() => onEditApprove(r.id)}>
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => onEditStartReject(r.id)}
+              >
+                Reject
+              </Button>
+            </div>
+          </div>
+
+          {editRejectingId === r.id && (
+            <div className="mt-3 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+              <TextField
+                multiline
+                rows={3}
+                placeholder="Reason for rejection (shown to the requester)…"
+                value={editRejectNote}
+                onChange={(e) => onEditRejectNoteChange(e.target.value)}
+              />
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={onEditCancelReject}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => onEditConfirmReject(r.id)}
+                >
+                  Confirm Reject
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <details className="mt-3">
+            <summary className="cursor-pointer text-[11px] text-xyne-fg-muted hover:text-xyne-fg-primary">
+              View proposed changes
+            </summary>
+            <pre className="mt-2 max-h-72 overflow-auto rounded-lg border border-xyne-border bg-xyne-surface-subtle p-2 text-[11px] text-xyne-fg-secondary">
+{JSON.stringify(r.proposedFields, null, 2)}
+            </pre>
+          </details>
+        </div>
+      ))}
       {mcpRequests.map((s) => {
         const meta = (s.connectorMeta ?? {}) as {
           ownerUserId?: string;

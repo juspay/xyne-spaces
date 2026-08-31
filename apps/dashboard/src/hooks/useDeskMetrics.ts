@@ -19,11 +19,15 @@ export function useDeskMetrics(
   stageNames?: string[],
   priorities?: TicketPriority[],
   userGroupIds?: string[],
+  tagValues?: string[],
+  aiCategories?: string[],
 ): UseQueryResult<DeskMetricsResponse> {
   const sortedStageNames = [...(stageNames ?? [])].sort();
   const sortedAssigneeIds = [...(assigneeIds ?? [])].sort();
   const sortedPriorities = [...(priorities ?? [])].sort();
   const sortedUserGroupIds = [...(userGroupIds ?? [])].sort();
+  const sortedTagValues = [...(tagValues ?? [])].sort();
+  const sortedAiCategories = [...(aiCategories ?? [])].sort();
   return useQuery({
     queryKey: [
       'desk-metrics',
@@ -34,6 +38,8 @@ export function useDeskMetrics(
       sortedStageNames,
       sortedPriorities,
       sortedUserGroupIds,
+      sortedTagValues,
+      sortedAiCategories,
     ],
     queryFn: () =>
       getDeskMetrics(
@@ -44,6 +50,8 @@ export function useDeskMetrics(
         sortedStageNames,
         sortedPriorities,
         sortedUserGroupIds,
+        sortedTagValues,
+        sortedAiCategories,
       ),
     enabled: enabled && !!channelId,
     retry: 1,
@@ -59,12 +67,16 @@ export function useAggregateDeskMetrics(
   stageNames?: string[],
   priorities?: TicketPriority[],
   userGroupIds?: string[],
+  tagValues?: string[],
+  aiCategories?: string[],
 ): UseQueryResult<DeskMetricsAggregateResponse> {
   const sortedIds = [...channelIds].sort();
   const sortedAssigneeIds = [...(assigneeIds ?? [])].sort();
   const sortedStageNames = [...(stageNames ?? [])].sort();
   const sortedPriorities = [...(priorities ?? [])].sort();
   const sortedUserGroupIds = [...(userGroupIds ?? [])].sort();
+  const sortedTagValues = [...(tagValues ?? [])].sort();
+  const sortedAiCategories = [...(aiCategories ?? [])].sort();
   const idsKey = sortedIds.join(',');
   return useQuery({
     queryKey: [
@@ -76,6 +88,8 @@ export function useAggregateDeskMetrics(
       sortedStageNames,
       sortedPriorities,
       sortedUserGroupIds,
+      sortedTagValues,
+      sortedAiCategories,
     ],
     queryFn: () =>
       getAggregateDeskMetrics(
@@ -86,6 +100,8 @@ export function useAggregateDeskMetrics(
         sortedStageNames,
         sortedPriorities,
         sortedUserGroupIds,
+        sortedTagValues,
+        sortedAiCategories,
       ),
     enabled: enabled && sortedIds.length > 0,
     retry: 1,

@@ -1,7 +1,6 @@
 import { logger } from '@/utils/logger';
 import { runAsSystem } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
-import webpush from 'web-push';
 import { websocketService } from './websocketService';
 import {
   createFlowJson,
@@ -23,7 +22,8 @@ import { serializeInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus } from '@xyne/shared';
+  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification } from '@xyne/shared';
+import { activityService } from '@/services/activity/activityService';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -171,9 +171,6 @@ interface UserPreferences {
 }
 
 class NotificationService {
-  constructor() {
-    this.initializeWebPush();
-  }
   /**
    * Helper to create a granular notification entry for a specific session (Mobile or Web)
    */
@@ -201,17 +198,6 @@ class NotificationService {
     });
   }
 
-  private initializeWebPush(): void {
-    const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
-    const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-    const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@xyne.ai';
-
-    if (vapidPublicKey && vapidPrivateKey) {
-      webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
-    } else {
-      logger.warn('VAPID keys not configured. Push notifications will not work.');
-    }
-  }
   async sendWorkflowCompletionNotification(workflowId: string, status: string, executionId: string): Promise<void> {
     logger.info(
       `[TicketBot] sendWorkflowCompletionNotification called for workflow ${workflowId} with status ${status}`
@@ -867,8 +853,6 @@ class NotificationService {
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
         notificationType: data.type,
-        title: data.title,
-        message: data.message,
         relatedEntityType: data.relatedEntityType,
         relatedEntityId: data.relatedEntityId,
         actionUrl: data.actionUrl,
@@ -880,7 +864,7 @@ class NotificationService {
         const hasActiveTokens = await fcmPushService.hasActiveTokens(userId);
 
         if (hasActiveTokens) {
-          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+          logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type}`);
 
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
@@ -939,7 +923,7 @@ class NotificationService {
 
       // ─── DESKTOP NOTIFICATIONS ───────────────────────────────────────────────
       if (sendDesktop) {
-        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
+        logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type}`);
 
         await realTimeNotificationService.sendNotification(
           userId,
@@ -1514,6 +1498,61 @@ class NotificationService {
       .map(result => result.value);
 
     return { deliveredUserIds };
+  }
+
+  async createSummaryTemplateSharedNotifications(
+    recipientUserIds: string[],
+    templateId: string,
+    templateName: string,
+    workspaceId: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'summary_template_shared' | 'summary_template_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+    if (recipientIds.length === 0) return { deliveredUserIds: [] };
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'summary_template',
+    });
+
+    const isRevoked = actorAction === 'summary_template_access_revoked';
+    const title = isRevoked
+      ? `${actorName} removed your access to a summary template`
+      : `${actorName} shared a summary template with you`;
+    const message = isRevoked
+      ? `${actorName} removed your access to "${templateName}"`
+      : `${actorName} shared "${templateName}" with you`;
+    const actionUrl = `/recordings?templates=1&summaryTemplateId=${encodeURIComponent(templateId)}`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.SUMMARY_TEMPLATE_SHARED,
+          relatedEntityType: 'summary_template',
+          relatedEntityId: templateId,
+          actionUrl,
+          workspaceId,
+          metadata: {
+            summaryTemplateId: templateId,
+            templateName,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      }),
+    );
+
+    return {
+      deliveredUserIds: results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map(result => result.value),
+    };
   }
 
   async createThreadReplyNotifications(
@@ -2220,6 +2259,167 @@ class NotificationService {
       );
     } catch (error) {
       logger.error('[NotificationService] Failed to send ticket reassignment notification:', error);
+    }
+  }
+
+  /**
+   * Notifies the group's subscribed members (user_group_mappings.isNotified)
+   * that no one could be assigned because every eligible candidate is at or
+   * above the group's maxWorkload cap. Not tied to a specific ticket — fires
+   * from the assignment engine itself, not a DB side-effect handler, since a
+   * blocked assignment writes nothing for a handler to react to.
+   */
+  async sendMaxWorkloadReachedNotification(
+    userGroupId: string,
+    groupName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const actionUrl = `/${workspaceId}/user-groups/${userGroupId}/assignment-config`;
+      const title = 'Max workload reached';
+      const message = `${groupName} is at max workload — no one was available for a new ticket.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.MAX_WORKLOAD_REACHED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          // Activities tab entry is written unconditionally, same as
+          // ticket-assignments-handler.ts — it's a persistent record, not a
+          // push, so a user's desktop/mobile notification preferences (below)
+          // shouldn't hide that this happened.
+          await activityService.createActivity({
+            userId,
+            actorId: userId,
+            actorAction: 'max_workload_reached',
+            actionSource: 'user_group',
+            actionSourceId: userGroupId,
+            classification: ActivityClassification.FYI,
+          });
+
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.MAX_WORKLOAD_REACHED,
+            relatedEntityType: 'user_group',
+            relatedEntityId: userGroupId,
+            actionUrl,
+            workspaceId,
+            metadata: { userGroupId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send max workload reached notification:', error);
+    }
+  }
+
+  /**
+   * Desktop/mobile push for subscribers (user_group_mappings.isNotified) when a
+   * user pauses ticket assignment. The Activities-tab entry is created
+   * separately by userAssignmentStateService (activityService.createActivities),
+   * matching the pre-existing AssignmentPauseActivity renderer's shape — this
+   * method only handles the push side.
+   */
+  async sendAssignmentPauseNotification(
+    pausedUserId: string,
+    pausedUserName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+    unavailableUntil: number,
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const availableAt = new Date(unavailableUntil).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      const title = 'Ticket assignment paused';
+      const message = `${pausedUserName} paused from ticket assignment until ${availableAt}.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.ASSIGNMENT_PAUSED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.ASSIGNMENT_PAUSED,
+            relatedEntityType: 'user',
+            relatedEntityId: pausedUserId,
+            workspaceId,
+            metadata: { pausedUserId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send assignment pause notification:', error);
+    }
+  }
+
+  /**
+   * Desktop/mobile push counterpart to sendAssignmentPauseNotification, fired
+   * when the user resumes. See that method's docstring for the activity-vs-push
+   * split.
+   */
+  async sendAssignmentResumeNotification(
+    resumedUserId: string,
+    resumedUserName: string,
+    workspaceId: string,
+    recipientUserIds: string[],
+  ): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+
+    try {
+      const title = 'Ticket assignment resumed';
+      const message = `${resumedUserName} resumed ticket assignment.`;
+
+      const { desktopUsers, mobileUsers } = await notificationFilterService.filterGlobalUsers(
+        recipientUserIds,
+        NotificationType.ASSIGNMENT_RESUMED,
+        'mention',
+      );
+
+      await Promise.allSettled(
+        recipientUserIds.map(async (userId) => {
+          const receiveDesktop = desktopUsers.includes(userId);
+          const receiveMobile = mobileUsers.includes(userId);
+          if (!receiveDesktop && !receiveMobile) return;
+
+          await this.createNotification(userId, {
+            title,
+            message,
+            type: NotificationType.ASSIGNMENT_RESUMED,
+            relatedEntityType: 'user',
+            relatedEntityId: resumedUserId,
+            workspaceId,
+            metadata: { resumedUserId },
+          }, { sendDesktop: receiveDesktop, sendMobile: receiveMobile });
+        }),
+      );
+    } catch (error) {
+      logger.error('[NotificationService] Failed to send assignment resume notification:', error);
     }
   }
 

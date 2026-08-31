@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
@@ -6,11 +7,13 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  GitBranch,
   History,
   Pencil,
   Power,
   Save as SaveIcon,
   Send,
+  Trash2,
   Undo2,
   X,
 } from 'lucide-react';
@@ -36,6 +39,7 @@ import {
 } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import {
+  fetchAutomationVersions,
   fetchOperators,
   fetchStepCatalog,
   fetchStepSchema,
@@ -157,6 +161,10 @@ export function AutomationBuilder({
   onAfterApprovalDecision,
   onBack,
   onShowRuns,
+  onShowVersionHistory,
+  onProposeChange,
+  onCancelFork,
+  readOnlyPreview = false,
 }: AutomationBuilderProps): React.ReactElement {
   const [name, setName] = useState(automation?.name ?? initialName ?? '');
   const [description, setDescription] = useState(
@@ -185,6 +193,7 @@ export function AutomationBuilder({
   const [editMode, setEditMode] = useState<boolean>(!automation);
   const [editConfirmOpen, setEditConfirmOpen] = useState(false);
   const [proposeChangeConfirmOpen, setProposeChangeConfirmOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     if (automation?.id) setSavedId(automation.id);
@@ -206,6 +215,23 @@ export function AutomationBuilder({
     queryFn: fetchOperators,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Lets the header show "which version am I looking at" (e.g. "v2 of 3"). Skipped
+  // in readOnlyPreview (the compare view), where the badge never renders.
+  const versionsQuery = useQuery({
+    queryKey: ['automation-versions', savedId],
+    queryFn: () => fetchAutomationVersions(savedId!),
+    enabled: !!savedId && !readOnlyPreview,
+    staleTime: 5 * 60 * 1000,
+  });
+  const versionPosition = useMemo(() => {
+    const versions = versionsQuery.data;
+    if (!versions || !savedId) return null;
+    // Versions come back newest-first; number chronologically (oldest = v1).
+    const indexFromNewest = versions.findIndex(v => v.id === savedId);
+    if (indexFromNewest === -1) return null;
+    return { number: versions.length - indexFromNewest, total: versions.length };
+  }, [versionsQuery.data, savedId]);
 
   const triggerSchemaQuery = useQuery({
     queryKey: ['automations', 'schema', 'trigger', config.trigger.type],
@@ -288,9 +314,15 @@ export function AutomationBuilder({
       description: string;
       config: AutomationConfig;
     }): Promise<SaveResult> => {
-      console.info('[automations] save attempted', {
-        id: savedId,
-        status: savedStatus,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] save attempted'),
+        context: [
+          {
+            id: savedId,
+            status: savedStatus,
+          },
+        ],
       });
 
       const validationResult = await validateAutomation(payload.config);
@@ -356,6 +388,7 @@ export function AutomationBuilder({
           createdAt: new Date(now).toISOString(),
           updatedAt: new Date(now).toISOString(),
           automationSeriesId: savedId ?? targetId,
+          eventType,
         },
         validation: validationResult,
       };
@@ -369,9 +402,15 @@ export function AutomationBuilder({
       }
       setSavedStatus(result.automation.status);
       setEditMode(false);
-      console.info('[automations] save succeeded', {
-        id: result.automation.id,
-        status: result.automation.status,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] save succeeded'),
+        context: [
+          {
+            id: result.automation.id,
+            status: result.automation.status,
+          },
+        ],
       });
       toast.success('Saved');
       onSaved?.(result);
@@ -381,14 +420,38 @@ export function AutomationBuilder({
       const v = (err as Error & { validation?: ValidationResult }).validation;
       if (v) setValidation(v);
       setErrorMessage(message);
-      console.error('[automations] save failed', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[automations] save failed'),
+        error: err,
+      });
+      toast.error(message);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string): Promise<void> => {
+      zero.mutate(mutators.automations.delete({ id }));
+      return Promise.resolve();
+    },
+    onSuccess: () => {
+      toast.success('Automation deleted');
+      onBack();
+    },
+    onError: err => {
+      const message = err instanceof Error ? err.message : 'Delete failed';
+      setErrorMessage(message);
       toast.error(message);
     },
   });
 
   const activateMutation = useMutation({
     mutationFn: async (id: string): Promise<void> => {
-      console.info('[automations] activate attempted', { id });
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] activate attempted'),
+        context: [{ id }],
+      });
       const validationResult = await validateAutomation(config);
       if (!validationResult.valid) {
         setValidation(validationResult);
@@ -415,17 +478,21 @@ export function AutomationBuilder({
   });
 
   const disableMutation = useMutation({
-    mutationFn: (id: string): Promise<void> => {
+    mutationFn: ({ id, cancelQueued }: { id: string; cancelQueued: boolean }): Promise<void> => {
       setSavedStatus(AutomationStatusValues.DISABLED);
       setErrorMessage(null);
-      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now() }));
-      toast.success('Automation disabled');
+      zero.mutate(mutators.automations.disable({ id, timestamp: Date.now(), cancelQueued }));
+      toast.success(
+        cancelQueued ? 'Automation disabled, queued runs will not fire' : 'Automation disabled',
+      );
       return Promise.resolve();
     },
     onError: err => {
       setErrorMessage(err instanceof Error ? err.message : 'Disable failed');
     },
   });
+
+  const [disableDialogOpen, setDisableDialogOpen] = useState(false);
 
   const archiveMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
@@ -482,10 +549,13 @@ export function AutomationBuilder({
   });
 
   const handleProposeChangeNavigate = useCallback((): void => {
-    if (automation?.id) {
-      void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+    if (!automation) return;
+    if (onProposeChange) {
+      onProposeChange(automation);
+      return;
     }
-  }, [automation?.id, navigate]);
+    void navigate(`../new?fork=${automation.id}`, { relative: 'path' });
+  }, [automation, onProposeChange, navigate]);
 
   // Approve / Reject — only used in approval-review mode, when an admin
   // opens a PENDING_APPROVAL proposal from the inbox. The actual auth check
@@ -563,10 +633,16 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, cond);
-          console.info('[automations] step added', {
-            type,
-            insertAt,
-            finalIndex: next.indexOf(cond),
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_info',
+            message: String('[automations] step added'),
+            context: [
+              {
+                type,
+                insertAt,
+                finalIndex: next.indexOf(cond),
+              },
+            ],
           });
           return { ...prev, steps: next };
         });
@@ -580,10 +656,16 @@ export function AutomationBuilder({
         };
         setConfig(prev => {
           const next = insertInto(prev.steps, sw);
-          console.info('[automations] step added', {
-            type,
-            insertAt,
-            finalIndex: next.indexOf(sw),
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_info',
+            message: String('[automations] step added'),
+            context: [
+              {
+                type,
+                insertAt,
+                finalIndex: next.indexOf(sw),
+              },
+            ],
           });
           return { ...prev, steps: next };
         });
@@ -598,10 +680,16 @@ export function AutomationBuilder({
       };
       setConfig(prev => {
         const next = insertInto(prev.steps, action);
-        console.info('[automations] step added', {
-          type,
-          insertAt,
-          finalIndex: next.indexOf(action),
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_info',
+          message: String('[automations] step added'),
+          context: [
+            {
+              type,
+              insertAt,
+              finalIndex: next.indexOf(action),
+            },
+          ],
         });
         return { ...prev, steps: next };
       });
@@ -638,9 +726,15 @@ export function AutomationBuilder({
   const handleDeleteStep = useCallback((index: number): void => {
     setConfig(prev => {
       const removed = prev.steps[index];
-      console.info('[automations] step removed', {
-        type: removed?.type,
-        index,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] step removed'),
+        context: [
+          {
+            type: removed?.type,
+            index,
+          },
+        ],
       });
       return { ...prev, steps: prev.steps.filter((_, i) => i !== index) };
     });
@@ -649,10 +743,16 @@ export function AutomationBuilder({
   const handleMoveStep = useCallback((index: number, direction: -1 | 1): void => {
     setConfig(prev => {
       const moved = prev.steps[index];
-      console.info('[automations] step reordered', {
-        type: moved?.type,
-        from: index,
-        to: index + direction,
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('[automations] step reordered'),
+        context: [
+          {
+            type: moved?.type,
+            from: index,
+            to: index + direction,
+          },
+        ],
       });
       return { ...prev, steps: moveStep(prev.steps, index, direction) };
     });
@@ -685,8 +785,8 @@ export function AutomationBuilder({
 
   const handleDisable = useCallback((): void => {
     if (!savedId) return;
-    disableMutation.mutate(savedId);
-  }, [disableMutation, savedId]);
+    setDisableDialogOpen(true);
+  }, [savedId]);
 
   const handleArchive = useCallback((): void => {
     if (!savedId) return;
@@ -710,22 +810,24 @@ export function AutomationBuilder({
     <div className='flex h-full w-full flex-col bg-background'>
       <div className='flex flex-col gap-3 border-b border-border bg-background px-6 py-4'>
         <div className='flex items-center gap-3'>
-          <Tooltip content='Back to automations' side='bottom'>
-            <button
-              type='button'
-              onClick={onBack}
-              aria-label='Back to automations list'
-              data-track-category='automation-builder'
-              data-track-name='back-to-list'
-              className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
-                'hover:text-foreground hover:bg-accent/40',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-              )}
-            >
-              <ArrowLeft className='size-4' aria-hidden='true' />
-            </button>
-          </Tooltip>
+          {!readOnlyPreview && (
+            <Tooltip content='Back to automations' side='bottom'>
+              <button
+                type='button'
+                onClick={onBack}
+                aria-label='Back to automations list'
+                data-track-category='automation-builder'
+                data-track-name='back-to-list'
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
+                  'hover:text-foreground hover:bg-accent/40',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                )}
+              >
+                <ArrowLeft className='size-4' aria-hidden='true' />
+              </button>
+            </Tooltip>
+          )}
           <InlineEditableText
             value={name}
             onChange={setName}
@@ -744,8 +846,51 @@ export function AutomationBuilder({
               {STATUS_LABEL[savedStatus] ?? savedStatus}
             </span>
           )}
+          {!editMode && !readOnlyPreview && versionPosition && (
+            <Tooltip
+              content={
+                versionPosition.total > 1
+                  ? `Version ${versionPosition.number} of ${versionPosition.total}`
+                  : 'Version 1'
+              }
+              side='bottom'
+            >
+              <button
+                type='button'
+                onClick={() => savedId && onShowVersionHistory?.(savedId)}
+                disabled={!onShowVersionHistory}
+                data-track-category='automation-builder'
+                data-track-name='header-version-indicator'
+                className='rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/40 disabled:pointer-events-none'
+              >
+                v{versionPosition.number}
+                {versionPosition.total > 1 ? ` / ${versionPosition.total}` : ''}
+              </button>
+            </Tooltip>
+          )}
+          {!editMode &&
+          !readOnlyPreview &&
+          savedId &&
+          savedStatus === AutomationStatusValues.DRAFT ? (
+            <Tooltip content='Delete draft' side='bottom'>
+              <button
+                type='button'
+                onClick={() => setDeleteDialogOpen(true)}
+                aria-label={`Delete draft automation ${name || 'Untitled automation'}`}
+                data-track-category='automation-builder'
+                data-track-name='header-delete-draft'
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
+                  'hover:bg-red-500/10 hover:text-red-600',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40',
+                )}
+              >
+                <Trash2 className='size-4' aria-hidden='true' />
+              </button>
+            </Tooltip>
+          ) : null}
 
-          {editMode ? (
+          {readOnlyPreview ? null : editMode ? (
             <>
               <Button
                 variant='outline'
@@ -760,7 +905,11 @@ export function AutomationBuilder({
                     return;
                   }
                   if (forkSourceAutomationId) {
-                    void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                    if (onCancelFork) {
+                      onCancelFork(forkSourceAutomationId);
+                    } else {
+                      void navigate(`../${forkSourceAutomationId}`, { relative: 'path' });
+                    }
                     return;
                   }
                   onBack();
@@ -794,6 +943,18 @@ export function AutomationBuilder({
                 >
                   <History className='size-4' />
                   Runs
+                </Button>
+              ) : null}
+              {savedId && onShowVersionHistory ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => onShowVersionHistory(savedId)}
+                  data-track-category='automation-builder'
+                  data-track-name='header-version-history'
+                >
+                  <GitBranch className='size-4' />
+                  Versions
                 </Button>
               ) : null}
               {savedId ? (
@@ -840,8 +1001,9 @@ export function AutomationBuilder({
                   </Button>
                 )
               ) : null}
-              {/* Admin-only: permanently retire a live automation. */}
-              {isLiveRow && savedId && isAutomationsAdmin ? (
+              {/* Admin-only: permanently retire an automation. Only offered once it is
+                  DISABLED, so it has to be switched off first. */}
+              {savedId && isAutomationsAdmin && savedStatus === AutomationStatusValues.DISABLED ? (
                 <Button
                   variant='outline'
                   size='sm'
@@ -961,9 +1123,9 @@ export function AutomationBuilder({
       <div
         className={cn(
           'flex-1 overflow-y-auto bg-muted/30',
-          !editMode && canEdit && 'cursor-pointer',
+          !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
         )}
-        {...(!editMode && canEdit
+        {...(!editMode && canEdit && !readOnlyPreview
           ? {
               onClick: (): void => {
                 if (forksOnEdit) setProposeChangeConfirmOpen(true);
@@ -978,6 +1140,10 @@ export function AutomationBuilder({
             !editMode && 'pointer-events-none select-none opacity-90',
           )}
           aria-readonly={!editMode}
+          // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
+          // form fields from the tab order, so they could still be focused and typed
+          // into via keyboard. `inert` fully removes this subtree from focus/interaction.
+          inert={readOnlyPreview}
         >
           <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
           <RuleSummaryCard
@@ -1154,6 +1320,45 @@ export function AutomationBuilder({
       </div>
 
       <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title='Delete draft automation?'
+        className='sm:max-w-md'
+      >
+        <div className='flex flex-col gap-4 px-5 py-4 text-sm text-foreground'>
+          <p>
+            Delete <strong>{name || 'this draft automation'}</strong>? This can&apos;t be undone.
+          </p>
+          <div className='flex justify-end gap-2 pt-2'>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => setDeleteDialogOpen(false)}
+              data-track-category='automation-builder'
+              data-track-name='delete-draft-cancel'
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='destructive'
+              size='sm'
+              disabled={deleteMutation.isPending}
+              loading={deleteMutation.isPending}
+              onClick={() => {
+                if (!savedId) return;
+                deleteMutation.mutate(savedId);
+                setDeleteDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='delete-draft-confirm'
+            >
+              Delete draft
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={editConfirmOpen}
         onOpenChange={setEditConfirmOpen}
         title='Edit this automation?'
@@ -1277,6 +1482,58 @@ export function AutomationBuilder({
               data-track-name='reject-confirm'
             >
               Reject
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={disableDialogOpen}
+        onOpenChange={setDisableDialogOpen}
+        title='Disable automation?'
+        className='sm:max-w-md'
+      >
+        <div className='flex flex-col gap-2 px-5 py-4 text-sm'>
+          <p className='text-base font-semibold text-foreground'>
+            Disable {name || 'this automation'}?
+          </p>
+          <p className='text-muted-foreground'>What should happen to the runs already queued?</p>
+          <div className='flex flex-wrap items-center justify-end gap-2 pt-4'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setDisableDialogOpen(false)}
+              data-track-category='automation-builder'
+              data-track-name='disable-cancel'
+            >
+              Cancel
+            </Button>
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={disableMutation.isPending}
+              onClick={() => {
+                if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: false });
+                setDisableDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='disable-keep-queued'
+            >
+              Let them finish
+            </Button>
+            <Button
+              variant='destructive'
+              size='sm'
+              disabled={disableMutation.isPending}
+              loading={disableMutation.isPending}
+              onClick={() => {
+                if (savedId) disableMutation.mutate({ id: savedId, cancelQueued: true });
+                setDisableDialogOpen(false);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='disable-cancel-queued'
+            >
+              Stop them
             </Button>
           </div>
         </div>

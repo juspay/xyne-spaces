@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { format } from 'date-fns';
 import type { Ticket } from '@xyne/shared';
 import * as Dialog from '@radix-ui/react-dialog';

@@ -1,5 +1,9 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, X, Users } from 'lucide-react';
+import {
+  SearchDefault as Search,
+  MultipleCrossCancelDefault as X,
+  UserTwo as Users,
+} from '@xyne/icons';
 import { Button } from '../../../../ui/Button';
 import Input from '../../../../ui/Input/Input';
 import { useUserGroups } from '../../../../../hooks/useUserGroup';
@@ -101,7 +105,11 @@ export const UserGroupSubmenu = ({
 
       {/* Selected Groups */}
       {selectedGroupsData.length > 0 && (
-        <div className='p-3 border-b border-border max-h-40 overflow-y-auto'>
+        <div
+          className='p-3 border-b border-border max-h-40 overflow-y-auto'
+          onWheel={e => e.stopPropagation()}
+          onTouchMove={e => e.stopPropagation()}
+        >
           <div className='text-xs font-medium text-muted-foreground mb-2'>Selected</div>
           <div className='space-y-1'>
             {selectedGroupsData.map((group: UserGroup) => (
@@ -137,7 +145,11 @@ export const UserGroupSubmenu = ({
       )}
 
       {/* Available Groups */}
-      <div className='max-h-64 overflow-y-auto'>
+      <div
+        className='max-h-64 overflow-y-auto'
+        onWheel={e => e.stopPropagation()}
+        onTouchMove={e => e.stopPropagation()}
+      >
         {!allUserGroups || allUserGroups.length === 0 ? (
           <div className='p-4 text-center text-sm text-muted-foreground'>
             Loading user groups...

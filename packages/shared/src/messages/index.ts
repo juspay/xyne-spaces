@@ -21,6 +21,8 @@ export {
   type SendResult,
 } from './send.js';
 
+export { subscribeSendLifecycle } from './mutationLifecycle.js';
+
 export {
   getMessagesSnapshot,
   getChannelSnapshot,
@@ -68,6 +70,7 @@ export {
   type PendingStatus,
   type PendingKind,
   type ZeroStateName,
+  type PendingAttachment,
 } from './pending.js';
 
 export { usePendingQueue } from './usePendingQueue.js';

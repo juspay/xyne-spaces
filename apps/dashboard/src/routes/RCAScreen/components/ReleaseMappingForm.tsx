@@ -427,6 +427,8 @@ export const ReleaseMappingForm = ({
             type='button'
             className='gap-1'
             onClick={() => void handleAddMapping()}
+            data-track-category='RCA'
+            data-track-name='ADD_RELEASE_MAPPING'
             disabled={isSubmitting || isSaving}
           >
             <Plus className='h-4 w-4' />
@@ -504,6 +506,8 @@ export const ReleaseMappingForm = ({
                           variant='ghost'
                           className='text-destructive hover:text-destructive hover:bg-destructive/10'
                           onClick={() => void handleDeleteMapping(attribution.id)}
+                          data-track-category='RCA'
+                          data-track-name='DELETE_RELEASE_MAPPING'
                           loading={deletingId === attribution.id}
                           disabled={isSubmitting || deletingId !== null}
                           aria-label='Remove release mapping'
@@ -520,7 +524,13 @@ export const ReleaseMappingForm = ({
 
           {/* Footer */}
           <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex justify-end'>
-            <Button type='button' onClick={handleContinue} disabled={isSubmitting}>
+            <Button
+              type='button'
+              onClick={handleContinue}
+              data-track-category='RCA'
+              data-track-name='CONTINUE_FROM_RELEASE_MAPPING'
+              disabled={isSubmitting}
+            >
               Next
             </Button>
           </div>

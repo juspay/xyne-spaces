@@ -4,8 +4,6 @@ import { useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  ChevronSortVertical,
-  CheckTickSingle,
   ChevronRight,
   FolderPlus,
   ListCheck,
@@ -14,36 +12,28 @@ import {
   PencilEdit,
   DeleteDustbin02,
 } from '@xyne/icons';
-import { ChannelSortOrder, type ChannelSection } from '@xyne/shared';
+import { ChannelFilterMode, ChannelSortOrder, type ChannelSection } from '@xyne/shared';
 import type { VisibleChannel } from '../../../machines/stateMachine';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { cn } from '../../../utils/classNames';
 import Badge from '../../ui/Badge';
 import SortableChannelItem from './SortableChannelItem';
-import { sumSectionUnread } from './ChatDirectory.utils';
+import SectionSettingsMenu, { MENU_ROW } from './SectionSettingsMenu';
+import { DEFAULT_FILTER_MODE } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
-
-const SORT_OPTIONS: { label: string; value: ChannelSortOrder | null }[] = [
-  { label: 'Unread & Activity', value: ChannelSortOrder.UNREAD },
-  { label: 'By recency', value: ChannelSortOrder.RECENCY },
-  { label: 'Alphabetical A-Z', value: ChannelSortOrder.ALPHABETICAL },
-  { label: 'Manual order', value: null },
-];
 
 interface SortableSectionProps {
   section: ChannelSection;
   channels: VisibleChannel[];
   sections: ChannelSection[];
   unreadCounts: Record<string, number>;
+  sectionUnreadCount: number;
   activeChannelId?: string | undefined;
   onRename: (section: ChannelSection) => void;
   onDelete: (section: ChannelSection) => void;
@@ -51,6 +41,7 @@ interface SortableSectionProps {
   onManageChannels: (section: ChannelSection) => void;
   onMoveChannelToSection: (channelId: string, sectionId: string | null) => void;
   onSetSortOrder: (sectionId: string, order: ChannelSortOrder | null) => void;
+  onSetFilterMode: (sectionId: string, mode: ChannelFilterMode) => void;
 }
 
 const SortableSection = ({
@@ -58,6 +49,7 @@ const SortableSection = ({
   channels,
   sections,
   unreadCounts,
+  sectionUnreadCount,
   activeChannelId,
   onRename,
   onDelete,
@@ -65,6 +57,7 @@ const SortableSection = ({
   onManageChannels,
   onMoveChannelToSection,
   onSetSortOrder,
+  onSetFilterMode,
 }: SortableSectionProps): ReactElement => {
   const [menuOpen, setMenuOpen] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -83,7 +76,6 @@ const SortableSection = ({
     opacity: isDragging ? 0.5 : undefined,
   };
 
-  const sectionUnreadCount = sumSectionUnread(channels, unreadCounts, activeChannelId);
   const currentSortOrder = section.sortOrder ?? null;
 
   return (
@@ -139,77 +131,81 @@ const SortableSection = ({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            align='end'
+            side='right'
+            align='start'
+            alignOffset={-4}
+            sideOffset={8}
             onCloseAutoFocus={e => e.preventDefault()}
-            className='min-w-[180px]'
+            className='min-w-[230px]'
           >
-            <div className='flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-sidebar-foreground'>
+            <p className='flex items-center gap-1.5 px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>
               {section.emoji && renderEmoji(section.emoji, 'size-4')}
               <span className='truncate'>{section.name}</span>
-            </div>
+            </p>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              className='gap-2'
+              className={MENU_ROW}
               onClick={e => {
                 e.stopPropagation();
                 onRename(section);
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='RENAME_SECTION'
             >
-              <PencilEdit size={14} className='shrink-0' />
+              <span className='flex size-5 shrink-0 items-center justify-center'>
+                <PencilEdit size={16} />
+              </span>
               <span className='flex-1'>Rename section</span>
             </DropdownMenuItem>
             <DropdownMenuItem
-              className='gap-2'
+              className={MENU_ROW}
               onClick={e => {
                 e.stopPropagation();
                 onManageChannels(section);
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='MANAGE_SECTION_CHANNELS'
             >
-              <ListCheck size={14} className='shrink-0' />
+              <span className='flex size-5 shrink-0 items-center justify-center'>
+                <ListCheck size={16} />
+              </span>
               <span className='flex-1'>Manage channels</span>
             </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className='gap-2'>
-                <ChevronSortVertical size={14} className='shrink-0' />
-                <span className='flex-1'>Sort channels</span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                {SORT_OPTIONS.map(opt => (
-                  <DropdownMenuItem
-                    key={opt.label}
-                    className='gap-2'
-                    onClick={e => {
-                      e.stopPropagation();
-                      onSetSortOrder(section.id, opt.value);
-                    }}
-                  >
-                    <span className='flex-1'>{opt.label}</span>
-                    {currentSortOrder === opt.value && (
-                      <CheckTickSingle size={14} className='shrink-0' />
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
             <DropdownMenuItem
-              className='gap-2'
+              className={MENU_ROW}
               onClick={e => {
                 e.stopPropagation();
                 onCreateSection();
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='CREATE_SECTION'
             >
-              <FolderPlus size={14} className='shrink-0' />
+              <span className='flex size-5 shrink-0 items-center justify-center'>
+                <FolderPlus size={16} />
+              </span>
               <span className='flex-1'>New section</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <SectionSettingsMenu
+              filterMode={section.filterMode ?? DEFAULT_FILTER_MODE}
+              sortOrder={currentSortOrder}
+              onSetFilter={mode => onSetFilterMode(section.id, mode)}
+              onSetSort={order => onSetSortOrder(section.id, order)}
+              showManualSort
+            />
+            <DropdownMenuSeparator />
             <DropdownMenuItem
-              className='gap-2 text-destructive focus:text-destructive'
+              className={cn(MENU_ROW, 'text-destructive focus:text-destructive')}
               onClick={e => {
                 e.stopPropagation();
                 onDelete(section);
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='DELETE_SECTION'
             >
-              <DeleteDustbin02 size={14} className='shrink-0' />
+              <span className='flex size-5 shrink-0 items-center justify-center'>
+                <DeleteDustbin02 size={16} />
+              </span>
               <span className='flex-1'>Delete section</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

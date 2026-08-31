@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { Dialog } from '../ui/Dialog/Dialog';
@@ -205,7 +206,11 @@ const ScheduledMessageModal = ({
         (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
         'Failed to save scheduled message';
       toast.error(message);
-      console.error('Error saving scheduled message:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Error saving scheduled message:'),
+        error: error,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -223,7 +228,11 @@ const ScheduledMessageModal = ({
         (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
         'Failed to delete scheduled message';
       toast.error(message);
-      console.error('Error deleting scheduled message:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Error deleting scheduled message:'),
+        error: error,
+      });
     }
   };
 
@@ -533,13 +542,23 @@ const ScheduledMessageModal = ({
           <div className='flex justify-between pt-4'>
             <div>
               {isEditMode && canEdit && (
-                <Button type='button' onClick={() => void handleDelete()}>
+                <Button
+                  type='button'
+                  onClick={() => void handleDelete()}
+                  data-track-category='scheduled-message'
+                  data-track-name='DELETE_SCHEDULED_MESSAGE'
+                >
                   Delete
                 </Button>
               )}
             </div>
             <div className='flex gap-2'>
-              <Button type='button' onClick={() => onOpenChange(false)}>
+              <Button
+                type='button'
+                onClick={() => onOpenChange(false)}
+                data-track-category='scheduled-message'
+                data-track-name='CLOSE_SCHEDULED_MESSAGE_MODAL'
+              >
                 Cancel
               </Button>
               <Button type='submit' disabled={(!canEdit && isEditMode) || isSubmitting}>

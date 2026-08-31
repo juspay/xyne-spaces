@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import type { TicketStatusV2 } from '@xyne/shared';
 import Input from '../../../../ui/Input/Input';
 import { KanbanIcon } from '../../../KanbanColumns/KanbanColumns';
@@ -87,7 +87,13 @@ export const StagesSubmenu = ({
           />
         </div>
       </div>
-      <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
+      <div
+        className='max-h-80 overflow-y-auto p-1'
+        role='listbox'
+        aria-multiselectable='true'
+        onWheel={e => e.stopPropagation()}
+        onTouchMove={e => e.stopPropagation()}
+      >
         {isLoading ? (
           <div className='p-8 text-center text-sm text-muted-foreground' aria-live='polite'>
             Loading status…

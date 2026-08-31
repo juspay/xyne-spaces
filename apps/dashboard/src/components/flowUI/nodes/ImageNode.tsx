@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Copy } from 'lucide-react';
+import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { toast } from 'sonner';
 import type { FlowComponent } from '@xyne/shared';
 import { DownloadButton } from '../../Chat/MessageAttachment/DownloadButton';
@@ -16,6 +16,7 @@ interface ImageNodeProps {
 export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
   const [errored, setErrored] = useState(false);
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const blobRef = useRef<Blob | null>(null);
   const { isMobile } = usePlatform();
   const { copyImage } = useClipboard();
@@ -69,6 +70,8 @@ export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
     if (!blobRef.current) return;
     try {
       await copyImage(blobRef.current);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
     } catch {
       toast.error('Failed to copy image');
     }
@@ -180,7 +183,11 @@ export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
                 data-track-category='FLOW_IMAGE'
                 data-track-name='CopyImage'
               >
-                <Copy className='h-[18px] w-[18px]' />
+                {copied ? (
+                  <CopyCopied size={18} className='text-status-success' />
+                ) : (
+                  <CopyDefault size={18} />
+                )}
               </button>
             )}
             <DownloadButton

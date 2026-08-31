@@ -71,3 +71,35 @@ export function parseBitbucketRepoUrl(url: string): { projectKey: string; repoSl
 
   return null;
 }
+
+// Parses a GitHub repo URL (github.com or GHE) into owner + repo, accepting
+// https, scheme-less, ssh:// and scp-like forms. Host-anchored via URL parsing
+// so lookalikes (notgithub.com, github.com.evil.io) never match.
+export function parseGitHubRepoUrl(url: string): { owner: string; repo: string } | null {
+  if (!url) return null;
+  let candidate = url.trim();
+
+  // scp-like SSH (git@host:owner/repo.git) isn't URL-parseable — normalise it.
+  const scpLike = /^git@([^:/\s]+):(.+)$/.exec(candidate);
+  if (scpLike) candidate = `ssh://git@${scpLike[1]}/${scpLike[2]}`;
+  else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) candidate = `https://${candidate}`;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return null;
+  }
+
+  // github.com / www / GHE (github.<domain>), but not github.com.<lookalike>
+  const host = parsed.hostname.toLowerCase();
+  const isGheHost = host.startsWith('github.') && !host.startsWith('github.com.');
+  if (host !== 'github.com' && host !== 'www.github.com' && !isGheHost) {
+    return null;
+  }
+
+  const [owner, repoSegment] = parsed.pathname.split('/').filter(Boolean);
+  const repo = repoSegment?.replace(/\.git$/i, '');
+  if (!owner || !repo) return null;
+  return { owner, repo };
+}

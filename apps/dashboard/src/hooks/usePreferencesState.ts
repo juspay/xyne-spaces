@@ -6,7 +6,9 @@ import { useTheme } from './useTheme';
 import { useAILandingDefault } from './useAILandingDefault';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
+import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOpen';
 import { useShowThreadTags } from './useShowThreadTags';
+import { useSummaryModelPreference } from './useSummaryModelPreference';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
@@ -43,8 +45,11 @@ export function usePreferencesState(enabled: boolean) {
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
+  const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
+    useDefaultFormattingToolbarOpen();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
-  const { searchMode, setSearchMode } = useSearchMode();
+  const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
+  const { searchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();
@@ -136,11 +141,14 @@ export function usePreferencesState(enabled: boolean) {
     debugSettings,
     toggleSendIndicators,
     enterSendsMessage,
+    defaultFormattingToolbarOpen,
+    setDefaultFormattingToolbarOpen,
     showThreadTags,
     setShowThreadTags,
+    summaryModelPreference,
+    setSummaryModelPreference,
     setEnterSendsMessage,
     searchMode,
-    setSearchMode,
     showClawDashboard,
     setShowClawDashboard,
     allowThreadBroadcastMentions,

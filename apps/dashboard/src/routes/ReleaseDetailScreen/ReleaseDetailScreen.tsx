@@ -1,8 +1,24 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ArrowLeft, Download, FileText, SquareArrowOutUpRight } from 'lucide-react';
+import {
+  ArrowLeft,
+  Boxes,
+  Check,
+  Download,
+  FileText,
+  GitMerge,
+  Plus,
+  RefreshCw,
+  Rocket,
+  Server,
+  SquareArrowOutUpRight,
+  TestTube,
+  Ticket as TicketIcon,
+} from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { FormContextType, FormEntityType } from '@xyne/shared';
 import { toast } from 'sonner';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -10,6 +26,8 @@ import { useZero } from '../../hooks/useZero';
 import { useUsers } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { queries } from '../../zero/queries';
+import { mutators } from '../../zero/mutators';
+import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 import { ChangeSections, type ChangeSectionsGroup } from '../../components/Release/ChangeCards';
 import { ReleaseStagePicker } from '../../components/Release/ReleaseStagePicker';
 import { DevTicketStagePicker } from '../../components/Release/DevTicketStagePicker';
@@ -31,10 +49,143 @@ import {
   buildDevTicketsCsvFilename,
   buildReleaseDetailDevTicketRows,
   downloadCsvFile,
+  devTicketAddableCellValue,
+  CORE_ADDABLE_DEV_TICKET_COLUMNS,
 } from './releaseReport.utils';
-import { usePublishReleaseReport } from './usePublishReleaseReport';
+import { apiInstance } from '../../services/clients/apiClient';
 
-type TabValue = 'testing' | 'envs' | 'migrations';
+type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline';
+
+// Map ReleaseEventType (from shared schema) to icon + color for the timeline.
+// Kept here (not exported) since the timeline is the only consumer right now.
+const EVENT_VISUAL: Record<string, { icon: ReactElement; bg: string; ring: string }> = {
+  RELEASE: {
+    icon: <Rocket size={12} />,
+    bg: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
+    ring: 'ring-purple-200 dark:ring-purple-800',
+  },
+  TICKET: {
+    icon: <TicketIcon size={12} />,
+    bg: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
+    ring: 'ring-blue-200 dark:ring-blue-800',
+  },
+  SUBTICKET: {
+    icon: <Boxes size={12} />,
+    bg: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400',
+    ring: 'ring-cyan-200 dark:ring-cyan-800',
+  },
+  TESTING: {
+    icon: <TestTube size={12} />,
+    bg: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+    ring: 'ring-amber-200 dark:ring-amber-800',
+  },
+  SYSTEM: {
+    icon: <Server size={12} />,
+    bg: 'bg-gray-200 dark:bg-gray-700/40 text-gray-700 dark:text-gray-300',
+    ring: 'ring-gray-300 dark:ring-gray-700',
+  },
+  CANVAS: {
+    icon: <FileText size={12} />,
+    bg: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+    ring: 'ring-green-200 dark:ring-green-800',
+  },
+};
+
+const EVENT_FALLBACK = {
+  icon: <GitMerge size={12} />,
+  bg: 'bg-muted text-muted-foreground',
+  ring: 'ring-border',
+};
+
+/** Short relative-time formatter for the timeline. Keeps the timeline scannable
+ * without dragging in date-fns just for one screen. */
+function formatRelativeTime(ts: number): string {
+  const diffSec = Math.floor((Date.now() - ts) / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86_400) return `${Math.floor(diffSec / 3600)}h ago`;
+  if (diffSec < 30 * 86_400) return `${Math.floor(diffSec / 86_400)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+// Human-readable titles for the eventName values written by the backend.
+// Falls back to title-casing the raw name for any we forgot to map.
+const EVENT_TITLES: Record<string, string> = {
+  COMMIT_ANALYSIS_STARTED: 'Analysis started',
+  COMMIT_ANALYSIS_COMPLETED: 'Analysis complete',
+  SUBTICKET_PROVISIONED: 'Application prepared',
+  STAGE_CHANGED: 'Stage changed',
+  FORM_SAVED: 'Form values saved',
+  REPORT_PUBLISHED: 'Report published',
+  REPORT_UPDATED: 'Report updated',
+  MAPPING_WRITE_FAILED: 'Failed to write release mappings',
+};
+const humanizeEventName = (raw: string): string =>
+  EVENT_TITLES[raw] ??
+  raw
+    .toLowerCase()
+    .split('_')
+    .map((s, i) => (i === 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s))
+    .join(' ');
+
+/** A timeline row — either a single event, or a stack of N identical-name
+ * events that fired within a short window (e.g. four FORM_SAVED events from
+ * one commit analysis run). Stacking collapses the visual noise without
+ * hiding information. */
+interface TimelineGroup {
+  key: string;
+  eventType: string;
+  eventName: string;
+  /** Most-recent timestamp from the group; what we display. */
+  createdAt: number;
+  /** All actor names found in the group (almost always one). */
+  actors: string[];
+  /** Each event's message body; rendered as a small list when count > 1. */
+  messages: string[];
+  count: number;
+}
+
+/**
+ * Collapse consecutive events with the same eventType+eventName into one row.
+ * Events further apart than `windowMs` aren't merged, so distinct release runs
+ * stay visually separated even when they share an eventName.
+ */
+function groupTimelineEvents(
+  events: ReadonlyArray<{
+    id: string;
+    eventType: string;
+    eventName: string;
+    message: string;
+    userName: string | null;
+    userId: string | null;
+    createdAt: number;
+  }>,
+  windowMs = 5 * 60 * 1000,
+): TimelineGroup[] {
+  const out: TimelineGroup[] = [];
+  for (const ev of events) {
+    const last = out[out.length - 1];
+    const sameKind = last && last.eventType === ev.eventType && last.eventName === ev.eventName;
+    const withinWindow = last && Math.abs(last.createdAt - ev.createdAt) <= windowMs;
+    if (sameKind && withinWindow) {
+      last.count++;
+      last.messages.push(ev.message);
+      const actor = ev.userName || (ev.userId ? 'a user' : 'system');
+      if (!last.actors.includes(actor)) last.actors.push(actor);
+      continue;
+    }
+    out.push({
+      key: ev.id,
+      eventType: ev.eventType,
+      eventName: ev.eventName,
+      createdAt: ev.createdAt,
+      actors: [ev.userName || (ev.userId ? 'a user' : 'system')],
+      messages: [ev.message],
+      count: 1,
+    });
+  }
+  return out;
+}
 
 // Page size for the Testing tab's ART (dev-ticket) table. CSV export bypasses
 // this and fetches the whole release on demand.
@@ -83,7 +234,7 @@ const TabTrigger = ({
 );
 
 const isTabValue = (value: unknown): value is TabValue =>
-  value === 'testing' || value === 'envs' || value === 'migrations';
+  value === 'testing' || value === 'envs' || value === 'migrations' || value === 'timeline';
 
 // ─── ReleaseDetailScreen ──────────────────────────────────────────────────────
 const ReleaseDetailScreen = (): ReactElement => {
@@ -143,12 +294,36 @@ const ReleaseDetailScreen = (): ReactElement => {
     queries.getFormEntityValuesByEntityId({ entityId: releaseTicketId ?? '' }),
     { enabled: !!releaseTicketId },
   );
+  // Added-column keys (persisted on the release ticket metadata). Read above the
+  // ART query since they decide whether it syncs the heavy column relations.
+  const persistedColumnKeys = useMemo(() => {
+    const md = releaseTicket?.metadata;
+    if (!md || typeof md !== 'object' || Array.isArray(md)) return [];
+    const value = (md as Record<string, unknown>)['devTicketColumns'];
+    return Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string') : [];
+  }, [releaseTicket?.metadata]);
+
+  const [selectedColumnKeys, setSelectedColumnKeys] = useState<string[]>([]);
+  useEffect(() => {
+    setSelectedColumnKeys(persistedColumnKeys);
+  }, [persistedColumnKeys]);
+
+  // Only widen the ART query when a relation-backed column is actually selected.
+  const needsDevTicketColumnData = useMemo(
+    () =>
+      selectedColumnKeys.some(
+        k => k === 'core:workflowType' || k === 'core:tags' || k.startsWith('custom:'),
+      ),
+    [selectedColumnKeys],
+  );
+
   // Over-fetch one extra row (limit + 1) to detect whether a next page exists.
   const [artPage] = useCachedQuery(
     queries.applicationReleaseTicketsByReleaseId({
       releaseId: releaseTicketId ?? '',
       limit: ART_PAGE_SIZE + 1,
       start: artStart,
+      includeColumnData: needsDevTicketColumnData,
     }),
     { enabled: !!releaseTicketId },
   );
@@ -175,6 +350,12 @@ const ReleaseDetailScreen = (): ReactElement => {
   const [stages] = useCachedQuery(queries.stagesByBoards({ projectId: projectId ?? '' }), {
     enabled: !!projectId,
   });
+  // Timeline events — gated on the Timeline tab being open so we don't sync
+  // potentially-large audit logs into the client until they're actually viewed.
+  const [timelineEvents] = useCachedQuery(
+    queries.releaseEventsByReleaseId({ releaseId: releaseTicketId ?? '', limit: 100 }),
+    { enabled: !!releaseTicketId && activeTab === 'timeline' },
+  );
   // The full workspace user list is already synced into client state at app
   // boot (InitialStateLoader → getUsersV2 → state machine), so reading it via
   // useUsers() is free — no extra per-viewer sync for the few referenced ids.
@@ -232,17 +413,73 @@ const ReleaseDetailScreen = (): ReactElement => {
     return buildStagesByBoard(stages);
   }, [stages]);
 
-  const existingReportCanvasUrl = useMemo(() => {
-    const metadata = releaseTicket?.metadata;
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
-    const value = (metadata as Record<string, unknown>)['releaseReportCanvasUrl'];
-    return typeof value === 'string' && value ? value : null;
-  }, [releaseTicket?.metadata]);
-  const {
-    isPublishing: isPublishingReport,
-    hasPublished: hasPublishedReport,
-    publish: publishReport,
-  } = usePublishReleaseReport(releaseTicketId, existingReportCanvasUrl);
+  // Re-run commit analysis for this release. Hits the existing backend endpoint
+  // which loads the release ticket's deployedCommitId / newCommitId / branch
+  // from form values, then dispatches the same analysis pipeline as create.
+  const [isReRunning, setIsReRunning] = useState(false);
+  const handleReRunAnalysis = async (): Promise<void> => {
+    if (!releaseTicketId) return;
+    setIsReRunning(true);
+    try {
+      const response = await apiInstance.post<{ success: boolean; error?: string }>(
+        `/commits/analyze/re-run/${releaseTicketId}`,
+        {},
+      );
+      if (response.data?.success) {
+        toast.success('Commit analysis re-run — check the conversation for the new summary.');
+      } else {
+        toast.error(response.data?.error ?? 'Re-run failed');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Re-run failed';
+      toast.error(msg);
+    } finally {
+      setIsReRunning(false);
+    }
+  };
+
+  // ─── Add-column picker: dev tickets' board fields (core + custom) ────────────
+  // Custom columns are sourced from the boards the dev tickets live on (not the
+  // release board), so a field defined there is both editable on each ticket and
+  // matched by the same field id when rendered here. A release may aggregate dev
+  // tickets from several boards, so we union the custom fields across every
+  // distinct board. Cells for a field a given ticket's board lacks render '—'.
+  const devTicketBoardIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const row of devTicketRows) if (row.boardId) ids.add(row.boardId);
+    return [...ids].sort();
+  }, [devTicketRows]);
+
+  const [devColsMappings] = useCachedQuery(
+    queries.getFormMappingsByContextIds({
+      contextIds: devTicketBoardIds,
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    }),
+    { enabled: devTicketBoardIds.length > 0 },
+  );
+
+  const availableColumns = useMemo(() => {
+    // Dedupe by column key so a field shared across boards appears once.
+    const custom = new Map<string, { key: string; label: string }>();
+    for (const mapping of devColsMappings ?? []) {
+      for (const field of resolveDisplayFormFields(
+        mapping.formId ?? '',
+        mapping.formFields ? [...mapping.formFields] : [],
+      )) {
+        const key = `custom:${field.id}`;
+        if (!custom.has(key)) custom.set(key, { key, label: field.fieldName });
+      }
+    }
+    return [...CORE_ADDABLE_DEV_TICKET_COLUMNS, ...custom.values()];
+  }, [devColsMappings]);
+
+  // Drops any stale key whose field no longer exists on the board and keeps a
+  // stable order (core first, then custom).
+  const selectedColumns = useMemo(
+    () => availableColumns.filter(col => selectedColumnKeys.includes(col.key)),
+    [availableColumns, selectedColumnKeys],
+  );
 
   if (!projectId || !releaseTicketId) {
     return <div className='p-6'>Missing route params</div>;
@@ -261,7 +498,10 @@ const ReleaseDetailScreen = (): ReactElement => {
 
     try {
       const exportArtRows = await zero.run(
-        queries.applicationReleaseTicketsByReleaseId({ releaseId: requestedReleaseId }),
+        queries.applicationReleaseTicketsByReleaseId({
+          releaseId: requestedReleaseId,
+          includeColumnData: needsDevTicketColumnData,
+        }),
         { type: 'complete' },
       );
 
@@ -274,7 +514,7 @@ const ReleaseDetailScreen = (): ReactElement => {
 
       const rows = buildReleaseDetailDevTicketRows(exportArtRows, users, changeCountsByDevTicket);
       downloadCsvFile(
-        buildDevTicketsCsv(rows),
+        buildDevTicketsCsv(rows, selectedColumns),
         buildDevTicketsCsvFilename(releaseTicket?.xyneId, releaseVersion),
       );
     } catch {
@@ -294,6 +534,29 @@ const ReleaseDetailScreen = (): ReactElement => {
     }
   };
 
+  const toggleColumn = (key: string, checked: boolean): void => {
+    const nextKeys = checked
+      ? [...selectedColumnKeys, key]
+      : selectedColumnKeys.filter(k => k !== key);
+    setSelectedColumnKeys(nextKeys);
+
+    const md = releaseTicket?.metadata;
+    const base =
+      md && typeof md === 'object' && !Array.isArray(md) ? (md as Record<string, unknown>) : {};
+    void (async (): Promise<void> => {
+      const res = await zero.mutate(
+        mutators.ticket.update({
+          id: releaseTicketId,
+          metadata: { ...base, devTicketColumns: nextKeys },
+          updatedAt: Date.now(),
+        }),
+      ).server;
+      if (res.type === 'error') {
+        toast.error('Failed to save columns');
+      }
+    })();
+  };
+
   const goPrevArtPage = (): void =>
     setArtCursorStack(stack => (stack.length > 1 ? stack.slice(0, -1) : stack));
 
@@ -306,11 +569,13 @@ const ReleaseDetailScreen = (): ReactElement => {
   return (
     <div className='h-full bg-muted flex flex-col'>
       <div className='flex-1 overflow-auto p-8'>
-        <div className='max-w-7xl mx-auto'>
+        <div className='max-w-none'>
           <button
             onClick={() =>
               void navigate(`/listProjects/${projectId}`, { state: { tab: 'release' } })
             }
+            data-track-category='Release'
+            data-track-name='BACK_TO_PROJECT_RELEASES'
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
           >
             <ArrowLeft size={20} />
@@ -327,6 +592,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                   const w = window.open(window.location.href, '_blank');
                   w?.focus();
                 }}
+                data-track-category='Release'
+                data-track-name='OPEN_RELEASE_IN_NEW_WINDOW'
                 className='shrink-0 p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                 title='Open in new window'
                 aria-label='Open in new window'
@@ -377,11 +644,111 @@ const ReleaseDetailScreen = (): ReactElement => {
                     </span>
                   )}
                 </TabTrigger>
+                <TabTrigger value='timeline' activeTab={activeTab}>
+                  Timeline
+                </TabTrigger>
               </Tabs.List>
 
               {/* Dev Tickets tab */}
               <Tabs.Content value='testing' className='mt-6 outline-none'>
                 <div className='mb-3 flex flex-wrap justify-end gap-2'>
+                  {availableColumns.length > 0 && (
+                    <DropdownMenu.Root>
+                      <DropdownMenu.Trigger asChild>
+                        <button
+                          type='button'
+                          data-testid='release-dev-tickets-add-column'
+                          className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted'
+                        >
+                          <Plus size={15} />
+                          Add column
+                        </button>
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content
+                          align='end'
+                          sideOffset={4}
+                          className='z-50 max-h-80 min-w-[200px] overflow-y-auto rounded-lg border border-border bg-background p-1 shadow-md'
+                        >
+                          {CORE_ADDABLE_DEV_TICKET_COLUMNS.map(col => {
+                            const checked = selectedColumnKeys.includes(col.key);
+                            return (
+                              <DropdownMenu.CheckboxItem
+                                key={col.key}
+                                checked={checked}
+                                onCheckedChange={value => toggleColumn(col.key, value)}
+                                onSelect={e => e.preventDefault()}
+                                className='flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-sm text-foreground outline-none data-[highlighted]:bg-muted'
+                              >
+                                <span>{col.label}</span>
+                                <span
+                                  className={`flex h-4 w-4 items-center justify-center rounded border ${
+                                    checked
+                                      ? 'border-primary bg-primary'
+                                      : 'border-input bg-background'
+                                  }`}
+                                >
+                                  {checked && (
+                                    <Check size={12} className='text-primary-foreground' />
+                                  )}
+                                </span>
+                              </DropdownMenu.CheckboxItem>
+                            );
+                          })}
+                          {availableColumns.length > CORE_ADDABLE_DEV_TICKET_COLUMNS.length && (
+                            <>
+                              <DropdownMenu.Separator className='my-1 h-px bg-border' />
+                              <div className='px-3 py-1.5 text-xs font-medium text-muted-foreground'>
+                                Custom Fields
+                              </div>
+                              {availableColumns
+                                .filter(col => col.key.startsWith('custom:'))
+                                .map(col => {
+                                  const checked = selectedColumnKeys.includes(col.key);
+                                  return (
+                                    <DropdownMenu.CheckboxItem
+                                      key={col.key}
+                                      checked={checked}
+                                      onCheckedChange={value => toggleColumn(col.key, value)}
+                                      onSelect={e => e.preventDefault()}
+                                      className='flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-sm text-foreground outline-none data-[highlighted]:bg-muted'
+                                    >
+                                      <span>{col.label}</span>
+                                      <span
+                                        className={`flex h-4 w-4 items-center justify-center rounded border ${
+                                          checked
+                                            ? 'border-primary bg-primary'
+                                            : 'border-input bg-background'
+                                        }`}
+                                      >
+                                        {checked && (
+                                          <Check size={12} className='text-primary-foreground' />
+                                        )}
+                                      </span>
+                                    </DropdownMenu.CheckboxItem>
+                                  );
+                                })}
+                            </>
+                          )}
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
+                  )}
+                  <button
+                    type='button'
+                    onClick={() => void handleReRunAnalysis()}
+                    disabled={isReRunning || !releaseTicketId}
+                    data-track-event='BUTTON_CLICK'
+                    data-track-category='Release'
+                    data-track-name='ReRunCommitAnalysis'
+                    data-track-metadata={JSON.stringify({ releaseTicketId })}
+                    data-testid='rerun-commit-analysis'
+                    title='Re-run commit analysis with the current release configuration — useful after fixing Application regex / paths.'
+                    className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                  >
+                    <RefreshCw size={15} className={isReRunning ? 'animate-spin' : ''} />
+                    {isReRunning ? 'Re-running…' : 'Re-run Analysis'}
+                  </button>
                   <button
                     type='button'
                     onClick={() => void exportDevTickets()}
@@ -399,33 +766,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                     <Download size={15} />
                     {isExportingArt ? 'Preparing…' : 'Export as CSV'}
                   </button>
-                  <button
-                    type='button'
-                    onClick={() => void publishReport()}
-                    disabled={!releaseTicket || isPublishingReport}
-                    data-track-event='BUTTON_CLICK'
-                    data-track-category='Release'
-                    data-track-name={
-                      hasPublishedReport ? 'UpdateReleaseReport' : 'PublishReleaseReport'
-                    }
-                    data-track-metadata={JSON.stringify({
-                      releaseTicketId,
-                      devTicketCount: devTicketRows.length,
-                      environmentVariableCount: envChangeCount,
-                      migrationFileCount: migrationChangeCount,
-                    })}
-                    data-testid='publish-release-report'
-                    className='inline-flex items-center gap-2 rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50'
-                  >
-                    <FileText size={15} />
-                    {isPublishingReport
-                      ? hasPublishedReport
-                        ? 'Updating...'
-                        : 'Publishing...'
-                      : hasPublishedReport
-                        ? 'Update Report'
-                        : 'Publish Report'}
-                  </button>
                 </div>
                 {!artRows || artRows.length === 0 ? (
                   <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
@@ -435,25 +775,34 @@ const ReleaseDetailScreen = (): ReactElement => {
                     </p>
                   </div>
                 ) : (
-                  <div className='border border-border rounded-lg overflow-hidden'>
-                    <table className='w-full text-sm'>
+                  <div className='thin-scrollbar overflow-x-auto rounded-lg border border-border'>
+                    <table className='w-max min-w-full text-sm [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap'>
                       <thead className='bg-muted text-left'>
                         <tr>
-                          <th className='px-4 py-2 font-medium'>Ticket Id</th>
-                          <th className='px-4 py-2 font-medium'>Title</th>
+                          <th className='sticky left-0 z-10 w-[110px] bg-muted px-4 py-2 font-medium'>
+                            Ticket Id
+                          </th>
+                          <th className='sticky left-[110px] z-10 min-w-[220px] border-r border-border bg-muted px-4 py-2 font-medium'>
+                            Title
+                          </th>
                           <th className='px-4 py-2 font-medium'>PR</th>
                           <th className='px-4 py-2 font-medium'>Dev Owner</th>
                           <th className='px-4 py-2 font-medium'>Type</th>
                           <th className='px-4 py-2 font-medium min-w-[160px]'>Status</th>
                           <th className='px-4 py-2 font-medium'>Changes</th>
                           <th className='px-4 py-2 font-medium'>QA Owner</th>
+                          {selectedColumns.map(col => (
+                            <th key={col.key} className='min-w-[120px] px-4 py-2 font-medium'>
+                              {col.label}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
                         {devTicketRows.map(row => {
                           return (
                             <tr key={row.internalTicketId} className='border-t border-border'>
-                              <td className='px-4 py-2 font-mono text-xs'>
+                              <td className='sticky left-0 z-10 w-[110px] bg-background px-4 py-2 font-mono text-xs'>
                                 {row.internalTicketId && row.channelId && row.conversationId ? (
                                   <button
                                     className='text-primary hover:underline cursor-pointer'
@@ -462,6 +811,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                                         `${baseRoute}/${row.channelId}/${row.conversationId}/${row.internalTicketId}?selectedTab=details`,
                                       )
                                     }
+                                    data-track-category='Release'
+                                    data-track-name='OPEN_RELEASE_CONVERSATION'
                                   >
                                     {row.ticketId}
                                   </button>
@@ -469,7 +820,12 @@ const ReleaseDetailScreen = (): ReactElement => {
                                   <span className='text-muted-foreground'>{row.ticketId}</span>
                                 )}
                               </td>
-                              <td className='px-4 py-2'>{row.title}</td>
+                              <td
+                                title={row.title}
+                                className='sticky left-[110px] z-10 min-w-[220px] max-w-[320px] truncate border-r border-border bg-background px-4 py-2'
+                              >
+                                {row.title}
+                              </td>
                               <td className='px-4 py-2'>
                                 {row.prId && row.prUrl ? (
                                   <a
@@ -486,9 +842,16 @@ const ReleaseDetailScreen = (): ReactElement => {
                               </td>
                               <td className='px-4 py-2 text-muted-foreground'>{row.devOwner}</td>
                               <td className='px-4 py-2'>
-                                <span className='text-xs px-2 py-0.5 rounded bg-muted'>
-                                  {row.type}
-                                </span>
+                                <div className='flex items-center gap-1.5'>
+                                  <span className='text-xs px-2 py-0.5 rounded bg-muted'>
+                                    {row.type}
+                                  </span>
+                                  {row.isHotfix && (
+                                    <span className='text-xs px-2 py-0.5 rounded font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400'>
+                                      🔥 Hotfix
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className='px-4 py-2'>
                                 <DevTicketStagePicker
@@ -516,6 +879,15 @@ const ReleaseDetailScreen = (): ReactElement => {
                                   currentUserName={row.testedBy ? row.qaOwner : null}
                                 />
                               </td>
+                              {selectedColumns.map(col => (
+                                <td
+                                  key={col.key}
+                                  title={devTicketAddableCellValue(row, col.key)}
+                                  className='min-w-[120px] max-w-[240px] truncate px-4 py-2 text-muted-foreground'
+                                >
+                                  {devTicketAddableCellValue(row, col.key)}
+                                </td>
+                              ))}
                             </tr>
                           );
                         })}
@@ -529,6 +901,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                         <button
                           type='button'
                           onClick={goPrevArtPage}
+                          data-track-category='Release'
+                          data-track-name='ARTIFACTS_PREV_PAGE'
                           disabled={artPageIndex === 0}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -537,6 +911,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                         <button
                           type='button'
                           onClick={goNextArtPage}
+                          data-track-category='Release'
+                          data-track-name='ARTIFACTS_NEXT_PAGE'
                           disabled={!artHasMore}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -565,6 +941,71 @@ const ReleaseDetailScreen = (): ReactElement => {
                   valuesByChangeId={valuesByChangeId}
                 />
               </Tabs.Content>
+
+              {/* Timeline tab — audit log of everything that happened on this
+                  release (commit analyses, SubTicket creation, env/migration
+                  captures, system events, canvas publishes). */}
+              <Tabs.Content value='timeline' className='mt-6 outline-none'>
+                {!timelineEvents || timelineEvents.length === 0 ? (
+                  <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
+                    <p className='text-sm text-muted-foreground'>
+                      No events yet. The timeline fills up as commit analysis runs and the release
+                      progresses through stages.
+                    </p>
+                  </div>
+                ) : (
+                  <ol className='relative border-l border-border ml-3 space-y-3'>
+                    {groupTimelineEvents([...timelineEvents]).map(g => {
+                      const visual = EVENT_VISUAL[g.eventType] ?? EVENT_FALLBACK;
+                      const absoluteTime = new Date(g.createdAt).toLocaleString();
+                      const actor = g.actors.join(', ');
+                      const uniqueMessages = Array.from(new Set(g.messages.filter(Boolean)));
+                      return (
+                        <li key={g.key} className='ml-6'>
+                          <span
+                            className={cn(
+                              'absolute -left-[11px] flex items-center justify-center w-[22px] h-[22px] rounded-full ring-4 ring-background',
+                              visual.bg,
+                            )}
+                          >
+                            {visual.icon}
+                          </span>
+                          <div className='flex items-baseline justify-between gap-3'>
+                            <div className='flex items-baseline gap-2 min-w-0'>
+                              <span className='text-sm font-medium text-foreground truncate'>
+                                {humanizeEventName(g.eventName)}
+                              </span>
+                              {g.count > 1 && (
+                                <span
+                                  className='text-[11px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full'
+                                  title={`${g.count} occurrences in a short window`}
+                                >
+                                  ×{g.count}
+                                </span>
+                              )}
+                            </div>
+                            <span
+                              className='text-xs text-muted-foreground shrink-0 whitespace-nowrap'
+                              title={`${absoluteTime} · by ${actor}`}
+                            >
+                              {formatRelativeTime(g.createdAt)}
+                            </span>
+                          </div>
+                          {uniqueMessages.length > 0 && (
+                            <div className='mt-0.5 text-sm text-muted-foreground space-y-0.5'>
+                              {uniqueMessages.map((m, i) => (
+                                <p key={i} className='whitespace-pre-wrap break-words'>
+                                  {m}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </Tabs.Content>
             </Tabs.Root>
           </div>
         </div>
@@ -589,6 +1030,8 @@ const ReleaseDetailScreen = (): ReactElement => {
               type='button'
               className='px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors'
               onClick={failureDialog.close}
+              data-track-category='Release'
+              data-track-name='CLOSE_FAILURE_DIALOG'
             >
               Cancel
             </button>
@@ -599,6 +1042,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                 !failureDialog.state.failureReason.trim() || failureDialog.state.isSubmitting
               }
               onClick={() => void failureDialog.submit()}
+              data-track-category='Release'
+              data-track-name='SUBMIT_FAILURE_DIALOG'
             >
               {failureDialog.state.isSubmitting ? 'Saving...' : 'Submit'}
             </button>

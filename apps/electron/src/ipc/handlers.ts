@@ -16,11 +16,20 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
-import { isPillSender, setRecordingPillTheme } from '../services/recording-pill-window';
+import {
+  isPillSender,
+  isRecordingPillEnabled,
+  setRecordingPillTheme,
+} from '../services/recording-pill-window';
+import { isTrayVisible, setTrayVisible } from '../services/tray';
 import {
   focusMainWindow,
   markRendererReady,
+  resumeRecordingFromOutside,
+  setCallActive,
   setOverlayMinimized,
+  setRecordingPillEnabled,
+  setRecordingStarting,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
@@ -133,6 +142,23 @@ function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
     errorLogger.warn('[ipc] Blocked privileged IPC from untrusted sender');
   }
   return trusted;
+}
+
+function isAppWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  const trusted =
+    !!frame && frame.parent === null && !!BrowserWindow.fromWebContents(event.sender);
+  if (!trusted) {
+    errorLogger.warn('[ipc] Blocked UI-preference IPC from untrusted sender');
+  }
+  return trusted;
+}
+
+function broadcastToAppWindows(channel: string, value: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send(channel, value);
+  }
 }
 
 // XYNE-16859 Issue 24: the error-report screen/mic capture handlers can enumerate
@@ -430,7 +456,7 @@ export function setupIpcHandlers(): void {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
-      if (process.platform === 'darwin') app.dock.bounce('critical');
+      if (process.platform === 'darwin') app.dock?.bounce('critical');
     }
   });
 
@@ -535,11 +561,13 @@ export function setupIpcHandlers(): void {
 
   // Meeting popup actions
   ipcMain.on('meeting-popup:dismiss', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_DISMISSED, {}, 'MeetingDetector');
     // Just close the popup — do NOT show/focus the main window
     hideMeetingPopup();
   });
 
   ipcMain.on('meeting-popup:start-recording', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_START_RECORDING, {}, 'MeetingDetector');
     const mainWindow = getMainWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
       // Navigate and auto-start recording without stealing focus from the meeting
@@ -562,6 +590,27 @@ export function setupIpcHandlers(): void {
     setOverlayMinimized(false);
   });
 
+  ipcMain.on('recording-pill:resume-recording', (event) => {
+    if (!isPillSender(event)) return;
+    resumeRecordingFromOutside('pill');
+  });
+
+  ipcMain.handle('tray:get-visible', () => isTrayVisible());
+
+  ipcMain.on('tray:set-visible', (event, visible: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setTrayVisible(!!visible);
+    broadcastToAppWindows('tray:visible-changed', isTrayVisible());
+  });
+
+  ipcMain.handle('recording-pill:get-enabled', () => isRecordingPillEnabled());
+
+  ipcMain.on('recording-pill:set-enabled', (event, enabled: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setRecordingPillEnabled(!!enabled);
+    broadcastToAppWindows('recording-pill:enabled-changed', isRecordingPillEnabled());
+  });
+
   ipcMain.on('recording:set-minimized', (event, isMinimized: unknown) => {
     if (!isMainWindowSender(event)) return;
     setOverlayMinimized(!!isMinimized);
@@ -569,10 +618,25 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on(
     'recording:state-changed',
-    (event, state: { active: boolean; startTime?: number }) => {
+    (
+      event,
+      state: {
+        active: boolean;
+        starting?: boolean;
+        startTime?: number;
+        paused?: boolean;
+        pauseStartedAt?: number | null;
+        accumulatedPausedMs?: number;
+      },
+    ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
-      syncRecordingState(!!state?.active, state?.startTime);
+      setRecordingStarting(!!state?.starting);
+      syncRecordingState(!!state?.active, state?.startTime, {
+        paused: !!state?.paused,
+        pauseStartedAt: state?.pauseStartedAt ?? null,
+        accumulatedPausedMs: state?.accumulatedPausedMs ?? 0,
+      });
     },
   );
 
@@ -580,6 +644,11 @@ export function setupIpcHandlers(): void {
     if (!isMainWindowSender(event)) return;
     if (theme !== 'light' && theme !== 'dark') return;
     setRecordingPillTheme(theme);
+  });
+
+  ipcMain.on('call:state-changed', (event, inCall: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    setCallActive(!!inCall);
   });
 
   ipcMain.on('recording:renderer-ready', (event) => {
@@ -594,6 +663,13 @@ export function setupIpcHandlers(): void {
 
   // Meeting detection toggle (user preference from settings)
   ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
+    Logger.info(
+      enabled
+        ? ElectronEvent.MEETING_DETECTION_ENABLED
+        : ElectronEvent.MEETING_DETECTION_DISABLED,
+      { enabled },
+      'MeetingDetector',
+    );
     if (enabled) {
       meetingDetectorService.start();
     } else {

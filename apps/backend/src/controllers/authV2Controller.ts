@@ -16,6 +16,7 @@ import '../types/express';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
+import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
@@ -26,7 +27,7 @@ import {
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
-import { aiProvisioningService } from '@/services/aiProvisioningService';
+import { setOnboardingCookie } from '@/utils/onboardingCookie';
 
 /**
  * Result type for single workspace auto-login
@@ -44,6 +45,7 @@ type AutoLoginResult = {
   };
   sessionId: string | null;
   jwtToken: string;
+  isNewUser: boolean;
 };
 
 export class AuthV2Controller {
@@ -106,19 +108,6 @@ export class AuthV2Controller {
     return this.googleClient;
   }
 
-  private clearAuthCookies(req: Request, res: Response): void {
-    res.clearCookie('google_access_token', { path: '/' });
-    res.clearCookie('user_session_id', { path: '/' });
-
-    for (const cookieName of Object.keys(req.cookies || {})) {
-      if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
-        res.clearCookie(cookieName, { path: '/' });
-      }
-    }
-
-    res.clearCookie('xyne_last_workspace', { path: '/' });
-  }
-
   private async ensureSelfDmForUser(
     userId: string,
     workspaceId: string
@@ -151,7 +140,7 @@ export class AuthV2Controller {
     platform: 'web' | 'mobile' | 'electron'
   ): Promise<AutoLoginResult> {
     // Create/get workspace user
-    const { user: workspaceUser } = await this.userService.createOrGetWorkspaceUser({
+    const { user: workspaceUser, isNewUser } = await this.userService.createOrGetWorkspaceUser({
       providerUserId: googleUserData.googleId,
       email: googleUserData.email,
       name: googleUserData.name,
@@ -200,7 +189,7 @@ export class AuthV2Controller {
       memberId: workspaceUser.orgMemberId,
     });
 
-    return { workspaceUser, sessionId, jwtToken };
+    return { workspaceUser, sessionId, jwtToken, isNewUser };
   }
 
   /**
@@ -612,7 +601,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -638,7 +627,12 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'lax' as const,
         });
 
         // Legacy cookie for backward compatibility with older dashboards
@@ -709,7 +703,6 @@ export class AuthV2Controller {
 
       if (!sessionId) {
         logger.warn(`[${requestId}] No session ID cookie found`);
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'No session found',
           message: 'Session ID cookie is missing',
@@ -723,7 +716,6 @@ export class AuthV2Controller {
 
       if (!session || !session.user) {
         logger.warn(`[${requestId}] Session not found in database`);
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid session',
           message: 'Session not found or expired',
@@ -735,7 +727,6 @@ export class AuthV2Controller {
 
       if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
         logger.warn(`[${requestId}] Session expired or inactive`);
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
@@ -970,7 +961,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -994,7 +985,12 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction,
+          sameSite: 'strict' as const,
         });
 
         res.cookie('user_session_id', sessionId, {
@@ -1085,10 +1081,6 @@ export class AuthV2Controller {
 
     // Helper to send error response (JSON for mobile, redirect for web)
     const sendError = (errorCode: string, message: string, statusCode = 400) => {
-      if (statusCode === 401) {
-        this.clearAuthCookies(req, res);
-      }
-
       if (isMobileNative) {
         res.status(statusCode).json({
           success: false,
@@ -1257,7 +1249,7 @@ export class AuthV2Controller {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
 
-        const { workspaceUser, sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+        const { workspaceUser, sessionId, jwtToken, isNewUser } = await this.performSingleWorkspaceAutoLogin(
           googleUserData,
           workspaceId,
           refresh_token,
@@ -1281,7 +1273,12 @@ export class AuthV2Controller {
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        setOnboardingCookie(res, isNewUser, {
+          secure: isProduction || isMobileNative,
+          sameSite: (isMobileNative ? 'none' : 'lax') as 'none' | 'lax',
         });
 
         if (sessionId) {
@@ -1365,6 +1362,10 @@ export class AuthV2Controller {
         await this.userSessionService.revokeSession(sessionId);
       }
 
+      if (req.user && sessionId) {
+        await getEncryptionProvider().revokeSessionKey(sessionId);
+      }
+
       // Clear global session cookie
       res.clearCookie('user_session_id', { path: '/' });
       
@@ -1436,7 +1437,6 @@ export class AuthV2Controller {
       if (pendingAuthCookie) {
         const parsed = await this.parsePendingAuthCookie(pendingAuthCookie);
         if (!parsed) {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'Pending auth data is corrupted or expired'
@@ -1453,7 +1453,6 @@ export class AuthV2Controller {
           pendingAccessTokenExpiry = parsed.pendingAccessTokenExpiry;
           pendingTokenKey = parsed.pendingTokenKey;
         } else {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'Pending auth data is missing provider identity'
@@ -1469,7 +1468,6 @@ export class AuthV2Controller {
         
         const session = await this.userSessionService.getSessionById(existingSessionId);
         if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid session',
             message: 'Session not found or expired'
@@ -1488,7 +1486,6 @@ export class AuthV2Controller {
         pendingAccessToken = session.accessToken || undefined;
         pendingAccessTokenExpiry = session.accessTokenExpiry || undefined;
       } else {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -1497,7 +1494,6 @@ export class AuthV2Controller {
       }
 
       if (!oauthUserData?.email) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'User data missing from pending auth'
@@ -1516,18 +1512,6 @@ export class AuthV2Controller {
         workspaceId,
         authProvider: provider,
       });
-
-      if (isNewUser) {
-        try {
-          await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
-        } catch (error) {
-          logger.error('[LOGIN-WORKSPACE] Failed to enqueue AI user provisioning', {
-            userId: workspaceUser.id,
-            workspaceId,
-            error,
-          });
-        }
-      }
 
       // Check if user is inactive or has left the workspace
       if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
@@ -1615,15 +1599,11 @@ export class AuthV2Controller {
         });
       }
 
-      // Set is_new_user cookie for new users (readable by frontend)
+      setOnboardingCookie(res, isNewUser, {
+        secure: isProduction,
+        sameSite: 'strict' as const,
+      });
       if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: isProduction,
-          sameSite: 'strict' as const,
-          path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-        });
         logger.info(`[LOGIN-WORKSPACE] Set is_new_user cookie for new user: ${workspaceUser.email}`);
       }
 
@@ -1676,7 +1656,6 @@ export class AuthV2Controller {
       // Get pending auth data from cookie
       const pendingAuthCookie = req.cookies?.google_access_token;
       if (!pendingAuthCookie) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -1686,7 +1665,6 @@ export class AuthV2Controller {
 
       const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'Pending auth data is corrupted or expired'
@@ -1696,7 +1674,6 @@ export class AuthV2Controller {
       const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
 
       if (!oauthUserData?.email) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'User data missing from pending auth'
@@ -1713,7 +1690,7 @@ export class AuthV2Controller {
         picture: oauthUserData.picture,
       };
 
-      const { organization, workspace, workspaceUser } = await this.userService.createOrganizationWithUser(
+      const { organization, workspace, workspaceUser, isNewUser } = await this.userService.createOrganizationWithUser(
         userData,
         orgName,
         workspaceName,
@@ -1805,13 +1782,10 @@ export class AuthV2Controller {
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       });
 
-      // Set is_new_user cookie for new users (readable by frontend)
-      res.cookie('is_new_user', 'true', {
-        httpOnly: false,
+      setOnboardingCookie(res, isNewUser, {
         secure: isProduction,
         sameSite: 'strict' as const,
-        path: '/',
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       // Clear pending auth cookie
@@ -1841,7 +1815,7 @@ export class AuthV2Controller {
           role: workspaceUser.role,
           workspaceId: workspaceUser.workspaceId
         },
-        isNewUser: true,
+        isNewUser,
         selfDmChannelId,
         landingChannelId: workspaceRecord?.landingChannelId ?? null,
       });
@@ -2005,7 +1979,6 @@ export class AuthV2Controller {
     try {
       const pendingAuthCookie = req.cookies?.google_access_token;
       if (!pendingAuthCookie) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
@@ -2015,7 +1988,6 @@ export class AuthV2Controller {
 
       const parsedAuth = await this.parsePendingAuthCookie(pendingAuthCookie);
       if (!parsedAuth) {
-        this.clearAuthCookies(req, res);
         res.status(401).json({
           error: 'Invalid auth data',
           message: 'Pending auth data is corrupted or expired'
@@ -2024,7 +1996,6 @@ export class AuthV2Controller {
       }
       const { oauthUserData, provider, pendingRefreshToken, pendingTokenKey } = parsedAuth;
         if (!oauthUserData?.email) {
-          this.clearAuthCookies(req, res);
           res.status(401).json({
             error: 'Invalid auth data',
             message: 'User data missing from pending auth'
@@ -2175,11 +2146,11 @@ export class AuthV2Controller {
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
+        const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
+
+        setOnboardingCookie(res, isNewUser, {
           secure: isProduction,
           sameSite: 'strict' as const,
-          path: '/',
           maxAge: 24 * 60 * 60 * 1000,
         });
 
@@ -2320,8 +2291,11 @@ export class AuthV2Controller {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
       res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-      res.cookie('is_new_user', 'true', {
-        httpOnly: false, secure: isProduction, sameSite: 'strict' as const, path: '/', maxAge: 24 * 60 * 60 * 1000,
+      const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
+      setOnboardingCookie(res, isNewUser, {
+        secure: isProduction,
+        sameSite: 'strict' as const,
+        maxAge: 24 * 60 * 60 * 1000,
       });
 
       logger.info(`[CREATE-WORKSPACE-AUTH] Created org ${organization.orgId} / workspace ${workspace.id} for ${currentUser.email}`);
@@ -2336,7 +2310,7 @@ export class AuthV2Controller {
           picture: workspaceUser.picture,
           workspaceId: workspaceUser.workspaceId,
         },
-        isNewUser: true,
+        isNewUser,
         selfDmChannelId,
         landingChannelId: workspaceRecord?.landingChannelId ?? null,
       });

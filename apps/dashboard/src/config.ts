@@ -25,28 +25,43 @@ const ELECTRON_BACKEND_ZERO_URL = isProd
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 
-export const API_BASE_URL = isElectronBundled
-  ? `${ELECTRON_BACKEND_URL}/api`
-  : `${protocol}://${hostname}${backendPort}/api`;
+// Replaces API_BASE_URL wholesale; the SDLC lane builds with '/sdlc-api'.
+// NOT named VITE_API_BASE_URL — that already means the backend origin with no
+// '/api' suffix, used as a vite proxy target.
+const apiBaseOverride = (import.meta.env['VITE_API_BASE_OVERRIDE'] as string | undefined) || '';
 
+export const API_BASE_URL =
+  apiBaseOverride ||
+  (isElectronBundled
+    ? `${ELECTRON_BACKEND_URL}/api`
+    : `${protocol}://${hostname}${backendPort}/api`);
+
+const zeroServerPort = isLocalhost ? ':4848' : isTestEnv ? ':4848' : '';
 export const APPS_PUBLIC_BASE_URL = isLocalhost
   ? 'http://localhost:3001/api/apps'
   : isSandBox
     ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
     : 'https://spaces.xyne.juspay.net/api/apps';
 
-// Zero Cache
-const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
-export const VITE_ZERO_SERVER = isElectronBundled
-  ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-  : `${protocol}://${hostname}${zeroCachePort}/zero`;
+// SDLC lane: same-origin path to its own zero-cache. Everything else derives from
+// the serving host. VITE_ZERO_SERVER is deliberately not read here — it is used
+// server-side (vite preview's /zero proxy, sandbox's traefik rule), and reading it
+// client-side let a baked absolute URL pin every host to one origin.
+const laneZeroPath = (import.meta.env['VITE_ZERO_PATH'] as string | undefined) || '';
+
+export const VITE_ZERO_SERVER = laneZeroPath
+  ? `${window.location.origin}${laneZeroPath}`
+  : isElectronBundled
+    ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+    : `${protocol}://${hostname}${zeroServerPort}/zero`;
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
 const otelPort = isLocalhost || isDockerTestEnv ? ':4318' : '';
+const otelPath = isLocalhost || isDockerTestEnv ? '/v1/metrics' : '/godel/v1/metrics';
 export const OTEL_METRICS_ENDPOINT = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/godel/v1/metrics`
-  : `${protocol}://${otelHost}${otelPort}/godel/v1/metrics`;
+  : `${protocol}://${otelHost}${otelPort}${otelPath}`;
 export const OTEL_SERVICE_NAME =
   (import.meta.env['VITE_OTEL_SERVICE_NAME'] as string) || 'xyne-spaces-frontend';
 export const OTEL_EXPORT_INTERVAL_MS: number = parseInt(
@@ -85,3 +100,32 @@ export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
 // Set VITE_DEFAULT_WORKSPACE_ID in .env.local to the default workspace ID.
 export const DEFAULT_WORKSPACE_ID: string =
   (import.meta.env['VITE_DEFAULT_WORKSPACE_ID'] as string) ?? '';
+
+// Slack app install page (user's own OAuth token for DM migration). Workspace-specific, so env-only;
+// set VITE_SLACK_APP_INSTALL_URL in .env.local — the UI hides the link when unset.
+export const SLACK_APP_INSTALL_URL: string =
+  (import.meta.env['VITE_SLACK_APP_INSTALL_URL'] as string) || '';
+// Deployment lane. The same source builds a second 'sdlc' bundle served at
+// '/sdlc-app/' with its own backend and zero-cache. Inert when VITE_XYNE_SURFACE
+// is unset. See docs/sdlc-fast-lane.md.
+
+export type XyneSurface = 'main' | 'sdlc';
+
+export const XYNE_SURFACE: XyneSurface =
+  (import.meta.env['VITE_XYNE_SURFACE'] as string) === 'sdlc' ? 'sdlc' : 'main';
+
+export const isSdlcSurface = XYNE_SURFACE === 'sdlc';
+
+// Router basename; vite.config.ts reads the same var for `base`. No trailing
+// slash, which is what react-router expects.
+export const APP_BASE_PATH: string = (
+  (import.meta.env['VITE_APP_BASE_PATH'] as string) || '/'
+).replace(/\/+$/, '');
+
+// Where the main bundle points its iframe.
+export const SDLC_APP_BASE_PATH: string =
+  (import.meta.env['VITE_SDLC_APP_BASE_PATH'] as string) || '/sdlc-app';
+
+// Gives this bundle its own Zero IndexedDB so two clients on one origin do not
+// share a store. Empty = single lane, unchanged behaviour.
+export const ZERO_STORAGE_KEY: string = (import.meta.env['VITE_ZERO_STORAGE_KEY'] as string) || '';

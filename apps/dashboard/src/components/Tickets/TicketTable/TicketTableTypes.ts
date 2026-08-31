@@ -48,7 +48,8 @@ export interface StageCellEditorProps {
   value: string;
   onValueChange: (value: string) => void;
   stopEditing?: () => void;
-  stages: Array<{ id: string; name: string }>;
+  stages?: Array<{ id: string; name: string }>;
+  data?: { boardId?: string | null } | undefined;
 }
 
 export interface DueDateCellEditorProps {

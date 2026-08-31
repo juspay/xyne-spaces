@@ -96,7 +96,11 @@ export function initializeTelemetry(): void {
       platformName,
     });
   } catch (error) {
-    console.error('[OTel] Failed to initialize telemetry:', error);
+    logger.error(Event.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[OTel] Failed to initialize telemetry:'),
+      error: error,
+    });
     // Don't throw - telemetry failure shouldn't break the app
   }
 }

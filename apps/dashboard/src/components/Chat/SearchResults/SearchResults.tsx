@@ -1,5 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from '@xyne/icons';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
@@ -40,6 +41,7 @@ import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWit
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
 import { SearchFilterBar } from './SearchFilterBar';
+import { SearchQueryInput } from './SearchQueryInput';
 import {
   useAllVisibleChannels,
   useAllChannels,
@@ -50,7 +52,7 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
   formatChannelLabel,
-  getDMSearchableNames,
+  getDMNames,
   isDMChannel,
   isGroupDMChannel,
   groupChannelsByScope,
@@ -172,7 +174,8 @@ function buildSelectedMentions(
 }
 
 const SearchResults = (): ReactElement => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const [selectedPanel, setSelectedPanel] = useState<SidePanelState>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -265,23 +268,28 @@ const SearchResults = (): ReactElement => {
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
+    searchNames?: string[];
   }> => {
     const result = [];
     for (const ch of starredChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     for (const ch of regularChannels) {
       result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
     }
     for (const ch of dmChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     return result;
@@ -293,6 +301,7 @@ const SearchResults = (): ReactElement => {
     isGrouped,
     isSearching: isLoading,
     searchError: error,
+    text: searchedText,
     setText,
     setActiveTab,
     setSelectedMentions,
@@ -310,6 +319,12 @@ const SearchResults = (): ReactElement => {
     defaultOnlyMyChannels: filters.onlyMyChannels,
     groupByDocType: true,
   });
+
+  // The text the on-screen results actually reflect. Results update live as the user
+  // types (the hook searches `searchedText`) but the URL `query` only commits on Enter,
+  // so query-driven UI (empty-state copy, local-section gating) must read this, not the
+  // stale URL param. Falls back to `query` on first paint before the sync effect runs.
+  const displayQuery = searchedText.trim() || query;
 
   // Sync hook text whenever the URL query param changes; also close sidebar on new search
   useEffect(() => {
@@ -489,11 +504,35 @@ const SearchResults = (): ReactElement => {
       mentionChannelName,
     ],
   );
+
+  // Editing the query in the header re-runs the search through the URL, the same path a
+  // cmd+K search takes, so back/forward and the overlay's query restore keep working.
+  // Filters live in their own params and are deliberately left untouched.
+  const handleQuerySubmit = useCallback(
+    (next: string) => {
+      if (next === query) return;
+      setSearchParams(
+        prev => {
+          const params = new URLSearchParams(prev);
+          if (next) params.set('query', next);
+          else params.delete('query');
+          // `display` is the pre-rendered label the top bar shows, built from mention
+          // names when the search was launched. It can't be patched from here, so drop
+          // it and let the bar fall back to the query it now shows.
+          params.delete('display');
+          return params;
+        },
+        { preventScrollReset: true },
+      );
+    },
+    [query, setSearchParams],
+  );
+
   // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
   // Guard against empty query so we don't show all channels before the user types.
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];
-    if (!query.trim()) return [];
+    if (!displayQuery) return [];
     return filteredLocalChannels.map(({ channel: c, searchableNames }) => {
       const isDm = isDMChannel(c.scopeType);
       const title = isDm ? searchableNames?.join(', ') || c.name : c.name;
@@ -506,7 +545,7 @@ const SearchResults = (): ReactElement => {
         metadata: {},
       };
     });
-  }, [isChannelsMode, filters.docType, query, filteredLocalChannels]);
+  }, [isChannelsMode, filters.docType, displayQuery, filteredLocalChannels]);
 
   // Single "narrowing filter active" flag (from:/in:/assignee: + priority:, not the
   // onlyMyChannels scope toggle) — shared by result stripping and local-section suppression.
@@ -563,8 +602,7 @@ const SearchResults = (): ReactElement => {
   const hasEverLoadedRef = useRef(false);
   const autoOpenedResultKeyRef = useRef<string | null>(null);
   const hasManualPanelSelectionRef = useRef(false);
-  const searchRequestKey = JSON.stringify([
-    query,
+  const filterKey = JSON.stringify([
     filters.docType,
     filters.fromUserIds,
     filters.fromEmails,
@@ -576,11 +614,23 @@ const SearchResults = (): ReactElement => {
     filters.onlyMyChannels,
     filters.rankProfile,
   ]);
+  const searchRequestKey = JSON.stringify([query, filterKey]);
   const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
   const prevSearchKeyRef = useRef(searchRequestKey);
+  const prevFilterKeyRef = useRef(filterKey);
   if (searchRequestKey !== prevSearchKeyRef.current) {
     prevSearchKeyRef.current = searchRequestKey;
-    hasEverLoadedRef.current = false; // reset for new search
+    // Only show the loading bridge when a new API call will actually run: a filter change,
+    // or a query the search hook hasn't fetched yet. Since results now update live while
+    // typing, pressing Enter commits the already-searched query to the URL but fires no API
+    // call (the hook duplicate-suppresses it) — so resetting here would leave `isLoading`
+    // false forever and spin the screen indefinitely. Guard against that.
+    // `query` is already both-ends trimmed (line ~183); the hook dedupes on text.trimEnd()
+    // (useSearchMetrics), so normalize the same way here or a leading-space edit would
+    // disagree with whether the hook actually re-fetches.
+    const willFetch = filterKey !== prevFilterKeyRef.current || query !== searchedText.trimEnd();
+    if (willFetch) hasEverLoadedRef.current = false; // reset for new search
+    prevFilterKeyRef.current = filterKey;
   }
   if (isLoading) hasEverLoadedRef.current = true;
 
@@ -744,11 +794,30 @@ const SearchResults = (): ReactElement => {
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
       <div className='shrink-0 px-4'>
-        {query && (
-          <p className='pt-4 text-base text-muted-foreground'>
-            Results for: <span className='font-semibold text-foreground'>{query}</span>
-          </p>
-        )}
+        <div className='pt-4 flex items-center gap-2'>
+          {/* This page is only ever arrived at from somewhere — the cmd+K palette, or a
+              link out of it — and it is the one screen that renders no AppNavigator, so it
+              had no in-app way back at all. Going back lands on the palette's own history
+              entry, which reopens cmd+K with the search still in it. */}
+          <button
+            type='button'
+            aria-label='Back'
+            onClick={() => void navigate(-1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_BACK'
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div className='flex-1 min-w-0'>
+            <SearchQueryInput
+              query={query}
+              onSubmit={handleQuerySubmit}
+              onLiveChange={setText}
+              isSearching={isLoading}
+            />
+          </div>
+        </div>
         <div className='mt-3'>
           <SearchFilterBar filters={filters} onFiltersChange={handleFiltersChange} />
         </div>
@@ -775,10 +844,21 @@ const SearchResults = (): ReactElement => {
           </div>
         )}
       </div>
-      <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto px-4'>
+      <div
+        ref={scrollRef}
+        className={cn(
+          // pb-16 so the last card clears the bottom of the viewport instead of sitting
+          // flush against it (and above the floating compare bar when it's up).
+          'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
+          // A re-search keeps the previous results on screen rather than blanking to a
+          // spinner — they fade back while the new ones land, and the box spins.
+          isLoading && results.length > 0 && 'opacity-50 transition-opacity duration-150',
+        )}
+      >
         <TicketSearchHighlightContext.Provider value={ticketHighlightMap}>
           <ResultsBody
             query={query}
+            displayQuery={displayQuery}
             hasActiveFilters={filtersActive}
             hasEverLoaded={hasEverLoadedRef.current}
             isLoading={isLoading}
@@ -879,6 +959,9 @@ export default SearchResults;
 
 interface ResultsBodyProps {
   query: string;
+  /** The text the visible results reflect (live typed text, falling back to the URL
+   *  query). Drives empty-state copy and local-section gating so they track live typing. */
+  displayQuery: string;
   hasActiveFilters: boolean;
   hasEverLoaded: boolean;
   isLoading: boolean;
@@ -1022,6 +1105,7 @@ function getAttachmentResultIcon(result: DisplaySearchResult): ReactElement {
 
 function ResultsBody({
   query,
+  displayQuery,
   hasActiveFilters,
   hasEverLoaded,
   isLoading,
@@ -1409,19 +1493,16 @@ function ResultsBody({
     // query, filteredLocalChannels returns every channel, so gate on the query to
     // avoid a partial browse (which would also drop 1:1 DMs) and keep the clean
     // empty state until the user types.
-    const showLocalSections = !hasActiveFilters && !!query.trim();
+    const showLocalSections = !hasActiveFilters && !!displayQuery;
     const hasLocalSections =
       showLocalSections && (userResults.length > 0 || filteredLocalChannels.length > 0);
     const hasBackendSections = backendOnly.length > 0;
 
     // True empty: nothing to show at all
     if (!hasLocalSections && !hasBackendSections) {
-      if (!query && !hasActiveFilters) {
+      if (!displayQuery && !hasActiveFilters) {
         return (
-          <EmptyState
-            title='Search for messages, files, and tickets'
-            subtitle='Type above and press Enter to search'
-          />
+          <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
         );
       }
       if (isLoading || !hasEverLoaded) {
@@ -1435,7 +1516,9 @@ function ResultsBody({
         <EmptyState
           title='No results found'
           subtitle={
-            query ? `Nothing matched "${query}"` : 'No results found for the active filters'
+            displayQuery
+              ? `Nothing matched "${displayQuery}"`
+              : 'No results found for the active filters'
           }
         />
       );
@@ -1483,12 +1566,9 @@ function ResultsBody({
 
   // ── Flat view — specific docType tabs and compare mode ──────────────────
   if (results.length === 0) {
-    if (!query && !hasActiveFilters) {
+    if (!displayQuery && !hasActiveFilters) {
       return (
-        <EmptyState
-          title='Search for messages, files, and tickets'
-          subtitle='Type above and press Enter to search'
-        />
+        <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
       );
     }
     if (isLoading || !hasEverLoaded) {
@@ -1501,7 +1581,11 @@ function ResultsBody({
     return (
       <EmptyState
         title='No results found'
-        subtitle={query ? `Nothing matched "${query}"` : 'No results found for the active filters'}
+        subtitle={
+          displayQuery
+            ? `Nothing matched "${displayQuery}"`
+            : 'No results found for the active filters'
+        }
       />
     );
   }

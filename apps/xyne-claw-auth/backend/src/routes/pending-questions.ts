@@ -11,8 +11,10 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
 import { redisService } from "../redis.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
+import type { UserQuestion } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("pending-questions");
@@ -27,8 +29,7 @@ export interface StoredQuestion {
   agentSlug: string;
   channelId: string;
   conversationId: string;
-  question: string;
-  options: string[];
+  questions: UserQuestion[];
 }
 
 export async function getQuestion(questionId: string): Promise<StoredQuestion | null> {
@@ -43,58 +44,54 @@ export async function deleteQuestion(questionId: string): Promise<void> {
   await redis.del(`${PREFIX}${questionId}`);
 }
 
+/** Atomically fetch-and-remove a pending question (getdel). Used by the
+ *  answer path so a question can't be consumed twice. */
+export async function consumeQuestion(questionId: string): Promise<StoredQuestion | null> {
+  const redis = redisService.getConnection();
+  const raw = await redis.getdel(`${PREFIX}${questionId}`);
+  if (!raw) return null;
+  return JSON.parse(raw) as StoredQuestion;
+}
+
 // POST / — store a pending question
-router.post("/", requireStrictS2S, async (req: Request, res: Response) => {
-  try {
-    const { questionId, userId, agentSlug, channelId, conversationId, question, options } = req.body as {
-      questionId?: string;
-      userId?: string;
-      agentSlug?: string;
-      channelId?: string;
-      conversationId?: string;
-      question?: string;
-      options?: string[];
-    };
+router.post("/", requireStrictS2S, asyncHandler(async (req: Request, res: Response) => {
+  const { questionId, userId, agentSlug, channelId, conversationId, questions } = req.body as {
+    questionId?: string;
+    userId?: string;
+    agentSlug?: string;
+    channelId?: string;
+    conversationId?: string;
+    questions?: UserQuestion[];
+  };
 
-    if (!questionId || !question || !options?.length) {
-      res.status(400).json({ success: false, error: "questionId, question, and options are required" });
-      return;
-    }
-
-    const data: StoredQuestion = {
-      questionId,
-      userId: userId ?? "",
-      agentSlug: agentSlug ?? "",
-      channelId: channelId ?? "",
-      conversationId: conversationId ?? "",
-      question,
-      options,
-    };
-
-    const redis = redisService.getConnection();
-    await redis.set(`${PREFIX}${questionId}`, JSON.stringify(data), "EX", TTL);
-
-    log.info(`[pending-questions] Stored question ${questionId}: "${question}" (${options.length} options)`);
-    res.json({ success: true });
-  } catch (err) {
-    log.error("[pending-questions] Store error:", err);
-    res.status(500).json({ success: false, error: "Failed to store question" });
+  if (!questionId || !Array.isArray(questions) || questions.length === 0) {
+    throw badRequest("questionId and questions are required");
   }
-});
+
+  const data: StoredQuestion = {
+    questionId,
+    userId: userId ?? "",
+    agentSlug: agentSlug ?? "",
+    channelId: channelId ?? "",
+    conversationId: conversationId ?? "",
+    questions,
+  };
+
+  const redis = redisService.getConnection();
+  await redis.set(`${PREFIX}${questionId}`, JSON.stringify(data), "EX", TTL);
+
+  log.info(`[pending-questions] Stored question set ${questionId} (${questions.length} questions)`);
+  ok(res);
+}));
 
 // GET /:id — retrieve a pending question
-router.get("/:id", requireStrictS2S, async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const data = await getQuestion(req.params.id);
-    if (!data) {
-      res.status(404).json({ success: false, error: "Question not found or expired" });
-      return;
-    }
-    res.json({ success: true, data });
-  } catch (err) {
-    log.error("[pending-questions] Get error:", err);
-    res.status(500).json({ success: false, error: "Failed to retrieve question" });
+router.get("/:id", requireStrictS2S, asyncHandler(async (req: Request, res: Response) => {
+  const questionId = (req.params as { id: string }).id;
+  const data = await getQuestion(questionId);
+  if (!data) {
+    throw notFound("Question not found or expired");
   }
-});
+  ok(res, data);
+}));
 
 export { router as pendingQuestionsRouter };

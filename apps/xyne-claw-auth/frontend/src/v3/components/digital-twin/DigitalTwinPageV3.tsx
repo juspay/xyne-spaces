@@ -60,7 +60,7 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
 
   /* ── Resizable split between Memories (left) and Controls (right) ── */
   const gridRef = useRef<HTMLDivElement>(null);
-  const [leftPct, setLeftPct] = useState(60);
+  const [leftPct, setLeftPct] = useState(72);
 
   const startDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -70,7 +70,7 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
       const rect = el.getBoundingClientRect();
       const pct = ((ev.clientX - rect.left) / rect.width) * 100;
       // Clamp so neither column collapses past a usable width.
-      setLeftPct(Math.min(78, Math.max(30, pct)));
+      setLeftPct(Math.min(85, Math.max(30, pct)));
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -280,9 +280,11 @@ export function DigitalTwinPageV3({ userId }: DigitalTwinPageV3Props) {
       ) : !showMetrics ? (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-h-0 flex-1 justify-center overflow-hidden">
+            {/* Full width: the constellation is the focus of this screen, and a
+                1280px cap left dead gutters on either side at desktop widths. */}
             <div
               ref={gridRef}
-              className="grid min-h-0 w-full max-w-[1280px] grid-rows-[minmax(0,1fr)] overflow-hidden"
+              className="grid min-h-0 w-full grid-rows-[minmax(0,1fr)] overflow-hidden"
               style={{ gridTemplateColumns: `${leftPct}% 7px minmax(0, 1fr)` }}
             >
 

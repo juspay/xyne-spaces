@@ -22,6 +22,7 @@ import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -389,6 +390,7 @@ class LiveKitWebhookController {
         const callType = roomMetadata.callType;
         const callOrigin = roomMetadata.callOrigin;
         const existingConversationId = roomMetadata.conversationId;
+        const artifactMessageId = roomMetadata.artifactMessageId;
         const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
 
         if (!channelId) {
@@ -452,7 +454,7 @@ class LiveKitWebhookController {
         const callId = uuidv4();
 
         // Construct room link
-        const roomLink = `${config.livekit.clientUrl}/call/${roomName}?type=${callType}`;
+        const roomLink = buildCallInviteUrl(roomName);
 
         // Use repository method to create call with all related records atomically
         // If this transaction fails the LiveKit room is already live with no DB record — a
@@ -476,6 +478,7 @@ class LiveKitWebhookController {
           messageId,
           now,
           callOrigin,
+          ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
         }).catch((txError) => {
           logger.error('[LiveKit Webhook] call_record_creation_failed', {
             stage: 'call_record_creation',
@@ -495,6 +498,77 @@ class LiveKitWebhookController {
         if (!result) return;
 
         call = result.call;
+
+        // SDLC linking: the initiator validated this context; now that the call
+        // and its conversation exist, record the entity mapping. Owner is a
+        // canvas or a track — either way the same two links are written:
+        //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
+        const sdlcLink = (roomMetadata as {
+          sdlcLink?: { repoId?: string; ownerType?: string; ownerId?: string };
+        }).sdlcLink;
+        if (sdlcLink?.repoId && sdlcLink.ownerType && sdlcLink.ownerId) {
+          try {
+            const sdlcRepo = await this.db.repo.findFirst({
+              where: { id: sdlcLink.repoId, channelId },
+              select: { id: true, workspaceId: true },
+            });
+            const linkWorkspaceId = channelRecord?.workspaceId ?? sdlcRepo?.workspaceId ?? null;
+            const ownerValid = sdlcRepo
+              ? sdlcLink.ownerType === 'CANVAS'
+                ? Boolean(
+                    await this.db.canvas.findFirst({
+                      where: { id: sdlcLink.ownerId, channelId },
+                      select: { id: true },
+                    }),
+                  )
+                : sdlcLink.ownerType === 'TRACK'
+                  ? Boolean(
+                      await this.db.sdlcTrack.findFirst({
+                        where: { id: sdlcLink.ownerId, repoId: sdlcRepo.id },
+                        select: { id: true },
+                      }),
+                    )
+                  : false
+              : false;
+            if (sdlcRepo && linkWorkspaceId && ownerValid) {
+              await this.db.sdlcEntityLink.createMany({
+                data: [
+                  {
+                    workspaceId: linkWorkspaceId,
+                    repoId: sdlcRepo.id,
+                    sourceType: sdlcLink.ownerType,
+                    sourceId: sdlcLink.ownerId,
+                    targetType: 'CALL',
+                    targetId: callId,
+                    relationType: 'CALL',
+                    createdBy,
+                  },
+                  {
+                    workspaceId: linkWorkspaceId,
+                    repoId: sdlcRepo.id,
+                    sourceType: sdlcLink.ownerType,
+                    sourceId: sdlcLink.ownerId,
+                    targetType: 'CONVERSATION',
+                    targetId: conversationId,
+                    relationType: 'DISCUSSION',
+                    createdBy,
+                  },
+                ],
+                skipDuplicates: true,
+              });
+              logger.info(
+                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId} repo=${sdlcRepo.id}`,
+              );
+            }
+          } catch (sdlcLinkError) {
+            // Linking must never break call creation.
+            logger.warn('[LiveKit Webhook] sdlc_link_failed', {
+              room: roomName,
+              call: callId,
+              error: sdlcLinkError,
+            });
+          }
+        }
 
         // Emit call-started automation event when the first participant creates the call
         if (call) {

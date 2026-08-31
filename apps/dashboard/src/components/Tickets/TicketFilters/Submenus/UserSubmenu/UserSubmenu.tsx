@@ -1,6 +1,10 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
-import { Search, Check, User as UserIcon } from 'lucide-react';
+import {
+  SearchDefault as Search,
+  CheckTickSingle as Check,
+  UserDefault as UserIcon,
+} from '@xyne/icons';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers, useSelf } from '../../../../../hooks/useUsers';
@@ -10,6 +14,7 @@ import {
   getUserDisplayName,
   isUserDeactivated,
   withYouLabel,
+  matchesUserQuery,
 } from '../../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import { Switch } from '../../../../ui/Switch';
@@ -112,14 +117,7 @@ export const UserSubmenu = ({
     let baseUsers: User[] = [];
 
     if (searchLower) {
-      baseUsers = users.filter((user: User) => {
-        const displayName = getUserDisplayName(user).toLowerCase();
-        return (
-          displayName.includes(searchLower) ||
-          user.name.toLowerCase().includes(searchLower) ||
-          user.email?.toLowerCase().includes(searchLower)
-        );
-      });
+      baseUsers = users.filter((user: User) => matchesUserQuery(user, searchTerm));
     } else if (normalizedAvailableUserIds) {
       // Scope to the board's users, keeping any selected users visible.
       const idSet = new Set<string>();
@@ -321,7 +319,12 @@ export const UserSubmenu = ({
       </div>
       {rows.length > 0 ? (
         isVirtualized ? (
-          <div role='listbox' aria-multiselectable='true'>
+          <div
+            role='listbox'
+            aria-multiselectable='true'
+            onWheel={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <Virtuoso
               data={rows}
               // Row-height estimate so the scroll range is right before rows measure.
@@ -335,7 +338,13 @@ export const UserSubmenu = ({
             />
           </div>
         ) : (
-          <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
+          <div
+            className='max-h-80 overflow-y-auto p-1'
+            role='listbox'
+            aria-multiselectable='true'
+            onWheel={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <div className='space-y-0.5'>{rows.map(item => renderRow(item))}</div>
           </div>
         )

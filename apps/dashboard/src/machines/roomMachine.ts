@@ -1,4 +1,5 @@
 import { setup, assign, createActor, fromCallback, fromPromise } from 'xstate';
+import type { SdlcCallLink } from '@xyne/shared';
 import {
   Room,
   RoomEvent as LiveKitRoomEvent,
@@ -33,6 +34,7 @@ import { CallType } from '@xyne/shared';
 import { mixpanelService } from '../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
+import { isCallUrlApiAllowed, type CallUrlOverrides } from '../utils/callUrlOverrides';
 import { toast } from 'sonner';
 import { MACOS_PRIVACY_URLS } from '../constants/permissions';
 import {
@@ -161,6 +163,8 @@ export interface RoomContext {
   scopeType: string | null; // Channel scope type (DM, GROUP_DM, DEFAULT, etc.)
   invitedUserId: string | null;
   conversationId: string | null;
+  artifactMessageId: string | null;
+  sdlcLink: SdlcCallLink | null;
   targetUserIds: string[];
   roomLink: string | null;
   isChatOpen: boolean;
@@ -171,6 +175,10 @@ export interface RoomContext {
   callStartTime: number | null; // Track when the call started for duration calculation
   isAIAssistantEnabled: boolean; // Track Xyne Automatic state
   transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
+  isTranscriptionEnabled: boolean; // Host kill-switch: false = agent silenced (audio unsubscribed)
+  transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
+  privacyPopoverOpen: boolean; // Shared open-state for the CallPrivacyIndicator popover
+  transcriptionPending: boolean; // A host toggle is in-flight, awaiting the agent's confirmation
   aiController: { id: string; name: string } | null;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
   isAiControlRequested: boolean; // Track if local user has a pending control request
@@ -197,6 +205,19 @@ export interface RoomContext {
   hostControls: HostControls;
   // Background blur on the local camera feed (web only). Off by default.
   isBackgroundBlurEnabled: boolean;
+  // What a call URL asked for, when the join was driven by one rather than by a
+  // person clicking Join (see utils/callUrlOverrides). `null` is the normal case
+  // and means "no request": enableLocalTracks falls back to the user's saved join
+  // preferences, and failures surface as a toast.
+  //
+  // Non-null also marks the join as URL-driven, which is what makes it retry on
+  // its own and stay silent while doing so — on an unattended display there is
+  // nobody to read or dismiss a toast mid-recovery.
+  //
+  // Carried here rather than read from the URL at the point of use so it stays
+  // scoped to one call and clears with the rest of the context on disconnect.
+  // Every consumer re-checks the CAC flag before acting on it.
+  callUrlOverrides: CallUrlOverrides | null;
 }
 
 // Events for Room operations
@@ -219,12 +240,18 @@ export type RoomMachineEvent =
       callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
       viewMode?: 'mini' | 'full';
       conversationId?: string; // Optional: for thread-initiated calls
+      artifactMessageId?: string; // Exact slash-command artifact that owns the call
+      sdlcLink?: SdlcCallLink; // Optional: SDLC entity to link the call to
+      // Omit for a join a person drove themselves (see RoomContext).
+      callUrlOverrides?: CallUrlOverrides;
     }
   | {
       type: 'JOIN_CALL';
       callId: string;
       zero: Zero | null;
       viewMode?: 'mini' | 'full';
+      // Omit for a join a person drove themselves (see RoomContext).
+      callUrlOverrides?: CallUrlOverrides;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -273,6 +300,12 @@ export type RoomMachineEvent =
   | { type: 'AI_CONTROLLER_CHANGED'; controller: string | null; controllerName: string | null }
   | { type: 'TRANSCRIPTION_AGENT_LEFT' } // LiveKit signalled the agent dropped mid-call
   | { type: 'DISMISS_AGENT_LEFT_WARNING' } // User acknowledged the agent-left toast
+  | { type: 'TOGGLE_TRANSCRIPTION' } // Host requested a transcription on/off change (command only)
+  | { type: 'TRANSCRIPTION_CONFIRMED'; enabled: boolean } // Agent's authoritative state broadcast
+  | { type: 'TRANSCRIPTION_TIMEOUT' } // No agent confirmation within the timeout window
+  | { type: 'DISMISS_TRANSCRIPTION_NOTICE' } // User acknowledged the transcription-toggle toast
+  | { type: 'SET_PRIVACY_POPOVER'; open: boolean } // Open/close the transcription privacy popover
+  | { type: 'SYNC_TRANSCRIPTION_STATE'; enabled: boolean } // Late-joiner sync from room metadata
   | { type: 'AI_CONTROL_REQUEST'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_PENDING'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_SENT' } // Local user sent a control request
@@ -325,9 +358,12 @@ export const roomMachine = setup({
           callType: CallType;
           targetUserIds?: string[];
           conversationId?: string;
+          artifactMessageId?: string;
+          sdlcLink?: SdlcCallLink;
         };
       }) => {
-        const { channelId, callType, targetUserIds, conversationId } = input;
+        const { channelId, callType, targetUserIds, conversationId, artifactMessageId, sdlcLink } =
+          input;
 
         // Backend now only generates LiveKit credentials, no DB writes
         // If targetUserIds is provided without channelId, backend will find/create DM or group DM channel
@@ -335,6 +371,8 @@ export const roomMachine = setup({
           ...(channelId && { channelId }),
           ...(targetUserIds && targetUserIds.length > 0 && { invitedUserIds: targetUserIds }),
           ...(conversationId && { conversationId }),
+          ...(artifactMessageId && { artifactMessageId }),
+          ...(sdlcLink && { sdlcLink }),
           callType,
         });
 
@@ -427,20 +465,37 @@ export const roomMachine = setup({
           }
         };
 
+        // Late-joiner sync: the host's transcription on/off state is mirrored into room
+        // metadata by the backend (data messages don't reach participants who join later).
+        const syncTranscriptionState = (metadata?: string) => {
+          if (!metadata) return;
+          try {
+            const parsed = JSON.parse(metadata) as { transcriptionEnabled?: unknown };
+            if (typeof parsed.transcriptionEnabled === 'boolean') {
+              sendBack({ type: 'SYNC_TRANSCRIPTION_STATE', enabled: parsed.transcriptionEnabled });
+            }
+          } catch {
+            // ignore malformed metadata
+          }
+        };
+
         // Connection events
         room.on(LiveKitRoomEvent.Connected, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Connected });
           updateParticipants();
           syncHostControls(room.metadata);
+          syncTranscriptionState(room.metadata);
         });
 
         room.on(LiveKitRoomEvent.RoomMetadataChanged, (metadata: string) => {
           syncHostControls(metadata);
+          syncTranscriptionState(metadata);
           updateParticipants();
         });
 
         // Listener mounts after connect; sync current metadata once.
         syncHostControls(room.metadata);
+        syncTranscriptionState(room.metadata);
         updateParticipants();
 
         // Same for connection state: the Connected event fired before this listener
@@ -719,6 +774,22 @@ export const roomMachine = setup({
                   sendBack({
                     type: 'AI_CONTROL_REQUEST_DENIED',
                   } as const);
+                }
+                break;
+
+              case 'AI_TRANSCRIPTION_STATE':
+                // The AGENT's authoritative state broadcast. Only the agent (a trusted,
+                // LiveKit-authenticated identity) may drive the client's privacy state, so
+                // the UI never shows "off" unless the agent actually stopped. The raw
+                // `transcription_toggle` command is intentionally NOT reflected here — a
+                // peer could otherwise spoof "off" while the agent keeps capturing.
+                if (
+                  _topic === AI_DATA_TOPIC &&
+                  event.type === 'AI_TRANSCRIPTION_STATE' &&
+                  !!_participant?.identity &&
+                  isTranscriptionAgentIdentity(_participant.identity)
+                ) {
+                  sendBack({ type: 'TRANSCRIPTION_CONFIRMED', enabled: event.enabled } as const);
                 }
                 break;
             }
@@ -1243,6 +1314,7 @@ export const roomMachine = setup({
       externalId: () => null,
       invitedUserId: () => null,
       conversationId: () => null,
+      artifactMessageId: () => null,
       targetUserIds: () => [],
       roomLink: () => null,
       isChatOpen: () => false,
@@ -1253,6 +1325,10 @@ export const roomMachine = setup({
       callStartTime: () => null,
       isAIAssistantEnabled: () => false,
       transcriptionAgentLeft: () => false,
+      isTranscriptionEnabled: () => true,
+      transcriptionToggleNotice: () => null,
+      privacyPopoverOpen: () => false,
+      transcriptionPending: () => false,
       aiController: () => null,
       pendingControlRequest: () => null,
       isAiControlRequested: () => false,
@@ -1269,6 +1345,7 @@ export const roomMachine = setup({
       unreadCallChatCount: () => 0,
       isBackgroundBlurEnabled: () => false,
       hostControls: () => DEFAULT_HOST_CONTROLS,
+      callUrlOverrides: () => null,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1297,13 +1374,29 @@ export const roomMachine = setup({
               'turnOffCamera',
             );
 
-            // Respect user preference: if joinMuted is true, always mute
-            // If joinMuted is false, use the existing threshold logic
-            const enableMic = !audioTurnedOffByHost && !joinMuted && !shouldMuteByDefault;
-            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            // The CAC flag is re-checked here, at the point the override is acted
+            // on, rather than being trusted from whoever sent the event: the hook
+            // that reads the URL gates entry, and this gates effect. A caller that
+            // sets callUrlOverrides without the flag gets the saved preferences,
+            // exactly as if it had asked for nothing.
+            const urlOverrides = isCallUrlApiAllowed() ? context.callUrlOverrides : null;
 
-            // For video: respect user preference
-            const enableCamera = !cameraTurnedOffByHost && !joinWithoutVideo;
+            // Precedence, strongest first:
+            //   1. host controls — never overridable by anyone but the host
+            //   2. an explicit request from the call URL (e.g. ?mic=on), once the
+            //      flag above allows it
+            //   3. the user's saved join preferences + the crowded-room mute threshold
+            // Applying (2) here rather than toggling after 'connected' is deliberate:
+            // this action is the single writer of the initial track state, so there is
+            // no window where a post-connect compare-and-toggle could read a value
+            // these very awaits are about to overwrite and end up inverted.
+            const enableMic =
+              !audioTurnedOffByHost && (urlOverrides?.mic ?? (!joinMuted && !shouldMuteByDefault));
+
+            const enableCamera =
+              !cameraTurnedOffByHost && (urlOverrides?.camera ?? !joinWithoutVideo);
+
+            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
 
             await context.room!.localParticipant.setCameraEnabled(enableCamera);
 
@@ -1320,7 +1413,8 @@ export const roomMachine = setup({
       }
     },
 
-    showJoinCallErrorToast: () => {
+    showJoinCallErrorToast: ({ context }) => {
+      if (context.callUrlOverrides) return;
       toast.error('Failed to join call', {
         description: 'Unable to connect to the room. Please try again.',
         duration: 4000,
@@ -1391,9 +1485,11 @@ export const roomMachine = setup({
     viewMode: 'mini',
     callId: null,
     channelId: null,
+    sdlcLink: null,
     scopeType: null,
     invitedUserId: null,
     conversationId: null,
+    artifactMessageId: null,
     targetUserIds: [],
     roomLink: null,
     isChatOpen: false,
@@ -1404,6 +1500,10 @@ export const roomMachine = setup({
     callStartTime: null,
     isAIAssistantEnabled: false,
     transcriptionAgentLeft: false,
+    isTranscriptionEnabled: true,
+    transcriptionToggleNotice: null,
+    privacyPopoverOpen: false,
+    transcriptionPending: false,
     aiController: null,
     pendingControlRequest: null,
     isAiControlRequested: false,
@@ -1429,6 +1529,7 @@ export const roomMachine = setup({
     unreadCallChatCount: 0,
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
+    callUrlOverrides: null,
   },
   id: 'roomMachine',
   on: {
@@ -1481,6 +1582,12 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
             conversationId: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.conversationId ?? null) : null,
+            artifactMessageId: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.artifactMessageId ?? null) : null,
+            sdlcLink: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.sdlcLink ?? null) : null,
+            callUrlOverrides: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.callUrlOverrides ?? null) : null,
             isInitiator: () => true,
           }),
         },
@@ -1496,6 +1603,8 @@ export const roomMachine = setup({
               zero: ({ event }) => (event.type === 'JOIN_CALL' ? (event.zero ?? null) : null),
               viewMode: ({ event }) =>
                 event.type === 'JOIN_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
+              callUrlOverrides: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.callUrlOverrides ?? null) : null,
               isInitiator: () => false,
             }),
           ],
@@ -1550,6 +1659,8 @@ export const roomMachine = setup({
             callType: CallType;
             targetUserIds?: string[];
             conversationId?: string;
+            artifactMessageId?: string;
+            sdlcLink?: SdlcCallLink;
           } = {
             callType: context.callType,
           };
@@ -1561,6 +1672,12 @@ export const roomMachine = setup({
           }
           if (context.conversationId) {
             input.conversationId = context.conversationId;
+          }
+          if (context.artifactMessageId) {
+            input.artifactMessageId = context.artifactMessageId;
+          }
+          if (context.sdlcLink) {
+            input.sdlcLink = context.sdlcLink;
           }
           return input;
         },
@@ -1963,6 +2080,74 @@ export const roomMachine = setup({
         DISMISS_AGENT_LEFT_WARNING: {
           actions: assign({
             transcriptionAgentLeft: () => false,
+          }),
+        },
+        // Host kill-switch (COMMAND ONLY): request the change from the agent and mark it
+        // pending. We do NOT flip the local privacy state here — the client reflects the
+        // agent's authoritative `transcription_state` confirmation instead, so the UI can
+        // never show "off" while the agent may still be capturing (e.g. if the publish
+        // fails or the agent rejects the command).
+        TOGGLE_TRANSCRIPTION: {
+          actions: [
+            assign({
+              transcriptionPending: () => true,
+            }),
+            ({ context }): void => {
+              if (!context.room) return;
+              const desired = !context.isTranscriptionEnabled;
+              void context.room.localParticipant.publishData(
+                new TextEncoder().encode(
+                  JSON.stringify({
+                    type: 'transcription_toggle',
+                    enabled: desired,
+                    at: Date.now(),
+                    participantId: context.room.localParticipant.identity,
+                    participantName: context.room.localParticipant.name,
+                  }),
+                ),
+                { reliable: true, topic: AI_DATA_TOPIC },
+              );
+            },
+          ],
+        },
+        // Agent's authoritative confirmation: reflect the real state + clear pending.
+        // Peers get the toast; the host's own toast/undo is handled by useTranscriptionHostToast.
+        TRANSCRIPTION_CONFIRMED: {
+          actions: assign({
+            isTranscriptionEnabled: ({ event }) => event.enabled,
+            isAIAssistantEnabled: ({ event, context }) =>
+              event.enabled ? context.isAIAssistantEnabled : false,
+            transcriptionPending: () => false,
+            transcriptionToggleNotice: ({ event }) => ({
+              enabled: event.enabled,
+              byName: 'The host',
+            }),
+          }),
+        },
+        // No confirmation arrived — clear pending; the privacy state is left unchanged
+        // (never optimistically flipped), so the UI keeps the last confirmed state.
+        TRANSCRIPTION_TIMEOUT: {
+          actions: assign({
+            transcriptionPending: () => false,
+          }),
+        },
+        DISMISS_TRANSCRIPTION_NOTICE: {
+          actions: assign({
+            transcriptionToggleNotice: () => null,
+          }),
+        },
+        SET_PRIVACY_POPOVER: {
+          actions: assign({
+            privacyPopoverOpen: ({ event }) => event.open,
+          }),
+        },
+        // Silent late-joiner sync from room metadata (no toast; idempotent for peers
+        // who already reflected the live data-channel toggle).
+        SYNC_TRANSCRIPTION_STATE: {
+          actions: assign({
+            isTranscriptionEnabled: ({ event }) => event.enabled,
+            isAIAssistantEnabled: ({ event, context }) =>
+              event.enabled ? context.isAIAssistantEnabled : false,
           }),
         },
         AI_CONTROLLER_CHANGED: {

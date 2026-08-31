@@ -8,6 +8,7 @@ import {
   ThreeDotsMenuHorizontal,
   DeleteDustbin01,
 } from '@xyne/icons';
+import { Archive, ArchiveRestore } from 'lucide-react';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import type { Canvas } from './Canvas.types';
 import {
@@ -74,6 +75,7 @@ export interface CanvasRowProps {
   onDelete?: ((id: string) => void) | undefined;
   onDuplicate?: ((canvas: Canvas) => void) | undefined;
   onToggleStar?: ((canvas: Canvas) => void) | undefined;
+  onArchiveToggle?: ((canvas: Canvas) => void) | undefined;
   trackNames: CanvasRowTrackNames;
   highlightQuery?: string | undefined;
 }
@@ -87,6 +89,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   onDelete,
   onDuplicate,
   onToggleStar,
+  onArchiveToggle,
   trackNames,
   highlightQuery,
 }) => {
@@ -133,6 +136,11 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
               </span>
             </Tooltip>
+            {canvas.isArchived && (
+              <span className='inline-flex h-4 shrink-0 items-center rounded border border-amber-200 bg-amber-50 px-1 text-[10px] font-medium leading-none text-amber-700'>
+                Archived
+              </span>
+            )}
           </button>
 
           {canToggleStar && (
@@ -175,25 +183,54 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end' className='w-44'>
               {onDuplicate && (
-                <DropdownMenuItem className='gap-2' onClick={() => onDuplicate(canvas)}>
+                <DropdownMenuItem
+                  className='gap-2'
+                  onClick={() => onDuplicate(canvas)}
+                  data-track-category='CANVAS'
+                  data-track-name='DUPLICATE_CANVAS'
+                >
                   <CopyDefault size={14} className='shrink-0' />
                   <span className='flex-1'>Duplicate</span>
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem className='gap-2' onClick={() => setShareOpen(true)}>
+              <DropdownMenuItem
+                className='gap-2'
+                onClick={() => setShareOpen(true)}
+                data-track-category='CANVAS'
+                data-track-name='OPEN_SHARE_CANVAS'
+              >
                 <Share01 size={14} className='shrink-0' />
                 <span className='flex-1'>Share</span>
               </DropdownMenuItem>
-              {onDelete && isOwner && (
+              {(onArchiveToggle || onDelete) && isOwner && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => onDelete(canvas.id)}
-                    className='gap-2 text-destructive focus:text-destructive'
-                  >
-                    <DeleteDustbin01 size={14} className='shrink-0' />
-                    <span className='flex-1'>Delete</span>
-                  </DropdownMenuItem>
+                  {onArchiveToggle && (
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={() => onArchiveToggle(canvas)}
+                      data-track-category='CANVAS'
+                      data-track-name={canvas.isArchived ? 'UNARCHIVE_CANVAS' : 'ARCHIVE_CANVAS'}
+                    >
+                      {canvas.isArchived ? (
+                        <ArchiveRestore size={14} className='shrink-0' />
+                      ) : (
+                        <Archive size={14} className='shrink-0' />
+                      )}
+                      <span className='flex-1'>{canvas.isArchived ? 'Unarchive' : 'Archive'}</span>
+                    </DropdownMenuItem>
+                  )}
+                  {onDelete && (
+                    <DropdownMenuItem
+                      onClick={() => onDelete(canvas.id)}
+                      data-track-category='CANVAS'
+                      data-track-name='DELETE_CANVAS'
+                      className='gap-2 text-destructive focus:text-destructive'
+                    >
+                      <DeleteDustbin01 size={14} className='shrink-0' />
+                      <span className='flex-1'>Delete</span>
+                    </DropdownMenuItem>
+                  )}
                 </>
               )}
             </DropdownMenuContent>

@@ -1,4 +1,5 @@
 import { useRef, type ReactElement, type ReactNode, type RefObject } from 'react';
+import { cn } from '../../utils/classNames';
 import { AISidebar } from './AISidebar';
 import {
   ResizableGroup,
@@ -12,7 +13,6 @@ import {
   CHAT_SIDEBAR_MAX_WIDTH,
   CHAT_SIDEBAR_MIN_WIDTH,
 } from '../../routes/ChatScreen/chatSidebarWidth';
-import { cn } from '../../utils/classNames';
 
 interface AIShellProps {
   activeSessionId?: string | undefined;
@@ -22,6 +22,9 @@ interface AIShellProps {
   mobileOpen?: boolean | undefined;
   onMobileOpenChange?: ((open: boolean) => void) | undefined;
   mainRef?: RefObject<HTMLDivElement | null> | undefined;
+  /** Overrides the main panel's background token (defaults to
+   *  `bg-background`) — e.g. `ai-page-bg` for screens (like /ai/knowledge)
+   *  that need to match a different surface elsewhere in the app. */
   mainClassName?: string | undefined;
   children: ReactNode;
 }
@@ -78,7 +81,10 @@ export function AIShell({
       <Panel id='ai-main' minSize='30%'>
         <div
           ref={mainRef}
-          className={cn('relative flex h-full min-w-0 flex-1 flex-col', mainClassName)}
+          className={cn(
+            'relative flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-2xl',
+            mainClassName ?? 'bg-background',
+          )}
         >
           {children}
         </div>

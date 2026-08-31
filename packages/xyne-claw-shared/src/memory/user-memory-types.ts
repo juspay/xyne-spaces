@@ -131,7 +131,7 @@ export const USER_MEMORY_SUBSYSTEMS: readonly UserMemorySubsystem[] = [
  * signalScore + the IDs it grounded on.
  */
 export interface UserMemoryCandidatePayload {
-  /** ≤ 1500 chars. Written in third person ("the user…") for clarity. */
+  /** Written in third person ("the user…") for clarity. */
   text: string;
   subsystem: UserMemorySubsystem;
   /** 0-1, where 1 = strongly evidenced across multiple records, 0 = single
@@ -170,12 +170,14 @@ export interface UserMemoryCuratorEmittedCandidate {
   groundedOnIds?: string[];
   verdict: "kept" | "dropped";
   /** Why the server-side filter dropped it (verdict="dropped" only).
-   *  empty-or-too-long: blank text or >1500 chars.
+   *  empty: blank text.
+   *  empty-or-too-long: legacy value from traces created before the per-candidate
+   *  length limit was removed.
    *  bad-subsystem: not one of the eight fixed labels.
    *  low-signal: signalScore < 0.7.
    *  ungrounded: no groundedOnIds matching an input record.
    *  malformed: not an object / unparseable entry. */
-  dropReason?: "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
 }
 
 /**

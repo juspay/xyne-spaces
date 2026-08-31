@@ -286,6 +286,8 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                   size='sm'
                   disabled={state.progressLabels.length >= 8}
                   onClick={() => update({ progressLabels: [...state.progressLabels, ''] })}
+                  data-track-category='Claw Agents'
+                  data-track-name='ADD_PROGRESS_LABEL'
                 >
                   <Plus className='size-3.5' /> Add label
                 </Button>
@@ -316,6 +318,8 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                         progressLabels: state.progressLabels.filter((_, i) => i !== index),
                       })
                     }
+                    data-track-category='Claw Agents'
+                    data-track-name='REMOVE_PROGRESS_LABEL'
                     aria-label='Remove progress label'
                   >
                     <X className='size-4' />
@@ -401,24 +405,41 @@ const ClawSubagentCreateScreen = (): ReactElement => {
             widthClass,
           )}
         >
-          <Button variant='ghost' onClick={cancel}>
+          <Button
+            variant='ghost'
+            onClick={cancel}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_CREATE_SUBAGENT'
+          >
             Cancel
           </Button>
           <div className='flex items-center gap-2'>
             {step > 0 && (
-              <Button variant='outline' onClick={goBack}>
+              <Button
+                variant='outline'
+                onClick={goBack}
+                data-track-category='Claw Agents'
+                data-track-name='SUBAGENT_WIZARD_BACK'
+              >
                 <ChevronLeft className='size-4' />
                 Back
               </Button>
             )}
             {step < LAST_STEP ? (
-              <Button onClick={goNext} disabled={!canNext}>
+              <Button
+                onClick={goNext}
+                data-track-category='Claw Agents'
+                data-track-name='SUBAGENT_WIZARD_NEXT'
+                disabled={!canNext}
+              >
                 Next
                 <ChevronRight className='size-4' />
               </Button>
             ) : (
               <Button
                 onClick={() => void handleCreate()}
+                data-track-category='Claw Agents'
+                data-track-name='CREATE_SUBAGENT'
                 loading={create.isPending}
                 disabled={!canNext}
               >

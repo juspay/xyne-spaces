@@ -56,6 +56,8 @@ const ESSENTIAL_RESOURCES = [
   { name: 'ORGANIZATIONS', description: 'Organization management access' },
   { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
   { name: 'XYNE-APPS', description: 'Admin access to Xyne Apps management (webhooks, bot configuration, signing secrets)'},
+  { name: 'ROLES', description: 'Role creation and management UI' },
+  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
   {
     name: 'AUTOMATIONS',
     description:
@@ -102,6 +104,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'WORKSPACE', accessType: AccessType.WRITE },
       { resourceName: 'ORGANIZATIONS', accessType: AccessType.READ },
       { resourceName: 'AUTOMATIONS', accessType: AccessType.WRITE },
+      { resourceName: 'SDLC', accessType: AccessType.WRITE },
     ]
   },
   {
@@ -126,6 +129,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'DASHBOARDS', accessType: AccessType.READ },
       { resourceName: 'WORKSPACE', accessType: AccessType.READ },
       { resourceName: 'AUTOMATIONS', accessType: AccessType.READ },
+      { resourceName: 'SDLC', accessType: AccessType.READ },
     ]
   }
 ];

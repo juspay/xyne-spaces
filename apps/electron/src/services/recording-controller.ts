@@ -1,16 +1,32 @@
 import { app, BrowserWindow, powerMonitor, powerSaveBlocker } from 'electron';
 import log from 'electron-log/main';
 import { getMainWindow, createMainWindow, setWindowReferences } from '../window/manager';
-import { showRecordingPill, hideRecordingPill, isPillWindow } from './recording-pill-window';
+import {
+  showRecordingPill,
+  hideRecordingPill,
+  isPillWindow,
+  isRecordingPillEnabled,
+  persistRecordingPillEnabled,
+} from './recording-pill-window';
 
 export type RecordingTrigger = 'tray' | 'shortcut' | 'pill';
 
 export interface RecordingSnapshot {
   active: boolean;
   startTime: number | null;
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
+}
+
+export interface RecordingPauseState {
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
 }
 
 const RENDERER_READY_TIMEOUT_MS = 10_000;
+const STARTING_RECORDING_TIMEOUT_MS = 2 * 60_000;
 const EXTERNAL_START_TIMEOUT_MS = 5 * 60_000;
 const PILL_SYNC_DEBOUNCE_MS = 150;
 const FOCUS_REQUEST_GRACE_MS = 2_000;
@@ -19,7 +35,13 @@ let pillSyncTimer: ReturnType<typeof setTimeout> | null = null;
 let focusRequestTimer: ReturnType<typeof setTimeout> | null = null;
 
 let active = false;
+let startingRecording = false;
+let callActive = false;
+let startingRecordingExpiry: ReturnType<typeof setTimeout> | null = null;
 let startTime: number | null = null;
+let paused = false;
+let pauseStartedAt: number | null = null;
+let accumulatedPausedMs = 0;
 let externalStartExpiry: ReturnType<typeof setTimeout> | null = null;
 
 let minimized = false;
@@ -33,7 +55,7 @@ const watchedRenderers = new WeakSet<BrowserWindow>();
 const listeners = new Set<(snapshot: RecordingSnapshot) => void>();
 
 function getSnapshot(): RecordingSnapshot {
-  return { active, startTime };
+  return { active, startTime, paused, pauseStartedAt, accumulatedPausedMs };
 }
 
 function notifyListeners(): void {
@@ -64,9 +86,17 @@ function watchRendererLifecycle(win: BrowserWindow): void {
   watchedRenderers.add(win);
   win.webContents.on('did-start-loading', () => {
     rendererReady = false;
+    // A reload tears down the LiveKit connection, so any call is over; the
+    // remounted renderer resends call state either way. Without this a renderer
+    // that hangs mid-reload would strand the flag true and mute detection.
+    callActive = false;
   });
   win.webContents.on('render-process-gone', () => {
     rendererReady = false;
+    // syncRecordingState early-returns on inactive -> inactive, so a crash
+    // mid-start would strand the flag.
+    setRecordingStarting(false);
+    callActive = false;
     syncRecordingState(false);
   });
 }
@@ -145,8 +175,13 @@ function cancelPendingPillSync(): void {
 
 function syncPillVisibility(): void {
   cancelPendingPillSync();
-  if (active && (minimized || !isMainWindowFocused())) {
-    showRecordingPill(startTime ?? Date.now());
+  if (active && isRecordingPillEnabled() && (minimized || !isMainWindowFocused())) {
+    showRecordingPill({
+      startTime: startTime ?? Date.now(),
+      paused,
+      pauseStartedAt,
+      accumulatedPausedMs,
+    });
   } else {
     hideRecordingPill();
   }
@@ -158,6 +193,12 @@ function scheduleSyncPillVisibility(): void {
     pillSyncTimer = null;
     syncPillVisibility();
   }, PILL_SYNC_DEBOUNCE_MS);
+}
+
+export function setRecordingPillEnabled(enabled: boolean): void {
+  persistRecordingPillEnabled(enabled);
+  syncPillVisibility();
+  log.info(`[RecordingController] Recording pill ${enabled ? 'enabled' : 'disabled'}`);
 }
 
 export function setOverlayMinimized(next: boolean): void {
@@ -264,6 +305,46 @@ export function stopRecording(trigger: RecordingTrigger): void {
   log.info(`[RecordingController] Stop requested from ${trigger}`);
 }
 
+export async function stopRecordingForReload(timeoutMs = 3000): Promise<void> {
+  if (!isRecordingInProgress()) return;
+
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  mainWindow.webContents.send('recording:stop-for-teardown');
+  log.info('[RecordingController] Stop requested before reload');
+
+  await new Promise<void>(resolve => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: (() => void) | null = null;
+    const finish = (): void => {
+      if (timer) clearTimeout(timer);
+      unsubscribe?.();
+      resolve();
+    };
+    unsubscribe = onRecordingStateChange(() => {
+      if (!isRecordingInProgress()) finish();
+    });
+    timer = setTimeout(finish, timeoutMs);
+  });
+}
+
+export function pauseRecordingFromOutside(trigger: RecordingTrigger): void {
+  if (!active || paused) return;
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('recording:pause-requested');
+  log.info(`[RecordingController] Pause requested from ${trigger}`);
+}
+
+export function resumeRecordingFromOutside(trigger: RecordingTrigger): void {
+  if (!active || !paused) return;
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('recording:resume-requested');
+  log.info(`[RecordingController] Resume requested from ${trigger}`);
+}
+
 export function toggleRecording(trigger: RecordingTrigger): void {
   if (active) {
     stopRecording(trigger);
@@ -272,13 +353,59 @@ export function toggleRecording(trigger: RecordingTrigger): void {
   }
 }
 
-export function syncRecordingState(nextActive: boolean, nextStartTime?: number): void {
+// Not folded into syncRecordingState: that early-returns when the recording is
+// inactive and was already inactive, which is exactly what a start looks like.
+export function setRecordingStarting(next: boolean): void {
+  if (startingRecordingExpiry) {
+    clearTimeout(startingRecordingExpiry);
+    startingRecordingExpiry = null;
+  }
+  startingRecording = next;
+  if (!next) return;
+
+  // The renderer is the only thing that clears this, and a hung start never
+  // reports back, so bound it — otherwise one stuck start suppresses the meeting
+  // popup for the rest of the session.
+  startingRecordingExpiry = setTimeout(() => {
+    startingRecordingExpiry = null;
+    startingRecording = false;
+    log.warn('[RecordingController] Recording start was not confirmed by the renderer');
+  }, STARTING_RECORDING_TIMEOUT_MS);
+}
+
+export function isRecordingInProgress(): boolean {
+  return active || startingRecording;
+}
+
+// Calls enable the mic the same way recordings do, so the meeting detector must
+// treat both as ours. The renderer reports call state on every transition and on
+// mount; the lifecycle hooks above clear it when the renderer reloads or dies.
+export function setCallActive(next: boolean): void {
+  callActive = next;
+}
+
+export function isMicOwnedByXyne(): boolean {
+  return active || startingRecording || callActive;
+}
+
+export function syncRecordingState(
+  nextActive: boolean,
+  nextStartTime?: number,
+  nextPause?: RecordingPauseState,
+): void {
   const wasActive = active;
   if (!nextActive && !wasActive) return;
 
   active = nextActive;
   startTime = nextActive ? (nextStartTime ?? Date.now()) : null;
+  paused = nextActive ? !!nextPause?.paused : false;
+  pauseStartedAt = nextActive ? (nextPause?.pauseStartedAt ?? null) : null;
+  accumulatedPausedMs = nextActive ? (nextPause?.accumulatedPausedMs ?? 0) : 0;
 
+  if (nextActive) {
+    // Via the setter so the watchdog is cleared too, not just the flag.
+    setRecordingStarting(false);
+  }
   if (nextActive && !wasActive) {
     clearExternalStartPending();
   }

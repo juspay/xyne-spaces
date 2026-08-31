@@ -32,6 +32,19 @@ export interface TimeSeriesDataPoint {
   groupDmMessages?: number;
 }
 
+/** Calls and recordings come from the same table, split by callType (HEADLESS = recording) */
+export interface CallsBreakdown {
+  calls: number;
+  recordings: number;
+}
+
+/** A /number-of-calls bucket - call and recording counts for that bucket */
+export interface CallsTimeSeriesPoint {
+  date: string;
+  calls: number;
+  recordings: number;
+}
+
 export interface ActiveUsersResponse {
   uniqueUsers: number;
   timeSeries: TimeSeriesDataPoint[];
@@ -150,13 +163,13 @@ class AnalyticsService {
     return response.data;
   }
 
+  /** Returns calls and recordings together - they differ only by callType (HEADLESS = recording) */
   async getNumberOfCalls(
     params: TimeRangeParams,
-  ): Promise<AnalyticsResponse<number | TimeSeriesDataPoint[]>> {
-    const response = await apiInstance.get<AnalyticsResponse<number | TimeSeriesDataPoint[]>>(
-      '/analytics/number-of-calls',
-      { params },
-    );
+  ): Promise<AnalyticsResponse<CallsBreakdown | CallsTimeSeriesPoint[]>> {
+    const response = await apiInstance.get<
+      AnalyticsResponse<CallsBreakdown | CallsTimeSeriesPoint[]>
+    >('/analytics/number-of-calls', { params });
     return response.data;
   }
 

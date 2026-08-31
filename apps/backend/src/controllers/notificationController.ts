@@ -61,22 +61,6 @@ export class NotificationController {
     return req.authenticatedSessionId;
   }
 
-  async getVapidPublicKey(_req: Request, res: Response): Promise<void> {
-    try {
-      const publicKey = process.env.VAPID_PUBLIC_KEY;
-
-      if (!publicKey) {
-        res.status(500).json({ error: 'VAPID public key not configured' });
-        return;
-      }
-
-      res.json({ publicKey });
-    } catch (error) {
-      logger.error('Failed to get VAPID public key:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
   registerMobilePushToken = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
