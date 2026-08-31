@@ -21,6 +21,7 @@ import {
   Globe,
   Microscope,
   File as FileIcon,
+  Folder,
   BookOpen,
   Ticket,
   Phone,
@@ -134,7 +135,7 @@ function ContextPill({
       <span
         className={cn(
           'max-w-[140px] truncate text-[12.5px] font-medium',
-          accent ? 'text-[#7C3AED]' : 'text-foreground',
+          accent ? 'text-claw-ai-fg' : 'text-foreground',
         )}
       >
         {label}
@@ -235,6 +236,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   }));
   const [collections, setCollections] = useState(() => seed.collections);
   const [fileScopes, setFileScopes] = useState(() => seed.fileScopes);
+  const [folderScopes, setFolderScopes] = useState(() => seed.folderScopes);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
@@ -303,6 +305,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       recordings: selections.recordings,
       collections,
       fileScopes,
+      folderScopes,
       research: null,
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
@@ -316,6 +319,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections,
       collections,
       fileScopes,
+      folderScopes,
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
@@ -578,8 +582,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections.transcripts.length > 0 ||
       selections.recordings.length > 0 ||
       collections.length > 0 ||
-      fileScopes.length > 0,
-    [attachments, selections, collections, fileScopes],
+      fileScopes.length > 0 ||
+      folderScopes.length > 0,
+    [attachments, selections, collections, fileScopes, folderScopes],
   );
 
   const canSend = value.trim().length > 0;
@@ -687,7 +692,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {collections.map(collection => (
                 <ContextPill
                   key={`co-${collection.id}`}
-                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={collection.name}
                   accent
                   onRemove={() => setCollections(prev => prev.filter(c => c.id !== collection.id))}
@@ -696,10 +701,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {fileScopes.map(fs => (
                 <ContextPill
                   key={`fs-${fs.id}`}
-                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={fs.name}
                   accent
                   onRemove={() => setFileScopes(prev => prev.filter(f => f.id !== fs.id))}
+                />
+              ))}
+              {folderScopes.map(folder => (
+                <ContextPill
+                  key={`fo-${folder.id}`}
+                  icon={<Folder className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
+                  label={folder.name}
+                  accent
+                  onRemove={() => setFolderScopes(prev => prev.filter(f => f.id !== folder.id))}
                 />
               ))}
               {attachments.map(attachment => (
@@ -769,8 +783,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               <ComposerCollectionPicker
                 collections={collections}
                 fileScopes={fileScopes}
+                folderScopes={folderScopes}
                 onCollectionsChange={setCollections}
                 onFileScopesChange={setFileScopes}
+                onFolderScopesChange={setFolderScopes}
               />
               <div className='mx-0.5 h-4 w-px bg-border' />
 

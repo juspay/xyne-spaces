@@ -17,6 +17,7 @@ export interface KnowledgeBaseContext {
   channelId: string | null;
   activeCollection: ActiveCollectionInfo | null;
   currentFolderId: string | null;
+  currentFileId: string | null;
   viewMode: ViewMode;
   expansionState: Record<string, boolean>;
   nodes: Record<string, CollectionTreeNode>;
@@ -31,6 +32,7 @@ export type KnowledgeBaseEvent =
   | { type: 'SET_ACTIVE_COLLECTION'; info: ActiveCollectionInfo | null }
   | { type: 'SET_VIEW_MODE'; mode: ViewMode }
   | { type: 'SET_CURRENT_FOLDER_ID'; id: string | null }
+  | { type: 'SET_CURRENT_FILE_ID'; id: string | null }
   | { type: 'TOGGLE_FOLDER'; folderId: string }
   | { type: 'EXPAND_FOLDER'; folderId: string }
   | { type: 'COLLAPSE_FOLDER'; folderId: string }
@@ -59,6 +61,7 @@ export const knowledgeBaseMachine = setup({
               channelId: null,
               activeCollection: null,
               currentFolderId: null,
+              currentFileId: null,
               expansionState: {},
               nodes: {},
               rootChildrenIds: [],
@@ -77,6 +80,7 @@ export const knowledgeBaseMachine = setup({
           ? {
               activeCollection: null,
               currentFolderId: null,
+              currentFileId: null,
               expansionState: {},
               nodes: {},
               rootChildrenIds: [],
@@ -94,6 +98,7 @@ export const knowledgeBaseMachine = setup({
         ...(idChanged
           ? {
               currentFolderId: null,
+              currentFileId: null,
               expansionState: {},
               nodes: {},
               rootChildrenIds: [],
@@ -110,6 +115,10 @@ export const knowledgeBaseMachine = setup({
     setCurrentFolderId: assign(({ event }) => {
       if (event.type !== 'SET_CURRENT_FOLDER_ID') return {};
       return { currentFolderId: event.id };
+    }),
+    setCurrentFileId: assign(({ event }) => {
+      if (event.type !== 'SET_CURRENT_FILE_ID') return {};
+      return { currentFileId: event.id };
     }),
     toggleFolder: assign(({ event, context }) => {
       if (event.type !== 'TOGGLE_FOLDER') return {};
@@ -154,6 +163,7 @@ export const knowledgeBaseMachine = setup({
     channelId: null,
     activeCollection: null,
     currentFolderId: null,
+    currentFileId: null,
     viewMode: 'list',
     expansionState: {},
     nodes: {},
@@ -169,6 +179,7 @@ export const knowledgeBaseMachine = setup({
         SET_ACTIVE_COLLECTION: { actions: 'setActiveCollection' },
         SET_VIEW_MODE: { actions: 'setViewMode' },
         SET_CURRENT_FOLDER_ID: { actions: 'setCurrentFolderId' },
+        SET_CURRENT_FILE_ID: { actions: 'setCurrentFileId' },
         TOGGLE_FOLDER: { actions: 'toggleFolder' },
         EXPAND_FOLDER: { actions: 'expandFolder' },
         COLLAPSE_FOLDER: { actions: 'collapseFolder' },
