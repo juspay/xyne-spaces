@@ -1,3 +1,4 @@
+import { createLazySpacesEncryptionKeyRing } from "./spaces-encryption-key-ring.js";
 import { createHmac } from "node:crypto";
 import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
 
@@ -22,6 +23,12 @@ const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("
 // the derived data key; reads fall back to the legacy root during migration.
 registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
 
+const loadSpacesEncryptionKeys =
+  createLazySpacesEncryptionKeyRing(
+    process.env["SPACES_ENCRYPTION_KEY"],
+    process.env["SPACES_ENCRYPTION_KEYS"]
+  );
+
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
   selfUrl: process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
@@ -38,14 +45,20 @@ export const CONFIG = {
   legacyActionSigningKey: rootEncryptionKey,
   legacySessionSigningKey,
   legacyOauthStateSigningKey: rootEncryptionKey,
-  // Spaces' AES-256-CBC key — must equal xyne-spaces backend's ENCRYPTION_KEY
-  // value (the two services are independently keyed). Used ONLY to decrypt
+  // Spaces' AES-256-CBC keys — these hold xyne-spaces backend's ENCRYPTION_KEY
+  // material, not this service's own. Used ONLY to decrypt
   // `installed_apps.signingSecret` read from the Spaces DB during the
-  // signing-secret backfill. Empty buffer when unset; the backfill
-  // short-circuits with a clear error if it needs this and it's missing.
-  spacesEncryptionKey: process.env["SPACES_ENCRYPTION_KEY"]
-    ? Buffer.from(process.env["SPACES_ENCRYPTION_KEY"]!, "hex")
-    : Buffer.alloc(0),
+  // signing-secret backfill.
+  //
+  // A ring rather than one key, because Spaces stamps the key id into the
+  // ciphertext and can hold several at once while a rotation drains. Whatever
+  // ids Spaces has in ENCRYPTION_KEYS must appear here too, under the same
+  // names, or rows written under a missing id cannot be read. SPACES_ENCRYPTION_KEY
+  // is registered as "legacy" to match the id Spaces gives unversioned rows.
+  // Empty ring when unset; the backfill short-circuits with a clear error.
+  get spacesEncryptionKeys(): ReadonlyMap<string, Buffer> {
+    return loadSpacesEncryptionKeys();
+  },
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
   // Public base URL of the claw SPA, used for post-OAuth browser redirects.
   // Precedence: explicit FRONTEND_URL override; else in production the SPA is
