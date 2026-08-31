@@ -136,7 +136,7 @@ const isBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim(
 export const ACL = {
   simple: (userId: string) =>
     isBenchLane()
-      ? `(permissions contains "${esc(userId)}" or permissions contains "*" or permissions contains "@")`
+      ? `(permissions contains "${esc(userId)}" or permissions contains "*" or isPrivate contains "false")`
       : `permissions contains "${esc(userId)}"`,
 
   // Member-or-public guard, shared by channel (chat_container) AND ticket:
