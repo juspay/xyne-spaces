@@ -507,3 +507,35 @@ describe("ast source guidance", () => {
     expect(createReactArtifactTool.description).toMatch(/`where` may traverse relations/);
   });
 });
+
+describe("name resolution guidance", () => {
+  // Both rules are invisible in the row itself: displayName is usually null, and
+  // a DM channel's `name` column holds participant ids. An agent that guesses
+  // renders blanks or raw cuids, so the description has to state them outright.
+  it("points the model at useXyneDirectory instead of joining a user source", () => {
+    expect(createReactArtifactTool.description).toContain("useXyneDirectory");
+    expect(createReactArtifactTool.description).toMatch(/never join a `user` source/i);
+  });
+
+  it("states the displayName fallback chain", () => {
+    expect(createReactArtifactTool.description).toContain("displayName || name || email");
+  });
+
+  it("warns that a DM channel's name column is not a name", () => {
+    expect(createReactArtifactTool.description).toMatch(/is not a name at all/i);
+  });
+});
+
+describe("session scoping guidance", () => {
+  // The tool has no update path — the payload is always a whole project — so
+  // "update" is realised by the host versioning the conversation's app. The
+  // model has to be told, or it announces a brand-new app on every fix.
+  it("tells the model a conversation has one app", () => {
+    expect(createReactArtifactTool.description).toMatch(/ONE APP PER CONVERSATION/);
+    expect(createReactArtifactTool.description).toMatch(/new version of that same app/i);
+  });
+
+  it("warns against dropping earlier work on an update", () => {
+    expect(createReactArtifactTool.description).toMatch(/do not drop features you built/i);
+  });
+});

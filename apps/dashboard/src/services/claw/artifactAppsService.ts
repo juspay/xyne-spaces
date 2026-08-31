@@ -37,6 +37,11 @@ export interface ArtifactAppDetail {
   visibility: ArtifactAppVisibility;
   ownerUserId: string;
   publishedVersionId: string | null;
+  /** The build the owner and the agent are currently on. Moves forward on every
+   *  generation and BACKWARD on restore — which is why staleness is measured
+   *  against this and not against the highest version number. Null for apps
+   *  saved before head tracking. */
+  headVersionId: string | null;
   publishedAt: string | null;
   isOwner: boolean;
 }

@@ -1,7 +1,10 @@
-import { type ReactElement, useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Upload } from 'lucide-react';
+import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { Upload, PanelRightOpen } from 'lucide-react';
 import { AIShell } from '../../components/AIScreen/AIShell';
+import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
+import { AppCreationModeProvider } from '../../components/AIScreen/ReactArtifact/appCreationModeContext';
+import { useAppCreationMode } from '../../components/AIScreen/ReactArtifact/useAppCreationMode';
 import { AIEmptyState } from '../../components/AIScreen/AIEmptyState';
 import {
   AIComposer,
@@ -18,11 +21,23 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
 
 const AIScreen = (): ReactElement => {
-  const [activeSessionId, setActiveSessionId] = useState(
-    () => sessionStorage.getItem(AI_ACTIVE_SESSION_KEY) ?? '',
-  );
-  const [showChatView, setShowChatView] = useState(
-    () => sessionStorage.getItem(AI_SHOW_CHAT_VIEW_KEY) === '1',
+  const { workspaceId, sessionId: routeSessionId } = useParams<{
+    workspaceId?: string;
+    sessionId?: string;
+  }>();
+  const location = useLocation();
+  /** '' for the landing page — `chat/new` is the literal, not a session id. */
+  const sessionFromUrl = routeSessionId && routeSessionId !== 'new' ? routeSessionId : '';
+
+  // The URL is the source of truth for the thread. `/ai/chat/new` means a NEW
+  // chat — full stop. The old sessionStorage restore is gone: it predates
+  // threads having URLs, and once they did it turned "new" into "whatever you
+  // had open last" (observed: navigating to chat/new landed on the most recent
+  // thread). Reload-keeps-your-chat now comes from the thread being in the URL,
+  // and the Library/daily-brief handoff navigates to the thread URL directly.
+  const [activeSessionId, setActiveSessionId] = useState(() => sessionFromUrl);
+  const [showChatView, setShowChatView] = useState(() =>
+    sessionFromUrl ? true : sessionStorage.getItem(AI_SHOW_CHAT_VIEW_KEY) === '1',
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [initialQuery, setInitialQuery] = useState<string>('');
@@ -50,6 +65,41 @@ const AIScreen = (): ReactElement => {
   useEffect(() => {
     showChatViewRef.current = showChatView;
   }, [showChatView]);
+
+  // ── Thread ↔ URL, two-way ────────────────────────────────────────────────
+  // Each direction fires only when ITS OWN source actually changed, tracked in
+  // a ref. Dep-array firing is not enough: effects run in the commit where the
+  // OTHER side is still stale. Concretely, clicking New Chat sets
+  // activeSessionId='' while the URL param still holds the old thread — an
+  // unguarded URL→state effect then "corrects" the state right back to the old
+  // thread, which is exactly the bounce this replaced.
+
+  // state → URL. `location.search` is carried so ?mode=create-app survives.
+  const lastPushedSession = useRef(activeSessionId);
+  useEffect(() => {
+    if (lastPushedSession.current === activeSessionId) return;
+    lastPushedSession.current = activeSessionId;
+    const target = activeSessionId || 'new';
+    if ((routeSessionId ?? 'new') === target) return;
+    if (!workspaceId) return;
+    void navigate(`/${workspaceId}/ai/chat/${target}${location.search}`, { replace: true });
+  }, [activeSessionId, routeSessionId, workspaceId, location.search, navigate]);
+
+  // URL → state, for Back/Forward and pasted links.
+  const lastSeenUrlSession = useRef(sessionFromUrl);
+  useEffect(() => {
+    if (lastSeenUrlSession.current === sessionFromUrl) return;
+    lastSeenUrlSession.current = sessionFromUrl;
+    if (sessionFromUrl === activeSessionId) return;
+    // Keep the other direction's ref in step, so this externally-driven change
+    // is not then re-announced as a state change.
+    lastPushedSession.current = sessionFromUrl;
+    setActiveSessionId(sessionFromUrl);
+    setShowChatView(Boolean(sessionFromUrl));
+    setInitialQuery('');
+    setInitialAttachments(undefined);
+    setChatKey(prev => prev + 1);
+  }, [sessionFromUrl, activeSessionId]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -215,68 +265,124 @@ const AIScreen = (): ReactElement => {
     void navigate('./settings');
   }, [navigate]);
 
+  // App Creation mode. The thread reports which app it is building; the mode
+  // hook decides whether the split view is on and which version the pane shows.
+  const [appId, setAppId] = useState<string | null>(null);
+  const [latestVersionId, setLatestVersionId] = useState<string | null>(null);
+  const appMode = useAppCreationMode(appId, activeSessionId || null, latestVersionId);
+
+  // The thread reports its app, but only while it is MOUNTED. On the landing
+  // page (showChatView false) and in the gap before a newly-selected thread has
+  // loaded, nothing reports — so a stale appId from the previous chat would
+  // keep the pane open over a thread that has no app. Clear it here instead of
+  // relying on the thread to say "none".
+  useEffect(() => {
+    if (!showChatView) {
+      setAppId(null);
+      setLatestVersionId(null);
+    }
+  }, [showChatView]);
+  useEffect(() => {
+    setAppId(null);
+    setLatestVersionId(null);
+  }, [activeSessionId]);
+  const handleAppChange = useCallback((id: string | null, versionId: string | null) => {
+    setAppId(id);
+    setLatestVersionId(versionId);
+  }, []);
+  // A fresh object here re-renders every context consumer — that is every
+  // artifact card in the transcript — on each AIScreen render.
+  const appModeSignal = useMemo(
+    () => ({
+      active: appMode.active,
+      appId: appMode.appId,
+      viewingVersionId: appMode.viewingVersionId,
+      viewVersion: appMode.viewVersion,
+    }),
+    [appMode.active, appMode.appId, appMode.viewingVersionId, appMode.viewVersion],
+  );
+  // Likewise a fresh element remounts the pane's subtree each render.
+  const appPane = useMemo(() => <ArtifactAppPane mode={appMode} />, [appMode]);
+
   return (
     <CitationDocsProvider>
-      <AIShell
-        activeSessionId={activeSessionId}
-        onCreateChat={handleCreateChat}
-        onSelectSession={handleSelectSession}
-        onAccount={handleAccount}
-        mobileOpen={mobileSidebarOpen}
-        onMobileOpenChange={setMobileSidebarOpen}
-        mainRef={dropZoneRef}
-      >
-        {isDragging && !showChatView && (
-          <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
-            <div className='flex flex-col items-center gap-3'>
-              <div className='rounded-full bg-primary/10 p-4'>
-                <Upload className='h-8 w-8 text-primary' />
-              </div>
-              <div className='text-center'>
-                <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
-                <p className='text-sm text-muted-foreground'>
-                  Images, PDF, text, office documents, or data files
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-        {showChatView ? (
-          <ChatWithCitationDocs>
-            <AIChatThread
-              ref={chatThreadRef}
-              key={chatKey}
-              sessionId={activeSessionId || undefined}
-              initialQuery={initialQuery}
-              initialAttachments={initialAttachments}
-              initialExtras={initialExtras}
-              onSetMobileSidebarOpen={setMobileSidebarOpen}
-              onConversationChange={handleConversationChange}
-              onAgentChange={handleAgentChange}
-              onContextChange={handleContextChange}
-              onInitialQueryConsumed={handleInitialQueryConsumed}
-            />
-          </ChatWithCitationDocs>
-        ) : (
-          /* Landing page – centred greeting + composer */
-          <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
-            <div className='flex w-full max-w-2xl flex-col'>
-              <AIEmptyState />
-              <div className='mt-6'>
-                <AIComposer
-                  ref={landingComposerRef}
-                  autoFocus
-                  onSubmit={handleComposerSubmit}
-                  onAgentChange={handleAgentChange}
-                  showAgentSelector={isV2}
-                  onContextChange={handleContextChange}
-                  hideDisclaimer
-                />
+      <AppCreationModeProvider value={appModeSignal}>
+        <AIShell
+          activeSessionId={activeSessionId}
+          onCreateChat={handleCreateChat}
+          onSelectSession={handleSelectSession}
+          onAccount={handleAccount}
+          mobileOpen={mobileSidebarOpen}
+          onMobileOpenChange={setMobileSidebarOpen}
+          mainRef={dropZoneRef}
+          {...(appMode.active ? { rightPanel: appPane } : {})}
+        >
+          {isDragging && !showChatView && (
+            <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+              <div className='flex flex-col items-center gap-3'>
+                <div className='rounded-full bg-primary/10 p-4'>
+                  <Upload className='h-8 w-8 text-primary' />
+                </div>
+                <div className='text-center'>
+                  <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                  <p className='text-sm text-muted-foreground'>
+                    Images, PDF, text, office documents, or data files
+                  </p>
+                </div>
               </div>
             </div>
-          </main>
-        )}
-      </AIShell>
+          )}
+          {appMode.hasApp && !appMode.active && showChatView && (
+            <button
+              type='button'
+              onClick={appMode.open}
+              className='absolute right-4 top-3 z-40 flex items-center gap-1.5 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground'
+              title='Reopen the app panel'
+              data-track-category='AskAI'
+              data-track-name='ArtifactAppPaneReopen'
+            >
+              <PanelRightOpen className='h-3.5 w-3.5' aria-hidden='true' />
+              Open app
+            </button>
+          )}
+          {showChatView ? (
+            <ChatWithCitationDocs>
+              <AIChatThread
+                ref={chatThreadRef}
+                key={chatKey}
+                sessionId={activeSessionId || undefined}
+                initialQuery={initialQuery}
+                initialAttachments={initialAttachments}
+                initialExtras={initialExtras}
+                onSetMobileSidebarOpen={setMobileSidebarOpen}
+                onConversationChange={handleConversationChange}
+                onAppChange={handleAppChange}
+                onAgentChange={handleAgentChange}
+                onContextChange={handleContextChange}
+                onInitialQueryConsumed={handleInitialQueryConsumed}
+              />
+            </ChatWithCitationDocs>
+          ) : (
+            /* Landing page – centred greeting + composer */
+            <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
+              <div className='flex w-full max-w-2xl flex-col'>
+                <AIEmptyState />
+                <div className='mt-6'>
+                  <AIComposer
+                    ref={landingComposerRef}
+                    autoFocus
+                    onSubmit={handleComposerSubmit}
+                    onAgentChange={handleAgentChange}
+                    showAgentSelector={isV2}
+                    onContextChange={handleContextChange}
+                    hideDisclaimer
+                  />
+                </div>
+              </div>
+            </main>
+          )}
+        </AIShell>
+      </AppCreationModeProvider>
     </CitationDocsProvider>
   );
 };
