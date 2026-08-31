@@ -43,7 +43,7 @@ import {
   registerLiveSession,
   unregisterLiveSession,
 } from "./session-store.js";
-import { acquireSessionLock, refreshSessionLock, releaseSessionLock, SessionLockedError } from "./session-lock.js";
+import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
 import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
@@ -1963,6 +1963,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     new RunHandoffError({ lastTurn: lastHandoffTurn, aborted: handoff?.isCapAborted() === true });
   let waitForCapAbortIdle: (() => Promise<void>) | undefined;
   let sessionReadyForFinalArchive = false;
+  let stopSessionLockHeartbeat: (() => void) | undefined;
   // HA: acquire the per-conversation lock BEFORE touching the session, so two
   // pods can't restore + run the same session concurrently and corrupt the
   // JSONL. A conflict (another pod owns it) throws SessionLockedError, which
@@ -1972,6 +1973,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     const acquired = await acquireSessionLock(conversationId);
     if (!acquired) throw new SessionLockedError(conversationId);
     markSessionActive(conversationId);
+    stopSessionLockHeartbeat = startSessionLockHeartbeat(conversationId);
   }
   try {
   // Freshness-aware restore (runs AFTER the conversation lock is acquired,
@@ -4012,6 +4014,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         log.error(`[agent] Skipping final archive for ${conversationId}; session freshness was not established`);
       }
       markSessionIdle(conversationId);
+      stopSessionLockHeartbeat?.();
       await releaseSessionLock(conversationId);
     }
     unregisterLiveSession([sessionId, conversationId]);
