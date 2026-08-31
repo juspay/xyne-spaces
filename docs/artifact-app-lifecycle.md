@@ -128,10 +128,11 @@ change that second turn produced a second unrelated app.
 
 ### Deferred out of Step 1
 
-- **The "newer version exists — open latest" chip on stale cards.** Cards
-  correctly pin their own version, so history is truthful, but a card scrolled
-  back to gives no hint that the app has moved on. Cheap to add once Step 3's
-  version UI exists.
+- ~~The "newer version exists" chip on stale cards.~~ **Shipped** after this
+  doc was first written, as `ArtifactSavedIndicator` — a Saved chip linking to
+  the app, and a "Newer version (vN)" chip when the card's build is behind head.
+  Staleness is measured against `headVersionId`, never the highest version
+  number, so a restored-to earlier head is correctly shown as current.
 - **Title drift** handling: the app keeps its v1 title unconditionally today.
 
 ### Edge cases (as implemented)
@@ -336,6 +337,112 @@ auto-rejected.
 
 ---
 
+## Step 6 — App Creation mode (persistent split view)
+
+**Goal:** the v0 / Lovable / Replit shape. Chat on the left, the app itself
+persistent on the right, versions switchable from a dropdown. Requested
+2026-08-31 with a reference screenshot; the target is the *layout*, not the
+theme.
+
+Today the app is a card inside the transcript and "expand" is a **modal**
+(`ReactArtifactDialog`). That is backwards for a build session: the thing you
+are iterating on disappears behind the thing you are typing into, and every
+open/close remounts the Sandpack iframe. Step 1 made a conversation own exactly
+one app — which is precisely what makes a single persistent pane correct rather
+than ambiguous.
+
+### What already exists (do not rebuild)
+
+| Need | Already there |
+|---|---|
+| Split layout | `AIShell` is a `ResizableGroup[Panel(sidebar) │ Separator │ Panel(main)]` |
+| Sidebar collapse | `react-resizable-panels@4`: `collapsible` + handle `.collapse()`/`.expand()`; `AIShell` already holds `sidebarPanelRef` |
+| The renderer | `ReactArtifactView` with `fill` — the dialog already uses it this way |
+| "Which app is this thread's?" | Step 1's `conversationId @unique` + `headVersionId` |
+| Version list | `GET /artifact-apps/:id` already returns every version for the owner |
+| Serving one version | payload route already honours `requestedVersionId` for the owner |
+
+So Step 6 is **composition plus one new panel**, not new infrastructure. The
+only genuinely new UI is the version dropdown and the mode's empty state.
+
+### Design
+
+Three panels when the mode is on:
+
+```
+[ sidebar (collapsed) │ chat thread │ app pane (persistent) ]
+```
+
+- **The sidebar is not auto-collapsed** (reversed 2026-08-31, after shipping it
+  the other way). Driving the panel imperatively means racing the group's own
+  deferred re-layout: `expand()` is a no-op unless the panel is collapsed *at
+  the instant it is called*, so a single call fired in the commit where the
+  third panel unmounts gets clobbered a frame later and the sidebar stays shut.
+  Worse, auto-collapse/auto-expand overrides whatever width the user chose.
+  The Panel stays `collapsible`, so it is one drag away. If this ever returns,
+  it needs a settle strategy and a user preference, not a one-shot call.
+- **Entering the mode.** DECISION: auto-enter the first time the conversation
+  materializes an app, and expose an explicit toggle to leave. Rationale: it
+  matches the reference products (you type, it builds, the preview appears),
+  needs no new affordance to discover, and Step 1 guarantees there is exactly
+  one app to show. The trigger lives in ONE predicate so it can be changed to
+  explicit-only without touching the layout.
+- **The pane renders head by default**, and whatever version the dropdown
+  selects otherwise. Selecting an old version is a *view*, not a restore: head
+  does not move. Restore stays Step 3's verb, and lands in this same dropdown.
+- **A new generation updates the pane in place** — the pane is keyed by the
+  conversation's app, not by a message, so when head advances the pane follows.
+
+### The hazard that decides the implementation: two live Sandpacks
+
+If the pane renders the app while the transcript still renders its inline
+cards, the same app runs **twice** — two iframes, two `useXyneData` bridges, two
+agent bridges, double the queries, and writes firing from whichever the user
+happens to click. In the mode, the inline cards must therefore degrade to a
+compact, non-executing reference ("Version 3 — shown in the pane") that scrolls
+to / selects in the pane rather than mounting a second preview.
+
+Two further remount rules, both already learned the hard way:
+
+- `ArtifactSandpack` is `memo`'d with a shallow compare — anything crossing that
+  boundary must stay a stable ref or a plain boolean, never a fresh object or
+  callback. This is why the directory/data bridges read the store imperatively.
+- The pane must be **mounted once and kept**, not conditionally re-created per
+  turn. A new version should change its `payload`, not its identity — otherwise
+  every generation costs a full iframe boot and the running app's state.
+
+### Layout persistence
+
+`AIShell`'s group persists under `autoSaveId='ai-screen-resize'`. A saved
+two-panel layout must not be applied to the three-panel arrangement, so the
+mode uses its own `autoSaveId` and the plain chat layout keeps the existing one.
+`AIShell` is shared with `AISectionLayout` (knowledge, library) — those must
+render byte-identically, so the third panel is strictly opt-in via prop.
+
+### What must be built
+
+1. `AIShell` gains an optional `rightPanel` (ReactNode). Absent → today's exact
+   two-panel tree. **No `collapseSidebar`**: see the decision below.
+2. `ArtifactAppPane` — header (title, version dropdown, publish/expand), body
+   `ReactArtifactView fill`. Owns the `['artifact-app', appId]` query the
+   Saved/Newer chip already uses, so both stay consistent and a restore
+   invalidates one key.
+3. Mode state on the conversation (which app, which version is being viewed,
+   is the mode on) — one hook, so the trigger predicate is single-sourced.
+4. Inline cards become compact references while the mode is on.
+
+### Verification
+
+Generate in `/ai/chat/new` → pane appears, sidebar is left ALONE, exactly ONE
+Sandpack iframe in the DOM. Ask for a change → the SAME pane shows the new
+build; the iframe is not re-created (watch for a preview flash / lost app
+state). Dropdown to v1 → pane shows v1, `headVersionId` in the DB is unchanged.
+Toggle the mode off → sidebar returns, inline cards render live again, and the
+knowledge/library screens are untouched. A thread with no app never enters the
+mode.
+
+---
+
 ## Sequencing & effort
 
 | Step | Ships | Depends on | Size |
@@ -345,11 +452,14 @@ auto-rejected.
 | 3. Restore | req 3 | 1 (head pointer lands with 1) | S — one route + version dropdown |
 | 4. Group-DM collaboration | req 5 | 1–3 stable | M/L — re-key flow, channel-surface parity, membership ACL |
 | 5. Fork + change requests | req 6 | 1–3 (4 independent) | M — two routes + CR model + review UI on existing diff view |
+| 6. App Creation mode (split view) | the v0/Lovable build surface | 1 (3 folds into its dropdown) | M — `AIShell` right panel + app pane + compact inline cards |
 
-Recommended order: **~~1~~ → 3 → 2 → 4 → 5.** Step 1 is done. Step 3 stays ahead
-of 2: its read half already landed with Step 1, so only the restore route and a
-version dropdown remain, and it de-risks Step 1's last-write-wins choice
-immediately.
+Recommended order: **~~1~~ → 6 → 3 → 2 → 4 → 5.** Step 1 is done. Step 6 comes
+next because it is where the rest is *seen*: restore needs a version dropdown to
+live in, and incremental updates only feel different if you are watching the app
+change. Step 3 follows immediately — its read half already landed with Step 1,
+so it is one route plus a Restore item in Step 6's dropdown, and it de-risks
+Step 1's last-write-wins choice.
 
 ## Standing constraints (do not rediscover)
 

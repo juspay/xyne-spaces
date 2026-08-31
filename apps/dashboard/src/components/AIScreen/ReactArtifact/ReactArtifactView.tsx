@@ -37,6 +37,7 @@ import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { TOP_BAR_HEIGHT_CLASS } from '../../AppNavigator/topBarHeight';
 import {
   DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
   REACT_ARTIFACT_AGENT_CAC_KEY,
@@ -182,6 +183,7 @@ export const ReactArtifactView = ({
   fill = false,
   onExpand,
   onClose,
+  titleSlot,
   onSave,
   saveState = 'idle',
 }: ReactArtifactViewProps): ReactElement => {
@@ -270,8 +272,18 @@ export const ReactArtifactView = ({
 
   return (
     <div className={shellClass} data-testid='react-artifact'>
-      <div className='flex items-center justify-between gap-2 border-b border-border px-3 py-2'>
-        <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
+      <div
+        className={`flex items-center justify-between gap-2 border-b px-3 ${
+          // Only when filling a panel does this sit on the same row as the
+          // AppNavigator, so it has to match both its height and its seam
+          // colour. Inline in a transcript it is a card header, not a top bar:
+          // content-sized, with the ordinary card border.
+          fill ? `${TOP_BAR_HEIGHT_CLASS} border-sidebar-border-muted` : 'border-border py-2'
+        }`}
+      >
+        {titleSlot ?? (
+          <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
+        )}
 
         {/* One group, so the bar reads as title | actions. Without it,
             justify-between spreads every control evenly across the header. */}

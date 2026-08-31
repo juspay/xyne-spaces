@@ -5,6 +5,8 @@ import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ReactArtifactView } from './ReactArtifactView';
 import { ReactArtifactDialog } from './ReactArtifactDialog';
 import { toArtifactRef, type ReactArtifactRef } from './ReactArtifact.types';
+import { useIsShownInPane } from './appCreationModeContext';
+import { ArtifactPaneReference } from './ArtifactPaneReference';
 import { saveArtifactApp } from '../../../services/claw/artifactAppsService';
 import { clawErrorText } from '../../../services/claw/clawRequest';
 import {
@@ -93,7 +95,7 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
   return (
     <>
       {artifacts.map(artifact => (
-        <ReactArtifactView
+        <ArtifactCard
           key={artifact.attachmentId}
           artifact={artifact}
           onExpand={handleExpand}
@@ -104,5 +106,35 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
       {saveError && <p className='mb-2 text-xs text-destructive'>{saveError}</p>}
       <ReactArtifactDialog artifact={expanded} onClose={handleClose} />
     </>
+  );
+}
+
+/**
+ * One artifact in the transcript — live, or a reference when App Creation mode
+ * is already running this app in the pane. Split into its own component because
+ * the decision needs a hook, and hooks cannot be called inside a `.map`.
+ */
+function ArtifactCard({
+  artifact,
+  onExpand,
+  onSave,
+  saveState,
+}: {
+  artifact: ReactArtifactRef;
+  onExpand: (a: ReactArtifactRef) => void;
+  onSave?: (a: ReactArtifactRef) => void;
+  saveState: SaveState;
+}): ReactElement {
+  const shownInPane = useIsShownInPane(artifact.savedAppId);
+
+  if (shownInPane) return <ArtifactPaneReference artifact={artifact} />;
+
+  return (
+    <ReactArtifactView
+      artifact={artifact}
+      onExpand={onExpand}
+      {...(onSave ? { onSave } : {})}
+      saveState={saveState}
+    />
   );
 }

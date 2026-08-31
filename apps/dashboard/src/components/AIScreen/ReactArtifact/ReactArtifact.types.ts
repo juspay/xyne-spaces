@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type {
   MessageAttachment,
   ReactArtifactManifest,
@@ -62,6 +63,14 @@ export interface ReactArtifactViewProps {
   onExpand?: (artifact: ReactArtifactRef) => void;
   /** Shows a close affordance; set when rendered inside the full-screen dialog. */
   onClose?: () => void;
+  /**
+   * Replaces the header's title span. Lets a host own that side of the single
+   * header row — the App Creation pane puts the app icon, the app's own title
+   * and the version dropdown here, rather than stacking a second header above
+   * this one. Note the app's title and `payload.title` can legitimately differ:
+   * an app keeps its v1 title while a later build may rename itself.
+   */
+  titleSlot?: ReactNode;
   /** Shows a save affordance. Omitted when already saved or behind the flag. */
   onSave?: (artifact: ReactArtifactRef) => void;
   /** Drives the save button's appearance without the view owning the request. */
