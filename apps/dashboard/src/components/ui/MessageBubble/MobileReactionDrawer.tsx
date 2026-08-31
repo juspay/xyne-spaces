@@ -256,6 +256,8 @@ export default function MobileReactionDrawer({
                         <button
                           key={idx}
                           onClick={() => paginate(idx + 1 - currentTabIndex)}
+                          data-track-category='MESSAGE'
+                          data-track-name='SWITCH_REACTION_TAB'
                           className='flex items-start gap-3 px-2 py-2 w-full text-left hover:bg-accent active:bg-accent rounded-lg transition-colors'
                         >
                           <span className='*:text-2xl flex-shrink-0'>
@@ -275,6 +277,8 @@ export default function MobileReactionDrawer({
                           <>
                             <button
                               onClick={() => handleUserClick(user.userId)}
+                              data-track-category='MESSAGE'
+                              data-track-name='OPEN_REACTOR_PROFILE'
                               key={idx}
                               className='flex items-center gap-3 px-2 py-2'
                             >

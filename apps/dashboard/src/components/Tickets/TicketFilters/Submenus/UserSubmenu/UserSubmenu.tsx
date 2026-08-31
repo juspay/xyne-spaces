@@ -1,6 +1,10 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
-import { Search, Check, User as UserIcon } from 'lucide-react';
+import {
+  SearchDefault as Search,
+  CheckTickSingle as Check,
+  UserDefault as UserIcon,
+} from '@xyne/icons';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers, useSelf } from '../../../../../hooks/useUsers';

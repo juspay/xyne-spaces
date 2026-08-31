@@ -252,6 +252,8 @@ const SkillsTab = (): ReactElement => {
                 type='button'
                 className='shrink-0'
                 onClick={() => void navigate('/claw-agents/skills/create')}
+                data-track-category='Claw Agents'
+                data-track-name='GO_TO_CREATE_SKILL'
               >
                 <Plus className='size-4' />
                 Create skill

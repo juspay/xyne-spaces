@@ -183,6 +183,8 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
               variant='secondary'
               size='sm'
               onClick={() => setShowDisconnectConfirm(false)}
+              data-track-category='workspace-desk-email'
+              data-track-name='CANCEL_DISCONNECT'
               disabled={isDisconnecting}
             >
               Cancel

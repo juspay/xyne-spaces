@@ -1450,7 +1450,13 @@ const BoardEditScreen = ({
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
         <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Board not found</p>
-          <Button onClick={onClose}>Close</Button>
+          <Button
+            onClick={onClose}
+            data-track-category='form'
+            data-track-name='CLOSE_BOARD_NOT_FOUND'
+          >
+            Close
+          </Button>
         </div>
       </div>
     );
@@ -1461,7 +1467,13 @@ const BoardEditScreen = ({
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
         <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-xyne-gray-600 mb-4'>Project not found</p>
-          <Button onClick={onClose}>Close</Button>
+          <Button
+            onClick={onClose}
+            data-track-category='form'
+            data-track-name='CLOSE_PROJECT_NOT_FOUND'
+          >
+            Close
+          </Button>
         </div>
       </div>
     );
@@ -1487,12 +1499,19 @@ const BoardEditScreen = ({
             </span>
           </div>
           <div className='flex items-center gap-3'>
-            <Button variant='secondary' onClick={onClose}>
+            <Button
+              variant='secondary'
+              onClick={onClose}
+              data-track-category='form'
+              data-track-name='CANCEL_BOARD_EDIT'
+            >
               Cancel
             </Button>
             <Button
               className='bg-[#6276BE] hover:bg-[#5060A0] text-white disabled:opacity-50'
               onClick={() => void handleSave()}
+              data-track-category='form'
+              data-track-name='SAVE_BOARD_EDIT'
               disabled={hasPendingOptionDecision}
               title={
                 hasPendingOptionDecision

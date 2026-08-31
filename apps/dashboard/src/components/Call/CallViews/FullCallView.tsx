@@ -40,6 +40,7 @@ import { useAutoPresentationMode } from '../useAutoPresentationMode';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -163,6 +164,7 @@ export function FullCallView({
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
   const { user } = useAuth();
+  const { isElectron, isMac } = usePlatform();
   const isTelepresenceEnabled = useTelepresenceEnabled(user?.email);
 
   // UI state
@@ -450,7 +452,12 @@ export function FullCallView({
       )}
 
       {/* Connection Status Indicators Bar */}
-      <div className='flex justify-between items-center px-4 py-3'>
+      <div
+        className={cn(
+          'flex justify-between items-center pr-4 py-3',
+          isElectron && isMac ? 'pl-24' : 'pl-4',
+        )}
+      >
         <div className='flex items-center gap-2'>
           <div className='relative visual-regression-hide'>
             <div className='w-2 h-2 bg-green-500 rounded-full'></div>

@@ -6,6 +6,7 @@ import {
   type SelectedCanvas,
   type SelectedTranscript,
   type SelectedRecording,
+  type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { StreamOverrides } from '../../hooks/useXyneAIStream';
 
@@ -96,6 +97,35 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
 }
 
 /**
+ * The FULL context set for DISPLAY on the sent message's pills — channels,
+ * tickets, canvases, calls PLUS the KB scopes (collections, folders, files)
+ * with their titles. This mirrors what the Spaces backend merges into
+ * attachedContext and persists (xyneAIControllerV2.ts), so the just-sent
+ * message shows the same pills a reload will. Distinct from the `attachedContext`
+ * actually SENT (channels/tickets/canvases/calls only) — the KB items ride as
+ * collectionIds/fileIds/folderIds and the backend resolves+merges them, so
+ * sending them here too would double-count.
+ */
+export function toDisplayAttachedContext(ctx: ComposerContext): AttachedContextItem[] {
+  return [
+    ...toAttachedContext({
+      channels: ctx.channels,
+      tickets: ctx.tickets,
+      canvases: ctx.canvases,
+      transcripts: ctx.transcripts,
+      recordings: ctx.recordings,
+    }),
+    ...ctx.collections.map(
+      (c): AttachedContextItem => ({ type: 'collection', id: c.id, title: c.name }),
+    ),
+    ...ctx.folderScopes.map(
+      (f): AttachedContextItem => ({ type: 'folder', id: f.id, title: f.name }),
+    ),
+    ...ctx.fileScopes.map((f): AttachedContextItem => ({ type: 'file', id: f.id, title: f.name })),
+  ];
+}
+
+/**
  * Convert a composer snapshot into the per-submit override object consumed by
  * useXyneAIStream.submitQuery. Mirrors how XyneAISidebar feeds the same fields
  * into the hook config (channelIds sent both as `channelIds` and inside
@@ -117,6 +147,9 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
       transcripts: ctx.transcripts,
       recordings: ctx.recordings,
     }),
+    // Display-only richer set (adds KB pills with titles) so the just-sent
+    // message matches the post-reload persisted pills. NOT sent to the backend.
+    displayAttachedContext: toDisplayAttachedContext(ctx),
     webSearchEnabled: ctx.webSearchEnabled,
     deepResearchEnabled: ctx.deepResearchEnabled,
     createCanvasEnabled: ctx.createCanvasEnabled,

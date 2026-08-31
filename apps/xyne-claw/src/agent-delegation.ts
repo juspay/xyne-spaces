@@ -188,6 +188,41 @@ export const A2A_DEFAULTS = {
 } as const;
 
 /**
+ * Bounds for the per-agent, per-run delegation budget. The default
+ * (A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN) applies when an agent has not set a
+ * value. The upper bound is a cost/blast-radius guard: each delegation is a full
+ * nested agent run, so an unbounded budget could fan out an expensive tree.
+ * Keep these values in sync with the dashboard behaviour-config helper
+ * (apps/dashboard/src/services/claw/behaviourConfig.ts).
+ */
+export const MAX_DELEGATIONS_PER_RUN_BOUNDS = {
+  MIN: 1,
+  MAX: 25,
+  DEFAULT: A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN,
+} as const;
+
+/**
+ * Coerce an untrusted config value (from an agent's free-form config bag) into a
+ * valid delegation budget. Non-integers, out-of-range, and missing values fall
+ * back to the default; in-range values are clamped to [MIN, MAX].
+ */
+export function clampMaxDelegationsPerRun(value: unknown): number {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    return MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT;
+  }
+  return Math.min(
+    MAX_DELEGATIONS_PER_RUN_BOUNDS.MAX,
+    Math.max(MAX_DELEGATIONS_PER_RUN_BOUNDS.MIN, n),
+  );
+}
+
+/**
  * Per-parent-run governor. One instance is created for the top-level run and
  * threaded through progressCtx. `childGovernor()` produces the governor handed
  * to a callee so the whole tree shares one count budget and one visited stack.

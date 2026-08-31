@@ -82,6 +82,8 @@ export const PromptVersionHistory = ({
                           loading={activate.isPending && activate.variables === version.version}
                           disabled={activate.isPending}
                           onClick={() => void restore(version.version)}
+                          data-track-category='Claw Agents'
+                          data-track-name='RESTORE_PROMPT_VERSION'
                           className='ml-auto'
                         >
                           <RotateCcw className='size-3.5' /> Activate

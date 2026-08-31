@@ -197,14 +197,15 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   return (
     <CardShell style={node.style}>
       {/* Inset panel — the frame's white card sitting on the shell's fill.
-          Radius is 11px, not the shell's 12px (`rounded-xl`): the panel sits
-          flush inside the shell's 1px border, so the radius it has to follow is
-          12 − 1. Matching the shell's 12px instead makes the two curves fight at
-          the top corners — concentric radii differ by the inset. */}
+          Bottom edge only: the shell already draws the outline, so bordering all
+          four sides stacks two 1px strokes on every edge and reads as a heavy
+          double rule. What is left is a single hairline dividing the body from
+          the chin. Bottom radius stays 11px (the shell's 12px minus its 1px
+          border) so the panel's curve sits concentric with the shell's. */}
       {/* Identical in every phase — the state reads from the chip and the chin
           (footer) alone, so a declined agent is presented exactly as a pending
           one rather than dimmed into a different-looking card. */}
-      <div className='flex flex-col gap-4 rounded-[11px] border border-border bg-card/80 p-3'>
+      <div className='flex flex-col gap-4 rounded-b-[11px] border-b border-border bg-card/80 p-3'>
         <div className='flex h-6 items-center gap-1.5 pl-1'>
           <div className='flex min-w-0 flex-1 items-center gap-1.5'>
             <span className='text-sm font-semibold leading-5 tracking-[-0.5px] text-muted-foreground'>

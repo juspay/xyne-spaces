@@ -955,6 +955,11 @@ const ChannelCommandMenu = ({
     if (text.trim()) params.set('query', text.trim());
     if (tab) params.set('tab', tab);
 
+    // Carry the cmd+K toggles so the full-screen page issues the identical Vespa request
+    // (same filtered results) and can reuse the popup's cached search.
+    params.set('onlyMyChannels', String(onlyMyChannels));
+    params.set('includeBotMessages', String(includeBotMessages));
+
     const fromMentions = mentions.filter(m => m.type === MentionType.USER && m.prefix === 'from:');
     const fromEmails = fromMentions.filter(m => m.id.includes('@')).map(m => m.id);
     const fromIds = fromMentions.filter(m => !m.id.includes('@')).map(m => m.id);
@@ -3635,6 +3640,9 @@ const ChannelCommandMenu = ({
                       </button>
                     ))}
                     <div className='my-1 border-t border-border' />
+                    {/* State-only — deliberately not mirrored to the URL: a per-click searchParams
+                        update would push a browser history entry each toggle. The URL is stamped
+                        once at the full-screen hand-off (buildSearchParams) instead. */}
                     <button
                       type='button'
                       onMouseDown={e => e.preventDefault()}
@@ -3691,6 +3699,9 @@ const ChannelCommandMenu = ({
                     className='z-[10000] bg-popover border border-border rounded-lg shadow-md min-w-[180px] p-1 text-popover-foreground'
                     onOpenAutoFocus={e => e.preventDefault()}
                   >
+                    {/* State-only — deliberately not mirrored to the URL: a per-click searchParams
+                        update would push a browser history entry each toggle. The URL is stamped
+                        once at the full-screen hand-off (buildSearchParams) instead. */}
                     <button
                       type='button'
                       onMouseDown={e => e.preventDefault()}
@@ -4530,6 +4541,8 @@ const ChannelCommandMenu = ({
                     variant='secondary'
                     size='sm'
                     onClick={toggleDeskMergeMode}
+                    data-track-category='SEARCH'
+                    data-track-name='TOGGLE_DESK_MERGE_MODE'
                     className={MERGE_BAR_BUTTON_NO_RING}
                   >
                     Cancel
@@ -4546,6 +4559,8 @@ const ChannelCommandMenu = ({
                       variant='ghost'
                       size='sm'
                       onClick={clearDeskMergeSelection}
+                      data-track-category='SEARCH'
+                      data-track-name='CLEAR_DESK_MERGE_SELECTION'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Clear
@@ -4554,6 +4569,8 @@ const ChannelCommandMenu = ({
                       variant='secondary'
                       size='sm'
                       onClick={toggleDeskMergeMode}
+                      data-track-category='SEARCH'
+                      data-track-name='TOGGLE_DESK_MERGE_MODE'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Cancel
@@ -4562,6 +4579,8 @@ const ChannelCommandMenu = ({
                       size='sm'
                       disabled={selectedMergeTickets.size < 2}
                       onClick={() => setShowMergeDialog(true)}
+                      data-track-category='SEARCH'
+                      data-track-name='OPEN_MERGE_DIALOG'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Merge {selectedMergeTickets.size > 0 ? `(${selectedMergeTickets.size})` : ''}

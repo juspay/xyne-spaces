@@ -27,12 +27,21 @@
  */
 
 import { Router, type Request } from "express";
+import { errMsg } from "../lib/errors.js";
 import { Prisma } from "@prisma/client";
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireUserAuth } from "../middleware/require-auth.js";
-import { countUserRecords } from "../services/userMemoryFetcher.js";
+import {
+  countUserRecords,
+  fetchUserCalls,
+  fetchUserCanvases,
+  fetchUserMessages,
+} from "../services/userMemoryFetcher.js";
+import { assembleConversationUnits, isContextAssemblerEnabled } from "../services/contextAssembler.js";
+import { packRecordsIntoBatches } from "../services/userMemoryBatcher.js";
+import { recordPipelineEvent } from "../services/digitalTwinPipelineEvents.js";
 import {
   curateAndPersistBatch,
   ensureTwinBank,
@@ -105,6 +114,8 @@ const inFlightDisables = new Set<string>();
 
 /** Dedupe concurrent soul-synthesis rebuilds per user (N LLM calls, ~30-60s). */
 const inFlightSynth = new Set<string>();
+/** Pipeline events currently being retried, so a double-click doesn't double-run. */
+const inFlightRetry = new Set<string>();
 
 /** Per-user in-flight flag for a manual memory-delete (all / range). Surfaced in
  *  /status as memoryDeleteInProgress so the UI can show a live indicator. */
@@ -267,7 +278,7 @@ digitalTwinRouter.get("/status", requireUserAuth, async (req, res) => {
         const page = await memory.listMemories(TWIN_BANK_ID, { tags: [`user:${userId}`], limit: wide });
         memoryCount = page.memories.filter((m) => (m.tags ?? []).includes(`user:${userId}`)).length;
       } catch (err) {
-        logger.warn("[digital-twin] status memoryCount failed", { userId, err: err instanceof Error ? err.message : String(err) });
+        logger.warn("[digital-twin] status memoryCount failed", { userId, err: errMsg(err) });
       }
     }
 
@@ -291,7 +302,7 @@ digitalTwinRouter.get("/status", requireUserAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error("[digital-twin] /status failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /status failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -322,7 +333,7 @@ digitalTwinRouter.get("/estimate", requireUserAuth, async (req, res) => {
       data: { ...counts, totalRecords, estCandidates, estCostUSD },
     });
   } catch (err) {
-    logger.error("[digital-twin] /estimate failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /estimate failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -417,7 +428,7 @@ digitalTwinRouter.post("/enable", requireUserAuth, async (req, res) => {
     await ensureDefaultFiles(TWIN_AGENT_SLUG, userId).catch((err) => {
       logger.warn("[digital-twin] ensureDefaultFiles failed", {
         userId,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     });
 
@@ -438,7 +449,7 @@ digitalTwinRouter.post("/enable", requireUserAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error("[digital-twin] /enable failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /enable failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -476,7 +487,7 @@ digitalTwinRouter.post("/backfill/pause", requireUserAuth, async (req, res) => {
     logger.info("[digital-twin] backfill paused", { userId, pausedSources, cancelledJobs });
     res.json({ success: true, data: { paused: pausedSources > 0, pausedSources, cancelledJobs } });
   } catch (err) {
-    logger.error("[digital-twin] /backfill/pause failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /backfill/pause failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -529,7 +540,7 @@ digitalTwinRouter.post("/backfill/resume", requireUserAuth, async (req, res) => 
     logger.info("[digital-twin] backfill resumed", { userId, resumed: jobIds.length, cleared: resumable.length });
     res.json({ success: true, data: { resumed: jobIds.length, jobIds, sources: resumable.length } });
   } catch (err) {
-    logger.error("[digital-twin] /backfill/resume failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /backfill/resume failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -558,7 +569,7 @@ digitalTwinRouter.get("/memory-files", requireUserAuth, async (req, res) => {
       data: { files, maxLoaded: MAX_LOADED_FILES, maxChars: MAX_FILE_CHARS },
     });
   } catch (err) {
-    logger.error("[digital-twin] list memory-files failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] list memory-files failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -590,7 +601,7 @@ digitalTwinRouter.put("/memory-files/:name", requireUserAuth, async (req, res) =
     });
     res.json({ success: true, data: { file, truncated: overCap, maxChars: MAX_FILE_CHARS } });
   } catch (err) {
-    logger.error("[digital-twin] put memory-file failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] put memory-file failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -619,7 +630,7 @@ digitalTwinRouter.post("/memory-files/:name/load", requireUserAuth, async (req, 
       res.status(404).json({ success: false, error: "File not found" });
       return;
     }
-    logger.error("[digital-twin] toggle memory-file load failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] toggle memory-file load failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -635,7 +646,7 @@ digitalTwinRouter.delete("/memory-files/:name", requireUserAuth, async (req, res
     const deleted = await deleteFile(TWIN_AGENT_SLUG, userId, name);
     res.json({ success: true, data: { deleted } });
   } catch (err) {
-    logger.error("[digital-twin] delete memory-file failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] delete memory-file failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -659,7 +670,7 @@ digitalTwinRouter.post("/synthesize", requireUserAuth, async (req, res) => {
     try {
       await synthesizeSoulFilesForUser(userId, "manual");
     } catch (err) {
-      logger.warn("[digital-twin] synthesize failed", { userId, err: err instanceof Error ? err.message : String(err) });
+      logger.warn("[digital-twin] synthesize failed", { userId, err: errMsg(err) });
     } finally {
       inFlightSynth.delete(userId);
     }
@@ -728,7 +739,7 @@ digitalTwinRouter.post("/memories/delete", requireUserAuth, async (req, res) => 
             logger.warn("[digital-twin] range delete: invalidate failed", {
               userId,
               id: m.id,
-              err: err instanceof Error ? err.message : String(err),
+              err: errMsg(err),
             });
           }
         });
@@ -743,7 +754,7 @@ digitalTwinRouter.post("/memories/delete", requireUserAuth, async (req, res) => 
       logger.error("[digital-twin] memory delete crashed", {
         userId,
         mode,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     } finally {
       inFlightMemDelete.delete(userId);
@@ -817,7 +828,7 @@ digitalTwinRouter.post("/disable", requireUserAuth, async (req, res) => {
         } catch (err) {
           logger.warn("[digital-twin] hindsight delete-by-tag failed on disable", {
             userId,
-            err: err instanceof Error ? err.message : String(err),
+            err: errMsg(err),
           });
         }
         const result = await prisma.userMemoryCandidate.deleteMany({ where: { userId } });
@@ -830,14 +841,14 @@ digitalTwinRouter.post("/disable", requireUserAuth, async (req, res) => {
       } catch (err) {
         logger.error("[digital-twin] disable-delete crashed", {
           userId,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       } finally {
         inFlightDisables.delete(userId);
       }
     });
   } catch (err) {
-    logger.error("[digital-twin] /disable failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /disable failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -888,7 +899,7 @@ digitalTwinRouter.get("/graph", requireUserAuth, async (req, res) => {
       }));
     res.json({ success: true, data: { nodes, edges } });
   } catch (err) {
-    logger.error("[digital-twin] /graph failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /graph failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -928,7 +939,7 @@ digitalTwinRouter.get("/clusters", requireUserAuth, async (req, res) => {
 
     res.json({ success: true, data: { clusters } });
   } catch (err) {
-    logger.error("[digital-twin] /clusters failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /clusters failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -948,7 +959,7 @@ digitalTwinRouter.get("/clusters/:subsystem", requireUserAuth, async (req, res) 
     });
     res.json({ success: true, data: { subsystem, candidates } });
   } catch (err) {
-    logger.error("[digital-twin] /clusters/:subsystem failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /clusters/:subsystem failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1032,7 +1043,7 @@ digitalTwinRouter.post("/clusters/:subsystem/approve", requireUserAuth, async (r
             userId,
             subsystem,
             candidateId: c.id,
-            err: err instanceof Error ? err.message : String(err),
+            err: errMsg(err),
           });
         }
       }
@@ -1045,7 +1056,7 @@ digitalTwinRouter.post("/clusters/:subsystem/approve", requireUserAuth, async (r
       inFlightClusterApprovals.delete(lockKey);
     });
   } catch (err) {
-    logger.error("[digital-twin] /clusters/:subsystem/approve failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /clusters/:subsystem/approve failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1102,7 +1113,7 @@ digitalTwinRouter.patch("/candidates/:id", requireUserAuth, async (req, res) => 
         logger.warn("[digital-twin] retain failed on patch-approve", {
           userId,
           candidateId: id,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
         res.status(500).json({ success: false, error: "Retain failed" });
         return;
@@ -1118,7 +1129,7 @@ digitalTwinRouter.patch("/candidates/:id", requireUserAuth, async (req, res) => 
     const updated = await prisma.userMemoryCandidate.update({ where: { id }, data: updates });
     res.json({ success: true, data: { id: updated.id, status: updated.status, hindsightMemoryId } });
   } catch (err) {
-    logger.error("[digital-twin] PATCH /candidates/:id failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] PATCH /candidates/:id failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1285,7 +1296,7 @@ digitalTwinRouter.get("/metrics", requireUserAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error("[digital-twin] GET /metrics failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] GET /metrics failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1390,7 +1401,7 @@ digitalTwinRouter.patch("/settings", requireUserAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error("[digital-twin] PATCH /settings failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] PATCH /settings failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1437,7 +1448,7 @@ digitalTwinRouter.post("/upload-md", requireUserAuth, async (req, res) => {
 
     res.json({ success: true, data: { filename, candidatesCreated: inserted } });
   } catch (err) {
-    logger.error("[digital-twin] /upload-md failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] /upload-md failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1532,7 +1543,82 @@ digitalTwinRouter.get("/pipeline/events", requireUserAuth, async (req, res) => {
 
     res.json({ success: true, data: { events, nextBefore } });
   } catch (err) {
-    logger.error("[digital-twin] GET /pipeline/events failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] GET /pipeline/events failed", { err: errMsg(err) });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+// Re-run one pipeline event's window. Only for runs that produced nothing —
+// an "ok" run already created candidates, so re-running it would duplicate them.
+// Fetch + LLM distill takes minutes, so this returns 202 and the work continues
+// in the background, writing its own events that the feed picks up.
+digitalTwinRouter.post("/pipeline/events/:id/retry", requireUserAuth, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Unauthenticated" });
+      return;
+    }
+    const eventId = String(req.params["id"] ?? "");
+    const event = await prisma.digitalTwinPipelineEvent.findFirst({
+      where: { id: eventId, userId },
+      select: { id: true, sourceKind: true, status: true, windowFrom: true, windowTo: true },
+    });
+    if (!event) {
+      res.status(404).json({ success: false, error: "Event not found" });
+      return;
+    }
+    // upload / twin-approval / synthesize runs have no source window to re-walk.
+    if (!event.sourceKind) {
+      res.status(400).json({ success: false, error: "This run has no source window to retry" });
+      return;
+    }
+    if (event.status !== "error" && event.status !== "empty") {
+      res.status(400).json({ success: false, error: "Only failed or empty runs can be retried" });
+      return;
+    }
+    if (inFlightRetry.has(eventId)) {
+      res.status(202).json({ success: true, data: { status: "already-running" } });
+      return;
+    }
+
+    inFlightRetry.add(eventId);
+    res.status(202).json({ success: true, data: { status: "started" } });
+
+    const kind = event.sourceKind as BackfillSource;
+    const window = { from: event.windowFrom, to: event.windowTo };
+    const source = `retry:${new Date().toISOString().slice(0, 10)}:${kind}`;
+
+    setImmediate(async () => {
+      try {
+        const records =
+          kind === "calls"
+            ? await fetchUserCalls(userId, window)
+            : kind === "canvases"
+              ? await fetchUserCanvases(userId, window)
+              : isContextAssemblerEnabled()
+                ? await assembleConversationUnits(userId, window)
+                : await fetchUserMessages(userId, window);
+
+        if (records.length === 0) {
+          // Still empty. Record it so the feed shows the retry happened and
+          // the window is genuinely bare, not that the button did nothing.
+          await recordPipelineEvent({ userId, source, window, status: "empty", recordCount: 0 });
+          return;
+        }
+        for (const batch of packRecordsIntoBatches(records)) {
+          await curateAndPersistBatch({ userId, window, records: batch, source });
+        }
+      } catch (err) {
+        const message = errMsg(err);
+        logger.warn("[digital-twin] pipeline retry failed", { userId, eventId, err: message });
+        await recordPipelineEvent({ userId, source, window, status: "error", recordCount: 0, error: message });
+      } finally {
+        inFlightRetry.delete(eventId);
+      }
+    });
+  } catch (err) {
+    logger.error("[digital-twin] POST /pipeline/events/:id/retry failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });
@@ -1566,7 +1652,7 @@ digitalTwinRouter.get("/pipeline/events/:id", requireUserAuth, async (req, res) 
       },
     });
   } catch (err) {
-    logger.error("[digital-twin] GET /pipeline/events/:id failed", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("[digital-twin] GET /pipeline/events/:id failed", { err: errMsg(err) });
     res.status(500).json({ success: false, error: "Internal error" });
   }
 });

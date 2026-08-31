@@ -68,6 +68,8 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
           setView('default');
           setIsOpen(true);
         }}
+        data-track-category='MOBILE_PROFILE_MENU'
+        data-track-name='OPEN_USER_MENU'
       >
         {hasValidStatus && (
           <span className='text-[19px] leading-none flex items-center justify-center shrink-0'>

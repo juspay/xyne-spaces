@@ -34,6 +34,7 @@ import { clawSettingsKey, useClawSettings } from '@/hooks/useClawSettings';
 import {
   deleteProviderCredential,
   deleteSubagentRouting,
+  exchangeClaudeOauth,
   exchangeCodexOauth,
   initiateCopilotGitHubLogin,
   listClaudeModelsForUser,
@@ -41,7 +42,9 @@ import {
   listCopilotModelsForUser,
   listProviderCredentials,
   pollCopilotGitHubLogin,
+  startClaudeOauth,
   startCodexOauth,
+  type ClaudeOauthFlow,
   upsertProviderCredential,
   upsertSubagentRouting,
 } from '@/services/claw/clawSettingsService';
@@ -90,6 +93,9 @@ const SUBAGENT_NAMES: Record<string, string> = {
 };
 
 const DEFAULT_REASONING: ReasoningEffort = 'medium';
+
+/** Stands in for "no model chosen" — Radix Select rejects an empty value. */
+const DEFAULT_MODEL_VALUE = '__default__';
 
 const errMsg = (err: unknown, fallback: string): string =>
   err instanceof Error ? err.message : fallback;
@@ -180,7 +186,13 @@ const ProviderCard = ({
       )}
 
       <div className='mt-auto flex justify-end'>
-        <Button size='sm' variant={isConnected ? 'secondary' : 'default'} onClick={onOpenDialog}>
+        <Button
+          size='sm'
+          variant={isConnected ? 'secondary' : 'default'}
+          onClick={onOpenDialog}
+          data-track-category='claw-settings'
+          data-track-name='OPEN_SETTINGS_DIALOG'
+        >
           {isConnected ? 'Configure' : 'Connect'}
         </Button>
       </div>
@@ -426,7 +438,12 @@ const CopilotConfigForm = ({
           <p className='text-sm text-muted-foreground'>
             Connect your GitHub account to use Copilot-powered code suggestions across all agents.
           </p>
-          <Button onClick={() => void startLogin()} disabled={starting}>
+          <Button
+            onClick={() => void startLogin()}
+            data-track-category='claw-settings'
+            data-track-name='START_GITHUB_LOGIN'
+            disabled={starting}
+          >
             {starting ? <Loader2 className='size-4 animate-spin' /> : <Plug className='size-4' />}
             {starting ? 'Starting...' : 'Log in with GitHub'}
           </Button>
@@ -455,12 +472,20 @@ const CopilotConfigForm = ({
             <Button
               variant='secondary'
               onClick={() => void startLogin()}
+              data-track-category='claw-settings'
+              data-track-name='RESTART_GITHUB_LOGIN'
               disabled={starting || saving}
             >
               <Github className='size-4' />
               Reconnect
             </Button>
-            <Button variant='destructive' onClick={() => void handleDisconnect()} disabled={saving}>
+            <Button
+              variant='destructive'
+              onClick={() => void handleDisconnect()}
+              data-track-category='claw-settings'
+              data-track-name='DISCONNECT_GITHUB'
+              disabled={saving}
+            >
               <Trash2 className='size-4' />
               Disconnect
             </Button>
@@ -480,6 +505,8 @@ const CopilotConfigForm = ({
               variant='ghost'
               aria-label='Copy GitHub authorization code'
               onClick={() => void navigator.clipboard.writeText(device.userCode)}
+              data-track-category='claw-settings'
+              data-track-name='COPY_GITHUB_DEVICE_CODE'
             >
               <Copy className='size-4' />
             </Button>
@@ -533,6 +560,13 @@ const GenericProviderConfigForm = ({
   const [codexFlow, setCodexFlow] = useState<CodexOauthStart | null>(null);
   const [codexCode, setCodexCode] = useState('');
   const [codexBusy, setCodexBusy] = useState(false);
+  const [claudeFlow, setClaudeFlow] = useState<ClaudeOauthFlow | null>(null);
+  const [claudeCode, setClaudeCode] = useState('');
+  const [claudeBusy, setClaudeBusy] = useState(false);
+  // Bumped after a sign-in lands, so the models effect re-runs against the
+  // credential that now exists. `hasKey` comes from the parent's snapshot and
+  // does not update until it refetches, which is too late for this dialog.
+  const [credentialNonce, setCredentialNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -564,7 +598,7 @@ const GenericProviderConfigForm = ({
   const isOauth = authType === 'oauth_token';
 
   useEffect(() => {
-    if (!hasKey) return undefined;
+    if (!hasKey && credentialNonce === 0) return undefined;
     let cancelled = false;
     setModelsError(null);
     const fetcher = isClaude ? listClaudeModelsForUser : listCodexModelsForUser;
@@ -581,7 +615,7 @@ const GenericProviderConfigForm = ({
     return (): void => {
       cancelled = true;
     };
-  }, [hasKey, userId, isClaude]);
+  }, [hasKey, userId, isClaude, credentialNonce]);
 
   const handleSave = async (): Promise<void> => {
     if (!apiKey && !hasKey) {
@@ -641,6 +675,40 @@ const GenericProviderConfigForm = ({
     }
   };
 
+  const startClaudeOAuth = async (): Promise<void> => {
+    setClaudeBusy(true);
+    setError(null);
+    try {
+      const flow = await startClaudeOauth(userId);
+      setClaudeFlow(flow);
+      window.open(flow.url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setError(errMsg(err, 'Failed to start sign-in'));
+    } finally {
+      setClaudeBusy(false);
+    }
+  };
+
+  const completeClaudeOAuth = async (): Promise<void> => {
+    if (!claudeFlow) return;
+    setClaudeBusy(true);
+    setError(null);
+    try {
+      await exchangeClaudeOauth(userId, { code: claudeCode.trim(), state: claudeFlow.state });
+      setClaudeFlow(null);
+      setClaudeCode('');
+      await onMutate();
+      // Stay open: the credential exists now, so the model list becomes
+      // fetchable and the user still has to pick one before saving.
+      setCredentialNonce(nonce => nonce + 1);
+      toast.success('Anthropic Claude connected — pick a model');
+    } catch (err) {
+      setError(errMsg(err, 'Sign-in failed'));
+    } finally {
+      setClaudeBusy(false);
+    }
+  };
+
   const completeCodexOAuth = async (): Promise<void> => {
     if (!codexFlow) return;
     setCodexBusy(true);
@@ -684,16 +752,78 @@ const GenericProviderConfigForm = ({
         </div>
 
         {isOauth && isClaude && (
-          <p className='mt-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2 text-xs text-[var(--claw-ai-fg)]'>
-            Run <code className='rounded bg-background px-1'>claude setup-token</code> on any
-            machine with Claude Code installed. Paste the resulting token below.
-          </p>
+          <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
+            {!claudeFlow ? (
+              <>
+                <p>
+                  Sign in with your Claude account. This captures a refreshable token, so it
+                  won&apos;t silently expire like a pasted one.
+                </p>
+                <Button size='sm' onClick={() => void startClaudeOAuth()} disabled={claudeBusy}>
+                  {claudeBusy ? (
+                    <Loader2 className='size-4 animate-spin' />
+                  ) : (
+                    <KeyRound className='size-4' />
+                  )}
+                  {claudeBusy ? 'Opening...' : 'Sign in with Claude'}
+                </Button>
+                <p className='text-muted-foreground'>
+                  Or run <code className='rounded bg-background px-1'>claude setup-token</code> and
+                  paste the token below.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  Paste the code Anthropic shows you below.{' '}
+                  <a
+                    href={claudeFlow.url}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='underline underline-offset-2'
+                  >
+                    Re-open tab
+                  </a>
+                </p>
+                <Input
+                  value={claudeCode}
+                  onChange={event => setClaudeCode(event.target.value)}
+                  placeholder='Paste code or callback URL'
+                />
+                <div className='flex gap-2'>
+                  <Button
+                    size='sm'
+                    onClick={() => void completeClaudeOAuth()}
+                    disabled={claudeBusy || !claudeCode.trim()}
+                  >
+                    {claudeBusy ? 'Verifying...' : 'Complete sign-in'}
+                  </Button>
+                  <Button
+                    size='sm'
+                    variant='ghost'
+                    onClick={() => {
+                      setClaudeFlow(null);
+                      setClaudeCode('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         {isOauth && isCodex && (
           <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
             {!codexFlow ? (
-              <Button size='sm' onClick={() => void startCodexOAuth()} disabled={codexBusy}>
+              <Button
+                size='sm'
+                onClick={() => void startCodexOAuth()}
+                data-track-category='claw-settings'
+                data-track-name='START_CODEX_OAUTH'
+                disabled={codexBusy}
+              >
                 {codexBusy ? (
                   <Loader2 className='size-4 animate-spin' />
                 ) : (
@@ -723,6 +853,8 @@ const GenericProviderConfigForm = ({
                   <Button
                     size='sm'
                     onClick={() => void completeCodexOAuth()}
+                    data-track-category='claw-settings'
+                    data-track-name='COMPLETE_CODEX_OAUTH'
                     disabled={codexBusy || !codexCode.trim()}
                   >
                     {codexBusy ? 'Verifying...' : 'Complete sign-in'}
@@ -734,6 +866,8 @@ const GenericProviderConfigForm = ({
                       setCodexFlow(null);
                       setCodexCode('');
                     }}
+                    data-track-category='claw-settings'
+                    data-track-name='CANCEL_CODEX_OAUTH'
                   >
                     Cancel
                   </Button>
@@ -758,11 +892,18 @@ const GenericProviderConfigForm = ({
       <div>
         <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>Model</span>
         {models && models.length > 0 ? (
-          <Select value={model} onValueChange={value => setModel(value)}>
+          // Radix Select cannot hold an empty string, so "no model chosen" is
+          // carried by a sentinel and mapped back to '' on the way out — the
+          // API treats a blank model as "use the platform default".
+          <Select
+            value={model || DEFAULT_MODEL_VALUE}
+            onValueChange={value => setModel(value === DEFAULT_MODEL_VALUE ? '' : value)}
+          >
             <SelectTrigger className='w-full'>
-              <SelectValue placeholder='Select a model' />
+              <SelectValue placeholder='Use default' />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={DEFAULT_MODEL_VALUE}>Use default</SelectItem>
               {models.map(option => (
                 <SelectItem key={option.id} value={option.id}>
                   {modelLabel(option)}
@@ -802,11 +943,23 @@ const GenericProviderConfigForm = ({
 
       <div className='flex items-center justify-end gap-2 pt-2'>
         {hasKey && (
-          <Button variant='ghost' onClick={() => void handleDelete()} disabled={deleting || saving}>
+          <Button
+            variant='ghost'
+            onClick={() => void handleDelete()}
+            data-track-category='claw-settings'
+            data-track-name='DELETE_MODEL_PROVIDER'
+            disabled={deleting || saving}
+          >
             {deleting ? 'Removing...' : 'Remove'}
           </Button>
         )}
-        <Button onClick={() => void handleSave()} loading={saving} disabled={!apiKey && !hasKey}>
+        <Button
+          onClick={() => void handleSave()}
+          data-track-category='claw-settings'
+          data-track-name='SAVE_MODEL_PROVIDER'
+          loading={saving}
+          disabled={!apiKey && !hasKey}
+        >
           {hasKey ? 'Save changes' : 'Connect'}
         </Button>
       </div>
@@ -1133,7 +1286,7 @@ const LabeledSelect = ({
       disabled={disabled ?? false}
     >
       <SelectTrigger className='w-full'>
-        <SelectValue />
+        <SelectValue placeholder='Use default' />
       </SelectTrigger>
       <SelectContent>
         {options.map(option => (

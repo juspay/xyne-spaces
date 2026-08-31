@@ -1,7 +1,3 @@
-import {
-  createLazySpacesEncryptionKeyRing,
-  parseSpacesEncryptionKeyRing,
-} from "./spaces-encryption-key-ring.js";
 import { createHmac } from "node:crypto";
 import { derivePurposeKey, registerDecryptionFallback } from "./crypto.js";
 
@@ -26,12 +22,6 @@ const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("
 // the derived data key; reads fall back to the legacy root during migration.
 registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
 
-const loadSpacesEncryptionKeys =
-  createLazySpacesEncryptionKeyRing(
-    process.env["SPACES_ENCRYPTION_KEY"],
-    process.env["SPACES_ENCRYPTION_KEYS"]
-  );
-
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
   selfUrl: process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
@@ -48,20 +38,14 @@ export const CONFIG = {
   legacyActionSigningKey: rootEncryptionKey,
   legacySessionSigningKey,
   legacyOauthStateSigningKey: rootEncryptionKey,
-  // Spaces' AES-256-CBC keys — these hold xyne-spaces backend's ENCRYPTION_KEY
-  // material, not this service's own. Used ONLY to decrypt
+  // Spaces' AES-256-CBC key — must equal xyne-spaces backend's ENCRYPTION_KEY
+  // value (the two services are independently keyed). Used ONLY to decrypt
   // `installed_apps.signingSecret` read from the Spaces DB during the
-  // signing-secret backfill.
-  //
-  // A ring rather than one key, because Spaces stamps the key id into the
-  // ciphertext and can hold several at once while a rotation drains. Whatever
-  // ids Spaces has in ENCRYPTION_KEYS must appear here too, under the same
-  // names, or rows written under a missing id cannot be read. SPACES_ENCRYPTION_KEY
-  // is registered as "legacy" to match the id Spaces gives unversioned rows.
-  // Empty ring when unset; the backfill short-circuits with a clear error.
-  get spacesEncryptionKeys(): ReadonlyMap<string, Buffer> {
-    return loadSpacesEncryptionKeys();
-  },
+  // signing-secret backfill. Empty buffer when unset; the backfill
+  // short-circuits with a clear error if it needs this and it's missing.
+  spacesEncryptionKey: process.env["SPACES_ENCRYPTION_KEY"]
+    ? Buffer.from(process.env["SPACES_ENCRYPTION_KEY"]!, "hex")
+    : Buffer.alloc(0),
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
   // Public base URL of the claw SPA, used for post-OAuth browser redirects.
   // Precedence: explicit FRONTEND_URL override; else in production the SPA is
@@ -86,7 +70,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -283,6 +267,30 @@ export const CONFIG = {
    */
   searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
   /**
+   * EnterpriseRAG-Bench (Onyx) eval harness — targets a SEPARATE Vespa cluster
+   * holding the benchmark corpus, never the prod-connected one above.
+   *
+   *   ONYX_EVAL_VESPA_ENDPOINT  benchmark Vespa query endpoint — used ONLY by
+   *                             the harness's gold-material fetch by id
+   *                             (§5.3 search); the agent-under-test NEVER
+   *                             touches this — retrieval runs via spaces-search
+   *                             (the prod code path).
+   *   ONYX_EVAL_WORKSPACE_ID    workspaceId stamped on every benchmark doc —
+   *                             used verbatim as the YQL `workspaceId contains`
+   *                             filter for the gold fetch (Vespa only, is a
+   *                             string literal there; no DB validates it).
+   *   ONYX_EVAL_CLAW_TIMEOUT_MS the claw run timeout applied to the S2S call.
+   *
+   * The dispatch fires the SEEDED "onyx-ask-ai" agent row — slug hardcoded in
+   * the worker; bench tool narrowing (onyx-bench-search only) is also
+   * programmatic. Retrieval reaches the benchmark Vespa DIRECTLY
+   * (CONFIG.onyxVespaEndpoint) from the tool child — no spaces backend in the
+   * path.
+   */
+  onyxVespaEndpoint: (process.env["ONYX_EVAL_VESPA_ENDPOINT"] ?? "").replace(/\/+$/, ""),
+  onyxWorkspaceId: process.env["ONYX_EVAL_WORKSPACE_ID"] ?? "",
+  onyxEvalClawTimeoutMs: Number(process.env["ONYX_EVAL_CLAW_TIMEOUT_MS"] ?? 300_000),
+  /**
    * Entity extraction — reads a channel's threads/tickets out of Vespa and
    * discovers the entity types the org talks about. The completions run on
    * xyne-claw (see services/entityExtraction/entityLlmClient.ts), so the model
@@ -362,3 +370,20 @@ export const ERROR_PIPELINE = {
   agentUserId: process.env["ERROR_PIPELINE_AGENT_USER_ID"] ?? "",
   agentTimeoutMs: 30 * 60 * 1000,
 } as const;
+
+export const CLAUDE_OAUTH = {
+  clientId: process.env["CLAUDE_OAUTH_CLIENT_ID"] ?? "",
+  authorizeUrl: process.env["CLAUDE_OAUTH_AUTHORIZE_URL"] ?? "",
+  tokenUrl: process.env["CLAUDE_OAUTH_TOKEN_URL"] ?? "",
+  redirectUri: process.env["CLAUDE_OAUTH_REDIRECT_URI"] ?? "",
+  scopes: process.env["CLAUDE_OAUTH_SCOPES"] ?? "",
+  pkcePrefix: process.env["CLAUDE_OAUTH_PKCE_PREFIX"] ?? "claude-pkce-user:",
+} as const;
+
+export const claudeOAuthConfigured = (): boolean =>
+  Boolean(
+    CLAUDE_OAUTH.clientId &&
+      CLAUDE_OAUTH.authorizeUrl &&
+      CLAUDE_OAUTH.tokenUrl &&
+      CLAUDE_OAUTH.redirectUri,
+  );

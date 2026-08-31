@@ -5,10 +5,9 @@ import { toast } from 'sonner';
 import { SearchableMultiSelect } from '../../../components/ui/SearchableMultiSelect/SearchableMultiSelect';
 import type { SearchableMultiSelectOption } from '../../../components/ui/SearchableMultiSelect/SearchableMultiSelect.types';
 import { Button } from '../../../components/ui/Button/Button';
-import { tagsApi } from '../../../api/tagsApi';
 import { useRecordingLabelSuggestions } from '../../../hooks/useRecordingLabelSuggestions';
 import {
-  markResolvedRecordingLabelMethod,
+  confirmRecordingLabelSuggestion,
   useResolvedRecordingLabels,
 } from '../../../hooks/useResolvedRecordingLabels';
 import { cn } from '../../../utils/classNames';
@@ -65,7 +64,7 @@ export function LabelChip({
 }
 
 /** An AI-suggested (unconfirmed) label — tick to keep it (moves into the confirmed pills), cross to discard it. */
-function SuggestedLabelChip({
+export function SuggestedLabelChip({
   label,
   onConfirm,
   onReject,
@@ -83,7 +82,10 @@ function SuggestedLabelChip({
         type='button'
         className='rounded-sm opacity-70 hover:opacity-100'
         aria-label={`Confirm suggested label ${label}`}
-        onClick={onConfirm}
+        onClick={event => {
+          event.stopPropagation();
+          onConfirm();
+        }}
         data-track-category='RecordingDetailV2'
         data-track-name='confirm_suggested_label'
       >
@@ -93,7 +95,10 @@ function SuggestedLabelChip({
         type='button'
         className='rounded-sm opacity-70 hover:opacity-100'
         aria-label={`Dismiss suggested label ${label}`}
-        onClick={onReject}
+        onClick={event => {
+          event.stopPropagation();
+          onReject();
+        }}
         data-track-category='RecordingDetailV2'
         data-track-name='reject_suggested_label'
       >
@@ -113,20 +118,20 @@ export function RecordingLabelPicker({
   const resolvable = useMemo(() => [...labels, ...suggestions], [labels, suggestions]);
   const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(resolvable);
 
-  // Confirmed labels eg: TagMethod === MANUAL are distinguish b/w the LLM tags and shared public viewable
+  // Confirmed labels (TagMethod.MANUAL) vs still-pending suggestions (LLM or AUTOMATED).
   const confirmedLabels = useMemo(
-    () => labels.filter(id => resolveMethod(id) !== TagMethod.LLM),
+    () => labels.filter(id => resolveMethod(id) === TagMethod.MANUAL),
     [labels, resolveMethod],
   );
   const suggestedLabels = useMemo(
-    () => (canEdit ? labels.filter(id => resolveMethod(id) === TagMethod.LLM) : []),
+    () => (canEdit ? labels.filter(id => resolveMethod(id) !== TagMethod.MANUAL) : []),
     [labels, canEdit, resolveMethod],
   );
 
   const options = useMemo<SearchableMultiSelectOption[]>(
     () =>
       normalizeRecordingTags([...suggestions, ...labels])
-        .filter(label => resolveMethod(label) !== TagMethod.LLM)
+        .filter(label => resolveMethod(label) === TagMethod.MANUAL)
         .map(label => ({ value: label, displayLabel: resolveLabel(label) }))
         .sort((left, right) => left.displayLabel.localeCompare(right.displayLabel))
         .map(({ value, displayLabel }) => ({
@@ -169,11 +174,10 @@ export function RecordingLabelPicker({
 
   /** Tick: keep the AI-suggested tag — flips its Tag row to `manual` in place, no labels change needed. */
   const handleConfirmSuggestion = async (labelId: string): Promise<void> => {
-    markResolvedRecordingLabelMethod(labelId, TagMethod.MANUAL);
+    const revertMethod = resolveMethod(labelId);
     try {
-      await tagsApi.confirmTag(labelId);
+      await confirmRecordingLabelSuggestion(labelId, revertMethod);
     } catch {
-      markResolvedRecordingLabelMethod(labelId, TagMethod.LLM);
       toast.error('Failed to confirm label');
     }
   };

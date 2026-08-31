@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
+import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { agentChainWorkflowRepository, agentRepository } from "../repositories/index.js";
-import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -10,6 +11,8 @@ import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
+
+import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("chain-workflows");
@@ -584,112 +587,100 @@ export { parseTriggers as parseWorkflowTriggers };
 /*  Routes                                                              */
 /* ------------------------------------------------------------------ */
 
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
 
-    const channelId = typeof req.query["channelId"] === "string" ? req.query["channelId"] : undefined;
-    if (channelId) {
-      const rows = await agentChainWorkflowRepository.listByChannel(channelId);
-      const admin = await isClawAdmin(requesterId);
-      const visible = admin
-        ? rows
-        : rows.filter((row) => row.createdByUserId === requesterId || row.workflow.createdByUserId === requesterId);
-      res.json({ success: true, data: visible });
-      return;
-    }
-
-    const rows = await agentChainWorkflowRepository.listByUser(requesterId);
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    log.error("[chain-workflows] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const channelId = typeof req.query["channelId"] === "string" ? req.query["channelId"] : undefined;
+  if (channelId) {
+    const rows = await agentChainWorkflowRepository.listByChannel(channelId);
+    const admin = await isClawAdmin(requesterId);
+    const visible = admin
+      ? rows
+      : rows.filter((row) => row.createdByUserId === requesterId || row.workflow.createdByUserId === requesterId);
+    ok(res, visible);
+    return;
   }
-});
 
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+  const rows = await agentChainWorkflowRepository.listByUser(requesterId);
+  ok(res, rows);
+}));
 
-    const { name, definition, isPublished, triggers, useCreatorCredentials } = req.body as {
-      name?: string;
-      definition?: unknown;
-      isPublished?: boolean;
-      triggers?: TriggerPayloadItem[];
-      useCreatorCredentials?: boolean;
-    };
+router.post("/", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
 
-    if (!name?.trim()) { res.status(400).json({ success: false, error: "name is required" }); return; }
+  const { name, definition, isPublished, triggers, useCreatorCredentials } = req.body as {
+    name?: string;
+    definition?: unknown;
+    isPublished?: boolean;
+    triggers?: TriggerPayloadItem[];
+    useCreatorCredentials?: boolean;
+  };
 
-    const parsed = parseWorkflowDefinition(definition);
-    if (!parsed) { res.status(400).json({ success: false, error: "definition is invalid" }); return; }
+  if (!name?.trim()) throw badRequest("name is required");
 
-    const validationError = validateWorkflowDefinition(parsed);
-    if (validationError) { res.status(400).json({ success: false, error: validationError }); return; }
+  const parsed = parseWorkflowDefinition(definition);
+  if (!parsed) throw badRequest("definition is invalid");
 
-    // Build trigger JSON: for each trigger, for each channel → create one Spaces automation.
-    const triggersJson: WorkflowTrigger[] = [];
-    const allNewChannelIds = new Set<string>();
+  const validationError = validateWorkflowDefinition(parsed);
+  if (validationError) throw badRequest(validationError);
 
-    // Names are unique per creator (the default "New Channel Workflow" makes
-    // collisions the norm), so auto-suffix to the first free "… (n)" instead of
-    // failing the create on a unique violation.
-    const uniqueName = await agentChainWorkflowRepository.resolveUniqueName(requesterId, name);
+  // Build trigger JSON: for each trigger, for each channel → create one Spaces automation.
+  const triggersJson: WorkflowTrigger[] = [];
+  const allNewChannelIds = new Set<string>();
 
-    // Create the workflow first so we have its id for Spaces config.
-    const workflow = await agentChainWorkflowRepository.createWorkflow({
-      name: uniqueName,
-      definition: JSON.parse(JSON.stringify(parsed)) as Prisma.InputJsonValue,
-      triggers: [],
-      ...(typeof isPublished === "boolean" ? { isPublished } : {}),
-      // Consent is self-asserted by the credential owner: the creator opts in
-      // to lending THEIR own creds, so we pin credentialUserId to requesterId.
-      ...(useCreatorCredentials === true ? { credentialUserId: requesterId } : {}),
-      createdByUser: { connect: { id: requesterId } },
-    });
+  // Names are unique per creator (the default "New Channel Workflow" makes
+  // collisions the norm), so auto-suffix to the first free "… (n)" instead of
+  // failing the create on a unique violation.
+  const uniqueName = await agentChainWorkflowRepository.resolveUniqueName(requesterId, name);
 
-    if (Array.isArray(triggers)) {
-      for (const t of triggers) {
-        if (!t.type?.trim() || !Array.isArray(t.channelIds)) continue;
-        const channels: TriggerChannel[] = [];
-        const entryAgentSlug = parsed.nodes[0]!.agentSlug;
-        for (const channelId of t.channelIds) {
-          if (!channelId?.trim()) continue;
-          const { id, webhookUrl } = await createAndSubmitSpacesAutomation(
-            requesterId,
-            `${name.trim()} — ${t.type}`,
-            buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
-            { issueWebhook: isVcsTemplateTrigger(t.type) },
-          );
-          channels.push({ channelId, spacesAutomationId: id, webhookUrl });
-          allNewChannelIds.add(channelId);
-        }
-        triggersJson.push({
-          id: crypto.randomUUID(),
-          type: t.type,
-          channels,
-          ...(t.configValues && Object.keys(t.configValues).length > 0 ? { configValues: t.configValues } : {}),
-        });
+  // Create the workflow first so we have its id for Spaces config.
+  const workflow = await agentChainWorkflowRepository.createWorkflow({
+    name: uniqueName,
+    definition: JSON.parse(JSON.stringify(parsed)) as Prisma.InputJsonValue,
+    triggers: [],
+    ...(typeof isPublished === "boolean" ? { isPublished } : {}),
+    // Consent is self-asserted by the credential owner: the creator opts in
+    // to lending THEIR own creds, so we pin credentialUserId to requesterId.
+    ...(useCreatorCredentials === true ? { credentialUserId: requesterId } : {}),
+    createdByUser: { connect: { id: requesterId } },
+  });
+
+  if (Array.isArray(triggers)) {
+    for (const t of triggers) {
+      if (!t.type?.trim() || !Array.isArray(t.channelIds)) continue;
+      const channels: TriggerChannel[] = [];
+      const entryAgentSlug = parsed.nodes[0]!.agentSlug;
+      for (const channelId of t.channelIds) {
+        if (!channelId?.trim()) continue;
+        const { id, webhookUrl } = await createAndSubmitSpacesAutomation(
+          requesterId,
+          `${name.trim()} — ${t.type}`,
+          buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
+          { issueWebhook: isVcsTemplateTrigger(t.type) },
+        );
+        channels.push({ channelId, spacesAutomationId: id, webhookUrl });
+        allNewChannelIds.add(channelId);
       }
+      triggersJson.push({
+        id: crypto.randomUUID(),
+        type: t.type,
+        channels,
+        ...(t.configValues && Object.keys(t.configValues).length > 0 ? { configValues: t.configValues } : {}),
+      });
     }
-
-    // Persist triggers JSON.
-    await agentChainWorkflowRepository.updateWorkflow(workflow.id, {
-      triggers: triggersJson as unknown as Prisma.InputJsonValue,
-    });
-
-    // Sync bindings for chain executor.
-    await syncBindings(workflow.id, parsed.nodes[0]!.agentSlug, new Set(), allNewChannelIds, requesterId);
-
-    const created = await agentChainWorkflowRepository.findWorkflowById(workflow.id);
-    res.status(201).json({ success: true, data: created });
-  } catch (err) {
-    log.error("[chain-workflows] create error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
   }
-});
+
+  // Persist triggers JSON.
+  await agentChainWorkflowRepository.updateWorkflow(workflow.id, {
+    triggers: triggersJson as unknown as Prisma.InputJsonValue,
+  });
+
+  // Sync bindings for chain executor.
+  await syncBindings(workflow.id, parsed.nodes[0]!.agentSlug, new Set(), allNewChannelIds, requesterId);
+
+  const created = await agentChainWorkflowRepository.findWorkflowById(workflow.id);
+  res.status(201).json({ success: true, data: created });
+}));
 
 router.put("/bindings/upsert", async (req: Request, res: Response) => {
   try {
@@ -730,6 +721,11 @@ router.put("/bindings/upsert", async (req: Request, res: Response) => {
     // scoped (e.g. an admin binding for another user, or "*" for any user).
     const targetUserId = userId?.trim() || requesterId;
 
+    if (targetUserId !== requesterId && !(await isClawAdmin(requesterId))) {
+      res.status(403).json({ success: false, error: "Only an admin can bind a workflow for another user" });
+      return;
+    }
+
     const workflow = await agentChainWorkflowRepository.findWorkflowById(workflowId.trim());
     if (!workflow) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
 
@@ -761,87 +757,67 @@ router.put("/bindings/upsert", async (req: Request, res: Response) => {
     res.json({ success: true, data: Array.isArray(channelIds) ? rows : rows[0] });
   } catch (err) {
     log.error("[chain-workflows] upsert binding error:", err);
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     res.status(500).json({ success: false, error: msg });
   }
 });
 
-router.patch("/bindings/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+router.patch("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
 
-    const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
-    if (!binding) { res.status(404).json({ success: false, error: "Binding not found" }); return; }
+  const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
+  if (!binding) throw notFound("Binding not found");
 
-    const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId);
-    if (!allowed) { res.status(403).json({ success: false, error: "Not allowed to update this binding" }); return; }
+  const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId);
+  if (!allowed) throw forbidden("Not allowed to update this binding");
 
-    const { enabled } = req.body as { enabled?: boolean };
-    if (typeof enabled !== "boolean") { res.status(400).json({ success: false, error: "enabled (boolean) is required" }); return; }
+  const { enabled } = req.body as { enabled?: boolean };
+  if (typeof enabled !== "boolean") throw badRequest("enabled (boolean) is required");
 
-    const row = await agentChainWorkflowRepository.setBindingEnabled(req.params.id, enabled);
-    res.json({ success: true, data: row });
-  } catch (err) {
-    log.error("[chain-workflows] patch binding error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const row = await agentChainWorkflowRepository.setBindingEnabled(req.params.id, enabled);
+  ok(res, row);
+}));
+
+router.delete("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
+
+  const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
+  if (!binding) throw notFound("Binding not found");
+
+  const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId);
+  if (!allowed) throw forbidden("Not allowed to delete this binding");
+
+  await agentChainWorkflowRepository.deleteBinding(req.params.id);
+  ok(res);
+}));
+
+router.get("/bindings/resolve", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
+
+  const channelId = typeof req.query["channelId"] === "string" ? req.query["channelId"].trim() : "";
+  const entryAgentSlug = typeof req.query["entryAgentSlug"] === "string" ? req.query["entryAgentSlug"].trim() : "";
+  // Which user's binding to resolve — defaults to the requester (self).
+  const userId = typeof req.query["userId"] === "string" && req.query["userId"].trim()
+    ? req.query["userId"].trim()
+    : requesterId;
+
+  if (!channelId || !entryAgentSlug) {
+    throw badRequest("channelId and entryAgentSlug are required");
   }
-});
 
-router.delete("/bindings/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-
-    const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
-    if (!binding) { res.status(404).json({ success: false, error: "Binding not found" }); return; }
-
-    const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId);
-    if (!allowed) { res.status(403).json({ success: false, error: "Not allowed to delete this binding" }); return; }
-
-    await agentChainWorkflowRepository.deleteBinding(req.params.id);
-    res.json({ success: true });
-  } catch (err) {
-    log.error("[chain-workflows] delete binding error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const row = await agentChainWorkflowRepository.getBinding(channelId, entryAgentSlug, userId);
+  if (!row) {
+    ok(res, null);
+    return;
   }
-});
 
-router.get("/bindings/resolve", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-
-    const channelId = typeof req.query["channelId"] === "string" ? req.query["channelId"].trim() : "";
-    const entryAgentSlug = typeof req.query["entryAgentSlug"] === "string" ? req.query["entryAgentSlug"].trim() : "";
-    // Which user's binding to resolve — defaults to the requester (self).
-    const userId = typeof req.query["userId"] === "string" && req.query["userId"].trim()
-      ? req.query["userId"].trim()
-      : requesterId;
-
-    if (!channelId || !entryAgentSlug) {
-      res.status(400).json({ success: false, error: "channelId and entryAgentSlug are required" });
-      return;
-    }
-
-    const row = await agentChainWorkflowRepository.getBinding(channelId, entryAgentSlug, userId);
-    if (!row) {
-      res.json({ success: true, data: null });
-      return;
-    }
-
-    const admin = await isClawAdmin(requesterId);
-    if (!admin && row.createdByUserId !== requesterId && row.workflow.createdByUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Not allowed to read this binding" });
-      return;
-    }
-
-    res.json({ success: true, data: row });
-  } catch (err) {
-    log.error("[chain-workflows] get binding error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const admin = await isClawAdmin(requesterId);
+  if (!admin && row.createdByUserId !== requesterId && row.workflow.createdByUserId !== requesterId) {
+    throw forbidden("Not allowed to read this binding");
   }
-});
+
+  ok(res, row);
+}));
 
 // ── "Push to global" request queue ────────────────────────────────────────
 //   owner requests                → POST /:id/request-global
@@ -852,240 +828,188 @@ router.get("/bindings/resolve", async (req: Request, res: Response) => {
 // NOTE: these are declared BEFORE the "/:id" routes so the literal
 // "global-requests" path isn't captured as a workflow id.
 
-router.post("/:id/request-global", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      res.status(401).json({ success: false, error: "x-user-id required" });
-      return;
-    }
-    const workflow = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
-    if (!workflow) {
-      res.status(404).json({ success: false, error: "Workflow not found" });
-      return;
-    }
-    if (!(await canAccessWorkflow(requesterId, workflow.createdByUserId))) {
-      res.status(403).json({ success: false, error: "Not allowed to request promotion for this workflow" });
-      return;
-    }
-    if (workflow.global) {
-      res.json({ success: true, data: { alreadyGlobal: true } });
-      return;
-    }
-    const request = await agentChainWorkflowRepository.createGlobalRequest(workflow.id, requesterId);
-    res.json({ success: true, data: request });
-  } catch (err) {
-    log.error("[chain-workflows] request-global error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.post("/:id/request-global", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id required");
   }
-});
+  const workflow = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
+  if (!workflow) {
+    throw notFound("Workflow not found");
+  }
+  if (!(await canAccessWorkflow(requesterId, workflow.createdByUserId))) {
+    throw forbidden("Not allowed to request promotion for this workflow");
+  }
+  if (workflow.global) {
+    ok(res, { alreadyGlobal: true });
+    return;
+  }
+  const request = await agentChainWorkflowRepository.createGlobalRequest(workflow.id, requesterId);
+  ok(res, request);
+}));
 
-router.get("/global-requests", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId || !(await isClawAdmin(requesterId))) {
-      res.status(403).json({ success: false, error: "Admin access required" });
-      return;
+router.get("/global-requests", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId || !(await isClawAdmin(requesterId))) {
+    throw forbidden("Admin access required");
+  }
+  const scope = getAdminOrgScope(req, "/chain-workflows/global-requests");
+  // TODO(admin-org-scope): workflow_global_requests has no orgId; scope through requestedByUserId.
+  const requestUserIds = scope.orgId
+    ? await prisma.user.findMany({
+      where: { orgId: scope.orgId },
+      select: { id: true },
+    }).then((users) => users.map((u) => u.id))
+    : undefined;
+  const rows = await agentChainWorkflowRepository.listPendingGlobalRequests(requestUserIds);
+  // Attach requester display info (plain id → name/email).
+  const userIds = Array.from(new Set(rows.map((r) => r.requestedByUserId)));
+  const users = userIds.length
+    ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true, orgId: true } })
+    : [];
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const orgNames = scope.allOrgs ? await getOrgNameMap(users.map((u) => u.orgId)) : new Map();
+  ok(res, rows.map((r) => {
+    const user = userMap.get(r.requestedByUserId);
+    return {
+      ...r,
+      ...(scope.allOrgs ? withOrgLabel({ orgId: user?.orgId ?? null }, orgNames) : {}),
+      requestedByUser: user ?? null,
+    };
+  }));
+}));
+
+router.post("/global-requests/:id/approve", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId || !(await isClawAdmin(requesterId))) {
+    throw forbidden("Admin access required");
+  }
+  const result = await agentChainWorkflowRepository.approveGlobalRequest(req.params.id, requesterId);
+  if (!result) {
+    throw new HttpError(409, "Request not found or no longer pending");
+  }
+  ok(res, result);
+}));
+
+router.post("/global-requests/:id/reject", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId || !(await isClawAdmin(requesterId))) {
+    throw forbidden("Admin access required");
+  }
+  const note = typeof (req.body as { note?: unknown })?.note === "string" ? (req.body as { note: string }).note : undefined;
+  const result = await agentChainWorkflowRepository.rejectGlobalRequest(req.params.id, requesterId, note);
+  ok(res, result);
+}));
+
+router.post("/global-requests/:id/cancel", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id required");
+  }
+  const reqRow = await agentChainWorkflowRepository.findGlobalRequestById(req.params.id);
+  if (!reqRow) {
+    throw notFound("Request not found");
+  }
+  const isAdmin = await isClawAdmin(requesterId);
+  if (!isAdmin && reqRow.requestedByUserId !== requesterId) {
+    throw forbidden("Not allowed to cancel this request");
+  }
+  const result = await agentChainWorkflowRepository.cancelGlobalRequest(req.params.id);
+  ok(res, result);
+}));
+
+router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
+
+  const row = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
+  if (!row) throw notFound("Workflow not found");
+
+  const allowed = await canAccessWorkflow(requesterId, row.createdByUserId);
+  if (!allowed) throw forbidden("Not allowed to read this workflow");
+
+  ok(res, row);
+}));
+
+router.put("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
+
+  const existing = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
+  if (!existing) throw notFound("Workflow not found");
+
+  const allowed = await canAccessWorkflow(requesterId, existing.createdByUserId);
+  if (!allowed) throw forbidden("Not allowed to update this workflow");
+
+  const { name, definition, isPublished, triggers, useCreatorCredentials } = req.body as {
+    name?: string;
+    definition?: unknown;
+    isPublished?: boolean;
+    triggers?: TriggerPayloadItem[] | null;
+    useCreatorCredentials?: boolean;
+  };
+
+  // Credential consent can only be CHANGED by the credential owner (the
+  // workflow creator) — an admin editing someone else's workflow must not be
+  // able to consent on the owner's behalf. Only enforce/apply when the
+  // requested value actually differs from the stored state, so that an admin
+  // saving other fields (and echoing back the same flag) isn't blocked.
+  const hasConsent = existing.credentialUserId != null;
+  const consentChanged = useCreatorCredentials !== undefined && useCreatorCredentials !== hasConsent;
+  if (consentChanged && requesterId !== existing.createdByUserId) {
+    throw forbidden("Only the workflow owner can change credential consent");
+  }
+
+  // Names are unique per creator. On an explicit rename, reject a collision
+  // with a clear 409 (rather than auto-suffixing — the user typed this name on
+  // purpose). Checked against the OWNER's namespace, since an admin may edit
+  // someone else's workflow. No-op renames (same name) are allowed.
+  if (name !== undefined && name.trim() !== existing.name) {
+    const taken = await agentChainWorkflowRepository.nameTaken(
+      existing.createdByUserId,
+      name.trim(),
+      existing.id,
+    );
+    if (taken) {
+      throw new HttpError(409, `A workflow named "${name.trim()}" already exists`);
     }
-    const scope = getAdminOrgScope(req, "/chain-workflows/global-requests");
-    // TODO(admin-org-scope): workflow_global_requests has no orgId; scope through requestedByUserId.
-    const requestUserIds = scope.orgId
-      ? await prisma.user.findMany({
-        where: { orgId: scope.orgId },
-        select: { id: true },
-      }).then((users) => users.map((u) => u.id))
-      : undefined;
-    const rows = await agentChainWorkflowRepository.listPendingGlobalRequests(requestUserIds);
-    // Attach requester display info (plain id → name/email).
-    const userIds = Array.from(new Set(rows.map((r) => r.requestedByUserId)));
-    const users = userIds.length
-      ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true, orgId: true } })
-      : [];
-    const userMap = new Map(users.map((u) => [u.id, u]));
-    const orgNames = scope.allOrgs ? await getOrgNameMap(users.map((u) => u.orgId)) : new Map();
-    res.json({
-      success: true,
-      data: rows.map((r) => {
-        const user = userMap.get(r.requestedByUserId);
-        return {
-          ...r,
-          ...(scope.allOrgs ? withOrgLabel({ orgId: user?.orgId ?? null }, orgNames) : {}),
-          requestedByUser: user ?? null,
-        };
-      }),
+  }
+
+  let parsedDefinition: WorkflowDefinition | undefined;
+  if (definition !== undefined) {
+    parsedDefinition = parseWorkflowDefinition(definition) ?? undefined;
+    if (!parsedDefinition) throw badRequest("definition is invalid");
+    const validationError = validateWorkflowDefinition(parsedDefinition);
+    if (validationError) throw badRequest(validationError);
+  }
+
+  const updateData: Prisma.AgentChainWorkflowUpdateInput = {
+    ...(name !== undefined ? { name: name.trim() } : {}),
+    ...(parsedDefinition !== undefined ? { definition: JSON.parse(JSON.stringify(parsedDefinition)) as Prisma.InputJsonValue } : {}),
+    ...(typeof isPublished === "boolean" ? { isPublished } : {}),
+    ...(consentChanged
+      ? { credentialUserId: useCreatorCredentials ? existing.createdByUserId : null }
+      : {}),
+  };
+
+  await agentChainWorkflowRepository.updateWorkflow(req.params.id, updateData);
+
+  // Sync triggers if provided.
+  if (triggers !== undefined) {
+    const entryAgentSlug = parsedDefinition?.nodes[0]?.agentSlug
+      ?? parseWorkflowDefinition(existing.definition)?.nodes[0]?.agentSlug
+      ?? "";
+    await syncWorkflowTriggers({
+      workflowId: req.params.id,
+      workflowName: name?.trim() || existing.name,
+      entryAgentSlug,
+      requesterId,
+      existingTriggers: parseTriggers(existing.triggers),
+      newTriggers: triggers,
     });
-  } catch (err) {
-    log.error("[chain-workflows] list global-requests error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
   }
-});
 
-router.post("/global-requests/:id/approve", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId || !(await isClawAdmin(requesterId))) {
-      res.status(403).json({ success: false, error: "Admin access required" });
-      return;
-    }
-    const result = await agentChainWorkflowRepository.approveGlobalRequest(req.params.id, requesterId);
-    if (!result) {
-      res.status(409).json({ success: false, error: "Request not found or no longer pending" });
-      return;
-    }
-    res.json({ success: true, data: result });
-  } catch (err) {
-    log.error("[chain-workflows] approve global-request error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.post("/global-requests/:id/reject", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId || !(await isClawAdmin(requesterId))) {
-      res.status(403).json({ success: false, error: "Admin access required" });
-      return;
-    }
-    const note = typeof (req.body as { note?: unknown })?.note === "string" ? (req.body as { note: string }).note : undefined;
-    const result = await agentChainWorkflowRepository.rejectGlobalRequest(req.params.id, requesterId, note);
-    res.json({ success: true, data: result });
-  } catch (err) {
-    log.error("[chain-workflows] reject global-request error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.post("/global-requests/:id/cancel", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      res.status(401).json({ success: false, error: "x-user-id required" });
-      return;
-    }
-    const reqRow = await agentChainWorkflowRepository.findGlobalRequestById(req.params.id);
-    if (!reqRow) {
-      res.status(404).json({ success: false, error: "Request not found" });
-      return;
-    }
-    const isAdmin = await isClawAdmin(requesterId);
-    if (!isAdmin && reqRow.requestedByUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Not allowed to cancel this request" });
-      return;
-    }
-    const result = await agentChainWorkflowRepository.cancelGlobalRequest(req.params.id);
-    res.json({ success: true, data: result });
-  } catch (err) {
-    log.error("[chain-workflows] cancel global-request error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-
-    const row = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
-    if (!row) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
-
-    const allowed = await canAccessWorkflow(requesterId, row.createdByUserId);
-    if (!allowed) { res.status(403).json({ success: false, error: "Not allowed to read this workflow" }); return; }
-
-    res.json({ success: true, data: row });
-  } catch (err) {
-    log.error("[chain-workflows] get error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.put("/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-
-    const existing = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
-    if (!existing) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
-
-    const allowed = await canAccessWorkflow(requesterId, existing.createdByUserId);
-    if (!allowed) { res.status(403).json({ success: false, error: "Not allowed to update this workflow" }); return; }
-
-    const { name, definition, isPublished, triggers, useCreatorCredentials } = req.body as {
-      name?: string;
-      definition?: unknown;
-      isPublished?: boolean;
-      triggers?: TriggerPayloadItem[] | null;
-      useCreatorCredentials?: boolean;
-    };
-
-    // Credential consent can only be CHANGED by the credential owner (the
-    // workflow creator) — an admin editing someone else's workflow must not be
-    // able to consent on the owner's behalf. Only enforce/apply when the
-    // requested value actually differs from the stored state, so that an admin
-    // saving other fields (and echoing back the same flag) isn't blocked.
-    const hasConsent = existing.credentialUserId != null;
-    const consentChanged = useCreatorCredentials !== undefined && useCreatorCredentials !== hasConsent;
-    if (consentChanged && requesterId !== existing.createdByUserId) {
-      res.status(403).json({ success: false, error: "Only the workflow owner can change credential consent" });
-      return;
-    }
-
-    // Names are unique per creator. On an explicit rename, reject a collision
-    // with a clear 409 (rather than auto-suffixing — the user typed this name on
-    // purpose). Checked against the OWNER's namespace, since an admin may edit
-    // someone else's workflow. No-op renames (same name) are allowed.
-    if (name !== undefined && name.trim() !== existing.name) {
-      const taken = await agentChainWorkflowRepository.nameTaken(
-        existing.createdByUserId,
-        name.trim(),
-        existing.id,
-      );
-      if (taken) {
-        res.status(409).json({ success: false, error: `A workflow named "${name.trim()}" already exists` });
-        return;
-      }
-    }
-
-    let parsedDefinition: WorkflowDefinition | undefined;
-    if (definition !== undefined) {
-      parsedDefinition = parseWorkflowDefinition(definition) ?? undefined;
-      if (!parsedDefinition) { res.status(400).json({ success: false, error: "definition is invalid" }); return; }
-      const validationError = validateWorkflowDefinition(parsedDefinition);
-      if (validationError) { res.status(400).json({ success: false, error: validationError }); return; }
-    }
-
-    const updateData: Prisma.AgentChainWorkflowUpdateInput = {
-      ...(name !== undefined ? { name: name.trim() } : {}),
-      ...(parsedDefinition !== undefined ? { definition: JSON.parse(JSON.stringify(parsedDefinition)) as Prisma.InputJsonValue } : {}),
-      ...(typeof isPublished === "boolean" ? { isPublished } : {}),
-      ...(consentChanged
-        ? { credentialUserId: useCreatorCredentials ? existing.createdByUserId : null }
-        : {}),
-    };
-
-    await agentChainWorkflowRepository.updateWorkflow(req.params.id, updateData);
-
-    // Sync triggers if provided.
-    if (triggers !== undefined) {
-      const entryAgentSlug = parsedDefinition?.nodes[0]?.agentSlug
-        ?? parseWorkflowDefinition(existing.definition)?.nodes[0]?.agentSlug
-        ?? "";
-      await syncWorkflowTriggers({
-        workflowId: req.params.id,
-        workflowName: name?.trim() || existing.name,
-        entryAgentSlug,
-        requesterId,
-        existingTriggers: parseTriggers(existing.triggers),
-        newTriggers: triggers,
-      });
-    }
-
-    const row = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
-    res.json({ success: true, data: row });
-  } catch (err) {
-    log.error("[chain-workflows] update error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+  const row = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
+  ok(res, row);
+}));
 
 router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
@@ -1150,193 +1074,184 @@ function buildTriggerInitialMessage(triggerPayload: Record<string, unknown> | un
   return `Automation event triggered: ${type ?? "unknown"}`;
 }
 
-router.post("/:id/trigger", requireS2S, async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const { userId, triggerPayload, conversationId: bodyConversationId, targetChannelId } = req.body as {
-      userId?: string;
-      triggerPayload?: Record<string, unknown>;
-      conversationId?: string;
-      targetChannelId?: string;
-    };
+router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const { userId, triggerPayload, conversationId: bodyConversationId, targetChannelId } = req.body as {
+    userId?: string;
+    triggerPayload?: Record<string, unknown>;
+    conversationId?: string;
+    targetChannelId?: string;
+  };
 
-    if (!userId) { res.status(400).json({ success: false, error: "userId is required" }); return; }
+  if (!userId) throw badRequest("userId is required");
 
-    const workflow = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
-    if (!workflow) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
+  const workflow = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
+  if (!workflow) throw notFound("Workflow not found");
 
-    // Credential-resolution identity. If the owner consented to lend their
-    // creds (credentialUserId set), the run resolves tools/MCP as THAT user —
-    // independent of whatever identity the trigger supplied. Otherwise fall
-    // back to the trigger-supplied userId.
-    const effectiveUserId = workflow.credentialUserId ?? userId;
-    const workflowOrgId = getOrgId(req)
-      ?? (await prisma.user.findUnique({
-        where: { id: workflow.credentialUserId ?? workflow.createdByUserId },
-        select: { orgId: true },
-    }))?.orgId;
-    if (!workflowOrgId) {
-      log.error(`[chain-workflows/trigger] orgId is required workflowId=${workflow.id} routeWorkflowId=${req.params.id} userId=${userId} effectiveUserId=${effectiveUserId} ownerUserId=${workflow.createdByUserId} credentialUserId=${workflow.credentialUserId ?? "none"} conversationId=${bodyConversationId ?? "none"} targetChannelId=${targetChannelId ?? "none"}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
-      return;
-    }
+  // Credential-resolution identity. If the owner consented to lend their
+  // creds (credentialUserId set), the run resolves tools/MCP as THAT user —
+  // independent of whatever identity the trigger supplied. Otherwise fall
+  // back to the trigger-supplied userId.
+  const effectiveUserId = workflow.credentialUserId ?? userId;
+  const workflowOrgId = getOrgId(req)
+    ?? (await prisma.user.findUnique({
+      where: { id: workflow.credentialUserId ?? workflow.createdByUserId },
+      select: { orgId: true },
+  }))?.orgId;
+  if (!workflowOrgId) {
+    log.error(`[chain-workflows/trigger] orgId is required workflowId=${workflow.id} routeWorkflowId=${req.params.id} userId=${userId} effectiveUserId=${effectiveUserId} ownerUserId=${workflow.createdByUserId} credentialUserId=${workflow.credentialUserId ?? "none"} conversationId=${bodyConversationId ?? "none"} targetChannelId=${targetChannelId ?? "none"}`);
+    throw badRequest("orgId is required");
+  }
 
-    const definition = parseWorkflowDefinition(workflow.definition);
-    if (!definition || definition.nodes.length === 0) {
-      res.status(400).json({ success: false, error: "Workflow has no nodes" });
-      return;
-    }
+  const definition = parseWorkflowDefinition(workflow.definition);
+  if (!definition || definition.nodes.length === 0) {
+    throw badRequest("Workflow has no nodes");
+  }
 
-    const entryAgentSlug = definition.nodes[0]!.agentSlug;
+  const entryAgentSlug = definition.nodes[0]!.agentSlug;
 
-    const msgPayload = triggerPayload?.["message"] as Record<string, unknown> | undefined;
-    const emailPayload = triggerPayload?.["email"] as Record<string, unknown> | undefined;
-    const callPayload = triggerPayload?.["call"] as Record<string, unknown> | undefined;
-    const ticketPayload = triggerPayload?.["ticket"] as Record<string, unknown> | undefined;
-    const authorPayload = triggerPayload?.["author"] as Record<string, unknown> | undefined;
-    const requesterPayload = triggerPayload?.["requester"] as Record<string, unknown> | undefined;
+  const msgPayload = triggerPayload?.["message"] as Record<string, unknown> | undefined;
+  const emailPayload = triggerPayload?.["email"] as Record<string, unknown> | undefined;
+  const callPayload = triggerPayload?.["call"] as Record<string, unknown> | undefined;
+  const ticketPayload = triggerPayload?.["ticket"] as Record<string, unknown> | undefined;
+  const authorPayload = triggerPayload?.["author"] as Record<string, unknown> | undefined;
+  const requesterPayload = triggerPayload?.["requester"] as Record<string, unknown> | undefined;
 
-    let conversationId: string | undefined =
-      (triggerPayload?.["conversationId"] as string | undefined) ??
-      (msgPayload?.["conversationId"] as string | undefined) ??
-      (emailPayload?.["conversationId"] as string | undefined) ??
-      (callPayload?.["conversationId"] as string | undefined) ??
-      (ticketPayload?.["conversationId"] as string | undefined) ??
-      bodyConversationId;
+  let conversationId: string | undefined =
+    (triggerPayload?.["conversationId"] as string | undefined) ??
+    (msgPayload?.["conversationId"] as string | undefined) ??
+    (emailPayload?.["conversationId"] as string | undefined) ??
+    (callPayload?.["conversationId"] as string | undefined) ??
+    (ticketPayload?.["conversationId"] as string | undefined) ??
+    bodyConversationId;
 
-    let channelId: string =
-      (msgPayload?.["channelId"] as string | undefined) ??
-      (emailPayload?.["channelId"] as string | undefined) ??
-      (callPayload?.["channelId"] as string | undefined) ??
-      (ticketPayload?.["channelId"] as string | undefined) ??
-      targetChannelId ?? "";
+  let channelId: string =
+    (msgPayload?.["channelId"] as string | undefined) ??
+    (emailPayload?.["channelId"] as string | undefined) ??
+    (callPayload?.["channelId"] as string | undefined) ??
+    (ticketPayload?.["channelId"] as string | undefined) ??
+    targetChannelId ?? "";
 
-    const senderId =
-      (triggerPayload?.["authorId"] as string | undefined) ??
-      (requesterPayload?.["email"] as string | undefined) ??
-      userId;
+  const senderId =
+    (triggerPayload?.["authorId"] as string | undefined) ??
+    (requesterPayload?.["email"] as string | undefined) ??
+    userId;
 
-    const senderName =
-      (authorPayload?.["name"] as string | undefined) ??
-      (requesterPayload?.["name"] as string | undefined) ??
-      userId;
+  const senderName =
+    (authorPayload?.["name"] as string | undefined) ??
+    (requesterPayload?.["name"] as string | undefined) ??
+    userId;
 
-    const task = triggerPayload
-      ? `Automation event triggered. Payload: ${JSON.stringify(triggerPayload)}`
-      : "Automation event triggered.";
+  const task = triggerPayload
+    ? `Automation event triggered. Payload: ${JSON.stringify(triggerPayload)}`
+    : "Automation event triggered.";
 
-    if (!conversationId) {
-      try {
-        // Resolve channelId from workflow bindings if not in payload.
-        if (!channelId) {
-          const bindings = await agentChainWorkflowRepository.findBindingsByWorkflowId(req.params.id);
-          if (bindings.length > 0) {
-            channelId = bindings[0]!.channelId;
-            log.info(`[chain-workflows/trigger] resolved channelId=${channelId} from workflow binding`);
-          }
+  if (!conversationId) {
+    try {
+      // Resolve channelId from workflow bindings if not in payload.
+      if (!channelId) {
+        const bindings = await agentChainWorkflowRepository.findBindingsByWorkflowId(req.params.id);
+        if (bindings.length > 0) {
+          channelId = bindings[0]!.channelId;
+          log.info(`[chain-workflows/trigger] resolved channelId=${channelId} from workflow binding`);
         }
-
-        // Fallback: look up first channel from triggers JSON.
-        if (!channelId) {
-          const triggers = parseTriggers(workflow.triggers);
-          for (const t of triggers) {
-            if (t.channels.length > 0) {
-              channelId = t.channels[0]!.channelId;
-              log.info(`[chain-workflows/trigger] resolved channelId=${channelId} from trigger JSON`);
-              break;
-            }
-          }
-        }
-
-        if (channelId) {
-          const agentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
-          if (agentRecord?.spacesAppToken) {
-            const [ciphertext, iv, authTag] = agentRecord.spacesAppToken.split(":");
-            const appToken = ciphertext && iv && authTag
-              ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
-            if (appToken) {
-              const initialMessage = buildTriggerInitialMessage(triggerPayload);
-              const postResult = (await spacesAppFetch("/chat/postMessage", {
-                channelId, text: initialMessage,
-              }, appToken)) as { conversationId?: string };
-              if (postResult.conversationId) {
-                conversationId = postResult.conversationId;
-                log.info(`[chain-workflows/trigger] created conversation ${conversationId} in channel ${channelId}`);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        log.warn(`[chain-workflows/trigger] could not auto-create conversation:`,
-          err instanceof Error ? err.message : String(err));
       }
-    }
 
-    const entryAgentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
-    if (!entryAgentRecord) {
-      log.warn(`[chain-workflows/trigger] agent org-scoped miss slug=${entryAgentSlug} orgId=${workflowOrgId ?? "none"} workflowId=${workflow.id} userId=${userId}`);
-      res.status(404).json({ success: false, error: `agent "${entryAgentSlug}" not found` });
-      return;
-    }
-    const dispatchOrgId = entryAgentRecord.orgId;
+      // Fallback: look up first channel from triggers JSON.
+      if (!channelId) {
+        const triggers = parseTriggers(workflow.triggers);
+        for (const t of triggers) {
+          if (t.channels.length > 0) {
+            channelId = t.channels[0]!.channelId;
+            log.info(`[chain-workflows/trigger] resolved channelId=${channelId} from trigger JSON`);
+            break;
+          }
+        }
+      }
 
-    log.info(`[chain-workflows/trigger] workflowId=${req.params.id} entryAgent=${entryAgentSlug} userId=${effectiveUserId}${workflow.credentialUserId ? " (creator-creds consent)" : ""} conversationId=${conversationId} channelId=${channelId}`);
-
-    const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
-    const runRes = await fetch(runUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      },
-      body: JSON.stringify({
-        userId: effectiveUserId, task, agentSlug: entryAgentSlug,
-        orgId: dispatchOrgId,
-        context: triggerPayload ?? {}, conversationId,
-        callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-        progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-      }),
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!runRes.ok) {
-      const text = await runRes.text().catch(() => "");
-      log.error(`[chain-workflows] /run failed ${runRes.status}: ${text.slice(0, 200)}`);
-      res.status(500).json({ success: false, error: "Failed to start agent run" });
-      return;
-    }
-
-    const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
-
-    if (runBody.sessionId && conversationId) {
-      try {
-        if (entryAgentRecord?.spacesAppToken && entryAgentRecord.spacesAppId) {
-          const [ciphertext, iv, authTag] = entryAgentRecord.spacesAppToken.split(":");
+      if (channelId) {
+        const agentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
+        if (agentRecord?.spacesAppToken) {
+          const [ciphertext, iv, authTag] = agentRecord.spacesAppToken.split(":");
           const appToken = ciphertext && iv && authTag
             ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
-          const sessionContext: SessionContext = {
-            mentionedUserId: entryAgentRecord.spacesAppUserId ?? userId,
-            senderId, senderName, channelId,
-            channelName: channelId, conversationId,
-            task, agentSlug: entryAgentSlug,
-            agentId: entryAgentRecord.id,
-            agentOrgId: entryAgentRecord.orgId,
-            responseMode: "conversation", appToken,
-            spacesAppId: entryAgentRecord.spacesAppId,
-            spacesAppUserId: entryAgentRecord.spacesAppUserId ?? "",
-          };
-          await setSession(runBody.sessionId, sessionContext);
-          log.info(`[chain-workflows/trigger] stored session ctx sessionId=${runBody.sessionId} conversationId=${conversationId}`);
+          if (appToken) {
+            const initialMessage = buildTriggerInitialMessage(triggerPayload);
+            const postResult = (await spacesAppFetch("/chat/postMessage", {
+              channelId, text: initialMessage,
+            }, appToken)) as { conversationId?: string };
+            if (postResult.conversationId) {
+              conversationId = postResult.conversationId;
+              log.info(`[chain-workflows/trigger] created conversation ${conversationId} in channel ${channelId}`);
+            }
+          }
         }
-      } catch (sessionErr) {
-        log.error(`[chain-workflows/trigger] failed to store session context:`, sessionErr);
       }
+    } catch (err) {
+      log.warn(`[chain-workflows/trigger] could not auto-create conversation:`,
+        errMsg(err));
     }
-
-    res.json({ success: true, data: { sessionId: runBody.sessionId } });
-  } catch (err) {
-    log.error("[chain-workflows] trigger error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
   }
-});
+
+  const entryAgentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
+  if (!entryAgentRecord) {
+    log.warn(`[chain-workflows/trigger] agent org-scoped miss slug=${entryAgentSlug} orgId=${workflowOrgId ?? "none"} workflowId=${workflow.id} userId=${userId}`);
+    throw notFound(`agent "${entryAgentSlug}" not found`);
+  }
+  const dispatchOrgId = entryAgentRecord.orgId;
+
+  log.info(`[chain-workflows/trigger] workflowId=${req.params.id} entryAgent=${entryAgentSlug} userId=${effectiveUserId}${workflow.credentialUserId ? " (creator-creds consent)" : ""} conversationId=${conversationId} channelId=${channelId}`);
+
+  const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
+  const runRes = await fetch(runUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify({
+      userId: effectiveUserId, task, agentSlug: entryAgentSlug,
+      orgId: dispatchOrgId,
+      context: triggerPayload ?? {}, conversationId,
+      callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+      progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!runRes.ok) {
+    const text = await runRes.text().catch(() => "");
+    log.error(`[chain-workflows] /run failed ${runRes.status}: ${text.slice(0, 200)}`);
+    throw new HttpError(500, "Failed to start agent run");
+  }
+
+  const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
+
+  if (runBody.sessionId && conversationId) {
+    try {
+      if (entryAgentRecord?.spacesAppToken && entryAgentRecord.spacesAppId) {
+        const [ciphertext, iv, authTag] = entryAgentRecord.spacesAppToken.split(":");
+        const appToken = ciphertext && iv && authTag
+          ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
+        const sessionContext: SessionContext = {
+          mentionedUserId: entryAgentRecord.spacesAppUserId ?? userId,
+          senderId, senderName, channelId,
+          channelName: channelId, conversationId,
+          task, agentSlug: entryAgentSlug,
+          agentId: entryAgentRecord.id,
+          agentOrgId: entryAgentRecord.orgId,
+          responseMode: "conversation", appToken,
+          spacesAppId: entryAgentRecord.spacesAppId,
+          spacesAppUserId: entryAgentRecord.spacesAppUserId ?? "",
+        };
+        await setSession(runBody.sessionId, sessionContext);
+        log.info(`[chain-workflows/trigger] stored session ctx sessionId=${runBody.sessionId} conversationId=${conversationId}`);
+      }
+    } catch (sessionErr) {
+      log.error(`[chain-workflows/trigger] failed to store session context:`, sessionErr);
+    }
+  }
+
+  ok(res, { sessionId: runBody.sessionId });
+}));
 
 export { router as chainWorkflowsRouter };

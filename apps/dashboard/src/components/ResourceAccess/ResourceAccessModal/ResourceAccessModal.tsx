@@ -425,6 +425,8 @@ export const ResourceAccessModal = ({
                               onClick={() =>
                                 handleAccessChange(resource.id, option.value as AccessType | 'NONE')
                               }
+                              data-track-category='RESOURCE_ACCESS'
+                              data-track-name='SET_RESOURCE_ACCESS'
                               className='text-xs'
                             >
                               <span className='flex-1'>{option.label}</span>
@@ -451,10 +453,21 @@ export const ResourceAccessModal = ({
 
         {/* Footer */}
         <div className='border-t border-border p-6 flex gap-3 justify-end bg-background'>
-          <Button variant='outline' onClick={onClose} disabled={loading}>
+          <Button
+            variant='outline'
+            onClick={onClose}
+            data-track-category='RESOURCE_ACCESS'
+            data-track-name='CANCEL_RESOURCE_ACCESS'
+            disabled={loading}
+          >
             Cancel
           </Button>
-          <Button onClick={() => void handleSave()} disabled={loading}>
+          <Button
+            onClick={() => void handleSave()}
+            data-track-category='RESOURCE_ACCESS'
+            data-track-name='SAVE_RESOURCE_ACCESS'
+            disabled={loading}
+          >
             {loading ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
@@ -471,12 +484,20 @@ export const ResourceAccessModal = ({
                 {pendingAction === 'deactivate' && ' They will lose access to the workspace.'}
               </p>
               <div className='flex gap-3 justify-end'>
-                <Button variant='outline' onClick={handleCancelAction} disabled={activationLoading}>
+                <Button
+                  variant='outline'
+                  onClick={handleCancelAction}
+                  data-track-category='USER_ACTIVATION'
+                  data-track-name='CANCEL_ACTIVATION_ACTION'
+                  disabled={activationLoading}
+                >
                   Cancel
                 </Button>
                 <Button
                   variant={pendingAction === 'activate' ? 'default' : 'destructive'}
                   onClick={() => void handleConfirmAction()}
+                  data-track-category='USER_ACTIVATION'
+                  data-track-name='CONFIRM_ACTIVATION_ACTION'
                   disabled={activationLoading}
                 >
                   {activationLoading

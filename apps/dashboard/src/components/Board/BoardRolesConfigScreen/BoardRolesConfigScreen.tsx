@@ -312,7 +312,13 @@ const BoardRolesConfigScreen = ({
       <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
         <div className='bg-background rounded-lg p-8 text-center'>
           <p className='text-muted-foreground mb-4'>Board not found</p>
-          <Button onClick={onClose}>Close</Button>
+          <Button
+            onClick={onClose}
+            data-track-category='BOARD_ROLE_CONFIG'
+            data-track-name='CLOSE_BOARD_ROLES'
+          >
+            Close
+          </Button>
         </div>
       </div>
     );
@@ -324,19 +330,32 @@ const BoardRolesConfigScreen = ({
         {/* ── Top bar ── */}
         <header className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
           <div className='flex items-center gap-2 min-w-0'>
-            <Button variant='ghost' size='sm' onClick={() => (onBack ? onBack() : onClose())}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => (onBack ? onBack() : onClose())}
+              data-track-category='BOARD_ROLE_CONFIG'
+              data-track-name='BOARD_ROLES_BACK'
+            >
               <ArrowLeft size={15} /> Back
             </Button>
             <span className='text-sm font-medium text-foreground truncate'>Configure roles</span>
             {boardName && <Badge variant='secondary'>{boardName}</Badge>}
           </div>
           <div className='flex items-center gap-2'>
-            <Button variant='secondary' onClick={onClose}>
+            <Button
+              variant='secondary'
+              onClick={onClose}
+              data-track-category='BOARD_ROLE_CONFIG'
+              data-track-name='CANCEL_BOARD_ROLES'
+            >
               Cancel
             </Button>
             <Button
               className='bg-[#185FA5] hover:bg-[#0C447C] text-white'
               onClick={() => void handleSave()}
+              data-track-category='BOARD_ROLE_CONFIG'
+              data-track-name='SAVE_BOARD_ROLES'
             >
               Finish
             </Button>

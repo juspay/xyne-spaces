@@ -229,6 +229,8 @@ const MobileChatDirectory = ({
                           e.stopPropagation();
                           setChannelSortOrder(ChannelSortOrder.UNREAD);
                         }}
+                        data-track-category='MOBILE_CHAT_DIRECTORY'
+                        data-track-name='SORT_CHANNELS_BY_UNREAD'
                         className='gap-2'
                       >
                         <NotificationBellOn size={14} className='shrink-0' />
@@ -242,6 +244,8 @@ const MobileChatDirectory = ({
                           e.stopPropagation();
                           setChannelSortOrder(ChannelSortOrder.RECENCY);
                         }}
+                        data-track-category='MOBILE_CHAT_DIRECTORY'
+                        data-track-name='SORT_CHANNELS_BY_RECENCY'
                         className='gap-2'
                       >
                         <ClockDefault size={14} className='shrink-0' />
@@ -255,6 +259,8 @@ const MobileChatDirectory = ({
                           e.stopPropagation();
                           setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
                         }}
+                        data-track-category='MOBILE_CHAT_DIRECTORY'
+                        data-track-name='SORT_CHANNELS_BY_ALPHABETICAL'
                         className='gap-2'
                       >
                         <ListSortAlphabetically size={14} className='shrink-0' />

@@ -5,6 +5,7 @@
  * Handlers call the Spaces HTTP client and return MCP-formatted results.
  */
 
+import { errMsg } from "../../lib/errors.js";
 import {
   interact,
   search,
@@ -13,6 +14,7 @@ import {
   spacesFetchBuffer,
   spacesFetchText,
   appFetch,
+  appFetchBuffer,
   type SpacesAuthContext,
 } from "./xyne-spaces-client.js";
 import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
@@ -35,6 +37,7 @@ const log = createLogger("xyne-spaces-tools");
 const RAW_ATTACHMENT_INLINE_LIMIT_BYTES = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INLINE_LIMIT_BYTES"] ?? 5 * 1024 * 1024,
 );
+const isOnyxBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true";
 const ATTACHMENT_INGEST_TIMEOUT_MS = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INGEST_TIMEOUT_MS"] ?? 120_000,
 );
@@ -102,12 +105,24 @@ export interface ToolDef {
   /** Default (user-session) implementation, hits `/api/query` etc. */
   handler: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>;
   /**
-   * Optional app-token implementation, hits the `/api/apps/*` routes. A tool is
-   * only available in APP MODE if it defines this. As Spaces adds app routes for
-   * search / ticket-filter / user-search, give those tools an `appHandler` here
-   * — no duplicate `apps-*` tool is created; it's the SAME tool, app backend.
+   * Optional app-token implementation, hits the `/api/apps/*` routes. As
+   * Spaces adds app routes for search / ticket-filter / user-search, give
+   * those tools an `appHandler` here — no duplicate `apps-*` tool is created;
+   * it's the SAME tool, app backend. Tools WITHOUT one still run in app mode
+   * through `handler` when that handler only hits dual-auth `/claw` routes
+   * (interact / search / memorySearch — authenticateUserOrApp on the Spaces
+   * side), which is most of the read tools.
    */
   appHandler?: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>;
+  /**
+   * True when the tool is meaningless or broken without a human user token:
+   * either it acts AS the human (user-send-message) or its handler hits
+   * user-session-only routes with no app equivalent and no appHandler. The
+   * app-tools server (which always runs in app mode) hides these from its
+   * listing and rejects calls to them — otherwise they surface to automation
+   * runs and can only 401.
+   */
+  userOnly?: boolean;
 }
 
 function ok(text: string): ToolResult {
@@ -176,6 +191,19 @@ function err(message: string): ToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+function withToolErrors(
+  label: string,
+  fn: (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult>,
+): (params: Record<string, unknown>, ctx: HandlerContext) => Promise<ToolResult> {
+  return async (params, ctx) => {
+    try {
+      return await fn(params, ctx);
+    } catch (e) {
+      return err(`${label}: ${errMsg(e)}`);
+    }
+  };
+}
+
 function formatAttachmentBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
   const units = ["B", "KB", "MB", "GB"] as const;
@@ -237,6 +265,54 @@ function pushThreadCitation(
     ...(extras?.xyneId ? { xyneId: extras.xyneId } : {}),
     ...(extras?.mailId ? { mailId: extras.mailId } : {}),
   });
+}
+
+/**
+ * Strip Vespa's `<hi>` highlight tags for use as a citation LABEL. `cleanSnippet`
+ * turns them into `**bold**`, which is right for prose but renders as literal
+ * asterisks inside a chip, so labels get the plain form.
+ */
+function plainLabel(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const stripped = text.replace(/<\/?hi>/gi, "").trim();
+  return stripped || undefined;
+}
+
+/**
+ * Cite a call at whatever target it actually has.
+ *
+ * A channel call lives in a thread, so `pushThreadCitation` is right for it. A
+ * note-taker recording has neither channel nor conversation — it is created from
+ * a LiveKit webhook and never posted anywhere — so a thread citation silently
+ * produced nothing while the row still rendered an inline `[clf-…#N]` token.
+ * That left a chip with no citation behind it, which the dashboard treats as an
+ * unlinkable auto-citation and routes to the debug panel on click. Recordings
+ * get a `recording` citation pointing at `/recordings/:externalId` instead.
+ *
+ * Returns whether anything was emitted, so callers can skip the inline token for
+ * a call that has no linkable target at all rather than render a dead chip.
+ */
+function pushCallCitation(
+  out: Citation[],
+  call: { id: string; externalId?: string; callType?: string; channelId?: string },
+  conversationId: string | undefined,
+  chunkIndex: number,
+  label?: string,
+): boolean {
+  if (call.callType === "HEADLESS" && call.externalId) {
+    out.push({
+      kind: "recording",
+      recordingId: call.externalId,
+      chunkIndex,
+      ...(label ? { label } : {}),
+    });
+    return true;
+  }
+  if (call.channelId) {
+    pushThreadCitation(out, call.channelId, conversationId, chunkIndex, label);
+    return true;
+  }
+  return false;
 }
 
 function pushCanvasCitation(
@@ -468,6 +544,36 @@ async function resolveCanvasViewIds(canvasDocIds: string[]): Promise<Map<string,
   return out;
 }
 
+/**
+ * Batch Vespa file docId (= collectionItem.fileId, a stable UUID shared
+ * across all versions of the file) → collectionItem.id (the Postgres cuid
+ * the FE's KB file-viewer route, downloads, and picker all key on). The two
+ * ids are NOT interchangeable — see the identical translation map built in
+ * claw-auth's kb-handlers.ts (`vespaDocIdToItemId`) for the same reason.
+ * Without this, a COLLECTIONS citation's `collectionItemId`/url would carry
+ * the Vespa docId straight through and 404 (or resolve to nothing) on the FE.
+ */
+async function resolveCollectionItemIds(fileDocIds: string[]): Promise<Map<string, string>> {
+  // Sliced for the same gateway take-ceiling reason as resolveMailLinks.
+  const ids = [...new Set(fileDocIds.filter(Boolean))].slice(0, GATEWAY_MAX_TAKE);
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  try {
+    const rows = (await interact({
+      model: "collectionItem",
+      operation: "findMany",
+      where: { fileId: { in: ids } },
+      take: ids.length,
+    })) as Array<{ id: string; fileId: string }>;
+    for (const c of rows) {
+      out.set(c.fileId, c.id);
+    }
+  } catch {
+    // Non-fatal — COLLECTIONS rows degrade to a channel-level thread chip.
+  }
+  return out;
+}
+
 function applyChannelInfo(
   citations: Citation[],
   info: Map<string, { name?: string; scopeType?: string; type?: string }>,
@@ -693,7 +799,8 @@ const spacesSearch: ToolDef = {
     "Only skip the fetch step when the snippet itself unambiguously and completely answers the question.\n\n" +
     "## When NOT to use spaces-search\n" +
     "- Ticket queries by status/priority/assignee/board/tag/stage/project → use **spaces-tickets** (richer filters, structured output).\n" +
-    "- Meeting content (action items, decisions, transcripts) → use **spaces-meeting-insights**.\n" +
+    "- Meeting content by TOPIC (action items, decisions, what was said) → **spaces-meeting-insights** (vector search);\n" +
+    "  a known call, an exact list, or one transcript in full → **spaces-calls** (deterministic; includeTranscript=true).\n" +
     "- Reading a specific thread → use **spaces-messages** with `conversationId`.\n" +
     "- Recent activity for the user → use **spaces-activity**.\n\n" +
     "## Scoping (important)\n" +
@@ -806,8 +913,7 @@ const spacesSearch: ToolDef = {
     },
     // required: ["query"],
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Search error", async (args, ctx) => {
       const query = String(args["query"] ?? "").trim();
       const params: Record<string, string> = {};
       // Deterministic q vs filter-only — the model no longer passes a `filterOnly`
@@ -843,8 +949,6 @@ const spacesSearch: ToolDef = {
       if (args["orderBy"]) params["orderBy"] = String(args["orderBy"]);
       // Only forward groupBy when not already forced to "" by the offset path above.
       if (args["groupBy"] && !params["groupBy"]) params["groupBy"] = String(args["groupBy"]);
-
-      console.error("[spaces-search]", args);
 
       let data: {
         success: boolean;
@@ -964,10 +1068,7 @@ const spacesSearch: ToolDef = {
           citations,
         ),
       );
-    } catch (e) {
-      return err(`Search error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-search-v2 ─────────────────────────────────────────────────
@@ -990,7 +1091,8 @@ const spacesSearchV2: ToolDef = {
     "Only skip the fetch step when the snippet itself unambiguously and completely answers the question.\n\n" +
     "## When NOT to use spaces-search\n" +
     "- Ticket queries by status/priority/assignee/board/tag/stage/project → use **spaces-tickets** (richer filters, structured output).\n" +
-    "- Meeting content (action items, decisions, transcripts) → use **spaces-meeting-insights**.\n" +
+    "- Meeting content by TOPIC (action items, decisions, what was said) → **spaces-meeting-insights** (vector search);\n" +
+    "  a known call, an exact list, or one transcript in full → **spaces-calls** (deterministic; includeTranscript=true).\n" +
     "- Reading a specific thread → use **spaces-messages** with `conversationId`.\n" +
     "- Recent activity for the user → use **spaces-activity**.\n\n" +
     "## Scoping (important)\n" +
@@ -1247,6 +1349,8 @@ const spacesTickets: ToolDef = {
     "given values. Returns structured ticket details including assignee, tags, stage, channel ID, conversation ID, " +
     "createdAt, and updatedAt, plus (when set) the resolver + close time, last editor, first-response time, ticket type, " +
     "AI triage labels, owning group, due date (ETA), archived status, and related/duplicate tickets — the full lifecycle in one call. " +
+    "Archived tickets are EXCLUDED from every filtered query (matching the Spaces UI); only a direct `ticketId`/`xyneId` " +
+    "lookup can return one. " +
     "Prefer this over spaces-search for ticket queries — it returns richer, more accurate data.",
   inputSchema: {
     type: "object",
@@ -1413,8 +1517,7 @@ const spacesTickets: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Tickets error", async (args) => {
       const include = {
         assignedToUser: { select: { name: true, email: true } },
         createdByUser: { select: { name: true, email: true } },
@@ -1458,7 +1561,7 @@ const spacesTickets: ToolDef = {
         });
       }
 
-      const baseWhere: Record<string, unknown> = {};
+      const baseWhere: Record<string, unknown> = { isArchived: { equals: false } };
       if (args["status"]) baseWhere["statusV2"] = { equals: args["status"] };
       if (args["priority"]) baseWhere["priority"] = { equals: args["priority"] };
       if (args["boardId"]) baseWhere["boardId"] = { equals: args["boardId"] };
@@ -1602,7 +1705,7 @@ const spacesTickets: ToolDef = {
             const rows = (await interact({
               model: "ticket",
               operation: "findMany",
-              where: { assignments: participantSome(p) },
+              where: { assignments: participantSome(p), isArchived: { equals: false } },
               take: 1000,
             })) as Array<{ id: string }>;
             return new Set(rows.map((r) => r.id));
@@ -1740,10 +1843,7 @@ const spacesTickets: ToolDef = {
       }
       if (participantNote) appendText(result, participantNote);
       return result;
-    } catch (e) {
-      return err(`Tickets error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 /**
@@ -2324,8 +2424,7 @@ const spacesMessages: ToolDef = {
     },
     required: ["conversationId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Messages error", async (args) => {
       const conversationId = String(args["conversationId"]);
       const sortDir: "asc" | "desc" = args["sortOrder"] === "desc" ? "desc" : "asc";
       const msgTypes = Array.isArray(args["msgType"])
@@ -2412,10 +2511,7 @@ const spacesMessages: ToolDef = {
           )}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Messages error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface MessageRow {
@@ -2448,8 +2544,7 @@ const spacesMessageDetail: ToolDef = {
     },
     required: ["messageId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Message detail error", async (args) => {
       const messageId = String(args["messageId"]);
       const rows = (await interact({
         model: "message",
@@ -2504,10 +2599,7 @@ const spacesMessageDetail: ToolDef = {
       applyChannelInfo(citations, channelInfo);
 
       return okCited(prefixChunk(1, parts[0]!, parts.slice(1)), citations);
-    } catch (e) {
-      return err(`Message detail error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface MessageDetailRow {
@@ -2611,8 +2703,7 @@ const spacesChannels: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Channels error", async (args) => {
       const where: Record<string, unknown> = {};
       if (args["name"]) where["name"] = { contains: args["name"] as string, mode: "insensitive" };
       if (args["description"])
@@ -2718,16 +2809,12 @@ const spacesChannels: ToolDef = {
         `${rows.length} channel(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Channels error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
   // APP MODE: list channels via the app-token route `/api/apps/channel/list`
   // (returns {items:[{id,name,description,scopeType,...}], hasMore, nextCursor}).
   // The app route supports scopeType + limit + cursor only, so name filtering
   // is applied client-side over the returned page.
-  async appHandler(args) {
-    try {
+  appHandler: withToolErrors("Channels error", async (args) => {
       const qs = new URLSearchParams();
       qs.set("limit", String(args["limit"] ?? 100));
       if (args["scopeType"]) qs.set("scopeType", String(args["scopeType"]));
@@ -2752,10 +2839,7 @@ const spacesChannels: ToolDef = {
           ? `\n\n[Showing ${items.length} channel(s) — more may exist. Raise limit or refine with name/scopeType filters.]`
           : "";
       return ok(`${items.length} channel(s):\n\n${lines.join("\n\n")}${moreNote}`);
-    } catch (e) {
-      return err(`Channels error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface ChannelRow {
@@ -2835,8 +2919,7 @@ const spacesUsers: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Users error", async (args) => {
       const nameOrEmail = args["nameOrEmail"] ? String(args["nameOrEmail"]) : "";
       const groupId = args["groupId"] ? String(args["groupId"]) : "";
       if (!nameOrEmail && !groupId) {
@@ -2881,10 +2964,7 @@ const spacesUsers: ToolDef = {
       return ok(
         `${rows.length} user(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
       );
-    } catch (e) {
-      return err(`Users error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface UserRow {
@@ -3082,7 +3162,7 @@ async function renderUserActivityContext(
       ].join("\n"),
     );
   } catch (e) {
-    return err(`User activity context error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`User activity context error: ${errMsg(e)}`);
   }
 }
 
@@ -3242,8 +3322,7 @@ const spacesActivity: ToolDef = {
       },
     },
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Activity error", async (args, ctx) => {
       const where: Record<string, unknown> = {
         userId: { equals: ctx.userId },
       };
@@ -3306,10 +3385,7 @@ const spacesActivity: ToolDef = {
         `${rows.length} activity entries:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Activity error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface UserActivityRow {
@@ -3350,8 +3426,7 @@ const spacesProjects: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Projects error", async (args) => {
       const search = args["search"] ? String(args["search"]) : "";
       const limit = (args["limit"] as number | undefined) ?? 100;
       const offset = (args["offset"] as number | undefined) ?? 0;
@@ -3408,10 +3483,7 @@ const spacesProjects: ToolDef = {
       return ok(
         `${rows.length} project(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
       );
-    } catch (e) {
-      return err(`Projects error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+  }),
 };
 
 interface ProjectRow {
@@ -3437,8 +3509,7 @@ const spacesProjectTeamMembers: ToolDef = {
     },
     required: ["projectId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Project team members error", async (args) => {
       const projectId = String(args["projectId"] ?? "");
       if (!projectId) return err("projectId is required");
 
@@ -3485,10 +3556,7 @@ const spacesProjectTeamMembers: ToolDef = {
       }
 
       return ok(lines.join("\n"));
-    } catch (e) {
-      return err(`Project team members error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-canvases ─────────────────────────────────────────────────
@@ -3564,8 +3632,7 @@ const spacesCanvases: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Canvases error", async (args, ctx) => {
       const where: Record<string, unknown> = {};
       if (args["search"]) where["title"] = { contains: args["search"] as string, mode: "insensitive" };
       if (args["channelId"]) where["channelId"] = { equals: args["channelId"] };
@@ -3636,10 +3703,7 @@ const spacesCanvases: ToolDef = {
         `${rows.length} canvas(es):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Canvases error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface CanvasRow {
@@ -3658,20 +3722,119 @@ interface CanvasRow {
 
 // ── spaces-calls ────────────────────────────────────────────────────
 
+/**
+ * Exact lookup of one call by either identifier. Search results and context
+ * blocks hand back the internal id while the call HTTP APIs are keyed by
+ * `externalId`, so accept both and normalise here rather than making the model
+ * guess which one it is holding. Two point queries, no fuzzy matching.
+ */
+async function resolveCallById(ref: string): Promise<CallRow[]> {
+  for (const field of ["id", "externalId"] as const) {
+    const rows = (await interact({
+      model: "call",
+      operation: "findMany",
+      where: { [field]: { equals: ref } },
+      take: 1,
+    })) as CallRow[] | null;
+    if (rows && rows.length > 0) return rows;
+  }
+  return [];
+}
+
+/**
+ * Pull one call's complete transcript. `call.transcript` is only a storage path
+ * — for regular calls (transcriptService) and for HEADLESS recordings
+ * (noteTakerTranscriptService) alike — so the text comes from the same route the
+ * web app's download button uses. That route re-checks call-audience and
+ * recording-view permission and streams the formatted .txt out of storage, which
+ * keeps this tool from opening a second, weaker path to the same content.
+ *
+ * Returns a formatted block (never throws) so a transcript problem degrades to a
+ * note under the call rather than failing the whole listing.
+ */
+async function fetchFullTranscript(
+  call: CallRow,
+  offset: number,
+  limit: number | undefined,
+): Promise<string> {
+  const label = call.title || call.externalId || call.id;
+  if (!call.externalId) return `\n\n(No transcript: call "${label}" has no externalId.)`;
+  if (!call.transcript) return `\n\n(No transcript: "${label}" was never transcribed.)`;
+
+  let text: string;
+  try {
+    text = await spacesFetchText(
+      `/api/calls/claw/${encodeURIComponent(call.externalId)}/download-transcript`,
+    );
+  } catch (e) {
+    const msg = errMsg(e);
+    if (msg.includes("403")) return `\n\n(No transcript: you do not have access to "${label}".)`;
+    if (msg.includes("404")) return `\n\n(No transcript: not available yet for "${label}".)`;
+    return `\n\n(Transcript fetch failed for "${label}": ${msg})`;
+  }
+
+  const total = text.length;
+  const start = Math.max(0, offset);
+  const slice = limit === undefined ? text.slice(start) : text.slice(start, start + limit);
+  const end = start + slice.length;
+  const footer =
+    end < total || start > 0
+      ? `\n\n(Characters ${start}-${end} of ${total}.` +
+        (end < total ? ` Call again with transcriptOffset=${end} for the rest.)` : ")")
+      : `\n\n(Complete transcript — ${total} characters.)`;
+
+  return `\n\n--- FULL TRANSCRIPT: ${label} ---\n\n${slice}${footer}`;
+}
+
 const spacesCalls: ToolDef = {
   name: "spaces-calls",
   description:
-    "Search and list calls, meetings, and RECORDINGS in Spaces. Filter by title, channel, status " +
-    "(ACTIVE/ENDED/SCHEDULED), call type (VIDEO/AUDIO/HEADLESS), organizer, creator, or recurring; page with limit/offset. " +
-    "HEADLESS = xyne-automation recordings (the '/recordings' page) — pass callType='HEADLESS' to list only recordings. " +
+    "DETERMINISTIC (exact, non-semantic) lookup of calls, meetings, and RECORDINGS in Spaces, AND the way to read " +
+    "one call's FULL transcript verbatim. Every filter here is an exact database match — title substring, channel, " +
+    "status (ACTIVE/ENDED/SCHEDULED), call type (VIDEO/AUDIO/HEADLESS), organizer, creator, participant, date range, " +
+    "recurring — so the same args always return the same rows, in a defined order, with an exact count. No embeddings, " +
+    "no relevance ranking, nothing dropped below a score threshold. " +
+    "Use this when you KNOW what you are looking for: a specific call, everything in a channel, every recording last " +
+    "week, or the complete text of one meeting. Use spaces-meeting-insights instead when you only know the TOPIC and " +
+    "need semantic/vector search to find which call discussed it. " +
+    "HEADLESS = xyne-automation recordings (the '/recordings' page) — pass callType='HEADLESS' to list only recordings; " +
+    "recordings carry transcripts exactly like regular calls and `includeTranscript` works the same for both. " +
     "Returns call ids, titles, organizer + creator names, channel, status, timing, and the participant list with each " +
-    "person's attendance (accepted / declined / left / missed, external guests included). The AI summary is returned " +
-    "inline; the readable TRANSCRIPT text is indexed in Vespa (file schema, subApp=TRANSCRIPT) — search or read it with " +
-    "spaces-meeting-insights (semantic) or spaces-search type=transcript. (A regular meeting call's summary may also be " +
-    "posted in its Spaces thread — open via spaces-messages.)",
+    "person's attendance (accepted / declined / left / missed, external guests included), plus the AI summary inline. " +
+    "Pass `callId` to fetch one call by id or externalId, and `includeTranscript: true` to get its complete " +
+    "`[MM:SS] Speaker: text` transcript — the whole document, not a snippet (page it with transcriptOffset/transcriptLimit). " +
+    "(A regular meeting call's summary may also be posted in its Spaces thread — open via spaces-messages.)",
   inputSchema: {
     type: "object",
     properties: {
+      callId: {
+        type: "string",
+        description:
+          "Fetch ONE specific call by its id or externalId — an exact lookup that ignores every other filter. " +
+          "Take the id from a spaces-meeting-insights result, from a previous spaces-calls row ('ID: ...'), or from " +
+          "an attached call's context block. Combine with includeTranscript to read that call in full.",
+      },
+      includeTranscript: {
+        type: "boolean",
+        default: false,
+        description:
+          "Include the COMPLETE verbatim transcript text ('[MM:SS] Speaker: text'), not a snippet. Only honoured when " +
+          "the query resolves to a single call — pass `callId`, or filter narrowly enough to return one row. Works " +
+          "for recordings (HEADLESS) exactly as it does for calls. Long meetings run to tens of thousands of " +
+          "characters; page with transcriptOffset/transcriptLimit rather than re-fetching.",
+      },
+      transcriptOffset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description: "Character offset to resume the transcript from (used with includeTranscript).",
+      },
+      transcriptLimit: {
+        type: "number",
+        minimum: 1,
+        description:
+          "Max transcript characters to return (default: the whole transcript). Only set this to page something huge.",
+      },
       search: { type: "string", description: "Filter by call title (case-insensitive partial match)" },
       channelId: { type: "string", description: "Filter by channel ID" },
       status: {
@@ -3727,8 +3890,7 @@ const spacesCalls: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Calls error", async (args) => {
       const where: Record<string, unknown> = {};
       if (args["search"]) where["title"] = { contains: args["search"] as string, mode: "insensitive" };
       if (args["channelId"]) where["channelId"] = { equals: args["channelId"] };
@@ -3753,17 +3915,42 @@ const spacesCalls: ToolDef = {
       if (Object.keys(startedAt).length > 0) where["startedAt"] = startedAt;
       if (typeof args["isRecurring"] === "boolean") where["isRecurring"] = { equals: args["isRecurring"] };
 
-      const rows = (await interact({
-        model: "call",
-        operation: "findMany",
-        where,
-        orderBy: [{ lastActivityAt: "desc" }],
-        take: (args["limit"] as number | undefined) ?? 100,
-        skip: (args["offset"] as number | undefined) ?? 0,
-      })) as CallRow[];
+      // `callId` is an exact single-call lookup, so it replaces the filter set
+      // rather than joining it — the caller already knows which call they want.
+      const callIdArg = String(args["callId"] ?? "").trim();
+      const rows = callIdArg
+        ? await resolveCallById(callIdArg)
+        : ((await interact({
+            model: "call",
+            operation: "findMany",
+            where,
+            orderBy: [{ lastActivityAt: "desc" }],
+            take: (args["limit"] as number | undefined) ?? 100,
+            skip: (args["offset"] as number | undefined) ?? 0,
+          })) as CallRow[]);
 
-      if (!rows || rows.length === 0)
+      if (!rows || rows.length === 0) {
+        if (callIdArg) return ok(`No call found with id "${callIdArg}" (or you do not have access to it).`);
         return ok(args["search"] ? `No calls found matching "${args["search"]}".` : "No calls found.");
+      }
+
+      // Full transcript is a per-call fetch out of object storage, so only do it
+      // when the query has narrowed to one call — otherwise a broad list would
+      // pull down 100 transcripts and bury the list itself.
+      let transcriptBlock = "";
+      if (args["includeTranscript"] === true) {
+        if (rows.length > 1) {
+          transcriptBlock =
+            `\n\n(Transcript not included: ${rows.length} calls matched. Re-run with callId=<id> ` +
+            `for the one you want, or narrow the filters to a single call.)`;
+        } else {
+          transcriptBlock = await fetchFullTranscript(
+            rows[0]!,
+            Number(args["transcriptOffset"] ?? 0),
+            args["transcriptLimit"] !== undefined ? Number(args["transcriptLimit"]) : undefined,
+          );
+        }
+      }
 
       // Cite each call's Spaces conversation THREAD — that's where the call
       // summary + transcript live, and it stays readable after the call ends.
@@ -3838,36 +4025,49 @@ const spacesCalls: ToolDef = {
           parts.push(`  Participants (${plist.length}): ${shown.join(", ")}${more}`);
         }
         // AI summary is stored as TEXT on the call row, so surface it inline.
-        // The transcript field is a GCS path (not text) — the readable transcript
-        // is indexed as searchable chunks in Vespa (file schema, subApp=TRANSCRIPT),
-        // so point the agent at the tools that read it rather than dumping a URL.
+        // The transcript field is a storage path (not text), so advertise the
+        // arg that fetches the text rather than dumping a path the agent can't use.
         if (c.aiSummary) parts.push(`  Summary: ${cleanSnippet(c.aiSummary)}`);
         if (c.transcript)
           parts.push(
-            `  Transcript: available — search/read it with spaces-meeting-insights, or spaces-search type=transcript`,
+            `  Transcript: available — re-run with callId=${c.id}, includeTranscript=true to read it in full`,
           );
         parts.push(`  ID: ${c.id}`);
         const conversationId = (c.metadata as { conversationId?: string } | null | undefined)?.conversationId;
-        pushThreadCitation(citations, c.channelId, conversationId, idx + 1, c.title ?? "Call");
-        return prefixChunk(idx + 1, parts[0]!, parts.slice(1));
+        // Only prefix the inline citation token when the row actually has a
+        // link target — a token with no citation behind it renders as a chip
+        // that goes nowhere (it opens the debug panel).
+        const cited = pushCallCitation(citations, c, conversationId, idx + 1, c.title ?? "Call");
+        return cited
+          ? prefixChunk(idx + 1, parts[0]!, parts.slice(1))
+          : [parts[0]!, ...parts.slice(1)].join("\n");
       });
       const channelInfo = await resolveChannelInfo(
         citations.map((c) => c.channelId).filter((v): v is string => !!v),
       );
       applyChannelInfo(citations, channelInfo);
 
+      // A callId lookup is a single exact row, so the list pagination footer
+      // ("call again with offset=…") would be misleading — skip it there.
+      const listFooter = callIdArg
+        ? ""
+        : paginationFooter({
+            returned: rows.length,
+            limit: Number(args["limit"] ?? 100),
+            offset: Number(args["offset"] ?? 0),
+          });
+
       return okCited(
-        `${rows.length} call(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
+        `${rows.length} call(s):\n\n${lines.join("\n\n")}${listFooter}${transcriptBlock}`,
         citations,
       );
-    } catch (e) {
-      return err(`Calls error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface CallRow {
   id: string;
+  /** Public id the call HTTP APIs are keyed by (…/download-transcript, recording detail). */
+  externalId?: string;
   title?: string;
   description?: string;
   callType?: string;
@@ -3877,9 +4077,10 @@ interface CallRow {
   createdByUserId?: string;
   /** AI meeting/recording summary — stored as TEXT on the call row. */
   aiSummary?: string;
-  /** GCS path to the transcript (NOT the text); non-empty = a transcript exists.
-   *  The readable transcript is indexed as searchable chunks in the Vespa `file`
-   *  schema (subApp=TRANSCRIPT) — read it via spaces-meeting-insights / type=transcript. */
+  /** Storage path to the transcript (NOT the text); non-empty = a transcript exists.
+   *  Set the same way for calls (transcriptService) and HEADLESS recordings
+   *  (noteTakerTranscriptService). Search its text via spaces-meeting-insights /
+   *  type=transcript; fetch the whole document with includeTranscript here. */
   transcript?: string;
   startsAt?: string;
   endsAt?: string;
@@ -3928,8 +4129,7 @@ const spacesBoards: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Boards error", async (args) => {
       const where: Record<string, unknown> = {};
       if (args["search"]) where["name"] = { contains: args["search"] };
       if (args["projectId"]) where["projectId"] = { equals: args["projectId"] };
@@ -3961,10 +4161,7 @@ const spacesBoards: ToolDef = {
       return ok(
         `${rows.length} board(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0) })}`,
       );
-    } catch (e) {
-      return err(`Boards error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface BoardRow {
@@ -4025,8 +4222,7 @@ const spacesCreateTicket: ToolDef = {
     },
     required: ["title", "description", "projectId", "boardId", "channelId"],
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("Create ticket error", async (args, ctx) => {
       if (!args["channelId"]) {
         return err("channelId is required.");
       }
@@ -4092,7 +4288,7 @@ const spacesCreateTicket: ToolDef = {
           }, sdlcSpacesAuth());
         } catch (linkError) {
           return err(
-            `Ticket ${data.xyneId} was created, but its artifact link failed: ${linkError instanceof Error ? linkError.message : String(linkError)}. Do not create a duplicate ticket.`,
+            `Ticket ${data.xyneId} was created, but its artifact link failed: ${errMsg(linkError)}. Do not create a duplicate ticket.`,
           );
         }
       }
@@ -4119,7 +4315,7 @@ const spacesCreateTicket: ToolDef = {
               ? `  Attachments: ${count} file(s) carried over`
               : `  Attachments: 0 files found on source conversation`;
         } catch (e) {
-          attachLine = `  Attachments: transfer failed — ${e instanceof Error ? e.message : String(e)}`;
+          attachLine = `  Attachments: transfer failed — ${errMsg(e)}`;
         }
       }
 
@@ -4144,10 +4340,7 @@ const spacesCreateTicket: ToolDef = {
         ...(attachLine ? [attachLine.trimStart()] : []),
       ];
       return okCited(prefixChunk(1, "Ticket created:", bodyLines), citations);
-    } catch (e) {
-      return err(`Create ticket error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-create-bulk-tickets ──────────────────────────────────────
@@ -4289,7 +4482,7 @@ const spacesCreateBulkTickets: ToolDef = {
         failures.push({
           index: i + 1,
           title: label,
-          reason: e instanceof Error ? e.message : String(e),
+          reason: errMsg(e),
         });
       }
     }
@@ -4317,6 +4510,10 @@ const spacesCreateBulkTickets: ToolDef = {
 
 const spacesUpdateTicket: ToolDef = {
   name: "spaces-update-ticket",
+  // PATCH /api/tickets/:id is user-session-only (unlike create, which has the
+  // dual-auth /api/tickets/claw route). Until Spaces grows an app-capable
+  // update route (or this gains an appHandler), app-mode calls can only 401.
+  userOnly: true,
   description:
     "Update an existing ticket in Spaces. At least one update field must be provided. " +
     "Use spaces-tickets to find the ticket ID (use the Internal ID, not the Xyne ID), spaces-users for user IDs, and spaces-boards for valid stage names. " +
@@ -4357,8 +4554,7 @@ const spacesUpdateTicket: ToolDef = {
     },
     required: ["ticketId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Update ticket error", async (args) => {
       const ticketId = String(args["ticketId"] ?? "").trim();
       const assigneeId = (args["assigneeId"] as string | undefined)?.trim();
       const stage = (args["stage"] as string | undefined)?.trim();
@@ -4410,11 +4606,199 @@ const spacesUpdateTicket: ToolDef = {
 
       const updates = result.updated ?? [];
       return ok(`Ticket ${ticketId} updated${updates.length > 0 ? `: ${updates.join(", ")}` : ""}.`);
-    } catch (e) {
-      return err(`Update ticket error: ${e instanceof Error ? e.message : String(e)}`);
+    }),
+};
+// ── spaces-update-bulk-tickets ──────────────────────────────────────
+
+interface BulkTicketUpdateInput {
+  ticketId?: unknown;
+  assigneeId?: unknown;
+  stage?: unknown;
+  groupId?: unknown;
+  title?: unknown;
+  description?: unknown;
+  priority?: unknown;
+  status?: unknown;
+  eta?: unknown;
+  tags?: unknown;
+}
+
+const spacesUpdateBulkTickets: ToolDef = {
+  name: "spaces-update-bulk-tickets",
+  // PATCH /api/tickets/:id is user-session-only (same constraint as
+  // spaces-update-ticket — there is no dual-auth /api/tickets/claw update
+  // route), so this bulk variant is likewise userOnly: app-mode calls 401.
+  userOnly: true,
+  description:
+    "Update MANY tickets in Spaces behind ONE approval. Prefer this over calling spaces-update-ticket repeatedly " +
+    "when applying updates to multiple tickets (e.g. moving a range of tickets to COMPLETED). Each ticket entry needs " +
+    "an internal ticketId (use spaces-tickets — the 'Internal ID', not the Xyne ID) plus at least one field to change. " +
+    "Set shared defaults once at the top level (defaultStage, defaultStatus, defaultPriority, defaultAssigneeId, " +
+    "defaultGroupId, defaultTags); each ticket may override any of them. A stage change also updates status to the " +
+    "stage's default status unless a status override is provided. Tickets are updated sequentially and partial " +
+    "failures are reported.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      defaultStage: { type: "string", description: "Stage applied to tickets that do not specify a stage." },
+      defaultStatus: {
+        type: "string",
+        enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"],
+        description: "Status applied to tickets that do not specify a status.",
+      },
+      defaultPriority: {
+        type: "string",
+        enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        description: "Priority applied to tickets that do not specify priority.",
+      },
+      defaultAssigneeId: { type: "string", description: "Assignee (user ID) applied to tickets that do not specify assigneeId." },
+      defaultGroupId: { type: "string", description: "User group ID applied to tickets that do not specify groupId." },
+      defaultTags: {
+        type: "array",
+        items: { type: "string" },
+        description: "Tags applied to tickets that do not specify tags (replaces that ticket's tags).",
+      },
+      tickets: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          properties: {
+            ticketId: {
+              type: "string",
+              description: "Internal database ID of the ticket to update (use spaces-tickets — 'Internal ID', not 'Xyne ID').",
+            },
+            assigneeId: { type: "string", description: "User ID to assign the ticket to" },
+            stage: { type: "string", description: "Stage name to move the ticket to" },
+            groupId: { type: "string", description: "User group ID to assign to the ticket" },
+            title: { type: "string", description: "New title for the ticket" },
+            description: { type: "string", description: "New description for the ticket" },
+            priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "New priority" },
+            status: {
+              type: "string",
+              enum: ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"],
+              description: "New status. A stage change may also change status to the stage's default — set this to override.",
+            },
+            eta: { type: "string", description: "New due date as ISO 8601 string" },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Replace the ticket's tags with this list (empty array clears all tags).",
+            },
+          },
+          required: ["ticketId"],
+        },
+      },
+    },
+    required: ["tickets"],
+  },
+  async handler(args) {
+    const tickets = Array.isArray(args["tickets"]) ? (args["tickets"] as BulkTicketUpdateInput[]) : [];
+    if (tickets.length === 0) return err("tickets must contain at least one ticket.");
+
+    const MAX_TICKETS = 100;
+    if (tickets.length > MAX_TICKETS) {
+      return err(`Too many tickets (${tickets.length} > ${MAX_TICKETS}). Update bulk tickets in batches of ${MAX_TICKETS} or fewer.`);
     }
+
+    const defaultStage = optionalString(args["defaultStage"]);
+    const defaultStatus = optionalString(args["defaultStatus"]);
+    const defaultPriority = optionalString(args["defaultPriority"]) as TicketPriority | undefined;
+    const defaultAssigneeId = optionalString(args["defaultAssigneeId"]);
+    const defaultGroupId = optionalString(args["defaultGroupId"]);
+    const defaultTags = normalizeTags(args["defaultTags"]);
+
+    const updated: Array<{ index: number; ticketId: string; fields: string[] }> = [];
+    const failures: Array<{ index: number; ticketId: string; reason: string }> = [];
+
+    for (let i = 0; i < tickets.length; i += 1) {
+      const ticket = tickets[i]!;
+      const ticketId = optionalString(ticket.ticketId);
+      const label = ticketId ?? `ticket ${i + 1}`;
+      if (!ticketId) {
+        failures.push({ index: i + 1, ticketId: label, reason: "ticketId is required." });
+        continue;
+      }
+
+      const assigneeId = optionalString(ticket.assigneeId) ?? defaultAssigneeId;
+      const stage = optionalString(ticket.stage) ?? defaultStage;
+      const groupId = optionalString(ticket.groupId) ?? defaultGroupId;
+      const title = optionalString(ticket.title);
+      const description = optionalString(ticket.description);
+      const priority = optionalString(ticket.priority) ?? defaultPriority;
+      const status = optionalString(ticket.status) ?? defaultStatus;
+      const eta = optionalString(ticket.eta);
+
+      // Tags: an explicit per-ticket array (including an empty array, which
+      // clears tags) takes precedence; otherwise fall back to defaultTags.
+      let tags: string[] | undefined;
+      let tagsToSend = false;
+      if (ticket.tags !== undefined) {
+        if (!Array.isArray(ticket.tags)) {
+          failures.push({ index: i + 1, ticketId: label, reason: "tags must be an array of strings." });
+          continue;
+        }
+        tags = (ticket.tags as unknown[]).map((t) => String(t));
+        tagsToSend = true;
+      } else if (defaultTags) {
+        tags = defaultTags;
+        tagsToSend = true;
+      }
+
+      const body: Record<string, unknown> = {};
+      if (assigneeId) body["assigneeId"] = assigneeId;
+      if (stage) body["stage"] = stage;
+      if (groupId) body["groupId"] = groupId;
+      if (title) body["title"] = title;
+      if (description) body["description"] = description;
+      if (priority) body["priority"] = priority;
+      if (status) body["status"] = status;
+      if (eta) body["eta"] = eta;
+      if (tagsToSend) body["tags"] = tags;
+
+      if (Object.keys(body).length === 0) {
+        failures.push({
+          index: i + 1,
+          ticketId: label,
+          reason: "at least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags).",
+        });
+        continue;
+      }
+
+      try {
+        const result = (await spacesFetch(`/api/tickets/${encodeURIComponent(ticketId)}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        })) as { success: boolean; updated?: string[] };
+        updated.push({ index: i + 1, ticketId, fields: result.updated ?? Object.keys(body) });
+      } catch (e) {
+        failures.push({
+          index: i + 1,
+          ticketId: label,
+          reason: errMsg(e),
+        });
+      }
+    }
+
+    const lines = [
+      `Bulk ticket update complete: requested ${tickets.length}, updated ${updated.length}, failed ${failures.length}.`,
+    ];
+    if (updated.length) {
+      lines.push("", "Updated:");
+      for (const u of updated) {
+        lines.push(`  ${u.index}. ${u.ticketId}${u.fields.length ? ` (${u.fields.join(", ")})` : ""}`);
+      }
+    }
+    if (failures.length) {
+      lines.push("", `Failures${failures.length > 10 ? " (first 10)" : ""}:`);
+      for (const f of failures.slice(0, 10)) {
+        lines.push(`  ${f.index}. ${f.ticketId}: ${f.reason}`);
+      }
+    }
+    return ok(lines.join("\n"));
   },
 };
+
 // ── spaces-schedule-call ────────────────────────────────────────────
 
 const spacesScheduleCall: ToolDef = {
@@ -4439,8 +4823,7 @@ const spacesScheduleCall: ToolDef = {
     },
     required: ["title", "startsAt", "endsAt"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Schedule call error", async (args) => {
       if (!args["channelId"] && !(args["targetUserIds"] as string[] | undefined)?.length) {
         return err("Must provide either channelId or targetUserIds.");
       }
@@ -4467,10 +4850,7 @@ const spacesScheduleCall: ToolDef = {
           `  channelId: ${data.channelId}`,
         ].join("\n"),
       );
-    } catch (e) {
-      return err(`Schedule call error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-whoami ─────────────────────────────────────────────────────
@@ -4478,11 +4858,11 @@ const spacesScheduleCall: ToolDef = {
 const spacesWhoami: ToolDef = {
   name: "spaces-whoami",
   description:
-    "Returns the current user's Spaces profile — userId, name, email and workspaceId of the User " +
-    "Call this first to get the userId needed for filtering other tools (e.g. assignedTo, from, createdBy).",
+    "Returns the current user's Spaces profile — userId, name, email and workspaceId. " +
+    "If the userId and name are ALREADY in your system prompt, so do not call this just to read them; " +
+    "use it only when you need the workspaceId or want to confirm the profile.",
   inputSchema: { type: "object", properties: {} },
-  async handler(_args, ctx) {
-    try {
+  handler: withToolErrors("Whoami error", async (_args, ctx) => {
       if (!ctx.userId) return err("Could not determine current user.");
       const rows = (await interact({
         model: "user",
@@ -4495,10 +4875,7 @@ const spacesWhoami: ToolDef = {
       return ok(
         `Current user:\n- ID: ${u.id}\n- Name: ${u.name}\n- Email: ${u.email}\n- Workspace ID: ${u.workspaceId}`,
       );
-    } catch (e) {
-      return err(`Whoami error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-read-canvas ──────────────────────────────────────────────
@@ -4519,8 +4896,7 @@ const spacesReadCanvas: ToolDef = {
     },
     required: ["viewAccessId"],
   },
-  async handler(params, ctx) {
-    try {
+  handler: withToolErrors("Read canvas error", async (params, ctx) => {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
@@ -4542,10 +4918,7 @@ const spacesReadCanvas: ToolDef = {
       const citations: Citation[] = [];
       pushCanvasCitation(citations, viewAccessId, 1, title);
       return okCited(prefixChunk(1, `# ${title}`, [``, `URL: ${url}`, ``, markdown]), citations);
-    } catch (e) {
-      return err(`Read canvas error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-edit-canvas ───────────────────────────────────────────────
@@ -4571,8 +4944,7 @@ const spacesEditCanvas: ToolDef = {
     },
     required: ["viewAccessId", "content"],
   },
-  async handler(params, ctx) {
-    try {
+  handler: withToolErrors("Edit canvas error", async (params, ctx) => {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       const content = String(params["content"] ?? "");
       const title = params["title"] ? String(params["title"]) : undefined;
@@ -4606,10 +4978,7 @@ const spacesEditCanvas: ToolDef = {
         ]),
         citations,
       );
-    } catch (e) {
-      return err(`Edit canvas error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── Export ────────────────────────────────────────────────────────────
@@ -4649,10 +5018,17 @@ const spacesTriggerAgent: ToolDef = {
 const spacesMeetingInsights: ToolDef = {
   name: "spaces-meeting-insights",
   description:
-    "Semantic search INSIDE the transcripts + AI summaries of Spaces calls & recordings (the '/recordings' " +
-    "content and any call that was transcribed). Searches the transcript text for summaries, action items, " +
-    "decisions, Q&A, pain points, and merchant discussions. " +
-    "Use this when the user asks what was said/decided/actioned in a call or recording. " +
+    "SEMANTIC / VECTOR search INSIDE the transcripts + AI summaries of Spaces calls & recordings (the '/recordings' " +
+    "content and any call that was transcribed). Hybrid embedding + keyword search over the transcript text for " +
+    "summaries, action items, decisions, Q&A, pain points, and merchant discussions. " +
+    "Because it is ranked and not exhaustive, it returns the best-matching calls by relevance — a call can match on " +
+    "meaning without sharing your wording, and a weak match can fall below the score cut. Never treat its result " +
+    "count as a complete or exact census of calls. " +
+    "Use it when you know the TOPIC but not which call: 'what did we decide about pricing', 'who complained about " +
+    "onboarding'. When you already know WHICH call (or want an exact, repeatable list — this channel, last week, " +
+    "type=HEADLESS), use spaces-calls instead: its filters are deterministic exact matches with an exact count. " +
+    "Each result carries the matching excerpt of the transcript plus the call's AI summary; for the WHOLE transcript " +
+    "of one call, follow up with spaces-calls using the returned call id and includeTranscript=true. " +
     "This is the CONTENT side of calls — pair it with spaces-calls, which lists calls/recordings and their " +
     "metadata (participants, attendance, status, timing, summary). " +
     "Prefer this over spaces-search for questions about what was discussed in a call. " +
@@ -4709,8 +5085,7 @@ const spacesMeetingInsights: ToolDef = {
     },
     required: [],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Meeting insights search error", async (args) => {
       const query = String(args["query"] ?? "").trim();
       const params: Record<string, string> = {
         q: query,
@@ -4759,8 +5134,9 @@ const spacesMeetingInsights: ToolDef = {
 
           const context = r.context ?? "";
           if (context) {
-            // Full context — no cap; highlights preserved. Oversized output is
-            // handled centrally by claw's promoteIfOversized().
+            // The matched transcript excerpt (Vespa's best-scoring chunk), not a
+            // substring of it — no cap here, highlights preserved. Oversized
+            // output is handled centrally by claw's promoteIfOversized().
             subLines.push(cleanSnippet(context));
           }
 
@@ -4773,15 +5149,39 @@ const spacesMeetingInsights: ToolDef = {
           if (meta["platform"]) metaParts.push(`Platform: ${meta["platform"]}`);
           if (metaParts.length > 0) subLines.push(metaParts.join(" · "));
 
-          // Harvest a thread citation when the search row carries channel +
-          // conversation IDs (matches what spaces-search:harvest does at :241).
+          // The id spaces-calls needs to pull this call's transcript in full.
+          const callId = (sc["callId"] as string | undefined) ?? r.id;
+          if (callId)
+            subLines.push(`Full transcript: spaces-calls callId=${callId} includeTranscript=true`);
+
+          // Cite the call this transcript belongs to. A channel call resolves to
+          // its thread; a note-taker recording has no channel, so it resolves to
+          // its /recordings page instead of silently emitting nothing.
           const channelId =
             (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
           const conversationId =
             (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
-          pushThreadCitation(citations, channelId, conversationId, chunkIndex, r.title || "Meeting");
+          const externalId =
+            (sc["externalId"] as string | undefined) ?? (meta["externalId"] as string | undefined);
+          const callType =
+            (sc["callType"] as string | undefined) ?? (meta["callType"] as string | undefined);
+          const cited = pushCallCitation(
+            citations,
+            {
+              id: callId ?? r.id,
+              ...(externalId ? { externalId } : {}),
+              ...(callType ? { callType } : {}),
+              ...(channelId ? { channelId } : {}),
+            },
+            conversationId,
+            chunkIndex,
+            plainLabel(r.title) ?? "Meeting",
+          );
 
-          return prefixChunk(chunkIndex, `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`, subLines);
+          const heading = `### ${chunkIndex}. ${r.title || "Untitled Meeting"}`;
+          return cited
+            ? prefixChunk(chunkIndex, heading, subLines)
+            : [heading, ...subLines].join("\n");
         })
         .join("\n\n---\n\n");
 
@@ -4794,10 +5194,7 @@ const spacesMeetingInsights: ToolDef = {
         `Found ${data.data.totalCount ?? results.length} meeting insight(s):\n\n${formatted}${paginationFooter({ returned: results.length, limit: Number(args["limit"] ?? 100), offset: Number(args["offset"] ?? 0), total: data.data.totalCount })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Meeting insights search error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-create-canvas ────────────────────────────────────────────
@@ -4826,8 +5223,7 @@ const spacesCreateCanvas: ToolDef = {
     },
     required: ["title", "markdown"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Create canvas error", async (args) => {
       const title = String(args["title"] ?? "").trim();
       const markdown = String(args["markdown"] ?? "");
       const visibility = String(args["visibility"] ?? "PRIVATE");
@@ -4862,10 +5258,7 @@ const spacesCreateCanvas: ToolDef = {
         ]),
         citations,
       );
-    } catch (e) {
-      return err(`Create canvas error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── canonical SDLC artifact mutation ──────────────────────────────
@@ -5022,7 +5415,7 @@ async function updateSdlcBaseline(args: Record<string, unknown>, ctx: HandlerCon
       citations,
     );
   } catch (e) {
-    return err(`Update SDLC baseline error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`Update SDLC baseline error: ${errMsg(e)}`);
   }
 }
 
@@ -5050,7 +5443,7 @@ async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
       citations,
     );
   } catch (e) {
-    return err(`Create SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`Create SDLC artifact error: ${errMsg(e)}`);
   }
 }
 
@@ -5076,7 +5469,7 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
       }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
       return ok(JSON.stringify(data.artifact));
     } catch (e) {
-      return err(`Update SDLC artifact error: ${e instanceof Error ? e.message : String(e)}`);
+      return err(`Update SDLC artifact error: ${errMsg(e)}`);
     }
   }
   if (artifactType !== "WIKI") return err("Unsupported SDLC artifactType.");
@@ -5117,7 +5510,7 @@ async function callSdlcWiki(path: string, args: Record<string, unknown>): Promis
     );
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC Wiki tool error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`SDLC Wiki tool error: ${errMsg(e)}`);
   }
 }
 
@@ -5140,7 +5533,7 @@ async function callSdlcArtifactHistory(
     );
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC artifact history error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`SDLC artifact history error: ${errMsg(e)}`);
   }
 }
 
@@ -5238,7 +5631,7 @@ async function callSdlcTracks(
     }, sdlcSpacesAuth());
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC tracks error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`SDLC tracks error: ${errMsg(e)}`);
   }
 }
 
@@ -5293,7 +5686,7 @@ async function callSdlcArtifactTypes(
     }, sdlcSpacesAuth());
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC artifact types error: ${e instanceof Error ? e.message : String(e)}`);
+    return err(`SDLC artifact types error: ${errMsg(e)}`);
   }
 }
 
@@ -5426,8 +5819,7 @@ const spacesSdlcCreatePullRequest: ToolDef = {
     },
     required: ["repoId", "title", "head", "base", "commitHash"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Create SDLC pull request error", async (args) => {
       const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
       if (!s2sKey) return err("Internal S2S key is unavailable for SDLC pull request creation.");
       const data = (await spacesFetch(
@@ -5449,10 +5841,7 @@ const spacesSdlcCreatePullRequest: ToolDef = {
           `Base: ${data.pullRequest.base ?? "unknown"}`,
         ].join("\n"),
       );
-    } catch (e) {
-      return err(`Create SDLC pull request error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
   async appHandler(args) {
     return spacesSdlcCreatePullRequest.handler(args, { userId: "sdlc", authMode: "app" });
   },
@@ -5505,8 +5894,7 @@ const spacesEmails: ToolDef = {
     },
     required: ["conversationId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Emails error", async (args) => {
       const conversationId = String(args["conversationId"]);
       const take = (args["limit"] as number | undefined) ?? 100;
       const from = (args["from"] as "first" | "last" | undefined) ?? "first";
@@ -5569,10 +5957,7 @@ const spacesEmails: ToolDef = {
         `${rows.length} email(s) in thread:\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit: take, offset: skip })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Emails error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 interface EmailRow {
@@ -5786,8 +6171,7 @@ const spacesThreadAttachments: ToolDef = {
     },
     required: ["conversationId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Thread attachments error", async (args) => {
       const conversationId = String(args["conversationId"] ?? "");
       if (!conversationId) return err("conversationId is required");
       const entityId = String(args["entityId"] ?? "").trim();
@@ -5911,11 +6295,82 @@ const spacesThreadAttachments: ToolDef = {
         `${rows.length} attachment(s) in ${conversationId}:\n\n${lines.join("\n")}${paginationFooter({ returned: rows.length, limit, offset, total: deduped.length })}`,
         citations,
       );
-    } catch (e) {
-      return err(`Thread attachments error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
+
+/**
+ * Shared render tail for spaces-fetch-attachment. Given resolved bytes (as a
+ * signed URL or base64 `data`) + metadata, ingest readable docs to markdown or
+ * return small raw files inline. Both the user-session `handler` and the
+ * app-token `appHandler` funnel through here so the two auth surfaces produce
+ * identical output — only the byte-fetch step differs.
+ */
+async function renderFetchedAttachment(params: {
+  source: AttachmentSource;
+  resolvedName: string;
+  resolvedMime: string;
+  declaredSize: number;
+  sourceLabel: string;
+  inlineBuffer?: Buffer | undefined;
+}): Promise<ToolResult> {
+  const { source, resolvedName, resolvedMime, declaredSize, sourceLabel, inlineBuffer } = params;
+      // Sanitise filename to keep it within .context/ — strip path separators
+      // and leading dots so the agent can't be tricked into reading outside.
+      const safeName = resolvedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+
+      if (isReadableAttachment(safeName, resolvedMime)) {
+        try {
+          const files = await ingestAttachmentToMarkdown(safeName, resolvedMime, source, declaredSize);
+          if (files.length === 0) {
+            return ok(
+              `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel}, ` +
+              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
+            );
+          }
+          const rendered = files
+            .map((f) => `# ${f.path}\n\n${f.content}`)
+            .join("\n\n---\n\n");
+          return ok(
+            `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel} and extracted it to markdown. ` +
+            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
+          );
+        } catch (ingestErr) {
+          return err(
+            `Could not extract attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
+            `${errMsg(ingestErr)}. ` +
+            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the source expired.`,
+          );
+        }
+      }
+
+      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+        return err(
+          `Attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
+          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
+          `This file type is not supported by the text extraction path, so it was not returned as base64 through MCP. ` +
+          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+        );
+      }
+
+      // Raw inline base64 for unsupported-but-small files. Reuse the bytes we
+      // already pulled for the /download fallback; otherwise fetch them from the
+      // signed URL now.
+      const buffer = inlineBuffer ?? (
+        "url" in source
+          ? await downloadSmallAttachmentFromSignedUrl(safeName, resolvedMime, declaredSize, source.url)
+              .catch((downloadErr) => {
+                throw new Error(
+                  `Could not download unsupported attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
+                  `${errMsg(downloadErr)}`,
+                );
+              })
+          : Buffer.from(source.data, "base64")
+      );
+
+      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
+      // base64 and writes the buffer to .context/<fileName> in the workspace.
+      return ok(`[SPACES_ATTACHMENT:${safeName}:${resolvedMime}]\n${buffer.toString("base64")}`);
+}
 
 const spacesFetchAttachment: ToolDef = {
   name: "spaces-fetch-attachment",
@@ -5930,8 +6385,7 @@ const spacesFetchAttachment: ToolDef = {
     },
     required: ["attachmentId"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Fetch attachment error", async (args) => {
       const attachmentId = String(args["attachmentId"] ?? "");
       if (!attachmentId) return err("attachmentId is required");
 
@@ -6000,66 +6454,57 @@ const spacesFetchAttachment: ToolDef = {
         }
       }
 
-      // Sanitise filename to keep it within .context/ — strip path separators
-      // and leading dots so the agent can't be tricked into reading outside.
-      const safeName = resolvedName.replace(/[/\\]/g, "_").replace(/^\.+/, "") || "attachment";
+      return renderFetchedAttachment({ source, resolvedName, resolvedMime, declaredSize, sourceLabel, inlineBuffer });
+    }),
+  /**
+   * App-token download. Headless/automation runs (no user session) cannot use
+   * the user-only `/api/attachments/:id/{signed-url,download}` routes — they
+   * 401. This path pulls the bytes through the app surface
+   * `/api/apps/files/download/:attachmentId` (authenticateApp + files:read,
+   * workspace-scoped) using the agent's app token, then funnels through the
+   * SAME renderFetchedAttachment tail so output matches the user path exactly.
+   */
+  appHandler: withToolErrors("Fetch attachment error", async (args) => {
+      const attachmentId = String(args["attachmentId"] ?? "");
+      if (!attachmentId) return err("attachmentId is required");
 
-      if (isReadableAttachment(safeName, resolvedMime)) {
-        try {
-          const files = await ingestAttachmentToMarkdown(safeName, resolvedMime, source, declaredSize);
-          if (files.length === 0) {
-            return ok(
-              `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel}, ` +
-              "but no extractable text was produced. If this is image-only/scanned content, OCR is required.",
-            );
-          }
-          const rendered = files
-            .map((f) => `# ${f.path}\n\n${f.content}`)
-            .join("\n\n---\n\n");
-          return ok(
-            `Fetched attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) via ${sourceLabel} and extracted it to markdown. ` +
-            `Use the content below to answer the user; if the runtime saved this result to a tool-output file, read that file for the full text.\n\n${rendered}`,
-          );
-        } catch (ingestErr) {
-          return err(
-            `Could not extract attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-            `${ingestErr instanceof Error ? ingestErr.message : String(ingestErr)}. ` +
-            `The raw file was not returned through MCP; ask the user for an OCR/text version if it is scanned, image-only, unsupported, or the source expired.`,
-          );
-        }
+      // Metadata via /api/query/claw (dual-auth — accepts the app token).
+      const meta = (await interact({
+        model: "messageAttachment",
+        operation: "findMany",
+        where: { id: { equals: attachmentId }, isDeleted: { equals: false } },
+        take: 1,
+      })) as MessageAttachmentRow[];
+      if (!meta || meta.length === 0) {
+        return err(`Attachment ${attachmentId} not found or deleted`);
       }
+      const m = meta[0]!;
 
-      if (declaredSize > RAW_ATTACHMENT_INLINE_LIMIT_BYTES) {
+      let dl: { buffer: Buffer; contentType: string };
+      try {
+        dl = await appFetchBuffer(`/files/download/${encodeURIComponent(attachmentId)}`);
+      } catch (e) {
+        // The app download route runs the real workspace/ACL check, so a
+        // failure here is the honest signal — the file is gone, or the agent's
+        // installed app is missing the `files:read` scope (403). Surface that
+        // plainly rather than masquerading as a storage outage.
         return err(
-          `Attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) is too large for the raw inline fallback. ` +
-          `Limit: ${formatAttachmentBytes(RAW_ATTACHMENT_INLINE_LIMIT_BYTES)}. ` +
-          `This file type is not supported by the text extraction path, so it was not returned as base64 through MCP. ` +
-          "Ask the user for a smaller file or a text/PDF/DOCX/XLSX/PPTX/HTML/ZIP version.",
+          `Could not fetch attachment "${m.originalFilename}" (${m.mimetype}, ${formatAttachmentBytes(m.size)}) ` +
+          `via the app download route: ${errMsg(e)}. ` +
+          "If this is a 403, grant the agent's app the `files:read` scope; if 404, the file was deleted.",
         );
       }
 
-      // Raw inline base64 for unsupported-but-small files. Reuse the bytes we
-      // already pulled for the /download fallback; otherwise fetch them from the
-      // signed URL now.
-      const buffer = inlineBuffer ?? (
-        "url" in source
-          ? await downloadSmallAttachmentFromSignedUrl(safeName, resolvedMime, declaredSize, source.url)
-              .catch((downloadErr) => {
-                throw new Error(
-                  `Could not download unsupported attachment "${safeName}" (${resolvedMime}, ${formatAttachmentBytes(declaredSize)}) from ${sourceLabel}: ` +
-                  `${downloadErr instanceof Error ? downloadErr.message : String(downloadErr)}`,
-                );
-              })
-          : Buffer.from(source.data, "base64")
-      );
-
-      // Marker format consumed by xyne-claw/src/mcp.ts which decodes the
-      // base64 and writes the buffer to .context/<fileName> in the workspace.
-      return ok(`[SPACES_ATTACHMENT:${safeName}:${resolvedMime}]\n${buffer.toString("base64")}`);
-    } catch (e) {
-      return err(`Fetch attachment error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+      const resolvedMime = m.mimetype || dl.contentType || "application/octet-stream";
+      return renderFetchedAttachment({
+        source: { data: dl.buffer.toString("base64") },
+        resolvedName: m.originalFilename,
+        resolvedMime,
+        declaredSize: dl.buffer.length,
+        sourceLabel: "an app-token direct download",
+        inlineBuffer: dl.buffer,
+      });
+    }),
 };
 
 // ── spaces-upload-to-kb ──────────────────────────────────────────────
@@ -6088,6 +6533,9 @@ interface AccessibleKbCollection {
 
 const spacesUploadToKb: ToolDef = {
   name: "spaces-upload-to-kb",
+  // Depends on /api/collections/accessible and the user attachment download —
+  // both user-session-only routes with no app equivalents wired here yet.
+  userOnly: true,
   description:
     "Save one or more files into a channel's Knowledge Base collection. TWO input sources — provide EXACTLY ONE: " +
     "(1) attachments — EXISTING Spaces thread attachments (get ids from spaces-thread-attachments). Pass a SINGLE id " +
@@ -6142,8 +6590,7 @@ const spacesUploadToKb: ToolDef = {
     },
     required: [],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Upload-to-KB error", async (args) => {
       // Normalize attachment ids from BOTH attachmentId (single) and
       // attachmentIds (array). Dedupe while preserving order so a caller can
       // pass either shape (or both) and get one upload per distinct id.
@@ -6296,7 +6743,7 @@ const spacesUploadToKb: ToolDef = {
           }
           return { ok: true };
         } catch (e) {
-          return { ok: false, error: `network error: ${e instanceof Error ? e.message : String(e)}` };
+          return { ok: false, error: `network error: ${errMsg(e)}` };
         }
       };
 
@@ -6393,10 +6840,7 @@ const spacesUploadToKb: ToolDef = {
       // a successful upload when nothing actually landed.
       if (uploaded.length === 0) return err(summary);
       return ok(summary);
-    } catch (e) {
-      return err(`Upload-to-KB error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-workflow-stats ─────────────────────────────────────────────
@@ -6453,8 +6897,7 @@ const spacesWorkflowStats: ToolDef = {
       },
     },
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("Workflow stats error", async (args) => {
       const workflowName = typeof args["workflowName"] === "string" ? args["workflowName"].trim() : "";
       const workflowType = typeof args["workflowType"] === "string" ? args["workflowType"].trim() : "";
       if (!workflowName && !workflowType) {
@@ -6606,10 +7049,7 @@ const spacesWorkflowStats: ToolDef = {
       };
 
       return ok(JSON.stringify(summary, null, 2));
-    } catch (e) {
-      return err(`Workflow stats error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── user-send-message ─────────────────────────────────────────────────
@@ -6634,6 +7074,9 @@ const spacesWorkflowStats: ToolDef = {
 //   - POST /api/channels/:channelId/conversations to start a new top-level thread
 const userSendMessage: ToolDef = {
   name: "user-send-message",
+  // Posts AS the human via their session token — inherently meaningless for an
+  // app-user run (and its channel-conversations lookup is a user-only route).
+  userOnly: true,
   description:
     "Post a message to a DIFFERENT thread or channel — NOT the one the user is talking to you in — AS THE LOGGED-IN USER. " +
     "The message appears in Spaces with the user's name + avatar, not the bot's. " +
@@ -6729,7 +7172,7 @@ const userSendMessage: ToolDef = {
         .join(", ");
       return ok(`Message sent as user to channel ${channelId}${ids ? ` (${ids})` : ""}.`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errMsg(e);
       return err(
         `user-send-message error: ${msg}. Use conversationId for an existing thread or channelId to post into a channel.`,
       );
@@ -6786,19 +7229,45 @@ const spacesVespaSchema: ToolDef = {
     },
     required: ["schema"],
   },
-  async handler(args) {
-    try {
+  handler: withToolErrors("vespa-schema error", async (args) => {
       const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
 
-      const text = await spacesFetchText(`/api/vespaSearch/schema${qs}`);
+      // The /claw mount is dual-auth (authenticateUserOrApp) so this works for
+      // both user and app tokens (the bare /api/vespaSearch mount is
+      // user-session-only and 401s app-mode runs).
+      const text = await spacesFetchText(`/api/vespaSearch/claw/schema${qs}`);
       if (!text || !text.trim())
         return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
       return ok(text);
-    } catch (e) {
-      return err(`vespa-schema error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
+
+/**
+ * Entity ids for the DIRECT-VESPA tools only.
+ *
+ * A `channel` / `project` lookup returns a NAME, but every follow-up query
+ * needs the ID — and `formatSearchResult` prints one only for people hits
+ * (`userId:`). Project rows are also non-routable, so they carry no citation
+ * chip either: the model got a name it could not turn into a filter, and had to
+ * re-resolve it through another tool.
+ *
+ * Deliberately NOT inside `formatSearchResult`: that renderer is shared with
+ * spaces-search / spaces-search-v2, and this is only wanted on the structured
+ * Vespa path where the ids feed straight back into `filters`.
+ *
+ * Ids come from searchContext (vespa-direct's transformHit); a project doc is
+ * keyed by its own id, so `r.id` is the fallback there.
+ */
+function directEntityIdLines(r: SearchResult): string {
+  const sc = r.searchContext ?? {};
+  const lines: string[] = [];
+  if (sc["channelId"] && (r.type === "chat_container" || r.type === "channel")) {
+    lines.push(`  channelId: ${sc["channelId"]}`);
+  }
+  if (sc["projectId"]) lines.push(`  projectId: ${sc["projectId"]}`);
+  else if (r.type === "project" && r.id) lines.push(`  projectId: ${r.id}`);
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
 
 // Shared renderer for the direct-Vespa tools (spaces-vespa-query raw YQL and
 // spaces-vespa-search structured). Builds a routable Citation per result row —
@@ -6818,6 +7287,7 @@ async function renderDirectResult(
   data: DirectSearchResponse,
   hits: number,
   offset: number,
+  workspaceId?: string,
 ): Promise<ToolResult> {
   const citations: Citation[] = [];
 
@@ -6832,13 +7302,16 @@ async function renderDirectResult(
     (scOf(r)["subApp"] as string | undefined)?.toUpperCase();
   const isFile = (r: SearchResult): boolean => r.type.toLowerCase() === "file";
 
-  const [mailLinks, ticketLinks, canvasViewIds] = await Promise.all([
+  const [mailLinks, ticketLinks, canvasViewIds, collectionItemIds] = await Promise.all([
     resolveMailLinks(allRows.filter((r) => r.type.toLowerCase() === "mail").map((r) => r.id)),
     resolveTicketLinks(allRows.filter(isFile).map((r) => scOf(r)["ticketId"] as string | undefined)),
     resolveCanvasViewIds(
       allRows
         .filter((r) => isFile(r) && subAppOf(r) === "CANVAS" && !scOf(r)["viewAccessId"])
         .map((r) => r.id),
+    ),
+    resolveCollectionItemIds(
+      allRows.filter((r) => isFile(r) && subAppOf(r) === "COLLECTIONS").map((r) => r.id),
     ),
   ]);
 
@@ -6876,23 +7349,30 @@ async function renderDirectResult(
       return citations.length > before;
     }
     // KB collection file → deep-link to the knowledge-base file viewer
-    // (/knowledge-base/<projectId>/<channelId>/<collectionId>/<folder>/<docId>).
-    // All ids are denormalized on the file doc at ingest (mapper.ts mapFile) and
-    // surfaced by transformHit, so NO collection lookup is needed. The FE forwards
-    // this url verbatim (clawCitationUrl.ts collection-item branch). Channel-scoped
-    // collections carry projectId + channelId + collectionId; workspace-scoped ones
-    // don't, so degrade to the channel-level thread chip rather than route to the
-    // wrong channel or emit an uncited row.
+    // (/<workspaceId>/knowledge-base/<projectId>/<channelId>/<collectionId>/<folder>/<itemId>).
+    // projectId/channelId/collectionId(=clId, the ROOT collection)/folderId(=clFd)
+    // are denormalized on the file doc at ingest (mapper.ts mapFile) and surfaced
+    // by transformHit, so no collection lookup is needed for those. `r.id` itself
+    // is the Vespa docId (= collectionItem.fileId, a stable UUID) though — NOT the
+    // collectionItem.id the FE route/download/picker key on — so it's translated
+    // via resolveCollectionItemIds before landing in the citation. The dashboard
+    // mounts every route under /:workspaceId/... (see AppRoot.tsx), so a missing
+    // workspaceId is just as fatal to the link as a missing collection id.
+    // Channel-scoped collections carry projectId + channelId + collectionId;
+    // workspace-scoped ones don't (nor do untranslatable/deleted items), so
+    // degrade to the channel-level thread chip rather than route to the wrong
+    // channel or emit a citation whose link 404s.
     if (type === "file" && subApp === "COLLECTIONS") {
       const projectId = sc["projectId"] as string | undefined;
       const collectionId = sc["collectionId"] as string | undefined;
       const folderId = sc["folderId"] as string | undefined;
-      if (projectId && channelId && collectionId) {
+      const itemId = collectionItemIds.get(r.id);
+      if (workspaceId && projectId && channelId && collectionId && itemId) {
         citations.push({
           kind: "collection-item",
-          url: `/knowledge-base/${projectId}/${channelId}/${collectionId}/${folderId || "_"}/${r.id}`,
+          url: `/${workspaceId}/knowledge-base/${projectId}/${channelId}/${collectionId}/${folderId || "_"}/${itemId}`,
           collectionId,
-          collectionItemId: r.id,
+          collectionItemId: itemId,
           fileName: label,
           chunkIndex,
           label,
@@ -6978,7 +7458,7 @@ async function renderDirectResult(
       for (const r of group.results) {
         chunkIndex += 1;
         const cited = harvest(r, chunkIndex);
-        parts.push(formatSearchResult(r, cited ? chunkIndex : null));
+        parts.push(formatSearchResult(r, cited ? chunkIndex : null) + directEntityIdLines(r));
       }
       parts.push("");
     }
@@ -6990,7 +7470,7 @@ async function renderDirectResult(
   const rendered = results
     .map((r, idx) => {
       const cited = harvest(r, idx + 1);
-      return formatSearchResult(r, cited ? idx + 1 : null);
+      return formatSearchResult(r, cited ? idx + 1 : null) + directEntityIdLines(r);
     })
     .join("\n\n");
   return finalize(
@@ -7006,13 +7486,162 @@ async function renderDirectResult(
 // (thrown before Vespa is hit) carry no executedYql and render as plain text.
 function directError(prefix: string, e: unknown): ToolResult {
   const executedYql = (e as { executedYql?: string })?.executedYql;
-  const base = `${prefix}: ${e instanceof Error ? e.message : String(e)}`;
+  const base = `${prefix}: ${errMsg(e)}`;
   const text = executedYql ? `${base}\n\n[Executed YQL (ACL guard injected): ${executedYql}]` : base;
   const result = err(text);
   return executedYql
     ? { ...result, _meta: { debug: { payloads: [{ stage: "direct", yql: executedYql, vespaParams: {} }] } } }
     : result;
 }
+
+// ── onyx-bench-search ────────────────────────────────────────────────────────
+// Dedicated search tool for EnterpriseRAG-Bench (§5 evaluation harness).
+// Searches the benchmark Vespa cluster (separate from prod) whose ~511k docs
+// span 9 enterprise source types (Slack, Gmail, Linear, Google Drive, HubSpot,
+// Fireflies, GitHub, Jira, Confluence). Available ONLY when ONYX_BENCH_VESPA=true.
+//
+// Ingestion maps source types to 4 Vespa schemas:
+//   slack        → chat_message (docType="slack")
+//   gmail        → mail         (docType="mail")
+//   jira/linear  → ticket       (docType="ticket")
+//   fireflies    → file         (docType="file", subApp="transcript")
+//   confluence/github/google_drive/hubspot → file (docType="file", subApp="knowledge_base")
+//
+// Each source type gets its own channel container: bench-ch-<workspaceId>-<sourceType>.
+// Source-type narrowing uses channelId (imported from channelRef on all 4 schemas)
+// since docType doesn't distinguish most source types.
+
+const BENCH_SOURCE_TYPES = [
+  "slack", "gmail", "linear", "google_drive", "hubspot",
+  "fireflies", "github", "jira", "confluence",
+] as const;
+
+/** The 4 content-bearing schemas the eval retrieval query targets. Mirrors
+ *  RETRIEVAL_SCHEMAS in the dataset branch's enterpriseRagEval.ts. */
+const BENCH_RETRIEVAL_SCHEMAS = "chat_message, file, mail, ticket";
+
+/** Extract sourceType from the bench channelId pattern `bench-ch-<ws>-<sourceType>`. */
+function sourceTypeFromChannelId(channelId: string | undefined): string | undefined {
+  if (!channelId || !channelId.startsWith("bench-ch-")) return undefined;
+  const rest = channelId.slice("bench-ch-".length);
+  const lastDash = rest.lastIndexOf("-");
+  if (lastDash < 0) return undefined;
+  return rest.slice(lastDash + 1);
+}
+
+const onyxBenchSearch: ToolDef = {
+  name: "onyx-bench-search",
+  description:
+    "Search the EnterpriseRAG-Bench corpus (~511k synthetic enterprise documents across 9 source types: " +
+    "Slack, Gmail, Linear, Google Drive, HubSpot, Fireflies, GitHub, Jira, Confluence). " +
+    "This is the fictional company \"Redwood Inference\" — use it to find documents relevant to the question.\n\n" +
+    "## How to use\n" +
+    "- Pass a `query` with the topic/keywords you're looking for.\n" +
+    "- Optionally narrow by `sourceType` (e.g. \"confluence\" for wikis, \"slack\" for chat messages).\n" +
+    "- Results include `docId`, `sourceType`, title, and a content snippet.\n" +
+    "- If the first search doesn't find the answer, try different keywords or broaden the sourceType.\n\n" +
+    "## Tips\n" +
+    "- Semantic questions may use roundabout phrasing — try multiple query formulations.\n" +
+    "- Project-related questions may require documents from different source types.\n" +
+    "- If information seems absent, say so — do not guess from superficially related documents.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "Free-text search query — keywords or natural language describing what you're looking for.",
+      },
+      sourceType: {
+        type: "string",
+        enum: [...BENCH_SOURCE_TYPES],
+        description:
+          "Narrow to one source type. slack (chat), gmail (email), linear (project tickets), " +
+          "google_drive (files), hubspot (CRM), fireflies (meeting transcripts), github (PRs), " +
+          "jira (support tickets), confluence (wikis/docs). Omit to search all source types.",
+      },
+      hits: {
+        type: "number",
+        minimum: 1,
+        maximum: 50,
+        default: 10,
+        description: "Max results to return (default 10, max 50).",
+      },
+      offset: {
+        type: "number",
+        minimum: 0,
+        default: 0,
+        description: "Pagination offset.",
+      },
+    },
+    required: ["query"],
+  },
+  handler: withToolErrors("onyx-bench-search error", async (args, ctx) => {
+    if (!isOnyxBenchLane()) {
+      return err("onyx-bench-search requires ONYX_BENCH_VESPA=true.");
+    }
+    const query = String(args["query"] ?? "").trim();
+    if (!query) return err("query is required.");
+    const sourceType = args["sourceType"] != null ? String(args["sourceType"]) : undefined;
+    const hits = Math.min(Math.max(Number(args["hits"] ?? 10), 1), 50);
+    const offset = Math.max(Number(args["offset"] ?? 0), 0);
+    const vespaEndpoint = process.env["VESPA_QUERY_ENDPOINT"] ?? "";
+    if (!vespaEndpoint) return err("VESPA_QUERY_ENDPOINT is not set — cannot reach benchmark Vespa.");
+
+    const workspaceId = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
+    if (!workspaceId) return err("XYNE_SPACES_WORKSPACE_ID is not set — cannot scope benchmark search.");
+
+    // Build YQL — mirrors the eval retrieval query from enterpriseRagEval.ts:
+    //   select * from sources chat_message, file, mail, ticket
+    //   where ({grammar:"tokenize"} userInput(@query)) and workspaceId contains "..."
+    //
+    // sourceType narrowing: each source type gets its own channel container
+    // (bench-ch-<workspaceId>-<sourceType>), and channelId is imported from
+    // channelRef.docId on all 4 schemas. This is the ONLY reliable way to
+    // narrow by source type — docType doesn't distinguish (e.g. gmail→"mail",
+    // jira→"ticket", fireflies→"file").
+    const clauses: string[] = [`workspaceId contains "${esc(workspaceId)}"`];
+    if (sourceType) {
+      const benchChannelId = `bench-ch-${workspaceId}-${sourceType}`;
+      clauses.push(`channelId contains "${esc(benchChannelId)}"`);
+    }
+    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ({grammar:"tokenize"} userInput(@query)) and ${clauses.join(" and ")}`;
+
+    try {
+      const data = await queryDirect(
+        yql,
+        query,
+        ctx.userId,
+        hits,
+        offset,
+        vespaEndpoint,
+        "default_native",
+        undefined,
+        workspaceId,
+      );
+      const results = data.data.results ?? [];
+      if (results.length === 0) return ok(`No results found for "${query}".`);
+
+      const rendered = results.map((r, idx) => {
+        const sc = r.searchContext ?? {};
+        const st = sourceTypeFromChannelId(sc["channelId"] as string | undefined) ?? r.type;
+        const lines = [
+          `[${idx + 1}] ${r.title || st}`,
+          `  docId: ${r.id}`,
+          `  sourceType: ${st}`,
+        ];
+        if (r.context && typeof r.context === "string") lines.push(`  content: ${r.context}`);
+        return lines.join("\n");
+      }).join("\n\n");
+
+      return ok(
+        `Found ${data.data.totalCount ?? results.length} result(s):\n\n${rendered}` +
+        paginationFooter({ returned: results.length, limit: hits, offset, total: data.data.totalCount }),
+      );
+    } catch (e) {
+      return directError("onyx-bench-search error", e);
+    }
+  }),
+};
 
 // ── spaces-vespa-query ───────────────────────────────────────────────────────
 
@@ -7115,7 +7744,7 @@ const spacesVespaQuery: ToolDef = {
           ? (args["rankInputs"] as Record<string, unknown>)
           : undefined;
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId) {
         log.error(
           `[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`,
@@ -7126,7 +7755,7 @@ const spacesVespaQuery: ToolDef = {
       const data = await queryDirect(
         yql,
         query,
-        ctx.userId,
+        aclUserId,
         hits,
         offset,
         CONFIG.vespaQueryEndpoint,
@@ -7134,12 +7763,50 @@ const spacesVespaQuery: ToolDef = {
         rankInputs,
         workspaceId,
       );
-      return renderDirectResult(data, hits, offset);
+      return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
       return directError("vespa-query error", e);
     }
   },
 };
+
+/**
+ * Caller identity for the DIRECT-VESPA tools, with a LOCAL-ONLY override.
+ *
+ * These tools do not go through the MCP credentials path: they read
+ * `ctx.userId` (the Spaces user id on the claw session) and resolve the tenant
+ * with `getWorkspaceIdForUser`, a lookup against the local Spaces DB. Locally
+ * that pins every query to whichever seeded user your Spaces instance
+ * authenticates as, so a query cannot be aimed at another tenant — which is
+ * exactly what you need when the Vespa endpoint is port-forwarded to a
+ * different environment and the local ids match nothing in that index.
+ *
+ * Scope is deliberately narrow: ONLY the ACL + workspace guards of the direct
+ * Vespa tools. The gateway-backed tools keep the real session identity, so
+ * they continue to work against local data instead of failing on an identity
+ * that has no local Spaces session.
+ *
+ * HARD-GATED on `!CONFIG.isProduction` — an override here would otherwise run
+ * one user's queries under another user's ACL.
+ */
+async function directVespaIdentity(
+  ctxUserId: string,
+): Promise<{ userId: string; workspaceId: string | null }> {
+  const devUser = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_USER_ID"] ?? "").trim();
+  const devWorkspace = CONFIG.isProduction ? "" : (process.env["XYNE_SPACES_DEV_WORKSPACE_ID"] ?? "").trim();
+  const userId = devUser || ctxUserId;
+  // Env-first workspace resolution: the tool server's spawn env already carries
+  // XYNE_SPACES_WORKSPACE_ID when the adapter is bound — bench + session modes.
+  // Falls back to the Spaces-DB user row when no env set.
+  const envWorkspace = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
+  const workspaceId = devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId));
+  if (devUser || devWorkspace) {
+    log.warn(
+      `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,
+    );
+  }
+  return { userId, workspaceId };
+}
 
 // ── spaces-vespa-search ──────────────────────────────────────────────────────
 
@@ -7297,11 +7964,26 @@ const spacesVespaSearch: ToolDef = {
       const hits = Math.min(Math.max(Number(args["hits"] ?? 20), 0), 100);
       const offset = Math.max(Number(args["offset"] ?? 0), 0);
       const rankProfile = args["rankProfile"] != null ? String(args["rankProfile"]) : undefined;
+      // `fields` — INTERNAL, deliberately absent from inputSchema.
+      //
+      // Column projection (`select <cols>` instead of `select *`), used by
+      // xyne-claw's prefetch to sample many hits for their channelId without
+      // dragging message bodies across the wire (60 hits: ~460KB -> ~20KB).
+      // It is NOT advertised to the model on purpose: it is a performance knob
+      // with no bearing on WHICH rows match, so exposing it would only add a
+      // dimension for the model to reason about and get wrong. The schema sets
+      // no top-level additionalProperties:false, so a caller that knows about
+      // it can pass it; everyone else gets full rows exactly as before.
+      // Entries are validated in buildYqlFromParams against the area's own
+      // columns — nothing raw reaches the YQL.
+      const fields = Array.isArray(args["fields"])
+        ? (args["fields"] as unknown[]).map(String).filter(Boolean)
+        : undefined;
 
       // Tenant scope — every direct-Vespa query is confined to the caller's
       // workspace, resolved from the user record (public.users). Refuse to run
       // unscoped rather than risk crossing tenants.
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId)
         return err("Could not resolve your workspaceId — cannot run a workspace-scoped search.");
 
@@ -7312,6 +7994,7 @@ const spacesVespaSearch: ToolDef = {
         {
           searchArea,
           query,
+          ...(fields && fields.length > 0 ? { fields } : {}),
           ...(filters ? { filters } : {}),
           ...(docType ? { docType } : {}),
           ...(groupBy ? { groupBy } : {}),
@@ -7322,14 +8005,14 @@ const spacesVespaSearch: ToolDef = {
           ...(rankProfile ? { rankProfile } : {}),
           hits,
         },
-        ctx.userId,
+        aclUserId,
         workspaceId,
       );
 
       const data = await queryDirect(
         built.yql,
         built.query,
-        ctx.userId,
+        aclUserId,
         hits,
         offset,
         CONFIG.vespaQueryEndpoint,
@@ -7337,7 +8020,7 @@ const spacesVespaSearch: ToolDef = {
         undefined,
         workspaceId,
       );
-      return renderDirectResult(data, hits, offset);
+      return renderDirectResult(data, hits, offset, workspaceId);
     } catch (e) {
       return directError("vespa-search error", e);
     }
@@ -7394,8 +8077,7 @@ const spacesMyItems: ToolDef = {
     },
     required: ["type"],
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("my-items error", async (args, ctx) => {
       const type = String(args["type"] ?? "");
       const limit = Math.min(Math.max(Number(args["limit"] ?? 50), 1), 100);
       const offset = Math.max(Number(args["offset"] ?? 0), 0);
@@ -7694,10 +8376,7 @@ const spacesMyItems: ToolDef = {
         `${rows.length} ${isEmail ? "email draft" : "draft"}(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: rows.length, limit, offset })}`,
         citations,
       );
-    } catch (e) {
-      return err(`my-items error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-saved-views (Project / Ticket board "Views") ──────────────
@@ -7744,8 +8423,7 @@ const spacesSavedViews: ToolDef = {
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset." },
     },
   },
-  async handler(args, ctx) {
-    try {
+  handler: withToolErrors("saved-views error", async (args, ctx) => {
       const limit = Math.min(Math.max(Number(args["limit"] ?? 50), 1), 100);
       const offset = Math.max(Number(args["offset"] ?? 0), 0);
       const contextId = args["contextId"] ? String(args["contextId"]) : undefined;
@@ -7824,10 +8502,7 @@ const spacesSavedViews: ToolDef = {
       return ok(
         `${views.length} saved view(s):\n\n${lines.join("\n\n")}${paginationFooter({ returned: views.length, limit, offset })}`,
       );
-    } catch (e) {
-      return err(`saved-views error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  },
+    }),
 };
 
 // ── spaces-corpus-scan ───────────────────────────────────────────────────────
@@ -7928,7 +8603,7 @@ const spacesCorpusScan: ToolDef = {
         bucket,
       });
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId)
         return err("Could not resolve your workspaceId — cannot run a workspace-scoped scan.");
 
@@ -7945,7 +8620,7 @@ const spacesCorpusScan: ToolDef = {
         const res = await queryDirect(
           yql,
           query,
-          ctx.userId,
+          aclUserId,
           0,
           0,
           CONFIG.vespaQueryEndpoint,
@@ -8089,7 +8764,7 @@ const spacesEvidencePack: ToolDef = {
       });
       const { scan, topic, perBucket } = validated;
 
-      const workspaceId = await getWorkspaceIdForUser(ctx.userId);
+      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
       if (!workspaceId) return err("Could not resolve your workspaceId — cannot run a workspace-scoped extraction.");
 
       const debugPayloads: Array<{ stage: string; yql: string; vespaParams: Record<string, unknown> }> = [];
@@ -8099,7 +8774,7 @@ const spacesEvidencePack: ToolDef = {
       // finite and the coverage note honest.
       const censusYql = buildCorpusScanYql(scan, { withTerm: true });
       const termBucketCounts = await Promise.all(scan.terms.map(async term => {
-        const res = await queryDirect(censusYql, termToQuery(term), ctx.userId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
+        const res = await queryDirect(censusYql, termToQuery(term), aclUserId, 0, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId);
         const executed = res.data.debug?.payloads?.[0];
         debugPayloads.push({ stage: `evidence-pack census: "${term}"`, yql: executed?.yql ?? censusYql, vespaParams: executed?.vespaParams ?? {} });
         const buckets: Record<number, number> = {};
@@ -8128,7 +8803,7 @@ const spacesEvidencePack: ToolDef = {
 
       const rowsNested = await Promise.all(fetchList.map(async ({ term, bucketKey }) => {
         const yql = buildPackFetchYql(scan, bucketRange(bucketKey, scan.bucket));
-        const res = await queryDirect(yql, termToQuery(term), ctx.userId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
+        const res = await queryDirect(yql, termToQuery(term), aclUserId, perBucket, 0, CONFIG.vespaQueryEndpoint, "unranked", undefined, workspaceId, true);
         const executed = res.data.debug?.payloads?.[0];
         debugPayloads.push({ stage: `evidence-pack fetch: "${term}" @ ${bucketKey}`, yql: executed?.yql ?? yql, vespaParams: executed?.vespaParams ?? {} });
         const results = (!res.data.grouped ? res.data.results : []) ?? [];
@@ -8191,14 +8866,325 @@ const spacesEvidencePack: ToolDef = {
   },
 };
 
+// ── spaces-desk-metrics ───────────────────────────────────────────────
+
+const DESK_METRIC_KEYS = [
+  "frt",
+  "rt",
+  "csat",
+  "counts",
+  "priority",
+  "trend",
+  "agents",
+  "tags",
+  "aiCategories",
+  "customFields",
+  "tickets",
+] as const;
+
+interface DeskSummary {
+  channelId: string;
+  channelName: string | null;
+  deskType: string;
+}
+
+/** Resolve the desks a request targets, or explain why it could not. */
+type DeskResolution =
+  | { ok: true; channelIds: string[] }
+  | { ok: false; text: string };
+
+async function listMetricsDesks(): Promise<DeskSummary[]> {
+  const data = (await spacesFetch("/api/desk-metrics/claw/desks")) as {
+    desks?: DeskSummary[];
+  };
+  return data.desks ?? [];
+}
+
+function describeDesks(desks: DeskSummary[]): string {
+  return desks
+    .map((d) => `- ${d.channelName ?? "(unnamed)"} [${d.deskType}] channelId=${d.channelId}`)
+    .join("\n");
+}
+
+async function resolveDesks(args: Record<string, unknown>): Promise<DeskResolution> {
+  const explicitIds = Array.isArray(args["channelIds"])
+    ? (args["channelIds"] as unknown[]).filter((v): v is string => typeof v === "string" && v.length > 0)
+    : [];
+  if (explicitIds.length > 0) return { ok: true, channelIds: explicitIds };
+
+  const desks = await listMetricsDesks();
+  if (desks.length === 0) {
+    return {
+      ok: false,
+      text:
+        "This user is not a member of any support desk, so there is nothing to report on. Desk " +
+        "metrics cover Xyne Desk channels only, and only ones the user belongs to.",
+    };
+  }
+
+  if (args["allDesks"] === true) {
+    return { ok: true, channelIds: desks.map((d) => d.channelId) };
+  }
+
+  const deskName = typeof args["deskName"] === "string" ? args["deskName"].trim() : "";
+  if (!deskName) {
+    return {
+      ok: false,
+      text:
+        `Specify which desk. Pass deskName, or channelIds, or allDesks=true to cover all ` +
+        `${desks.length}. Desks available to this user:\n${describeDesks(desks)}`,
+    };
+  }
+
+  const needle = deskName.toLowerCase();
+  // Tier 1: case-insensitive exact.
+  let matches = desks.filter((d) => (d.channelName ?? "").toLowerCase() === needle);
+  // Tier 2: case-insensitive contains — catches the casing/wording drift that
+  // makes a plain equality check fail on names the user typed from memory.
+  if (matches.length === 0) {
+    matches = desks.filter((d) => (d.channelName ?? "").toLowerCase().includes(needle));
+  }
+  // Tier 3: no match — surface real candidates rather than a dead end.
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      text:
+        `No desk matched "${deskName}". Re-call with one of these exact names, or its channelId:\n` +
+        describeDesks(desks),
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      text:
+        `"${deskName}" matched ${matches.length} desks. Re-call with one exact name or channelId, ` +
+        `or allDesks=true to merge them:\n${describeDesks(matches)}`,
+    };
+  }
+  return { ok: true, channelIds: [matches[0]!.channelId] };
+}
+
+const spacesDeskMetrics: ToolDef = {
+  name: "spaces-desk-metrics",
+  description:
+    "Support-desk analytics for Xyne Desk channels: first-response time (FRT), resolution time (RT), " +
+    "CSAT, tickets opened, email replies sent, per-stage and per-priority breakdowns, per-agent " +
+    "performance, tag breakdowns, and a daily opened-vs-closed trend. This is the SAME data the Desk " +
+    "Metrics dashboard shows. " +
+    "Use when the user asks how a support desk is performing — 'what's our average response time', " +
+    "'CSAT last month', 'who resolved the most tickets', 'how many tickets did we get last week', " +
+    "'which tags are spiking'. " +
+    "Identify the desk by `deskName` (partial, case-insensitive; the tool returns real candidates if " +
+    "nothing matches), by `channelIds`, or set `allDesks=true` to merge every desk the " +
+    "user can see. Call with no desk argument to list the available desks. " +
+    "ASK FOR ONLY THE METRICS YOU NEED via `metrics` — each key is a separate database query, and the " +
+    "default runs all of them. " +
+    "For \"what are the tickets about\" / classify / categorise questions use metrics:[\"aiCategories\"], " +
+    "which returns exact ticket counts per AI category AND per (category, sub-category) pair over the " +
+    "whole cohort — do not enumerate tickets and tally the labels yourself. Narrow with the " +
+    "`aiCategories` / `aiSubCategories` filters. " +
+    "For custom (form) field questions: run metrics:[\"customFields\"] to discover which fields the desk " +
+    "carries, then pass `customFieldBreakdown` with the exact names to get a value distribution, or " +
+    "`customFieldFilter` to scope any other metric to tickets matching a field value. " +
+    "IMPORTANT semantics, also restated in the response's `notes`: (1) frt/rt/counts/priority/agents/" +
+    "tags/tickets are COHORT-scoped — they describe tickets CREATED in the range, so a ticket created " +
+    "earlier and resolved during the range is NOT counted; (2) csat and counts.emailRepliesInRange are " +
+    "ACTIVITY-scoped — events that happened in the range whatever their ticket's age; (3) rt excludes " +
+    "still-open tickets, so a low average over few resolvedTickets is survivorship bias; (4) agents[] " +
+    "attributes tickets to the CURRENT assignee; (5) data is forward-only and does not extend before " +
+    "desk metrics was deployed — old ranges are partial, not empty. " +
+    "Durations are SECONDS. Report them in human units (minutes/hours) rather than reading the raw number aloud.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      deskName: {
+        type: "string",
+        description:
+          "Desk (channel) name, case-insensitive partial match. If nothing matches, or the match is " +
+          "ambiguous, the tool returns the real desk names — re-call with one of those.",
+      },
+      channelIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Explicit desk channel ids. Takes precedence over deskName/allDesks. Max 20; more than one " +
+          "merges them with denominator-weighted averages and adds a perDesk split.",
+      },
+      allDesks: {
+        type: "boolean",
+        description:
+          "Merge every desk the user can see. Use for org-wide questions ('how is support doing " +
+          "overall'). Ignored when channelIds is set.",
+      },
+      lastDays: {
+        type: "number",
+        minimum: 1,
+        maximum: 90,
+        description: "Window length in days ending now (1-90). Defaults to 7. Mutually exclusive with timeRange.",
+      },
+      timeRange: {
+        type: "string",
+        description:
+          "Absolute window as 'startMs_endMs' (epoch milliseconds), e.g. '1735689600000_1738368000000'. " +
+          "Use for a specific calendar period; otherwise prefer lastDays. Max span 90 days.",
+      },
+      metrics: {
+        type: "array",
+        items: { type: "string", enum: [...DESK_METRIC_KEYS] },
+        description:
+          "Which metrics to compute; defaults to all. Each key costs a separate query, so pass only what " +
+          "the question needs. 'counts' covers ticketsOpened + emailReplies + per-stage counts; 'tags' " +
+          "covers both the category and per-tag breakdowns; 'tickets' additionally needs includeTickets.",
+      },
+      includeTickets: {
+        type: "number",
+        minimum: 0,
+        maximum: 50,
+        description:
+          "Return this many individual ticket rows (newest first), each with title, priority, stage, " +
+          "assignee, FRT/RT seconds, CSAT and custom fields. Defaults to 0. Rows are heavy — ask for them " +
+          "only when the user wants examples or a drill-down, not to compute aggregates yourself.",
+      },
+      assigneeIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets currently assigned to these user ids (from spaces-users).",
+      },
+      stageNames: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets currently in these stages.",
+      },
+      priorities: {
+        type: "array",
+        items: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        description: "Restrict to these ticket priorities.",
+      },
+      userGroupIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Restrict to tickets owned by these user groups.",
+      },
+      tagValues: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Restrict to tickets carrying these desk-email tags, each as 'category:tag' (e.g. " +
+          "'issue_type:refund'). Get the real values from a tags-enabled run first.",
+      },
+      aiCategories: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Restrict to tickets the AI classifier put in these top-level categories (exact match). " +
+          "Run metrics:[\"aiCategories\"] first to see the real labels on this desk.",
+      },
+      aiSubCategories: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Restrict to these AI sub-categories (exact match). Independent of aiCategories — " +
+          "setting both requires BOTH to match.",
+      },
+      customFieldBreakdown: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Custom (form) field NAMES to break down by value, e.g. [\"Primary Issue\"]. Max 5. Names must " +
+          "match exactly — run with metrics:[\"customFields\"] first to discover what this desk has. " +
+          "Multi-select fields count a ticket once per value, so their counts do not sum to the ticket " +
+          "total; the response's notes say which fields those are.",
+      },
+      customFieldFilter: {
+        type: "object",
+        description:
+          "Restrict the cohort by custom field. `keys` alone means 'the field is set at all'; add " +
+          "perKeyFilters to match values. Discover field names with metrics:[\"customFields\"] first.",
+        properties: {
+          keys: {
+            type: "array",
+            items: { type: "string" },
+            description: "Field names to require, e.g. [\"Primary Issue\"].",
+          },
+          perKeyFilters: {
+            type: "object",
+            description:
+              "Per field name: { values: [exact matches] } or { textTerms: [substrings] }. Use values " +
+              "for dropdowns/multi-selects, textTerms for free-text fields.",
+          },
+        },
+        required: ["keys"],
+      },
+    },
+  },
+  handler: withToolErrors("desk-metrics error", async (args) => {
+      if (args["lastDays"] !== undefined && typeof args["timeRange"] === "string") {
+        return err("Pass either lastDays or timeRange, not both.");
+      }
+
+      const resolution = await resolveDesks(args);
+      if (!resolution.ok) return ok(resolution.text);
+
+      const body: Record<string, unknown> = { channelIds: resolution.channelIds };
+      if (typeof args["timeRange"] === "string") body["timeRange"] = args["timeRange"];
+      else body["lastDays"] = typeof args["lastDays"] === "number" ? args["lastDays"] : 7;
+
+      const metrics = Array.isArray(args["metrics"])
+        ? (args["metrics"] as unknown[]).filter(
+            (m): m is string => typeof m === "string" && (DESK_METRIC_KEYS as readonly string[]).includes(m),
+          )
+        : [];
+      if (metrics.length > 0) body["metrics"] = metrics;
+
+      const includeTickets = typeof args["includeTickets"] === "number" ? args["includeTickets"] : 0;
+      if (includeTickets > 0) {
+        body["includeTickets"] = includeTickets;
+        // Asking for rows without the 'tickets' key would silently return none.
+        if (metrics.length > 0 && !metrics.includes("tickets")) {
+          body["metrics"] = [...metrics, "tickets"];
+        }
+      }
+
+      for (const key of [
+        "assigneeIds",
+        "stageNames",
+        "priorities",
+        "userGroupIds",
+        "tagValues",
+        "aiCategories",
+        "aiSubCategories",
+      ]) {
+        const value = args[key];
+        if (Array.isArray(value) && value.length > 0) body[key] = value;
+      }
+
+      const breakdown = args["customFieldBreakdown"];
+      if (Array.isArray(breakdown) && breakdown.length > 0) body["customFieldBreakdown"] = breakdown;
+
+      const cff = args["customFieldFilter"];
+      if (cff && typeof cff === "object" && Array.isArray((cff as { keys?: unknown }).keys)) {
+        body["customFieldFilter"] = cff;
+      }
+
+      const data = (await spacesFetch("/api/desk-metrics/claw/query", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as Record<string, unknown>;
+
+      return ok(JSON.stringify(data, null, 2));
+    }),
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
+  onyxBenchSearch,
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,
   spacesSavedViews,
   spacesWorkflowStats,
+  spacesDeskMetrics,
   userSendMessage,
   spacesMeetingInsights,
   spacesTickets,
@@ -8220,6 +9206,7 @@ export const tools: ToolDef[] = [
   spacesCreateTicket,
   spacesCreateBulkTickets,
   spacesUpdateTicket,
+  spacesUpdateBulkTickets,
   spacesScheduleCall,
   spacesReadCanvas,
   spacesEditCanvas,

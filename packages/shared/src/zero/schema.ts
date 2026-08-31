@@ -1655,6 +1655,9 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
+    deskReportEnabled: boolean().optional(),
+    deskReportAgentSlug: string().optional(),
+    deskReportRangeDays: number().optional(),
   })
   .primaryKey('channelId');
 

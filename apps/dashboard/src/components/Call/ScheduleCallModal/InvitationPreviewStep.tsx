@@ -282,7 +282,13 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
 
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <div className='flex justify-between items-center border-t p-3 shrink-0'>
-        <Button variant='ghost' onClick={onBack} disabled={isSubmitting}>
+        <Button
+          variant='ghost'
+          onClick={onBack}
+          data-track-category='calls'
+          data-track-name='BACK_FROM_INVITATION_PREVIEW'
+          disabled={isSubmitting}
+        >
           Back
         </Button>
         <div className='flex items-center gap-3'>
@@ -290,7 +296,12 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
             Sending to <strong className='text-foreground'>{recipients.length}</strong> external
             {recipients.length === 1 ? '' : 's'} as a reply.
           </p>
-          <Button onClick={onSend} disabled={isSubmitting}>
+          <Button
+            onClick={onSend}
+            data-track-category='calls'
+            data-track-name='SEND_CALL_INVITATION'
+            disabled={isSubmitting}
+          >
             {isSubmitting ? 'Sending…' : 'Send & schedule'}
           </Button>
         </div>

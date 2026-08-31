@@ -15255,6 +15255,9 @@ export function createMutators(
           metricsEnabled: z.boolean().optional(),
           frtStageNames: z.string().optional().nullable(),
           appWebhookDeliveryEnabled: z.boolean().optional(),
+          deskReportEnabled: z.boolean().optional(),
+          deskReportAgentSlug: z.string().optional().nullable(),
+          deskReportRangeDays: z.number().optional(),
         }),
         async ({
           tx,
@@ -15271,6 +15274,9 @@ export function createMutators(
             metricsEnabled,
             frtStageNames,
             appWebhookDeliveryEnabled,
+            deskReportEnabled,
+            deskReportAgentSlug,
+            deskReportRangeDays,
           },
         }) => {
           const existing = await tx.run(
@@ -15290,6 +15296,9 @@ export function createMutators(
               ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
               ...(frtStageNames !== undefined ? { frtStageNames } : {}),
               ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
+              ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
+              ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
+              ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
             });
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -15317,6 +15326,9 @@ export function createMutators(
               metricsEnabled: metricsEnabled ?? false,
               frtStageNames: frtStageNames ?? null,
               appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
+              deskReportEnabled: deskReportEnabled ?? false,
+              deskReportAgentSlug: deskReportAgentSlug ?? null,
+              deskReportRangeDays: deskReportRangeDays ?? 1,
             });
           }
         },

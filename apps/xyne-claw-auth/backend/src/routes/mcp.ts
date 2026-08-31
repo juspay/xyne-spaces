@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from "express";
+import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
+import { errMsg } from "../lib/errors.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -79,6 +81,16 @@ const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS?.split(",")
   .map((tenant) => tenant.trim())
   .find((tenant) => tenant.length > 0);
 const loggedGlobalServerExclusions = new Set<string>();
+
+// Tools implemented locally by xyne-spaces-app-tools-server.ts (not part of the
+// shared Spaces registry it also mounts). On non-automation runs the app-tools
+// listing is reduced to exactly these — see the filter in GET /mcp/tools.
+// `spaces-send-message` is the legacy alias the server still dispatches.
+const APP_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "ping",
+  "apps-send-message",
+  "spaces-send-message",
+]);
 
 function isStrictAgentToolsEnabled(): boolean {
   return (process.env.MCP_STRICT_AGENT_TOOLS ?? "on").toLowerCase() !== "off";
@@ -690,26 +702,102 @@ async function loadSlackSurfaceCredentials(
 }
 
 /**
- * Mirror the per-run Slack subagent injection at the claw-auth enforcement
- * boundary. MCP listing/call routes load the agent's stored config, not the
- * agentConfig override forwarded to claw, so without this the virtual Slack
- * group is created and then immediately filtered back out.
+ * Add a tool to the agent's `direct` allowlist for THIS run only.
+ *
+ * `apps-send-message` never appears in the agent tool picker (it acts as the
+ * bot identity, so it is deliberately not offered for interactive runs), which
+ * means a strict `tools.direct` allowlist always excludes it. For an AWAKENED
+ * run that is fatal rather than merely restrictive: nobody is in a thread to
+ * receive the agent's final answer, so this tool is the ONLY way it can speak.
+ * Without it the agent reasons correctly, decides to reply, finds no tool, and
+ * says nothing — the whole feature is inert. (Observed live 2026-08-25.)
+ *
+ * Per-run and in-memory: the stored agent config is untouched, and interactive
+ * runs of the same agent are unaffected.
  */
-async function withSlackSurfaceToolsConfig(
+function withDirectTool(config: AgentToolsConfig, toolName: string): AgentToolsConfig {
+  const direct = Array.isArray(config.direct)
+    ? config.direct.filter((value): value is string => typeof value === "string")
+    : [];
+  if (direct.includes(toolName)) return config;
+  return { ...config, direct: [...direct, toolName] };
+}
+
+function withSubagent(config: AgentToolsConfig, subagentName: string): AgentToolsConfig {
+  const subagents = Array.isArray(config.subagents)
+    ? config.subagents.filter((value): value is string => typeof value === "string")
+    : [];
+  if (subagents.includes(subagentName)) return config;
+  return { ...config, subagents: [...subagents, subagentName] };
+}
+
+/**
+ * Mirror per-run surface tool injection at the claw-auth enforcement boundary.
+ * MCP listing/call routes load the agent's stored config, not the agentConfig
+ * override forwarded to claw, so without this a surface-default virtual group
+ * is created and then immediately filtered back out.
+ */
+export async function withSurfaceDefaultToolsConfig(
   config: AgentToolsConfig | undefined,
   sessionId: string,
+  sessionSpacesAppId?: string,
 ): Promise<AgentToolsConfig | undefined> {
   if (!config) return undefined;
 
   const { getSession } = await import("./webhook.js");
   const runCtx = await getSession(sessionId).catch(() => null);
-  if (!runCtx?.slackDelivery?.surfaceAgentId || !runCtx.slackDelivery.teamId) return config;
 
-  const subagents = Array.isArray(config.subagents)
-    ? config.subagents.filter((value): value is string => typeof value === "string")
-    : [];
-  if (subagents.includes("slack")) return config;
-  return { ...config, subagents: [...subagents, "slack"] };
+  let effective = config;
+  if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
+    effective = withSubagent(effective, "slack");
+  }
+
+  // Spaces-originated runs already carry the agent's Spaces app/user context in
+  // the session and credential fallback. Give those runs the Spaces subagent by
+  // default, matching Slack's surface-default injection, without mutating the
+  // stored agent config or granting Spaces tools to API/chat runs. Scheduled
+  // jobs post their result into a Spaces channel, so a scheduled run that
+  // carries Spaces app context counts as a Spaces surface too and gets the same
+  // default (a non-Spaces scheduled run, lacking that context, does not).
+  const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery;
+  // The run-context (`getSession`) can come back empty or partial at tool-list
+  // time — a Redis miss or a race — and that silently strips a Spaces-app
+  // agent's Spaces tools (prod 2026-08-24: agent `xyne` kept only its hand-
+  // listed read tools, every write tool + the app-tools server dropped). The
+  // AUTHENTICATED session's own `spacesAppId` is an authoritative signal that
+  // this run belongs to a Spaces app, independent of the run-context. Trust it
+  // as a Spaces surface unless the run is explicitly a non-Spaces one (Slack
+  // delivery, or an explicit api/chat trigger) — so the fallback fixes the
+  // empty-run-context case without granting Spaces tools to true API/chat runs.
+  const sessionIsSpacesApp =
+    !!sessionSpacesAppId &&
+    !runCtx?.slackDelivery &&
+    runCtx?.triggerSource !== "api" &&
+    runCtx?.triggerSource !== "chat";
+  const isSpacesSurface =
+    runCtx?.triggerSource === "spaces" ||
+    runCtx?.triggerSource === "automation" ||
+    runCtx?.isAutomation === true ||
+    (runCtx?.triggerSource === "scheduled" && hasSpacesContext) ||
+    (runCtx?.triggerSource == null && hasSpacesContext) ||
+    sessionIsSpacesApp;
+  if (isSpacesSurface) {
+    if (!hasSpacesContext && sessionIsSpacesApp && runCtx?.triggerSource == null) {
+      log.info(`[mcp/tools] spaces default injected from session spacesAppId (run-context absent) app=${sessionSpacesAppId}`);
+    }
+    effective = withSubagent(effective, "spaces");
+  }
+
+  // An awakened run (heartbeat / reflex) has no thread its answer is posted
+  // into, so the bot-identity send tool is its only voice. Grant it for this
+  // run regardless of the agent's stored allowlist; the write POLICY
+  // (observe / reply / act, plus shadow) still governs whether the call is
+  // permitted — see awakening/write-policy.ts, enforced at /mcp/call.
+  if (runCtx?.triggerSource === "heartbeat" || runCtx?.triggerSource === "reflex") {
+    effective = withDirectTool(effective, AWAKENING_SEND_TOOL);
+  }
+
+  return effective;
 }
 
 async function loadEffectiveCredentialsWithSpacesFallback(
@@ -794,7 +882,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
     const tenantUniqueId = resolveGatewayTenantForRequest();
 
@@ -849,12 +937,58 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
+    // ── Automation app-mode Spaces (decided HERE, at entry build) ──────────
+    // Automation (app-user) runs get Spaces served in APP MODE: the
+    // xyne-spaces-app-tools server (full registry, app token, see
+    // xyne-spaces-app-tools-server.ts) replaces the user xyne-spaces server.
+    // The decision is made once, where server entries are assembled — not by
+    // splicing the listing afterwards. `isAutomation` is the explicit dispatch
+    // flag; resolveMentions/externalResultCallback is the legacy proxy kept
+    // for sessions dispatched before the flag existed.
+    const { getSession } = await import("./webhook.js");
+    const runCtx = await getSession(req.params.sessionId).catch(() => null);
+    const isAutomationRun =
+      runCtx?.isAutomation === true ||
+      runCtx?.resolveMentions === true ||
+      !!runCtx?.externalResultCallback;
+    let automationAppSwap = false;
+    if (isAutomationRun) {
+      // Only swap when the app token actually resolves AND the app-tools
+      // server row exists — otherwise we'd strip Spaces access and silently
+      // break the run. Keep the user server and log loudly instead.
+      const appCreds = await getAppTokenCredentials(userId);
+      const appToolsRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
+      if (appCreds && appToolsRow) {
+        automationAppSwap = true;
+        let dropped = 0;
+        for (let i = entries.length - 1; i >= 0; i--) {
+          if (entries[i]!.serverType === "xyne-spaces") {
+            entries.splice(i, 1);
+            dropped++;
+          }
+        }
+        log.info(
+          `[mcp/tools] automation app-mode: xyne-spaces-app-tools serves Spaces for userId=${userId} ` +
+          `(dropped ${dropped} xyne-spaces entr${dropped === 1 ? "y" : "ies"})`,
+        );
+      } else {
+        log.warn(
+          `[mcp/tools] automation app-mode SKIPPED for userId=${userId}: ` +
+          `appCreds=${!!appCreds} appToolsRow=${!!appToolsRow}. ` +
+          "Keeping xyne-spaces user MCP to avoid stripping Spaces access. " +
+          "If this is an automation run, the agent's app is likely not installed / app token missing.",
+        );
+      }
+    }
+
     // Virtual xyne-spaces entry: if SPACES_DB_URL is configured the user can
     // use Spaces tools without ever clicking "Connect" — loadEffectiveCredentials
     // synthesizes the creds from the live session row. Only add when there's
     // no existing user/global row for xyne-spaces (else we'd duplicate).
+    // Skipped under the automation app-mode swap — Spaces is served by
+    // xyne-spaces-app-tools for those runs.
     const hasSpacesEntry = entries.some((e) => e.serverType === "xyne-spaces");
-    if (!hasSpacesEntry && CONFIG.spacesDbUrl) {
+    if (!hasSpacesEntry && !automationAppSwap && CONFIG.spacesDbUrl) {
       const spacesServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces" } });
       log.info(`[mcp/tools] spaces virtual-entry check: mcpServerRow=${!!spacesServer}`);
       if (spacesServer) {
@@ -922,8 +1056,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // connection. The verified workspace install supplies credentials.
     const hasSlackEntry = entries.some((entry) => entry.serverType === "slack");
     if (!hasSlackEntry) {
-      const { getSession } = await import("./webhook.js");
-      const runCtx = await getSession(req.params.sessionId).catch(() => null);
+      // runCtx fetched once above (automation app-mode block).
       if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
         const slackServer = await prisma.mcpServer.findUnique({ where: { type: "slack" } });
         if (slackServer) {
@@ -935,10 +1068,12 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
 
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
 
-    // Fallback: if no xyne-spaces connection exists, try using the agent's app token
+    // Fallback: if no xyne-spaces connection exists, try using the agent's app token.
+    // Skipped under the automation app-mode swap — that path must NOT re-list the
+    // user xyne-spaces server (with app creds) that the swap just removed.
     const hasSpacesConnection = entries.some((e) => e.serverType === "xyne-spaces" && e.type !== "user");
     let appTokenToolsResult: Awaited<ReturnType<typeof listToolsForUser>> | null = null;
-    if (!hasSpacesConnection) {
+    if (!hasSpacesConnection && !automationAppSwap) {
       const appCreds = await getAppTokenCredentials(userId);
       if (appCreds) {
         try {
@@ -1141,6 +1276,36 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       writeTools: [],
     });
 
+    // ── Non-automation runs: app-tools shows ONLY its app-native tools ─────
+    // The app-tools server mounts the full Spaces registry so it can be the
+    // sole Spaces server on automation runs (the entry-stage swap above). On
+    // every OTHER run those registry tools must not be reachable through the
+    // bot identity — a human's call would execute with app credentials and
+    // skip user ACLs. So outside the swap, app-tools is reduced to its
+    // app-native tools regardless of whether a user xyne-spaces server is
+    // present (the old name-collision de-dup left the full registry exposed
+    // whenever the user server happened to be missing).
+    if (!automationAppSwap) {
+      const appToolsIdx = data.findIndex((s2) => s2.serverType === "xyne-spaces-app-tools");
+      if (appToolsIdx >= 0) {
+        const appTools = data[appToolsIdx]!;
+        const kept = appTools.tools.filter((t) => APP_ONLY_TOOL_NAMES.has(t.name));
+        const removed = appTools.tools.length - kept.length;
+        if (removed > 0) {
+          // McpServerTools.tools/writeTools are readonly — replace the object.
+          data[appToolsIdx] = {
+            ...appTools,
+            tools: kept,
+            writeTools: appTools.writeTools.filter((n) => APP_ONLY_TOOL_NAMES.has(n)),
+          };
+          log.info(
+            `[mcp/tools] hid ${removed} Spaces registry tool(s) on xyne-spaces-app-tools ` +
+            `(non-automation run) for userId=${userId}`,
+          );
+        }
+      }
+    }
+
     if (strictAgentToolsConfig && sessionAgentTools) {
       const entryTypes = new Map<string, EnforcementLogType>();
       for (const entry of entries) {
@@ -1180,7 +1345,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
     const sessionAgentTools = await loadSessionAgentToolsContext(agentSlug, spacesAppId, sessionAgentOrgId);
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
-      ? await withSlackSurfaceToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId)
+      ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
     const { serverType, tool, params, permission, backendId } = req.body as {
       serverType?: string;
@@ -1294,7 +1459,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         res.json({
           success: true,
           data: {
-            content: `KB tool failed: ${err instanceof Error ? err.message : String(err)}`,
+            content: `KB tool failed: ${errMsg(err)}`,
             isError: true,
           },
         });
@@ -1357,7 +1522,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         res.json({
           success: true,
           data: {
-            content: `${tool} failed: ${err instanceof Error ? err.message : String(err)}`,
+            content: `${tool} failed: ${errMsg(err)}`,
             isError: true,
           },
         });
@@ -1435,6 +1600,21 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       log.info(
         `[mcp/call] user=${userId} server=${serverType} tool=${tool} permission=${effectivePermission}${requiresApproval ? " (gateway approval required, forced ask)" : ""}`,
       );
+
+      // Hard deny. Distinct from "ask": there is no approval that unblocks it,
+      // because there is nobody to ask. Used by unattended runs (an awakened
+      // agent in shadow or observe mode) where a write must be impossible
+      // rather than merely queued behind a card no human will ever click.
+      if (effectivePermission === "deny") {
+        log.info(`[mcp/call] denied ${serverType}/${tool} for user=${userId} (permission=deny)`);
+        res.json({
+          success: true,
+          data: {
+            content: `Blocked: this run is not permitted to call ${tool}. It is running without write access; describe what you would have done instead.`,
+          },
+        });
+        return;
+      }
 
       if (effectivePermission === "ask") {
         const action = { serverType, tool, params: params ?? {}, userId };
@@ -1514,7 +1694,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         .markUsedUserToken(req.params.sessionId)
         .catch((e) =>
           log.warn(
-            `[mcp/call] markUsedUserToken failed for ${req.params.sessionId}: ${e instanceof Error ? e.message : String(e)}`,
+            `[mcp/call] markUsedUserToken failed for ${req.params.sessionId}: ${errMsg(e)}`,
           ),
         );
     }
@@ -1567,6 +1747,21 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         isWriteTool,
       },
     );
+
+    // Hard deny. Distinct from "ask": there is no approval that unblocks it,
+    // because there is nobody to ask. Used by unattended runs (an awakened
+    // agent in shadow or observe mode) where a write must be impossible
+    // rather than merely queued behind a card no human will ever click.
+    if (effectivePermission === "deny") {
+      log.info(`[mcp/call] denied ${serverType}/${tool} for user=${userId} (permission=deny)`);
+      res.json({
+        success: true,
+        data: {
+          content: `Blocked: this run is not permitted to call ${tool}. It is running without write access; describe what you would have done instead.`,
+        },
+      });
+      return;
+    }
 
     if (effectivePermission === "ask") {
       const validationError = await validateWriteAction(serverType, tool, effectiveParams, {
@@ -1688,7 +1883,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       } catch (err) {
         res.json({
           success: true,
-          data: { content: `Error: ${err instanceof Error ? err.message : String(err)}` },
+          data: { content: `Error: ${errMsg(err)}` },
         });
       }
       return;
@@ -1870,7 +2065,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
 
     res.json({ success: true, data: result });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     // serverType/tool are block-scoped to the try above; re-read from the body
     // so the error is attributable to a server/tool in the structured log.
     const body = req.body as { serverType?: string; tool?: string };

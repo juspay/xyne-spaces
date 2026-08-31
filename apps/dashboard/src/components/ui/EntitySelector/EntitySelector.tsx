@@ -180,6 +180,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         handleOpenChange(false);
         setSearchValue('');
       }}
+      data-track-category='ENTITY_PICKER'
+      data-track-name='CLEAR_SELECTION'
     >
       <span className='flex h-5 w-5 flex-none items-center justify-center'>
         <div className='w-5 h-5 rounded-full bg-border flex items-center justify-center'>
@@ -208,6 +210,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               : 'cursor-pointer text-foreground hover:bg-accent'
         }`}
         onClick={() => !option.disabled && handleSelect(option.value)}
+        data-track-category='ENTITY_PICKER'
+        data-track-name='SELECT_OPTION'
         onKeyDown={(e): void => {
           if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
             e.preventDefault();
@@ -279,6 +283,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
+            data-track-category='ENTITY_PICKER'
+            data-track-name='CLEAR_SELECTION'
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
@@ -376,6 +382,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
+            data-track-category='ENTITY_PICKER'
+            data-track-name='CLEAR_SELECTION'
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />

@@ -83,6 +83,8 @@ export function UpcomingCallsList({
               variant='outline'
               size='sm'
               onClick={() => onJoinCall(call)}
+              data-track-category='Calls'
+              data-track-name='JOIN_UPCOMING_CALL'
               tabIndex={0}
               className={cn(
                 'w-full justify-center sm:w-auto sm:shrink-0 transition-opacity duration-150',

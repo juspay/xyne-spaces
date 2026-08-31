@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown } from '@xyne/icons';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Popover } from '../../ui/Popover/Popover';

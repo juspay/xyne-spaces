@@ -140,7 +140,12 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
           </Button>
 
           <div className='flex items-center gap-3'>
-            <Button variant='secondary' onClick={handleClose}>
+            <Button
+              variant='secondary'
+              onClick={handleClose}
+              data-track-category='CANVAS'
+              data-track-name='CLOSE_CANVAS_ATTACHMENT_MODAL'
+            >
               Cancel
             </Button>
             <Button

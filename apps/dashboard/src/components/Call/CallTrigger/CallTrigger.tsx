@@ -4,6 +4,7 @@ import { PhoneDefault, PhoneCancel } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { cn } from '../../../utils/classNames';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -106,7 +107,19 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   // Default Button trigger
   return (
     <>
-      <Tooltip content={tooltipContent} side='left'>
+      <Tooltip
+        content={
+          isAlone || isNotMember ? (
+            tooltipContent
+          ) : (
+            <span className='flex items-center gap-2'>
+              {tooltipContent}
+              <ShortcutHint shortcut='huddle.toggle' />
+            </span>
+          )
+        }
+        side='left'
+      >
         <button
           onClick={handleButtonClick}
           disabled={isAlone || isNotMember}

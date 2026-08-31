@@ -60,6 +60,19 @@ function createServerSchema() {
   });
 }
 
+function createServerEditor() {
+  return ServerBlockNoteEditor.create({ schema: createServerSchema() });
+}
+type ServerEditor = ReturnType<typeof createServerEditor>;
+
+let sharedServerEditor: ServerEditor | null = null;
+function getServerEditor(): ServerEditor {
+  if (!sharedServerEditor) {
+    sharedServerEditor = createServerEditor();
+  }
+  return sharedServerEditor;
+}
+
 /**
  * Y-Sweet XML fragment name used by the frontend collaborative editor
  */
@@ -198,7 +211,7 @@ export async function initializeYSweetDoc(
     logger.debug(`[YSweetUtils] Created/retrieved Y-Sweet document for canvas ${canvasId}`);
 
     // Step 2: Convert BlockNote blocks to Y.Doc format
-    const editor = ServerBlockNoteEditor.create({ schema: createServerSchema() });
+    const editor = getServerEditor();
     const ydoc = editor.blocksToYDoc(blocks as any, YSWEET_XML_FRAGMENT);
 
     // Step 3: Encode the state as an update
@@ -271,7 +284,7 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
 
     // Use ServerBlockNoteEditor.blocksToYXmlFragment to directly populate the fragment
     // This is more efficient than creating an intermediate Y.Doc and cloning elements
-    const editor = ServerBlockNoteEditor.create({ schema: createServerSchema() });
+    const editor = getServerEditor();
     
     ydoc.transact(() => {
       // Clear existing content
@@ -330,7 +343,7 @@ export async function readFromYSweet(canvasId: string): Promise<BlockNoteBlock[]
     Y.applyUpdate(ydoc, existingUpdate);
 
     // Convert Y.Doc back to BlockNote blocks using ServerBlockNoteEditor
-    const editor = ServerBlockNoteEditor.create({ schema: createServerSchema() });
+    const editor = getServerEditor();
     const blocks = editor.yDocToBlocks(ydoc, YSWEET_XML_FRAGMENT);
 
     logger.info(`[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`);
