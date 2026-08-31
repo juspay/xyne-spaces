@@ -37,9 +37,22 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
   { value: 'MONTHLY' as RotationInterval, label: 'Monthly' },
 ];
 
-const ASSIGNMENT_STRATEGY_OPTIONS: { value: AssignmentStrategy; label: string }[] = [
-  { value: 'WORKLOAD' as AssignmentStrategy, label: 'Workload based' },
-  { value: 'ROUND_ROBIN' as AssignmentStrategy, label: 'Round robin' },
+const ASSIGNMENT_STRATEGY_OPTIONS: {
+  value: AssignmentStrategy;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'WORKLOAD' as AssignmentStrategy,
+    label: 'Workload based',
+    description: 'Lowest score wins — weighted load, expertise bonus and % share.',
+  },
+  {
+    value: 'ROUND_ROBIN' as AssignmentStrategy,
+    label: 'Round robin',
+    description:
+      'Least recently assigned wins — ignores score, ticket counts and % share. Eligibility is unchanged, so where expertise is set it rotates among the experts.',
+  },
 ];
 
 /** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
@@ -1170,6 +1183,12 @@ export const AssignmentConfigScreen = ({
                       </SelectContent>
                     </Select>
                   </div>
+                  <p className='flex-1 pb-2 text-xs leading-[1.4] text-muted-foreground'>
+                    {
+                      ASSIGNMENT_STRATEGY_OPTIONS.find(o => o.value === localAssignmentStrategy)
+                        ?.description
+                    }
+                  </p>
                 </div>
               </div>
 
@@ -1554,15 +1573,8 @@ export const AssignmentConfigScreen = ({
                     experts go first.
                   </li>
                   <li>
-                    <strong className='font-medium text-foreground'>Assignment method</strong>:
-                    Workload based ranks eligible people by score; Round robin instead gives the
-                    ticket to whoever was assigned least recently, ignoring ticket counts and %
-                    share. Eligibility is unchanged either way — so where expertise is set, Round
-                    robin rotates only among the experts.
-                  </li>
-                  <li>
-                    <strong className='font-medium text-foreground'>Score</strong>: with Workload
-                    based, the lowest score gets the ticket —{' '}
+                    <strong className='font-medium text-foreground'>Score</strong>: the lowest score
+                    gets the ticket —{' '}
                     <code className='font-mono text-xs'>
                       weightedActiveTasks − expertiseBonus − percentDiff
                     </code>
