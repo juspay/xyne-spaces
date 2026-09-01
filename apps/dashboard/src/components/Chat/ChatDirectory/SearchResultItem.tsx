@@ -181,11 +181,16 @@ const TicketAssigneeSegment = ({
 }: {
   assigneeId?: string | undefined;
   assigneeName?: string | undefined;
-}): ReactElement => (
-  <span className='min-w-0 truncate'>
-    {!assigneeId && !assigneeName ? 'Unassigned' : assigneeName || 'Unassigned'}
-  </span>
-);
+}): ReactElement => {
+  // Resolve through the user store so this reads the same as the file row's
+  // uploader — `searchContext.assigneeName` is the stored name, which ignores a
+  // user's displayName. Falls back to it when the id isn't in the store.
+  const assignee = useUser(assigneeId || '');
+  const resolved = assignee ? getUserDisplayName(assignee) : '';
+  const name = (resolved && resolved !== 'Unknown' ? resolved : assigneeName) || 'Unassigned';
+
+  return <span className='min-w-0 truncate'>{name}</span>;
+};
 
 const AttachmentSearchResultItem = ({
   result,
@@ -515,6 +520,11 @@ const SearchResultItem = ({
       // Only the title / channel / assignee truncate; every field reuses an
       // existing construct (no new icons).
       const ticketId = result.searchContext?.xyneId;
+      const idSegment = result.subtitle?.split(' | ')[0];
+      const ticketIdHtml =
+        ticketId && idSegment?.includes('<hi>') && idSegment.replace(/<\/?hi>/g, '') === ticketId
+          ? idSegment
+          : undefined;
       const rawTs = result.metadata.timestamp;
       const createdAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
       const status = result.searchContext?.ticketStatus;
@@ -556,7 +566,7 @@ const SearchResultItem = ({
               {ticketId && (
                 <>
                   <span className='shrink-0 whitespace-nowrap text-[15px] leading-[1.2] tracking-[-0.1px] text-muted-foreground'>
-                    {ticketId}
+                    {ticketIdHtml ? <RenderMessageWithHTML message={ticketIdHtml} /> : ticketId}
                   </span>
                   <span className='shrink-0 text-[14px] font-medium leading-[1.2] tracking-[-0.28px] text-muted-foreground'>
                     ·
