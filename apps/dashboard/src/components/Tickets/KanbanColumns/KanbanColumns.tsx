@@ -335,6 +335,13 @@ interface KanbanColumnsProps {
     columnType: 'stage' | 'status';
     baseArgs: KanbanTicketsPageBaseArgs;
   };
+  /**
+   * A search is active. Server counts are not refetched for the search term, so
+   * they are either stale or absent — and a collapsed column unmounts its query,
+   * so it can never report a match again. Both count display and auto-collapse
+   * have to stop trusting `stageCounts` while this is true.
+   */
+  searchActive?: boolean;
   allKnownTickets?: Ticket[];
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   onAddTicketInColumn?: (column: {
@@ -378,6 +385,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   showEmailReads,
   slaPolicies,
   paginatedColumnConfig,
+  searchActive,
   allKnownTickets,
   onTicketsChange,
   onAddTicketInColumn,
@@ -387,19 +395,21 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     () => allKnownTickets ?? Object.values(ticketsByStage).flat(),
     [allKnownTickets, ticketsByStage],
   );
+  // Only the paginated board can starve a collapsed column of its count; the
+  // non-paginated board always has every ticket in `ticketsByStage`.
+  const countsAreReliable = !(paginatedColumnConfig && searchActive);
   const stageCountById = React.useMemo(() => {
     const counts: Record<string, number> = {};
 
     for (const stage of stages) {
-      counts[stage.id] =
-        stageCounts?.[stage.id] ??
-        stageCounts?.[stage.name] ??
-        ticketsByStage[stage.id]?.length ??
-        0;
+      const loaded = ticketsByStage[stage.id]?.length ?? 0;
+      counts[stage.id] = countsAreReliable
+        ? (stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded)
+        : loaded;
     }
 
     return counts;
-  }, [stages, stageCounts, ticketsByStage]);
+  }, [stages, stageCounts, ticketsByStage, countsAreReliable]);
   const stageCollapseSignature = React.useMemo(
     () => stages.map(stage => `${stage.id}:${stageCountById[stage.id] ?? 0}`).join('|'),
     [stages, stageCountById],
@@ -408,6 +418,17 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>([]);
 
   React.useEffect(() => {
+    // While counts cannot be trusted, release everything the user did not collapse
+    // by hand. Collapsing here would unmount the column's query and hide matches
+    // that can then never be fetched back.
+    if (!countsAreReliable) {
+      setCollapsedStageIds(prev => {
+        const next = prev.filter(id => userToggledCollapsedStageIdsRef.current.has(id));
+        return next.length === prev.length ? prev : next;
+      });
+      return;
+    }
+
     if (!stages.some(stage => (stageCountById[stage.id] ?? 0) > 0)) {
       return;
     }
@@ -429,7 +450,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
 
       return next.size === prev.length && prev.every(id => next.has(id)) ? prev : [...next];
     });
-  }, [stageCollapseSignature, stages, stageCountById]);
+  }, [stageCollapseSignature, stages, stageCountById, countsAreReliable]);
 
   const toggleCollapse = (stageId: string) => {
     userToggledCollapsedStageIdsRef.current.add(stageId);
