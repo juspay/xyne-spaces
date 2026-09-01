@@ -14,9 +14,10 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess, NotificationType } from '@xyne/shared';
+import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess, NotificationType, ActivityClassification } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
 import { notificationService } from '@/services/notificationService';
+import { activityService } from '@/services/activity/activityService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
@@ -27,6 +28,14 @@ import {
 // configured" check entirely (see assertManualCategoryOrOverride).
 const NOTE_TAKER_TAG_SOURCE_TYPE = 'CALL';
 const NOTE_TAKER_LABEL_CATEGORY = 'topic';
+
+// Upper bound on auto-generated labels per call — transcriptService already
+// trims the model's output to the same limit; this is the persistence-side guard.
+const MAX_CALL_LABEL_TAGS = 3;
+
+// Activity.actorAction for "the AI summary for this recording is ready".
+// Rendered by the dashboard's RecordingSummaryActivity.
+const RECORDING_SUMMARY_READY_ACTION = 'recording_summary_ready';
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
@@ -266,9 +275,10 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Notify the recording owner that the detailed summary finished generating.
-   * Best-effort: a notification failure must never fail the generation flow,
-   * so errors are logged and swallowed.
+   * Notify the recording owner that the detailed summary finished generating:
+   * an ephemeral notification plus a persistent Activity-feed entry.
+   * Best-effort: neither may fail the generation flow, so each is wrapped
+   * independently and its errors are logged and swallowed.
    */
   private async notifySummaryReady(call: Call): Promise<void> {
     try {
@@ -290,6 +300,55 @@ class NoteTakerTranscriptService {
       });
     } catch (error) {
       logger.error(`[${call.externalId}] summary_ready_notification_failed`, {
+        path: 'note_taker',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    await this.recordSummaryReadyActivity(call);
+  }
+
+  /**
+   * Persist the Activity-feed entry for a finished summary, so the owner can
+   * still find it after the notification toast is gone (same reasoning as the
+   * KB ingestion activity). Regenerating a summary bumps the existing row back
+   * to unread instead of stacking a second entry for the same recording.
+   */
+  private async recordSummaryReadyActivity(call: Call): Promise<void> {
+    try {
+      if (!call.workspaceId) return;
+
+      const existing = await db.activity.findFirst({
+        where: {
+          callId: call.id,
+          userId: call.createdByUserId,
+          actorAction: RECORDING_SUMMARY_READY_ACTION,
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        // `updatedAt` is @updatedAt, so this also re-sorts the row to the top
+        // of the feed (which orders by updatedAt desc).
+        await db.activity.update({ where: { id: existing.id }, data: { isRead: false } });
+        return;
+      }
+
+      await activityService.createActivity({
+        userId: call.createdByUserId,
+        // System event: the recording is the subject, and its owner is both the
+        // notional actor and the only recipient.
+        actorId: call.createdByUserId,
+        actorAction: RECORDING_SUMMARY_READY_ACTION,
+        actionSource: 'call',
+        actionSourceId: call.id,
+        callId: call.id,
+        workspaceId: call.workspaceId,
+        // Purely informational — classify up front so the LLM classifier
+        // worker never picks it up (it claims every PENDING row).
+        classification: ActivityClassification.FYI,
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] summary_ready_activity_failed`, {
         path: 'note_taker',
         error: error instanceof Error ? error.message : String(error),
       });
@@ -992,7 +1051,7 @@ class NoteTakerTranscriptService {
 
     const tagIds: string[] = [];
     for (const rawLabel of labels) {
-      if (tagIds.length >= 4) break;
+      if (tagIds.length >= MAX_CALL_LABEL_TAGS) break;
       const slug = this.slugifyLabel(rawLabel);
       if (!slug) continue;
       try {
