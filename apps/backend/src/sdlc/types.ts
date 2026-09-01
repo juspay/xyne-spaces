@@ -40,6 +40,9 @@ export interface SdlcArtifact {
   kind?: 'BASELINE';
   viewAccessId?: string;
   url?: string;
+  /** Update parked as suggestions for human review — the canvas is unchanged. */
+  parked?: boolean;
+  pendingChanges?: number;
 }
 
 export interface SdlcLink {
