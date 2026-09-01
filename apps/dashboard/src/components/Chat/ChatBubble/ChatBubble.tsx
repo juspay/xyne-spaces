@@ -681,13 +681,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     // Get conversation ID from conversation object or fallback to message
     const conversationId = conversation?.conversationId || message.conversationId;
     let messageLink = '';
+    // Temporal anchor so the receiver can center the snapshot window directly
+    // on the target message, instead of falling back to the channel bottom for
+    // older conversations that are not in the initial snapshot.
+    const anchorCreatedAt = conversation?.createdAt ?? message.createdAt;
+    const anchorParam =
+      typeof anchorCreatedAt === 'number' ? `&createdAt=${anchorCreatedAt}` : '';
     if (conversationId) {
       if (context === 'thread') {
         // Thread message: include full path with conversation + messageId in hash
-        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}${anchorParam}`;
       } else {
         // Channel message: only channel in path, conversation in hash
-        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}${anchorParam}`;
       }
     }
 
