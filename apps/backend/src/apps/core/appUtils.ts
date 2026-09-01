@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import { isValidUrl } from '@/utils/urlUtils';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { getAppEditorRole } from './appCollaboratorUtils';
 
 /**
  * Install an external app
@@ -257,7 +258,7 @@ export async function regenerateJwt(appId: string, workspaceId: string) {
 
 /**
  * Get decrypted signing secret for an installed app
- * Only app creator or ADMIN can access this.
+ * Only app creator, a collaborator, or ADMIN can access this.
  *
  * @param appId - The ID of the app
  * @param userId - The ID of the user requesting the secret
@@ -272,9 +273,9 @@ export async function getSigningSecret(appId: string, userId: string, isAdmin: b
       throw new Error(`[GET-SIGNING-SECRET] App with ID ${appId} not found`);
     }
 
-    // Check if user is admin or app creator
-    if (!isAdmin && app.createdBy !== userId) {
-      throw new Error(`[GET-SIGNING-SECRET] Unauthorized: Only admin or app creator can access signing secret`);
+    // Check if user is admin, app creator, or a collaborator (they need the secret to develop)
+    if (!isAdmin && app.createdBy !== userId && !(await getAppEditorRole(appId, userId))) {
+      throw new Error(`[GET-SIGNING-SECRET] Unauthorized: Only admin, app creator or a collaborator can access signing secret`);
     }
 
     if (!app.signingSecret) {

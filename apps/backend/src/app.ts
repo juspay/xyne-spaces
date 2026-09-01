@@ -97,6 +97,7 @@ import boardRoutes from '@/routes/boards';
 import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
+import appCollaboratorsBackfillRoutes from '@/routes/appCollaboratorsBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -421,6 +422,10 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    // Seed each app's creator as an ADMIN row in app_collaborators. The '-backfill' path
+    // suffix puts it behind backfillMountGuard mounted above.
+    this.app.use('/api/admin/app-collaborators-backfill', appCollaboratorsBackfillRoutes);
+    this.app.use('/migrate/api/admin/app-collaborators-backfill', appCollaboratorsBackfillRoutes);
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 

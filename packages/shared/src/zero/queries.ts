@@ -4249,6 +4249,19 @@ export const queries = defineQueries({
     },
   ),
 
+  // Collaborators of one app (Edit App dialog). User details are resolved from hooks on the client.
+  getAppCollaborators: defineQuery(
+    z.object({ appId: z.string() }),
+    ({ args: { appId } }) => {
+      return zql.app_collaborators.where('appId', appId).orderBy('createdAt', 'asc');
+    },
+  ),
+
+  // The caller's own collaborator rows — gates Edit buttons on the Apps screen.
+  getMyAppCollaborations: defineQuery(({ ctx }) => {
+    return zql.app_collaborators.where('userId', ctx.userID);
+  }),
+
   // Recap Queries
   projectRecaps: defineQuery(
     z.object({

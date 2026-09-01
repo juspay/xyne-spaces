@@ -3,6 +3,7 @@ import { BaseQueryACL, ACLContext } from './base-acl'
 import {
   ActivitiesACL,
   AppsACL,
+  AppCollaboratorsACL,
   InstalledAppsACL,
   AgentsACL,
   AgentStepsACL,
@@ -365,6 +366,8 @@ export class ACLFactory {
       return new UnscopedACL(ctx, prisma)
     case 'apiKey':
       return new BaseQueryACL(ctx, prisma)
+    case 'appCollaborator':
+      return new AppCollaboratorsACL(ctx, prisma)
     case 'appCommand':
       return new BaseQueryACL(ctx, prisma)
     case 'appIncomingWebhook':

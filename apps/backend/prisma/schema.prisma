@@ -861,6 +861,7 @@ model User {
   expertiseMappings         UserExpertiseMapping[] @relation("UserExpertiseUser")
   appsCreated               Apps[]                @relation("AppsCreatedBy")
   installedAppsFor          InstalledApps[]        @relation("InstalledAppsUser")
+  appCollaborations         AppCollaborator[]      @relation("AppCollaboratorsUser")
   incomingWebhooksCreated   AppIncomingWebhook[]     @relation("AppIncomingWebhookCreatedBy")
   incomingWebhooksRevoked   AppIncomingWebhook[]     @relation("AppIncomingWebhookRevokedBy")
   orgMember                 OrgMember?              @relation(fields: [orgMemberId], references: [memberId])
@@ -4056,12 +4057,37 @@ model Apps {
   installations       InstalledApps[]
   commands            AppCommand[]
   appPermissions AppPermission[]
+  collaborators       AppCollaborator[]
 
   @@index([name])
   @@index([createdBy])
   @@index([orgId])
   @@index([scope])
   @@map("apps")
+  @@schema("public")
+}
+
+// Users who can maintain an app template. CONTRIBUTOR may edit the app
+// (fields/commands/permissions/webhooks); ADMIN may also manage collaborators.
+// The app creator is always treated as an implicit ADMIN.
+model AppCollaborator {
+  workspaceId      String   // denormalized tenant key (stamped on insert)
+  id               String   @id @default(cuid())
+  appId            String
+  userId           String
+  // 'ADMIN' | 'CONTRIBUTOR' — validated app-side via z.enum in the app-collaborator mutators.
+  // Plain String (not a DB enum) so adding a value needs zero DB migration.
+  collaboratorType String
+  createdAt        DateTime
+  updatedAt        DateTime
+
+  app  Apps @relation(fields: [appId], references: [id], onDelete: Cascade)
+  user User @relation("AppCollaboratorsUser", fields: [userId], references: [id])
+
+  @@unique([appId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("app_collaborators")
   @@schema("public")
 }
 

@@ -10,6 +10,18 @@ import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class AppsACL extends BaseACL<'apps'> {
 
+  // The creator (implicit ADMIN) or any collaborator (ADMIN or CONTRIBUTOR) may edit the app
+  // template (commands/permissions/webhook/description).
+  private async canEditTemplate(app: { createdBy: string; id: string }, tx: Transaction<Schema>): Promise<boolean> {
+    if (app.createdBy === this.ctx.userID) {
+      return true;
+    }
+    const collaborator = await tx.run(
+      zql.app_collaborators.where('appId', app.id).where('userId', this.ctx.userID).one(),
+    );
+    return !!collaborator;
+  }
+
   async canInsert(args: InsertValue<TableSchema<'apps'>>, _tx: Transaction<Schema>): Promise<void> {
     assertGuestWriteBlocked(this.ctx, 'apps', 'insert', 'App');
     // Pin createdBy to the authenticated caller so an insert cannot attribute the
@@ -30,12 +42,11 @@ export class AppsACL extends BaseACL<'apps'> {
       throw new MutationACLError('App update failed: app does not exist', 'apps');
     }
 
-    // Only the creator may edit the app template (commands/permissions/webhook/description).
-    if (app.createdBy === this.ctx.userID) {
+    if (await this.canEditTemplate(app, tx)) {
       return;
     }
 
-    throw new MutationACLError('App update failed: only the app creator can modify this app', 'apps');
+    throw new MutationACLError('App update failed: only the app creator or a collaborator can modify this app', 'apps');
   }
 
   async canDelete(_args: DeleteID<TableSchema<'apps'>>, _tx: Transaction<Schema>): Promise<void> {
@@ -50,11 +61,10 @@ export class AppsACL extends BaseACL<'apps'> {
       throw new MutationACLError('App upsert failed: app does not exist for update', 'apps');
     }
 
-    // Only the creator may edit the app template.
-    if (app.createdBy === this.ctx.userID) {
+    if (await this.canEditTemplate(app, tx)) {
       return;
     }
 
-    throw new MutationACLError('App upsert failed: only the app creator can modify this app', 'apps');
+    throw new MutationACLError('App upsert failed: only the app creator or a collaborator can modify this app', 'apps');
   }
 }

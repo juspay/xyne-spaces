@@ -23,6 +23,7 @@ import {
   Command,
   Shield,
   Link2,
+  Users,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
@@ -40,6 +41,7 @@ import {
   type AppPermission,
 } from '../../../services/Apps/appsService';
 import { APPS_PUBLIC_BASE_URL } from '../../../config';
+import CollaboratorsSection from './CollaboratorsSection';
 import { AppIncomingWebhookAction, CommandAccessibility, CommandType } from '@xyne/shared';
 
 // ─── Inline command row ───────────────────────────────────────────────────────
@@ -788,6 +790,9 @@ export interface EditAppFormProps {
   // (admin; edits this workspace's install — webhook + permissions, commands read-only).
   editMode?: 'template' | 'install';
   installedAppId?: string | null;
+  // Needed for the Collaborators section (template mode): who created the app and who is looking.
+  appCreatedBy?: string | null;
+  currentUserId?: string | null;
   // false = the app's creator viewing their own install: every section still renders, but each
   // control is locked -- Incoming Webhooks is the only editable one. Admins/template edits pass true.
   canEditInstallSettings?: boolean;
@@ -858,7 +863,13 @@ function WebhookNameInput({
 
 // ─── Sectioned navigation ─────────────────────────────────────────────────────
 
-type EditAppSection = 'basic' | 'commands' | 'shortcuts' | 'permissions' | 'incoming';
+type EditAppSection =
+  | 'basic'
+  | 'commands'
+  | 'shortcuts'
+  | 'permissions'
+  | 'collaborators'
+  | 'incoming';
 
 interface EditAppNavItem {
   id: EditAppSection;
@@ -887,6 +898,8 @@ export const EditAppForm = ({
   appInstallations,
   editMode = 'template',
   installedAppId = null,
+  appCreatedBy = null,
+  currentUserId = null,
   canEditInstallSettings = true,
   onSave,
   onUploadPicture,
@@ -1258,6 +1271,16 @@ export const EditAppForm = ({
     { id: 'commands', label: 'Commands', icon: <Command className='size-4' /> },
     { id: 'shortcuts', label: 'Shortcuts', icon: <Zap className='size-4' /> },
     { id: 'permissions', label: 'Permissions', icon: <Shield className='size-4' /> },
+    // Collaborators apply to the app template, so this only appears in template edit mode.
+    ...(editMode === 'template'
+      ? [
+          {
+            id: 'collaborators' as const,
+            label: 'Collaborators',
+            icon: <Users className='size-4' />,
+          },
+        ]
+      : []),
     ...(showIncomingSection
       ? [
           {
@@ -1969,6 +1992,18 @@ export const EditAppForm = ({
               readOnly={!canEditInstallSettings}
             />
           )}
+
+          {/* Collaborators (template mode only) */}
+          {activeSection === 'collaborators' &&
+            editMode === 'template' &&
+            appCreatedBy &&
+            currentUserId && (
+              <CollaboratorsSection
+                appId={appId}
+                appCreatedBy={appCreatedBy}
+                currentUserId={currentUserId}
+              />
+            )}
         </div>
       </div>
 

@@ -65,6 +65,7 @@ import { SurfaceLinksACL } from '../tables/surface-links-acl';
 import { SavedUserConfigurationsACL } from '../tables/saved-user-configurations-acl';
 import { SavedUserConfigurationValuesACL } from '../tables/saved-user-configuration-values-acl';
 import { AppsACL } from '../tables/apps-acl';
+import { AppCollaboratorsACL } from '../tables/app-collaborators-acl';
 import { TicketAssignmentsACL } from '../tables/ticket-assignments-acl';
 import { TicketStageEtaACL } from '../tables/ticket-stage-eta-acl';
 import { UserProfilesACL } from '../tables/user-profiles-acl';
@@ -186,6 +187,8 @@ export class ACLFactory {
         return new ActivitiesACL(ctx);
       case 'apps':
         return new AppsACL(ctx);
+      case 'app_collaborators':
+        return new AppCollaboratorsACL(ctx);
       case 'agent_tools_mappings':
         return new AgentToolsMappingsACL(ctx);
       case 'agents':

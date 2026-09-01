@@ -2141,6 +2141,18 @@ export const appsTable = table('apps')
   })
   .primaryKey('id');
 
+export const appCollaboratorsTable = table('app_collaborators')
+  .columns({
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
+    id: string(),
+    appId: string(),
+    userId: string(),
+    collaboratorType: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const installedAppsTable = table('installed_apps')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -3710,6 +3722,19 @@ export const appsTableRelationships = relationships(appsTable, ({ one, many }) =
     destField: ['orgId'],
     destSchema: workspaceTable,
   }),
+  collaborators: many({
+    sourceField: ['id'],
+    destField: ['appId'],
+    destSchema: appCollaboratorsTable,
+  }),
+}));
+
+export const appCollaboratorsTableRelationships = relationships(appCollaboratorsTable, ({ one }) => ({
+  app: one({
+    sourceField: ['appId'],
+    destField: ['id'],
+    destSchema: appsTable,
+  }),
 }));
 
 export const installedAppsTableRelationships = relationships(installedAppsTable, ({ one }) => ({
@@ -4857,6 +4882,7 @@ export const schema = createSchema({
     recapsTable,
     // Apps
     appsTable,
+    appCollaboratorsTable,
     installedAppsTable,
     // Saved Views
     savedUserConfigurationTable,
@@ -4990,6 +5016,7 @@ export const schema = createSchema({
     recapsTableRelationships,
     // Apps
     appsTableRelationships,
+    appCollaboratorsTableRelationships,
     installedAppsTableRelationships,
     // Saved Views
     savedUserConfigurationTableRelationships,
@@ -5134,6 +5161,7 @@ export type Recap = Row<typeof schema.tables.recaps>;
 
 // Apps Types
 export type Apps = Row<typeof schema.tables.apps>;
+export type AppCollaborator = Row<typeof schema.tables.app_collaborators>;
 export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;

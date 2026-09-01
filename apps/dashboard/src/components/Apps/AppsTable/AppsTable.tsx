@@ -72,6 +72,9 @@ interface AppsTableProps {
   installedVersionByAppId?: Record<string, number>;
   // appId's origin orgId -> org name, for "Created by" attribution on cross-workspace/org apps.
   orgNamesById?: Record<string, string>;
+  // appId -> the caller's collaborator role ('ADMIN' | 'CONTRIBUTOR'). Collaborators may edit the
+  // template like the creator; admins can also manage collaborators (from getMyAppCollaborations).
+  myCollaborationsByAppId?: Record<string, string>;
 }
 
 export const AppsTable = ({
@@ -93,6 +96,7 @@ export const AppsTable = ({
   dataSource = 'app',
   installedVersionByAppId = {},
   orgNamesById = {},
+  myCollaborationsByAppId = {},
 }: AppsTableProps): ReactElement => {
   const isInstalledView = dataSource === 'install';
   const appAccessLevel = useMemo(() => {
@@ -108,11 +112,12 @@ export const AppsTable = ({
 
   // Who may OPEN the edit dialog, by screen:
   // - Installed view: any XYNE-APPS admin, plus the app's creator (webhooks only -- see below).
-  // - Org/Marketplace view: editing the app template -> creator only (matches AppsACL.canUpdate).
+  // - Org/Marketplace view: editing the app template -> creator or a collaborator
+  //   (matches AppsACL.canUpdate).
   const canEditApp = (app: AppRow): boolean => {
     if (appAccessLevel === 'READ' || appAccessLevel === null) return false;
     if (isInstalledView) return hasAdminAccess || app.createdBy === currentUserId;
-    return app.createdBy === currentUserId;
+    return app.createdBy === currentUserId || !!myCollaborationsByAppId[app.id];
   };
 
   const canEditInstallSettings = (): boolean => !isInstalledView || hasAdminAccess;
@@ -313,7 +318,8 @@ export const AppsTable = ({
       renderCell: (_value, app) => {
         const status = getStatus(app);
         const isInstalled = status === 'Installed';
-        const canCopy = hasAdminAccess || app.createdBy === currentUserId;
+        const canCopy =
+          hasAdminAccess || app.createdBy === currentUserId || !!myCollaborationsByAppId[app.id];
 
         if (!isInstalled) {
           return <span className='text-muted-foreground text-xs'>Install app first</span>;
@@ -346,8 +352,10 @@ export const AppsTable = ({
       field: 'signingSecret',
       header: 'Signing Secret',
       renderCell: (_value, app) => {
-        // Signing secret is app-level — visible/copyable regardless of install state (creator/admin only).
-        const canCopy = hasAdminAccess || app.createdBy === currentUserId;
+        // Signing secret is app-level — visible/copyable regardless of install state
+        // (creator, collaborator or admin only).
+        const canCopy =
+          hasAdminAccess || app.createdBy === currentUserId || !!myCollaborationsByAppId[app.id];
 
         return (
           <div className='flex items-center gap-2'>
@@ -394,7 +402,9 @@ export const AppsTable = ({
             onClick={() => handleStartEdit(app)}
             disabled={isDisabledEdit}
             className='gap-1 h-8'
-            title={isDisabledEdit ? 'Only creator or admin can edit' : 'Edit app'}
+            title={
+              isDisabledEdit ? 'Only the creator, a collaborator or admin can edit' : 'Edit app'
+            }
             data-track-category='Apps'
             data-track-name='OpenEditAppModal'
           >
@@ -484,6 +494,8 @@ export const AppsTable = ({
             appInstallations={editingApp.installations}
             editMode={isInstalledView ? 'install' : 'template'}
             installedAppId={isInstalledView ? (editingApp.installations?.[0]?.id ?? null) : null}
+            appCreatedBy={editingApp.createdBy}
+            currentUserId={currentUserId}
             canEditInstallSettings={canEditInstallSettings()}
             onSave={handleSaveEdit}
             onUploadPicture={uploadPictureHandler}

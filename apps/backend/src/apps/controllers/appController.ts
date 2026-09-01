@@ -6,6 +6,7 @@ import { db } from '@/database/client';
 import { CreateAppInput } from '@/database/repositories/appsRepository';
 import { logger } from '@/utils/logger';
 import { installApp, configureWebhook, regenerateJwt, getSigningSecret } from '../core/appUtils';
+import { getAppEditorRole } from '../core/appCollaboratorUtils';
 import { isValidUrl } from '@/utils/urlUtils';
 import { UserManagementService } from '@/services/userManagementService';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -385,9 +386,10 @@ export class AppController {
         return;
       }
 
-      if (!isAdmin && app.createdBy !== userId) {
+      const editorRole = isAdmin ? null : await getAppEditorRole(appId, userId);
+      if (!isAdmin && !editorRole) {
         res.status(403).json({
-          error: 'Unauthorized: Only admin or app creator can regenerate JWT',
+          error: 'Unauthorized: Only admin, app creator or a collaborator can regenerate JWT',
           code: 'FORBIDDEN'
         });
         return;

@@ -14608,6 +14608,142 @@ export function createMutators(
       ),
     },
 
+    appCollaborators: {
+      add: defineMutator(
+        z.object({
+          id: z.string(),
+          appId: z.string(),
+          userId: z.string(),
+          collaboratorType: z.enum(['ADMIN', 'CONTRIBUTOR']),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, appId, userId, collaboratorType, timestamp } }) => {
+          // Only the creator (implicit ADMIN) or an ADMIN collaborator may manage collaborators.
+          const app = await tx.run(zql.apps.where('id', appId).one());
+          if (!app) {
+            throw new Error('App not found');
+          }
+          if (app.createdBy !== authData.sub) {
+            const adminRow = await tx.run(
+              zql.app_collaborators
+                .where('appId', appId)
+                .where('userId', authData.sub)
+                .where('collaboratorType', 'ADMIN')
+                .one(),
+            );
+            if (!adminRow) {
+              throw new Error('Only an app admin can manage collaborators');
+            }
+          }
+
+          const existing = await tx.run(
+            zql.app_collaborators.where('appId', appId).where('userId', userId).one(),
+          );
+          if (existing) {
+            throw new Error('User is already a collaborator on this app');
+          }
+
+          await tx.mutate.app_collaborators.insert({
+            workspaceId: authData.workspaceId,
+            id,
+            appId,
+            userId,
+            collaboratorType,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+
+      updateRole: defineMutator(
+        z.object({
+          id: z.string(),
+          collaboratorType: z.enum(['ADMIN', 'CONTRIBUTOR']),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, collaboratorType, timestamp } }) => {
+          const row = await tx.run(zql.app_collaborators.where('id', id).one());
+          if (!row) {
+            throw new Error('Collaborator not found');
+          }
+
+          const app = await tx.run(zql.apps.where('id', row.appId).one());
+          if (!app) {
+            throw new Error('App not found');
+          }
+          if (app.createdBy !== authData.sub) {
+            const adminRow = await tx.run(
+              zql.app_collaborators
+                .where('appId', row.appId)
+                .where('userId', authData.sub)
+                .where('collaboratorType', 'ADMIN')
+                .one(),
+            );
+            if (!adminRow) {
+              throw new Error('Only an app admin can manage collaborators');
+            }
+          }
+
+          // The last ADMIN cannot be demoted — the app would become unmanageable again.
+          if (row.collaboratorType === 'ADMIN' && collaboratorType !== 'ADMIN') {
+            const admins = await tx.run(
+              zql.app_collaborators.where('appId', row.appId).where('collaboratorType', 'ADMIN'),
+            );
+            if (admins.length <= 1) {
+              throw new Error('An app must keep at least one admin');
+            }
+          }
+
+          await tx.mutate.app_collaborators.update({
+            id,
+            collaboratorType,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+
+      remove: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          const row = await tx.run(zql.app_collaborators.where('id', id).one());
+          if (!row) {
+            throw new Error('Collaborator not found');
+          }
+
+          const app = await tx.run(zql.apps.where('id', row.appId).one());
+          if (!app) {
+            throw new Error('App not found');
+          }
+          if (app.createdBy !== authData.sub) {
+            const adminRow = await tx.run(
+              zql.app_collaborators
+                .where('appId', row.appId)
+                .where('userId', authData.sub)
+                .where('collaboratorType', 'ADMIN')
+                .one(),
+            );
+            if (!adminRow) {
+              throw new Error('Only an app admin can manage collaborators');
+            }
+          }
+
+          // The last ADMIN cannot be removed — the app would become unmanageable again.
+          if (row.collaboratorType === 'ADMIN') {
+            const admins = await tx.run(
+              zql.app_collaborators.where('appId', row.appId).where('collaboratorType', 'ADMIN'),
+            );
+            if (admins.length <= 1) {
+              throw new Error('An app must keep at least one admin');
+            }
+          }
+
+          await tx.mutate.app_collaborators.delete({ id });
+        },
+      ),
+    },
+
     emailSignature: {
       create: defineMutator(
         z.object({
