@@ -97,7 +97,16 @@ import {
   createSdlcLinkSchema,
   sdlcDiscussionSchema,
 } from '@xyne/shared';
-import { THREAD_TYPE_NAMES } from '@xyne/shared';
+import {
+  normalizeThreadTypeName,
+  parseAppliedTags,
+  serializeAppliedTags,
+  type AppliedTag,
+} from '@xyne/shared';
+import {
+  getThreadTypeVocabulary,
+  recordVocabularyCandidate,
+} from '@/services/messageClassification/vocabulary';
 import {
   MessageArtifactStatus,
   parseSlashCommandArtifactMessage,
@@ -5071,9 +5080,6 @@ export function createMutators(
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
-          if (call.createdByUserId !== authData.sub) {
-            throw new Error('Only the call creator can admit participants');
-          }
           await tx.mutate.call_participants.update({
             id: participantId,
             response: InvitationResponse.ACCEPTED,
@@ -5086,9 +5092,6 @@ export function createMutators(
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
-          if (call.createdByUserId !== authData.sub) {
-            throw new Error('Only the call creator can decline participants');
-          }
           await tx.mutate.call_participants.update({
             id: participantId,
             response: InvitationResponse.DECLINED,
@@ -12438,33 +12441,92 @@ export function createMutators(
       setTypes: defineMutator(
         z.object({
           conversationId: z.string(),
-          // Free-form, not z.enum: the built-in vocabulary is a starting point, and projects
-          // add their own. Length-capped so a tag stays a label rather than a paragraph.
+          // Free-form, not z.enum: the workspace vocabulary is a starting point, and people
+          // type their own. Length-capped so a tag stays a label rather than a paragraph.
           types: z.array(z.string().trim().min(1).max(40)),
+          /**
+           * What a newly invented tag means. Stored as the vocabulary candidate's
+           * description, not on the thread — see the candidate write below.
+           */
+          note: z.string().trim().max(280).optional(),
+          timestamp: z.number(),
         }),
-        async ({ tx, ctx, args: { conversationId, types } }) => {
+        async ({ tx, ctx, args: { conversationId, types, note, timestamp } }) => {
           const conversation = await tx.run(
             zql.conversations.where('conversationId', conversationId).one(),
           );
           if (!conversation) throw new Error('Conversation not found');
 
-          // Built-in types first in vocabulary order, then custom ones alphabetically, so
-          // chips render in a stable order regardless of the order they were picked.
-          const rank = (name: string): number => {
-            const i = (THREAD_TYPE_NAMES as readonly string[]).indexOf(name);
-            return i === -1 ? THREAD_TYPE_NAMES.length : i;
-          };
-          const unique = [...new Set(types.map(t => t.trim()).filter(Boolean))].sort(
-            (a, b) => rank(a) - rank(b) || a.localeCompare(b),
-          );
+          const existing = parseAppliedTags(conversation.threadType);
+          const byName = new Map(existing.map(tag => [tag.name, tag]));
 
+          // Normalise the names being ADDED, and only those. A name already on this thread is
+          // passed through untouched: the caller resends the full set on every edit, so
+          // normalising indiscriminately would silently rewrite tags applied long ago, on an
+          // edit that had nothing to do with them, leaving the same tag spelled two ways
+          // across the workspace.
+          const desired = [
+            ...new Set(
+              types
+                .map(raw => {
+                  const trimmed = raw.trim();
+                  return byName.has(trimmed) ? trimmed : normalizeThreadTypeName(trimmed);
+                })
+                .filter(Boolean),
+            ),
+          ];
 
-          // '[]' rather than null when cleared: null means "never classified" and the
-          // classifier would re-derive it on its next pass.
+          // A merge, never a replace. The caller sends the full desired set, but each tag
+          // already there keeps its own provenance — who applied it and when. Rewriting them all
+          // as freshly hand-applied would erase exactly the trail the tooltip exists to show.
+          const next: AppliedTag[] = [];
+          // Names THIS call applied fresh. Not the same as "every human tag on the thread":
+          // a tag someone else added survives the merge with their `by` intact, and sweeping
+          // those up would file a candidate crediting the wrong person every time anyone
+          // touched the thread's tags.
+          const addedNames: string[] = [];
+          for (const name of desired) {
+            const prior = byName.get(name);
+            if (prior && !prior.removed) {
+              next.push(prior);
+              continue;
+            }
+            next.push({ name, at: timestamp, by: ctx.userID });
+            addedNames.push(name);
+          }
+
+          // Dropped tags are tombstoned, not deleted: removal has to stay auditable, and a
+          // deleted tag would look unclassified to the classifier and come straight back.
+          const kept = new Set(desired);
+          for (const tag of existing) {
+            if (kept.has(tag.name)) continue;
+            next.push(
+              tag.removed ? tag : { ...tag, removed: true, at: timestamp, by: ctx.userID },
+            );
+          }
+
           await tx.mutate.conversations.update({
             conversationId,
-            threadType: unique.length > 0 ? JSON.stringify(unique) : '[]',
+            threadType: serializeAppliedTags(next),
           });
+
+          // Backend copy only, like the refeed below: a free-form tag someone invented is
+          // recorded as a vocabulary candidate for an admin to promote or drop. The tag is
+          // already on the thread — this only governs whether the NAME becomes something the
+          // picker offers and the classifier may assign.
+          const workspaceIdForVocab = conversation.workspaceId;
+          if (workspaceIdForVocab && addedNames.length > 0) {
+            asyncTasks.push(async () => {
+              const vocabulary = await getThreadTypeVocabulary(workspaceIdForVocab);
+              const known = new Set(vocabulary.map(entry => entry.name));
+              for (const name of addedNames) {
+                if (known.has(name)) continue;
+                // The note describes the tag, so it lands on the candidate as its
+                // description — not copied onto every thread that carries the name.
+                await recordVocabularyCandidate(workspaceIdForVocab, name, ctx.userID, note);
+              }
+            });
+          }
 
           // Backend copy only. Zero collects no side-effect job for conversation updates
           // (SIDE_EFFECT_OPERATION_CONFIG lists insert/delete), and a thread's tags live on

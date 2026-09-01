@@ -48,7 +48,7 @@ class RadarManualActionsService {
     // Bounded: the remainder stays open for the next click, which beats a
     // transaction that times out and rolls the whole batch back.
     const items = await prisma.executionItem.findMany({
-      where: { conversationId, workspaceId: auth.workspaceId, status: 'open' },
+      where: { conversationId, workspaceId: auth.workspaceId, status: 'OPEN' },
       select: { id: true, channelId: true },
       take: MAX_RESOLVE_ALL_ITEMS,
     });
@@ -82,7 +82,7 @@ class RadarManualActionsService {
     if (!(await canAccessConversation(auth, item.conversationId))) {
       throw new RadarActionError('not-found', 'Execution item not found');
     }
-    if (item.status !== 'open') {
+    if (item.status !== 'OPEN') {
       throw new RadarActionError('bad-request', 'Execution item is not open');
     }
     return item;

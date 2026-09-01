@@ -13,6 +13,9 @@ interface SwitchProps {
   /** `desk` — pill toggle used in Desk Settings (gray off, brand blue on). */
   variant?: SwitchVariant;
   className?: string;
+  /** Override the built-in SWITCH tracking with a caller-specific event. */
+  'data-track-category'?: string;
+  'data-track-name'?: string;
 }
 
 export const Switch: React.FC<SwitchProps> = ({
@@ -24,6 +27,8 @@ export const Switch: React.FC<SwitchProps> = ({
   disabled = false,
   variant = 'default',
   className,
+  'data-track-category': trackCategory,
+  'data-track-name': trackName,
 }) => {
   const isDesk = variant === 'desk';
 
@@ -40,8 +45,8 @@ export const Switch: React.FC<SwitchProps> = ({
         // Tagged here rather than at each call site so every Switch in the app
         // is captured. `id` is the stable per-switch identifier; aria-label and
         // label are fallbacks for the callers that omit it.
-        data-track-category='SWITCH'
-        data-track-name={id ?? ariaLabel ?? label ?? 'TOGGLE'}
+        data-track-category={trackCategory ?? 'SWITCH'}
+        data-track-name={trackName ?? id ?? ariaLabel ?? label ?? 'TOGGLE'}
         data-track-metadata={JSON.stringify({ toChecked: !checked })}
         className={cn(
           'relative inline-flex shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',

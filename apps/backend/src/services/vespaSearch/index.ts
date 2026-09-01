@@ -214,7 +214,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       priority,    // Priority (HIGH, MEDIUM, LOW) - comma-separated
       searchId,
       board,       // Board name/ID
-      tags,        // Comma-separated tags
+      tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
+      threadType,  // Thread classification type(s) - comma-separated; matches thread roots
+      messageActs, // Thread type(s) a message was cited as evidence for - comma-separated
       dynamicFieldValues, // Dynamic field filters
       dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
       before,      // Created before date (multiple formats)
@@ -775,6 +777,16 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
     if (channelMentions) {
       options.slack.mentionedChannelIds = channelMentions;
+    }
+    // Thread classification. threadType matches a thread's ROOT message, so it returns one
+    // hit per thread; messageActs matches the individual messages the classifier cited as
+    // evidence. Sent together they AND, which is how you ask for "the message that made this
+    // an ISSUE" rather than either on its own.
+    if (threadType) {
+      options.slack.threadType = toFilterValues(threadType, 'threadType');
+    }
+    if (messageActs) {
+      options.slack.messageActs = toFilterValues(messageActs, 'messageActs');
     }
     // Highlight-only: exact display names to bold in result snippets (kept out of the YQL filter).
     if (mentionHighlights) {

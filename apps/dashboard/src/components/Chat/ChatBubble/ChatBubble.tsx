@@ -31,6 +31,7 @@ import {
   isDeskChannelType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
+import { MessageTags } from '../../tags/MessageTags';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
@@ -136,6 +137,8 @@ interface ChatBubbleProps {
   linkedConversationId?: string | null;
   /** Message ID to highlight when this bubble is rendered in a thread context (e.g. search screen sidebar). */
   highlightMessageId?: string | null;
+  /** Tag being inspected from the thread header; messages carrying it show a chip. */
+  inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
   isThreadTicketSubTicket?: boolean;
 }
@@ -165,6 +168,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isNextActivity = false,
   linkedConversationId,
   highlightMessageId,
+  inspectedTag = null,
   afterTextContent,
   isThreadTicketSubTicket = false,
 }) => {
@@ -964,12 +968,27 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // the overlay can derive them at show time. Hover never sets state here.
 
   const hoverToolbarKey = useId();
+
   const appliedThreadTypes = useMemo(
     () => parseThreadTypes(conversation?.threadType),
     [conversation?.threadType],
   );
   const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
   const { showThreadTags } = useShowThreadTags();
+  // The thread types this message was cited as evidence for. Composed onto afterTextContent
+  // rather than the header slot: the header only renders for the first message in a group,
+  // and the second and third messages of a burst are exactly the ones you need to see marked.
+  const messageTags =
+    showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
+      <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
+    ) : null;
+  const textTrailer =
+    afterTextContent !== undefined || messageTags ? (
+      <>
+        {afterTextContent}
+        {messageTags}
+      </>
+    ) : undefined;
 
   const canShowHoverToolbar =
     !isMobile &&
@@ -1287,7 +1306,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
-            {...(afterTextContent !== undefined && { afterTextContent })}
+            {...(textTrailer !== undefined && { afterTextContent: textTrailer })}
             {...(context === 'channel' &&
               !isSystemMessage &&
               !isMessageDeleted && {

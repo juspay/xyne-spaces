@@ -187,7 +187,7 @@ const SlideContent: React.FC<{
           onClick={() => {
             void downloadFile(file.fileUrl, file.fileName);
           }}
-          data-track-category='FILE_VIEWER'
+          data-track-category='FileViewer'
           data-track-name='DownloadVideo'
           className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
         >
@@ -736,7 +736,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             aria-label='Previous file'
             title='Previous (←)'
             type='button'
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='PreviousFile'
           >
             <ChevronLeft className='h-6 w-6' />
@@ -754,7 +754,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             aria-label='Next file'
             title='Next (→)'
             type='button'
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NextFile'
           >
             <ChevronRight className='h-6 w-6' />
@@ -1190,7 +1190,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           <p className='text-gray-400'>Video cannot be streamed</p>
           <button
             onClick={() => void handleDownload()}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='DownloadVideo'
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
           >
@@ -1411,7 +1411,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           {isImage && (
             <button
               onClick={() => void handleCopyImageGallery()}
-              data-track-category='FILE_VIEWER'
+              data-track-category='FileViewer'
               data-track-name='CopyImageGallery'
               title='Copy Image'
               className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
@@ -1425,7 +1425,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           )}
           <button
             onClick={() => void handleDownload()}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='DownloadFile'
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
@@ -1435,7 +1435,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             <Dialog.Close asChild>
               <button
                 onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
-                data-track-category='FILE_VIEWER'
+                data-track-category='FileViewer'
                 data-track-name='Close'
                 className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
                 aria-label='Close'
@@ -1460,7 +1460,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {canGoPrevious && (
           <button
             onClick={handlePrevious}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NavigatePrevious'
             className={cn(
               'absolute left-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
@@ -1476,7 +1476,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {canGoNext && (
           <button
             onClick={handleNext}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NavigateNext'
             className={cn(
               'absolute right-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',

@@ -472,6 +472,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'tagsConfig':
       return new BaseQueryACL(ctx, prisma)
+    // Workspace-scoped config, reached only through the thread-type-vocabulary API, which
+    // does its own admin check. Listed so the switch stays exhaustive over ModelName.
+    case 'threadTypeVocabulary':
+      return new BaseQueryACL(ctx, prisma)
     case 'teamIntelligenceIngestionBatchV2':
       return new UnscopedACL(ctx, prisma)
     case 'teamIntelligenceOrgSummaryV2':

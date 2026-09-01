@@ -373,7 +373,7 @@ const CalendarCallPopup = ({
             </span>
             <button
               onClick={onClose}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='calendar-popup-close'
               className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
             >
@@ -489,7 +489,7 @@ const CalendarCallPopup = ({
           <button
             disabled={isLoading}
             onClick={() => void submitRsvp(seriesPrompt, false)}
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='rsvp-this-call'
             className='text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer disabled:opacity-50 text-foreground'
           >
@@ -498,7 +498,7 @@ const CalendarCallPopup = ({
           <button
             disabled={isLoading}
             onClick={() => void submitRsvp(seriesPrompt, true)}
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='rsvp-all-calls'
             className='text-sm px-4 py-2 rounded-lg bg-action-primary text-action-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50'
           >
@@ -528,7 +528,7 @@ const CalendarCallPopup = ({
               onHideClick?.();
               setShowHideSeriesPrompt(false);
             }}
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='hide-this-call'
             className='text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer text-foreground'
           >
@@ -539,7 +539,7 @@ const CalendarCallPopup = ({
               onHideClick?.({ isSeries: true });
               setShowHideSeriesPrompt(false);
             }}
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='hide-all-calls'
             className='text-sm px-4 py-2 rounded-lg bg-action-primary text-action-primary-foreground hover:opacity-90 transition-opacity cursor-pointer'
           >
@@ -617,7 +617,7 @@ const CalendarCallPopup = ({
             aria-label='Edit call'
             variant='ghost'
             size='iconSm'
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='popup-edit-call'
             className='text-muted-foreground'
           >
@@ -631,7 +631,7 @@ const CalendarCallPopup = ({
             aria-label='Delete call'
             variant='ghost'
             size='iconSm'
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='popup-delete-call'
             className='text-destructive hover:bg-destructive/10 hover:text-destructive'
           >
@@ -645,7 +645,7 @@ const CalendarCallPopup = ({
             aria-label='Hide call'
             variant='ghost'
             size='iconSm'
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='popup-hide-call'
             className='text-destructive hover:bg-destructive/10 hover:text-destructive'
           >
@@ -659,7 +659,7 @@ const CalendarCallPopup = ({
             aria-label='Go to message'
             variant='ghost'
             size='iconSm'
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='popup-goto-message'
             className='text-muted-foreground'
           >
@@ -672,7 +672,7 @@ const CalendarCallPopup = ({
           aria-label='Close'
           variant='ghost'
           size='iconSm'
-          data-track-category='Calls'
+          data-track-category='CALLS'
           data-track-name='popup-close'
           className='text-muted-foreground'
         >
@@ -752,7 +752,7 @@ const CalendarCallPopup = ({
           {/* Collapsible header */}
           <button
             onClick={() => setIsGuestsExpanded(prev => !prev)}
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='toggle-guests-list'
             className='w-full flex items-center gap-3 px-3 py-3 cursor-pointer hover:bg-muted/50 transition-colors'
           >
@@ -862,7 +862,7 @@ const CalendarCallPopup = ({
         ? onDownloadTranscript && (
             <button
               onClick={onDownloadTranscript}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='popup-download-transcript'
               className='w-full mt-3 h-8 flex items-center justify-center gap-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer'
             >
@@ -875,7 +875,7 @@ const CalendarCallPopup = ({
             <button
               onClick={onJoinCall}
               disabled={isJoinDisabled}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='popup-join-call'
               className={cn(
                 'w-full mt-3 h-10 flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-opacity',
@@ -913,7 +913,7 @@ const CalendarCallPopup = ({
               <button
                 disabled={isLoading}
                 onClick={() => handleRsvpClick(RSVP_CHOICE.ACCEPTED)}
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='rsvp-accepted'
                 className={cn(
                   'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
@@ -927,7 +927,7 @@ const CalendarCallPopup = ({
               <button
                 disabled={isLoading}
                 onClick={() => handleRsvpClick(RSVP_CHOICE.DECLINED)}
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='rsvp-declined'
                 className={cn(
                   'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
@@ -941,7 +941,7 @@ const CalendarCallPopup = ({
               <button
                 disabled={isLoading}
                 onClick={() => handleRsvpClick(RSVP_CHOICE.MAYBE)}
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='rsvp-maybe'
                 className={cn(
                   'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
