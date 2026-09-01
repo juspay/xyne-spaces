@@ -857,7 +857,6 @@ function ReplyCard({
           </div>
           <Button
             size='sm'
-            onClick={() => void send()}
             data-track-category='twin-dock'
             data-track-name='send-draft'
             trackId='twin_send_reply'

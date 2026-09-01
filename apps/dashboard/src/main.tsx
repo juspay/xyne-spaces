@@ -33,7 +33,7 @@ const handleConsoleError = (args: unknown[]): void => {
     posthogService.capture('Frontend Error', properties);
     logger.error(Event.FRONTEND_ERROR, { ...properties, error });
   } catch (trackingError) {
-    originalConsoleError('Failed to track browser console error to Mixpanel:', trackingError);
+    originalConsoleError('Failed to track browser console error to PostHog:', trackingError);
   }
 };
 
@@ -55,7 +55,7 @@ const handleWindowError = (event: ErrorEvent): void => {
     posthogService.capture('Frontend Error', properties);
     logger.error(Event.FRONTEND_ERROR, { ...properties, error });
   } catch (trackingError) {
-    originalConsoleError('Failed to track error to Mixpanel:', trackingError);
+    originalConsoleError('Failed to track error to PostHog:', trackingError);
   }
 };
 
@@ -81,7 +81,7 @@ const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
     posthogService.capture('Frontend Error', properties);
     logger.error(Event.FRONTEND_ERROR, { ...properties, error: reason });
   } catch (trackingError) {
-    originalConsoleError('Failed to track promise rejection to Mixpanel:', trackingError);
+    originalConsoleError('Failed to track promise rejection to PostHog:', trackingError);
   }
 };
 

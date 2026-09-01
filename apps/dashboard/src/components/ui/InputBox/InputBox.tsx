@@ -1314,11 +1314,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           }
         }
 
-        // Record how the message was sent (Enter key vs. send button). Autocapture
-        // sees the button click but is blind to keyboard sends, so most sends would
-        // otherwise be invisible; this makes the Enter-vs-button split measurable.
-        posthogService.capture('message_send', { trigger, composer: 'chat' });
-
         setIsSending(true);
         try {
           // Filter to only send actual File objects
@@ -1339,6 +1334,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           const finalPlainText = editor?.getText().trim() || plainText;
 
           await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
+          // Record a successful send after the await resolves (a throw skips
+          // this). Autocapture sees the button click but is blind to keyboard
+          // sends, so `trigger` makes the Enter-vs-button split measurable.
+          posthogService.capture(EVENTS.MESSAGE_SEND, { trigger, composer: 'chat' });
+
           editor.commands.setContent('');
           setContent('');
           setAttachedCanvas(null);

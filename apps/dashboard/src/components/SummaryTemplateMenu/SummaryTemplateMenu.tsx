@@ -134,7 +134,7 @@ export function SummaryTemplateMenu({
             onRegenerate();
           }}
           trackId='regenerate_selected_summary_template'
-          trackProps={{ trackCategory }}
+          trackProps={{ 'track-category': trackCategory }}
           aria-label={`Regenerate with ${fullLabel}`}
           className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category={trackCategory}

@@ -52,6 +52,11 @@ const buttonVariants = cva(
         icon: 'size-9',
         iconSm: 'size-8',
         iconLg: 'size-10',
+        // For buttons that carry their own height/padding/alignment via
+        // `className` (e.g. small inline text buttons). Injects no `h-*` and
+        // undoes the base `justify-center` so a swapped-in `<button>` keeps its
+        // original sizing instead of inheriting the 36px default.
+        inline: 'h-auto justify-start',
       },
     },
     defaultVariants: {
@@ -76,8 +81,9 @@ interface ButtonProps extends React.ComponentProps<'button'>, VariantProps<typeo
    * a loading spinner while it is pending, blocking double-submits. Sync or
    * async; thrown errors are swallowed so a failing action never leaves the
    * button stuck spinning — the action itself is responsible for user-facing
-   * error handling (e.g. toasts). Note: when set, `onClick` is not called; move
-   * the click work into `trackAction`.
+   * error handling (e.g. toasts). `onClick`, if also supplied, still runs first.
+   * Note: `trackAction` may be awaited, so read `event.currentTarget` before the
+   * first `await` — React nulls it once the handler returns.
    */
   trackAction?: (event: React.MouseEvent<HTMLButtonElement>) => void | Promise<void>;
   /**
@@ -105,16 +111,18 @@ function Button({
   const [pending, setPending] = React.useState(false);
   const isDisabled = disabled || loading || pending;
 
-  const captureAttributes = React.useMemo(
-    () => buildCaptureAttributes(trackId, trackProps),
-    [trackId, trackProps],
-  );
+  // Callers pass `trackProps` as inline object literals, so a useMemo here would
+  // miss every render anyway — just build the attributes directly.
+  const captureAttributes = buildCaptureAttributes(trackId, trackProps);
 
   const handleClick = React.useCallback(
     (event: React.MouseEvent<HTMLButtonElement>): void => {
       // Clicks are recorded by PostHog autocapture; the Button only owns the
-      // action lifecycle here. When a trackAction is supplied, run it with a
-      // pending spinner that blocks double-submits.
+      // action lifecycle here. A plain onClick always runs. When a trackAction
+      // is also supplied, run it with a pending spinner that blocks
+      // double-submits.
+      onClick?.(event);
+
       if (trackAction) {
         setPending(true);
         void (async (): Promise<void> => {
@@ -127,10 +135,7 @@ function Button({
             setPending(false);
           }
         })();
-        return;
       }
-
-      onClick?.(event);
     },
     [onClick, trackAction],
   );

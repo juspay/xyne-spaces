@@ -61,8 +61,17 @@ class PostHogService {
         // --- Full user journey capture ---
         // Automatically capture every click (all buttons), change and submit event.
         autocapture: true,
-        // Track navigation so the journey is stitched across pages/routes.
-        capture_pageview: true,
+        // Chat/email/ticket bodies are sensitive. Autocapture ships the clicked
+        // element's `$el_text` + elements chain by default, which would leak
+        // message bodies, subjects, ticket titles and contact names. Mask all
+        // text so only the click + our `data-ph-capture-attribute-*` metadata
+        // (track-id, trackProps) survive. Element attributes are intentionally
+        // NOT masked (`mask_all_element_attributes` off) so those attrs still flow.
+        mask_all_text: true,
+        // Track navigation across SPA route changes. `defaults: '2025-05-24'`
+        // resolves pageview capture to `'history_change'`; set it explicitly so a
+        // future default change cannot silently drop navigation pageviews.
+        capture_pageview: 'history_change',
         capture_pageleave: true,
         // Enable click + scroll heatmaps in the PostHog dashboard.
         enable_heatmaps: true,
@@ -160,7 +169,16 @@ class PostHogService {
    * Identify a user. All properties except id/picture become person properties.
    */
   identify(user: PosthogUser): void {
-    if (!this.isInitialized || !user?.id) {
+    if (!user?.id) {
+      return;
+    }
+    // `identify` can fire from the module-level auth actor before
+    // AnalyticsProvider's effect runs `initialize()`. Init on demand so the
+    // call is not silently dropped and the user left anonymous for the session.
+    if (!this.isInitialized) {
+      this.initialize();
+    }
+    if (!this.isInitialized) {
       return;
     }
     try {

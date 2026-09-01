@@ -32,6 +32,7 @@ export const EVENTS = {
   APP_OPEN: 'app_open',
 
   // Messaging events
+  MESSAGE_SEND: 'message_send',
   MESSAGE_SEND_FAILED: 'message_send_failed',
 
   // Conversation events
