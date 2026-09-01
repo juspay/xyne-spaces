@@ -719,6 +719,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const searchTerm = searchParams.get('search') ?? '';
   const [isBoardDropdownOpen, setIsBoardDropdownOpen] = useState(false);
   const [isSourceChannelsOpen, setIsSourceChannelsOpen] = useState(false);
+  const [isFiltersDropdownOpen, setIsFiltersDropdownOpen] = useState(false);
 
   const myTicketBoardsQuery = useQuery({
     queryKey: ['tickets', 'my-board-ids', user?.id],
@@ -738,7 +739,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // Source channels also needs board data (boards -> projects -> channels),
     // so opening that submenu enables this fetch too.
     enabled:
-      viewMode === 'my-tickets' && (isBoardDropdownOpen || isSourceChannelsOpen) && !!user?.id,
+      viewMode === 'my-tickets' &&
+        (isBoardDropdownOpen || isSourceChannelsOpen || isFiltersDropdownOpen) &&
+        !!user?.id,
     staleTime: 60_000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -750,6 +753,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const handleSourceChannelsOpenChange = useCallback((open: boolean) => {
     setIsSourceChannelsOpen(open);
+  }, []);
+
+  const handleFiltersDropdownOpenChange = useCallback((open: boolean) => {
+    setIsFiltersDropdownOpen(open);
   }, []);
 
   const setGroupBy = useCallback(
@@ -1748,9 +1755,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
+  const tagsProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
   const [projectTags, projectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: effectiveProjectId || '' }),
-    { enabled: !!effectiveProjectId },
+    queries.projectTagsByProjectId({ projectId: tagsProjectId || '' }),
+    { enabled: !!tagsProjectId },
   );
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
@@ -3399,6 +3407,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       });
     }
 
+    if (groupBy === 'priority') {
+      const PRIORITY_SORT_ORDER: Record<string, number> = {
+        CRITICAL: 0,
+        HIGH: 1,
+        MEDIUM: 2,
+        LOW: 3,
+      };
+      const getOrder = (key: string): number =>
+        PRIORITY_SORT_ORDER[key] ?? Number.MAX_SAFE_INTEGER;
+      mapped.sort((a, b) => {
+        const orderA = getOrder(a.key);
+        const orderB = getOrder(b.key);
+        if (orderA !== orderB) return orderA - orderB;
+        // 'No Priority' and unknown keys go to the end
+        if (a.key === 'No Priority') return 1;
+        if (b.key === 'No Priority') return -1;
+        return a.displayName.localeCompare(b.displayName);
+      });
+    }
+
     return mapped;
   }, [
     localTickets,
@@ -3483,6 +3511,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               isTicketsSyncing={isTicketsSyncing}
               onBoardDropdownOpenChange={handleBoardDropdownOpenChange}
               onSourceChannelsOpenChange={handleSourceChannelsOpenChange}
+              onFiltersDropdownOpenChange={handleFiltersDropdownOpenChange}
               isNonLinearBoard={isNonLinearBoard}
               formMappings={
                 filters.boards?.length === 1 && selectedBoardDetail
@@ -4051,29 +4080,32 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           handleSetGroupBy('none');
                         }}
                       >
-                        <div className='cursor-pointer hover:bg-muted rounded p-1 transition-colors text-foreground'>
-                          <X className='w-3.5 h-3.5' />
-                        </div>
+                        <span className='cursor-pointer text-xs text-muted-foreground hover:text-foreground font-medium transition-colors'>
+                          Clear
+                        </span>
                       </DropdownMenu.Item>
                     )}
                   </div>
 
                   {/* Grouping Options */}
-                  {groupingOptions.map(({ value, label, icon }) => (
+                  {groupingOptions.map(({ value, label, icon }) => {
+                    const isSelected =
+                      typeof value === 'string'
+                        ? groupBy === value
+                        : typeof groupBy === 'object' &&
+                          groupBy.type === 'formField' &&
+                          groupBy.fieldId === value.fieldId;
+                    return (
                     <DropdownMenu.CheckboxItem
                       key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
                       className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
       transition-colors
       data-[highlighted]:bg-muted data-[highlighted]:text-foreground
       data-[state=checked]:bg-accent data-[state=checked]:text-foreground data-[state=checked]:font-semibold'
-                      checked={
-                        typeof value === 'string'
-                          ? groupBy === value
-                          : typeof groupBy === 'object' &&
-                            groupBy.type === 'formField' &&
-                            groupBy.fieldId === value.fieldId
+                      checked={isSelected}
+                      onCheckedChange={() =>
+                        handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
                       }
-                      onCheckedChange={() => handleSetGroupBy(value as GroupByType)}
                       data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
                     >
                       <div className='flex items-center gap-3'>
@@ -4083,7 +4115,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         <span className='font-medium'>{label.replace('Group by: ', '')}</span>
                       </div>
                     </DropdownMenu.CheckboxItem>
-                  ))}
+                    );
+                  })}
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>

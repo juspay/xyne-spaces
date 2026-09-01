@@ -70,6 +70,19 @@ export const StagesSubmenu = ({
     );
   };
 
+  const visibleStageNames = finalResults.map(s => s.name);
+  const allVisibleSelected =
+    visibleStageNames.length > 0 && visibleStageNames.every(n => selectedStages.includes(n));
+
+  const handleSelectAllToggle = (): void => {
+    if (allVisibleSelected) {
+      onChange(selectedStages.filter(s => !visibleStageNames.includes(s)));
+    } else {
+      const merged = new Set([...selectedStages, ...visibleStageNames]);
+      onChange([...merged]);
+    }
+  };
+
   return (
     <div
       className={`w-80 border border-border flex flex-col rounded-lg shadow-lg bg-background overflow-hidden ${className}`}
@@ -102,6 +115,24 @@ export const StagesSubmenu = ({
           <div className='p-8 text-center text-sm text-muted-foreground'>No status available</div>
         ) : finalResults.length > 0 ? (
           <div className='space-y-0.5'>
+            <button
+              type='button'
+              onClick={handleSelectAllToggle}
+              className={`
+                w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
+                ${allVisibleSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+                focus-visible:ring-2 focus-visible:ring-ring border-b border-border/50
+              `}
+              data-track-category='TICKETS'
+              data-track-name='ToggleSelectAllStages'
+            >
+              <span className='flex-1 text-left text-sm font-medium text-primary'>
+                {allVisibleSelected ? 'Deselect all' : 'Select all'}
+              </span>
+              {allVisibleSelected && (
+                <Check className='w-4 h-4 text-primary shrink-0' aria-hidden='true' />
+              )}
+            </button>
             {finalResults.map(stage => {
               const isSelected = selectedStages.includes(stage.name);
               return (
