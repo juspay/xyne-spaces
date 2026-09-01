@@ -301,7 +301,7 @@ export const DEV_DEFAULTS: StreamsDevSettings = {
   // 8, not `HEADER_PAD`'s 12. The header carries three things now — the stream
   // name, the switcher and the nav row — and at 12 the band above the strip read
   // as a gap rather than as breathing room.
-  headerPad: 8,
+  headerPad: 6,
   // Off. It is a live query per channel column and a second header above the
   // one the column already has — worth reaching for, not worth every column
   // carrying it at rest.

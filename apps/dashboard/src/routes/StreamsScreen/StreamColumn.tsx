@@ -663,7 +663,7 @@ const StreamColumn = ({
             title={
               activity.count > 0
                 ? `${activity.count} needing you — click to clear`
-                : 'New since you last looked — click to clear'
+                : 'New since you last looked. Click to clear'
             }
             aria-label='Mark this column read'
             className='streams-press flex shrink-0 items-center rounded-full'

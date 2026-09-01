@@ -2336,8 +2336,13 @@ const StreamsScreen = (): ReactElement => {
             >
               {/* One group, flex-1, so the actions sit against the right edge
                   without an `ml-auto` on a sibling — the same shape a channel
-                  header uses, and the reason its spacing is even. */}
-              <div className='flex min-w-0 flex-1 items-center gap-2'>
+                  header uses, and the reason its spacing is even.
+
+                  `min-h-8` so the row is one control tall whether or not the nav
+                  is mounted. The nav is the only 32px child — the switcher is
+                  23.5px — so an empty stream drew a header 8.5px shorter and the
+                  whole strip jumped down the moment you added the first column. */}
+              <div className='flex min-h-8 min-w-0 flex-1 items-center gap-2'>
                 {/* The screen's title, and there is no separate one.
 
                     A constant "Streams" label used to hold this slot, with the
@@ -2407,7 +2412,6 @@ const StreamsScreen = (): ReactElement => {
                     />
                   )}
               </div>
-
               {/* The stream's verbs, as one group, at the same `gap-1` a channel
                   header puts between its own icon buttons. */}
               <div className='flex shrink-0 items-center gap-1'>
@@ -2441,7 +2445,6 @@ const StreamsScreen = (): ReactElement => {
                     column`; Share comes back as its own verb when there is
                     something behind it. */}
               </div>
-
               {/* Centred on the viewport, not on the space left over between the
                   title and the verbs — that space starts wherever the stream's
                   name happens to end, so laying this out in the row would centre
@@ -2655,8 +2658,8 @@ const StreamsScreen = (): ReactElement => {
                         <span className='text-xs'>Add a column</span>
                         {columns.length === 0 && (
                           <span className='max-w-[15rem] px-6 text-center text-[11px] leading-relaxed text-muted-foreground/70'>
-                            A stream is the handful of things you want to watch at once — channels,
-                            a board, threads, a topic feed.
+                            A stream is the handful of things you want to watch at once: channels, a
+                            board, threads, a topic feed.
                           </span>
                         )}
                       </button>
