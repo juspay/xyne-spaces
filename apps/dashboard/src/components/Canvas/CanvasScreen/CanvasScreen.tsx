@@ -6,6 +6,7 @@ import { usePath } from '../../../hooks/usePath';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/CollaborativeCanvasEditor';
+import type { InlineSuggestionRow } from '../CollaborativeCanvasEditor/suggestionDecorations';
 import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
 import { CanvasList } from '../CanvasList';
 import { CanvasShareModal } from '../CanvasShareModal';
@@ -81,6 +82,7 @@ import {
   CanvasRole,
   isBaselineCanvasType,
   computeDeletionEvents,
+  isBaselineCanvasType,
   type BlockDeletionEvent,
 } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
@@ -1736,6 +1738,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 canvasId={selectedCanvas.id}
                 canEdit={canEdit}
                 editorContainerRef={canvasContentRef}
+                editorRef={editorRef}
               />
             )}
 
@@ -1790,6 +1793,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   canvasParticipants={canvasParticipants}
                   canvasCreatedBy={selectedCanvas.createdBy}
                   currentUserRole={selectedCanvas.accessLevel ?? null}
+                  suggestions={suggestionRows as unknown as InlineSuggestionRow[]}
                 />
               ) : (
                 <CanvasEditor
