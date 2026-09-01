@@ -10,6 +10,7 @@ import { mentionInlineContentSpec } from './CanvasMentionSpec';
 import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
+import { canvasTicketStyleSpec } from './CanvasTicketStyleSpec/CanvasTicketStyleSpec';
 import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
 import { canvasDiagramBlockSpec } from './CanvasDiagramSpec';
 import { canvasMathBlockSpec } from './CanvasMathBlockSpec';
@@ -51,6 +52,7 @@ function createCanvasSchema() {
     },
     styleSpecs: {
       canvasCommentThread: canvasCommentThreadStyleSpec,
+      canvasTicket: canvasTicketStyleSpec,
     },
   });
 }

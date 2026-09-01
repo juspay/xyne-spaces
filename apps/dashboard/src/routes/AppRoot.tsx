@@ -2002,6 +2002,38 @@ export const router = createBrowserRouter(
           ),
         },
         {
+          path: '/newWindow/chat/canvas',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <ZeroFallbackProvider>
+                  <InitialStateLoader>
+                    <EditProvider>
+                      <div className='h-full bg-background'>
+                        <CanvasPanel />
+                      </div>
+                      <AttachmentGalleryModal />
+                      <AttachmentCitationPreview />
+                      <ThreadCitationModal />
+                      <TranscriptCitationModal />
+                    </EditProvider>
+                  </InitialStateLoader>
+                </ZeroFallbackProvider>
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
+          children: [
+            {
+              index: true,
+              element: null,
+            },
+            {
+              path: ':canvasId',
+              element: <CanvasScreen />,
+            },
+          ],
+        },
+        {
           path: '/newWindow/create-ticket',
           element: (
             <ZeroProvider>
