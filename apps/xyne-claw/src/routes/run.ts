@@ -4936,7 +4936,7 @@ function buildLateFollowUpCallbackUrl(callbackUrl: string): string | undefined {
   }
 }
 
-async function sendCallback(
+export async function sendCallback(
   callbackUrl: ProgressDest,
   sessionToken: string,
   payload: Record<string, unknown>,

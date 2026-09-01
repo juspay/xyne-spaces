@@ -1,6 +1,7 @@
 import { DelayedError, Worker, type Job } from "bullmq";
 import { executeRunFromPayload, type InternalRunPayload, type RunOutcome } from "./run-execution.js";
-import { abortRunForOwnershipLoss } from "./routes/run.js";
+import { abortRunForOwnershipLoss, sendCallback } from "./routes/run.js";
+import { gcsDownloadResultMarker } from "./storage.js";
 import {
   claimOwnership,
   createOwnerToken,
@@ -64,6 +65,35 @@ async function postProgressLabel(payload: InternalRunPayload, toolLabel: string)
   if (!res.ok) {
     clog.warn(`[run-queue] progress label "${toolLabel}" returned ${res.status}`);
   }
+}
+
+async function notifyTerminalFailure(job: Job<InternalRunPayload> | undefined, err: Error): Promise<void> {
+  if (!job) return;
+  const { sessionId, sessionToken, callbackUrl, userId, conversationId, agentSlug, idempotencyKey } = job.data;
+  if (!sessionId?.trim() || !sessionToken?.trim() || !callbackUrl) return;
+  const stalled = /stalled/i.test(err.message);
+  const maxAttempts = job.opts?.attempts ?? 1;
+  if (!stalled && job.attemptsMade < maxAttempts) return;
+  const marker = await gcsDownloadResultMarker(idempotencyKey ?? sessionId).catch(() => null);
+  if (marker) return;
+  metric.count("run_queue_terminal_notified", {
+    agent: agentSlug ?? "unknown",
+    session: sessionId,
+    reason: stalled ? "stalled" : "attempts_exhausted",
+  });
+  clog.error(
+    `[run-queue] job terminally failed without a posted result — notifying user session=${sessionId} reason=${stalled ? "stalled" : "attempts_exhausted"} err=${err.message}`,
+  );
+  await sendCallback(callbackUrl, sessionToken.trim(), {
+    sessionId,
+    userId: userId ?? null,
+    conversationId: conversationId ?? null,
+    agentSlug: agentSlug ?? null,
+    status: "failed",
+    error: stalled
+      ? "run_interrupted: the run's executor was lost twice — please retry"
+      : `run_interrupted: ${err.message}`,
+  });
 }
 
 export const RUN_EXECUTION_QUEUE_NAME = "run-execution";
@@ -173,6 +203,9 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
       agent: job?.data?.agentSlug ?? "unknown",
       session: job?.data?.sessionId ?? job?.id ?? "unknown",
       reason: err instanceof Error ? err.name : "unknown",
+    });
+    void notifyTerminalFailure(job, err).catch((notifyErr: Error) => {
+      clog.warn(`[run-queue] terminal-failure notify failed: ${notifyErr.message}`);
     });
   });
 
