@@ -1,3 +1,10 @@
+## [1.250.2](https://github.com/juspay/xyne-spaces/compare/v1.250.1...v1.250.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* workspace thread-type vocabulary with admin tag review ([#1153](https://github.com/juspay/xyne-spaces/issues/1153)) ([ec70176](https://github.com/juspay/xyne-spaces/commit/ec7017654010ba024642a9ebb1c233359b4224a3))
+
 ## [1.250.1](https://github.com/juspay/xyne-spaces/compare/v1.250.0...v1.250.1) (2026-08-31)
 
 
