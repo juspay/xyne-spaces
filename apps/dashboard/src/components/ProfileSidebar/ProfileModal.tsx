@@ -72,7 +72,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
             onClick={onClose}
             className='!p-2 border border-border rounded-md hover:bg-accent'
             title='Close'
-            data-track-category='Profile'
+            data-track-category='PROFILE'
             data-track-name='CloseProfileModal'
             data-track-metadata={JSON.stringify({ userId })}
           >

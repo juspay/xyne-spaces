@@ -1547,6 +1547,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <button
                   type='button'
                   onClick={onCancelSlashCommandArtifact}
+                  data-track-category='CHAT_INPUT'
+                  data-track-name='CANCEL_SLASH_COMMAND_ARTIFACT'
                   className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
                   aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
                 >
