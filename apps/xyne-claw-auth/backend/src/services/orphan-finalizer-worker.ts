@@ -3,6 +3,7 @@ import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { finalizeOrphanedRun } from "./orphan-run-finalizer.js";
+import { hasActiveRunRecovery, isRunStillExecuting } from "../queue/run-recovery-worker.js";
 
 const log = createLogger("orphan-finalizer");
 
@@ -76,8 +77,25 @@ async function tickOnce(): Promise<void> {
     }
 
     let finalized = 0;
+    let skippedLive = 0;
     const now = Date.now();
     for (const run of candidates) {
+      // The global gate above is a per-pod, load-balanced signal: /healthz/ready
+      // answers from ONE xyne-claw replica, so it can report activeRuns=0 while a
+      // DIFFERENT replica is still executing this exact session. Finalizing here
+      // would flip a live run's row to "failed"; when it later completes, its
+      // result callback is rejected as "superseded or settled" and the answer is
+      // lost (prod: session a1149216 on 2026-08-31, finalized at age=36min while
+      // still running, delivered its result 13min later to a dead row).
+      //
+      // So re-check THIS session before finalizing it, using two pod-independent
+      // signals: recovery state lives in Redis (authoritative across replicas),
+      // and the per-session /alive probe is the same one run-recovery trusts.
+      if ((await hasActiveRunRecovery(run.sessionId)) || (await isRunStillExecuting(run.sessionId))) {
+        skippedLive++;
+        log.info(`[orphan-finalizer] session=${run.sessionId} agent=${run.agentSlug} still alive — skipping finalize`);
+        continue;
+      }
       const ok = await finalizeOrphanedRun(run, ERROR, "orphan-finalizer");
       if (!ok) continue;
       finalized++;
@@ -87,7 +105,7 @@ async function tickOnce(): Promise<void> {
       // months-old zombie backlog — count them as inflight kills.
       if (ageMin < 120) log.warn(`[metric] name=inflight_killed kind=count value=1 cause=orphan_finalized agent=${run.agentSlug} session=${run.sessionId}`);
     }
-    log.info(`[metric] name=orphan_finalizer_finalized kind=count value=${finalized}`);
+    log.info(`[metric] name=orphan_finalizer_finalized kind=count value=${finalized} skippedLive=${skippedLive}`);
   } catch (err) {
     log.error("[orphan-finalizer] tick failed:", errMsg(err));
   } finally {
