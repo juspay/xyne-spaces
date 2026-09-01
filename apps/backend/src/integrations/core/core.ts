@@ -340,7 +340,7 @@ export class ExternalSourceCore {
       );
 
     if (blocked) {
-      logger.warn(`Ingestion blocked (${blockedReason ?? 'unknown'}) for source ${sourceName}`, {
+      logger.warn(`Ingestion skipped (${blockedReason ?? 'unknown'}) for source ${sourceName}`, {
         externalThreadId: normalizedData.externalThreadId,
         externalId: normalizedData.externalId,
         blockedReason,
@@ -827,20 +827,17 @@ export class ExternalSourceCore {
         rfcMessageId: normalizedData.rfcMessageId,
         ticketMetadata: normalizedData.metadata,
         uploadedFiles: uploadedFiles,
-        sourceName: normalizedData.emailData.skipBlockingCheck
-          ? undefined
-          : source.name,
         receivedAt: normalizedData.metadata.timestamp,
         ...this.getEmailIntegrationFields(normalizedData),
       });
-      if ((createResult as any)?.blocked || (createResult as any)?.isDuplicate) {
+      if ((createResult as any)?.isDuplicate) {
         return {
           conversation: undefined,
           message: undefined,
           email: undefined,
           isNew: false,
           blocked: true,
-          blockedReason: (createResult as any)?.blocked ? 'superposition' : 'duplicate',
+          blockedReason: 'duplicate',
         };
       }
       const { conversation, email } = createResult as any;
