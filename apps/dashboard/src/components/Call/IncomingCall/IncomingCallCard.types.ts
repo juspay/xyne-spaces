@@ -74,6 +74,13 @@ export interface IncomingCallViewModel {
   /** Drives the notice block and swaps Accept for the Switch-call pill. */
   isInActiveCall: boolean;
   /**
+   * The call arrived without a ringtone because the user was already busy —
+   * on a call, recording, or in a meeting elsewhere. Purely an explanation for
+   * the muted-bell glyph; the sound itself is suppressed by the modal, and the
+   * card is otherwise identical either way.
+   */
+  isSilenced: boolean;
+  /**
    * Who invited the current user — `invitedBy`, falling back to the call
    * creator. Unused by the card today; it is the signal that separates "invited
    * because I am in the channel" from "someone picked me", which is what a

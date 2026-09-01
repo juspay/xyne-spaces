@@ -662,6 +662,11 @@ export function setupIpcHandlers(): void {
     syncRecordingState(false);
   });
 
+  // Seeds the renderer's meeting state. The 'meeting:detected' broadcast is
+  // fire-and-forget, so a renderer that reloads mid-meeting would otherwise
+  // never learn one is running and would ring a call it should have silenced.
+  ipcMain.handle('meeting:get-current', () => meetingDetectorService.getCurrentMeeting());
+
   // Meeting detection toggle (user preference from settings)
   ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
     Logger.info(
