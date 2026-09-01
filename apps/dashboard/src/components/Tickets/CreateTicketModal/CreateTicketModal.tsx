@@ -508,6 +508,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     { enabled: !!selectedChannelProjectId },
   );
   const boards = useMemo(() => {
+    // Release repos are project-scoped (its release boards), not channel-mapped.
+    if (ticketKind === 'release') return projectBoards ?? [];
     const mappingSynced = mappingDetails.type === 'complete';
     const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
     const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
@@ -536,7 +538,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       projectBoardsCount: projectBoardsList.length,
     });
     return projectBoardsList;
-  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId]);
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId, ticketKind]);
 
   // Read by the open-reset effect without adding `boards` to its deps.
   const boardsRef = useRef(boards);
