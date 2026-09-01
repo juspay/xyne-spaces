@@ -616,6 +616,8 @@ export class PullRequestValidationService {
     buildStatus: { KEY: string; NAME: string }
   ): Promise<void> {
     try {
+      // Both providers get the same link, so either check is clickable.
+      const targetUrl = process.env.FRONTEND_URL || '';
       if (target.provider === VCSProviderType.GITHUB) {
         await githubManager.postCommitStatus(
           target.owner,
@@ -624,6 +626,7 @@ export class PullRequestValidationService {
           state,
           buildStatus.NAME,
           description,
+          targetUrl || undefined,
         );
         return;
       }
@@ -632,7 +635,7 @@ export class PullRequestValidationService {
         BITBUCKET_BUILD_STATE[state],
         buildStatus.KEY,
         buildStatus.NAME,
-        process.env.FRONTEND_URL || '',
+        targetUrl,
         description,
       );
     } catch (error) {
