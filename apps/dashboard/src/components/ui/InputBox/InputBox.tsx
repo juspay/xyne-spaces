@@ -139,6 +139,67 @@ const MaxListDepthPlugin = Extension.create({
   },
 });
 
+/**
+ * When an ordered list is directly preceded by another ordered list of the same
+ * style, continue its numbering instead of restarting at 1.
+ *
+ * ProseMirror keeps split/pasted ordered lists as separate `<ol>` nodes, and the
+ * second one has no `start` attribute, so the browser renders it from 1 again.
+ * This happens when a middle list item is lifted out on Enter (splitting one list
+ * into two) or when two ordered lists end up adjacent. We reconcile the `start`
+ * attribute so the visible numbering stays continuous.
+ */
+const OrderedListContinuationPlugin = Extension.create({
+  name: 'orderedListContinuation',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('orderedListContinuation'),
+        appendTransaction: (transactions, _oldState, newState) => {
+          if (!transactions.some(tr => tr.docChanged)) return null;
+          const orderedList = newState.schema.nodes['orderedList'];
+          if (!orderedList) return null;
+
+          const tr = newState.tr;
+          let modified = false;
+
+          const visit = (parent: PMNode, contentStart: number) => {
+            let prev: { node: PMNode; effStart: number } | null = null;
+            parent.forEach((child, offset) => {
+              const childPos = contentStart + offset;
+              if (child.type === orderedList) {
+                let effStart = (child.attrs['start'] as number) ?? 1;
+                if (
+                  prev &&
+                  prev.node.type === orderedList &&
+                  (prev.node.attrs['type'] ?? null) === (child.attrs['type'] ?? null)
+                ) {
+                  const desired = prev.effStart + prev.node.childCount;
+                  if (((child.attrs['start'] as number) ?? 1) !== desired) {
+                    tr.setNodeMarkup(childPos, undefined, {
+                      ...child.attrs,
+                      start: desired,
+                    });
+                    modified = true;
+                  }
+                  effStart = desired;
+                }
+                prev = { node: child, effStart };
+              } else {
+                prev = null;
+              }
+              if (child.childCount) visit(child, childPos + 1);
+            });
+          };
+
+          visit(newState.doc, 0);
+          return modified ? tr : null;
+        },
+      }),
+    ];
+  },
+});
+
 // Eagerly start loading emoji data so it's ready for sync lookups
 preloadEmojiData();
 
@@ -595,6 +656,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           },
         }),
         MaxListDepthPlugin,
+        OrderedListContinuationPlugin,
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
