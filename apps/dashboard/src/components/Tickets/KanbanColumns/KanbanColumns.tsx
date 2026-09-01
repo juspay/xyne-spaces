@@ -309,9 +309,6 @@ const PaginatedStageList: React.FC<{
   );
 };
 
-const isTerminalStageStatus = (status?: TicketStatusV2): boolean =>
-  status === TicketStatusV2.COMPLETED || status === TicketStatusV2.CANCELLED;
-
 const ticketBelongsToColumn = (
   ticket: Ticket,
   columnType: 'stage' | 'status',
@@ -390,35 +387,49 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     () => allKnownTickets ?? Object.values(ticketsByStage).flat(),
     [allKnownTickets, ticketsByStage],
   );
+  const stageCountById = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+
+    for (const stage of stages) {
+      counts[stage.id] =
+        stageCounts?.[stage.id] ??
+        stageCounts?.[stage.name] ??
+        ticketsByStage[stage.id]?.length ??
+        0;
+    }
+
+    return counts;
+  }, [stages, stageCounts, ticketsByStage]);
   const stageCollapseSignature = React.useMemo(
-    () => stages.map(stage => `${stage.id}:${stage.defaultTicketStatusV2 ?? ''}`).join('|'),
-    [stages],
+    () => stages.map(stage => `${stage.id}:${stageCountById[stage.id] ?? 0}`).join('|'),
+    [stages, stageCountById],
   );
   const userToggledCollapsedStageIdsRef = React.useRef<Set<string>>(new Set());
-  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>(() =>
-    stages
-      .filter(stage => isTerminalStageStatus(stage.defaultTicketStatusV2))
-      .map(stage => stage.id),
-  );
+  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>([]);
 
   React.useEffect(() => {
+    if (!stages.some(stage => (stageCountById[stage.id] ?? 0) > 0)) {
+      return;
+    }
+
     setCollapsedStageIds(prev => {
       const next = new Set(prev);
 
       for (const stage of stages) {
-        if (
-          !isTerminalStageStatus(stage.defaultTicketStatusV2) ||
-          userToggledCollapsedStageIdsRef.current.has(stage.id)
-        ) {
+        if (userToggledCollapsedStageIdsRef.current.has(stage.id)) {
           continue;
         }
 
-        next.add(stage.id);
+        if ((stageCountById[stage.id] ?? 0) > 0) {
+          next.delete(stage.id);
+        } else {
+          next.add(stage.id);
+        }
       }
 
-      return [...next];
+      return next.size === prev.length && prev.every(id => next.has(id)) ? prev : [...next];
     });
-  }, [stageCollapseSignature, stages]);
+  }, [stageCollapseSignature, stages, stageCountById]);
 
   const toggleCollapse = (stageId: string) => {
     userToggledCollapsedStageIdsRef.current.add(stageId);
@@ -437,9 +448,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
       {stages.map(stage => {
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
-        const countByStageId = stageCounts?.[stage.id];
-        const countByStageName = stageCounts?.[stage.name];
-        const stageCount = countByStageId ?? countByStageName ?? stageTickets.length;
+        const stageCount = stageCountById[stage.id] ?? stageTickets.length;
         const isCollapsed = collapsedStageIds.includes(stage.id);
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
