@@ -12,7 +12,7 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { config } from '@/config/env';
-import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { assertWebhookUrlSafe, safeWebhookFetch, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
   buildSentinelRawFallbackMessage,
   buildSentinelRawFallbackTicketDescription,
@@ -1029,7 +1029,8 @@ class IncomingWebhookController {
     }
 
     try {
-      const response = await fetch(subscribeUrl, {
+      // Pin the connection to the address just validated (rebinding-safe).
+      const response = await safeWebhookFetch(subscribeUrl, {
         method: 'GET',
         // A redirect would take this somewhere we never intended, so treat one
         // as a failure rather than following it.

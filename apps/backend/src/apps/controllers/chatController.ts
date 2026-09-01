@@ -14,7 +14,7 @@ import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
-import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
@@ -627,7 +627,8 @@ export class ChatController {
 
     // Forward to the external URL server-side (no CORS issues)
     // callerUserId is derived from the authenticated session (XYNE-12145)
-    // `actionableUrl` is caller-supplied, so it goes through `assertWebhookUrlSafe`.
+    // `actionableUrl` is caller-supplied, so it is dispatched via `safeWebhookFetch`,
+    // which validates the destination and pins the connection to it (rebinding-safe).
     // The first-party internal callback (same origin as backendUrl, authenticated
     // with the S2S key) is exempt so it works even when backendUrl is a private/dev host.
     try {
@@ -639,11 +640,6 @@ export class ChatController {
         }
       })();
 
-      if (!isInternalSpacesCallback) {
-        // Throws on a blocked target; caught below, so the action simply isn't dispatched.
-        await assertWebhookUrlSafe(actionableUrl);
-      }
-
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (isInternalSpacesCallback) {
         const s2sKey = config.internalS2sKey;
@@ -654,13 +650,18 @@ export class ChatController {
         }
       }
 
-      const callbackRes = await fetch(actionableUrl, {
+      const callbackInit: RequestInit = {
         method: 'POST',
         headers,
         body: JSON.stringify({ actionId, context, messageId, conversationId, callerUserId }),
         redirect: 'manual', // don't follow 3xx redirects
         signal: AbortSignal.timeout(30_000),
-      });
+      };
+      // Internal S2S callbacks are trusted-config hosts (kept on the plain client);
+      // external targets are caller-supplied, so validate + pin (rebinding-safe).
+      const callbackRes = isInternalSpacesCallback
+        ? await fetch(actionableUrl, callbackInit)
+        : await safeWebhookFetch(actionableUrl, callbackInit);
       if (!callbackRes.ok) {
         const text = await callbackRes.text().catch(() => '');
         logger.error(`[dispatchAction] Callback failed ${callbackRes.status}: ${text.slice(0, 300)}`);

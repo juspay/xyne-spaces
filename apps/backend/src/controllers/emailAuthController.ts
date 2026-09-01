@@ -12,6 +12,7 @@ import {
   isClientPasswordHash,
   normalizeClientPasswordHash,
   verifyEmailPassword,
+  DUMMY_PASSWORD_HASH,
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -47,8 +48,6 @@ const LOGIN_MAX_FAILED_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_SECONDS = 5 * 60;
 const LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS = 5 * 60;
 const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
-
-const DUMMY_PASSWORD_HASH = crypto.randomBytes(32).toString('hex');
 
 const REGISTER_RATE_LIMIT_SECONDS = 60;
 const REGISTER_REQUEST_MESSAGE = 'If this email is not already registered, a verification code has been sent.';

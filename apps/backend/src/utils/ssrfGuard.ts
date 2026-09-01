@@ -3,6 +3,7 @@ import { promises as dns } from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import { BlockList, isIP } from 'node:net';
+import { Agent, fetch as undiciFetch } from 'undici';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
@@ -239,6 +240,54 @@ export function pinnedAgentsFor(
     httpAgent: new http.Agent({ keepAlive: false, lookup: lookup as never }),
     httpsAgent: new https.Agent({ keepAlive: false, lookup: lookup as never }),
   };
+}
+
+/**
+ * An undici dispatcher whose connection lookup is fixed to `pinned`, for callers
+ * that use fetch() rather than axios (which cannot take an http.Agent). Same
+ * guarantee as pinnedAgentsFor: the request connects only to the validated
+ * addresses, the URL keeps its hostname so TLS still verifies against the name,
+ * and any other hostname (e.g. a redirect target) fails closed.
+ */
+export function pinnedDispatcherFor(hostname: string, pinned: PinnedHost): Agent {
+  return new Agent({
+    keepAliveTimeout: 1000,
+    connect: {
+      lookup: ((host: string, _options: unknown, callback: (err: Error | null, address?: unknown, family?: number) => void): void => {
+        if (host !== hostname) {
+          callback(new Error(`Refusing to resolve unexpected host "${host}"`));
+          return;
+        }
+        callback(null, pinned.addresses.map((address) => ({ address, family: pinned.family })));
+      }) as never,
+    },
+  });
+}
+
+/**
+ * Validate an outbound URL and fetch it pinned to the addresses that passed, so a
+ * second DNS answer cannot swing the connection to an internal host between the
+ * check and the request (rebinding). This is the fetch() counterpart to how
+ * LinkPreviewService uses resolveExternalHostPinned + pinnedAgentsFor. Use it for
+ * caller-supplied external webhook URLs. Callers MUST still pass
+ * `redirect: 'manual'` — a 3xx target is a fresh URL that this has not validated.
+ * Throws SsrfBlockedError on a blocked destination.
+ */
+export async function safeWebhookFetch(rawUrl: string, init: RequestInit = {}): Promise<Response> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
+  }
+  const allowPrivate = isAllowPrivate() && config.env === 'development';
+  const pinned = await resolveExternalHostPinned(parsed.hostname, allowPrivate);
+  // A fresh dispatcher per request — never shared, so a pinned socket is never
+  // reused under a later verdict; its idle socket is dropped on keep-alive timeout.
+  const dispatcher = pinned
+    ? pinnedDispatcherFor(parsed.hostname, pinned)
+    : new Agent({ keepAliveTimeout: 1000 });
+  return (await undiciFetch(rawUrl, { ...init, dispatcher } as never)) as unknown as Response;
 }
 
 /**
