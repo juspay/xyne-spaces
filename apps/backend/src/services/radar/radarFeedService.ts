@@ -246,7 +246,7 @@ class RadarFeedService {
     return prisma.executionItem.findMany({
       where: {
         workspaceId: auth.workspaceId,
-        status: 'open',
+        status: 'OPEN',
         ...filter,
       },
       orderBy: { updatedAt: 'desc' },

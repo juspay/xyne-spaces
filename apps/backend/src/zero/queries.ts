@@ -29,6 +29,9 @@ import {
   ChannelRole,
   AttachmentEntityType,
   ChannelType,
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_STRUCTURAL_RELATIONS,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
   EmailType,
   ActivityClassification, LinkVisibility,
   NudgeState,
@@ -3747,8 +3750,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       limit: z.number(),
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
+      conversationIds: z.array(z.string()).optional(),
     }),
-    ({ ctx, args: { channelId, limit, start, direction } }) => {
+    ({ ctx, args: { channelId, limit, start, direction, conversationIds } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
         .related('initialMessageAttachments')
@@ -3760,6 +3764,10 @@ export const queries: AnyQueryRegistry = defineQueries({
             ),
           ),
         );
+
+      if (conversationIds) {
+        query = query.where(helpers => helpers.cmp('conversationId', 'IN', conversationIds));
+      }
 
       // Apply ordering based on direction
       const orderDirection = direction === 'forward' ? 'desc' : 'asc';
@@ -3844,10 +3852,14 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV3: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
-    ({ ctx, args: { channelId, limit } }) => {
-      return zql.conversations
-        .where('channelId', channelId)
+    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number(), conversationIds: z.array(z.string()).optional() }),
+    ({ ctx, args: { channelId, limit, conversationIds } }) => {
+      let query = zql.conversations
+        .where('channelId', channelId);
+      if (conversationIds) {
+        query = query.where(helpers => helpers.cmp('conversationId', 'IN', conversationIds));
+      }
+      return query
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
@@ -4275,44 +4287,65 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getAllRepos: defineQuery(() => {
     return zql.repos.orderBy('name', 'asc');
   }),
-  getSdlcRepos: defineQuery(() => {
-    return zql.repos
-      .where('projectId', 'IS NOT', null)
-      .where('channelId', 'IS NOT', null)
-      .related('project')
-      .related('channel', channel => channel.related('participants').related('channelStats'))
-      .related('setupExecution')
-      .related('sdlcEntityLinks')
-      .orderBy('name', 'asc');
-  }),
-  getSdlcTracks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
-    zql.sdlc_tracks.where('repoId', repoId).orderBy('createdAt', 'asc'),
+  /** SDLC hubs the viewer can reach, each with the repositories it covers. */
+  getSdlcChannels: defineQuery(({ ctx }) =>
+    zql.channels
+      .where('type', ChannelType.SDLC)
+      .where('isArchived', false)
+      // The channels ACL lets workspace admins and public channels through; a hub
+      // is only usable by its participants, and every write re-checks that.
+      .whereExists('participants', participant => participant.where('userId', ctx.userID))
+      .related('sdlcEntityLinks', link =>
+        link
+          .where('relationType', SDLC_MEMBERSHIP_RELATION)
+          .related('repo', repo => repo.related('project')),
+      )
+      .orderBy('name', 'asc'),
   ),
-  getSdlcRepoByChannelId: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) => zql.repos.where('channelId', channelId).one(),
+  getSdlcChannelById: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.channels
+      .where('id', channelId)
+      .where('type', ChannelType.SDLC)
+      .related('participants')
+      .related('channelStats')
+      .related('canvasFolders', folder =>
+        folder.related('canvases', canvas => canvas.related('sdlcArtifact')),
+      )
+      .related('sdlcEntityLinks', link =>
+        link
+          .where('relationType', SDLC_MEMBERSHIP_RELATION)
+          .related('repo', repo => repo.related('project').related('setupExecution')),
+      )
+      .one(),
   ),
-  getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
-    return zql.repos
+  /** A hub's tracks. Tracks carry no scope column; the CHANNEL -> TRACK edge places them. */
+  getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.sdlc_tracks
+      .whereExists('sdlcEntityLinks', link =>
+        link
+          .where('channelId', channelId)
+          .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION),
+      )
+      .orderBy('createdAt', 'asc'),
+  ),
+  getSdlcRepoById: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) =>
+    zql.repos
       .where('id', repoId)
       .where('projectId', 'IS NOT', null)
-      .where('channelId', 'IS NOT', null)
       .related('project')
-      .related('channel', channel =>
-        channel
-          .related('participants')
-          .related('channelStats')
-          .related('canvasFolders', folder =>
-            folder.related('canvases', canvas => canvas.related('sdlcArtifact')),
-          ),
-      )
       .related('setupExecution')
-      .related('sdlcEntityLinks')
-      .one();
-  }),
-  getSdlcLinks: defineQuery(z.object({ repoId: z.string() }), ({ args: { repoId } }) => {
-    return zql.sdlc_entity_links.where('repoId', repoId).orderBy('createdAt', 'asc');
-  }),
+      .one(),
+  ),
+  /**
+     * The content graph for a hub. Structural edges (repository and track membership)
+     * share this table — grep SDLC_STRUCTURAL_RELATIONS for every exclusion.
+     */
+  getSdlcLinks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.sdlc_entity_links
+      .where('channelId', channelId)
+      .where(helpers => helpers.cmp('relationType', 'NOT IN', [...SDLC_STRUCTURAL_RELATIONS]))
+      .orderBy('createdAt', 'asc'),
+  ),
   sdlcTicketsByIds: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
     ({ args: { ticketIds } }) =>
@@ -4325,6 +4358,20 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           ),
         )
         .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc')),
+  ),
+  sdlcTicketsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where('rootId', 'IS', null)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('ticketType', 'IS', null),
+            helpers.cmp('ticketType', '!=', BaseTicketType.Support),
+          ),
+        ),
   ),
   sdlcDiscussionConversations: defineQuery(
     z.object({

@@ -164,6 +164,7 @@ export const ticketTable = table('tickets')
     description: string(),
     status: enumeration<TicketStatus>(),  // Deprecated - use statusV2
     statusV2: enumeration<TicketStatusV2>(),
+    messageId: string().optional(), // Source message this ticket was created from
     createdBy: string(),
     updatedBy: string(),
     assignedTo: string().optional(),
@@ -894,6 +895,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(), // Markdown format ticket card data
     initial_message_md: string().optional(), // Markdown format initial message data
     parent_message_md: string().optional(), // Markdown format parent message data
+    sub_tickets_md: string().optional(), // Markdown format sub-ticket card snapshots
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
     threadType: string().optional(),
@@ -1463,6 +1465,7 @@ export const repoTable = table('repos')
     prefix: string(), // Branch prefix: "feature"
     createdBy: string(),
     projectId: string().optional(),
+    /** @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links */
     channelId: string().optional(),
     sdlcSetupExecutionId: string().optional(),
     accessCapabilities: json().optional(),
@@ -1473,7 +1476,10 @@ export const sdlcEntityLinkTable = table('sdlc_entity_links')
   .columns({
     id: string(),
     workspaceId: string(),
-    repoId: string(),
+    // The only scope these rows carry; a repository is one end of the edge.
+    channelId: string().optional(),
+    /** @deprecated -> scope is channelId; the repository is an endpoint of the edge */
+    repoId: string().optional(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
@@ -1488,7 +1494,8 @@ export const sdlcArtifactTable = table('sdlc_artifacts')
   .columns({
     workspaceId: string(),
     artifactId: string(),
-    repoId: string(),
+    /** @deprecated -> repository comes from the link table; no new reads or writes */
+    repoId: string().optional(),
     artifactType: string(),
     artifactStatus: string(),
     workflowExecutionId: string().optional(),
@@ -1501,11 +1508,13 @@ export const sdlcArtifactTable = table('sdlc_artifacts')
   })
   .primaryKey('artifactId');
 
+// Tracks carry no scope column: the CHANNEL -> TRACK edge in sdlc_entity_links places them.
 export const sdlcTrackTable = table('sdlc_tracks')
   .columns({
     workspaceId: string(),
     id: string(),
-    repoId: string(),
+    /** @deprecated -> scope is the CHANNEL -> TRACK edge in sdlc_entity_links */
+    repoId: string().optional(),
     name: string(),
     description: string().optional(),
     status: string(),
@@ -3349,10 +3358,10 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: canvasFolderTable,
   }),
-  sdlcRepos: many({
+  sdlcEntityLinks: many({
     sourceField: ['id'],
     destField: ['channelId'],
-    destSchema: repoTable,
+    destSchema: sdlcEntityLinkTable,
   }),
   guestAccess: many({
     sourceField: ['id'],
@@ -3388,28 +3397,31 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
     destField: ['id'],
     destSchema: projectTable,
   }),
-  channel: one({
-    sourceField: ['channelId'],
-    destField: ['id'],
-    destSchema: channelTable,
-  }),
   setupExecution: one({
     sourceField: ['sdlcSetupExecutionId'],
     destField: ['id'],
     destSchema: workflowExecutionTable,
   }),
+  // Membership edges pointing here. targetId is polymorphic, so readers filter
+  // by relationType.
   sdlcEntityLinks: many({
     sourceField: ['id'],
-    destField: ['repoId'],
+    destField: ['targetId'],
     destSchema: sdlcEntityLinkTable,
   }),
 }));
 
 export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  // Only meaningful on membership edges, where targetId is the repository.
   repo: one({
-    sourceField: ['repoId'],
+    sourceField: ['targetId'],
     destField: ['id'],
     destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 
@@ -3426,11 +3438,12 @@ export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, (
   }),
 }));
 
-export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ one }) => ({
-  repo: one({
-    sourceField: ['repoId'],
-    destField: ['id'],
-    destSchema: repoTable,
+export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
   }),
 }));
 

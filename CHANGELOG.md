@@ -1,3 +1,50 @@
+## [1.251.2](https://github.com/juspay/xyne-spaces/compare/v1.251.1...v1.251.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* Add logs to debug missing emails ([#1292](https://github.com/juspay/xyne-spaces/issues/1292)) ([7639a1e](https://github.com/juspay/xyne-spaces/commit/7639a1ead81dd4d37d6212e4e6c755857cdfa4c2))
+* cmdK result card metadata ([#1167](https://github.com/juspay/xyne-spaces/issues/1167)) ([065bd1d](https://github.com/juspay/xyne-spaces/commit/065bd1da56488fbe259a3cea54052eec727e4494))
+* continue ordered-list numbering when a list is split ([#1333](https://github.com/juspay/xyne-spaces/issues/1333)) ([b23aa8a](https://github.com/juspay/xyne-spaces/commit/b23aa8a7ba96db03c44d4eebff6457fb96e1868e))
+* remove Superposition blocking guard from email ingestion ([#1293](https://github.com/juspay/xyne-spaces/issues/1293)) ([f40b33c](https://github.com/juspay/xyne-spaces/commit/f40b33c0a92abb49e3d7a298c8db351f4f486255))
+* resolve KB collection scope and widen Contents panel ([#1331](https://github.com/juspay/xyne-spaces/issues/1331)) ([181a5d2](https://github.com/juspay/xyne-spaces/commit/181a5d236f71512764e38631409310d3fbe68e06))
+* SDLC  ([#1334](https://github.com/juspay/xyne-spaces/issues/1334)) ([a5a24f8](https://github.com/juspay/xyne-spaces/commit/a5a24f8670293789e09e0ff5ff10e995ba8df4b0)), closes [#1236](https://github.com/juspay/xyne-spaces/issues/1236) [#1272](https://github.com/juspay/xyne-spaces/issues/1272) [#1287](https://github.com/juspay/xyne-spaces/issues/1287)
+
+## [1.251.1](https://github.com/juspay/xyne-spaces/compare/v1.251.0...v1.251.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* make lean as default presentation summary for vespa search ([#1282](https://github.com/juspay/xyne-spaces/issues/1282)) ([56670f7](https://github.com/juspay/xyne-spaces/commit/56670f7a625cdb5d4d6eacdf5fd38d59e3370045))
+
+## [1.251.0](https://github.com/juspay/xyne-spaces/compare/v1.250.6...v1.251.0) (2026-09-01)
+
+
+### Features
+
+* make templates private ([#1280](https://github.com/juspay/xyne-spaces/issues/1280)) ([33348e2](https://github.com/juspay/xyne-spaces/commit/33348e20161da270ab3018c357a4c3cd91bef8b2))
+
+## [1.250.6](https://github.com/juspay/xyne-spaces/compare/v1.250.5...v1.250.6) (2026-09-01)
+
+
+### Bug Fixes
+
+* authrevamp phase 1 ([#913](https://github.com/juspay/xyne-spaces/issues/913)) ([78dee77](https://github.com/juspay/xyne-spaces/commit/78dee77fda854d568c0f9335a4cb2cfbe335e47a))
+
+## [1.250.5](https://github.com/juspay/xyne-spaces/compare/v1.250.4...v1.250.5) (2026-09-01)
+
+
+### Bug Fixes
+
+* uppercase radar execution item status values ([#1305](https://github.com/juspay/xyne-spaces/issues/1305)) ([e648795](https://github.com/juspay/xyne-spaces/commit/e648795470cfe77ba56dafb37dd667d637dfc22a))
+
+## [1.250.4](https://github.com/juspay/xyne-spaces/compare/v1.250.3...v1.250.4) (2026-09-01)
+
+
+### Bug Fixes
+
+* Improve events tracking accuracy ([#1234](https://github.com/juspay/xyne-spaces/issues/1234)) ([b08ffeb](https://github.com/juspay/xyne-spaces/commit/b08ffeba55ad9cc6774e230f2d53818d928e6952))
+
 ## [1.250.3](https://github.com/juspay/xyne-spaces/compare/v1.250.2...v1.250.3) (2026-09-01)
 
 

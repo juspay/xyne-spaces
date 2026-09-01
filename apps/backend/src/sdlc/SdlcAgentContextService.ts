@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { allBaselinesReady } from './sdlcProgressiveGate';
+import { findSdlcMembershipForActor } from './sdlcChannelMembership';
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
@@ -80,38 +81,30 @@ export class SdlcAgentContextService {
     repoId: string,
     input: SdlcAgentContextInput
   ): Promise<SdlcAgentContext> {
-    const repo = await this.prisma.repo.findFirst({
-      where: {
-        id: repoId,
-        workspaceId: actor.workspaceId,
-        projectId: { not: null },
-        channelId: { not: null },
-      },
-      select: {
-        id: true,
-        name: true,
-        url: true,
-        canonicalUrl: true,
-        baseBranch: true,
-        projectId: true,
-        channelId: true,
-        accessCapabilities: true,
-        channel: {
-          select: {
-            participants: {
-              where: { userId: actor.userId },
-              select: { role: true },
-              take: 1,
-            },
-          },
+    const [repo, membership] = await Promise.all([
+      this.prisma.repo.findFirst({
+        where: { id: repoId, workspaceId: actor.workspaceId, projectId: { not: null } },
+        select: {
+          id: true,
+          name: true,
+          url: true,
+          canonicalUrl: true,
+          baseBranch: true,
+          projectId: true,
+          accessCapabilities: true,
         },
-      },
-    });
-    if (!repo?.projectId || !repo.channelId) throw new AppError('SDLC repository not found', 404);
-    const participant = repo.channel?.participants[0];
-    if (!participant) throw new AppError('You are not a member of this repository', 403);
+      }),
+      findSdlcMembershipForActor(this.prisma, {
+        workspaceId: actor.workspaceId,
+        repoId,
+        userId: actor.userId,
+      }),
+    ]);
+    if (!repo?.projectId) throw new AppError('SDLC repository not found', 404);
+    if (!membership) throw new AppError('You are not a member of this repository', 403);
+    const channelId = membership.channelId;
     const baselines = await this.prisma.sdlcArtifact.findMany({
-      where: { canvas: { is: { channelId: repo.channelId } } },
+      where: { repoId: repo.id, canvas: { is: { channelId } } },
       select: { artifactType: true, artifactStatus: true },
     });
     const parsed = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
@@ -120,7 +113,7 @@ export class SdlcAgentContextService {
       operation: input.operation,
       workspaceId: actor.workspaceId,
       projectId: repo.projectId,
-      channelId: repo.channelId,
+      channelId,
       actorUserId: actor.userId,
       repository: {
         id: repo.id,
@@ -129,7 +122,7 @@ export class SdlcAgentContextService {
         baseBranch: requireSdlcBaseBranch(repo.baseBranch),
       },
       permissions: {
-        repositoryRole: participant.role === 'ADMIN' ? 'ADMIN' : 'MEMBER',
+        repositoryRole: membership.role === 'ADMIN' ? 'ADMIN' : 'MEMBER',
       },
       gates: {
         capabilities: Array.isArray(repo.accessCapabilities) ? repo.accessCapabilities : [],
