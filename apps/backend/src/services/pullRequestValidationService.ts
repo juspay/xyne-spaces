@@ -47,6 +47,8 @@ export interface SpecValidationResult {
   isValid: boolean;
   missing: string[];
   hasSpecHeading: boolean;
+  /** Sections actually enforced, after the wrapper name is dropped. */
+  requiredCount: number;
 }
 
 interface SpecMarker {
@@ -128,9 +130,13 @@ export function validateSpecSections(
 ): SpecValidationResult {
   // The wrapper name can never be satisfied as a section: narrowing removes it.
   const required = [...sections].filter(section => normalizeHeading(section) !== SPEC_SECTION);
-  if (!required.length) return { isValid: false, missing: [], hasSpecHeading: false };
+  // Nothing enforceable was asked for, so there is nothing to fail on. Callers
+  // resolve the list from config and fall back to the defaults before this.
+  if (!required.length) {
+    return { isValid: true, missing: [], hasSpecHeading: false, requiredCount: 0 };
+  }
   if (!description || !description.trim()) {
-    return { isValid: false, missing: required, hasSpecHeading: false };
+    return { isValid: false, missing: required, hasSpecHeading: false, requiredCount: required.length };
   }
 
   const sectionNames = new Set<string>([
@@ -168,7 +174,12 @@ export function validateSpecSections(
     return !occurrences.some(hasBody);
   });
 
-  return { isValid: missing.length === 0, missing, hasSpecHeading };
+  return {
+    isValid: missing.length === 0,
+    missing,
+    hasSpecHeading,
+    requiredCount: required.length,
+  };
 }
 
 const formatMissingSections = (missing: string[]): string => {
@@ -481,9 +492,18 @@ export class PullRequestValidationService {
       const sections = rawSections
         .split(',')
         .map(section => section.trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .filter(section => normalizeHeading(section) !== SPEC_SECTION);
 
-      return { enabled, sections: sections.length ? sections : fallback.sections };
+      if (!sections.length) {
+        logger.warn(
+          `[PR-Validation] ${PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS} has no ` +
+            `enforceable section, using defaults: ${sanitizeForLog(rawSections)}`
+        );
+        return { enabled, sections: fallback.sections };
+      }
+
+      return { enabled, sections };
     } catch (error) {
       logger.warn('[PR-Validation] Superposition lookup failed, spec check stays off:', error);
       return fallback;
@@ -539,7 +559,7 @@ export class PullRequestValidationService {
       return;
     }
 
-    const allMissing = spec.missing.length === sections.length && !spec.hasSpecHeading;
+    const allMissing = spec.missing.length === spec.requiredCount && !spec.hasSpecHeading;
     const errorMessage = allMissing
       ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.MISSING(xyneId)
       : PR_VALIDATION_CONFIG.SPEC_MESSAGES.INCOMPLETE(
