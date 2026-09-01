@@ -26,6 +26,7 @@ const PR_VALIDATION_CONFIG = {
     INCOMPLETE: (ticketId: string, missing: string) => `${ticketId} spec missing: ${missing}`,
     NOT_CHECKED: 'Ticket not resolved - spec not checked',
     NOT_EVALUATED: 'Spec not evaluated - validation error',
+    DISABLED: 'Spec check disabled',
     VALIDATION_PASSED: 'Specification complete',
   },
   BUILD_STATUS: {
@@ -134,8 +135,7 @@ export function validateSpecSections(
 ): SpecValidationResult {
   // The wrapper name can never be satisfied as a section: narrowing removes it.
   const required = [...sections].filter(section => normalizeHeading(section) !== SPEC_SECTION);
-  // Nothing enforceable was asked for, so there is nothing to fail on. Callers
-  // resolve the list from config and fall back to the defaults before this.
+  // Nothing enforceable was asked for, so there is nothing to fail on.
   if (!required.length) {
     return { isValid: true, missing: [], hasSpecHeading: false, requiredCount: 0 };
   }
@@ -211,8 +211,8 @@ export type BuildStatusTarget =
 
 const DEFAULT_BUILD_STATUS_TARGET: BuildStatusTarget = { provider: VCSProviderType.BITBUCKET_SERVER };
 
-// Superposition's own timeout is 30s and this sits on the webhook response path,
-// which GitHub gives 10s. One bounded read, so the worst case is this budget.
+// Superposition's own timeout is 30s; this sits on the webhook response path,
+// which GitHub gives 10s.
 const SPEC_CONFIG_TIMEOUT_MS = 2500;
 
 const withTimeout = async <T>(work: Promise<T>, fallback: T, label: string): Promise<T> => {
@@ -276,10 +276,9 @@ export class PullRequestValidationService {
       numberOfComments,
       target,
     );
-    // Awaited so two events for the same commit cannot post out of order. The
-    // config lookups inside are time-bounded, so this cannot eat GitHub's 10s
-    // webhook window. Called here so no early return in runTicketValidation
-    // skips it.
+    // Awaited so two events for the same commit cannot post out of order; the
+    // config read inside is time-bounded. Called here so no early return in
+    // runTicketValidation skips it.
     await this.postSpecBuildStatus(target, commitHash, workspaceId, result);
     return result;
   }
@@ -502,8 +501,7 @@ export class PullRequestValidationService {
           : {}),
       };
 
-      // One read for both keys: a per-flag lookup is a full config fetch, so two
-      // of them would double both the network cost and the time budget.
+      // One read for both keys: a per-flag lookup is a full config fetch.
       const details = await withTimeout(
         superpositionClient.resolveAllConfigDetails(context),
         {} as ResolvedConfigDetails,
@@ -539,6 +537,20 @@ export class PullRequestValidationService {
     }
   }
 
+  /** Bitbucket is not a target for this check, so only GitHub is inspected. */
+  private async hasSpecStatus(
+    target: BuildStatusTarget,
+    commitHash: string
+  ): Promise<boolean> {
+    if (target.provider !== VCSProviderType.GITHUB) return false;
+    return githubManager.hasCommitStatus(
+      target.owner,
+      target.repo,
+      commitHash,
+      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME,
+    );
+  }
+
   /**
    * Report whether the linked ticket carries a complete spec, under its own
    * status so a spec failure is distinguishable from a ticket failure.
@@ -549,17 +561,28 @@ export class PullRequestValidationService {
     workspaceId: string,
     result: ValidationResult
   ): Promise<void> {
-    // Destructured consts so the guard below narrows both for the rest of the method.
     const { ticketDescription, xyneId } = result;
     const resolvable = ticketDescription !== undefined && xyneId !== undefined;
     const { enabled, sections } = await this.resolveSpecCheckConfig(target, workspaceId);
-    if (!enabled) return;
-
     const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
 
-    // Once enabled, every path posts one terminal status. A non-verdict is a
-    // pass: the spec was never judged, so it must not hold up a merge, and an
-    // unfinalized state would linger on the commit.
+    // Clear a verdict left from when the check was on; stay silent on commits
+    // that never had one.
+    if (!enabled) {
+      if (await this.hasSpecStatus(target, commitHash)) {
+        await this.postBuildStatus(
+          target,
+          commitHash,
+          'success',
+          PR_VALIDATION_CONFIG.SPEC_MESSAGES.DISABLED,
+          specStatus,
+        );
+      }
+      return;
+    }
+
+    // A non-verdict passes: the spec was never judged, so it must not hold up a
+    // merge, and an unfinalized state would linger on the commit.
     if (!resolvable) {
       const reason =
         result.failureKind === 'internal-error'
@@ -609,7 +632,6 @@ export class PullRequestValidationService {
     buildStatus: { KEY: string; NAME: string }
   ): Promise<void> {
     try {
-      // Both providers get the same link, so either check is clickable.
       const targetUrl = process.env.FRONTEND_URL || '';
       if (target.provider === VCSProviderType.GITHUB) {
         await githubManager.postCommitStatus(
