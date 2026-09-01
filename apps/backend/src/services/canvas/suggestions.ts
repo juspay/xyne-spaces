@@ -3,11 +3,11 @@
  *
  * createSuggestionBatch parks an agent's derived ops as PENDING rows (the
  * document is untouched). applySuggestionChanges applies accepted rows in one
- * batch: one read, pure apply (suggestionApply.ts), one undo snapshot, one
- * Y-Sweet write, then statuses — all under a per-canvas lock.
+ * batch: one read, pure apply (suggestionApply.ts), one Y-Sweet write, then
+ * statuses — all under a per-canvas lock
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { DatabaseClient } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
@@ -15,10 +15,10 @@ import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { createBlockRenderer } from './blockRender';
 import type { DerivedOp } from './blockLabels';
-import { applyOps, type SuggestionRowLike } from './suggestionApply';
-// Relative import on purpose: the backend's "@xyne/shared" alias points at the
-// package's BUILT output, and this pure module must be usable (and testable)
-// without a rebuild. The dashboard imports the same file via "@xyne/shared".
+// Relative imports on purpose: the backend's "@xyne/shared" alias points at
+// the package's BUILT output, and these pure modules must be usable (and
+// testable) without a rebuild. The dashboard imports them via "@xyne/shared".
+import { applyOps, type SuggestionRowLike } from '../../../../../packages/shared/src/canvas/suggestionApply';
 import { computeDeletionEvents } from '../../../../../packages/shared/src/canvas/blockDeletionEvents';
 
 function stableStringify(value: unknown): string {
@@ -37,15 +37,6 @@ function stableStringify(value: unknown): string {
   };
   return JSON.stringify(normalize(value));
 }
-
-const sha256 = (input: string): string => createHash('sha256').update(input).digest('hex');
-
-/** Fingerprint of one block, including its children. */
-function hashBlocks(blocks: BlockNoteBlock[]): string {
-  return sha256(stableStringify(blocks));
-}
-
-/** Look up a block by id anywhere in the tree, including nested children. */
 
 const LOCK_TTL_SECONDS = 30;
 
@@ -118,12 +109,11 @@ export async function createSuggestionBatch({ workspaceId, canvasId, ops }: Crea
 export interface BatchResult {
   applied: number;
   stale: number;
-  versionId: string | null;
   error?: string;
 }
 
-export async function applySuggestionChanges(changeIds: string[], actorUserId: string): Promise<BatchResult> {
-  const empty: BatchResult = { applied: 0, stale: 0, versionId: null };
+export async function applySuggestionChanges(changeIds: string[]): Promise<BatchResult> {
+  const empty: BatchResult = { applied: 0, stale: 0 };
   if (!changeIds.length) return empty;
 
   const prisma = DatabaseClient.getInstance();
@@ -166,33 +156,7 @@ export async function applySuggestionChanges(changeIds: string[], actorUserId: s
 
       if (!outcome.applied.length) {
         await markStatuses(outcome.stale, 'STALE');
-        return { applied: 0, stale: outcome.stale.length, versionId: null };
-      }
-
-      // One undo snapshot of the pre-apply state; an existing identical
-      // version already serves as the undo point.
-      const contentHash = hashBlocks(current);
-      let versionId: string | null = null;
-      const existing = await prisma.canvasVersion.findFirst({ where: { canvasId, contentHash }, select: { id: true } });
-      if (existing) {
-        versionId = existing.id;
-      } else {
-        const created = await prisma.canvasVersion
-          .create({
-            data: {
-              workspaceId: rows[0]!.workspaceId,
-              id: randomUUID(),
-              canvasId,
-              name: `Before AI changes · ${new Date().toLocaleString()}`,
-              content: toJsonSafe(current) as never,
-              contentHash,
-              createdBy: actorUserId,
-            },
-            select: { id: true },
-          })
-          .catch(() => null);
-        versionId = created?.id ?? null;
-        if (!versionId) logger.warn('[Suggestions] Could not snapshot an undo point; applying anyway');
+        return { applied: 0, stale: outcome.stale.length };
       }
 
       const ok = await syncToYSweet(canvasId, outcome.blocks);
@@ -203,6 +167,29 @@ export async function applySuggestionChanges(changeIds: string[], actorUserId: s
 
       await markStatuses(outcome.applied, 'ACCEPTED');
       await markStatuses(outcome.stale, 'STALE');
+
+      // An accepted placement row hands its still-pending same-anchor
+      // followers (same batch, higher orderIndex) to the block it placed.
+      // Descending orderIndex so simultaneous accepts chain: d→c, c→b, b→a.
+      const appliedSet = new Set(outcome.applied);
+      const placedRows = rows
+        .filter(r => appliedSet.has(r.id) && (r.op === 'insert' || r.op === 'move'))
+        .sort((a, b) => b.orderIndex - a.orderIndex);
+      for (const row of placedRows) {
+        const newAnchor = row.op === 'insert' ? row.id : row.blockId;
+        if (!newAnchor) continue;
+        await prisma.canvasSuggestionChange.updateMany({
+          where: {
+            canvasId,
+            batchId: row.batchId,
+            status: 'PENDING',
+            op: { in: ['insert', 'move'] },
+            currentAnchorId: row.currentAnchorId,
+            orderIndex: { gt: row.orderIndex },
+          },
+          data: { currentAnchorId: newAnchor },
+        });
+      }
 
       // Forward anchors of OTHER pending rows past blocks this batch deleted.
       const events = computeDeletionEvents(preIds, topLevelIds(outcome.blocks));
@@ -219,7 +206,6 @@ export async function applySuggestionChanges(changeIds: string[], actorUserId: s
       return {
         applied: outcome.applied.length,
         stale: outcome.stale.length,
-        versionId,
       };
     },
     () => ({ ...empty, error: 'Another change is being applied to this canvas; try again' })

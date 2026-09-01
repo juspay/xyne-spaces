@@ -9,6 +9,7 @@ export * from './types/activity';
 export * from './forwardedMessage';
 export * from './canvas/contentEmpty';
 export * from './canvas/blockDeletionEvents';
+export * from './canvas/suggestionApply';
 export * from './activity';
 export * from './types/index';
 export * from './config/index';
