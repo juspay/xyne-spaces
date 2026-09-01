@@ -1,5 +1,6 @@
 import { spawn } from "child_process"
 import { createHash, randomBytes } from "crypto"
+import { constants as fsConstants } from "fs"
 import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import path from "path"
@@ -64,9 +65,14 @@ async function readLocalCache(cachePath: string): Promise<Buffer | null> {
     // freshness check and the read see the same inode — a path-based
     // stat-then-readFile has a window where the file can be replaced or
     // deleted in between the two calls.
+    //
+    // cachePath is fully predictable (tmpdir()/office-conversion-cache/<sha256 of
+    // content>.pdf), so O_NOFOLLOW rejects a symlink someone else planted at that
+    // path before we get here — without it, a planted symlink would make us read
+    // and serve back whatever arbitrary file it points to as the "cached" PDF.
     let handle
     try {
-        handle = await open(cachePath, "r")
+        handle = await open(cachePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
         const stats = await handle.stat()
         if (Date.now() - stats.mtimeMs > CACHE_MAX_AGE_MS) return null
         return await handle.readFile()
