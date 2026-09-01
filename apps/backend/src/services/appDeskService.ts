@@ -149,6 +149,11 @@ class AppDeskService {
         ? (ack.body as { externalId: string }).externalId
         : externalMessageId;
 
+    // Stored form of the app's id. The webhook payload above carries the bare id —
+    // that is the wire contract — while storage namespaces it by source, identically
+    // on Email.externalMessageId and ExternalMessage.externalId so the two stay equal.
+    const scopedAckExternalId = scopeExternalMessageIdToSource(externalSource.id, ackExternalId);
+
     if (ack) {
       logger.info(`${TAG} DESK_REPLY accepted by app`, {
         conversationId,
@@ -173,10 +178,7 @@ class AppDeskService {
           channelId: conversation.channelId,
           workspaceId: conversation.workspaceId,
           externalThreadId: threadId,
-          // Namespaced: ackExternalId is chosen by the app, and Email's unique is
-          // channel-scoped — two apps on one channel would collide here (P2002
-          // after the webhook already fired, so the retry double-delivers).
-          externalMessageId: scopeExternalMessageIdToSource(externalSource.id, ackExternalId),
+          externalMessageId: scopedAckExternalId,
           sentByUserId: userId,
         } as Prisma.EmailUncheckedCreateInput,
       });
@@ -185,7 +187,7 @@ class AppDeskService {
         await tx.externalMessage.create({
           data: {
             externalSourceId: externalSource.id,
-            externalId: ackExternalId,
+            externalId: scopedAckExternalId,
             externalThreadId: threadId,
             messageId: created.id,
             entityId: created.id,

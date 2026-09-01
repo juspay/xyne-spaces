@@ -2472,43 +2472,16 @@ export class TicketController {
       }
 
       const externalThreadId = threadId;
-      // Raw app-chosen id: the app-facing dedup key, stored on ExternalMessage.
+      // The id the app sent. Never stored bare — see below.
       const appExternalId = bodyExternalId || randomUUID();
-      // Source-namespaced id: Email's unique is (externalMessageId, channelId), so
-      // two apps on one channel would otherwise collide on any shared id.
+      // Source-namespaced, and written to BOTH Email.externalMessageId and
+      // ExternalMessage.externalId. Those two columns are the same identifier
+      // throughout this repo (core.ts writes normalizedData.externalId to both,
+      // emailService.ts:2517 copies one into the other), and joins rely on that —
+      // so the namespace has to be applied on both sides or not at all. Applying it
+      // is what stops two apps on one channel from colliding on a shared id, since
+      // Email's unique is (externalMessageId, channelId) and the id is app-chosen.
       const externalMessageId = scopeExternalMessageIdToSource(externalSource.id, appExternalId);
-
-      // Load-bearing, not a guard. Email's dedup lock is the namespaced
-      // externalMessageId, so it cannot match rows written before namespacing:
-      // a repost on such a conversation would resolve the thread and then append
-      // a SECOND copy of a message we already have. Keying on ExternalMessage
-      // (source-scoped, raw id) matches old and new rows alike, so a repost is a
-      // no-op either way. Runs before uploadFiles so duplicates cost no storage.
-      const alreadyIngested = await externalMessageRepo.findByExternalId(externalSource.id, appExternalId);
-      if (alreadyIngested?.entityId) {
-        const ingestedEmail = await repositories.emails.findById(alreadyIngested.entityId);
-        const ingestedTicket = ingestedEmail
-          ? await prismaClient.ticket.findFirst({
-              where: { conversationId: ingestedEmail.conversationId },
-              select: { id: true, xyneId: true },
-            })
-          : null;
-        logger.info('[AppDeskInbound] duplicate externalId, returning existing ticket', {
-          channelId,
-          threadId: externalThreadId,
-          externalId: appExternalId,
-          externalSourceId: externalSource.id,
-          ticketId: ingestedTicket?.id,
-        });
-        res.status(200).json({
-          ticketId: ingestedTicket?.id,
-          xyneId: ingestedTicket?.xyneId,
-          conversationId: ingestedEmail?.conversationId,
-          isNew: false,
-          isDuplicate: true,
-        });
-        return;
-      }
 
       let customFieldValues: CustomFieldWritePayload | undefined;
       let emailFrom =
@@ -2525,9 +2498,16 @@ export class TicketController {
       const uploadedFiles = files.length > 0 ? await uploadFiles(files) : [];
 
       const ownerUser = channelPref.ownerUserId ? await repositories.users.findById(channelPref.ownerUserId) : null;
+      // The desk's own address comes from its mailbox source, never from the app
+      // binding — an app-desk displayName is the app's name and holds no address, so
+      // reading it here would skip a perfectly good mailbox for the owner's personal
+      // address on any EMAIL desk without sendAsEmail.
+      const mailboxSource = await externalSourceRepo.findChannelSource(channelId, {
+        sourceTypes: ['google', 'microsoft', 'zoho'],
+      });
       const recipientEmail =
         channelPref.sendAsEmail ||
-        extractEmailAddress(externalSource.displayName ?? '') ||
+        extractEmailAddress(mailboxSource?.displayName ?? '') ||
         ownerUser?.email ||
         `desk-${channelId}@apps.xyne.ai`;
 
@@ -2588,7 +2568,7 @@ export class TicketController {
           externalThreadId,
           externalMessageId,
           emailType: EmailType.DEFAULT,
-          externalSourceLink: { externalSourceId: externalSource.id, externalId: appExternalId, externalThreadId },
+          externalSourceLink: { externalSourceId: externalSource.id, externalId: externalMessageId, externalThreadId },
           ...(uploadedFiles.length > 0 && { uploadedFiles }),
           receivedAt: new Date(),
         });
@@ -2665,7 +2645,7 @@ export class TicketController {
         emailTo: [recipientEmail],
         externalThreadId,
         externalMessageId,
-        externalSourceLink: { externalSourceId: externalSource.id, externalId: appExternalId, externalThreadId },
+        externalSourceLink: { externalSourceId: externalSource.id, externalId: externalMessageId, externalThreadId },
         ...(uploadedFiles.length > 0 && { uploadedFiles }),
         ticketMetadata: {
           deskSource: {

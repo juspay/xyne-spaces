@@ -133,7 +133,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
               >
                 <div className='flex min-w-0 items-center gap-2'>
                   <Plug size={16} className='shrink-0 text-muted-foreground' />
-                  <span className='truncate text-desk-label'>{app.appName}</span>
+                  <span className='truncate text-desk-label'>{app.appName ?? 'Unknown app'}</span>
                   {!app.isActive && (
                     <span className='ml-2 shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground'>
                       Disconnected

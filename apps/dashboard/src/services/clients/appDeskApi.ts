@@ -3,7 +3,8 @@ import { apiInstance } from './apiClient';
 export interface ConnectedChannelApp {
   sourceId: string;
   installedAppId: string;
-  appName: string;
+  /** Null for a binding whose app was uninstalled — nothing deletes the source row. */
+  appName: string | null;
   isActive: boolean;
   createdAt: string;
 }

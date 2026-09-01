@@ -150,20 +150,22 @@ router.post('/:conversationId/reply', authV2Middleware.authenticate, async (req:
     // This route delivers agent-authored content to a third-party webhook, and it
     // now reaches conversations on any desk channel — so it must prove the caller
     // belongs to the conversation's workspace and channel before routing anything.
+    // Mirrors ChannelsACL: workspace-scoped, then PUBLIC or participant. Desk
+    // channels are browsable un-joined and SupportScreen renders the app composer
+    // without gating on membership, so requiring participation alone would show an
+    // agent a composer that 403s on send.
     const conversation = await db.conversation.findFirst({
-      where: { conversationId, channel: { workspaceId: req.user!.workspaceId! } },
+      where: {
+        conversationId,
+        channel: {
+          workspaceId: req.user!.workspaceId!,
+          OR: [{ visibility: 'PUBLIC' }, { participants: { some: { userId } } }],
+        },
+      },
       select: { channelId: true },
     });
     if (!conversation) {
       res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-    const participant = await db.channelParticipant.findFirst({
-      where: { channelId: conversation.channelId, userId },
-      select: { id: true },
-    });
-    if (!participant) {
-      res.status(403).json({ error: 'You do not have access to this channel' });
       return;
     }
 
@@ -264,7 +266,7 @@ router.post(
         channelId,
         installedAppId,
         workspaceId: req.user!.workspaceId!,
-        displayName: channel.name,
+        displayName: validation.installedApp.app.name,
       });
 
       // The binding alone is not enough to let the app post. Inbound runs through

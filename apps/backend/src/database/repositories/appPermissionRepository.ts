@@ -6,6 +6,7 @@ import { type Prisma, type AvailableAppPermission } from '@prisma/client';
 import { PrismaClient } from '@prisma/client';
 import { AppPermissionStatus, AppPermissionType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 // ─── Typed row shapes from Prisma includes ────────────────────────────────────
@@ -364,8 +365,20 @@ export class AppPermissionRepository extends BaseRepository<
     });
     if (deskWrite) return;
 
+    // Pre-migration rows carry a null externalIdentifier and encode the install id in
+    // their name, so filtering on the column alone would leave exactly those bindings
+    // active after the grant is gone. Match on the resolved id instead.
+    const candidates = await this.db.externalSource.findMany({
+      where: { sourceType: 'app-desk', isActive: true },
+      select: { id: true, name: true, externalIdentifier: true },
+    });
+    const staleIds = candidates
+      .filter(s => resolveAppDeskInstalledAppId(s) === installedAppId)
+      .map(s => s.id);
+    if (staleIds.length === 0) return;
+
     const { count } = await this.db.externalSource.updateMany({
-      where: { sourceType: 'app-desk', externalIdentifier: installedAppId, isActive: true },
+      where: { id: { in: staleIds } },
       data: { isActive: false },
     });
     if (count > 0) {
