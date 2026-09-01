@@ -566,9 +566,6 @@ const SupportScreen = (): ReactElement => {
   }>();
   const supportBase = workspaceId ? `/${workspaceId}/support` : '/support';
   const navigate = useNavigate();
-  // Stamped by the desk list when it pushes a ticket: the list is the entry directly
-  // behind the detail, so closing the detail pops instead of stacking a second list.
-  const detailRouterState = useLocation().state as { fromDeskList?: boolean } | null;
   // Gate the Tickets shortcut the same way the main rail gates '/projects'.
   const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1895,7 +1892,11 @@ const SupportScreen = (): ReactElement => {
         setShowMergeDialog(false);
         if (parentTicket) {
           void navigate(`${supportBase}/${parentTicket.channelId}/${parentTicket.xyneId}`, {
-            state: { conversationId: parentTicket.conversationId, ticketId: parentTicket.id },
+            state: {
+              conversationId: parentTicket.conversationId,
+              ticketId: parentTicket.id,
+              fromDeskList: true,
+            },
           });
         }
       } catch (error: unknown) {
@@ -3458,14 +3459,10 @@ const SupportScreen = (): ReactElement => {
                             size='sm'
                             variant='ghost'
                             onClick={() => {
-                              if (detailRouterState?.fromDeskList) {
-                                void navigate(-1);
-                                return;
-                              }
                               const back = selectedChannelId
                                 ? `${supportBase}/${selectedChannelId}`
                                 : supportBase;
-                              void navigate(back, { replace: true });
+                              void navigate(back);
                             }}
                             data-track-category='Support'
                             data-track-name='CloseTicketPanel'
@@ -3574,7 +3571,7 @@ const SupportScreen = (): ReactElement => {
                   availableStages={availableStages}
                   onTicketClick={ticket => {
                     void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId },
+                      state: { ticketId: ticket.ticketId, fromDeskList: true },
                     });
                   }}
                 />
@@ -4412,20 +4409,11 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
-    // The desk list is the entry directly behind us, so pop it — navigating to the
-    // list instead would leave the ticket sitting one Back away.
-    if (routerState?.fromDeskList) {
+    // Both markers are stamped by the opener (desk list, Kanban, My Tickets) as it pushes
+    // this entry, so its page is one Back away — pop it rather than stacking a second copy.
+    // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
+    if (routerState?.fromDeskList || routerState?.returnToUrl) {
       void navigate(-1);
-      return;
-    }
-    // Ticket boards (Kanban, My Tickets) hand us the URL they came from, so
-    // "back" returns to that board instead of dumping the user in the channel
-    // inbox they never visited. Only same-origin paths are honoured — reject
-    // absolute URLs and the "//host" / "/\host" protocol-relative forms so
-    // router state can't drive an off-site redirect.
-    const returnToUrl = routerState?.returnToUrl;
-    if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
-      void navigate(returnToUrl, { replace: true });
       return;
     }
     const base = navBasePath ?? supportBase;
@@ -5658,6 +5646,10 @@ const EmailThreadItem = ({
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
+  const emailRouterState = useLocation().state as {
+    fromDeskList?: boolean;
+    returnToUrl?: string | null;
+  } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
   const ccList = email.cc || [];
@@ -5696,11 +5688,17 @@ const EmailThreadItem = ({
         });
 
         if (channelIdParam) {
+          // In-place swap like the ticket-level unmerge — the opener stays directly behind.
           void navigate(`/support/${channelIdParam}/${response.data.newTicket.xyneId}`, {
+            replace: true,
             state: {
               conversationId: response.data.newTicket.conversationId,
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
+              ...(emailRouterState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(emailRouterState?.returnToUrl
+                ? { returnToUrl: emailRouterState.returnToUrl }
+                : {}),
             },
           });
         }
