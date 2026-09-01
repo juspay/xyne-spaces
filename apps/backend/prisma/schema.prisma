@@ -4661,7 +4661,7 @@ model ExecutionItem {
   sourceMessageId String // message that created the ask; >1 item per source = split
   title           String
   contextSummary  String?
-  status          String    @default("open") // open | resolved (String: no new PG enums)
+  status          String    @default("OPEN") // OPEN | RESOLVED (String: no new PG enums)
   requestedBy     String[]  @default([]) // who asked (userIds); NOT NULL — see migration
   pendingOn       String[]  @default([]) // whose turn it is; [] = ownerless or resolved
   createdAt       DateTime  @default(now())
