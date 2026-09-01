@@ -1,3 +1,10 @@
+## [1.252.0](https://github.com/juspay/xyne-spaces/compare/v1.251.2...v1.252.0) (2026-09-01)
+
+
+### Features
+
+* added merge queue in the repo branch rulesets ([#1358](https://github.com/juspay/xyne-spaces/issues/1358)) ([8850cf1](https://github.com/juspay/xyne-spaces/commit/8850cf11cec30f3e7cdb6bb00f631d799d28f944))
+
 ## [1.251.2](https://github.com/juspay/xyne-spaces/compare/v1.251.1...v1.251.2) (2026-09-01)
 
 
