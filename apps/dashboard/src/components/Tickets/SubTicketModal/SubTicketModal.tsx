@@ -12,6 +12,7 @@ interface SubTicketModalProps {
   onClose: () => void;
   ticketId: string;
   conversationId: string;
+  sourceMessageId?: string;
   onSuccess?: () => void;
 }
 
@@ -22,6 +23,7 @@ export const SubTicketModal = ({
   onClose,
   ticketId,
   conversationId,
+  sourceMessageId,
   onSuccess,
 }: SubTicketModalProps): ReactElement | null => {
   const zero = useZero();
@@ -60,6 +62,7 @@ export const SubTicketModal = ({
       initialPriority={ticket.priority}
       initialTags={initialTags}
       isFromSubTicket={true}
+      {...(sourceMessageId && { sourceMessageId })}
       parentTicketId={ticketId}
       onTicketCreated={createdTicket => {
         // Create SubTicket and mapping using Zero mutators

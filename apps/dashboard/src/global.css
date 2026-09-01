@@ -3125,7 +3125,7 @@ img.inline-emoji,
 
 /* Base markdown content styling with text wrapping for overflow prevention.
    Typography sits in `components` so a surface that sets its own size on the
-   wrapper (e.g. AIChatThread's `text-[15px] leading-7`) still wins. */
+   wrapper still wins over this baseline. */
 @layer components {
   .bot-markdown-content,
   .bot-markdown-content-call-summary {
@@ -4246,23 +4246,15 @@ img.inline-emoji,
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* AI composer — match the page bg (overrides the component's own literal) */
-[data-theme="classic"] .ai-composer-wrapper,
-[data-theme="summer_breeze"] .ai-composer-wrapper {
-  background-color: hsl(var(--background));
-}
-
-/* AI composer dark mode overrides */
+/* AI composer dark mode shadows — surface/border come from the shared
+   chat-composer tokens the channel & thread input uses */
 [data-theme="midnight"] .ai-composer-wrapper {
-  border-color: #3a3a3a;
-  background-color: #1e1e1e;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.05),
     0 8px 24px -12px rgba(0, 0, 0, 0.3);
 }
 
 [data-theme="midnight"] .ai-composer-wrapper:focus-within {
-  border-color: #555;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.1),
     0 12px 30px -12px rgba(0, 0, 0, 0.4);

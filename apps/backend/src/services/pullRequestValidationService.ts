@@ -36,14 +36,16 @@ const PR_VALIDATION_CONFIG = {
     VALIDATION_PASSED: 'Specification complete',
   },
   BUILD_STATUS: {
-    // Bitbucket build-status key (dedupes statuses per commit).
-    KEY: 'xyne-ticket-check',
+    // Statuses are stored per COMMIT by both providers, so the key/context must
+    // include the PR id: one branch can back several open PRs (e.g. the same
+    // head for a main PR and a release-branch PR), and a shared context would
+    // let the last-validated PR overwrite the others' result on that commit.
+    // Bitbucket build-status key (dedupes statuses per commit + key).
+    KEY: (prId: number) => `xyne-ticket-check-pr-${prId}`,
     // Display name: Bitbucket build-status `name`, GitHub commit-status `context`.
-    NAME: 'Ticket Validation',
+    NAME: (prId: number) => `Ticket Validation (#${prId})`,
   },
-  // Keyed by PR, not just commit: statuses live on the commit, so several open
-  // PRs sharing a head would overwrite each other under one fixed context - and
-  // they usually name different tickets. No Bitbucket key: this check is GitHub only.
+  // Keyed per PR for the same reason as above. No Bitbucket key: GitHub only.
   SPEC_BUILD_STATUS: {
     NAME: (prId: number) => `Spec Validation (#${prId})`,
   },
@@ -172,7 +174,7 @@ export class PullRequestValidationService {
 
       if (!ticketIdMatch || !hasValidProjectCode) {
         const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.INVALID_FORMAT;
-        await this.postFailedBuildStatus(target, commitHash, errorMessage);
+        await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
         return { isValid: false, errorMessage };
       }
 
@@ -184,13 +186,13 @@ export class PullRequestValidationService {
 
       if (!ticket) {
         const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.TICKET_NOT_FOUND(ticketId);
-        await this.postFailedBuildStatus(target, commitHash, errorMessage);
+        await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
         return { isValid: false, errorMessage, ticketId, xyneId: ticketId };
       }
 
       if (ticket.status === 'RESOLVED') {
         const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.TICKET_ALREADY_RESOLVED(ticketId);
-        await this.postFailedBuildStatus(target, commitHash, errorMessage);
+        await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
         return {
           isValid: false,
           errorMessage,
@@ -236,7 +238,7 @@ export class PullRequestValidationService {
                 `rejecting duplicate`
             );
             const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
-            await this.postFailedBuildStatus(target, commitHash, errorMessage);
+            await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
             return {
               isValid: false,
               errorMessage,
@@ -267,7 +269,7 @@ export class PullRequestValidationService {
 
           // Post success and return valid
           const successMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
-          await this.postSuccessfulBuildStatus(target, commitHash, successMessage);
+          await this.postSuccessfulBuildStatus(target, prId, commitHash, successMessage);
           return {
             isValid: true,
             ticketId: resolvedTicketId,
@@ -279,7 +281,7 @@ export class PullRequestValidationService {
         // Duplicate PR is manual (no workflowExecutionId), reject it
         logger.debug(`[PR-Validation] Duplicate PR ${duplicatePR.prId} is manual, rejecting`);
         const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.DUPLICATE_PR(ticketId);
-        await this.postFailedBuildStatus(target, commitHash, errorMessage);
+        await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
         return {
           isValid: false,
           errorMessage,
@@ -290,7 +292,7 @@ export class PullRequestValidationService {
       }
 
       const successMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
-      await this.postSuccessfulBuildStatus(target, commitHash, successMessage);
+      await this.postSuccessfulBuildStatus(target, prId, commitHash, successMessage);
       logger.info(`[PR-Validation] PR ${prId} passed validation for ticket ${ticketId}`);
 
       // Validation service only validates - storage is handled by webhook handlers
@@ -303,37 +305,33 @@ export class PullRequestValidationService {
     } catch (error) {
       logger.error('[PR-Validation] Unexpected error during validation:', error);
       const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR;
-      await this.postFailedBuildStatus(target, commitHash, errorMessage);
+      await this.postFailedBuildStatus(target, prId, commitHash, errorMessage);
       return { isValid: false, errorMessage, failureKind: 'internal-error' };
     }
   }
   
   private async postSuccessfulBuildStatus(
     target: BuildStatusTarget,
+    prId: number,
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(
-      target,
-      commitHash,
-      'success',
-      description,
-      PR_VALIDATION_CONFIG.BUILD_STATUS,
-    );
+    await this.postBuildStatus(target, commitHash, 'success', description, {
+      NAME: PR_VALIDATION_CONFIG.BUILD_STATUS.NAME(prId),
+      KEY: PR_VALIDATION_CONFIG.BUILD_STATUS.KEY(prId),
+    });
   }
 
   private async postFailedBuildStatus(
     target: BuildStatusTarget,
+    prId: number,
     commitHash: string,
     description: string
   ): Promise<void> {
-    await this.postBuildStatus(
-      target,
-      commitHash,
-      'failure',
-      description,
-      PR_VALIDATION_CONFIG.BUILD_STATUS,
-    );
+    await this.postBuildStatus(target, commitHash, 'failure', description, {
+      NAME: PR_VALIDATION_CONFIG.BUILD_STATUS.NAME(prId),
+      KEY: PR_VALIDATION_CONFIG.BUILD_STATUS.KEY(prId),
+    });
   }
 
   /**

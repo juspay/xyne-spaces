@@ -71,6 +71,8 @@ export interface InputBoxProps {
   hideVoiceInput?: boolean;
   compact?: boolean;
   sendDisabled?: boolean;
+  /** Shown on the send button's tooltip in place of 'Send message' while sendDisabled. */
+  sendDisabledReason?: string;
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;

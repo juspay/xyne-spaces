@@ -1,5 +1,7 @@
 import { ReactElement, useState } from 'react';
-import { TextInput, TextArea, Button, ButtonType } from '@juspay/blend-design-system';
+import { Button } from '../../ui/Button';
+import { Input } from '../../ui/Input';
+import { Textarea } from '../../ui/Textarea';
 import { mixpanelService } from '../../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../../services/Analytics/mixpanel.types';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
@@ -90,16 +92,37 @@ export const ProjectForm = ({
   const isLoading = loading || isSubmitting;
 
   return (
-    <div className='space-y-4'>
+    <form
+      className='flex flex-col gap-4 p-6'
+      noValidate
+      onSubmit={e => {
+        e.preventDefault();
+        handleSubmit();
+      }}
+    >
+      <div className='flex flex-col gap-1.5'>
+        <h2 className='text-base font-semibold text-foreground'>
+          {isEdit ? 'Edit project' : 'Create new project'}
+        </h2>
+        <p className='text-sm text-muted-foreground'>
+          {isEdit
+            ? 'Update the name and description for this project.'
+            : 'Name your project and pick a code for its ticket IDs.'}
+        </p>
+      </div>
+
       {error && (
-        <div className='bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded'>
+        <p className='rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive'>
           {error}
-        </div>
+        </p>
       )}
 
-      <div>
-        <TextInput
-          label='Project Name'
+      <div className='flex flex-col gap-1.5'>
+        <label htmlFor='project-name' className='text-sm font-medium text-foreground'>
+          Project name
+        </label>
+        <Input
+          id='project-name'
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder='Enter project name'
@@ -110,23 +133,31 @@ export const ProjectForm = ({
       </div>
 
       {!isEdit && (
-        <div>
-          <TextInput
-            label='Project Code (Ticket Prefix)'
+        <div className='flex flex-col gap-1.5'>
+          <label htmlFor='project-code' className='text-sm font-medium text-foreground'>
+            Project code
+          </label>
+          <Input
+            id='project-code'
             value={code}
             onChange={e => setCode(sanitizeProjectCode(e.target.value))}
             placeholder='e.g., EUL, PROJ, PRO1, XY2'
-            required={!isEdit}
+            required
             disabled={isLoading}
-            hintText={`Tickets will be: ${code || 'CODE'}-0001, ${code || 'CODE'}-0002...`}
             data-testid='project-code-input'
           />
+          <p className='text-xs text-muted-foreground'>
+            Tickets will be: {code || 'CODE'}-0001, {code || 'CODE'}-0002...
+          </p>
         </div>
       )}
 
-      <div>
-        <TextArea
-          label='Description'
+      <div className='flex flex-col gap-1.5'>
+        <label htmlFor='project-description' className='text-sm font-medium text-foreground'>
+          Description
+        </label>
+        <Textarea
+          id='project-description'
           value={description}
           onChange={e => setDescription(e.target.value)}
           placeholder='Enter project description (optional)'
@@ -135,34 +166,31 @@ export const ProjectForm = ({
         />
       </div>
 
-      <div className='flex gap-2 justify-end'>
+      <div className='flex justify-end gap-2'>
         <Button
-          buttonType={ButtonType.SECONDARY}
-          text='Cancel'
+          type='button'
+          variant='outline'
+          size='sm'
           onClick={onCancel}
           disabled={isLoading}
           data-track-category='Projects'
           data-track-name='CancelProjectForm'
           data-track-metadata={JSON.stringify({ projectId: project?.id, isEdit })}
-        />
+        >
+          Cancel
+        </Button>
         <Button
-          buttonType={ButtonType.PRIMARY}
-          text={
-            isLoading
-              ? isEdit
-                ? 'Updating...'
-                : 'Creating...'
-              : isEdit
-                ? 'Update Project'
-                : 'Create Project'
-          }
-          onClick={handleSubmit}
+          type='submit'
+          size='sm'
+          loading={isLoading}
           disabled={isLoading || !name.trim()}
           data-track-category='Projects'
           data-track-name='SubmitProjectForm'
           data-track-metadata={JSON.stringify({ projectId: project?.id, isEdit })}
-        />
+        >
+          {isEdit ? 'Update project' : 'Create project'}
+        </Button>
       </div>
-    </div>
+    </form>
   );
 };
