@@ -1163,7 +1163,7 @@ export class TicketController {
           await this.channelRepository.updateLastActivity(ticketChannelId);
         } catch (err) {
           logger.warn(
-            `[createTicket] Skipped last-activity update for channel ${String(ticketChannelId).replace(/[\r\n]/g, '')}: ${err instanceof Error ? err.message : String(err)}`,
+            `[createTicket] Skipped last-activity update for channel ${String(ticketChannelId).replace(/[\r\n]/g, '')}: ${(err instanceof Error ? err.message : String(err)).replace(/[\r\n]/g, '')}`,
           );
         }
       }
