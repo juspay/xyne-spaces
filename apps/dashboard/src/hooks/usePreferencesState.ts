@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { useTheme } from './useTheme';
 import { useAILandingDefault } from './useAILandingDefault';
+import { useAppModeCollapseSidebar } from './useAppModeCollapseSidebar';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
 import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOpen';
@@ -42,6 +43,7 @@ export function usePreferencesState(enabled: boolean) {
   );
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
+  const { appModeCollapseSidebar, setAppModeCollapseSidebar } = useAppModeCollapseSidebar();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
@@ -135,6 +137,8 @@ export function usePreferencesState(enabled: boolean) {
     theme,
     changeTheme,
     aiLandingDefault,
+    appModeCollapseSidebar,
+    setAppModeCollapseSidebar,
     setAiLandingDefault,
     debugSettings,
     toggleSendIndicators,
