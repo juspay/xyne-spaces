@@ -33,6 +33,17 @@ export interface ConversationFilters {
   pinned?: boolean;
 }
 
+const MOVE_CHUNK_SIZE = 500;
+const REINDEX_ENQUEUE_BATCH_SIZE = 50;
+
+const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
 export class ConversationRepository extends BaseRepository<Conversation, CreateConversationInput, UpdateConversationInput> {
   constructor() {
     super('conversation');
@@ -361,6 +372,25 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
 
     const conversationIds = conversations.map(c => c.conversationId);
 
+    let moved = 0;
+    for (const chunk of chunkArray(conversationIds, MOVE_CHUNK_SIZE)) {
+      moved += await this.reparentChunk(chunk, sourceChannelId, targetChannelId);
+    }
+
+    await this.reindexMovedMessages(conversationIds);
+
+    const remaining = await this.db.conversation.count({
+      where: { channelId: sourceChannelId }
+    });
+
+    return { moved, remaining };
+  }
+
+  private async reparentChunk(
+    conversationIds: string[],
+    sourceChannelId: string,
+    targetChannelId: string
+  ): Promise<number> {
     const [movedConversations] = await this.db.$transaction([
       this.db.conversation.updateMany({
         where: { conversationId: { in: conversationIds } },
@@ -392,7 +422,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         data: { channelId: targetChannelId }
       }),
       this.db.messageArtifact.updateMany({
-        where: { conversationId: { in: conversationIds } },
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
         data: { channelId: targetChannelId }
       }),
       this.db.executionItem.updateMany({
@@ -400,7 +430,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         data: { channelId: targetChannelId }
       }),
       this.db.delayedMessage.updateMany({
-        where: { conversationId: { in: conversationIds } },
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
         data: { channelId: targetChannelId }
       }),
       this.db.prThreadLink.updateMany({
@@ -426,37 +456,31 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       })
     ]);
 
-    await this.reindexMovedMessages(conversationIds);
-
-    const remaining = await this.db.conversation.count({
-      where: { channelId: sourceChannelId }
-    });
-
-    return { moved: movedConversations.count, remaining };
+    return movedConversations.count;
   }
 
   private async reindexMovedMessages(conversationIds: string[]): Promise<void> {
-    const messages = await this.db.message.findMany({
-      where: { conversationId: { in: conversationIds }, isDeleted: false },
-      select: { messageId: true }
-    });
+    for (const chunk of chunkArray(conversationIds, MOVE_CHUNK_SIZE)) {
+      const messages = await this.db.message.findMany({
+        where: { conversationId: { in: chunk }, isDeleted: false },
+        select: { messageId: true }
+      });
 
-    if (messages.length === 0) {
-      return;
-    }
-
-    await Promise.all(
-      messages.map(message =>
-        vespaQueue
-          .addJob({ schema: messageSchema, jobType: 'feed', docId: message.messageId })
-          .catch(error =>
-            logger.error(
-              `Failed to queue Vespa re-index for moved message ${message.messageId}:`,
-              error
-            )
+      for (const batch of chunkArray(messages, REINDEX_ENQUEUE_BATCH_SIZE)) {
+        await Promise.all(
+          batch.map(message =>
+            vespaQueue
+              .addJob({ schema: messageSchema, jobType: 'feed', docId: message.messageId })
+              .catch(error =>
+                logger.error(
+                  `Failed to queue Vespa re-index for moved message ${message.messageId}:`,
+                  error
+                )
+              )
           )
-      )
-    );
+        );
+      }
+    }
   }
 
   /**
