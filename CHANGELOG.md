@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.3](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.2...v1.251.0-release-20260901.3) (2026-09-01)
+
+
+### Bug Fixes
+
+* make lean as default presentation summary for vespa search ([#1325](https://github.com/juspay/xyne-spaces/issues/1325)) ([cd52aa4](https://github.com/juspay/xyne-spaces/commit/cd52aa4e805b2adbcc47c6292d976401c0205fc0))
+
 ## [1.251.0-release-20260901.2](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.1...v1.251.0-release-20260901.2) (2026-09-01)
 
 
