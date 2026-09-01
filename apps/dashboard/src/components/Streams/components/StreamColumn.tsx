@@ -456,7 +456,13 @@ const StreamColumn = ({
         // has to actually go to zero rather than just turn transparent — a 1px
         // transparent edge still occupies layout, so eight columns would keep
         // eight columns' worth of phantom gutter.
-        'group/column relative flex h-full shrink-0 flex-col overflow-hidden bg-card',
+        // `bg-background`, not `bg-card`. Every surface a column hosts paints
+        // `bg-background` itself, so a card-coloured shell shows through as a
+        // lighter strip behind the header — the one band of the column the
+        // surface does not cover. Invisible in the light theme, where `--card`
+        // and `--background` are both `0 0% 100%`, and 4 points of lightness
+        // apart in the dark one, which is why it only ever showed there.
+        'group/column relative flex h-full shrink-0 flex-col overflow-hidden bg-background',
         // Centre rather than start: every column is the same width in focus mode
         // and a sliver of the neighbours shows on both sides, which is what says
         // the stream continues in both directions.
