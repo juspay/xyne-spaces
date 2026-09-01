@@ -1263,6 +1263,29 @@ export const queries = defineQueries({
         );
     },
   ),
+  // Topics Explorer: one desk's tickets in a created-at window, rolled up client-side.
+  // Not supportTicketsPageV3 — that pulls emailDrafts, emailReads, userMailbox and
+  // formEntityValues per row, where this reads scalar columns and no relation at all.
+  // The window bounds the sync: the panel caps its range at 7 days and opens on one.
+  // channelId + isMember are forwarded to TicketsACL for membership gating.
+  topicsExplorerTickets: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      createdAtStart: z.number(),
+      createdAtEnd: z.number(),
+    }).refine(
+      args => args.createdAtStart <= args.createdAtEnd,
+      'createdAtStart must be less than or equal to createdAtEnd',
+    ),
+    ({ args: { channelId, createdAtStart, createdAtEnd } }) =>
+      zql.tickets
+        .where('channelId', channelId)
+        .where('isArchived', false)
+        .where('createdAt', '>=', createdAtStart)
+        .where('createdAt', '<=', createdAtEnd)
+        .orderBy('createdAt', 'desc'),
+  ),
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
   // channelId + isMember are forwarded to TicketsACL for membership gating.
   // emailDrafts is scoped to the current user (drafts are per-user private).
