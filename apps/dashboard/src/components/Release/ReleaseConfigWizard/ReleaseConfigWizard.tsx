@@ -1,4 +1,3 @@
-/* eslint-disable local-rules/require-tracking-on-click */
 import { CSSProperties, ReactElement, useEffect, useMemo, useState } from 'react';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -215,6 +214,8 @@ const PathChipsInput = ({
           <button
             type='button'
             onClick={() => remove(p)}
+            data-track-category='Release'
+            data-track-name='REMOVE_PATH_CHIP'
             className='text-muted-foreground hover:text-destructive shrink-0'
             aria-label={`Remove ${p}`}
           >
@@ -227,6 +228,8 @@ const PathChipsInput = ({
         value={draft}
         aria-label={ariaLabel}
         placeholder={paths.length === 0 ? placeholder : ''}
+        data-track-category='Release'
+        data-track-name='PATH_DRAFT_INPUT'
         onChange={e => {
           const v = e.target.value;
           // Pasting or typing a comma commits everything up to the last comma
@@ -355,6 +358,8 @@ const ApplicationRow = ({
           value={app.name}
           disabled={isLocked}
           onChange={e => onUpdate(app.id, 'name', e.target.value)}
+          data-track-category='Release'
+          data-track-name='APPLICATION_NAME_INPUT'
           placeholder='e.g., backend'
           className={INPUT_CLASS}
         />
@@ -369,6 +374,8 @@ const ApplicationRow = ({
           type='text'
           value={app.regex}
           onChange={e => onUpdate(app.id, 'regex', e.target.value)}
+          data-track-category='Release'
+          data-track-name='APPLICATION_REGEX_INPUT'
           placeholder='e.g., ^backend/'
           className={INPUT_CLASS}
         />
@@ -468,6 +475,8 @@ const Step3Applications = ({
                   type='text'
                   value={sharedRepoUrl}
                   onChange={e => onSharedRepoUrlChange(e.target.value)}
+                  data-track-category='Release'
+                  data-track-name='REPOSITORY_URL_INPUT'
                   placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
                   className={INPUT_CLASS}
                 />
@@ -475,6 +484,8 @@ const Step3Applications = ({
                   variant='secondary'
                   size='sm'
                   onClick={() => void onTestConnection()}
+                  data-track-category='Release'
+                  data-track-name='TEST_REPO_CONNECTION'
                   disabled={isTestingConnection || !sharedRepoUrl.trim()}
                   title='Verify the repo URL and token before configuring applications'
                 >

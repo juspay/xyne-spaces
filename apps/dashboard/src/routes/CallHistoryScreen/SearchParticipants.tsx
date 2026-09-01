@@ -337,7 +337,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                       className='w-4 h-4 cursor-pointer'
                       title='Select All'
                       checked={!!allSelected}
-                      data-track-category='calls'
+                      data-track-category='CALLS'
                       data-track-name='select-all-channel-members'
                       ref={el => {
                         if (el) {
@@ -356,7 +356,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   )}
                   <button
                     type='button'
-                    data-track-category='calls'
+                    data-track-category='CALLS'
                     data-track-name='toggle-channel-members-expand'
                     onClick={e => {
                       e.stopPropagation();
@@ -379,7 +379,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                 toggleValue(selectedGroupOrChannel.value);
               }}
               className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground shrink-0'
-              data-track-category='calls'
+              data-track-category='CALLS'
               data-track-name='remove-participant'
             >
               <X className='size-3' />
@@ -393,7 +393,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                 void onMultiSelect([]);
               }}
               className='text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0'
-              data-track-category='calls'
+              data-track-category='CALLS'
               data-track-name='change-selection'
             >
               Change
@@ -417,7 +417,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           role='button'
           tabIndex={0}
           className='relative flex items-center h-10 border border-border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background'
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='search-participants-input'
         >
           <span className='px-2 bg-background'>
@@ -470,7 +470,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                     onChange={e => setParticipantSearchQuery(e.target.value)}
                     onClick={e => e.stopPropagation()}
                     onKeyDown={e => e.stopPropagation()}
-                    data-track-category='calls'
+                    data-track-category='CALLS'
                     data-track-name='channel-member-search'
                     className='flex-1 bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted-foreground'
                   />
@@ -498,7 +498,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                             type='checkbox'
                             checked={isChecked}
                             onChange={() => toggleExcludedChannelMember(userId)}
-                            data-track-category='calls'
+                            data-track-category='CALLS'
                             data-track-name='toggle-channel-member-inclusion'
                             className='shrink-0'
                           />
@@ -565,7 +565,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                               setIsOpen(false);
                             }}
                             onMouseEnter={() => setIndex(index)}
-                            data-track-category='calls'
+                            data-track-category='CALLS'
                             data-track-name='select-participant-option'
                             data-testid='participant-option'
                           >
@@ -620,7 +620,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                     toggleValue(option.value);
                   }}
                   className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
-                  data-track-category='calls'
+                  data-track-category='CALLS'
                   data-track-name='remove-participant'
                 >
                   <X className='size-3' />
@@ -632,7 +632,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
             type='button'
             onClick={() => void onMultiSelect([])}
             className='ml-2 shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5'
-            data-track-category='calls'
+            data-track-category='CALLS'
             data-track-name='clear-all-participants'
           >
             Clear all

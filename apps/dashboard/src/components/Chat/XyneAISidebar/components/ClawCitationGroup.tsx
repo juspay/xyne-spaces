@@ -100,7 +100,7 @@ export function ClawCitationGroup({
             e.stopPropagation();
             citationDocs!.openDoc(doc);
           }}
-          data-track-category='ask-ai'
+          data-track-category='AskAI'
           data-track-name='citation-open-doc-panel'
         >
           {inner}
@@ -216,7 +216,7 @@ export function ClawCitationGroup({
                   e.stopPropagation();
                   citationDocs!.openDoc(doc);
                 }}
-                data-track-category='ask-ai'
+                data-track-category='AskAI'
                 data-track-name='citation-open-doc-panel-grouped'
               >
                 {inner}

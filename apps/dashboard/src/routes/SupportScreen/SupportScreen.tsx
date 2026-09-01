@@ -5685,7 +5685,7 @@ const EmailThreadItem = ({
       disabled={isDemerging}
       className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
       title={mergedSource ? 'Unmerge this ticket' : 'Unmerge this email to a new ticket'}
-      data-track-category='SUPPORT'
+      data-track-category='Support'
       data-track-name={mergedSource ? 'UnmergeTicket' : 'DemergeEmail'}
       data-track-metadata={JSON.stringify({
         emailId: email.id,

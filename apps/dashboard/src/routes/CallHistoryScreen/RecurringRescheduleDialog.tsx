@@ -32,7 +32,7 @@ const RecurringRescheduleDialog = ({
       <div className='flex justify-end gap-2'>
         <button
           onClick={onCancel}
-          data-track-category='Calls'
+          data-track-category='CALLS'
           data-track-name='recurring-reschedule-cancel'
           className='text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer text-foreground'
         >
@@ -40,7 +40,7 @@ const RecurringRescheduleDialog = ({
         </button>
         <button
           onClick={onConfirm}
-          data-track-category='Calls'
+          data-track-category='CALLS'
           data-track-name='recurring-reschedule-confirm'
           className='text-sm px-4 py-2 rounded-lg bg-[#6276BE] text-white hover:bg-[#5566ae] transition-colors cursor-pointer'
         >
