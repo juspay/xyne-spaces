@@ -5814,10 +5814,9 @@ export function createMutators(
             }
           }
 
-          // ACL Business Logic: Check ticket transfer permission for assignedTo, userGroupId,
+          // ACL Business Logic: Check ticket transfer permission for assignedTo,
           // eta, stageName (which triggers stage ETA recalculation), or boardId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
-          const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
 
@@ -14483,6 +14482,39 @@ export function createMutators(
           }
 
           await tx.mutate.saved_user_configurations.delete({ id: configId });
+        },
+      ),
+    },
+    kanbanBoardViewAccess: {
+      grant: defineMutator(
+        z.object({
+          id: z.string(),
+          viewId: z.string(),
+          userId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, viewId, userId, timestamp } }) => {
+          const existing = await tx.run(
+            zql.kanban_board_view_access.where('viewId', viewId).where('userId', userId).one(),
+          );
+          if (existing) return;
+
+          await tx.mutate.kanban_board_view_access.insert({
+            workspaceId: authData.workspaceId,
+            id,
+            viewId,
+            userId,
+            sharedBy: authData.sub,
+            createdAt: timestamp,
+          });
+        },
+      ),
+      revoke: defineMutator(
+        z.object({
+          id: z.string(),
+        }),
+        async ({ tx, args: { id } }) => {
+          await tx.mutate.kanban_board_view_access.delete({ id });
         },
       ),
     },

@@ -10846,6 +10846,39 @@ export const mutators = defineMutators({
       },
     ),
   },
+  kanbanBoardViewAccess: {
+    grant: defineMutator(
+      z.object({
+        id: z.string(),
+        viewId: z.string(),
+        userId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, viewId, userId, timestamp } }) => {
+        const existing = await tx.run(
+          zql.kanban_board_view_access.where('viewId', viewId).where('userId', userId).one(),
+        );
+        if (existing) return;
+
+        await tx.mutate.kanban_board_view_access.insert({
+          workspaceId: ctx.workspaceId,
+          id,
+          viewId,
+          userId,
+          sharedBy: ctx.userID,
+          createdAt: timestamp,
+        });
+      },
+    ),
+    revoke: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, args: { id } }) => {
+        await tx.mutate.kanban_board_view_access.delete({ id });
+      },
+    ),
+  },
   apps: {
     update: defineMutator(
       z.object({

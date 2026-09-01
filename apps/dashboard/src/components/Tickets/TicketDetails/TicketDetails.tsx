@@ -3553,10 +3553,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   {stageReadOnly ? (
                     <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <TicketStatusIcon
-                        size={14}
-                        color={getTicketStatusColor(ticket.statusV2)}
-                      />
+                      <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       {ticket.stageName || 'Not set'}
                     </span>
                   ) : (
@@ -3566,10 +3563,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       onValueChange={handleStageChange}
                       placeholder='Set Status'
                       icon={
-                        <TicketStatusIcon
-                          size={14}
-                          color={getTicketStatusColor(ticket.statusV2)}
-                        />
+                        <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       }
                       getItemIcon={item =>
                         (() => {

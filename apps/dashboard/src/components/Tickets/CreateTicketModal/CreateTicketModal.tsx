@@ -141,7 +141,7 @@ interface CreateTicketModalProps {
   onBeforeCreate?: (description: string, files: File[]) => Promise<void>;
   onTicketCreated?: (ticket: {
     id: string;
-    conversationId: string;
+    conversationId?: string;
     channelId?: string;
     xyneId?: string;
     workflowType?: string;
