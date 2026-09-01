@@ -292,17 +292,19 @@ export function buildFindingsMarkdown(
   return lines.join("\n").trimEnd();
 }
 
-export async function postExperimentNotice(run: { channelId: string; conversationId: string; agentSlug: string; orgId: string | null; finalReport?: string | null }): Promise<void> {
+export async function postExperimentNotice(run: ExperimentRun): Promise<void> {
   if (!run.orgId) return;
   const agent = await agentRepository.findBySlug(run.agentSlug, run.orgId);
   if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
   const appToken = decryptStoredField(agent.spacesAppToken);
+  const [findings, reviews] = await Promise.all([
+    experimentRepository.listFindings(run.id),
+    experimentRepository.listReviews(run.id),
+  ]);
   await spacesAppFetch("/chat/postMessage", {
     channelId: run.channelId,
     conversationId: run.conversationId,
-    markdownText: run.finalReport?.trim()
-      ? `**/experiment ended**\n\n${run.finalReport.trim()}`
-      : "**/experiment ended**\n\n(experiment ended without final report)",
+    markdownText: `**/experiment ended**\n\n${buildLedgerMarkdown(run, findings, reviews)}`,
     userId: agent.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
   }, appToken);
