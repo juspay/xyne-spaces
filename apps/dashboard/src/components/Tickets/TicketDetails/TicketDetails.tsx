@@ -203,7 +203,6 @@ const toVespaProjectTicket = (result: {
 });
 
 const fetchProjectTicketsPageFromVespa = async (
-  projectId: string,
   query: string,
   offset: number,
 ): Promise<{
@@ -216,7 +215,6 @@ const fetchProjectTicketsPageFromVespa = async (
     query: query || '*',
     type: 'tickets',
     apps: 'ticket',
-    projectId,
     limit: 200,
     offset,
   });
@@ -1106,14 +1104,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     setProjectTicketSearch('');
     setIsAddTicketMenuOpen(false);
     projectTicketsRequestIdRef.current += 1;
-  }, [ticket?.projectId]);
+  }, [ticket?.id]);
 
   const loadProjectTicketsPage = useCallback(
     async (offset: number, replace: boolean): Promise<void> => {
-      if (!ticket?.projectId) {
-        return;
-      }
-
       const normalizedQuery = projectTicketSearch.trim();
       const requestId = ++projectTicketsRequestIdRef.current;
       const isInitialLoad = replace || offset === 0;
@@ -1125,11 +1119,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       try {
-        const response = await fetchProjectTicketsPageFromVespa(
-          ticket.projectId,
-          normalizedQuery,
-          offset,
-        );
+        const response = await fetchProjectTicketsPageFromVespa(normalizedQuery, offset);
 
         if (requestId !== projectTicketsRequestIdRef.current) {
           return;
@@ -1162,7 +1152,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           message: String('[TicketDetails] Failed to load Vespa project tickets'),
           context: [
             {
-              projectId: ticket.projectId,
               offset,
               query: normalizedQuery || '*',
               error,
@@ -1183,11 +1172,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }
       }
     },
-    [projectTicketSearch, ticket?.projectId],
+    [projectTicketSearch],
   );
 
   useEffect(() => {
-    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+    if (!isAddTicketMenuOpen) {
       return;
     }
 
@@ -1197,7 +1186,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (projectTicketSearch.trim()) {
       void loadProjectTicketsPage(0, true);
     }
-  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+  }, [isAddTicketMenuOpen, loadProjectTicketsPage, projectTicketSearch]);
 
   const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
     setIsAddTicketMenuOpen(open);
