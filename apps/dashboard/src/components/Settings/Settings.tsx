@@ -200,7 +200,7 @@ const Settings = ({
                   setPresencePopoverOpen(false);
                 }}
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
-                data-track-category='SETTINGS'
+                data-track-category='Settings'
                 data-track-name='SetPresenceOnline'
               >
                 <div className='w-2 h-2 rounded-full bg-green-500' />
@@ -215,7 +215,7 @@ const Settings = ({
                   setPresencePopoverOpen(false);
                 }}
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
-                data-track-category='SETTINGS'
+                data-track-category='Settings'
                 data-track-name='SetPresenceAway'
               >
                 <div className='w-2 h-2 rounded-full border border-muted-foreground' />

@@ -1288,7 +1288,12 @@ function ResultsBody({
     // message, missing ticket_md), so render a compact data-driven ticket card.
     if (isDeskTicket && ticketSummary) {
       return (
-        <div key={key} className='w-full'>
+        <div
+          key={key}
+          className='w-full'
+          data-track-category='SEARCH_RESULTS'
+          data-track-name='OPEN_DESK_TICKET_RESULT'
+        >
           <TicketCardV2
             ticket={ticketSummary}
             isConversation

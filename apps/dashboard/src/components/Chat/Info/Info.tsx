@@ -691,7 +691,7 @@ const ParticipantListItem = ({
                     onClick={() =>
                       onRemove(participant.userId, getUserDisplayName(user) || 'this user')
                     }
-                    data-track-category='ChatInfo'
+                    data-track-category='CHAT_INFO'
                     data-track-name='RemoveParticipant'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >

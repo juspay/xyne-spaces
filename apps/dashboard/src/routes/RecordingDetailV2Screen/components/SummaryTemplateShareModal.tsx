@@ -354,6 +354,8 @@ export function SummaryTemplateShareModal({
                   variant='outline'
                   size='sm'
                   onClick={() => setShowAdmins(value => !value)}
+                  data-track-category='SummaryTemplates'
+                  data-track-name='ToggleTemplateAdmins'
                   className={`${INLINE_ACTION_CLASS} text-muted-foreground`}
                 >
                   {showAdmins ? 'Hide admins' : 'Show admins'}
