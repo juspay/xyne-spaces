@@ -1,3 +1,10 @@
+## [1.250.5](https://github.com/juspay/xyne-spaces/compare/v1.250.4...v1.250.5) (2026-09-01)
+
+
+### Bug Fixes
+
+* uppercase radar execution item status values ([#1305](https://github.com/juspay/xyne-spaces/issues/1305)) ([e648795](https://github.com/juspay/xyne-spaces/commit/e648795470cfe77ba56dafb37dd667d637dfc22a))
+
 ## [1.250.4](https://github.com/juspay/xyne-spaces/compare/v1.250.3...v1.250.4) (2026-09-01)
 
 
