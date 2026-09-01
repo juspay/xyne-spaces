@@ -26,10 +26,12 @@ export function AFKWarningModal({
           label: 'Stay',
           onClick: onStay,
           variant: 'outline',
+          trackName: 'AFK_WARNING_STAY',
         },
         {
           label: 'Leave',
           onClick: onLeave,
+          trackName: 'AFK_WARNING_LEAVE',
           className: 'bg-[#6276BE] hover:bg-[#5264a8] text-white',
         },
       ]}

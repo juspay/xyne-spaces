@@ -1146,7 +1146,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                     type='button'
                     onClick={() => void navigate('/chat/scheduled')}
                     className='font-semibold text-primary hover:underline'
-                    data-track-category='chat-input'
+                    data-track-category='CHAT_INPUT'
                     data-track-name='open-delayed-messages-from-banner'
                   >
                     See all scheduled messages
@@ -1269,7 +1269,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                         onClick={() => setShortcutModalOpen(true)}
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Open shortcuts'
-                        data-track-category='chat-input'
+                        data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'
                       >
                         <Zap className='h-4 w-4 text-muted-foreground' />

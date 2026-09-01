@@ -151,6 +151,8 @@ const ClawDigitalTwinScreen = (): ReactElement => {
                     key={section.to}
                     to={section.to}
                     end={section.end}
+                    data-track-category='Claw Agents'
+                    data-track-name='Digital Twin Nav Section'
                     className={navLinkClass}
                   >
                     <IconComponent className='size-4 shrink-0' />
@@ -159,11 +161,21 @@ const ClawDigitalTwinScreen = (): ReactElement => {
                 );
               })}
               <div className='my-2 border-t border-border' />
-              <NavLink to='/claw-agents/digital-twin/metrics' className={navLinkClass}>
+              <NavLink
+                to='/claw-agents/digital-twin/metrics'
+                data-track-category='Claw Agents'
+                data-track-name='Digital Twin Nav Metrics'
+                className={navLinkClass}
+              >
                 <BarChart3 className='size-4 shrink-0' />
                 Metrics
               </NavLink>
-              <NavLink to='/claw-agents/digital-twin/settings' className={navLinkClass}>
+              <NavLink
+                to='/claw-agents/digital-twin/settings'
+                data-track-category='Claw Agents'
+                data-track-name='Digital Twin Nav Settings'
+                className={navLinkClass}
+              >
                 <Settings className='size-4 shrink-0' />
                 Settings
               </NavLink>
