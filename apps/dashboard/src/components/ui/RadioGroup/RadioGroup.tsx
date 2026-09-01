@@ -78,16 +78,23 @@ const RadioGroup = ({
   );
 };
 
-interface RadioProps {
+interface RadioProps extends React.HTMLAttributes<HTMLDivElement> {
   value: string;
   subtext?: string;
   children: React.ReactNode;
-  className?: string;
 }
 
-const Radio = ({ value, subtext, children, className }: RadioProps): React.ReactElement => {
+const Radio = ({
+  value,
+  subtext,
+  children,
+  className,
+  ...rest
+}: RadioProps): React.ReactElement => {
   return (
-    <div className={cn('flex items-center justify-start space-x-3', className)}>
+    // rest carries data-track-* through to the DOM; the click tracker's
+    // ancestor walk covers both the radio item and its label from here.
+    <div className={cn('flex items-center justify-start space-x-3', className)} {...rest}>
       <RadioGroupItem value={value} id={value} />
       <div className='flex-1 space-y-0.5'>
         <label

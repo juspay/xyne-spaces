@@ -957,6 +957,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   disabled={!canSend}
                   aria-label='Send'
                   title='Send'
+                  data-track-category='XyneAI'
+                  data-track-name='SEND_MESSAGE'
                   className={cn(
                     'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
                   )}

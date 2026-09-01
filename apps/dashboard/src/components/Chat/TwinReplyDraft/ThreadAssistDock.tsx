@@ -856,6 +856,8 @@ function ReplyCard({
           <Button
             size='sm'
             onClick={() => void send()}
+            data-track-category='twin-dock'
+            data-track-name='send-draft'
             disabled={loading}
             loading={loading}
             className='h-7 gap-1 rounded-lg px-[9px] text-[13px] font-medium'

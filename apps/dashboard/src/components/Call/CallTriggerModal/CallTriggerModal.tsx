@@ -225,7 +225,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           <button
             className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-muted transition-colors'
             onClick={() => handleCallAction(handleInitiateCall)}
-            data-track-category='CALL'
+            data-track-category='CALLS'
             data-track-name='StartCallNow'
             data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >
