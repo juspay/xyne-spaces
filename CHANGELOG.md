@@ -1,3 +1,16 @@
+## [1.255.0](https://github.com/juspay/xyne-spaces/compare/v1.254.0...v1.255.0) (2026-09-01)
+
+
+### Features
+
+* add restore logic for apps ([#1370](https://github.com/juspay/xyne-spaces/issues/1370)) ([135b01f](https://github.com/juspay/xyne-spaces/commit/135b01fff2d7e45144e3f39607bb0cec524e6945))
+
+
+### Bug Fixes
+
+* per-PR ticket validation status context ([#1364](https://github.com/juspay/xyne-spaces/issues/1364)) ([56e9341](https://github.com/juspay/xyne-spaces/commit/56e93418835dba4bc958fd38ac2637a6e8c80f89))
+* simplify invitation email to a single Join CTA ([#1365](https://github.com/juspay/xyne-spaces/issues/1365)) ([55b5db8](https://github.com/juspay/xyne-spaces/commit/55b5db84e50f60ee7824ae02267971fad8e4ce86))
+
 ## [1.254.0](https://github.com/juspay/xyne-spaces/compare/v1.253.0...v1.254.0) (2026-09-01)
 
 
