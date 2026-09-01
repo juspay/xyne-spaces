@@ -2,7 +2,10 @@ import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
 import { BitbucketManager } from '@/bitbucket/apis';
 import { githubManager, sanitizeForLog } from '@/git-providers/github/apis';
-import { superpositionClient } from '@/services/superpositionClient';
+import {
+  superpositionClient,
+  type ResolvedConfigDetails,
+} from '@/services/superpositionClient';
 import { logger } from '@/utils/logger';
 import { sanitizeProjectCode, isValidProjectCode, VCSProviderType } from '@xyne/shared';
 
@@ -192,6 +195,8 @@ interface ValidationResult {
   isValid: boolean;
   errorMessage?: string;
   ticketId?: string;
+  /** Set when validation failed on infrastructure, not on the PR itself. */
+  failureKind?: 'internal-error';
   xyneId?: string;
   ticketDescription?: string | null;
 }
@@ -206,9 +211,8 @@ export type BuildStatusTarget =
 
 const DEFAULT_BUILD_STATUS_TARGET: BuildStatusTarget = { provider: VCSProviderType.BITBUCKET_SERVER };
 
-// Superposition's own timeout is 30s and the lookups sit on the webhook response
-// path, which GitHub gives 10s. Slow config means the check stays off, not that
-// the delivery fails.
+// Superposition's own timeout is 30s and this sits on the webhook response path,
+// which GitHub gives 10s. One bounded read, so the worst case is this budget.
 const SPEC_CONFIG_TIMEOUT_MS = 2500;
 
 const withTimeout = async <T>(work: Promise<T>, fallback: T, label: string): Promise<T> => {
@@ -439,7 +443,7 @@ export class PullRequestValidationService {
       logger.error('[PR-Validation] Unexpected error during validation:', error);
       const errorMessage = PR_VALIDATION_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR;
       await this.postFailedBuildStatus(target, commitHash, errorMessage);
-      return { isValid: false, errorMessage };
+      return { isValid: false, errorMessage, failureKind: 'internal-error' };
     }
   }
   
@@ -477,8 +481,7 @@ export class PullRequestValidationService {
    */
   private async resolveSpecCheckConfig(
     target: BuildStatusTarget,
-    workspaceId: string,
-    needSections: boolean
+    workspaceId: string
   ): Promise<{ enabled: boolean; sections: string[] }> {
     const fallback = {
       enabled: false,
@@ -499,27 +502,21 @@ export class PullRequestValidationService {
           : {}),
       };
 
-      const enabled = await withTimeout(
-        superpositionClient.getBooleanValue(
-          PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED,
-          fallback.enabled,
-          context,
-        ),
-        fallback.enabled,
-        PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED,
+      // One read for both keys: a per-flag lookup is a full config fetch, so two
+      // of them would double both the network cost and the time budget.
+      const details = await withTimeout(
+        superpositionClient.resolveAllConfigDetails(context),
+        {} as ResolvedConfigDetails,
+        'spec-check config',
       );
-      // Each lookup is a full config fetch, so skip the list where it is unused.
-      if (!enabled || !needSections) return { enabled, sections: fallback.sections };
 
-      const rawSections = await withTimeout(
-        superpositionClient.getStringValue(
-          PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS,
-          fallback.sections.join(','),
-          context,
-        ),
-        fallback.sections.join(','),
-        PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS,
-      );
+      const enabledValue = details[PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED]?.value;
+      const enabled = typeof enabledValue === 'boolean' ? enabledValue : fallback.enabled;
+      if (!enabled) return { enabled: false, sections: fallback.sections };
+
+      const sectionsValue = details[PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS]?.value;
+      const rawSections =
+        typeof sectionsValue === 'string' ? sectionsValue : fallback.sections.join(',');
 
       const sections = rawSections
         .split(',')
@@ -555,11 +552,7 @@ export class PullRequestValidationService {
     // Destructured consts so the guard below narrows both for the rest of the method.
     const { ticketDescription, xyneId } = result;
     const resolvable = ticketDescription !== undefined && xyneId !== undefined;
-    const { enabled, sections } = await this.resolveSpecCheckConfig(
-      target,
-      workspaceId,
-      resolvable,
-    );
+    const { enabled, sections } = await this.resolveSpecCheckConfig(target, workspaceId);
     if (!enabled) return;
 
     const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
@@ -569,7 +562,7 @@ export class PullRequestValidationService {
     // unfinalized state would linger on the commit.
     if (!resolvable) {
       const reason =
-        result.errorMessage === PR_VALIDATION_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR
+        result.failureKind === 'internal-error'
           ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_EVALUATED
           : PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_CHECKED;
       await this.postBuildStatus(target, commitHash, 'success', reason, specStatus);
