@@ -111,7 +111,7 @@ export type ActiveTab = (typeof ACTIVE_TABS)[number];
 const isActiveTab = (value: unknown): value is ActiveTab =>
   ACTIVE_TABS.includes(value as ActiveTab);
 
-interface StoredFilters {
+export interface StoredFilters {
   rangeLabel: RangeLabel;
   customStart?: string;
   customEnd?: string;
@@ -129,6 +129,7 @@ interface StoredFilters {
   comparedChannelIds: string[];
   chartView: ChartView;
   activeTab: ActiveTab;
+  activeViewId: string | null;
 }
 
 const DEFAULT_STORED: StoredFilters = {
@@ -146,6 +147,7 @@ const DEFAULT_STORED: StoredFilters = {
   comparedChannelIds: [],
   chartView: 'priority',
   activeTab: 'overview',
+  activeViewId: null,
 };
 
 const readStorage = (key: string): StoredFilters => {
@@ -193,6 +195,7 @@ const readStorage = (key: string): StoredFilters => {
       comparedChannelIds: isStringArray(p['comparedChannelIds']) ? p['comparedChannelIds'] : [],
       chartView: isChartView(p['chartView']) ? p['chartView'] : DEFAULT_STORED.chartView,
       activeTab: isActiveTab(p['activeTab']) ? p['activeTab'] : DEFAULT_STORED.activeTab,
+      activeViewId: typeof p['activeViewId'] === 'string' ? p['activeViewId'] : null,
     };
     if (typeof p['customStart'] === 'string') result.customStart = p['customStart'];
     if (typeof p['customEnd'] === 'string') result.customEnd = p['customEnd'];
@@ -225,6 +228,7 @@ export interface PersistedDeskMetricsFilters {
   comparedChannelIds: string[];
   chartView: ChartView;
   activeTab: ActiveTab;
+  activeViewId: string | null;
   setDateRange: (dr: DateRangeValue, st: string, et: string) => void;
   setSelectedAssigneeIds: (ids: string[]) => void;
   setSelectedStageNames: (names: string[]) => void;
@@ -237,6 +241,9 @@ export interface PersistedDeskMetricsFilters {
   setComparedChannelIds: (ids: string[]) => void;
   setChartView: (view: ChartView) => void;
   setActiveTab: (tab: ActiveTab) => void;
+  setActiveViewId: (id: string | null) => void;
+  applyView: (partial: Partial<StoredFilters>, viewId: string) => void;
+  storedFilters: StoredFilters;
 }
 
 export const usePersistedDeskMetricsFilters = (
@@ -266,7 +273,13 @@ export const usePersistedDeskMetricsFilters = (
     (dr: DateRangeValue, st: string, et: string) => {
       const label = detectLabel(dr);
       persist(prev => {
-        const next: StoredFilters = { ...prev, rangeLabel: label, startTime: st, endTime: et };
+        const next: StoredFilters = {
+          ...prev,
+          rangeLabel: label,
+          startTime: st,
+          endTime: et,
+          activeViewId: null,
+        };
         if (label === 'custom') {
           next.customStart = dr.startDate.toISOString();
           next.customEnd = dr.endDate.toISOString();
@@ -282,28 +295,28 @@ export const usePersistedDeskMetricsFilters = (
 
   const setSelectedAssigneeIds = useCallback(
     (ids: string[]) => {
-      persist(prev => ({ ...prev, selectedAssigneeIds: ids }));
+      persist(prev => ({ ...prev, selectedAssigneeIds: ids, activeViewId: null }));
     },
     [persist],
   );
 
   const setSelectedStageNames = useCallback(
     (names: string[]) => {
-      persist(prev => ({ ...prev, selectedStageNames: names }));
+      persist(prev => ({ ...prev, selectedStageNames: names, activeViewId: null }));
     },
     [persist],
   );
 
   const setSelectedPriorities = useCallback(
     (priorities: TicketPriority[]) => {
-      persist(prev => ({ ...prev, selectedPriorities: priorities }));
+      persist(prev => ({ ...prev, selectedPriorities: priorities, activeViewId: null }));
     },
     [persist],
   );
 
   const setSelectedUserGroupIds = useCallback(
     (ids: string[]) => {
-      persist(prev => ({ ...prev, selectedUserGroupIds: ids }));
+      persist(prev => ({ ...prev, selectedUserGroupIds: ids, activeViewId: null }));
     },
     [persist],
   );
@@ -311,28 +324,33 @@ export const usePersistedDeskMetricsFilters = (
   const setSelectedTagCategory = useCallback(
     (cat: string | null) => {
       // Changing category always clears specific tag selections
-      persist(prev => ({ ...prev, selectedTagCategory: cat, selectedTagValues: [] }));
+      persist(prev => ({
+        ...prev,
+        selectedTagCategory: cat,
+        selectedTagValues: [],
+        activeViewId: null,
+      }));
     },
     [persist],
   );
 
   const setSelectedTagValues = useCallback(
     (vals: string[]) => {
-      persist(prev => ({ ...prev, selectedTagValues: vals }));
+      persist(prev => ({ ...prev, selectedTagValues: vals, activeViewId: null }));
     },
     [persist],
   );
 
   const setSelectedAiCategories = useCallback(
     (categories: string[]) => {
-      persist(prev => ({ ...prev, selectedAiCategories: categories }));
+      persist(prev => ({ ...prev, selectedAiCategories: categories, activeViewId: null }));
     },
     [persist],
   );
 
   const setSelectedCustomFieldValues = useCallback(
     (vals: Record<string, string[]>) => {
-      persist(prev => ({ ...prev, selectedCustomFieldValues: vals }));
+      persist(prev => ({ ...prev, selectedCustomFieldValues: vals, activeViewId: null }));
     },
     [persist],
   );
@@ -340,21 +358,41 @@ export const usePersistedDeskMetricsFilters = (
   const setComparedChannelIds = useCallback(
     (ids: string[]) => {
       const extras = [...new Set(ids.filter(id => id !== channelId))];
-      persist(prev => ({ ...prev, comparedChannelIds: extras }));
+      persist(prev => ({ ...prev, comparedChannelIds: extras, activeViewId: null }));
     },
     [persist, channelId],
   );
 
   const setChartView = useCallback(
     (view: ChartView) => {
-      persist(prev => ({ ...prev, chartView: view }));
+      persist(prev => ({ ...prev, chartView: view, activeViewId: null }));
     },
     [persist],
   );
 
   const setActiveTab = useCallback(
     (tab: ActiveTab) => {
-      persist(prev => ({ ...prev, activeTab: tab }));
+      persist(prev => ({ ...prev, activeTab: tab, activeViewId: null }));
+    },
+    [persist],
+  );
+
+  const setActiveViewId = useCallback(
+    (id: string | null) => {
+      persist(prev => ({ ...prev, activeViewId: id }));
+    },
+    [persist],
+  );
+
+  // Apply a saved view atomically — sets all filters AND activeViewId in one persist call
+  // so auto-deselect logic (which clears activeViewId on manual changes) never fires.
+  const applyView = useCallback(
+    (partial: Partial<StoredFilters>, viewId: string) => {
+      persist(prev => ({
+        ...prev,
+        ...partial,
+        activeViewId: viewId,
+      }));
     },
     [persist],
   );
@@ -374,6 +412,8 @@ export const usePersistedDeskMetricsFilters = (
     comparedChannelIds: stored.comparedChannelIds,
     chartView: stored.chartView,
     activeTab: stored.activeTab,
+    activeViewId: stored.activeViewId,
+    storedFilters: stored,
     setDateRange,
     setSelectedAssigneeIds,
     setSelectedStageNames,
@@ -386,5 +426,7 @@ export const usePersistedDeskMetricsFilters = (
     setComparedChannelIds,
     setChartView,
     setActiveTab,
+    setActiveViewId,
+    applyView,
   };
 };

@@ -14419,14 +14419,21 @@ export function createMutators(
           tx,
           args: { id, name, contextType, contextId, visibility, timestamp, values },
         }) => {
-          // Check for duplicate name (case-insensitive) per user per contextId
           const allUserConfigs = await tx.run(
             zql.saved_user_configurations
               .where('userId', authData.sub)
+              .where('contextType', contextType)
               .where('contextId', contextId)
           );
-          if (allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-            throw new Error('A saved view with this name already exists for this board');
+          // Desk contexts are case-sensitive; board views keep case-insensitive matching.
+          const isDeskContext =
+            contextType === SavedConfigContextType.DESK_METRICS ||
+            contextType === SavedConfigContextType.DESK_TICKET;
+          const nameConflict = isDeskContext
+            ? allUserConfigs.some(c => c.name === name)
+            : allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase());
+          if (nameConflict) {
+            throw new Error('A saved view with this name already exists');
           }
 
           await tx.mutate.saved_user_configurations.insert({
@@ -14482,15 +14489,27 @@ export function createMutators(
             throw new Error('You can only edit your own saved views');
           }
 
-          // If renaming, check for duplicate name (case-insensitive)
-          if (name && name.toLowerCase() !== config.name.toLowerCase()) {
-            const allUserConfigs = await tx.run(
-              zql.saved_user_configurations
-                .where('userId', authData.sub)
-                .where('contextId', config.contextId)
-            );
-            if (allUserConfigs.some(c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase())) {
-              throw new Error('A saved view with this name already exists for this board');
+          // Desk contexts are case-sensitive; board views keep case-insensitive matching.
+          const isDeskUpdate =
+            config.contextType === SavedConfigContextType.DESK_METRICS ||
+            config.contextType === SavedConfigContextType.DESK_TICKET;
+          if (name) {
+            const nameChanged = isDeskUpdate
+              ? name !== config.name
+              : name.toLowerCase() !== config.name.toLowerCase();
+            if (nameChanged) {
+              const allUserConfigs = await tx.run(
+                zql.saved_user_configurations
+                  .where('userId', authData.sub)
+                  .where('contextType', config.contextType)
+                  .where('contextId', config.contextId)
+              );
+              const updateConflict = isDeskUpdate
+                ? allUserConfigs.some(c => c.id !== configId && c.name === name)
+                : allUserConfigs.some(c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase());
+              if (updateConflict) {
+                throw new Error('A saved view with this name already exists');
+              }
             }
           }
 

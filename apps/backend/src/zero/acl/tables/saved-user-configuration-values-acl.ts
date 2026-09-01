@@ -24,19 +24,25 @@ interface TicketFilterFieldDescriptor {
  * Column type (string vs number) is derived from col.type at runtime — not hardcoded.
  */
 const TICKET_FILTER_SCHEMA: Record<string, TicketFilterFieldDescriptor> = {
-  boards:           { col: ticketCols.boardId,         enumValues: null },
-  assignee:         { col: ticketCols.assignedTo,      enumValues: null },
-  createdBy:        { col: ticketCols.createdBy,       enumValues: null },
-  userGroups:       { col: ticketCols.userGroupId,     enumValues: null },
-  tags:             { col: tagCols.name,               enumValues: null },
-  stages:           { col: ticketCols.stageName,       enumValues: null },
-  ticketTypes:      { col: ticketCols.ticketType,      enumValues: null },
-  sourceChannels:   { col: ticketCols.channelId,       enumValues: null },
-  dueDateStart:     { col: ticketCols.eta,             enumValues: null },
-  dueDateEnd:       { col: ticketCols.eta,             enumValues: null },
-  createdDateStart: { col: ticketCols.createdAt,       enumValues: null },
-  createdDateEnd:   { col: ticketCols.createdAt,       enumValues: null },
-  priority:         { col: ticketCols.priority,        enumValues: new Set(Object.values(TicketPriority)) },
+  // Direct column mappings
+  boards:              { col: ticketCols.boardId,        enumValues: null },
+  assignee:            { col: ticketCols.assignedTo,     enumValues: null },
+  createdBy:           { col: ticketCols.createdBy,      enumValues: null },
+  userGroups:          { col: ticketCols.userGroupId,    enumValues: null },
+  tags:                { col: tagCols.name,              enumValues: null },
+  generatedTags:       { col: tagCols.name,              enumValues: null },
+  stages:              { col: ticketCols.stageName,      enumValues: null },
+  ticketTypes:         { col: ticketCols.ticketType,     enumValues: null },
+  sourceChannels:      { col: ticketCols.channelId,      enumValues: null },
+  conversationLabelId: { col: ticketCols.id,             enumValues: null },
+  aiCategory:          { col: ticketCols.aiCategory,     enumValues: null },
+  dueDateStart:        { col: ticketCols.eta,            enumValues: null },
+  dueDateEnd:          { col: ticketCols.eta,            enumValues: null },
+  createdDateStart:    { col: ticketCols.createdAt,      enumValues: null },
+  createdDateEnd:      { col: ticketCols.createdAt,      enumValues: null },
+  lastEmailAtStart:    { col: ticketCols.lastEmailAt,    enumValues: null },
+  lastEmailAtEnd:      { col: ticketCols.lastEmailAt,    enumValues: null },
+  priority:            { col: ticketCols.priority,       enumValues: new Set(Object.values(TicketPriority)) },
 };
 
 function validateTicketValue(fieldName: string, fieldValue: string): void {
@@ -50,6 +56,22 @@ function validateTicketValue(fieldName: string, fieldValue: string): void {
 
   // Virtual UI-state field (the groupBy column name), not a real column.
   if (fieldName === '__groupBy') return;
+
+  // Boolean filters — value must be "true" or "false"
+  if (
+    fieldName === 'assigned' ||
+    fieldName === 'created' ||
+    fieldName === 'hasAiDraft' ||
+    fieldName === 'hasSubTickets'
+  ) {
+    if (fieldValue !== 'true' && fieldValue !== 'false') {
+      throw new MutationACLError(`${fieldName} must be "true" or "false"`, table);
+    }
+    return;
+  }
+
+  // Dynamic form field values — serialized as "dynamicFields.<fieldId>" with JSON value
+  if (fieldName.startsWith('dynamicFields.')) return;
 
   if (fieldName === 'roleAssignments') {
     const [roleId, userIdsCsv] = fieldValue.split('|');
@@ -202,6 +224,56 @@ async function validateFormEntityValue(
   }
 }
 
+const DESK_METRICS_FIELD_WHITELIST = new Set([
+  'rangeLabel',
+  'customStart',
+  'customEnd',
+  'startTime',
+  'endTime',
+  'selectedAssigneeIds',
+  'selectedStageNames',
+  'selectedPriorities',
+  'selectedUserGroupIds',
+  'selectedTagCategory',
+  'selectedTagValues',
+  'selectedAiCategories',
+  'comparedChannelIds',
+  'chartView',
+  'activeTab',
+]);
+
+const DESK_METRICS_CHART_VIEWS = new Set(['priority', 'trend', 'assignee', 'tags']);
+const DESK_METRICS_ACTIVE_TABS = new Set(['overview', 'agents', 'desks']);
+const DESK_METRICS_RANGE_LABELS = new Set([
+  'Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'Last 60 days', 'Last 90 days', 'custom',
+]);
+
+function validateDeskMetricsValue(fieldName: string, fieldValue: string): void {
+  const table = 'saved_user_configuration_values' as const;
+
+  // Custom field values are serialized as "selectedCustomFieldValues.<fieldId>"
+  if (fieldName.startsWith('selectedCustomFieldValues.')) return;
+
+  if (!DESK_METRICS_FIELD_WHITELIST.has(fieldName)) {
+    throw new MutationACLError(`Invalid desk metrics field: ${fieldName}`, table);
+  }
+
+  if (!fieldValue) {
+    throw new MutationACLError(`Field value cannot be empty for field: ${fieldName}`, table);
+  }
+
+  if (fieldName === 'chartView' && !DESK_METRICS_CHART_VIEWS.has(fieldValue)) {
+    throw new MutationACLError(`Invalid chartView value: "${fieldValue}"`, table);
+  }
+  if (fieldName === 'activeTab' && !DESK_METRICS_ACTIVE_TABS.has(fieldValue)) {
+    throw new MutationACLError(`Invalid activeTab value: "${fieldValue}"`, table);
+  }
+  if (fieldName === 'rangeLabel' && !DESK_METRICS_RANGE_LABELS.has(fieldValue)) {
+    throw new MutationACLError(`Invalid rangeLabel value: "${fieldValue}"`, table);
+  }
+  // All other whitelisted fields are free-form strings; non-empty is sufficient.
+}
+
 export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configuration_values'> {
   constructor(ctx: QueryContext) {
     super(ctx, 'saved_user_configuration_values');
@@ -238,6 +310,9 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
       case SavedConfigEntityName.FORM_ENTITY_VALUE:
         await validateFormEntityValue(args.fieldName, args.fieldValue, tx);
         break;
+      case SavedConfigEntityName.DESK_METRICS:
+        validateDeskMetricsValue(args.fieldName, args.fieldValue);
+        break;
       default:
         throw new MutationACLError(
           `Unsupported entity name: ${args.entityName}`,
@@ -267,6 +342,9 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
           break;
         case SavedConfigEntityName.FORM_ENTITY_VALUE:
           await validateFormEntityValue(args.fieldName, args.fieldValue, tx);
+          break;
+        case SavedConfigEntityName.DESK_METRICS:
+          validateDeskMetricsValue(args.fieldName, args.fieldValue);
           break;
         default:
           throw new MutationACLError(

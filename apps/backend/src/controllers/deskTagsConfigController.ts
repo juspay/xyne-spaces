@@ -171,21 +171,43 @@ export class DeskTagsConfigController {
   };
 
   /**
-   * GET /api/channels/:channelId/tags-config/all-generated-tags
-   * Returns all distinct category:tag pairs that exist for this channel (capped at 500).
+   * GET /api/channels/:channelId/tags-config/generated-tag-categories
+   * Returns distinct AI tag categories for this channel. Cheap — runs on submenu open.
    * ACL: channel member.
    */
-  getAllGeneratedTags = async (req: Request, res: Response): Promise<void> => {
+  getGeneratedTagCategories = async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
     const userId = await this.assertAccess(req, res, channelId);
     if (!userId) return;
 
     try {
-      const rows = await tagRepository.findDistinctTagsByConfigKey(deskEmailConfigKey(channelId));
-      res.status(200).json({ tags: rows.map(r => ({ category: r.tagCategory, tag: r.tag })) });
+      const rows = await tagRepository.findDistinctTagCategoriesByConfigKey(deskEmailConfigKey(channelId));
+      res.status(200).json({ categories: rows.map(r => r.tagCategory) });
     } catch (error) {
-      logger.error('[DESK-TAGS-CONFIG] getAllGeneratedTags failed', { channelId, error });
-      res.status(500).json({ error: 'Failed to load generated tags' });
+      logger.error('[DESK-TAGS-CONFIG] getGeneratedTagCategories failed', { channelId, error });
+      res.status(500).json({ error: 'Failed to load tag categories' });
+    }
+  };
+
+  /**
+   * GET /api/channels/:channelId/tags-config/generated-tags/:tagCategory
+   * Returns distinct tags for one category. Runs on category click.
+   * ACL: channel member.
+   */
+  getGeneratedTagsByCategory = async (req: Request, res: Response): Promise<void> => {
+    const { channelId, tagCategory } = req.params;
+    const userId = await this.assertAccess(req, res, channelId);
+    if (!userId) return;
+
+    try {
+      const rows = await tagRepository.findDistinctTagsByConfigKeyAndCategory(
+        deskEmailConfigKey(channelId),
+        tagCategory,
+      );
+      res.status(200).json({ tags: rows.map(r => r.tag) });
+    } catch (error) {
+      logger.error('[DESK-TAGS-CONFIG] getGeneratedTagsByCategory failed', { channelId, tagCategory, error });
+      res.status(500).json({ error: 'Failed to load tags for category' });
     }
   };
 

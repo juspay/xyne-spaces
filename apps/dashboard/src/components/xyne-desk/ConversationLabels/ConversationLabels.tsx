@@ -9,7 +9,7 @@ import { mutators } from '../../../zero/mutators';
 import { Popover } from '../../ui/Popover/Popover';
 import { cn } from '../../../utils/classNames';
 
-export type ConversationLabelSlot = 'chips' | 'picker';
+export type ConversationLabelSlot = 'chips' | 'picker' | 'inline-picker';
 
 interface ConversationLabelsProps {
   conversationId: string;
@@ -62,7 +62,7 @@ export const ConversationLabels = ({
 
   const [catalog] = useCachedQuery(
     queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
-    { enabled: !!channelId && pickerOpen },
+    { enabled: !!channelId && (pickerOpen || slot === 'inline-picker') },
   );
 
   const appliedNames = useMemo(
@@ -200,6 +200,10 @@ export const ConversationLabels = ({
       )}
     </div>
   );
+
+  if (slot === 'inline-picker') {
+    return <>{picker}</>;
+  }
 
   if (slot === 'chips') {
     if (appliedMappings.length === 0) return null;

@@ -1,4 +1,4 @@
-import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { ReactElement, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePersistedDeskMetricsFilters } from '../../../hooks/usePersistedDeskMetricsFilters';
 import {
@@ -6,8 +6,9 @@ import {
   X,
   BarChart3,
   BarChart4,
-  AlertCircle,
+  BookmarkCheck,
   Check,
+  AlertCircle,
   Sparkles,
   ChevronLeft,
   ChevronRight,
@@ -66,6 +67,10 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
+import { useDeskMetricsSavedViews } from '../../../hooks/useDeskMetricsSavedViews';
+import { queries } from '../../../zero/queries';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { DeskSavedViewsControls } from '../DeskSavedViewsControls';
 import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/constants';
 
 export interface DeskMetricsSelectableDesk {
@@ -986,7 +991,37 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     setChartView,
     activeTab,
     setActiveTab,
+    activeViewId,
+    setActiveViewId,
+    applyView,
+    storedFilters,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
+
+  const { savedViews, saveView, deleteView, applySavedView } = useDeskMetricsSavedViews(
+    channelId,
+    applyView,
+  );
+
+  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === channelId,
+  );
+
+  // Restore active view once savedViews loads (useCachedQuery starts empty)
+  const hasRestoredView = useRef(false);
+  useEffect(() => {
+    if (hasRestoredView.current) return;
+    if (!activeViewId || savedViews.length === 0) return;
+    const view = savedViews.find(v => v.id === activeViewId);
+    if (view) {
+      hasRestoredView.current = true;
+      applySavedView(view.id);
+    } else {
+      // View was deleted externally — clear the stale id
+      setActiveViewId(null);
+      hasRestoredView.current = true;
+    }
+  }, [savedViews, activeViewId, applySavedView, setActiveViewId]);
 
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
@@ -1366,505 +1401,351 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={handleOpenChange}
-      title='Desk Metrics'
-      className={cn(
-        'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
-        'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
-        'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
-      )}
-    >
-      <div className='relative h-full w-full'>
-        <button
-          type='button'
-          onClick={onClose}
-          className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
-          aria-label='Close desk metrics'
-          data-track-category='DeskMetrics'
-          data-track-name='CloseButton'
-        >
-          <X size={16} />
-        </button>
-        <div className='isolate flex h-full w-full flex-col overflow-hidden rounded-l-[16px] border border-desk-border bg-popover shadow-2xl dark:border-border'>
-          {/* Header */}
-          <div className='grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-desk-border px-6 pt-4 dark:border-border'>
-            <div className='flex min-w-0 items-center gap-4 pr-12'>
-              <div className='flex items-center gap-2'>
-                <BarChart3 size={18} className='text-desk-accent' />
-                <span className='text-base font-semibold text-foreground'>
-                  {isMultiDesk
-                    ? `${selectedDeskIds.length} desks — Metrics`
-                    : channelName
-                      ? `${channelName} — Metrics`
-                      : 'Desk Metrics'}
-                </span>
-              </div>
-              <div
-                role='tablist'
-                aria-label='Metrics view'
-                className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'
-              >
-                {(
-                  [
-                    { id: 'overview', label: 'Overview' },
-                    { id: 'agents', label: 'Agents' },
-                    ...(isMultiDesk ? ([{ id: 'desks', label: 'By desk' }] as const) : []),
-                  ] as const
-                ).map(({ id, label }) => (
-                  <button
-                    key={id}
-                    type='button'
-                    role='tab'
-                    aria-selected={activeTab === id}
-                    onClick={() => setActiveTab(id)}
-                    data-track-category='DeskMetrics'
-                    data-track-name={
-                      id === 'overview'
-                        ? 'TabOverview'
-                        : id === 'agents'
-                          ? 'TabAgents'
-                          : 'TabByDesk'
-                    }
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                      activeTab === id
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {id === 'overview' ? (
-                      <BarChart3 size={13} />
-                    ) : id === 'agents' ? (
-                      <Users size={13} />
-                    ) : (
-                      <Layers size={13} />
-                    )}
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className='contents'>
-              <div className='col-span-2 row-start-2 -mx-6 flex min-w-0 flex-wrap items-center justify-start gap-3 border-t border-desk-border bg-muted/20 px-6 py-3 dark:border-border'>
-                {availableDesks.length > 1 && (
-                  <Popover
-                    open={deskPickerOpen}
-                    onOpenChange={openState => {
-                      setDeskPickerOpen(openState);
-                      if (!openState) setDeskSearch('');
-                    }}
-                    align='start'
-                    sideOffset={6}
-                    className='p-0'
-                    trigger={
-                      <button
-                        type='button'
-                        className='flex h-[32px] w-[150px] max-w-[150px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
-                        data-track-category='DeskMetrics'
-                        data-track-name='DeskSelector'
-                      >
-                        <Layers size={14} className='shrink-0 text-muted-foreground' />
-                        <span className='flex-1 truncate text-left text-sm'>
-                          {isMultiDesk ? `${selectedDeskIds.length} desks` : '1 desk'}
-                        </span>
-                        {comparedChannelIds.length > 0 ? (
-                          <X
-                            size={12}
-                            className='shrink-0 text-muted-foreground hover:text-foreground'
-                            onClick={e => {
-                              e.stopPropagation();
-                              setComparedChannelIds([]);
-                              if (activeTab === 'desks') setActiveTab('overview');
-                            }}
-                          />
-                        ) : (
-                          <ChevronDown size={12} className='shrink-0 text-muted-foreground' />
-                        )}
-                      </button>
-                    }
-                  >
-                    <div className='w-[260px]'>
-                      <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
-                        <Search size={14} className='shrink-0 text-muted-foreground' />
-                        <input
-                          type='text'
-                          value={deskSearch}
-                          onChange={e => setDeskSearch(e.target.value)}
-                          onKeyDown={e => e.stopPropagation()}
-                          placeholder='Search desks…'
-                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-                          data-track-category='DeskMetrics'
-                          data-track-name='SearchDesks'
-                        />
-                      </div>
-                      <div
-                        className='max-h-[260px] overflow-y-auto py-1'
-                        onWheel={e => e.stopPropagation()}
-                      >
-                        {((): ReactElement | ReactElement[] => {
-                          const query = deskSearch.trim().toLowerCase();
-                          const visible = availableDesks.filter(
-                            d => !query || d.name.toLowerCase().includes(query),
-                          );
-                          if (visible.length === 0) {
-                            return (
-                              <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
-                                No desks match
-                              </div>
-                            );
-                          }
-                          return visible.map(desk => {
-                            const isPrimary = desk.id === channelId;
-                            const isSelected = selectedDeskIds.includes(desk.id);
-                            const isDisabledByLimit = !isSelected && isDeskSelectionAtLimit;
-                            return (
-                              <label
-                                key={desk.id}
-                                className={cn(
-                                  'flex items-center gap-2 px-3 py-1.5 text-sm',
-                                  isPrimary && 'cursor-default opacity-70',
-                                  isDisabledByLimit && 'cursor-not-allowed opacity-50',
-                                  !isPrimary &&
-                                    !isDisabledByLimit &&
-                                    'cursor-pointer hover:bg-accent',
-                                )}
-                                title={
-                                  isPrimary
-                                    ? 'The desk this dashboard was opened from is always included'
-                                    : isDisabledByLimit
-                                      ? `You can compare up to ${DESK_METRICS_MAX_AGGREGATE_DESKS} desks at once`
-                                      : undefined
-                                }
-                              >
-                                <input
-                                  type='checkbox'
-                                  checked={isSelected}
-                                  disabled={isPrimary || isDisabledByLimit}
-                                  onChange={() => toggleDesk(desk.id)}
-                                  className='h-3.5 w-3.5 accent-desk-accent'
-                                  data-track-category='DeskMetrics'
-                                  data-track-name='ToggleDesk'
-                                />
-                                <span className='flex-1 truncate'>{desk.name}</span>
-                                {isPrimary && (
-                                  <span className='shrink-0 text-[10px] uppercase text-muted-foreground'>
-                                    current
-                                  </span>
-                                )}
-                              </label>
-                            );
-                          });
-                        })()}
-                      </div>
-                      <div
-                        className={cn(
-                          'border-t border-border px-3 py-2 text-xs text-muted-foreground',
-                          isDeskSelectionAtLimit && 'text-amber-600 dark:text-amber-400',
-                        )}
-                      >
-                        {selectedDeskIds.length} of {DESK_METRICS_MAX_AGGREGATE_DESKS} desks
-                        selected
-                        {isDeskSelectionAtLimit && ' — limit reached'}
-                      </div>
-                    </div>
-                  </Popover>
-                )}
-
-                {/* Assignee filter */}
-                <Popover
-                  open={assigneePopoverOpen}
-                  onOpenChange={setAssigneePopoverOpen}
-                  align='start'
-                  sideOffset={6}
-                  collisionPadding={12}
-                  className='border-0 bg-transparent p-0 shadow-none'
-                  trigger={
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={handleOpenChange}
+        title='Desk Metrics'
+        className={cn(
+          'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
+          'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
+          'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+        )}
+      >
+        <div className='relative h-full w-full'>
+          <button
+            type='button'
+            onClick={onClose}
+            className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
+            aria-label='Close desk metrics'
+            data-track-category='DeskMetrics'
+            data-track-name='CloseButton'
+          >
+            <X size={16} />
+          </button>
+          <div className='isolate flex h-full w-full flex-col overflow-hidden rounded-l-[16px] border border-desk-border bg-popover shadow-2xl dark:border-border'>
+            {/* Header */}
+            <div className='grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-desk-border px-6 pt-4 dark:border-border'>
+              <div className='flex min-w-0 items-center gap-3 pr-24'>
+                <div className='flex items-center gap-2'>
+                  <BarChart3 size={18} className='text-desk-accent' />
+                  <span className='text-base font-semibold text-foreground'>
+                    {isMultiDesk
+                      ? `${selectedDeskIds.length} desks — Metrics`
+                      : channelName
+                        ? `${channelName} — Metrics`
+                        : 'Desk Metrics'}
+                  </span>
+                </div>
+                {activeViewId && savedViews.find(v => v.id === activeViewId) && (
+                  <div className='flex items-center gap-1 rounded-full border border-desk-border bg-accent px-2.5 py-0.5 text-xs font-medium text-foreground'>
+                    <BookmarkCheck size={11} className='shrink-0 text-primary' />
+                    <span className='max-w-[120px] truncate'>
+                      {savedViews.find(v => v.id === activeViewId)?.name}
+                    </span>
                     <button
                       type='button'
-                      className='flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
+                      onClick={() => setActiveViewId(null)}
+                      className='ml-0.5 text-muted-foreground hover:text-foreground'
+                      aria-label='Dismiss saved view'
                       data-track-category='DeskMetrics'
-                      data-track-name='AssigneeFilter'
+                      data-track-name='DismissSavedView'
                     >
-                      <UserCircle2 size={14} className='shrink-0 text-muted-foreground' />
-                      <span className='font-medium'>Assignee</span>
-                      {selectedAssigneeIds.length > 0 && (
-                        <span className='ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'>
-                          {selectedAssigneeIds.length}
-                        </span>
-                      )}
-                      <ChevronDown
-                        size={12}
-                        className={cn(
-                          'ml-auto shrink-0 text-muted-foreground transition-transform',
-                          assigneePopoverOpen && 'rotate-180',
-                        )}
-                      />
+                      <X size={10} />
                     </button>
-                  }
+                  </div>
+                )}
+                <div
+                  role='tablist'
+                  aria-label='Metrics view'
+                  className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'
                 >
-                  <UserSubmenu
-                    selectedUsers={selectedAssigneeIds}
-                    onChange={setSelectedAssigneeIds}
-                    label='Assignee'
-                    channelId={channelId}
-                    demoteDeactivated
-                  />
-                </Popover>
-
-                {/* Kanban-style additional filters */}
-                <>
-                  <Popover
-                    open={customFieldPopoverOpen}
-                    onOpenChange={nextOpen => {
-                      setCustomFieldPopoverOpen(nextOpen);
-                      if (!nextOpen) {
-                        setActiveSubmenu(null);
-                        setFilterSearch('');
+                  {(
+                    [
+                      { id: 'overview', label: 'Overview' },
+                      { id: 'agents', label: 'Agents' },
+                      ...(isMultiDesk ? ([{ id: 'desks', label: 'By desk' }] as const) : []),
+                    ] as const
+                  ).map(({ id, label }) => (
+                    <button
+                      key={id}
+                      type='button'
+                      role='tab'
+                      aria-selected={activeTab === id}
+                      onClick={() => setActiveTab(id)}
+                      data-track-category='DeskMetrics'
+                      data-track-name={
+                        id === 'overview'
+                          ? 'TabOverview'
+                          : id === 'agents'
+                            ? 'TabAgents'
+                            : 'TabByDesk'
                       }
-                    }}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
+                        activeTab === id
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {id === 'overview' ? (
+                        <BarChart3 size={13} />
+                      ) : id === 'agents' ? (
+                        <Users size={13} />
+                      ) : (
+                        <Layers size={13} />
+                      )}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Save view + Saved views buttons */}
+                <div className='ml-auto flex items-center gap-1.5'>
+                  <DeskSavedViewsControls
+                    savedViews={savedViews}
+                    activeViewId={activeViewId}
+                    onActiveViewChange={setActiveViewId}
+                    currentUserId={user?.id}
+                    isChannelAdmin={isChannelAdmin}
+                    onApply={applySavedView}
+                    onSave={(name, visibility) => saveView(name, storedFilters, visibility)}
+                    onDelete={deleteView}
+                    trackCategory='DeskMetrics'
+                    align='end'
+                  />
+                </div>
+              </div>
+              <div className='contents'>
+                <div className='col-span-2 row-start-2 -mx-6 flex min-w-0 flex-wrap items-center justify-start gap-3 border-t border-desk-border bg-muted/20 px-6 py-3 dark:border-border'>
+                  {availableDesks.length > 1 && (
+                    <Popover
+                      open={deskPickerOpen}
+                      onOpenChange={openState => {
+                        setDeskPickerOpen(openState);
+                        if (!openState) setDeskSearch('');
+                      }}
+                      align='start'
+                      sideOffset={6}
+                      className='p-0'
+                      trigger={
+                        <button
+                          type='button'
+                          className='flex h-[32px] w-[150px] max-w-[150px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
+                          data-track-category='DeskMetrics'
+                          data-track-name='DeskSelector'
+                        >
+                          <Layers size={14} className='shrink-0 text-muted-foreground' />
+                          <span className='flex-1 truncate text-left text-sm'>
+                            {isMultiDesk ? `${selectedDeskIds.length} desks` : '1 desk'}
+                          </span>
+                          {comparedChannelIds.length > 0 ? (
+                            <X
+                              size={12}
+                              className='shrink-0 text-muted-foreground hover:text-foreground'
+                              onClick={e => {
+                                e.stopPropagation();
+                                setComparedChannelIds([]);
+                                if (activeTab === 'desks') setActiveTab('overview');
+                              }}
+                            />
+                          ) : (
+                            <ChevronDown size={12} className='shrink-0 text-muted-foreground' />
+                          )}
+                        </button>
+                      }
+                    >
+                      <div className='w-[260px]'>
+                        <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
+                          <Search size={14} className='shrink-0 text-muted-foreground' />
+                          <input
+                            type='text'
+                            value={deskSearch}
+                            onChange={e => setDeskSearch(e.target.value)}
+                            onKeyDown={e => e.stopPropagation()}
+                            placeholder='Search desks…'
+                            className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                            data-track-category='DeskMetrics'
+                            data-track-name='SearchDesks'
+                          />
+                        </div>
+                        <div
+                          className='max-h-[260px] overflow-y-auto py-1'
+                          onWheel={e => e.stopPropagation()}
+                        >
+                          {((): ReactElement | ReactElement[] => {
+                            const query = deskSearch.trim().toLowerCase();
+                            const visible = availableDesks.filter(
+                              d => !query || d.name.toLowerCase().includes(query),
+                            );
+                            if (visible.length === 0) {
+                              return (
+                                <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
+                                  No desks match
+                                </div>
+                              );
+                            }
+                            return visible.map(desk => {
+                              const isPrimary = desk.id === channelId;
+                              const isSelected = selectedDeskIds.includes(desk.id);
+                              const isDisabledByLimit = !isSelected && isDeskSelectionAtLimit;
+                              return (
+                                <label
+                                  key={desk.id}
+                                  className={cn(
+                                    'flex items-center gap-2 px-3 py-1.5 text-sm',
+                                    isPrimary && 'cursor-default opacity-70',
+                                    isDisabledByLimit && 'cursor-not-allowed opacity-50',
+                                    !isPrimary &&
+                                      !isDisabledByLimit &&
+                                      'cursor-pointer hover:bg-accent',
+                                  )}
+                                  title={
+                                    isPrimary
+                                      ? 'The desk this dashboard was opened from is always included'
+                                      : isDisabledByLimit
+                                        ? `You can compare up to ${DESK_METRICS_MAX_AGGREGATE_DESKS} desks at once`
+                                        : undefined
+                                  }
+                                >
+                                  <input
+                                    type='checkbox'
+                                    checked={isSelected}
+                                    disabled={isPrimary || isDisabledByLimit}
+                                    onChange={() => toggleDesk(desk.id)}
+                                    className='h-3.5 w-3.5 accent-desk-accent'
+                                    data-track-category='DeskMetrics'
+                                    data-track-name='ToggleDesk'
+                                  />
+                                  <span className='flex-1 truncate'>{desk.name}</span>
+                                  {isPrimary && (
+                                    <span className='shrink-0 text-[10px] uppercase text-muted-foreground'>
+                                      current
+                                    </span>
+                                  )}
+                                </label>
+                              );
+                            });
+                          })()}
+                        </div>
+                        <div
+                          className={cn(
+                            'border-t border-border px-3 py-2 text-xs text-muted-foreground',
+                            isDeskSelectionAtLimit && 'text-amber-600 dark:text-amber-400',
+                          )}
+                        >
+                          {selectedDeskIds.length} of {DESK_METRICS_MAX_AGGREGATE_DESKS} desks
+                          selected
+                          {isDeskSelectionAtLimit && ' — limit reached'}
+                        </div>
+                      </div>
+                    </Popover>
+                  )}
+
+                  {/* Assignee filter */}
+                  <Popover
+                    open={assigneePopoverOpen}
+                    onOpenChange={setAssigneePopoverOpen}
                     align='start'
                     sideOffset={6}
                     collisionPadding={12}
-                    className='w-56 rounded-lg border border-border bg-background p-0 shadow-lg'
-                    onInteractOutside={event => {
-                      const target = event.target;
-                      if (
-                        target instanceof Element &&
-                        target.closest('[data-custom-field-submenu="true"]')
-                      ) {
-                        event.preventDefault();
-                      }
-                    }}
+                    className='border-0 bg-transparent p-0 shadow-none'
                     trigger={
                       <button
                         type='button'
-                        className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
+                        className='flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
                         data-track-category='DeskMetrics'
-                        data-track-name='OpenCustomFieldFilters'
+                        data-track-name='AssigneeFilter'
                       >
-                        <ListFilter size={13} className='shrink-0' />
-                        <span className='font-medium'>More Filters</span>
-                        {hasMoreFiltersActive && (
-                          <span className='h-1.5 w-1.5 rounded-full bg-blue-500' />
+                        <UserCircle2 size={14} className='shrink-0 text-muted-foreground' />
+                        <span className='font-medium'>Assignee</span>
+                        {selectedAssigneeIds.length > 0 && (
+                          <span className='ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'>
+                            {selectedAssigneeIds.length}
+                          </span>
                         )}
+                        <ChevronDown
+                          size={12}
+                          className={cn(
+                            'ml-auto shrink-0 text-muted-foreground transition-transform',
+                            assigneePopoverOpen && 'rotate-180',
+                          )}
+                        />
                       </button>
                     }
                   >
-                    <>
-                      <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
-                        <Search size={14} className='shrink-0 text-muted-foreground' />
-                        <input
-                          type='text'
-                          value={filterSearch}
-                          onChange={e => setFilterSearch(e.target.value)}
-                          onKeyDown={e => e.stopPropagation()}
-                          placeholder='Search filters…'
-                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                    <UserSubmenu
+                      selectedUsers={selectedAssigneeIds}
+                      onChange={setSelectedAssigneeIds}
+                      label='Assignee'
+                      channelId={channelId}
+                      demoteDeactivated
+                    />
+                  </Popover>
+
+                  {/* Kanban-style additional filters */}
+                  <>
+                    <Popover
+                      open={customFieldPopoverOpen}
+                      onOpenChange={nextOpen => {
+                        setCustomFieldPopoverOpen(nextOpen);
+                        if (!nextOpen) {
+                          setActiveSubmenu(null);
+                          setFilterSearch('');
+                        }
+                      }}
+                      align='start'
+                      sideOffset={6}
+                      collisionPadding={12}
+                      className='w-56 rounded-lg border border-border bg-background p-0 shadow-lg'
+                      onInteractOutside={event => {
+                        const target = event.target;
+                        if (
+                          target instanceof Element &&
+                          target.closest('[data-custom-field-submenu="true"]')
+                        ) {
+                          event.preventDefault();
+                        }
+                      }}
+                      trigger={
+                        <button
+                          type='button'
+                          className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
                           data-track-category='DeskMetrics'
-                          data-track-name='SearchFilters'
-                        />
-                      </div>
-                      <div
-                        className='max-h-[360px] overflow-y-auto py-1'
-                        onWheel={e => e.stopPropagation()}
-                        onTouchMove={e => e.stopPropagation()}
-                      >
-                        {(!filterSearch || 'priority'.includes(filterSearch.toLowerCase())) && (
-                          <PopoverPrimitive.Root
-                            open={activeSubmenu === '__priority'}
-                            onOpenChange={nextOpen =>
-                              setActiveSubmenu(nextOpen ? '__priority' : null)
-                            }
-                          >
-                            <PopoverPrimitive.Trigger asChild>
-                              <button
-                                type='button'
-                                className={cn(
-                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                  activeSubmenu === '__priority' && 'bg-muted font-medium',
-                                )}
-                                data-track-category='DeskMetrics'
-                                data-track-name='OpenPriorityFilterSubmenu'
-                              >
-                                <div className='flex min-w-0 items-center gap-3'>
-                                  <BarChart4 size={16} className='shrink-0' />
-                                  <span>Priority</span>
-                                  {selectedPriorities.length > 0 && (
-                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                  )}
-                                </div>
-                                <ChevronRight
-                                  size={16}
-                                  className='shrink-0 text-muted-foreground'
-                                />
-                              </button>
-                            </PopoverPrimitive.Trigger>
-                            <PopoverPrimitive.Portal>
-                              <PopoverPrimitive.Content
-                                side='right'
-                                align='start'
-                                sideOffset={4}
-                                collisionPadding={12}
-                                className='z-[70] outline-none'
-                                data-custom-field-submenu='true'
-                                onOpenAutoFocus={event => event.preventDefault()}
-                              >
-                                <PrioritySubmenu
-                                  selectedPriorities={selectedPriorities}
-                                  onChange={setSelectedPriorities}
-                                />
-                              </PopoverPrimitive.Content>
-                            </PopoverPrimitive.Portal>
-                          </PopoverPrimitive.Root>
-                        )}
-                        {(!filterSearch || 'user groups'.includes(filterSearch.toLowerCase())) && (
-                          <PopoverPrimitive.Root
-                            open={activeSubmenu === '__userGroups'}
-                            onOpenChange={nextOpen =>
-                              setActiveSubmenu(nextOpen ? '__userGroups' : null)
-                            }
-                          >
-                            <PopoverPrimitive.Trigger asChild>
-                              <button
-                                type='button'
-                                className={cn(
-                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                  activeSubmenu === '__userGroups' && 'bg-muted font-medium',
-                                )}
-                                data-track-category='DeskMetrics'
-                                data-track-name='OpenUserGroupFilterSubmenu'
-                              >
-                                <div className='flex min-w-0 items-center gap-3'>
-                                  <Users size={16} className='shrink-0' />
-                                  <span>User Groups</span>
-                                  {selectedUserGroupIds.length > 0 && (
-                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                  )}
-                                </div>
-                                <ChevronRight
-                                  size={16}
-                                  className='shrink-0 text-muted-foreground'
-                                />
-                              </button>
-                            </PopoverPrimitive.Trigger>
-                            <PopoverPrimitive.Portal>
-                              <PopoverPrimitive.Content
-                                side='right'
-                                align='start'
-                                sideOffset={4}
-                                collisionPadding={12}
-                                className='z-[70] outline-none'
-                                data-custom-field-submenu='true'
-                                onOpenAutoFocus={event => event.preventDefault()}
-                              >
-                                <UserGroupSubmenu
-                                  selectedGroups={selectedUserGroupIds}
-                                  onChange={setSelectedUserGroupIds}
-                                  onClose={() => setActiveSubmenu(null)}
-                                />
-                              </PopoverPrimitive.Content>
-                            </PopoverPrimitive.Portal>
-                          </PopoverPrimitive.Root>
-                        )}
-                        {(!filterSearch || 'tag category'.includes(filterSearch.toLowerCase())) && (
-                          <PopoverPrimitive.Root
-                            open={activeSubmenu === '__tagCategory'}
-                            onOpenChange={nextOpen =>
-                              setActiveSubmenu(nextOpen ? '__tagCategory' : null)
-                            }
-                          >
-                            <PopoverPrimitive.Trigger asChild>
-                              <button
-                                type='button'
-                                className={cn(
-                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                  activeSubmenu === '__tagCategory' && 'bg-muted font-medium',
-                                )}
-                                data-track-category='DeskMetrics'
-                                data-track-name='OpenTagCategorySubmenu'
-                              >
-                                <div className='flex min-w-0 items-center gap-3'>
-                                  <Tag size={16} className='shrink-0' />
-                                  <span>Tag Category</span>
-                                  {selectedTagCategory !== null && (
-                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                  )}
-                                </div>
-                                <ChevronRight
-                                  size={16}
-                                  className='shrink-0 text-muted-foreground'
-                                />
-                              </button>
-                            </PopoverPrimitive.Trigger>
-                            <PopoverPrimitive.Portal>
-                              <PopoverPrimitive.Content
-                                side='right'
-                                align='start'
-                                sideOffset={4}
-                                collisionPadding={12}
-                                className='z-[70] outline-none'
-                                data-custom-field-submenu='true'
-                                onOpenAutoFocus={event => event.preventDefault()}
-                              >
-                                <div className='w-56 rounded-[10px] border border-border bg-background shadow-lg'>
-                                  <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                                    Select Category
-                                  </div>
-                                  <div
-                                    className='max-h-72 overflow-y-auto p-1'
-                                    onWheel={e => e.stopPropagation()}
-                                    onTouchMove={e => e.stopPropagation()}
-                                  >
-                                    {(data?.tagCategories ?? []).length === 0 ? (
-                                      <div className='p-6 text-center text-sm text-muted-foreground'>
-                                        No categories
-                                      </div>
-                                    ) : (
-                                      <div className='space-y-0.5'>
-                                        {(data?.tagCategories ?? []).map(tc => (
-                                          <button
-                                            key={tc.tagCategory}
-                                            type='button'
-                                            onClick={() => {
-                                              setSelectedTagCategory(
-                                                selectedTagCategory === tc.tagCategory
-                                                  ? null
-                                                  : tc.tagCategory,
-                                              );
-                                              setActiveSubmenu(null);
-                                            }}
-                                            data-track-category='DeskMetrics'
-                                            data-track-name='SelectTagCategory'
-                                            className={cn(
-                                              'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
-                                              selectedTagCategory === tc.tagCategory
-                                                ? 'bg-accent text-accent-foreground'
-                                                : 'text-foreground hover:bg-muted',
-                                            )}
-                                          >
-                                            <span className='truncate'>{tc.tagCategory}</span>
-                                            <span className='ml-2 shrink-0 text-xs text-muted-foreground'>
-                                              {tc.count}
-                                            </span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </PopoverPrimitive.Content>
-                            </PopoverPrimitive.Portal>
-                          </PopoverPrimitive.Root>
-                        )}
-                        {/* Tags within selected category */}
-                        {selectedTagCategory !== null &&
-                          (!filterSearch || 'tags'.includes(filterSearch.toLowerCase())) && (
+                          data-track-name='OpenCustomFieldFilters'
+                        >
+                          <ListFilter size={13} className='shrink-0' />
+                          <span className='font-medium'>More Filters</span>
+                          {hasMoreFiltersActive && (
+                            <span className='h-1.5 w-1.5 rounded-full bg-blue-500' />
+                          )}
+                        </button>
+                      }
+                    >
+                      <>
+                        <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
+                          <Search size={14} className='shrink-0 text-muted-foreground' />
+                          <input
+                            type='text'
+                            value={filterSearch}
+                            onChange={e => setFilterSearch(e.target.value)}
+                            onKeyDown={e => e.stopPropagation()}
+                            placeholder='Search filters…'
+                            className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                            data-track-category='DeskMetrics'
+                            data-track-name='SearchFilters'
+                          />
+                        </div>
+                        <div
+                          className='max-h-[360px] overflow-y-auto py-1'
+                          onWheel={e => e.stopPropagation()}
+                          onTouchMove={e => e.stopPropagation()}
+                        >
+                          {(!filterSearch || 'priority'.includes(filterSearch.toLowerCase())) && (
                             <PopoverPrimitive.Root
-                              open={activeSubmenu === '__tags'}
+                              open={activeSubmenu === '__priority'}
                               onOpenChange={nextOpen =>
-                                setActiveSubmenu(nextOpen ? '__tags' : null)
+                                setActiveSubmenu(nextOpen ? '__priority' : null)
                               }
                             >
                               <PopoverPrimitive.Trigger asChild>
@@ -1872,15 +1753,114 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   type='button'
                                   className={cn(
                                     'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                    activeSubmenu === '__tags' && 'bg-muted font-medium',
+                                    activeSubmenu === '__priority' && 'bg-muted font-medium',
                                   )}
                                   data-track-category='DeskMetrics'
-                                  data-track-name='OpenTagsSubmenu'
+                                  data-track-name='OpenPriorityFilterSubmenu'
+                                >
+                                  <div className='flex min-w-0 items-center gap-3'>
+                                    <BarChart4 size={16} className='shrink-0' />
+                                    <span>Priority</span>
+                                    {selectedPriorities.length > 0 && (
+                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                    )}
+                                  </div>
+                                  <ChevronRight
+                                    size={16}
+                                    className='shrink-0 text-muted-foreground'
+                                  />
+                                </button>
+                              </PopoverPrimitive.Trigger>
+                              <PopoverPrimitive.Portal>
+                                <PopoverPrimitive.Content
+                                  side='right'
+                                  align='start'
+                                  sideOffset={4}
+                                  collisionPadding={12}
+                                  className='z-[70] outline-none'
+                                  data-custom-field-submenu='true'
+                                  onOpenAutoFocus={event => event.preventDefault()}
+                                >
+                                  <PrioritySubmenu
+                                    selectedPriorities={selectedPriorities}
+                                    onChange={setSelectedPriorities}
+                                  />
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          )}
+                          {(!filterSearch ||
+                            'user groups'.includes(filterSearch.toLowerCase())) && (
+                            <PopoverPrimitive.Root
+                              open={activeSubmenu === '__userGroups'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__userGroups' : null)
+                              }
+                            >
+                              <PopoverPrimitive.Trigger asChild>
+                                <button
+                                  type='button'
+                                  className={cn(
+                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                    activeSubmenu === '__userGroups' && 'bg-muted font-medium',
+                                  )}
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='OpenUserGroupFilterSubmenu'
+                                >
+                                  <div className='flex min-w-0 items-center gap-3'>
+                                    <Users size={16} className='shrink-0' />
+                                    <span>User Groups</span>
+                                    {selectedUserGroupIds.length > 0 && (
+                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                    )}
+                                  </div>
+                                  <ChevronRight
+                                    size={16}
+                                    className='shrink-0 text-muted-foreground'
+                                  />
+                                </button>
+                              </PopoverPrimitive.Trigger>
+                              <PopoverPrimitive.Portal>
+                                <PopoverPrimitive.Content
+                                  side='right'
+                                  align='start'
+                                  sideOffset={4}
+                                  collisionPadding={12}
+                                  className='z-[70] outline-none'
+                                  data-custom-field-submenu='true'
+                                  onOpenAutoFocus={event => event.preventDefault()}
+                                >
+                                  <UserGroupSubmenu
+                                    selectedGroups={selectedUserGroupIds}
+                                    onChange={setSelectedUserGroupIds}
+                                    onClose={() => setActiveSubmenu(null)}
+                                  />
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          )}
+                          {(!filterSearch ||
+                            'tag category'.includes(filterSearch.toLowerCase())) && (
+                            <PopoverPrimitive.Root
+                              open={activeSubmenu === '__tagCategory'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__tagCategory' : null)
+                              }
+                            >
+                              <PopoverPrimitive.Trigger asChild>
+                                <button
+                                  type='button'
+                                  className={cn(
+                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                    activeSubmenu === '__tagCategory' && 'bg-muted font-medium',
+                                  )}
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='OpenTagCategorySubmenu'
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Tag size={16} className='shrink-0' />
-                                    <span>Tags</span>
-                                    {selectedTagValues.length > 0 && (
+                                    <span>Tag Category</span>
+                                    {selectedTagCategory !== null && (
                                       <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
                                     )}
                                   </div>
@@ -1900,979 +1880,1089 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   data-custom-field-submenu='true'
                                   onOpenAutoFocus={event => event.preventDefault()}
                                 >
-                                  <TagsInCategorySubmenu
-                                    availableTags={stableTagsInCategory}
-                                    category={selectedTagCategory}
-                                    selectedTags={selectedTagValues}
-                                    onChange={setSelectedTagValues}
-                                  />
-                                </PopoverPrimitive.Content>
-                              </PopoverPrimitive.Portal>
-                            </PopoverPrimitive.Root>
-                          )}
-
-                        {!isMultiDesk &&
-                          stageOptions.length > 0 &&
-                          (!filterSearch || 'stages'.includes(filterSearch.toLowerCase())) && (
-                            <PopoverPrimitive.Root
-                              open={activeSubmenu === '__stages'}
-                              onOpenChange={nextOpen =>
-                                setActiveSubmenu(nextOpen ? '__stages' : null)
-                              }
-                            >
-                              <PopoverPrimitive.Trigger asChild>
-                                <button
-                                  type='button'
-                                  className={cn(
-                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                    activeSubmenu === '__stages' && 'bg-muted font-medium',
-                                  )}
-                                  data-track-category='DeskMetrics'
-                                  data-track-name='OpenStageFilterSubmenu'
-                                >
-                                  <div className='flex min-w-0 items-center gap-3'>
-                                    <Circle size={16} className='shrink-0' />
-                                    <span>Stages</span>
-                                    {selectedStageNames.length > 0 && (
-                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                    )}
-                                  </div>
-                                  <ChevronRight
-                                    size={16}
-                                    className='shrink-0 text-muted-foreground'
-                                  />
-                                </button>
-                              </PopoverPrimitive.Trigger>
-                              <PopoverPrimitive.Portal>
-                                <PopoverPrimitive.Content
-                                  side='right'
-                                  align='start'
-                                  sideOffset={4}
-                                  collisionPadding={12}
-                                  className='z-[70] outline-none'
-                                  data-custom-field-submenu='true'
-                                  onOpenAutoFocus={event => event.preventDefault()}
-                                >
-                                  <StagesSubmenu
-                                    selectedStages={selectedStageNames}
-                                    onChange={setSelectedStageNames}
-                                    availableStages={[...stageOptions]}
-                                  />
-                                </PopoverPrimitive.Content>
-                              </PopoverPrimitive.Portal>
-                            </PopoverPrimitive.Root>
-                          )}
-                        {!isMultiDesk &&
-                          (!filterSearch || 'ai category'.includes(filterSearch.toLowerCase())) && (
-                            <PopoverPrimitive.Root
-                              open={activeSubmenu === '__aiCategory'}
-                              onOpenChange={nextOpen =>
-                                setActiveSubmenu(nextOpen ? '__aiCategory' : null)
-                              }
-                            >
-                              <PopoverPrimitive.Trigger asChild>
-                                <button
-                                  type='button'
-                                  className={cn(
-                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                    activeSubmenu === '__aiCategory' && 'bg-muted font-medium',
-                                  )}
-                                  data-track-category='DeskMetrics'
-                                  data-track-name='OpenAICategoryFilterSubmenu'
-                                >
-                                  <div className='flex min-w-0 items-center gap-3'>
-                                    <Sparkles size={16} className='shrink-0' />
-                                    <span>AI Category</span>
-                                    {selectedAiCategories.length > 0 && (
-                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                    )}
-                                  </div>
-                                  <ChevronRight
-                                    size={16}
-                                    className='shrink-0 text-muted-foreground'
-                                  />
-                                </button>
-                              </PopoverPrimitive.Trigger>
-                              <PopoverPrimitive.Portal>
-                                <PopoverPrimitive.Content
-                                  side='right'
-                                  align='start'
-                                  sideOffset={4}
-                                  collisionPadding={12}
-                                  className='z-[70] outline-none'
-                                  data-custom-field-submenu='true'
-                                  onOpenAutoFocus={event => event.preventDefault()}
-                                >
-                                  <AICategorySubmenu
-                                    selectedCategories={selectedAiCategories}
-                                    onChange={setSelectedAiCategories}
-                                    availableCategories={[
-                                      ...new Set([
-                                        ...availableAiCategories,
-                                        ...selectedAiCategories,
-                                      ]),
-                                    ]}
-                                  />
-                                </PopoverPrimitive.Content>
-                              </PopoverPrimitive.Portal>
-                            </PopoverPrimitive.Root>
-                          )}
-                        {!isMultiDesk &&
-                          availableCustomFields
-                            .filter(
-                              def =>
-                                !filterSearch ||
-                                def.fieldName.toLowerCase().includes(filterSearch.toLowerCase()),
-                            )
-                            .map(definition => {
-                              const key = definition.fieldName;
-                              const FieldIcon = getIconForFieldType(definition.fieldType);
-                              const isOpen = activeSubmenu === key;
-                              const isActive = activeCustomFieldKeys.includes(key);
-
-                              return (
-                                <PopoverPrimitive.Root
-                                  key={key}
-                                  open={isOpen}
-                                  onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? key : null)}
-                                >
-                                  <PopoverPrimitive.Trigger asChild>
-                                    <button
-                                      type='button'
-                                      className={cn(
-                                        'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                        isOpen && 'bg-muted font-medium',
+                                  <div className='w-56 rounded-[10px] border border-border bg-background shadow-lg'>
+                                    <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                                      Select Category
+                                    </div>
+                                    <div
+                                      className='max-h-72 overflow-y-auto p-1'
+                                      onWheel={e => e.stopPropagation()}
+                                      onTouchMove={e => e.stopPropagation()}
+                                    >
+                                      {(data?.tagCategories ?? []).length === 0 ? (
+                                        <div className='p-6 text-center text-sm text-muted-foreground'>
+                                          No categories
+                                        </div>
+                                      ) : (
+                                        <div className='space-y-0.5'>
+                                          {(data?.tagCategories ?? []).map(tc => (
+                                            <button
+                                              key={tc.tagCategory}
+                                              type='button'
+                                              onClick={() => {
+                                                setSelectedTagCategory(
+                                                  selectedTagCategory === tc.tagCategory
+                                                    ? null
+                                                    : tc.tagCategory,
+                                                );
+                                                setActiveSubmenu(null);
+                                              }}
+                                              data-track-category='DeskMetrics'
+                                              data-track-name='SelectTagCategory'
+                                              className={cn(
+                                                'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
+                                                selectedTagCategory === tc.tagCategory
+                                                  ? 'bg-accent text-accent-foreground'
+                                                  : 'text-foreground hover:bg-muted',
+                                              )}
+                                            >
+                                              <span className='truncate'>{tc.tagCategory}</span>
+                                              <span className='ml-2 shrink-0 text-xs text-muted-foreground'>
+                                                {tc.count}
+                                              </span>
+                                            </button>
+                                          ))}
+                                        </div>
                                       )}
-                                      data-track-category='DeskMetrics'
-                                      data-track-name='OpenCustomFieldFilterSubmenu'
-                                      data-track-metadata={JSON.stringify({ fieldName: key })}
-                                    >
-                                      <div className='flex min-w-0 items-center gap-3'>
-                                        <FieldIcon className='h-4 w-4 shrink-0' />
-                                        <span className='truncate' title={key}>
-                                          {key}
-                                        </span>
-                                        {isActive && (
-                                          <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                    </div>
+                                  </div>
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          )}
+                          {/* Tags within selected category */}
+                          {selectedTagCategory !== null &&
+                            (!filterSearch || 'tags'.includes(filterSearch.toLowerCase())) && (
+                              <PopoverPrimitive.Root
+                                open={activeSubmenu === '__tags'}
+                                onOpenChange={nextOpen =>
+                                  setActiveSubmenu(nextOpen ? '__tags' : null)
+                                }
+                              >
+                                <PopoverPrimitive.Trigger asChild>
+                                  <button
+                                    type='button'
+                                    className={cn(
+                                      'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                      activeSubmenu === '__tags' && 'bg-muted font-medium',
+                                    )}
+                                    data-track-category='DeskMetrics'
+                                    data-track-name='OpenTagsSubmenu'
+                                  >
+                                    <div className='flex min-w-0 items-center gap-3'>
+                                      <Tag size={16} className='shrink-0' />
+                                      <span>Tags</span>
+                                      {selectedTagValues.length > 0 && (
+                                        <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                      )}
+                                    </div>
+                                    <ChevronRight
+                                      size={16}
+                                      className='shrink-0 text-muted-foreground'
+                                    />
+                                  </button>
+                                </PopoverPrimitive.Trigger>
+                                <PopoverPrimitive.Portal>
+                                  <PopoverPrimitive.Content
+                                    side='right'
+                                    align='start'
+                                    sideOffset={4}
+                                    collisionPadding={12}
+                                    className='z-[70] outline-none'
+                                    data-custom-field-submenu='true'
+                                    onOpenAutoFocus={event => event.preventDefault()}
+                                  >
+                                    <TagsInCategorySubmenu
+                                      availableTags={stableTagsInCategory}
+                                      category={selectedTagCategory}
+                                      selectedTags={selectedTagValues}
+                                      onChange={setSelectedTagValues}
+                                    />
+                                  </PopoverPrimitive.Content>
+                                </PopoverPrimitive.Portal>
+                              </PopoverPrimitive.Root>
+                            )}
+
+                          {!isMultiDesk &&
+                            stageOptions.length > 0 &&
+                            (!filterSearch || 'stages'.includes(filterSearch.toLowerCase())) && (
+                              <PopoverPrimitive.Root
+                                open={activeSubmenu === '__stages'}
+                                onOpenChange={nextOpen =>
+                                  setActiveSubmenu(nextOpen ? '__stages' : null)
+                                }
+                              >
+                                <PopoverPrimitive.Trigger asChild>
+                                  <button
+                                    type='button'
+                                    className={cn(
+                                      'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                      activeSubmenu === '__stages' && 'bg-muted font-medium',
+                                    )}
+                                    data-track-category='DeskMetrics'
+                                    data-track-name='OpenStageFilterSubmenu'
+                                  >
+                                    <div className='flex min-w-0 items-center gap-3'>
+                                      <Circle size={16} className='shrink-0' />
+                                      <span>Stages</span>
+                                      {selectedStageNames.length > 0 && (
+                                        <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                      )}
+                                    </div>
+                                    <ChevronRight
+                                      size={16}
+                                      className='shrink-0 text-muted-foreground'
+                                    />
+                                  </button>
+                                </PopoverPrimitive.Trigger>
+                                <PopoverPrimitive.Portal>
+                                  <PopoverPrimitive.Content
+                                    side='right'
+                                    align='start'
+                                    sideOffset={4}
+                                    collisionPadding={12}
+                                    className='z-[70] outline-none'
+                                    data-custom-field-submenu='true'
+                                    onOpenAutoFocus={event => event.preventDefault()}
+                                  >
+                                    <StagesSubmenu
+                                      selectedStages={selectedStageNames}
+                                      onChange={setSelectedStageNames}
+                                      availableStages={[...stageOptions]}
+                                    />
+                                  </PopoverPrimitive.Content>
+                                </PopoverPrimitive.Portal>
+                              </PopoverPrimitive.Root>
+                            )}
+                          {!isMultiDesk &&
+                            (!filterSearch ||
+                              'ai category'.includes(filterSearch.toLowerCase())) && (
+                              <PopoverPrimitive.Root
+                                open={activeSubmenu === '__aiCategory'}
+                                onOpenChange={nextOpen =>
+                                  setActiveSubmenu(nextOpen ? '__aiCategory' : null)
+                                }
+                              >
+                                <PopoverPrimitive.Trigger asChild>
+                                  <button
+                                    type='button'
+                                    className={cn(
+                                      'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                      activeSubmenu === '__aiCategory' && 'bg-muted font-medium',
+                                    )}
+                                    data-track-category='DeskMetrics'
+                                    data-track-name='OpenAICategoryFilterSubmenu'
+                                  >
+                                    <div className='flex min-w-0 items-center gap-3'>
+                                      <Sparkles size={16} className='shrink-0' />
+                                      <span>AI Category</span>
+                                      {selectedAiCategories.length > 0 && (
+                                        <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                      )}
+                                    </div>
+                                    <ChevronRight
+                                      size={16}
+                                      className='shrink-0 text-muted-foreground'
+                                    />
+                                  </button>
+                                </PopoverPrimitive.Trigger>
+                                <PopoverPrimitive.Portal>
+                                  <PopoverPrimitive.Content
+                                    side='right'
+                                    align='start'
+                                    sideOffset={4}
+                                    collisionPadding={12}
+                                    className='z-[70] outline-none'
+                                    data-custom-field-submenu='true'
+                                    onOpenAutoFocus={event => event.preventDefault()}
+                                  >
+                                    <AICategorySubmenu
+                                      selectedCategories={selectedAiCategories}
+                                      onChange={setSelectedAiCategories}
+                                      availableCategories={[
+                                        ...new Set([
+                                          ...availableAiCategories,
+                                          ...selectedAiCategories,
+                                        ]),
+                                      ]}
+                                    />
+                                  </PopoverPrimitive.Content>
+                                </PopoverPrimitive.Portal>
+                              </PopoverPrimitive.Root>
+                            )}
+                          {!isMultiDesk &&
+                            availableCustomFields
+                              .filter(
+                                def =>
+                                  !filterSearch ||
+                                  def.fieldName.toLowerCase().includes(filterSearch.toLowerCase()),
+                              )
+                              .map(definition => {
+                                const key = definition.fieldName;
+                                const FieldIcon = getIconForFieldType(definition.fieldType);
+                                const isOpen = activeSubmenu === key;
+                                const isActive = activeCustomFieldKeys.includes(key);
+
+                                return (
+                                  <PopoverPrimitive.Root
+                                    key={key}
+                                    open={isOpen}
+                                    onOpenChange={nextOpen =>
+                                      setActiveSubmenu(nextOpen ? key : null)
+                                    }
+                                  >
+                                    <PopoverPrimitive.Trigger asChild>
+                                      <button
+                                        type='button'
+                                        className={cn(
+                                          'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                          isOpen && 'bg-muted font-medium',
                                         )}
-                                      </div>
-                                      <ChevronRight
-                                        size={16}
-                                        className='shrink-0 text-muted-foreground'
-                                      />
-                                    </button>
-                                  </PopoverPrimitive.Trigger>
-                                  <PopoverPrimitive.Portal>
-                                    <PopoverPrimitive.Content
-                                      side='right'
-                                      align='start'
-                                      sideOffset={4}
-                                      collisionPadding={12}
-                                      className='z-[70] outline-none'
-                                      data-custom-field-submenu='true'
-                                      onOpenAutoFocus={event => event.preventDefault()}
-                                    >
-                                      <DynamicFieldSubmenu
-                                        fieldId={definition.id}
-                                        fieldName={key}
-                                        fieldType={definition.fieldType}
-                                        fieldEnum={parseFieldOptionValues(definition.fieldEnum)}
-                                        selectedValue={selectedCustomFieldValues[key] ?? []}
-                                        onChange={value => {
-                                          if (!Array.isArray(value)) return;
-                                          updateCustomFieldValues(key, value);
-                                        }}
-                                        onClose={() => setActiveSubmenu(null)}
-                                      />
-                                    </PopoverPrimitive.Content>
-                                  </PopoverPrimitive.Portal>
-                                </PopoverPrimitive.Root>
-                              );
-                            })}
-                      </div>
-                    </>
-                  </Popover>
+                                        data-track-category='DeskMetrics'
+                                        data-track-name='OpenCustomFieldFilterSubmenu'
+                                        data-track-metadata={JSON.stringify({ fieldName: key })}
+                                      >
+                                        <div className='flex min-w-0 items-center gap-3'>
+                                          <FieldIcon className='h-4 w-4 shrink-0' />
+                                          <span className='truncate' title={key}>
+                                            {key}
+                                          </span>
+                                          {isActive && (
+                                            <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                          )}
+                                        </div>
+                                        <ChevronRight
+                                          size={16}
+                                          className='shrink-0 text-muted-foreground'
+                                        />
+                                      </button>
+                                    </PopoverPrimitive.Trigger>
+                                    <PopoverPrimitive.Portal>
+                                      <PopoverPrimitive.Content
+                                        side='right'
+                                        align='start'
+                                        sideOffset={4}
+                                        collisionPadding={12}
+                                        className='z-[70] outline-none'
+                                        data-custom-field-submenu='true'
+                                        onOpenAutoFocus={event => event.preventDefault()}
+                                      >
+                                        <DynamicFieldSubmenu
+                                          fieldId={definition.id}
+                                          fieldName={key}
+                                          fieldType={definition.fieldType}
+                                          fieldEnum={parseFieldOptionValues(definition.fieldEnum)}
+                                          selectedValue={selectedCustomFieldValues[key] ?? []}
+                                          onChange={value => {
+                                            if (!Array.isArray(value)) return;
+                                            updateCustomFieldValues(key, value);
+                                          }}
+                                          onClose={() => setActiveSubmenu(null)}
+                                        />
+                                      </PopoverPrimitive.Content>
+                                    </PopoverPrimitive.Portal>
+                                  </PopoverPrimitive.Root>
+                                );
+                              })}
+                        </div>
+                      </>
+                    </Popover>
 
-                  {hasAnyFiltersActive && (
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setSelectedAssigneeIds([]);
-                        setSelectedStageNames([]);
-                        setSelectedPriorities([]);
-                        setSelectedUserGroupIds([]);
-                        setSelectedTagCategory(null);
-                        setSelectedTagValues([]);
-                        setSelectedAiCategories([]);
-                        clearAllCustomFieldFilters();
-                      }}
-                      className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
-                      data-track-category='DeskMetrics'
-                      data-track-name='ClearDeskMetricsFilters'
-                    >
-                      <X size={14} />
-                      <span>Clear Filters</span>
-                    </button>
-                  )}
-                </>
+                    {hasAnyFiltersActive && (
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setSelectedAssigneeIds([]);
+                          setSelectedStageNames([]);
+                          setSelectedPriorities([]);
+                          setSelectedUserGroupIds([]);
+                          setSelectedTagCategory(null);
+                          setSelectedTagValues([]);
+                          setSelectedAiCategories([]);
+                          clearAllCustomFieldFilters();
+                        }}
+                        className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
+                        data-track-category='DeskMetrics'
+                        data-track-name='ClearDeskMetricsFilters'
+                      >
+                        <X size={14} />
+                        <span>Clear Filters</span>
+                      </button>
+                    )}
+                  </>
 
-                <DeskMetricsDateRangePicker
-                  dateRange={dateRange}
-                  startTime={startTime}
-                  endTime={endTime}
-                  onChange={(dr, st, et) => {
-                    persistDateRange(dr, st, et);
-                  }}
-                />
+                  <DeskMetricsDateRangePicker
+                    dateRange={dateRange}
+                    startTime={startTime}
+                    endTime={endTime}
+                    onChange={(dr, st, et) => {
+                      persistDateRange(dr, st, et);
+                    }}
+                  />
 
-                <button
-                  type='button'
-                  onClick={() => void refetch()}
-                  disabled={isFetching}
-                  className={cn(
-                    'rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-                    isFetching && 'cursor-not-allowed opacity-60',
-                  )}
-                  title='Refresh metrics'
-                  data-track-category='DeskMetrics'
-                  data-track-name='Refresh'
-                >
-                  <RefreshCw size={16} className={cn(isFetching && 'animate-spin')} />
-                </button>
+                  <button
+                    type='button'
+                    onClick={() => void refetch()}
+                    disabled={isFetching}
+                    className={cn(
+                      'rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+                      isFetching && 'cursor-not-allowed opacity-60',
+                    )}
+                    title='Refresh metrics'
+                    data-track-category='DeskMetrics'
+                    data-track-name='Refresh'
+                  >
+                    <RefreshCw size={16} className={cn(isFetching && 'animate-spin')} />
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Body */}
-          <div className='min-h-0 flex-1 overflow-y-auto p-6'>
-            {skippedDesks.length > 0 && (
-              <div className='mb-4 flex items-start gap-2 rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/15'>
-                <AlertCircle size={14} className='mt-0.5 shrink-0 text-amber-600' />
-                <div className='text-xs text-amber-800 dark:text-amber-300'>
-                  <span className='font-medium'>
-                    {skippedDesks.length === 1
-                      ? '1 desk is not included:'
-                      : `${skippedDesks.length} desks are not included:`}
-                  </span>{' '}
-                  {skippedDesks
-                    .map(skip => {
-                      const name = deskNameById.get(skip.channelId) ?? skip.channelId;
-                      const reason =
-                        skip.reason === 'metrics_disabled'
-                          ? 'metrics not enabled'
-                          : skip.reason === 'forbidden'
-                            ? 'no access'
-                            : skip.reason === 'not_found'
-                              ? 'desk not found'
-                              : 'failed to load';
-                      return `${name} (${reason})`;
-                    })
-                    .join(', ')}
+            {/* Body */}
+            <div className='min-h-0 flex-1 overflow-y-auto p-6'>
+              {skippedDesks.length > 0 && (
+                <div className='mb-4 flex items-start gap-2 rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-900/40 dark:bg-amber-900/15'>
+                  <AlertCircle size={14} className='mt-0.5 shrink-0 text-amber-600' />
+                  <div className='text-xs text-amber-800 dark:text-amber-300'>
+                    <span className='font-medium'>
+                      {skippedDesks.length === 1
+                        ? '1 desk is not included:'
+                        : `${skippedDesks.length} desks are not included:`}
+                    </span>{' '}
+                    {skippedDesks
+                      .map(skip => {
+                        const name = deskNameById.get(skip.channelId) ?? skip.channelId;
+                        const reason =
+                          skip.reason === 'metrics_disabled'
+                            ? 'metrics not enabled'
+                            : skip.reason === 'forbidden'
+                              ? 'no access'
+                              : skip.reason === 'not_found'
+                                ? 'desk not found'
+                                : 'failed to load';
+                        return `${name} (${reason})`;
+                      })
+                      .join(', ')}
+                  </div>
                 </div>
-              </div>
-            )}
-            {isLoading ? (
-              <div className='flex animate-pulse flex-col gap-4'>
-                <div className='grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6'>
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className='h-20 rounded-[12px] bg-muted/60' />
-                  ))}
-                </div>
-                <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-                  <div className='h-[200px] rounded-[12px] bg-muted/60' />
-                  <div className='h-[200px] rounded-[12px] bg-muted/60' />
-                </div>
-                <div className='h-[400px] rounded-[12px] bg-muted/60' />
-              </div>
-            ) : isError ? (
-              <div className='flex h-full flex-col items-center justify-center gap-2 text-center'>
-                <AlertCircle size={28} className='text-red-500' />
-                <p className='text-sm font-medium text-foreground'>Failed to load metrics</p>
-                <p className='text-xs text-muted-foreground'>
-                  Metrics may not be enabled for this desk, or something went wrong.
-                </p>
-                <button
-                  type='button'
-                  onClick={() => void refetch()}
-                  className='mt-2 rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90'
-                  data-track-category='DeskMetrics'
-                  data-track-name='Retry'
-                >
-                  Retry
-                </button>
-              </div>
-            ) : !data ? null : activeTab === 'desks' ? (
-              <div className='overflow-x-auto rounded-[12px] border border-desk-border dark:border-border'>
-                <table className='w-full min-w-[720px] text-sm'>
-                  <thead>
-                    <tr className='border-b border-desk-border bg-muted/30 text-left dark:border-border'>
-                      <th className='px-4 py-2.5 font-medium text-muted-foreground'>Desk</th>
-                      <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
-                        Opened
-                      </th>
-                      <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
-                        Avg first response
-                      </th>
-                      <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
-                        Avg resolution
-                      </th>
-                      <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
-                        CSAT
-                      </th>
-                      <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
-                        Email replies
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {perDeskRows.map(row => (
-                      <tr
-                        key={row.channelId}
-                        className='border-b border-desk-border last:border-0 hover:bg-accent/40 dark:border-border'
-                      >
-                        <td className='px-4 py-2.5'>
-                          <div className='flex items-center gap-2'>
-                            <span className='truncate font-medium text-foreground'>
-                              {row.channelName ?? deskNameById.get(row.channelId) ?? row.channelId}
-                            </span>
-                            {row.channelId === channelId && (
-                              <span className='shrink-0 text-[10px] uppercase text-muted-foreground'>
-                                current
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
-                          {row.openedInRange}
-                        </td>
-                        <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
-                          {formatDuration(row.avgFrtSeconds)}
-                          <span className='ml-1 text-xs text-muted-foreground'>
-                            ({row.respondedTickets})
-                          </span>
-                        </td>
-                        <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
-                          {formatDuration(row.avgRtSeconds)}
-                          <span className='ml-1 text-xs text-muted-foreground'>
-                            ({row.resolvedTickets})
-                          </span>
-                        </td>
-                        <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
-                          {row.csatAvgScore === null ? '—' : row.csatAvgScore.toFixed(2)}
-                          <span className='ml-1 text-xs text-muted-foreground'>
-                            ({row.csatGood}/{row.csatGood + row.csatBad})
-                          </span>
-                        </td>
-                        <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
-                          {row.emailRepliesInRange}
-                        </td>
-                      </tr>
+              )}
+              {isLoading ? (
+                <div className='flex animate-pulse flex-col gap-4'>
+                  <div className='grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6'>
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className='h-20 rounded-[12px] bg-muted/60' />
                     ))}
-                    {perDeskRows.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          className='px-4 py-10 text-center text-sm text-muted-foreground'
-                        >
-                          No desks contributed data in this time range
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                <p className='border-t border-desk-border px-4 py-2 text-xs text-muted-foreground dark:border-border'>
-                  Averages in parentheses show the number of tickets each average is computed over.
-                  Blended totals in Overview are weighted by these counts.
-                </p>
-              </div>
-            ) : activeTab === 'agents' ? (
-              <div className='flex flex-col gap-4'>
-                {agents.length === 0 ? (
-                  <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
-                    <Users size={28} className='text-muted-foreground/70' />
-                    <p className='text-sm font-medium text-foreground'>
-                      No agent activity in this time range
-                    </p>
-                    <p className='max-w-[420px] text-xs text-muted-foreground'>
-                      Agent performance is derived from tickets created in this range and replies
-                      sent within it.
-                    </p>
                   </div>
-                ) : (
-                  <>
-                    <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
-                      <KpiCard
-                        label='Agents'
-                        value={String(agentTotals.count)}
-                        sub='with activity'
-                      />
-                      <KpiCard
-                        label='Total Tickets'
-                        value={String(data.counts.openedInRange)}
-                        sub='created in range'
-                      />
-                      <KpiCard
-                        label='Tickets Resolved'
-                        value={String(agentTotals.resolved)}
-                        {...(agentTotals.assigned > 0
-                          ? {
-                              sub: `${Math.round((agentTotals.resolved / agentTotals.assigned) * 100)}% of assigned`,
-                            }
-                          : {})}
-                      />
-                      <KpiCard
-                        label='Tickets Reopened'
-                        value={String(agentTotals.reopened)}
-                        sub='distinct tickets'
-                      />
-                      <KpiCard label='Replies Sent' value={String(agentTotals.replies)} />
-                    </div>
-
-                    <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
-                      <div className='mb-3 text-sm font-medium text-foreground'>
-                        Assigned vs resolved by agent
-                        {agents.length > AGENT_CHART_CAP && (
-                          <span className='ml-1 font-normal text-muted-foreground'>
-                            (top {AGENT_CHART_CAP} of {agents.length} — full list in the table
-                            below)
-                          </span>
-                        )}
-                      </div>
-                      <div className='h-[280px]'>
-                        <ResponsiveContainer width='100%' height='100%'>
-                          <BarChart
-                            data={agentChartData}
-                            margin={{ left: -8, right: 16, bottom: 56 }}
-                          >
-                            <CartesianGrid strokeDasharray='3 3' vertical={false} />
-                            <XAxis
-                              dataKey='name'
-                              tick={{ fontSize: 11 }}
-                              interval={0}
-                              tickFormatter={(name: string) =>
-                                name.length > 10 ? `${name.slice(0, 9)}…` : name
-                              }
-                              angle={-40}
-                              textAnchor='end'
-                              height={70}
-                            />
-                            <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                            <RechartsTooltip cursor={false} />
-                            <Legend />
-                            <Bar
-                              dataKey='assigned'
-                              name='Assigned'
-                              fill='#6366f1'
-                              radius={[4, 4, 0, 0]}
-                            />
-                            <Bar
-                              dataKey='resolved'
-                              name='Resolved'
-                              fill='#10b981'
-                              radius={[4, 4, 0, 0]}
-                            />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
-                    <MetricsAgentTable
-                      agents={agents}
-                      onDownload={handleDownloadAgents}
-                      onAgentClick={handleAgentClick}
-                    />
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className='flex flex-col gap-4'>
-                {/* KPI row — FRT / RT / CSAT / Email Replies */}
-                <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
-                  <KpiCard
-                    label='Avg First Response'
-                    value={formatDuration(data.frt.avgSeconds)}
-                    sub={`${data.frt.respondedTickets} responded`}
-                  />
-                  <KpiCard
-                    label='Avg Resolution'
-                    value={formatDuration(data.rt.avgSeconds)}
-                    sub={`${data.rt.resolvedTickets} resolved`}
-                  />
-                  <KpiCard
-                    label='CSAT'
-                    value={data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'}
-                    sub={
-                      csatTotal > 0
-                        ? `${data.csat.good} good · ${data.csat.bad} bad`
-                        : 'No responses'
-                    }
-                  />
-                  <KpiCard label='Email Replies' value={String(data.counts.emailRepliesInRange)} />
+                  <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+                    <div className='h-[200px] rounded-[12px] bg-muted/60' />
+                    <div className='h-[200px] rounded-[12px] bg-muted/60' />
+                  </div>
+                  <div className='h-[400px] rounded-[12px] bg-muted/60' />
                 </div>
-
-                {/* Stage counts */}
-                {data.counts.stageCounts.length > 0 && (
-                  <div className='flex flex-col gap-2 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
-                    <div className='text-sm font-medium text-foreground'>Tickets by stage</div>
-                    <div className='flex flex-wrap gap-2'>
-                      {data.counts.stageCounts.map(s => (
-                        <div
-                          key={s.stageName}
-                          className='flex items-center gap-2 rounded-[8px] border border-desk-border/60 bg-muted/30 px-3 py-1.5 dark:border-border/60'
+              ) : isError ? (
+                <div className='flex h-full flex-col items-center justify-center gap-2 text-center'>
+                  <AlertCircle size={28} className='text-red-500' />
+                  <p className='text-sm font-medium text-foreground'>Failed to load metrics</p>
+                  <p className='text-xs text-muted-foreground'>
+                    Metrics may not be enabled for this desk, or something went wrong.
+                  </p>
+                  <button
+                    type='button'
+                    onClick={() => void refetch()}
+                    className='mt-2 rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90'
+                    data-track-category='DeskMetrics'
+                    data-track-name='Retry'
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : !data ? null : activeTab === 'desks' ? (
+                <div className='overflow-x-auto rounded-[12px] border border-desk-border dark:border-border'>
+                  <table className='w-full min-w-[720px] text-sm'>
+                    <thead>
+                      <tr className='border-b border-desk-border bg-muted/30 text-left dark:border-border'>
+                        <th className='px-4 py-2.5 font-medium text-muted-foreground'>Desk</th>
+                        <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
+                          Opened
+                        </th>
+                        <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
+                          Avg first response
+                        </th>
+                        <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
+                          Avg resolution
+                        </th>
+                        <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
+                          CSAT
+                        </th>
+                        <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
+                          Email replies
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {perDeskRows.map(row => (
+                        <tr
+                          key={row.channelId}
+                          className='border-b border-desk-border last:border-0 hover:bg-accent/40 dark:border-border'
                         >
-                          <span className='text-xs text-muted-foreground'>{s.stageName}</span>
-                          <span className='font-mono text-sm font-semibold tabular-nums text-foreground'>
-                            {s.count}
-                          </span>
-                        </div>
+                          <td className='px-4 py-2.5'>
+                            <div className='flex items-center gap-2'>
+                              <span className='truncate font-medium text-foreground'>
+                                {row.channelName ??
+                                  deskNameById.get(row.channelId) ??
+                                  row.channelId}
+                              </span>
+                              {row.channelId === channelId && (
+                                <span className='shrink-0 text-[10px] uppercase text-muted-foreground'>
+                                  current
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
+                            {row.openedInRange}
+                          </td>
+                          <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
+                            {formatDuration(row.avgFrtSeconds)}
+                            <span className='ml-1 text-xs text-muted-foreground'>
+                              ({row.respondedTickets})
+                            </span>
+                          </td>
+                          <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
+                            {formatDuration(row.avgRtSeconds)}
+                            <span className='ml-1 text-xs text-muted-foreground'>
+                              ({row.resolvedTickets})
+                            </span>
+                          </td>
+                          <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
+                            {row.csatAvgScore === null ? '—' : row.csatAvgScore.toFixed(2)}
+                            <span className='ml-1 text-xs text-muted-foreground'>
+                              ({row.csatGood}/{row.csatGood + row.csatBad})
+                            </span>
+                          </td>
+                          <td className='px-4 py-2.5 text-right tabular-nums text-foreground'>
+                            {row.emailRepliesInRange}
+                          </td>
+                        </tr>
                       ))}
-                    </div>
-                  </div>
-                )}
-
-                {isEmpty ? (
-                  <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
-                    <BarChart3 size={28} className='text-muted-foreground/70' />
-                    <p className='text-sm font-medium text-foreground'>
-                      No activity in this time range
-                    </p>
-                    <p className='max-w-[420px] text-xs text-muted-foreground'>
-                      Metrics are collected from when desk metrics were enabled for this desk.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    {/* Chart panel with view selector */}
-                    <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
-                      <div className='mb-3 flex items-center justify-between gap-3'>
-                        <div className='text-sm font-medium text-foreground'>
-                          {chartView === 'priority' && 'Tickets by priority'}
-                          {chartView === 'trend' &&
-                            `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
-                          {chartView === 'assignee' && 'Tickets by assignee'}
-                          {chartView === 'tags' &&
-                            (selectedTagCategory
-                              ? `Tags in "${selectedTagCategory}"`
-                              : 'Tickets by tag category')}
-                        </div>
-                        <div className='flex items-center gap-2'>
-                          <div className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('priority')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewPriority'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'priority'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              By Priority
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('trend')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewTrend'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'trend'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              Created vs Resolved
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('assignee')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewAssignee'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'assignee'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              By Assignee
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('tags')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewTags'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'tags'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              By Tags
-                            </button>
-                          </div>
-                          <button
-                            type='button'
-                            onClick={() => setExpandedChart(chartView)}
-                            title='Expand'
-                            data-track-category='DeskMetrics'
-                            data-track-name='ExpandChart'
-                            className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
+                      {perDeskRows.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className='px-4 py-10 text-center text-sm text-muted-foreground'
                           >
-                            <Maximize2 size={13} />
-                          </button>
+                            No desks contributed data in this time range
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <p className='border-t border-desk-border px-4 py-2 text-xs text-muted-foreground dark:border-border'>
+                    Averages in parentheses show the number of tickets each average is computed
+                    over. Blended totals in Overview are weighted by these counts.
+                  </p>
+                </div>
+              ) : activeTab === 'agents' ? (
+                <div className='flex flex-col gap-4'>
+                  {agents.length === 0 ? (
+                    <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
+                      <Users size={28} className='text-muted-foreground/70' />
+                      <p className='text-sm font-medium text-foreground'>
+                        No agent activity in this time range
+                      </p>
+                      <p className='max-w-[420px] text-xs text-muted-foreground'>
+                        Agent performance is derived from tickets created in this range and replies
+                        sent within it.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
+                        <KpiCard
+                          label='Agents'
+                          value={String(agentTotals.count)}
+                          sub='with activity'
+                        />
+                        <KpiCard
+                          label='Total Tickets'
+                          value={String(data.counts.openedInRange)}
+                          sub='created in range'
+                        />
+                        <KpiCard
+                          label='Tickets Resolved'
+                          value={String(agentTotals.resolved)}
+                          {...(agentTotals.assigned > 0
+                            ? {
+                                sub: `${Math.round((agentTotals.resolved / agentTotals.assigned) * 100)}% of assigned`,
+                              }
+                            : {})}
+                        />
+                        <KpiCard
+                          label='Tickets Reopened'
+                          value={String(agentTotals.reopened)}
+                          sub='distinct tickets'
+                        />
+                        <KpiCard label='Replies Sent' value={String(agentTotals.replies)} />
+                      </div>
+
+                      <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
+                        <div className='mb-3 text-sm font-medium text-foreground'>
+                          Assigned vs resolved by agent
+                          {agents.length > AGENT_CHART_CAP && (
+                            <span className='ml-1 font-normal text-muted-foreground'>
+                              (top {AGENT_CHART_CAP} of {agents.length} — full list in the table
+                              below)
+                            </span>
+                          )}
+                        </div>
+                        <div className='h-[280px]'>
+                          <ResponsiveContainer width='100%' height='100%'>
+                            <BarChart
+                              data={agentChartData}
+                              margin={{ left: -8, right: 16, bottom: 56 }}
+                            >
+                              <CartesianGrid strokeDasharray='3 3' vertical={false} />
+                              <XAxis
+                                dataKey='name'
+                                tick={{ fontSize: 11 }}
+                                interval={0}
+                                tickFormatter={(name: string) =>
+                                  name.length > 10 ? `${name.slice(0, 9)}…` : name
+                                }
+                                angle={-40}
+                                textAnchor='end'
+                                height={70}
+                              />
+                              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                              <RechartsTooltip cursor={false} />
+                              <Legend />
+                              <Bar
+                                dataKey='assigned'
+                                name='Assigned'
+                                fill='#6366f1'
+                                radius={[4, 4, 0, 0]}
+                              />
+                              <Bar
+                                dataKey='resolved'
+                                name='Resolved'
+                                fill='#10b981'
+                                radius={[4, 4, 0, 0]}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
                         </div>
                       </div>
 
-                      {chartView === 'priority' &&
-                        (priorityData.length === 0 ? (
-                          <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
-                            No tickets in range
-                          </div>
-                        ) : (
-                          <div className='h-[280px]'>
-                            <ResponsiveContainer width='100%' height='100%'>
-                              <PieChart>
-                                <Pie
-                                  data={priorityData}
-                                  dataKey='value'
-                                  nameKey='name'
-                                  innerRadius={70}
-                                  outerRadius={105}
-                                  paddingAngle={3}
-                                >
-                                  {priorityData.map(entry => (
-                                    <Cell key={entry.name} fill={entry.color} />
-                                  ))}
-                                </Pie>
-                                <RechartsTooltip cursor={false} />
-                                <Legend />
-                              </PieChart>
-                            </ResponsiveContainer>
+                      <MetricsAgentTable
+                        agents={agents}
+                        onDownload={handleDownloadAgents}
+                        onAgentClick={handleAgentClick}
+                      />
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className='flex flex-col gap-4'>
+                  {/* KPI row — FRT / RT / CSAT / Email Replies */}
+                  <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
+                    <KpiCard
+                      label='Avg First Response'
+                      value={formatDuration(data.frt.avgSeconds)}
+                      sub={`${data.frt.respondedTickets} responded`}
+                    />
+                    <KpiCard
+                      label='Avg Resolution'
+                      value={formatDuration(data.rt.avgSeconds)}
+                      sub={`${data.rt.resolvedTickets} resolved`}
+                    />
+                    <KpiCard
+                      label='CSAT'
+                      value={
+                        data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'
+                      }
+                      sub={
+                        csatTotal > 0
+                          ? `${data.csat.good} good · ${data.csat.bad} bad`
+                          : 'No responses'
+                      }
+                    />
+                    <KpiCard
+                      label='Email Replies'
+                      value={String(data.counts.emailRepliesInRange)}
+                    />
+                  </div>
+
+                  {/* Stage counts */}
+                  {data.counts.stageCounts.length > 0 && (
+                    <div className='flex flex-col gap-2 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
+                      <div className='text-sm font-medium text-foreground'>Tickets by stage</div>
+                      <div className='flex flex-wrap gap-2'>
+                        {data.counts.stageCounts.map(s => (
+                          <div
+                            key={s.stageName}
+                            className='flex items-center gap-2 rounded-[8px] border border-desk-border/60 bg-muted/30 px-3 py-1.5 dark:border-border/60'
+                          >
+                            <span className='text-xs text-muted-foreground'>{s.stageName}</span>
+                            <span className='font-mono text-sm font-semibold tabular-nums text-foreground'>
+                              {s.count}
+                            </span>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
 
-                      {chartView === 'trend' &&
-                        (trendData.length === 0 ? (
-                          <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
-                            No data in range
+                  {isEmpty ? (
+                    <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
+                      <BarChart3 size={28} className='text-muted-foreground/70' />
+                      <p className='text-sm font-medium text-foreground'>
+                        No activity in this time range
+                      </p>
+                      <p className='max-w-[420px] text-xs text-muted-foreground'>
+                        Metrics are collected from when desk metrics were enabled for this desk.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Chart panel with view selector */}
+                      <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
+                        <div className='mb-3 flex items-center justify-between gap-3'>
+                          <div className='text-sm font-medium text-foreground'>
+                            {chartView === 'priority' && 'Tickets by priority'}
+                            {chartView === 'trend' &&
+                              `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
+                            {chartView === 'assignee' && 'Tickets by assignee'}
+                            {chartView === 'tags' &&
+                              (selectedTagCategory
+                                ? `Tags in "${selectedTagCategory}"`
+                                : 'Tickets by tag category')}
                           </div>
-                        ) : (
-                          <div className='h-[280px]'>
-                            <ResponsiveContainer width='100%' height='100%'>
-                              <BarChart data={trendData} margin={{ left: -16, right: 4 }}>
-                                <CartesianGrid strokeDasharray='3 3' vertical={false} />
-                                <XAxis
-                                  dataKey='label'
-                                  tick={{ fontSize: 11 }}
-                                  interval={tickInterval}
-                                />
-                                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                                <RechartsTooltip cursor={false} />
-                                <Legend />
-                                <Bar
-                                  dataKey='opened'
-                                  name='Created'
-                                  fill='#6366f1'
-                                  radius={[4, 4, 0, 0]}
-                                />
-                                <Bar
-                                  dataKey='closed'
-                                  name='Resolved'
-                                  fill='#10b981'
-                                  radius={[4, 4, 0, 0]}
-                                />
-                              </BarChart>
-                            </ResponsiveContainer>
-                          </div>
-                        ))}
-
-                      {chartView === 'assignee' &&
-                        (assigneeData.length === 0 ? (
-                          <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
-                            No tickets in range
-                          </div>
-                        ) : (
-                          <div className='h-[280px]'>
-                            <ResponsiveContainer width='100%' height='100%'>
-                              <BarChart
-                                data={assigneeData}
-                                margin={{ left: -8, right: 16, bottom: 56 }}
+                          <div className='flex items-center gap-2'>
+                            <div className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'>
+                              <button
+                                type='button'
+                                onClick={() => setChartView('priority')}
+                                data-track-category='DeskMetrics'
+                                data-track-name='ChartViewPriority'
+                                className={cn(
+                                  'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
+                                  chartView === 'priority'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground',
+                                )}
                               >
-                                <CartesianGrid strokeDasharray='3 3' vertical={false} />
-                                <XAxis
-                                  dataKey='name'
-                                  tick={{ fontSize: 11 }}
-                                  interval={0}
-                                  tickFormatter={(name: string) =>
-                                    name.length > 10 ? `${name.slice(0, 9)}…` : name
-                                  }
-                                  angle={-40}
-                                  textAnchor='end'
-                                  height={70}
-                                />
-                                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                                <RechartsTooltip
-                                  cursor={false}
-                                  content={({ active, payload }) => {
-                                    if (!active || !payload?.length) return null;
-                                    const d = payload[0];
-                                    if (!d) return null;
-                                    return (
-                                      <div className='rounded-[8px] border border-border bg-background px-3 py-2 shadow-md'>
-                                        <div className='text-sm font-medium text-foreground'>
-                                          {(d.payload as { name: string }).name}
-                                        </div>
-                                        <div className='text-xs text-muted-foreground'>
-                                          Tickets:{' '}
-                                          <span className='font-semibold text-foreground'>
-                                            {d.value as number}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    );
-                                  }}
-                                />
-                                <Bar dataKey='count' name='Tickets' radius={[4, 4, 0, 0]}>
-                                  {assigneeData.map((_, i) => (
-                                    <Cell key={i} fill={barColors[i % barColors.length]} />
-                                  ))}
-                                </Bar>
-                              </BarChart>
-                            </ResponsiveContainer>
+                                By Priority
+                              </button>
+                              <button
+                                type='button'
+                                onClick={() => setChartView('trend')}
+                                data-track-category='DeskMetrics'
+                                data-track-name='ChartViewTrend'
+                                className={cn(
+                                  'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
+                                  chartView === 'trend'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground',
+                                )}
+                              >
+                                Created vs Resolved
+                              </button>
+                              <button
+                                type='button'
+                                onClick={() => setChartView('assignee')}
+                                data-track-category='DeskMetrics'
+                                data-track-name='ChartViewAssignee'
+                                className={cn(
+                                  'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
+                                  chartView === 'assignee'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground',
+                                )}
+                              >
+                                By Assignee
+                              </button>
+                              <button
+                                type='button'
+                                onClick={() => setChartView('tags')}
+                                data-track-category='DeskMetrics'
+                                data-track-name='ChartViewTags'
+                                className={cn(
+                                  'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
+                                  chartView === 'tags'
+                                    ? 'bg-background text-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground',
+                                )}
+                              >
+                                By Tags
+                              </button>
+                            </div>
+                            <button
+                              type='button'
+                              onClick={() => setExpandedChart(chartView)}
+                              title='Expand'
+                              data-track-category='DeskMetrics'
+                              data-track-name='ExpandChart'
+                              className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
+                            >
+                              <Maximize2 size={13} />
+                            </button>
                           </div>
-                        ))}
+                        </div>
 
-                      {chartView === 'tags' &&
-                        (() => {
-                          const chartData = selectedTagCategory
-                            ? tagBreakdownData
-                            : tagCategoryData;
-                          return chartData.length === 0 ? (
+                        {chartView === 'priority' &&
+                          (priorityData.length === 0 ? (
                             <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
-                              No tag data in range
+                              No tickets in range
                             </div>
                           ) : (
                             <div className='h-[280px]'>
                               <ResponsiveContainer width='100%' height='100%'>
                                 <PieChart>
                                   <Pie
-                                    data={chartData}
+                                    data={priorityData}
                                     dataKey='value'
                                     nameKey='name'
                                     innerRadius={70}
                                     outerRadius={105}
                                     paddingAngle={3}
-                                    cx='35%'
                                   >
-                                    {chartData.map(entry => (
+                                    {priorityData.map(entry => (
                                       <Cell key={entry.name} fill={entry.color} />
                                     ))}
                                   </Pie>
                                   <RechartsTooltip cursor={false} />
-                                  <Legend
-                                    layout='vertical'
-                                    align='right'
-                                    verticalAlign='middle'
-                                    content={renderTagLegend as NonNullable<LegendProps['content']>}
-                                  />
+                                  <Legend />
                                 </PieChart>
                               </ResponsiveContainer>
                             </div>
-                          );
-                        })()}
-                    </div>
+                          ))}
 
-                    {/* Ticket table */}
-                    {data.tickets.length > 0 && (
-                      <MetricsTicketTable
-                        tickets={data.tickets}
-                        onDownload={handleDownload}
-                        onTicketClick={onTicketClick}
-                        onAssigneeClick={handleAssigneeClick}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-            )}
+                        {chartView === 'trend' &&
+                          (trendData.length === 0 ? (
+                            <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
+                              No data in range
+                            </div>
+                          ) : (
+                            <div className='h-[280px]'>
+                              <ResponsiveContainer width='100%' height='100%'>
+                                <BarChart data={trendData} margin={{ left: -16, right: 4 }}>
+                                  <CartesianGrid strokeDasharray='3 3' vertical={false} />
+                                  <XAxis
+                                    dataKey='label'
+                                    tick={{ fontSize: 11 }}
+                                    interval={tickInterval}
+                                  />
+                                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                                  <RechartsTooltip cursor={false} />
+                                  <Legend />
+                                  <Bar
+                                    dataKey='opened'
+                                    name='Created'
+                                    fill='#6366f1'
+                                    radius={[4, 4, 0, 0]}
+                                  />
+                                  <Bar
+                                    dataKey='closed'
+                                    name='Resolved'
+                                    fill='#10b981'
+                                    radius={[4, 4, 0, 0]}
+                                  />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          ))}
+
+                        {chartView === 'assignee' &&
+                          (assigneeData.length === 0 ? (
+                            <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
+                              No tickets in range
+                            </div>
+                          ) : (
+                            <div className='h-[280px]'>
+                              <ResponsiveContainer width='100%' height='100%'>
+                                <BarChart
+                                  data={assigneeData}
+                                  margin={{ left: -8, right: 16, bottom: 56 }}
+                                >
+                                  <CartesianGrid strokeDasharray='3 3' vertical={false} />
+                                  <XAxis
+                                    dataKey='name'
+                                    tick={{ fontSize: 11 }}
+                                    interval={0}
+                                    tickFormatter={(name: string) =>
+                                      name.length > 10 ? `${name.slice(0, 9)}…` : name
+                                    }
+                                    angle={-40}
+                                    textAnchor='end'
+                                    height={70}
+                                  />
+                                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                                  <RechartsTooltip
+                                    cursor={false}
+                                    content={({ active, payload }) => {
+                                      if (!active || !payload?.length) return null;
+                                      const d = payload[0];
+                                      if (!d) return null;
+                                      return (
+                                        <div className='rounded-[8px] border border-border bg-background px-3 py-2 shadow-md'>
+                                          <div className='text-sm font-medium text-foreground'>
+                                            {(d.payload as { name: string }).name}
+                                          </div>
+                                          <div className='text-xs text-muted-foreground'>
+                                            Tickets:{' '}
+                                            <span className='font-semibold text-foreground'>
+                                              {d.value as number}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    }}
+                                  />
+                                  <Bar dataKey='count' name='Tickets' radius={[4, 4, 0, 0]}>
+                                    {assigneeData.map((_, i) => (
+                                      <Cell key={i} fill={barColors[i % barColors.length]} />
+                                    ))}
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          ))}
+
+                        {chartView === 'tags' &&
+                          (() => {
+                            const chartData = selectedTagCategory
+                              ? tagBreakdownData
+                              : tagCategoryData;
+                            return chartData.length === 0 ? (
+                              <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
+                                No tag data in range
+                              </div>
+                            ) : (
+                              <div className='h-[280px]'>
+                                <ResponsiveContainer width='100%' height='100%'>
+                                  <PieChart>
+                                    <Pie
+                                      data={chartData}
+                                      dataKey='value'
+                                      nameKey='name'
+                                      innerRadius={70}
+                                      outerRadius={105}
+                                      paddingAngle={3}
+                                      cx='35%'
+                                    >
+                                      {chartData.map(entry => (
+                                        <Cell key={entry.name} fill={entry.color} />
+                                      ))}
+                                    </Pie>
+                                    <RechartsTooltip cursor={false} />
+                                    <Legend
+                                      layout='vertical'
+                                      align='right'
+                                      verticalAlign='middle'
+                                      content={
+                                        renderTagLegend as NonNullable<LegendProps['content']>
+                                      }
+                                    />
+                                  </PieChart>
+                                </ResponsiveContainer>
+                              </div>
+                            );
+                          })()}
+                      </div>
+
+                      {/* Ticket table */}
+                      {data.tickets.length > 0 && (
+                        <MetricsTicketTable
+                          tickets={data.tickets}
+                          onDownload={handleDownload}
+                          onTicketClick={onTicketClick}
+                          onAssigneeClick={handleAssigneeClick}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Expanded chart overlay */}
-      {expandedChart !== null && (
-        <div
-          className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/60'
-          role='button'
-          tabIndex={-1}
-          aria-label='Close expanded chart'
-          onClick={e => {
-            if (e.target === e.currentTarget) setExpandedChart(null);
-          }}
-          onKeyDown={e => {
-            if (e.key === 'Escape') setExpandedChart(null);
-          }}
-          data-track-category='DeskMetrics'
-          data-track-name='ExpandedChartBackdrop'
-        >
-          <div className='relative flex h-[80vh] w-[90vw] max-w-[1000px] flex-col rounded-[16px] bg-background p-6 shadow-2xl'>
-            <div className='mb-4 flex items-center justify-between'>
-              <h2 className='text-base font-semibold text-foreground'>
-                {expandedChart === 'priority' && 'Tickets by priority'}
-                {expandedChart === 'trend' &&
-                  `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
-                {expandedChart === 'assignee' && 'Tickets by assignee'}
-                {expandedChart === 'tags' &&
-                  (selectedTagCategory
-                    ? `Tags in "${selectedTagCategory}"`
-                    : 'Tickets by tag category')}
-              </h2>
-              <button
-                type='button'
-                onClick={() => setExpandedChart(null)}
-                data-track-category='DeskMetrics'
-                data-track-name='CloseExpandedChart'
-                className='flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground hover:bg-accent hover:text-foreground'
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className='min-h-0 flex-1'>
-              {expandedChart === 'priority' &&
-                (priorityData.length === 0 ? (
-                  <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                    No tickets in range
-                  </div>
-                ) : (
-                  <ResponsiveContainer width='100%' height='100%'>
-                    <PieChart>
-                      <Pie
-                        data={priorityData}
-                        dataKey='value'
-                        nameKey='name'
-                        innerRadius='30%'
-                        outerRadius='55%'
-                        paddingAngle={3}
-                      >
-                        {priorityData.map(entry => (
-                          <Cell key={entry.name} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip cursor={false} />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ))}
-              {expandedChart === 'trend' &&
-                (trendData.length === 0 ? (
-                  <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                    No data in range
-                  </div>
-                ) : (
-                  <ResponsiveContainer width='100%' height='100%'>
-                    <BarChart data={trendData} margin={{ left: -16, right: 8 }}>
-                      <CartesianGrid strokeDasharray='3 3' vertical={false} />
-                      <XAxis dataKey='label' tick={{ fontSize: 12 }} interval={tickInterval} />
-                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                      <RechartsTooltip cursor={false} />
-                      <Legend />
-                      <Bar dataKey='opened' name='Created' fill='#6366f1' radius={[4, 4, 0, 0]} />
-                      <Bar dataKey='closed' name='Resolved' fill='#10b981' radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ))}
-              {expandedChart === 'assignee' &&
-                (assigneeData.length === 0 ? (
-                  <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                    No tickets in range
-                  </div>
-                ) : (
-                  <ResponsiveContainer width='100%' height='100%'>
-                    <BarChart data={assigneeData} margin={{ left: -8, right: 16, bottom: 64 }}>
-                      <CartesianGrid strokeDasharray='3 3' vertical={false} />
-                      <XAxis
-                        dataKey='name'
-                        tick={{ fontSize: 12 }}
-                        interval={0}
-                        tickFormatter={(name: string) =>
-                          name.length > 10 ? `${name.slice(0, 9)}…` : name
-                        }
-                        angle={-40}
-                        textAnchor='end'
-                        height={80}
-                      />
-                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                      <RechartsTooltip
-                        cursor={false}
-                        content={({ active, payload }) => {
-                          if (!active || !payload?.length) return null;
-                          const d = payload[0];
-                          if (!d) return null;
-                          return (
-                            <div className='rounded-[8px] border border-border bg-background px-3 py-2 shadow-md'>
-                              <div className='text-sm font-medium text-foreground'>
-                                {(d.payload as { name: string }).name}
-                              </div>
-                              <div className='text-xs text-muted-foreground'>
-                                Tickets:{' '}
-                                <span className='font-semibold text-foreground'>
-                                  {d.value as number}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        }}
-                      />
-                      <Bar dataKey='count' name='Tickets' radius={[6, 6, 0, 0]}>
-                        {assigneeData.map((_, i) => (
-                          <Cell key={i} fill={barColors[i % barColors.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ))}
-              {expandedChart === 'tags' &&
-                (() => {
-                  const chartData = selectedTagCategory ? tagBreakdownData : tagCategoryData;
-                  return chartData.length === 0 ? (
+        {/* Expanded chart overlay */}
+        {expandedChart !== null && (
+          <div
+            className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/60'
+            role='button'
+            tabIndex={-1}
+            aria-label='Close expanded chart'
+            onClick={e => {
+              if (e.target === e.currentTarget) setExpandedChart(null);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Escape') setExpandedChart(null);
+            }}
+            data-track-category='DeskMetrics'
+            data-track-name='ExpandedChartBackdrop'
+          >
+            <div className='relative flex h-[80vh] w-[90vw] max-w-[1000px] flex-col rounded-[16px] bg-background p-6 shadow-2xl'>
+              <div className='mb-4 flex items-center justify-between'>
+                <h2 className='text-base font-semibold text-foreground'>
+                  {expandedChart === 'priority' && 'Tickets by priority'}
+                  {expandedChart === 'trend' &&
+                    `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
+                  {expandedChart === 'assignee' && 'Tickets by assignee'}
+                  {expandedChart === 'tags' &&
+                    (selectedTagCategory
+                      ? `Tags in "${selectedTagCategory}"`
+                      : 'Tickets by tag category')}
+                </h2>
+                <button
+                  type='button'
+                  onClick={() => setExpandedChart(null)}
+                  data-track-category='DeskMetrics'
+                  data-track-name='CloseExpandedChart'
+                  className='flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground hover:bg-accent hover:text-foreground'
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className='min-h-0 flex-1'>
+                {expandedChart === 'priority' &&
+                  (priorityData.length === 0 ? (
                     <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                      No tag data in range
+                      No tickets in range
                     </div>
                   ) : (
                     <ResponsiveContainer width='100%' height='100%'>
                       <PieChart>
                         <Pie
-                          data={chartData}
+                          data={priorityData}
                           dataKey='value'
                           nameKey='name'
                           innerRadius='30%'
                           outerRadius='55%'
                           paddingAngle={3}
-                          cx='35%'
                         >
-                          {chartData.map(entry => (
+                          {priorityData.map(entry => (
                             <Cell key={entry.name} fill={entry.color} />
                           ))}
                         </Pie>
                         <RechartsTooltip cursor={false} />
-                        <Legend
-                          layout='vertical'
-                          align='right'
-                          verticalAlign='middle'
-                          content={renderTagLegend as NonNullable<LegendProps['content']>}
-                        />
+                        <Legend />
                       </PieChart>
                     </ResponsiveContainer>
-                  );
-                })()}
+                  ))}
+                {expandedChart === 'trend' &&
+                  (trendData.length === 0 ? (
+                    <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                      No data in range
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width='100%' height='100%'>
+                      <BarChart data={trendData} margin={{ left: -16, right: 8 }}>
+                        <CartesianGrid strokeDasharray='3 3' vertical={false} />
+                        <XAxis dataKey='label' tick={{ fontSize: 12 }} interval={tickInterval} />
+                        <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                        <RechartsTooltip cursor={false} />
+                        <Legend />
+                        <Bar dataKey='opened' name='Created' fill='#6366f1' radius={[4, 4, 0, 0]} />
+                        <Bar
+                          dataKey='closed'
+                          name='Resolved'
+                          fill='#10b981'
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ))}
+                {expandedChart === 'assignee' &&
+                  (assigneeData.length === 0 ? (
+                    <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                      No tickets in range
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width='100%' height='100%'>
+                      <BarChart data={assigneeData} margin={{ left: -8, right: 16, bottom: 64 }}>
+                        <CartesianGrid strokeDasharray='3 3' vertical={false} />
+                        <XAxis
+                          dataKey='name'
+                          tick={{ fontSize: 12 }}
+                          interval={0}
+                          tickFormatter={(name: string) =>
+                            name.length > 10 ? `${name.slice(0, 9)}…` : name
+                          }
+                          angle={-40}
+                          textAnchor='end'
+                          height={80}
+                        />
+                        <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                        <RechartsTooltip
+                          cursor={false}
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length) return null;
+                            const d = payload[0];
+                            if (!d) return null;
+                            return (
+                              <div className='rounded-[8px] border border-border bg-background px-3 py-2 shadow-md'>
+                                <div className='text-sm font-medium text-foreground'>
+                                  {(d.payload as { name: string }).name}
+                                </div>
+                                <div className='text-xs text-muted-foreground'>
+                                  Tickets:{' '}
+                                  <span className='font-semibold text-foreground'>
+                                    {d.value as number}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }}
+                        />
+                        <Bar dataKey='count' name='Tickets' radius={[6, 6, 0, 0]}>
+                          {assigneeData.map((_, i) => (
+                            <Cell key={i} fill={barColors[i % barColors.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ))}
+                {expandedChart === 'tags' &&
+                  (() => {
+                    const chartData = selectedTagCategory ? tagBreakdownData : tagCategoryData;
+                    return chartData.length === 0 ? (
+                      <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                        No tag data in range
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width='100%' height='100%'>
+                        <PieChart>
+                          <Pie
+                            data={chartData}
+                            dataKey='value'
+                            nameKey='name'
+                            innerRadius='30%'
+                            outerRadius='55%'
+                            paddingAngle={3}
+                            cx='35%'
+                          >
+                            {chartData.map(entry => (
+                              <Cell key={entry.name} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip cursor={false} />
+                          <Legend
+                            layout='vertical'
+                            align='right'
+                            verticalAlign='middle'
+                            content={renderTagLegend as NonNullable<LegendProps['content']>}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </Dialog>
+        )}
+      </Dialog>
+    </>
   );
 };

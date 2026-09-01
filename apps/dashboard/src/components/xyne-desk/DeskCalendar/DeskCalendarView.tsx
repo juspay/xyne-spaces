@@ -16,6 +16,7 @@ interface DeskCalendarViewProps {
     aiCategory?: string[] | undefined;
     conversationIdWhitelist?: string[] | undefined;
     hasAiDraft?: boolean | undefined;
+    hasSubTickets?: boolean | undefined;
     userGroups?: string[] | undefined;
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
