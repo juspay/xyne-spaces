@@ -3335,6 +3335,21 @@ export const queries: AnyQueryRegistry = defineQueries({
   ),
 
   /** Unresolved suggestion changes for a canvas; the panel groups them by batchId and shows batches with a pending row. */
+  /** Placement rows (insert/move) of a canvas, ACCEPTED included — the client-side
+   *  siblingOrder source for ordered placement. Never rendered as cards. */
+  canvasSuggestionPlacementOrder: defineQuery(
+    z.object({ canvasId: z.string() }),
+    ({ ctx, args: { canvasId } }) => {
+      return zql.canvas_suggestion_changes
+        .where('canvasId', canvasId)
+        .where('op', 'IN', ['insert', 'move'])
+        .where('status', 'IN', ['PENDING', 'ACCEPTED'])
+        .whereExists('canvas', canvas =>
+          applyCanvasVisibilityQueryFilter(canvas, ctx.userID),
+        );
+    },
+  ),
+
   canvasSuggestionChanges: defineQuery(
     z.object({ canvasId: z.string() }),
     ({ ctx, args: { canvasId } }) => {
