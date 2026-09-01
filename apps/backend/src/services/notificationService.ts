@@ -1400,6 +1400,7 @@ class NotificationService {
     actorName: string,
     role: string,
     actorAction: 'canvas_shared' | 'canvas_role_changed' | 'canvas_access_revoked',
+    workspaceId?: string,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1420,6 +1421,19 @@ class NotificationService {
         ? `Your access to "${canvasTitle}" was revoked by ${actorName}`
         : `${actorName} changed your role to ${role} on "${canvasTitle}"`;
 
+    // Deep-link straight at the canvas, matching CANVAS_ACCESS_REQUESTED and the
+    // canvas-mention notification. Without an actionUrl the client falls back to
+    // building a `/redirected?type=canvas&...` link, and that page resolves the
+    // workspace prefix from localStorage alone — absent in incognito or a fresh
+    // browser it drops the canvasId and lands the user on the AI home screen.
+    //
+    // Revocations get no link on purpose: the recipient can no longer open the
+    // canvas, so a View button would only take them to "Canvas Not Found".
+    const canvasActionUrl =
+      workspaceId && actorAction !== 'canvas_access_revoked'
+        ? `/${workspaceId}/chat/canvas/${canvasId}`
+        : undefined;
+
     const results = await Promise.allSettled(
       recipientIds.map(async userId => {
         await this.createNotification(userId, {
@@ -1428,12 +1442,18 @@ class NotificationService {
           type: 'CANVAS_SHARED' as NotificationType,
           relatedEntityType: 'canvas',
           relatedEntityId: canvasId,
+          ...(canvasActionUrl && { actionUrl: canvasActionUrl }),
           metadata: {
             canvasId,
             actorId,
             actorName,
             role,
             actorAction,
+            // Pins the notification's workspace to the canvas's, the way the
+            // mention notification does. Otherwise the producer falls back to
+            // the recipient's cached workspace, which can disagree with the
+            // workspace baked into actionUrl above.
+            ...(workspaceId && { workspaceId }),
           },
         });
         return userId;
