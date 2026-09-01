@@ -81,10 +81,17 @@ export function hashPasswordForAuth(password: string): string {
 
 export async function verifyEmailPassword(password: string, storedHash: string): Promise<boolean> {
   if (isClientPasswordHash(storedHash)) {
-    return crypto.timingSafeEqual(
+    const matches = crypto.timingSafeEqual(
       Buffer.from(hashPasswordForAuth(password), 'hex'),
       Buffer.from(normalizeClientPasswordHash(storedHash), 'hex'),
     );
+    // Stored hashes are a mix of this fast (sha256) form and the slow scrypt form
+    // (passwords set via reset/change). Run one scrypt derivation here too so the
+    // verification cost does not depend on which form an account uses — otherwise
+    // login latency would reveal the format and, against the scrypt dummy used for
+    // the no-account branch, whether the email is registered at all.
+    await verifyPassword(password, DUMMY_PASSWORD_HASH);
+    return matches;
   }
 
   return verifyPassword(password, storedHash);

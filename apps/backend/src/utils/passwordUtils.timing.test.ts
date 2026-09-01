@@ -32,35 +32,39 @@ describe('DUMMY_PASSWORD_HASH timing parity', () => {
     expect(dummyParams).toBe(realParams);
   });
 
-  it('verifies against the dummy in the same order of magnitude as a real scrypt hash', async () => {
-    const realHash = await hashPassword('Passw0rd!parity');
-    // warm up the scrypt path
-    await verifyEmailPassword('warmup', realHash);
+  it('verifies in uniform time across all stored-hash forms and the no-account path', async () => {
+    // Stored hashes are a mix of two forms in production:
+    //   register flow -> client sha256 hash (fast branch)
+    //   reset/change  -> scrypt hash        (slow branch)
+    // Login must cost the same for both, and for a missing account (dummy), or the
+    // latency reveals the stored form and/or whether the email is registered.
+    const shaAccount = hashPasswordForAuth('Passw0rd!parity'); // register-flow account
+    const scryptAccount = await hashPassword('Passw0rd!parity'); // reset/change account
+    expect(isClientPasswordHash(shaAccount)).toBe(true);
+    expect(isClientPasswordHash(scryptAccount)).toBe(false);
+
+    // warm up
+    await verifyEmailPassword('warmup', shaAccount);
+    await verifyEmailPassword('warmup', scryptAccount);
     await verifyEmailPassword('warmup', DUMMY_PASSWORD_HASH);
 
     const median = async (storedHash: string): Promise<number> => {
       const samples: number[] = [];
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 7; i++) {
         samples.push(await timeMs(() => verifyEmailPassword('guess-does-not-match', storedHash)));
       }
       samples.sort((a, b) => a - b);
-      return samples[2]!;
+      return samples[3]!;
     };
 
-    const tReal = await median(realHash);
-    const tDummy = await median(DUMMY_PASSWORD_HASH);
+    const tSha = await median(shaAccount); // register-flow account
+    const tScrypt = await median(scryptAccount); // reset/change account
+    const tNone = await median(DUMMY_PASSWORD_HASH); // no such account
 
-    // A client-hash (sha256) compare is sub-millisecond; scrypt is tens of ms. The
-    // dummy must land near the real scrypt cost, not near the sha256 cost.
-    const tClientHash = await timeMs(async () =>
-      verifyEmailPassword('guess', hashPasswordForAuth('anything')),
-    );
-
-    // Real and dummy must be within a small ratio of each other...
-    const ratio = Math.max(tReal, tDummy) / Math.min(tReal, tDummy);
-    expect(ratio).toBeLessThan(4);
-    // ...and both must be clearly in the slow (scrypt) regime, far above a sha256 compare.
-    expect(tDummy).toBeGreaterThan(tClientHash * 5);
-    expect(tReal).toBeGreaterThan(tClientHash * 5);
+    // All three must land within a small ratio of one another — no timing oracle for
+    // existence OR stored-hash format. (Was ~100x apart before the scrypt-pad fix.)
+    const times = [tSha, tScrypt, tNone];
+    const ratio = Math.max(...times) / Math.min(...times);
+    expect(ratio).toBeLessThan(2);
   });
 });
