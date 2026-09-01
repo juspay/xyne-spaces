@@ -86,6 +86,8 @@ import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/Canvas
 import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
 import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
+import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
+import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
 const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
@@ -564,6 +566,18 @@ export const CollaborativeCanvasEditor = forwardRef<
       onOpenCommentCountChange,
       ready: isEditorReady,
     });
+    const {
+      activeTicketAnchor,
+      isTicketChannelArchived,
+      openTicketForCurrentSelection,
+      closeTicketModal,
+      handleTicketCreated,
+    } = useCanvasTicketEditorBridge({
+      channelId,
+      containerRef,
+      getEditor: getCanvasCommentEditor,
+      ready: isEditorReady,
+    });
 
     // Expose presentation and comment drawer methods via ref
     useImperativeHandle(
@@ -676,8 +690,18 @@ export const CollaborativeCanvasEditor = forwardRef<
           ...(canvasId && { canvasId }),
           ...(title && { canvasTitle: title }),
           canComment: editable && !isReadOnly,
+          canCreateTicket: editable && !isReadOnly && !isTicketChannelArchived,
+          onCreateTicket: openTicketForCurrentSelection,
         }),
-      [canvasId, editable, isReadOnly, openCommentsForCurrentBlock, title],
+      [
+        canvasId,
+        editable,
+        isReadOnly,
+        isTicketChannelArchived,
+        openCommentsForCurrentBlock,
+        openTicketForCurrentSelection,
+        title,
+      ],
     );
 
     useEffect((): (() => void) | void => {
@@ -834,6 +858,13 @@ export const CollaborativeCanvasEditor = forwardRef<
             />
           )}
         </div>
+
+        <CanvasTicketCreationFlow
+          anchor={activeTicketAnchor}
+          channelId={channelId}
+          onClose={closeTicketModal}
+          onTicketCreated={handleTicketCreated}
+        />
 
         {/* Presentation Modal */}
         {showPresentation && (
