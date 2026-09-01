@@ -10,7 +10,6 @@ import {
 } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
   ChevronRight,
