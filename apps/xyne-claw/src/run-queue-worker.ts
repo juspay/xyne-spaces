@@ -12,6 +12,7 @@ import {
   registerOwnedSession,
   unregisterOwnedSession,
   unfenceSession,
+  warmOwnershipClient,
 } from "./run-ownership.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
@@ -128,6 +129,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
     return null;
   }
 
+  warmOwnershipClient();
   const worker = new Worker<InternalRunPayload>(
     RUN_EXECUTION_QUEUE_NAME,
     async (job: Job<InternalRunPayload>, token?: string) => {

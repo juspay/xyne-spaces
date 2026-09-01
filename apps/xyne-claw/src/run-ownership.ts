@@ -60,13 +60,16 @@ function getClient(): Redis | null {
       ...(process.env["REDIS_TLS"] ? { tls: { rejectUnauthorized: false } } : {}),
       connectTimeout: 3_000,
       maxRetriesPerRequest: 1,
-      enableOfflineQueue: false,
     });
     client.on("error", (err: Error) => {
       clog.warn(`[run-ownership] connection error: ${err.message}`);
     });
   }
   return client;
+}
+
+export function warmOwnershipClient(): void {
+  getClient();
 }
 
 export function __setOwnershipClientForTests(stub: Redis | null): void {
