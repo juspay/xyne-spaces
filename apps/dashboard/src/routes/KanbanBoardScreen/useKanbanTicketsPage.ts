@@ -87,6 +87,8 @@ type UseKanbanTicketsPageResult = {
   isLoadingMore: boolean;
   loadMore: () => void;
   reset: () => void;
+  /** True when tickets come directly from Vespa search (trusted, already filtered) */
+  isUsingDirectVespaRows: boolean;
 };
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -164,8 +166,14 @@ const canRepresentGroupInVespa = (
   groupKey: string | undefined,
 ): boolean => {
   if (!groupBy || groupBy === 'none') return true;
-  if (groupBy === 'assignee' || groupBy === 'status' || groupBy === 'priority') {
-    return true;
+  if (groupBy === 'assignee') {
+    return Boolean(groupKey) && groupKey !== 'Unassigned';
+  }
+  if (groupBy === 'priority') {
+    return Boolean(groupKey) && groupKey !== 'No Priority';
+  }
+  if (groupBy === 'status') {
+    return Boolean(groupKey);
   }
   if (typeof groupBy !== 'object' || groupBy.type !== 'formField') return false;
   if (!groupKey) return false;
@@ -378,15 +386,19 @@ export const useKanbanTicketsPage = (
   const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const pageVespaTokensSet = new Set(options.dynamicFieldVespaTokens ?? []);
   const pageVespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
-  if (
-    typeof options.groupBy === 'object' &&
-    options.groupBy?.type === 'formField' &&
-    options.groupBy.fieldType !== FormFieldType.DATE
-  ) {
-    if (MISSING_FORM_FIELD_GROUP_KEYS.has(options.groupKey ?? '')) {
-      pageVespaTokensSet.add(`${options.groupBy.fieldId}::${VESPA_MISSING_DYNAMIC_FIELD_VALUE}`);
-    } else if (options.groupKey) {
-      pageVespaTokensSet.add(`${options.groupBy.fieldId}::${options.groupKey}`);
+  if (typeof options.groupBy === 'object' && options.groupBy?.type === 'formField') {
+    // Always add a token for form field groupBy to ensure Vespa search triggers
+    const fieldId = options.groupBy.fieldId;
+    const groupKey = options.groupKey ?? '';
+
+    if (options.groupBy.fieldType === FormFieldType.DATE) {
+      // For DATE grouping, always add a placeholder token to trigger Vespa
+      // The actual filtering is done via dynamicFieldDateRanges
+      pageVespaTokensSet.add(`${fieldId}::${VESPA_MISSING_DYNAMIC_FIELD_VALUE}`);
+    } else if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey) || !groupKey) {
+      pageVespaTokensSet.add(`${fieldId}::${VESPA_MISSING_DYNAMIC_FIELD_VALUE}`);
+    } else {
+      pageVespaTokensSet.add(`${fieldId}::${groupKey}`);
     }
   }
   const pageVespaTokens = Array.from(pageVespaTokensSet).sort();
@@ -406,6 +418,58 @@ export const useKanbanTicketsPage = (
     canRepresentGroupInVespa(options.groupBy, options.groupKey) &&
     !options.showOverdueOnly;
 
+  // Convert filter arrays to comma-separated strings for Vespa (only if non-empty)
+  const vespaPriority =
+    options.filters?.priority && options.filters.priority.length > 0
+      ? options.filters.priority.join(',')
+      : undefined;
+  const vespaAssignee =
+    options.filters?.assignee && options.filters.assignee.length > 0
+      ? options.filters.assignee.join(',')
+      : undefined;
+  const vespaTags =
+    options.filters?.tags && options.filters.tags.length > 0
+      ? options.filters.tags.join(',')
+      : undefined;
+  const vespaCreatedBy =
+    options.filters?.createdBy && options.filters.createdBy.length > 0
+      ? options.filters.createdBy.join(',')
+      : undefined;
+
+  // Compute group-specific filter for Vespa based on groupBy/groupKey
+  // This ensures search results are filtered to only show in the correct group
+  const vespaGroupFilter: { priority?: string; assignee?: string; status?: string } = (() => {
+    if (!options.groupBy || options.groupBy === 'none' || !options.groupKey) {
+      return {};
+    }
+    if (options.groupBy === 'priority') {
+      // Don't filter if groupKey is the "No Priority" placeholder
+      if (options.groupKey === 'No Priority') return {};
+      return { priority: options.groupKey };
+    }
+    if (options.groupBy === 'assignee') {
+      // Don't filter if groupKey is "Unassigned" - Vespa can't filter for null assignee easily
+      if (options.groupKey === 'Unassigned') return {};
+      // Remove prefixes like "user:" or "group:" if present
+      const normalizedKey = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
+      return { assignee: normalizedKey };
+    }
+    if (options.groupBy === 'status') {
+      // Filter by the group's status value
+      return { status: options.groupKey };
+    }
+    // For formField grouping, dynamic field tokens already handle it
+    return {};
+  })();
+
+  // Create a search key that changes when the group context changes
+  // This forces the search to re-trigger when switching views
+  const groupByKey =
+    typeof options.groupBy === 'object'
+      ? `${options.groupBy.type}:${options.groupBy.fieldId}`
+      : String(options.groupBy ?? 'none');
+  const vespaSearchKey = `${groupByKey}:${options.groupKey ?? ''}:${options.stageName}`;
+
   const vespaTicketSearch = useVespaTicketSearch({
     searchTerm: trimmedSearchTerm,
     dynamicFieldValues: pageVespaTokens,
@@ -413,6 +477,7 @@ export const useKanbanTicketsPage = (
     limit: 200,
     fetchAllDynamicFieldMatches: true,
     maxFetchedResults: 400,
+    searchKey: vespaSearchKey,
     ...(options.dynamicFieldDateRanges
       ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
       : {}),
@@ -420,6 +485,11 @@ export const useKanbanTicketsPage = (
     ...(effectiveVespaBoardId ? { boardId: effectiveVespaBoardId } : {}),
     ...(options.columnType === 'status' ? { status: options.stageName } : {}),
     ...(options.columnType === 'stage' ? { stage: options.stageName } : {}),
+    ...(vespaPriority ? { priority: vespaPriority } : {}),
+    ...(vespaAssignee ? { assignee: vespaAssignee } : {}),
+    ...(vespaTags ? { tags: vespaTags } : {}),
+    ...(vespaCreatedBy ? { createdBy: vespaCreatedBy } : {}),
+    ...vespaGroupFilter,
   });
   const localFilterKey = JSON.stringify({
     priority: options.filters?.priority ?? [],
@@ -594,5 +664,6 @@ export const useKanbanTicketsPage = (
     isLoadingMore,
     loadMore,
     reset,
+    isUsingDirectVespaRows: shouldUseDirectVespaRows,
   };
 };

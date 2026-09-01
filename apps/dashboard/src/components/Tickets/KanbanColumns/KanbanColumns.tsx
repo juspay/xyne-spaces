@@ -4,7 +4,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { Ticket, TicketTagMapping } from '@xyne/shared';
+import type { Ticket, TicketTagMapping, FormEntityValues } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 
 type TicketWithTags = Ticket & { tagMappings?: TicketTagMapping[] };
@@ -247,13 +247,49 @@ const PaginatedStageList: React.FC<{
 }) => {
   const columnValue = columnType === 'status' ? stage.id : stage.name;
   const columnStatus = stage.defaultTicketStatusV2;
-  const { tickets, hasMore, isLoadingMore, loadMore } = useKanbanTicketsPage({
-    ...paginationArgs,
-    columnType,
-    stageName: columnValue,
-  });
+  const { groupBy } = paginationArgs;
+  const { tickets, hasMore, isLoadingMore, loadMore, isUsingDirectVespaRows } =
+    useKanbanTicketsPage({
+      ...paginationArgs,
+      columnType,
+      stageName: columnValue,
+    });
   const renderedTickets = React.useMemo(() => {
-    if (allKnownTickets.length === 0) return tickets;
+    const isGroupByActive = groupBy && groupBy !== 'none';
+
+    // When using direct Vespa rows, trust the results - they're already filtered
+    // by group-specific Vespa filters (dynamic field tokens, assignee, priority, etc.)
+    if (isUsingDirectVespaRows) {
+      // Merge with cached tickets for optimistic updates if available
+      if (allKnownTickets.length > 0) {
+        const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
+        return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+      }
+      return tickets;
+    }
+
+    // In normal view (no grouping), trust server-side filtering
+    if (!isGroupByActive) {
+      if (allKnownTickets.length === 0) {
+        return tickets;
+      }
+      // Merge with cached tickets for optimistic updates
+      const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
+      return tickets.map(ticket => {
+        const known = knownTicketsById.get(ticket.id);
+        if (known && ticketBelongsToColumn(known, columnType, columnValue, columnStatus)) {
+          return known;
+        }
+        return ticket;
+      });
+    }
+
+    // In group by mode without direct Vespa rows, use allKnownTickets as source of truth.
+    // This path is used when Zero query provides the tickets.
+    if (allKnownTickets.length === 0) {
+      // Grouping not ready yet - return empty to prevent showing wrong tickets
+      return [];
+    }
 
     const knownTicketsById = new Map(allKnownTickets.map(ticket => [ticket.id, ticket]));
     const renderedTicketsById = new Map<string, Ticket>();
@@ -261,16 +297,32 @@ const PaginatedStageList: React.FC<{
     for (const ticket of tickets) {
       const knownTicket = knownTicketsById.get(ticket.id);
       if (knownTicket) {
-        if (!ticketBelongsToColumn(knownTicket, columnType, columnValue, columnStatus)) continue;
-        renderedTicketsById.set(ticket.id, knownTicket);
-        continue;
+        // Ticket exists in client-side grouped data - use cached version
+        // but validate it still belongs to this column
+        const belongsToColumn = ticketBelongsToColumn(
+          knownTicket,
+          columnType,
+          columnValue,
+          columnStatus,
+        );
+        if (belongsToColumn) {
+          renderedTicketsById.set(ticket.id, knownTicket);
+        }
       }
-
-      renderedTicketsById.set(ticket.id, ticket);
+      // If ticket is not in knownTicketsById, it doesn't belong to this group
+      // according to client-side grouping - skip it
     }
 
     return [...renderedTicketsById.values()];
-  }, [allKnownTickets, columnStatus, columnType, columnValue, tickets]);
+  }, [
+    allKnownTickets,
+    columnStatus,
+    columnType,
+    columnValue,
+    groupBy,
+    isUsingDirectVespaRows,
+    tickets,
+  ]);
 
   const fetchedTicketSnapshotSignature = React.useMemo(
     () => tickets.map(ticket => ticketBoardSnapshotSignature(ticket)).join(','),
@@ -359,6 +411,10 @@ interface KanbanColumnsProps {
    * stage-based SLA (no policy fetch needed in that case).
    */
   slaPolicies?: BoardSlaPolicy[];
+  /** Form field values by ticket ID - used for validating group membership when groupBy is a form field */
+  formValuesByTicketId?: Map<string, FormEntityValues[]>;
+  /** User names by ID - used for resolving user IDs to names in form field group validation */
+  userNamesById?: Map<string, string>;
 }
 
 export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
@@ -389,12 +445,21 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   allKnownTickets,
   onTicketsChange,
   onAddTicketInColumn,
+  formValuesByTicketId,
+  userNamesById,
 }) => {
   const columnType = paginatedColumnConfig?.columnType ?? 'stage';
-  const knownTicketsForOptimisticMerge = React.useMemo(
-    () => allKnownTickets ?? Object.values(ticketsByStage).flat(),
-    [allKnownTickets, ticketsByStage],
-  );
+  const isGroupByActive =
+    paginatedColumnConfig?.baseArgs?.groupBy && paginatedColumnConfig.baseArgs.groupBy !== 'none';
+  const knownTicketsForOptimisticMerge = React.useMemo(() => {
+    // In group by mode, ticketsByStage contains only this group's tickets
+    // Use it as source of truth to prevent tickets from appearing in wrong groups
+    if (isGroupByActive) {
+      return Object.values(ticketsByStage).flat();
+    }
+    // In normal mode, use allKnownTickets for optimistic updates
+    return allKnownTickets ?? Object.values(ticketsByStage).flat();
+  }, [allKnownTickets, isGroupByActive, ticketsByStage]);
   // Only the paginated board can starve a collapsed column of its count; the
   // non-paginated board always has every ticket in `ticketsByStage`.
   const countsAreReliable = !(paginatedColumnConfig && searchActive);
@@ -587,6 +652,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                 <div className='flex-1 min-h-0'>
                   {paginatedColumnConfig ? (
                     <PaginatedStageList
+                      key={columnKey}
                       stage={stage}
                       columnKey={columnKey}
                       paginationArgs={paginatedColumnConfig.baseArgs}
@@ -600,6 +666,8 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       onTicketClick={onTicketClick}
                       {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                       {...(slaPolicies !== undefined && { slaPolicies })}
+                      {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
+                      {...(userNamesById !== undefined && { userNamesById })}
                     />
                   ) : (
                     <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
