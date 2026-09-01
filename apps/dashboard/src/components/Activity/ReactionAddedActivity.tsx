@@ -7,7 +7,7 @@ import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { renderEmoji } from '../../utils/customEmojiUtils';
+import { ResolvedEmoji } from './ResolvedEmoji';
 import { getReactionMessagePreview } from './reactionMessagePreview';
 
 export const ReactionAddedActivity = ({
@@ -35,7 +35,7 @@ export const ReactionAddedActivity = ({
       actorId={reaction.userId}
       actorName={getUserDisplayName(actorUser)}
       channelId={message.conversation?.channelId}
-      badgeIcon={renderEmoji(reaction.emojiName)}
+      badgeIcon={<ResolvedEmoji emojiName={reaction.emojiName} />}
       badgeColorClass='bg-muted'
       description={
         <>

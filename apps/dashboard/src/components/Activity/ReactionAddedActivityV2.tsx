@@ -8,7 +8,7 @@ import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { parseReactionsMd, ReactionsData, getMostRecentEmoji } from '@xyne/shared';
-import { renderEmoji } from '../../utils/customEmojiUtils';
+import { ResolvedEmoji } from './ResolvedEmoji';
 import { getReactionMessagePreview } from './reactionMessagePreview';
 
 export const ReactionAddedActivityV2 = ({
@@ -72,7 +72,7 @@ export const ReactionAddedActivityV2 = ({
       actorId={activity.actorId} // Most recent reactor
       actorName={getUserDisplayName(actorUser)}
       channelId={message.conversation?.channelId}
-      badgeIcon={renderEmoji(latestEmoji)}
+      badgeIcon={<ResolvedEmoji emojiName={latestEmoji} />}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
