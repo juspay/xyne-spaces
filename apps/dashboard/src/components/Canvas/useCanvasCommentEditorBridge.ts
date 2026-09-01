@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 
 import { scrollToHeading } from '../../utils/canvasUtils';
 import type { CanvasCommentAnchor } from './CanvasCommentsPanel/CanvasCommentsPanel';
+import { useCanvasCommentAnchors } from './useCanvasCommentAnchors';
 import {
   useCanvasCommentHighlights,
   type CanvasCommentHighlightThread,
@@ -47,6 +48,9 @@ interface TiptapEditorLike {
   };
   commands: {
     setTextSelection: (range: { from: number; to: number }) => boolean;
+  };
+  view?: {
+    posAtDOM: (node: Node, offset: number) => number;
   };
 }
 
@@ -108,6 +112,40 @@ const getCommentThreadRect = (
   );
 };
 
+/**
+ * Puts the caret at the first character of the commented text rather than at the top of its
+ * block, by mapping the rendered anchor back to a document position. Returns false when the
+ * anchor is not rendered, so the caller can fall back to the block.
+ */
+const focusCommentAnchorStart = (
+  editor: CanvasEditorLike,
+  container: HTMLElement | null,
+  threadId: string,
+): boolean => {
+  if (!container) return false;
+
+  const anchorElement = container.querySelector<HTMLElement>(
+    `[data-canvas-comment-thread-id="${escapeSelectorValue(threadId)}"]`,
+  );
+  if (!anchorElement) return false;
+
+  const tiptapEditor = getTiptapEditor(editor);
+  const view = tiptapEditor?.view;
+  if (!tiptapEditor || !view) return false;
+
+  try {
+    const position = view.posAtDOM(anchorElement, 0);
+    if (typeof position !== 'number' || Number.isNaN(position) || position < 0) return false;
+
+    tiptapEditor.commands.setTextSelection({ from: position, to: position });
+    (editor as unknown as { focus?: () => void }).focus?.();
+    anchorElement.scrollIntoView({ block: 'center' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const INLINE_COMMENT_INTERACTIVE_SELECTOR = [
   '[data-canvas-inline-comment-thread="true"]',
   '[data-overlay-portal]',
@@ -142,7 +180,7 @@ export function useCanvasCommentEditorBridge({
 
   const handleCommentAnchorClick = useCallback(
     (thread: CanvasCommentHighlightThread, rect?: DOMRect): void => {
-      setIsCommentsOpen(false);
+      // The panel stays open — clicking an anchor selects a thread, it does not dismiss the list.
       setActiveCommentBlockId(thread.blockId);
       setActiveCommentThreadId(thread.id);
       setActiveCommentAnchor(null);
@@ -157,16 +195,36 @@ export function useCanvasCommentEditorBridge({
     [],
   );
 
+  // The anchor mark is part of the document, so it dies with the text it wraps and comes back
+  // with an undo. Everything that shows a comment follows this set rather than the thread rows.
+  const { anchoredThreadIds: anchoredCommentThreadIds, trackAnchoredThreadId } =
+    useCanvasCommentAnchors({
+      canvasId,
+      containerRef,
+      getEditor,
+      enabled: ready && Boolean(canvasId),
+      refreshKey: commentHighlightVersion,
+    });
+
   useCanvasCommentHighlights({
     canvasId,
     containerRef,
     enabled: ready && Boolean(canvasId),
     refreshKey: commentHighlightVersion,
     activeThreadId: activeCommentThreadId,
+    anchoredThreadIds: anchoredCommentThreadIds,
     onAnchorClick: handleCommentAnchorClick,
     onOpenCountChange: onOpenCommentCountChange,
     onThreadsChange: setCommentThreads,
   });
+
+  // A card left open over text that just got deleted has nothing to point at.
+  useEffect(() => {
+    if (!anchoredCommentThreadIds || !activeCommentThreadId) return;
+    if (anchoredCommentThreadIds.has(activeCommentThreadId)) return;
+    setInlineCommentThread(null);
+    setActiveCommentThreadId(null);
+  }, [activeCommentThreadId, anchoredCommentThreadIds]);
 
   useEffect(() => {
     setInlineCommentThread(current => {
@@ -183,24 +241,42 @@ export function useCanvasCommentEditorBridge({
   useEffect(() => {
     if (!inlineCommentThread) return;
 
+    // Both paths must also drop the active thread. Its badge is hidden with
+    // `pointer-events: none` while active, so leaving the id set after the card closes would
+    // leave an invisible, unclickable badge behind and the next click would do nothing.
+    const dismissInlineThread = (): void => {
+      setInlineCommentThread(null);
+      setActiveCommentThreadId(null);
+    };
+
     const handlePointerDown = (event: PointerEvent): void => {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (target.closest(INLINE_COMMENT_INTERACTIVE_SELECTOR)) return;
-      setInlineCommentThread(null);
+      dismissInlineThread();
     };
 
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
-        setInlineCommentThread(null);
+        dismissInlineThread();
       }
+    };
+
+    // Scrolling the document dismisses the card, but scrolling inside it (a long thread)
+    // must not. Capture phase is required — scroll events do not bubble.
+    const handleScroll = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(INLINE_COMMENT_INTERACTIVE_SELECTOR)) return;
+      dismissInlineThread();
     };
 
     document.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('scroll', handleScroll, true);
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('scroll', handleScroll, true);
     };
   }, [inlineCommentThread]);
 
@@ -305,13 +381,16 @@ export function useCanvasCommentEditorBridge({
           from: anchor.selectionTo,
           to: anchor.selectionTo,
         });
+        // Claim the anchor now: the thread row lands before the next scan reads the mark, and
+        // without this the brand new comment would blink out for that window.
+        trackAnchoredThreadId(threadId);
         refreshCommentHighlights();
         return true;
       } catch {
         return false;
       }
     },
-    [getEditor, refreshCommentHighlights],
+    [getEditor, refreshCommentHighlights, trackAnchoredThreadId],
   );
 
   const removeCommentAnchorStyle = useCallback(
@@ -373,12 +452,16 @@ export function useCanvasCommentEditorBridge({
   }, [containerRef, getCurrentBlockId, getCurrentCommentAnchor, getEditor]);
 
   const focusCommentBlock = useCallback(
-    (blockId: string): void => {
+    (blockId: string, threadId?: string): void => {
       setActiveCommentBlockId(blockId);
-      setActiveCommentThreadId(null);
+      setActiveCommentThreadId(threadId ?? null);
       setActiveCommentAnchor(null);
       const editor = getEditor();
       if (!editor) return;
+
+      // Prefer the commented text itself; fall back to the block when it is not rendered.
+      if (threadId && focusCommentAnchorStart(editor, containerRef.current, threadId)) return;
+
       try {
         editor.setTextCursorPosition(blockId, 'start');
         (editor as unknown as { focus?: () => void }).focus?.();
@@ -407,6 +490,7 @@ export function useCanvasCommentEditorBridge({
     activeCommentBlockId,
     activeCommentThreadId,
     activeCommentAnchor,
+    anchoredCommentThreadIds,
     refreshCommentHighlights,
     openCommentsForCurrentBlock,
     focusCommentBlock,
