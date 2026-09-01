@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.2](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.1...v1.251.0-release-20260901.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* SDLC  ([#1340](https://github.com/juspay/xyne-spaces/issues/1340)) ([578c674](https://github.com/juspay/xyne-spaces/commit/578c6743b7a42236ac4ca57ac06d4067bd3db9a3)), closes [#1236](https://github.com/juspay/xyne-spaces/issues/1236) [#1272](https://github.com/juspay/xyne-spaces/issues/1272) [#1287](https://github.com/juspay/xyne-spaces/issues/1287)
+
 ## [1.251.0-release-20260901.1](https://github.com/juspay/xyne-spaces/compare/v1.250.2-release-20260901.3...v1.251.0-release-20260901.1) (2026-09-01)
 
 
