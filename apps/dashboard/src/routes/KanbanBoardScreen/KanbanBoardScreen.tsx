@@ -740,8 +740,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // so opening that submenu enables this fetch too.
     enabled:
       viewMode === 'my-tickets' &&
-        (isBoardDropdownOpen || isSourceChannelsOpen || isFiltersDropdownOpen) &&
-        !!user?.id,
+      (isBoardDropdownOpen || isSourceChannelsOpen || isFiltersDropdownOpen) &&
+      !!user?.id,
     staleTime: 60_000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -3219,14 +3219,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           label: 'View Details',
           onClick: () => {
             if (ticketChannelId && ticket.conversationId) {
-              navigate(
-                buildChannelRoute(
-                  `${ticketChannelId}/${ticket.conversationId}/${ticket.id}`,
-                  { selectedTab: 'details' },
-                ),
+              void navigate(
+                buildChannelRoute(`${ticketChannelId}/${ticket.conversationId}/${ticket.id}`, {
+                  selectedTab: 'details',
+                }),
               );
             } else if (ticketChannelId) {
-              navigate(
+              void navigate(
                 buildChannelRoute(ticketChannelId, {
                   tab: 'tickets',
                   ticketId: ticket.id,
@@ -3234,7 +3233,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 }),
               );
             } else {
-              navigate(`${baseRoute}/tickets/${ticket.id}`);
+              void navigate(`${baseRoute}/tickets/${ticket.id}`);
             }
           },
         },
@@ -3439,8 +3438,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         MEDIUM: 2,
         LOW: 3,
       };
-      const getOrder = (key: string): number =>
-        PRIORITY_SORT_ORDER[key] ?? Number.MAX_SAFE_INTEGER;
+      const getOrder = (key: string): number => PRIORITY_SORT_ORDER[key] ?? Number.MAX_SAFE_INTEGER;
       mapped.sort((a, b) => {
         const orderA = getOrder(a.key);
         const orderB = getOrder(b.key);
@@ -4127,25 +4125,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           groupBy.type === 'formField' &&
                           groupBy.fieldId === value.fieldId;
                     return (
-                    <DropdownMenu.CheckboxItem
-                      key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
-                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
+                      <DropdownMenu.CheckboxItem
+                        key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
+                        className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
       transition-colors
       data-[highlighted]:bg-muted data-[highlighted]:text-foreground
       data-[state=checked]:bg-accent data-[state=checked]:text-foreground data-[state=checked]:font-semibold'
-                      checked={isSelected}
-                      onCheckedChange={() =>
-                        handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
-                      }
-                      data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
-                          {icon}
-                        </span>
-                        <span className='font-medium'>{label.replace('Group by: ', '')}</span>
-                      </div>
-                    </DropdownMenu.CheckboxItem>
+                        checked={isSelected}
+                        onCheckedChange={() =>
+                          handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
+                        }
+                        data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
+                      >
+                        <div className='flex items-center gap-3'>
+                          <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
+                            {icon}
+                          </span>
+                          <span className='font-medium'>{label.replace('Group by: ', '')}</span>
+                        </div>
+                      </DropdownMenu.CheckboxItem>
                     );
                   })}
                 </DropdownMenu.Content>

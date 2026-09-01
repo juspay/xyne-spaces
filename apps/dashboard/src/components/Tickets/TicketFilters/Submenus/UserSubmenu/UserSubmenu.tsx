@@ -210,10 +210,7 @@ export const UserSubmenu = ({
 
   // Select-all / deselect-all toggle: visible user IDs from the filtered rows
   const visibleUserIds = useMemo(
-    () =>
-      rows
-        .filter((r): r is User => typeof r === 'object' && 'id' in r)
-        .map(u => u.id),
+    () => rows.filter((r): r is User => typeof r === 'object' && 'id' in r).map(u => u.id),
     [rows],
   );
   const allVisibleSelected =
