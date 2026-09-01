@@ -74,6 +74,7 @@ import {
   RolesACL,
   SavedUserConfigurationsACL,
   SavedUserConfigurationValuesACL,
+  KanbanBoardViewAccessACL,
   StageApproversACL,
   StagesACL,
   SubTicketsACL,
@@ -285,6 +286,8 @@ export class ACLFactory {
       return new SavedUserConfigurationsACL(ctx, prisma)
     case 'savedUserConfigurationValue':
       return new SavedUserConfigurationValuesACL(ctx, prisma)
+    case 'kanbanBoardViewAccess':
+      return new KanbanBoardViewAccessACL(ctx, prisma)
     case 'stage':
       return new StagesACL(ctx, prisma)
     case 'stageApprovers':

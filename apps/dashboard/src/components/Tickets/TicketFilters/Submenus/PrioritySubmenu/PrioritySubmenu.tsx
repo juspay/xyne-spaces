@@ -78,30 +78,30 @@ export const PrioritySubmenu = ({
               {allSelected && <Check className='w-4 h-4 text-primary shrink-0' />}
             </button>
             {prioritiesToShow.map(([priority, config]) => {
-            const isSelected = selectedPriorities.includes(priority as TicketPriority);
+              const isSelected = selectedPriorities.includes(priority as TicketPriority);
 
-            return (
-              <button
-                key={priority}
-                onClick={() => handleToggle(priority as TicketPriority)}
-                type='button'
-                className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md
+              return (
+                <button
+                  key={priority}
+                  onClick={() => handleToggle(priority as TicketPriority)}
+                  type='button'
+                  className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md
                   ${isSelected ? 'bg-accent text-foreground' : 'hover:bg-muted text-foreground'}
                 `}
-                data-track-category='Tickets'
-                data-track-name='TogglePriorityFilter'
-                data-track-metadata={JSON.stringify({ priority, selected: !isSelected })}
-                data-testid={`priority-filter-${priority.toLowerCase()}`}
-              >
-                <div className='flex items-center gap-2'>
-                  <div className='flex items-center justify-center'>
-                    {getPriorityIcon(priority as TicketPriority)}
+                  data-track-category='Tickets'
+                  data-track-name='TogglePriorityFilter'
+                  data-track-metadata={JSON.stringify({ priority, selected: !isSelected })}
+                  data-testid={`priority-filter-${priority.toLowerCase()}`}
+                >
+                  <div className='flex items-center gap-2'>
+                    <div className='flex items-center justify-center'>
+                      {getPriorityIcon(priority as TicketPriority)}
+                    </div>
+                    <span className='text-sm font-medium'>{config.label}</span>
                   </div>
-                  <span className='text-sm font-medium'>{config.label}</span>
-                </div>
 
-                {isSelected && <Check className='w-5 h-5 text-foreground' strokeWidth={2.5} />}
-              </button>
+                  {isSelected && <Check className='w-5 h-5 text-foreground' strokeWidth={2.5} />}
+                </button>
               );
             })}
           </>
