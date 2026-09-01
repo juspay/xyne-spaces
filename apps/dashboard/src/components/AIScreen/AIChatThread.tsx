@@ -225,7 +225,7 @@ function ChatTopbar({
       >
         <Menu className='h-4 w-4' aria-hidden strokeWidth={1.75} />
       </button>
-      <h1 className='flex-1 truncate text-[13.5px] font-medium text-foreground'>{title}</h1>
+      <h1 className='flex-1 truncate text-base font-medium text-foreground'>{title}</h1>
     </header>
   );
 }
@@ -316,7 +316,7 @@ function ReasoningSection({
       style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
     >
       <div className='overflow-hidden'>
-        <div className='my-1 text-[12.5px]'>
+        <div className='my-1 text-xs'>
           <button
             type='button'
             onClick={() => {
@@ -1064,7 +1064,7 @@ function ChatMessageBubble({
             )}
             <div
               className={cn(
-                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-[14.5px] leading-relaxed text-gray-900',
+                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900',
                 isEditing ? 'w-full' : 'max-w-full',
               )}
             >
@@ -1086,7 +1086,7 @@ function ChatMessageBubble({
                         setIsEditing(false);
                       }
                     }}
-                    className='min-h-[60px] w-full resize-none bg-transparent text-[14.5px] leading-relaxed text-gray-900 outline-none'
+                    className='min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-gray-900 outline-none'
                     rows={Math.max(2, editText.split('\n').length)}
                     data-track-category='XyneAI'
                     data-track-name='EDIT_TEXTAREA'
@@ -1174,7 +1174,7 @@ function ChatMessageBubble({
 
           {displayContent && displayContent.length > 0 && (
             <div
-              className={`bot-markdown-content xyne-ai-markdown text-[15px] font-normal leading-7 text-foreground${
+              className={`bot-markdown-content xyne-ai-markdown text-sm font-normal leading-7 text-foreground${
                 // Keyed off everStreamed (not isStreaming) so content that
                 // lands AT completion — the final tail words, finalized
                 // citation chips — still fades in instead of popping the
