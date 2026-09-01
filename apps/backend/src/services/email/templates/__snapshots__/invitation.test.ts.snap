@@ -1,21 +1,7 @@
-import { InviteExperience } from '@xyne/shared';
-import { SendInvitationEmailParams } from '../base-email-service';
+// Jest Snapshot v1, https://goo.gl/fbAQLP
 
-export function invitationEmailHtml({
-  inviterName,
-  workspaceName,
-  invitationLink,
-  tempPassword,
-  frontendUrl,
-  inviteExperience,
-}: Pick<
-  SendInvitationEmailParams,
-  'inviterName' | 'workspaceName' | 'invitationLink' | 'tempPassword' | 'frontendUrl' | 'inviteExperience'
->): string {
-  const isBrowser = inviteExperience === InviteExperience.BROWSER;
-
-  return `
-<!DOCTYPE html>
+exports[`invitationEmailHtml renders the desktop-mode template (default/unset inviteExperience) — regression snapshot 1`] = `
+"<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -42,10 +28,10 @@ export function invitationEmailHtml({
               <!-- Greeting -->
               <h2 style="color:#1f2937;margin:0 0 16px 0;font-size:22px;">You've been invited!</h2>
               <p style="color:#4b5563;margin:0 0 24px 0;">
-                <strong>${inviterName}</strong> has invited you to join <strong>${workspaceName}</strong> on Xyne Spaces — a collaborative workspace for teams to communicate, manage tickets, and work together efficiently.
+                <strong>Ada Lovelace</strong> has invited you to join <strong>Analytics Engine</strong> on Xyne Spaces — a collaborative workspace for teams to communicate, manage tickets, and work together efficiently.
               </p>
 
-              ${isBrowser ? '' : `
+              
               <!-- Warning Banner -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
                 <tr>
@@ -71,12 +57,12 @@ export function invitationEmailHtml({
                   <td valign="top">
                     <strong style="display:block;color:#1f2937;font-size:15px;margin-bottom:6px;">Download &amp; Install the Xyne Spaces Desktop App</strong>
                     <p style="color:#6b7280;font-size:13px;margin:0 0 14px 0;">The desktop app is required to access your workspace. Download it for your platform from the link below and complete the installation before proceeding.</p>
-                    <a href="${frontendUrl}/apps/downloads" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:11px 24px;border-radius:8px;font-weight:600;font-size:14px;">Download Xyne Spaces App</a>
+                    <a href="https://app.spaces.xyne.juspay.net/apps/downloads" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:11px 24px;border-radius:8px;font-weight:600;font-size:14px;">Download Xyne Spaces App</a>
                     <p style="color:#6b7280;font-size:12px;margin:10px 0 0 0;">
-                      Or visit: <a href="${frontendUrl}/apps/downloads" style="color:#6366f1;word-break:break-all;">${frontendUrl}/apps/downloads</a>
+                      Or visit: <a href="https://app.spaces.xyne.juspay.net/apps/downloads" style="color:#6366f1;word-break:break-all;">https://app.spaces.xyne.juspay.net/apps/downloads</a>
                     </p>
                     <p style="color:#6b7280;font-size:12px;margin:6px 0 0 0;">
-                      Already set up? Open your invite: <a href="${frontendUrl}/invite" style="color:#6366f1;word-break:break-all;">${frontendUrl}/invite</a>
+                      Already set up? Open your invite: <a href="https://app.spaces.xyne.juspay.net/invite" style="color:#6366f1;word-break:break-all;">https://app.spaces.xyne.juspay.net/invite</a>
                     </p>
                   </td>
                 </tr>
@@ -88,44 +74,44 @@ export function invitationEmailHtml({
                   <td style="border-top:1px solid #e5e7eb;"></td>
                 </tr>
               </table>
-              `}
+              
 
-              <!-- ${isBrowser ? 'Accept Your Invitation' : 'Step 2'} -->
+              <!-- Step 2 -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:32px;">
                 <tr>
                   <td width="44" valign="top" style="padding-top:2px;">
                     <table cellpadding="0" cellspacing="0" border="0">
                       <tr>
                         <td width="32" height="32" align="center" valign="middle" style="background:#000000;border-radius:50%;color:#ffffff;font-weight:700;font-size:14px;width:32px;height:32px;text-align:center;line-height:32px;">
-                          ${isBrowser ? '1' : '2'}
+                          2
                         </td>
                       </tr>
                     </table>
                   </td>
                   <td valign="top">
                     <strong style="display:block;color:#1f2937;font-size:15px;margin-bottom:6px;">Accept Your Invitation &amp; Log In</strong>
-                    <p style="color:#6b7280;font-size:13px;margin:0 0 6px 0;">${isBrowser ? 'Click the button below to accept your invitation and open your workspace in the browser. Nothing to install.' : 'Once the app is installed, click the button below to accept your invitation and log in to your workspace.'}</p>
-                    ${isBrowser ? '' : `<p style="color:#6b7280;font-size:13px;margin:0 0 14px 0;"><strong style="color:#1f2937;">Do not open this link in a browser</strong> — it must be opened in the Xyne Spaces desktop app.</p>`}
-                    <a href="${invitationLink}" style="display:inline-block;background:#000000;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">${isBrowser ? 'Open My Workspace' : 'Accept Invitation'}</a>
+                    <p style="color:#6b7280;font-size:13px;margin:0 0 6px 0;">Once the app is installed, click the button below to accept your invitation and log in to your workspace.</p>
+                    <p style="color:#6b7280;font-size:13px;margin:0 0 14px 0;"><strong style="color:#1f2937;">Do not open this link in a browser</strong> — it must be opened in the Xyne Spaces desktop app.</p>
+                    <a href="https://app.spaces.xyne.juspay.net/launch?path=invite%3FworkspaceId%3Dws1%26invitationId%3Dinv1" style="display:inline-block;background:#000000;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Accept Invitation</a>
                     <p style="color:#6b7280;font-size:12px;margin:10px 0 0 0;word-break:break-all;">
-                      Or copy and paste this link: <a href="${invitationLink}" style="color:#6366f1;">${invitationLink}</a>
+                      Or copy and paste this link: <a href="https://app.spaces.xyne.juspay.net/launch?path=invite%3FworkspaceId%3Dws1%26invitationId%3Dinv1" style="color:#6366f1;">https://app.spaces.xyne.juspay.net/launch?path=invite%3FworkspaceId%3Dws1%26invitationId%3Dinv1</a>
                     </p>
                   </td>
                 </tr>
               </table>
 
-              ${tempPassword ? `
+              
               <!-- Temp Password Banner -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
                 <tr>
                   <td style="background:#ecfdf5;border:1px solid #10b981;border-radius:8px;padding:12px 16px;">
                     <strong style="display:block;color:#065f46;font-size:13px;margin-bottom:4px;">🔑 Your Temporary Password</strong>
                     <span style="color:#065f46;font-size:13px;">Use this password to sign in with your email. This will remain your password until you have set it manually. Alternately, sign-in with Google/Microsoft SSO instead.</span>
-                    <p style="font-size:18px;font-weight:bold;color:#047857;margin:8px 0 0 0;letter-spacing:1px;">${tempPassword}</p>
+                    <p style="font-size:18px;font-weight:bold;color:#047857;margin:8px 0 0 0;letter-spacing:1px;">temp-pass-123</p>
                   </td>
                 </tr>
               </table>
-              ` : ''}
+              
 
               <!-- Footer -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -143,28 +129,14 @@ export function invitationEmailHtml({
     </tr>
   </table>
 </body>
-</html>
-  `.trim();
-}
+</html>"
+`;
 
-export function invitationEmailText({
-  inviterName,
-  workspaceName,
-  invitationLink,
-  tempPassword,
-  frontendUrl,
-  inviteExperience,
-}: Pick<
-  SendInvitationEmailParams,
-  'inviterName' | 'workspaceName' | 'invitationLink' | 'tempPassword' | 'frontendUrl' | 'inviteExperience'
->): string {
-  const isBrowser = inviteExperience === InviteExperience.BROWSER;
+exports[`invitationEmailText renders the desktop-mode template (default/unset inviteExperience) — regression snapshot 1`] = `
+"You've been invited to join Analytics Engine on Xyne Spaces!
 
-  return `
-You've been invited to join ${workspaceName} on Xyne Spaces!
+Ada Lovelace has invited you to collaborate on Xyne Spaces — a platform for teams to communicate, manage tickets, and work together efficiently.
 
-${inviterName} has invited you to collaborate on Xyne Spaces — a platform for teams to communicate, manage tickets, and work together efficiently.
-${isBrowser ? '' : `
 ⚠️  IMPORTANT: You must complete BOTH steps below in order. The invitation will only work correctly inside the desktop app.
 
 ──────────────────────────────────────────
@@ -172,28 +144,28 @@ STEP 1 — Download & Install the Desktop App (REQUIRED)
 ──────────────────────────────────────────
 Before doing anything else, download and install the Xyne Spaces desktop app for your platform:
 
-  ${frontendUrl}/apps/downloads
+  https://app.spaces.xyne.juspay.net/apps/downloads
 
-Already set up? Open your invite: ${frontendUrl}/invite
+Already set up? Open your invite: https://app.spaces.xyne.juspay.net/invite
 
 Complete the installation before moving to Step 2.
-`}
-──────────────────────────────────────────
-${isBrowser ? 'ACCEPT YOUR INVITATION' : 'STEP 2 — Accept Your Invitation & Log In'}
-──────────────────────────────────────────
-${isBrowser ? 'Click the button below to accept your invitation and open your workspace in the browser. Nothing to install.' : 'Once the app is installed, open the link below to accept your invitation and log in to your workspace.\nDo NOT open this link in a browser — it must be opened in the Xyne Spaces desktop app.'}
 
-  ${invitationLink}
+──────────────────────────────────────────
+STEP 2 — Accept Your Invitation & Log In
+──────────────────────────────────────────
+Once the app is installed, open the link below to accept your invitation and log in to your workspace.
+Do NOT open this link in a browser — it must be opened in the Xyne Spaces desktop app.
 
-${tempPassword ? `──────────────────────────────────────────
+  https://app.spaces.xyne.juspay.net/launch?path=invite%3FworkspaceId%3Dws1%26invitationId%3Dinv1
+
+──────────────────────────────────────────
 🔑 YOUR TEMPORARY PASSWORD
 ──────────────────────────────────────────
 Use this password to sign in with your email. This will remain your password until you have set it manually. Alternately, sign-in with Google/Microsoft SSO instead.
 
-  ${tempPassword}
-` : ''}
+  temp-pass-123
+
 
 ──────────────────────────────────────────
-This invitation was sent by Xyne Spaces. If you weren't expecting this email, you can safely ignore it.
-  `.trim();
-}
+This invitation was sent by Xyne Spaces. If you weren't expecting this email, you can safely ignore it."
+`;
