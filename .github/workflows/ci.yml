@@ -24,7 +24,7 @@ jobs:
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, github-builds-runners]
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
@@ -64,7 +64,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard ${{ matrix.task }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, github-builds-runners]
     strategy:
       fail-fast: false
       matrix:
