@@ -126,6 +126,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
 // Core items that are always in the toolbar. Users cannot remove these — their
 // toggle is locked on in the customize UI.
 export const REQUIRED_TOOLBAR_PATHS: string[] = [
+  '/ai',
   '/chat/dir',
   '/chat/dm',
   '/calls',
