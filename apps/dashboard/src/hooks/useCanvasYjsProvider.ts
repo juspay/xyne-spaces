@@ -207,13 +207,12 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   }, [authTokenData]);
 
   latestAuthTokenRef.current = authTokenData;
-  const [hasAuthToken, setHasAuthToken] = useState(false);
-  useEffect(() => {
-    if (authTokenData) setHasAuthToken(true);
-  }, [authTokenData]);
-  useEffect(() => {
-    setHasAuthToken(false);
-  }, [canvasId]);
+  // Derived, not effect-driven state: two useEffects here (set true when the
+  // token arrives, reset false on canvasId change) both fire on mount, and
+  // when the token is already cached the reset can run after the set and
+  // win, permanently gating out provider creation for that mount. Deriving
+  // it during render has no such ordering to race.
+  const hasAuthToken = authTokenData?.docId === canvasId;
 
   const getAuthToken = useCallback(async (): Promise<YSweetAuthToken> => {
     if (errorCountRef.current >= 5) {

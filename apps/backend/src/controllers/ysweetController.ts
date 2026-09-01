@@ -254,20 +254,37 @@ export class YSweetController {
    */
   async validateAccess(req: Request, res: Response): Promise<void> {
     try {
-      const { docId, userId } = req.body;
+      const { docId, userId, authorization } = req.body;
 
-      if (!docId || typeof docId !== 'string' || !userId || typeof userId !== 'string') {
+      if (
+        !docId ||
+        typeof docId !== 'string' ||
+        !userId ||
+        typeof userId !== 'string' ||
+        (authorization !== 'full' && authorization !== 'read-only')
+      ) {
         res.status(400).json({
           error: 'Invalid request',
-          message: 'docId and userId are required and must be strings',
+          message: "docId, userId are required strings and authorization must be 'full' or 'read-only'",
         });
         return;
       }
 
       const authResult = await canvasAuthService.checkCanvasAccess(docId, userId, await getValidateDbInstance());
 
-      if (!authResult.canvas || !authResult.hasAccess) {
-        logger.warn(`[YSweet] validateAccess denied for user ${userId} on canvas ${docId}`, {
+      // The connection was issued at `authorization` level (full = edit,
+      // read-only = view). If the user's edit access was revoked since, a
+      // still-open full-access connection must be denied even though they
+      // may still have view access — checking `hasAccess` alone would let
+      // an editor downgraded to viewer keep writing.
+      const stillAllowed =
+        authorization === 'full' ? authResult.canEdit : authResult.hasAccess;
+
+      if (!authResult.canvas || !stillAllowed) {
+        logger.warn('[YSweet] validateAccess denied', {
+          userId,
+          docId,
+          authorization,
           canEdit: authResult.canEdit,
           canView: authResult.canView,
           hasAccess: authResult.hasAccess,

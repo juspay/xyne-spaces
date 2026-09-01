@@ -10,4 +10,4 @@ export default router;
 
 export const ysweetValidateRouter = Router();
 
-ysweetValidateRouter.post('/validate', ysweetController.validateAccess.bind(ysweetController));
+ysweetValidateRouter.post('/', ysweetController.validateAccess.bind(ysweetController));
