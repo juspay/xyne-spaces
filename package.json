@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.250.5",
+  "version": "1.250.6",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",

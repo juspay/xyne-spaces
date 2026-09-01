@@ -1,3 +1,10 @@
+## [1.250.6](https://github.com/juspay/xyne-spaces/compare/v1.250.5...v1.250.6) (2026-09-01)
+
+
+### Bug Fixes
+
+* authrevamp phase 1 ([#913](https://github.com/juspay/xyne-spaces/issues/913)) ([78dee77](https://github.com/juspay/xyne-spaces/commit/78dee77fda854d568c0f9335a4cb2cfbe335e47a))
+
 ## [1.250.5](https://github.com/juspay/xyne-spaces/compare/v1.250.4...v1.250.5) (2026-09-01)
 
 
