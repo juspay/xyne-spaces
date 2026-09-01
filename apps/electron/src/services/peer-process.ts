@@ -24,6 +24,26 @@ export interface PeerProcess {
 
 const EXEC_TIMEOUT_MS = 2000;
 
+/** Options for {@link resolvePeerProcess}. */
+export interface ResolvePeerOptions {
+  /**
+   * Run the macOS `codesign` verification (populates `signed`). Only the grant-time
+   * consent dialog reads `signed`; the token re-check path compares `execPath` only, so
+   * it passes `false` to skip a per-request `codesign --verify` shell-out. Default true.
+   */
+  verifySignature?: boolean;
+  /**
+   * When > 0, cache a successful (non-null) resolution keyed on `remotePort` for this many
+   * ms. An established socket's peer process cannot change within the window, so this removes
+   * most of the repeated shell-out cost on hot paths without weakening the binding. Failures
+   * (null) are never cached, so a transient lookup error is not sticky. Default 0 (no cache).
+   */
+  cacheTtlMs?: number;
+}
+
+// Per-socket cache of successful resolutions, keyed on the client ephemeral port.
+const peerCache = new Map<number, { value: PeerProcess; expiresAt: number }>();
+
 /**
  * Resolve the local process that owns `remotePort` — the client end of a
  * loopback connection to our server. `selfPid` (our own pid) is excluded so we
@@ -37,11 +57,21 @@ const EXEC_TIMEOUT_MS = 2000;
 export async function resolvePeerProcess(
   remotePort: number | undefined,
   selfPid: number,
+  opts: ResolvePeerOptions = {},
 ): Promise<PeerProcess | null> {
+  const { verifySignature = true, cacheTtlMs = 0 } = opts;
+
   if (!remotePort || !Number.isInteger(remotePort) || remotePort <= 0) {
     return null;
   }
 
+  const now = Date.now();
+  if (cacheTtlMs > 0) {
+    const hit = peerCache.get(remotePort);
+    if (hit && hit.expiresAt > now) return hit.value;
+  }
+
+  let result: PeerProcess | null = null;
   try {
     let pid: number | null = null;
     if (process.platform === 'darwin') {
@@ -52,18 +82,29 @@ export async function resolvePeerProcess(
       pid = await pidFromPortLinux(remotePort);
     }
 
-    if (pid === null || pid === selfPid) {
-      return null;
+    if (pid !== null && pid !== selfPid) {
+      const execPath = await execPathFromPid(pid);
+      const signed =
+        verifySignature && execPath && process.platform === 'darwin'
+          ? await isSignedMac(execPath)
+          : null;
+      result = { pid, execPath, signed };
     }
-
-    const execPath = await execPathFromPid(pid);
-    const signed = execPath && process.platform === 'darwin' ? await isSignedMac(execPath) : null;
-
-    return { pid, execPath, signed };
   } catch (error) {
     log.warn('[PeerProcess] Failed to resolve peer process:', error);
-    return null;
+    result = null;
   }
+
+  // Cache successful resolutions only; never cache a null so transient failures are not sticky.
+  if (cacheTtlMs > 0 && result !== null) {
+    if (peerCache.size > 256) {
+      for (const [k, v] of peerCache) {
+        if (v.expiresAt <= now) peerCache.delete(k);
+      }
+    }
+    peerCache.set(remotePort, { value: result, expiresAt: now + cacheTtlMs });
+  }
+  return result;
 }
 
 /**

@@ -39,7 +39,9 @@ function loadToken() {
 }
 
 function saveToken(data) {
-  writeFileSync(TOKEN_FILE, JSON.stringify(data, null, 2));
+  // 0o600: token is a bearer credential — keep it readable only by the owner so
+  // other users on a shared host cannot lift it from the world-readable temp dir.
+  writeFileSync(TOKEN_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
 function parseFlags(argv) {

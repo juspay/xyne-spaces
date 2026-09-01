@@ -45,6 +45,11 @@ type DurationOption = '5min' | '1hour' | 'session';
 // dialog. Keyed by requester exe path (or 'unknown' when unresolved).
 const DENY_COOLDOWN_MS = 30 * 1000;
 
+// TTL for the per-socket peer cache used on the token re-check path. An established
+// socket's peer process cannot change within this window, so caching removes most of
+// the per-request shell-out cost without weakening the path binding.
+const PEER_RECHECK_CACHE_MS = 1500;
+
 // Registry of executables recognised as first-party agents. Anything not on the
 // list is shown in the consent dialog as an "Unregistered agent" alongside its
 // real path, so the user is not tricked by an attacker-controlled agentName.
@@ -1510,23 +1515,47 @@ class AgentAuthService {
    * issued to (Payatu #2). Re-resolves the peer from the OS TCP table on every call and
    * rejects a path mismatch, so a token leaked to another local process is unusable.
    *
-   * Note: when the peer cannot be resolved right now (currentPath === null) but a path was
-   * bound at grant time, we log and allow rather than break a legitimate agent on a transient
-   * lookup failure — the null case is "unknown", not a proven mismatch.
+   * Fail closed on an unverified peer. Per the peer-process contract, a null result MUST be
+   * treated as "unverified" rather than "trusted", so both an unbound session (no path captured
+   * at grant time) and an unresolved re-lookup deny the request. The null case is reachable on
+   * demand — a process holding a leaked token can push lsof/ss/PowerShell past EXEC_TIMEOUT_MS
+   * under load, or run where the lookup tool is unavailable — so allowing it would reopen the
+   * exact token-replay hole the path binding exists to close.
    */
   private async validateTokenAndPeer(token: string, req: IncomingMessage): Promise<boolean> {
     if (!this.validateToken(token)) return false;
 
     const session = this.sessions.get(token);
     if (!session) return false;
-    if (!session.agentPath) return true; // nothing bound at grant time; cannot enforce
 
-    const peer = await resolvePeerProcess(req.socket.remotePort, process.pid);
+    // Nothing bound at grant time → the token was never tied to a process, so it is
+    // unverifiable. Treat as unverified and deny rather than trust it.
+    if (!session.agentPath) {
+      Logger.warn(ElectronEvent.AGENT_AUTH_PEER_MISMATCH, {
+        agentName: session.agentName,
+        expected: 'unbound-session',
+        actual: null,
+      }, 'AgentAuth');
+      return false;
+    }
+
+    // Re-check the signature only matters at grant time (consent dialog); here we compare
+    // execPath, so skip codesign. A short per-socket cache absorbs the per-request shell-out
+    // cost on the MCP ingest path without weakening the binding (an established socket's peer
+    // cannot change within the TTL).
+    const peer = await resolvePeerProcess(req.socket.remotePort, process.pid, {
+      verifySignature: false,
+      cacheTtlMs: PEER_RECHECK_CACHE_MS,
+    });
     const currentPath = peer?.execPath ?? null;
 
     if (currentPath === null) {
-      log.warn('[AgentAuth] Could not re-resolve peer for token-gated request; allowing bound session');
-      return true;
+      Logger.warn(ElectronEvent.AGENT_AUTH_PEER_MISMATCH, {
+        agentName: session.agentName,
+        expected: session.agentPath,
+        actual: 'unresolved-peer',
+      }, 'AgentAuth');
+      return false;
     }
 
     if (currentPath === session.agentPath) return true;
@@ -1541,7 +1570,7 @@ class AgentAuthService {
 
   private sanitizeDialogText(value: string | undefined, maxLen: number): string {
     if (typeof value !== 'string') return '';
-    const cleaned = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleaned = value.replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ').replace(/\s+/g, ' ').trim();
     return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}…` : cleaned;
   }
 

@@ -74,7 +74,11 @@ export function callInvitePath(candidate: string): string | null {
 export function sanitizeAskAiText(value: unknown, maxLen: number): string {
   if (typeof value !== 'string') return '';
   const cleaned = value
-    .replace(/[\u0000-\u001F\u007F]/g, " ") // control chars
+    // Strip C0 + DEL + C1 controls, plus the invisible/format chars that survive a
+    // naive control-char filter but break prompt structure downstream: zero-width
+    // (200B-200D), line/paragraph separators (2028/2029), bidi overrides
+    // (202A-202E) and isolates (2066-2069), and the BOM/zero-width-no-break (FEFF).
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/g, " ")
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
