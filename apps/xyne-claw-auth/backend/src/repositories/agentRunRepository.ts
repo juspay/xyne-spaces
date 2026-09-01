@@ -643,6 +643,25 @@ export const agentRunRepository = {
       select: { sessionId: true, userId: true, agentSlug: true, conversationId: true, status: true },
     }),
 
+  findLatestByConversation: (conversationId: string, agentSlug?: string) =>
+    prisma.agentRun.findFirst({
+      where: { conversationId, ...(agentSlug ? { agentSlug } : {}) },
+      orderBy: { startedAt: "desc" },
+      select: {
+        sessionId: true,
+        userId: true,
+        agentSlug: true,
+        status: true,
+        provider: true,
+        model: true,
+        currentToolLabel: true,
+        error: true,
+        toolInvocations: true,
+        startedAt: true,
+        completedAt: true,
+      },
+    }),
+
   /**
    * Every RUNNING run for a conversation. `/stop` uses this to reconcile all
    * stale DB rows, not just the newest one.

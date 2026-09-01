@@ -3,6 +3,7 @@ import { parseExperimentCommand } from "../experiment.js";
 import { handleExperimentCommand } from "./experiment.js";
 import { handleQueueClear, handleQueueShow } from "./queue.js";
 import { handleHelp } from "./help.js";
+import { handleStatus } from "./status.js";
 import { applyFastTaskCommand, handleFastModeToggle, handleFastModeUsage } from "./fast-mode.js";
 import { handleClear } from "./clear.js";
 import { handleStop } from "./stop.js";
@@ -37,6 +38,11 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
 
   if (slash?.kind === "queueShow") {
     await handleQueueShow(ctx);
+    return { kind: "handled" };
+  }
+
+  if (slash?.kind === "status") {
+    await handleStatus(ctx);
     return { kind: "handled" };
   }
 
