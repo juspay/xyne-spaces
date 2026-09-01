@@ -10,9 +10,12 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Globe,
+  Monitor,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
+import { SegmentedToggle } from '../../components/ui/SegmentedToggle';
 import { useSelf, useUsers, useUserSearch } from '../../hooks/useUsers';
 import { useZero } from '../../hooks/useZero';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -31,6 +34,10 @@ import type { User as UserType } from '../../machines/stateMachine';
 import { WorkspaceRole } from '@xyne/shared';
 import { usePlatform } from '../../hooks/usePlatform';
 import { WorkspaceChannelEmailCard } from '../../components/xyne-desk/WorkspaceChannelEmailCard/WorkspaceChannelEmailCard';
+import {
+  workspaceSettingsApi,
+  type InviteExperience,
+} from '../../services/workspaceSettingsService';
 
 const MEMBERS_PAGE_SIZE = 15;
 
@@ -85,12 +92,18 @@ export const GeneralAndMembersTab = ({
   const { isMobile } = usePlatform();
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
+  // Invite experience: per-workspace toggle between the desktop-app-required
+  // invite flow (default) and a browser-only flow with no install step.
+  const [inviteExperience, setInviteExperience] = useState<InviteExperience>('DESKTOP');
+  const [savingInviteExperience, setSavingInviteExperience] = useState(false);
+
   // Load workspace data when available
   useEffect(() => {
     if (workspace) {
       setName(workspace.name || '');
       setDescription(workspace.description || '');
       setHasChanges(false);
+      setInviteExperience(workspace.inviteExperience === 'BROWSER' ? 'BROWSER' : 'DESKTOP');
     }
   }, [workspace]);
 
@@ -134,6 +147,31 @@ export const GeneralAndMembersTab = ({
     );
     toast.success('Workspace settings saved');
     setHasChanges(false);
+  };
+
+  const handleInviteExperienceChange = (next: InviteExperience): void => {
+    if (!workspaceId || next === inviteExperience) return;
+
+    const previous = inviteExperience;
+    setInviteExperience(next);
+    setSavingInviteExperience(true);
+
+    workspaceSettingsApi
+      .updateInviteExperience(workspaceId, next)
+      .then(() => {
+        toast.success(
+          next === 'BROWSER'
+            ? 'New invites will now open directly in the browser'
+            : 'New invites will now require the desktop app',
+        );
+      })
+      .catch((error: unknown) => {
+        setInviteExperience(previous);
+        toast.error(error instanceof Error ? error.message : 'Failed to update invite experience');
+      })
+      .finally(() => {
+        setSavingInviteExperience(false);
+      });
   };
 
   // Members section state
@@ -304,6 +342,57 @@ export const GeneralAndMembersTab = ({
           </div>
         </Card>
       </div>
+
+      {/* Invite Experience Section — admin/owner only */}
+      {canManageMembers && (
+        <div className='space-y-4'>
+          <div>
+            <h2 className='text-lg font-semibold text-foreground'>Invite Experience</h2>
+            <p className='text-sm text-muted-foreground'>
+              Choose what happens when someone accepts an invitation to this workspace.
+            </p>
+          </div>
+
+          <Card className='p-6'>
+            <div className='flex items-start justify-between gap-6 flex-wrap'>
+              <div className='max-w-md'>
+                <p className='text-sm font-medium text-foreground mb-1'>
+                  {inviteExperience === 'BROWSER'
+                    ? 'Opens directly in the browser'
+                    : 'Requires the desktop app'}
+                </p>
+                <p className='text-sm text-muted-foreground'>
+                  {inviteExperience === 'BROWSER'
+                    ? 'New members accept their invite and land straight in the workspace in their browser — nothing to install.'
+                    : 'New members are asked to install the Xyne Spaces desktop app before their invite link will work.'}
+                </p>
+              </div>
+
+              <div className='flex items-center gap-2'>
+                {savingInviteExperience && (
+                  <Loader2 className='w-4 h-4 animate-spin text-muted-foreground' />
+                )}
+                <SegmentedToggle<InviteExperience>
+                  options={[
+                    {
+                      value: 'DESKTOP',
+                      label: 'Desktop App',
+                      icon: <Monitor className='w-3.5 h-3.5' />,
+                    },
+                    { value: 'BROWSER', label: 'Browser', icon: <Globe className='w-3.5 h-3.5' /> },
+                  ]}
+                  value={inviteExperience}
+                  onChange={handleInviteExperienceChange}
+                />
+              </div>
+            </div>
+            <p className='text-xs text-muted-foreground mt-4 pt-4 border-t border-border'>
+              Only applies to invites sent after this change — invites already in someone&apos;s
+              inbox keep working the way they were sent.
+            </p>
+          </Card>
+        </div>
+      )}
 
       <div className='space-y-4'>
         <div>

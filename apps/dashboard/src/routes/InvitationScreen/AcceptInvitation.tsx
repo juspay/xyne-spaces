@@ -21,6 +21,7 @@ interface InvitationDetails {
   entityType?: string;
   entityId?: string;
   entityTitle?: string | null;
+  inviteExperience?: string;
 }
 
 interface VerificationResponse {
@@ -315,12 +316,13 @@ export const AcceptInvitation = (): ReactElement => {
       targetPath = `/${state.workspaceId}`;
     }
 
-    if (isInElectron) {
+    if (isInElectron || state.invitation.inviteExperience === 'BROWSER') {
       // In Electron: JWT cookies are already set in session — go directly to the workspace.
       // authMachine will run validateSession (user_id is in localStorage) and land authenticated.
+      // Browser-mode workspaces: same thing — skip the /launch deep-link entirely.
       window.location.href = targetPath;
     } else {
-      // In browser: open Electron app via /launch deep-link so the user lands in the desktop app.
+      // In browser, desktop-mode workspace: open Electron app via /launch deep-link so the user lands in the desktop app.
       const launchPath = targetPath.replace(/^\//, '');
       window.location.href = `/launch?path=${encodeURIComponent(launchPath)}`;
     }

@@ -11,7 +11,7 @@ import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole } from '@xyne/shared';
+import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole, InviteExperience } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -43,8 +43,9 @@ export async function buildInvitationLink(params: {
   req: Request;
   workspaceId: string;
   invitationId: string;
+  inviteExperience?: string | null;
 }): Promise<string> {
-  const { req, workspaceId, invitationId } = params;
+  const { req, workspaceId, invitationId, inviteExperience } = params;
   const origin = req.headers.origin as string | undefined;
   const domain = origin ? extractDomainFromOrigin(origin) : null;
 
@@ -55,6 +56,10 @@ export async function buildInvitationLink(params: {
     baseUrl = (cacUrl || origin!).replace(/\/$/, '');
   } else {
     baseUrl = config.slackFrontendUrl.replace(/\/$/, '');
+  }
+
+  if (inviteExperience === InviteExperience.BROWSER) {
+    return `${baseUrl}/invite?workspaceId=${workspaceId}&invitationId=${invitationId}`;
   }
 
   const path = `invite?workspaceId=${workspaceId}&invitationId=${invitationId}`;
@@ -131,8 +136,13 @@ export class InvitationController {
       }
 
       const publicInvitationId = invitation.invitationId || invitation.id;
-      const invitationLink =
-        await buildInvitationLink({ req, workspaceId, invitationId: invitation.invitationId || invitation.id });
+      const inviteExperience = invitation.workspace?.inviteExperience;
+      const invitationLink = await buildInvitationLink({
+        req,
+        workspaceId,
+        invitationId: invitation.invitationId || invitation.id,
+        inviteExperience,
+      });
 
       if (config.env === 'development') {
         logger.info(`[InvitationController] DEV MODE — skipping email send. Invitation link for ${email}: ${invitationLink}`);
@@ -145,6 +155,7 @@ export class InvitationController {
           invitationLink,
           invitationId: publicInvitationId,
           tempPassword: tempPassword ?? undefined,
+          inviteExperience,
         });
 
         // If email failed, delete the invitation to maintain consistency
@@ -276,6 +287,11 @@ export class InvitationController {
       }
 
       // Invitation is valid
+      const inviteExperience =
+        invitation.workspace?.inviteExperience === InviteExperience.BROWSER
+          ? InviteExperience.BROWSER
+          : InviteExperience.DESKTOP;
+
       res.status(200).json({
         valid: true,
         invitation: {
@@ -287,6 +303,7 @@ export class InvitationController {
           entityType,
           entityId,
           entityTitle,
+          inviteExperience,
         },
       });
     } catch (error) {
@@ -567,13 +584,19 @@ export class InvitationController {
       );
       invitationId = invitation.invitationId ?? invitation.id;
 
-      const provisionInvitationLink = await buildInvitationLink({ req, workspaceId: workspace.id, invitationId });
+      const provisionInvitationLink = await buildInvitationLink({
+        req,
+        workspaceId: workspace.id,
+        invitationId,
+        inviteExperience: workspace.inviteExperience,
+      });
       const emailResult = await invitationService.sendInvitationEmail({
         to: normalizedOwnerEmail,
         inviterName: req.user?.name ?? 'Administrator',
         workspaceName: workspaceName.trim(),
         invitationLink: provisionInvitationLink,
         invitationId,
+        inviteExperience: workspace.inviteExperience,
       });
 
       if (!emailResult.success) {
