@@ -38,6 +38,12 @@ schema mail {
       attribute: fast-search
     }
 
+    # Project shortcode of the linked ticket, the "<code>" half of its xyneId "<code>-<number>".
+    field projectCode type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
     field channelRef type reference<chat_container> {
       indexing: attribute
     }
