@@ -50,6 +50,8 @@ export interface CollaborativeCanvasEditorRef {
   handleThemeChange: (themeOrEvent: string | React.ChangeEvent<HTMLSelectElement>) => void;
   getBlocks: () => PartialBlock[];
   replaceContent: (blocks: PartialBlock[]) => void;
+  /** Place the caret in a block (used after client-applied suggestion accepts). */
+  setTextCursorPosition?: (blockId: string, placement?: 'start' | 'end') => void;
   exportMarkdown: (title: string) => Promise<CanvasMarkdownExportResult>;
   exportPDF: (title: string) => Promise<CanvasPdfExportResult>;
   toggleComments: () => void;
