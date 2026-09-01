@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useCacConfig } from '@xyne/shared/hooks';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ReactArtifactView } from './ReactArtifactView';
 import { ReactArtifactDialog } from './ReactArtifactDialog';
@@ -9,16 +8,6 @@ import { useIsShownInPane } from './appCreationModeContext';
 import { ArtifactPaneReference } from './ArtifactPaneReference';
 import { saveArtifactApp } from '../../../services/claw/artifactAppsService';
 import { clawErrorText } from '../../../services/claw/clawRequest';
-import {
-  REACT_ARTIFACT_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_CAC_CONFIG,
-  type ReactArtifactCacConfig,
-} from './reactArtifactCacConfig';
-import {
-  REACT_ARTIFACT_PUBLISH_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_PUBLISH_CAC_CONFIG,
-  type ReactArtifactPublishCacConfig,
-} from './reactArtifactPublishCacConfig';
 
 type SaveState = 'idle' | 'saving' | 'saved';
 
@@ -30,15 +19,6 @@ type SaveState = 'idle' | 'saving' | 'saved';
  * surface, so this is additive — anything that isn't an artifact is left alone.
  */
 export function MessageReactArtifacts({ message }: { message: Message }): ReactElement | null {
-  const { config } = useCacConfig<ReactArtifactCacConfig>({
-    key: REACT_ARTIFACT_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_CAC_CONFIG,
-  });
-  const { config: publishConfig } = useCacConfig<ReactArtifactPublishCacConfig>({
-    key: REACT_ARTIFACT_PUBLISH_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_PUBLISH_CAC_CONFIG,
-  });
-
   const [expanded, setExpanded] = useState<ReactArtifactRef | null>(null);
   // Keyed by attachmentId: one message can carry several artifacts, and each
   // saves independently.
@@ -89,7 +69,6 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
     [message.attachments],
   );
 
-  if (!config.enabled) return null;
   if (artifacts.length === 0) return null;
 
   return (
@@ -99,7 +78,7 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
           key={artifact.attachmentId}
           artifact={artifact}
           onExpand={handleExpand}
-          {...(publishConfig.enabled && !artifact.savedAppId ? { onSave: handleSave } : {})}
+          {...(artifact.savedAppId ? {} : { onSave: handleSave })}
           saveState={saveStates[artifact.attachmentId] ?? 'idle'}
         />
       ))}

@@ -25,6 +25,7 @@ import {
   CanvasCommentThreadStatus,
   BookmarkEntityType,
   AttachmentEntityType,
+  AttachmentUploadStatus,
   UserPresenceStatus,
   FormFieldType,
   FormContextType,
@@ -166,6 +167,41 @@ async function resolveCollectionPermissionRole(
     if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
   }
   return role;
+}
+
+export const ATTACHMENT_STILL_UPLOADING = 'Attachment is still uploading';
+
+/**
+ * An attachment row is created the moment a file is picked, and its bytes land later over
+ * a separate upload request. Rows predating `uploadStatus` carry only a url.
+ */
+export function isAttachmentUploaded(attachment: {
+  url: string;
+  uploadStatus?: string | null;
+}): boolean {
+  return (
+    !!attachment.url &&
+    (attachment.uploadStatus == null ||
+      attachment.uploadStatus === AttachmentUploadStatus.COMPLETED)
+  );
+}
+
+/**
+ * Inside this window an unfinished upload is probably still streaming, so the send is
+ * rejected and the caller retries. Beyond it the upload is never coming back (the client
+ * died mid-transfer and its cleanup never reached the server), and the message goes
+ * without the attachment — otherwise one orphan row would block the composer forever.
+ */
+const ATTACHMENT_UPLOAD_WINDOW_MS = 30 * 60 * 1000;
+
+export function isAttachmentUploadInFlight(attachment: {
+  uploadStatus?: string | null;
+  createdAt: number;
+}): boolean {
+  return (
+    attachment.uploadStatus !== AttachmentUploadStatus.FAILED &&
+    Date.now() - attachment.createdAt < ATTACHMENT_UPLOAD_WINDOW_MS
+  );
 }
 
 /** Build initial_message_md from message data. Single helper for all conversation creation sites. */
@@ -1731,7 +1767,7 @@ export const mutators = defineMutators({
           // Transfer only these specific ids; leave any other draft attachments
           // alone so a concurrent compose isn't corrupted. Never delete the draft row.
           if (attachmentIds.length > 0) {
-            hasAttachments = true;
+            let attachedCount = 0;
             for (const attachmentId of attachmentIds) {
               const attachment = await tx.run(
                 zql.message_attachments.where('id', attachmentId).one(),
@@ -1741,6 +1777,13 @@ export const mutators = defineMutators({
                 attachment.entityType === AttachmentEntityType.CHAT &&
                 attachment.entityId === messageId
               ) {
+                attachedCount++;
+                continue;
+              }
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
                 continue;
               }
               await tx.mutate.message_attachments.update({
@@ -1749,7 +1792,9 @@ export const mutators = defineMutators({
                 entityType: AttachmentEntityType.CHAT,
                 conversationId,
               });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
           }
         } else {
           // Legacy path: scan the current draft and transfer everything.
@@ -1768,17 +1813,23 @@ export const mutators = defineMutators({
                 .where('entityType', AttachmentEntityType.DRAFT),
             );
 
-            if (draftAttachments.length > 0) {
-              hasAttachments = true;
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
+            let attachedCount = 0;
+            for (const attachment of draftAttachments) {
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
+                continue;
               }
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
 
             await tx.mutate.draft_messages.delete({
               id: draft.id,
@@ -2347,7 +2398,7 @@ export const mutators = defineMutators({
           // those ids, leave any other DRAFT attachments alone, never touch
           // the draft row (the client's clearContent mutator owns draft state).
           if (attachmentIds.length > 0) {
-            hasAttachments = true;
+            let attachedCount = 0;
             for (const attachmentId of attachmentIds) {
               const attachment = await tx.run(
                 zql.message_attachments.where('id', attachmentId).one(),
@@ -2357,6 +2408,13 @@ export const mutators = defineMutators({
                 attachment.entityType === AttachmentEntityType.CHAT &&
                 attachment.entityId === messageId
               ) {
+                attachedCount++;
+                continue;
+              }
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
                 continue;
               }
               await tx.mutate.message_attachments.update({
@@ -2365,7 +2423,9 @@ export const mutators = defineMutators({
                 entityType: AttachmentEntityType.CHAT,
                 conversationId,
               });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
           }
         } else {
           // Legacy path: scan the draft for this conversation and transfer everything.
@@ -2384,17 +2444,23 @@ export const mutators = defineMutators({
                 .where('entityType', AttachmentEntityType.DRAFT),
             );
 
-            if (draftAttachments.length > 0) {
-              hasAttachments = true;
-              for (const attachment of draftAttachments) {
-                await tx.mutate.message_attachments.update({
-                  id: attachment.id,
-                  entityId: messageId,
-                  entityType: AttachmentEntityType.CHAT,
-                  conversationId: conversationId,
-                });
+            let attachedCount = 0;
+            for (const attachment of draftAttachments) {
+              if (!isAttachmentUploaded(attachment)) {
+                if (isAttachmentUploadInFlight(attachment)) {
+                  throw new Error(ATTACHMENT_STILL_UPLOADING);
+                }
+                continue;
               }
+              await tx.mutate.message_attachments.update({
+                id: attachment.id,
+                entityId: messageId,
+                entityType: AttachmentEntityType.CHAT,
+                conversationId: conversationId,
+              });
+              attachedCount++;
             }
+            hasAttachments = attachedCount > 0;
 
             await tx.mutate.draft_messages.delete({
               id: draft.id,
@@ -3286,6 +3352,7 @@ export const mutators = defineMutators({
               position: index,
               createdBy: ctx.userID,
               url: '', // Will be populated after upload completes
+              uploadStatus: AttachmentUploadStatus.PENDING,
               workspaceId: ctx.workspaceId,
               metadata: attachmentMetadata,
               conversationId: conversationId || null,

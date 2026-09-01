@@ -1,3 +1,43 @@
+## [1.255.0](https://github.com/juspay/xyne-spaces/compare/v1.254.0...v1.255.0) (2026-09-01)
+
+
+### Features
+
+* add restore logic for apps ([#1370](https://github.com/juspay/xyne-spaces/issues/1370)) ([135b01f](https://github.com/juspay/xyne-spaces/commit/135b01fff2d7e45144e3f39607bb0cec524e6945))
+
+
+### Bug Fixes
+
+* per-PR ticket validation status context ([#1364](https://github.com/juspay/xyne-spaces/issues/1364)) ([56e9341](https://github.com/juspay/xyne-spaces/commit/56e93418835dba4bc958fd38ac2637a6e8c80f89))
+* simplify invitation email to a single Join CTA ([#1365](https://github.com/juspay/xyne-spaces/issues/1365)) ([55b5db8](https://github.com/juspay/xyne-spaces/commit/55b5db84e50f60ee7824ae02267971fad8e4ce86))
+
+## [1.254.0](https://github.com/juspay/xyne-spaces/compare/v1.253.0...v1.254.0) (2026-09-01)
+
+
+### Features
+
+* rebuild the Xyne AI Digital Twin screen ([#890](https://github.com/juspay/xyne-spaces/issues/890)) ([394fdbb](https://github.com/juspay/xyne-spaces/commit/394fdbba2e39fb4be6f5f2f177c16fb8e5fb7e56))
+
+## [1.253.0](https://github.com/juspay/xyne-spaces/compare/v1.252.1...v1.253.0) (2026-09-01)
+
+
+### Features
+
+* add Topics Explorer to the desk support screen ([#974](https://github.com/juspay/xyne-spaces/issues/974)) ([e0117b2](https://github.com/juspay/xyne-spaces/commit/e0117b2bae03b1412d4a1c61cbce1e109b63654f))
+
+
+### Bug Fixes
+
+* use claw callback URL for desk report result callback ([#1357](https://github.com/juspay/xyne-spaces/issues/1357)) ([4023a20](https://github.com/juspay/xyne-spaces/commit/4023a201893a0c498daac005a440d9d82973104c))
+
+## [1.252.1](https://github.com/juspay/xyne-spaces/compare/v1.252.0...v1.252.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* gate message send on attachment upload completion. ([#1356](https://github.com/juspay/xyne-spaces/issues/1356)) ([b55c3b3](https://github.com/juspay/xyne-spaces/commit/b55c3b32c159bb3693588fe2b4313db30c28ba92))
+* UI feedback v3 ([#1355](https://github.com/juspay/xyne-spaces/issues/1355)) ([8e68e86](https://github.com/juspay/xyne-spaces/commit/8e68e867e6077787afd8ba51604287dbeb1eed31))
+
 ## [1.252.0](https://github.com/juspay/xyne-spaces/compare/v1.251.2...v1.252.0) (2026-09-01)
 
 

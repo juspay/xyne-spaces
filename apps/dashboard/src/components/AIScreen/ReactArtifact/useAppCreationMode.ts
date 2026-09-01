@@ -17,9 +17,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getArtifactApp,
+  restoreArtifactAppVersion,
+  type ArtifactAppRestoreEvent,
   type ArtifactAppVersionSummary,
 } from '../../../services/claw/artifactAppsService';
 
@@ -38,10 +40,19 @@ export interface AppCreationMode {
   viewing: ArtifactAppVersionSummary | null;
   /** Every version, newest first. Empty until the app loads. */
   versions: ArtifactAppVersionSummary[];
+  /** Recorded head-moved-backward events, oldest first. The transcript merges
+   *  these in by time so a rollback stays readable long after it happened. */
+  restores: ArtifactAppRestoreEvent[];
   headVersionId: string | null;
   title: string | null;
   /** View an older build. A VIEW, not a restore — head does not move. */
   viewVersion: (versionId: string | null) => void;
+  /** Make a version current: moves HEAD on the server. Unlike `viewVersion`
+   *  this is durable and is what the agent's next update builds on. */
+  restoreVersion: (versionId: string) => void;
+  /** True while a restore is in flight, so the menu can disable itself. */
+  restoring: boolean;
+  restoreError: string | null;
   /** Open the pane (also used by the reopen affordance). */
   open: () => void;
   /** Close the pane; inline cards go live again. */
@@ -103,6 +114,10 @@ export function useAppCreationMode(
   // generation reopens nothing, while switching threads starts fresh.
   useEffect(() => {
     if (!appId) return;
+    // Wait for the conversation to be named. `autoEnteredFor` starts as null and
+    // a fresh chat's conversationId is also null, so acting here would compare
+    // null === null and mark the thread handled before it even has an identity.
+    if (!conversationId) return;
     if (autoEnteredFor.current === conversationId) return;
     autoEnteredFor.current = conversationId;
     if (!modeOn) setMode(true);
@@ -132,6 +147,25 @@ export function useAppCreationMode(
     if (!known) void queryClient.invalidateQueries({ queryKey: ['artifact-app', appId] });
   }, [appId, latestVersionId, queryClient]);
 
+  const restore = useMutation({
+    mutationFn: (versionId: string) => restoreArtifactAppVersion(appId as string, versionId),
+    onSuccess: () => {
+      // Head moved on the server. Drop the local pin so the pane follows the new
+      // head rather than staying stuck on whatever was being previewed, and
+      // refetch so every consumer of this key — the pane, the Saved chip, the
+      // "Newer version" chips — re-evaluates against the new head at once.
+      setPinnedVersionId(null);
+      void queryClient.invalidateQueries({ queryKey: ['artifact-app', appId] });
+    },
+  });
+  const restoreVersion = useCallback(
+    (versionId: string) => {
+      if (!appId) return;
+      restore.mutate(versionId);
+    },
+    [appId, restore],
+  );
+
   const open = useCallback(() => setMode(true), [setMode]);
   const exit = useCallback(() => {
     // Mark handled so the next generation does not reopen what was just closed.
@@ -151,6 +185,7 @@ export function useAppCreationMode(
     [headVersionId],
   );
   const versions = useMemo(() => data?.versions ?? [], [data]);
+  const restores = useMemo(() => data?.restores ?? [], [data]);
 
   /** The build the pane should render — the manifest comes from here, so the
    *  pane never needs a second fetch to know what it is showing. */
@@ -174,12 +209,31 @@ export function useAppCreationMode(
       viewingVersionId: viewing?.id ?? null,
       viewing,
       versions,
+      restores,
       headVersionId,
       title,
       viewVersion,
+      restoreVersion,
+      restoring: restore.isPending,
+      restoreError: restore.error ? String(restore.error) : null,
       open,
       exit,
     }),
-    [active, hasApp, appId, viewing, versions, headVersionId, title, viewVersion, open, exit],
+    [
+      active,
+      hasApp,
+      appId,
+      viewing,
+      versions,
+      restores,
+      headVersionId,
+      title,
+      viewVersion,
+      restoreVersion,
+      restore.isPending,
+      restore.error,
+      open,
+      exit,
+    ],
   );
 }

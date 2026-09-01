@@ -53,6 +53,11 @@ import { getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { sendMessage, type ConversationRef, type PendingAttachment } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
+import {
+  ATTACHMENT_STILL_UPLOADING,
+  isAttachmentUploaded,
+  isAttachmentUploadInFlight,
+} from '@xyne/shared/zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
@@ -460,6 +465,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // composer; used to carry attachments through the pending-message send.
     const channelDraftForSend = useDraftFromDB(channelId, conversationId ?? null);
 
+    // An attachment row exists from the moment a file is picked; its bytes land later over
+    // a separate upload request. Sending in between would publish a tile with no file behind
+    // it, so the send button stays disabled until the upload finishes. Attachments whose
+    // upload died long ago are not held: the send mutator drops those instead.
+    const isAttachmentUploading = useMemo(
+      () =>
+        !messageId &&
+        (channelDraftForSend?.attachments ?? []).some(
+          a => !isAttachmentUploaded(a) && isAttachmentUploadInFlight(a),
+        ),
+      [messageId, channelDraftForSend?.attachments],
+    );
+
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
       if (isForwardedContent || initialContent) return initialContent;
@@ -661,6 +679,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             )
           : bodyHtml;
         const hasFiles = files && files.length > 0;
+
+        // Backstop for callers that reach the send handler with the button bypassed
+        // (the send mutators reject it too — this is only so the user is told why).
+        if (isAttachmentUploading) {
+          toast.warning('Attachment is still uploading', {
+            description: 'It will be ready in a moment — try sending again.',
+          });
+          throw new Error(ATTACHMENT_STILL_UPLOADING);
+        }
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
@@ -985,6 +1012,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         allUsersForMentionResolution,
         onMessageChange,
         isOffline,
+        isAttachmentUploading,
         user?.id,
         context.workspaceId,
         allowThreadBroadcastMentions,
@@ -1253,7 +1281,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }}
               onCreateCanvas={handleCreateCanvasFromComposer}
               hasTicket={hasTicket}
-              sendDisabled={isOffline}
+              sendDisabled={isOffline || isAttachmentUploading}
+              {...(isAttachmentUploading && {
+                sendDisabledReason: 'Attachment is still uploading',
+              })}
               onScheduleSend={handleScheduleSend}
               {...(globalShortcuts.length > 0 && {
                 bottomLeftSlot: (
