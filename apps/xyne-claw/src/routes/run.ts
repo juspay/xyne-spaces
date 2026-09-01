@@ -146,6 +146,7 @@ import {
   resolveTaskCommandMode,
 } from "../task-commands.js";
 import { createLogger } from "../logger.js";
+import { mergeArchitectureReviewSubagents } from "../architecture-review.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
@@ -1819,6 +1820,10 @@ async function processTask(
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
     const taskCommand = parseTaskCommand(task);
+    const activeCustomSubagents = mergeArchitectureReviewSubagents(
+      customSubagents,
+      taskCommand?.subagents,
+    );
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
@@ -2169,7 +2174,7 @@ async function processTask(
         : undefined;
     customToolsResult = loadCustomTools(
       effectiveConfig,
-      meta,
+      taskCommand ? { ...(meta ?? {}), taskCommand: taskCommand.command } : meta,
       (att) => pushAttachment(progressUrl, sessionId, att),
       researchContext,
       progressUrlForCustom,
@@ -2416,7 +2421,9 @@ async function processTask(
     // is drained by runTask after the model loop settles. See agent.ts.
     const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
 
-    const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
+    const fastModeEnabled = taskCommand?.forceSubagentMode
+      ? false
+      : effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
     // The catalog is built for EVERY run, not just fast-mode ones. Its CONTENT
     // is what differs: with subagent delegation on, the wrappers already carry
@@ -2426,7 +2433,7 @@ async function processTask(
     const fastCatalogCandidateItems = buildToolCatalog({
       groups: allGroups,
       customTools: customToolDefs,
-      ...(customSubagents ? { customSubagents } : {}),
+      ...(activeCustomSubagents ? { customSubagents: activeCustomSubagents } : {}),
       includeSubagentTools: fastModeEnabled,
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
@@ -2472,7 +2479,7 @@ async function processTask(
             backgroundRegistry: backgroundSubagentRegistry,
           },
           undefined, // bonusToolsBySubagent — removed with the sandbox subagent
-          customSubagents,
+          activeCustomSubagents,
           directPickSuffixes,
         );
 
@@ -2841,7 +2848,7 @@ async function processTask(
 
       allTools = allTools.filter((t) => {
         if (subagentTools.some((s) => s.name === t.name))
-          return allowedSubagents.has(t.name);
+          return forcedTaskCommandTools.has(t.name) || allowedSubagents.has(t.name);
         if (directTools.some((d) => d.name === t.name)) {
           // Live tool names (t.name) and config entries (d) can disagree on
           // case and on separator convention:
@@ -2917,6 +2924,19 @@ async function processTask(
       log(
         `Agent tools config applied: ${allTools.length} tools after filtering`,
       );
+    }
+
+    // A bounded command can remove capabilities from the saved palette. This
+    // is applied after config filtering so command-level safety always wins.
+    if (taskCommand?.blockedTools?.length || taskCommand?.blockWriteTools) {
+      const blockedTaskCommandTools = new Set(taskCommand.blockedTools ?? []);
+      const writeTaskCommandTools = taskCommand.blockWriteTools
+        ? new Set(customToolDefs
+            .filter((tool) => (tool as { isWriteTool?: boolean }).isWriteTool === true)
+            .map((tool) => tool.name))
+        : new Set<string>();
+      allTools = allTools.filter((tool) =>
+        !blockedTaskCommandTools.has(tool.name) && !writeTaskCommandTools.has(tool.name));
     }
 
     // ── Plan tools: framework default, not per-agent config ──────────────────
@@ -3381,10 +3401,15 @@ async function processTask(
 
     // Task commands (/explainer …): a leading command binds the run to a
     // required tool — instruction injected here, exit gated in runTask.
+    const requiredTaskCommandTools = taskCommand
+      ? [
+          ...(taskCommand.requiredTool ? [taskCommand.requiredTool] : []),
+          ...(taskCommand.requiredTools ?? []),
+        ]
+      : [];
     const taskCommandToolAvailable =
       taskCommand !== null &&
-      (taskCommand.requiredTool === undefined ||
-        allTools.some((t) => t.name === taskCommand.requiredTool));
+      requiredTaskCommandTools.every((name) => allTools.some((t) => t.name === name));
     if (taskCommand) {
       // The fenced-```html contract exists for Design Studio's live preview,
       // where the chat UI hides the block. Webhook-originated runs (Spaces
@@ -3406,7 +3431,7 @@ async function processTask(
             : (taskCommand.missingToolInstruction ?? taskCommand.instruction)) + surfaceSuffix,
       });
       log(
-        `[task-command] ${taskCommand.command} → requires ${taskCommand.requiredTool ?? "(delivery contract)"} (available=${taskCommandToolAvailable})`,
+        `[task-command] ${taskCommand.command} → requires ${requiredTaskCommandTools.join(", ") || "(delivery contract)"} (available=${taskCommandToolAvailable})`,
       );
     }
     const designSystemInjection = buildDesignSystemPromptInjection(taskCommand, agentConfig);
@@ -3948,8 +3973,8 @@ async function processTask(
       log(`[catalog] presentation primer injected (${presentationPrimer.length} chars)`);
     }
     const fastModeSubagentSkills =
-      fastModeEnabled && customSubagents && customSubagents.length > 0
-        ? customSubagents.map((spec) => ({
+      fastModeEnabled && activeCustomSubagents && activeCustomSubagents.length > 0
+        ? activeCustomSubagents.map((spec) => ({
             slug: `fast-${spec.name}`,
             name: `fast-${spec.name}`,
             description: `Fast-mode guidance for ${spec.name}; read before using its referenced tools.`,
@@ -4070,6 +4095,18 @@ async function processTask(
           activeInjections.length > 0 ? activeInjections : undefined,
         ...(taskCommand?.requiredTool && taskCommandToolAvailable
           ? { requiredTool: { name: taskCommand.requiredTool, nudge: taskCommand.nudge } }
+          : {}),
+        ...(taskCommand?.requiredTools?.length && taskCommandToolAvailable
+          ? {
+              requiredTools: {
+                names: taskCommand.requiredTools,
+                nudge: taskCommand.nudge,
+                ...(taskCommand.requiredToolsSharedArgument
+                  ? { sharedArgument: taskCommand.requiredToolsSharedArgument }
+                  : {}),
+                ...(taskCommand.requiredToolsSameTurn ? { sameTurn: true } : {}),
+              },
+            }
           : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
         abortSignal,
