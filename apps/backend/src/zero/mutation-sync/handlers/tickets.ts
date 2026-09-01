@@ -1,5 +1,10 @@
 import type { Transaction } from '@rocicorp/zero';
-import { Schema, serializeTicketMd } from '@xyne/shared';
+import {
+  Schema,
+  serializeTicketMd,
+  updateParentSubTicketsMdFromZero,
+  syncTicketRelativesFromZero,
+} from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { zql } from '../../queries';
 import { BaseMutationSyncHandler } from '../base-handler';
@@ -36,6 +41,10 @@ export class TicketsMutationSyncHandler extends BaseMutationSyncHandler {
       conversationId,
       ticket_md: null,
     });
+
+    if (previous?.id) {
+      await updateParentSubTicketsMdFromZero(tx, zql, previous.id);
+    }
   }
 }
 
@@ -77,4 +86,6 @@ const updateTicketMd = async (args: unknown, tx: Transaction<Schema>): Promise<v
     conversationId: ticket.conversationId,
     ticket_md: ticketMd,
   });
+
+  await syncTicketRelativesFromZero(tx, zql, ticket.id);
 };
