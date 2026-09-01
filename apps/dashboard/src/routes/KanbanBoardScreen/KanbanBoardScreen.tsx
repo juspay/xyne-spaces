@@ -608,6 +608,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [viewModeProp, projectIdParam, boardId, channel]);
 
   const isWorkspaceView = viewMode === 'workspace-view';
+  // Tracks whether workspace view initial seeding is complete. Used to gate queries until
+  // initialFilters are applied, preventing double queries with stale storage filters.
+  const [hasSeededWorkspaceView, setHasSeededWorkspaceView] = useState(!isWorkspaceView);
   // A workspace view queries as a project view with no projectId; scope comes from filters.boards.
   const queryViewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets' =
     viewMode === 'workspace-view' ? 'project' : viewMode;
@@ -812,9 +815,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const filters = state.context.filters;
   const channelViewType = state.context.viewType;
   const showOverdueOnly = state.context.showOverdueOnly;
+  const isMachineInitialized = state.value === 'initialized';
 
-  // Don't query a workspace view until a board is picked (else it fans out across the workspace).
-  const workspaceViewReady = !isWorkspaceView || (filters.boards?.length ?? 0) > 0;
+  // Don't query until:
+  // 1. Machine is initialized (filters loaded from URL/storage)
+  // 2. For workspace views: seeding is complete AND a board is picked
+  const workspaceViewReady =
+    isMachineInitialized &&
+    (!isWorkspaceView || (hasSeededWorkspaceView && (filters.boards?.length ?? 0) > 0));
   const showSubStatus = state.context.showSubStatus;
 
   const setShowOverdueOnly = useCallback(
@@ -951,15 +959,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   // Seed filters/groupBy once when a workspace view mounts.
+  // Split into two effects to avoid race condition:
+  // 1. This effect dispatches setFilters to the machine
+  // 2. A separate effect below marks seeding complete when filters are actually applied
   const hasSeededViewRef = useRef(false);
+  const urlHasFiltersRef = useRef(false);
   useEffect(() => {
     if (!isWorkspaceView || hasSeededViewRef.current) return;
     if (state.value !== 'initialized') return;
     hasSeededViewRef.current = true;
     const urlHasFilters = Object.keys(state.context.urlFilters ?? {}).length > 0;
-    if (urlHasFilters) return;
-    setFilters(initialFilters ? { ...initialFilters } : {});
-    setGroupBy(initialGroupBy ? parseGroupBy(initialGroupBy) : 'none');
+    urlHasFiltersRef.current = urlHasFilters;
+    if (urlHasFilters) {
+      // URL already has filters, mark seeding complete immediately
+      setHasSeededWorkspaceView(true);
+    } else {
+      // Dispatch to machine - seeding will be marked complete by the effect below
+      // when filters are actually applied
+      setFilters(initialFilters ? { ...initialFilters } : {});
+      setGroupBy(initialGroupBy ? parseGroupBy(initialGroupBy) : 'none');
+    }
   }, [
     isWorkspaceView,
     state.value,
@@ -969,6 +988,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setFilters,
     setGroupBy,
   ]);
+
+  // Mark workspace view seeding complete when filters are actually applied by the machine.
+  // This effect watches for filters.boards to match initialFilters.boards after setFilters was called.
+  useEffect(() => {
+    if (!isWorkspaceView || hasSeededWorkspaceView) return;
+    if (!hasSeededViewRef.current || urlHasFiltersRef.current) return;
+    // Check if filters have been applied (boards match what we expect)
+    const expectedBoards = initialFilters?.boards ?? [];
+    const currentBoards = filters.boards ?? [];
+    const boardsMatch =
+      expectedBoards.length === currentBoards.length &&
+      expectedBoards.every((b, i) => b === currentBoards[i]);
+    if (boardsMatch) {
+      setHasSeededWorkspaceView(true);
+    }
+  }, [isWorkspaceView, hasSeededWorkspaceView, filters.boards, initialFilters?.boards]);
 
   const [isSavingWorkspaceView, setIsSavingWorkspaceView] = useState(false);
   const [isSavePopoverOpen, setIsSavePopoverOpen] = useState(false);
@@ -1892,6 +1927,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [filters, channelId, viewMode]);
 
   const deferredFilters = useDeferredValue(scopedFilters);
+
+  // Check if deferredFilters has caught up with scopedFilters (for boards).
+  // useDeferredValue causes deferredFilters to lag, which can trigger queries with stale filters.
+  const deferredFiltersReady = useMemo(() => {
+    const scopedBoards = scopedFilters.boards ?? [];
+    const deferredBoards = deferredFilters.boards ?? [];
+    return (
+      scopedBoards.length === deferredBoards.length &&
+      scopedBoards.every((b, i) => b === deferredBoards[i])
+    );
+  }, [scopedFilters.boards, deferredFilters.boards]);
 
   const filteredTickets = useMemo(() => {
     if (!shouldUseLegacyTicketsQuery || !allProjectTickets) {
@@ -3245,7 +3291,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const currentBoardId = filteredSingleBoardId ?? null;
 
   const hasSearchTerm = searchTerm.trim().length > 0;
-  const canUseKanbanColumnPagination = isKanbanLayout && workspaceViewReady;
+  // Also require deferredFilters to have caught up before enabling queries
+  const canUseKanbanColumnPagination = isKanbanLayout && workspaceViewReady && deferredFiltersReady;
   const shouldFetchKanbanCounts = canUseKanbanColumnPagination && !hasSearchTerm;
   const kanbanCounts = useKanbanCounts({
     ...ticketsQueryParams,
