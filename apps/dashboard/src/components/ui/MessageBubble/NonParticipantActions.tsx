@@ -9,6 +9,8 @@ import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMe
 import { useMutation } from '@tanstack/react-query';
 import { channelService } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
+import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useUsersById } from '../../../hooks/useUsers';
 
 interface MentionedUser {
   userId: string;
@@ -46,6 +48,8 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zero = useZero();
+  const { role: currentUserRole } = useAuthContextValues();
+  const usersById = useUsersById();
   // Query for channel information to check scopeType
   const channel = useChannel(activeChannelId || '');
 
@@ -108,6 +112,15 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
     setError(null);
 
     const userIds = mentionedUsers.map(u => u.userId);
+
+    const hasGuest = userIds.some(id => usersById.get(id)?.role === 'GUEST');
+    if (hasGuest && currentUserRole !== 'ADMIN' && currentUserRole !== 'OWNER') {
+      toast.error('Guests can only be added to channels they were invited to.', {
+        description: 'Please ask your workspace admin to add them.',
+        duration: 5000,
+      });
+      return;
+    }
 
     // Check if this is a GROUP_DM channel
     if (channel?.scopeType === ChannelScopeType.GROUP_DM) {

@@ -126,7 +126,7 @@ export class InvitationController {
       });
 
       let tempPassword: string | null = null;
-      if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
+      if (existingWorkspaceUsers === 0) {
         tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
       }
 
