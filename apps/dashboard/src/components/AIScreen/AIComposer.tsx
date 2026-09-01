@@ -150,7 +150,7 @@ function ContextPill({
       {icon}
       <span
         className={cn(
-          'max-w-[140px] truncate text-[12.5px] font-medium',
+          'max-w-[140px] truncate text-sm font-medium',
           accent ? 'text-claw-ai-fg' : 'text-foreground',
         )}
       >
@@ -813,7 +813,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               placeholder={placeholder}
               rows={1}
               className={cn(
-                'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-[15px] leading-6 placeholder:text-muted-foreground/80 focus:outline-none',
+                'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-sm leading-6 placeholder:text-muted-foreground/80 focus:outline-none',
                 isVoiceRecording && !value && 'invisible',
               )}
               data-track-category='XyneAI'
@@ -904,7 +904,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 {compactToolbar && modelSelectorNode}
               </div>
               <ToolbarButton
-                icon={<span className='text-[15px] font-semibold leading-none'>/</span>}
+                icon={<span className='text-sm font-semibold leading-none'>/</span>}
                 label='Add context'
                 onClick={() => setShowContextModal(v => !v)}
                 active={showContextModal}
