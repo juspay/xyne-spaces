@@ -77,8 +77,8 @@ class RadarApplier {
             // first. The predicates also stop a mis-scoped id cross-tenant.
             case 'resolve': {
               const { count } = await tx.executionItem.updateMany({
-                where: { id: op.itemId, workspaceId, conversationId, status: 'open' },
-                data: { status: 'resolved', resolvedAt: new Date(), pendingOn: [] },
+                where: { id: op.itemId, workspaceId, conversationId, status: 'OPEN' },
+                data: { status: 'RESOLVED', resolvedAt: new Date(), pendingOn: [] },
               });
               if (count === 0) break;
               auditRows.push(this.auditRow(params, op, op.itemId as string));
@@ -87,7 +87,7 @@ class RadarApplier {
             }
             case 'reassign': {
               const { count } = await tx.executionItem.updateMany({
-                where: { id: op.itemId, workspaceId, conversationId, status: 'open' },
+                where: { id: op.itemId, workspaceId, conversationId, status: 'OPEN' },
                 data: { pendingOn: op.pendingOn ?? [] },
               });
               if (count === 0) break;

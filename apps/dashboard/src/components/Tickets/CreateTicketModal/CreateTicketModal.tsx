@@ -2173,7 +2173,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     ticketKind === 'release' ? 'Enter Release Title...' : 'Enter Ticket Title...'
                   }
                   data-testid='ticket-title-input'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='EDIT_TICKET_TITLE'
                   data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                   className={cn(
@@ -2213,7 +2213,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 placeholder='Enter Ticket Description...'
                 aria-label='Ticket Description'
                 data-testid='ticket-description-input'
-                data-track-category='TICKETS'
+                data-track-category='Tickets'
                 data-track-name='EDIT_TICKET_DESCRIPTION'
                 data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                 onChange={e => {
@@ -2269,7 +2269,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             type='button'
                             onClick={saveEditedSubTicket}
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='SaveEditedSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -2306,7 +2306,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             type='button'
                             onClick={() => beginEditSubTicket(index)}
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='EditSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -2317,7 +2317,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             onClick={() => deleteSubTicket(index)}
                             aria-label={`Delete subticket ${index + 1}`}
                             className='text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='DeleteSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -2397,7 +2397,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         resetBoardSuggestionState();
                         setTimeout(() => setBoardSelectorOpen(true), 0);
                       }}
-                      data-track-category='TICKETS'
+                      data-track-category='Tickets'
                       data-track-name='CancelAISuggestedBoard'
                     >
                       <X className='size-3.5 shrink-0' strokeWidth={2.33} />
@@ -2436,7 +2436,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             resetBoardSuggestionState();
                           }
                         }}
-                        data-track-category='TICKETS'
+                        data-track-category='Tickets'
                         data-track-name='AcceptAISuggestedBoard'
                       >
                         Accept
@@ -2450,7 +2450,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           // Defer open until EntitySelector has mounted in DOM
                           setTimeout(() => setBoardSelectorOpen(true), 0);
                         }}
-                        data-track-category='TICKETS'
+                        data-track-category='Tickets'
                         data-track-name='RejectAISuggestedBoard'
                       >
                         Reject
@@ -2860,7 +2860,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     variant='ghost'
                     size='icon'
                     onClick={resetDuplicateState}
-                    data-track-category='TICKETS'
+                    data-track-category='Tickets'
                     data-track-name='RESET_DUPLICATE_STATE'
                     className='size-6 '
                   >
@@ -3227,7 +3227,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             disabled={form.state.isSubmitting}
             className='size-6'
             data-testid='ticket-attachment-button'
-            data-track-category='TICKETS'
+            data-track-category='Tickets'
             data-track-name='ATTACH_FILE'
             data-track-metadata={JSON.stringify({
               boardId: selectedBoardId,
@@ -3247,7 +3247,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                     className='pointer-events-none'
                     data-testid='ticket-submit-button'
-                    data-track-category='TICKETS'
+                    data-track-category='Tickets'
                     data-track-name='SUBMIT_CREATE_TICKET_MODAL'
                     data-track-metadata={JSON.stringify({
                       boardId: selectedBoardId,
@@ -3270,7 +3270,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 loading={form.state.isSubmitting}
                 disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                 data-testid='ticket-submit-button'
-                data-track-category='TICKETS'
+                data-track-category='Tickets'
                 data-track-name='SUBMIT_CREATE_TICKET_MODAL'
                 data-track-metadata={JSON.stringify({
                   boardId: selectedBoardId,

@@ -7,6 +7,7 @@ import { cn } from '../../../../utils/classNames';
 import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
+import { ChatWithAgentButton } from './ChatWithAgentButton';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
@@ -120,6 +121,13 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           </>
         )}
       </AuditLine>
+    </div>
+  );
+
+  const decidedFooter = (
+    <div className='flex w-full items-center justify-between gap-3'>
+      {auditNode}
+      {props.phase === 'created' && <ChatWithAgentButton slug={props.agent.slug} />}
     </div>
   );
 
@@ -265,10 +273,11 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           decision lands (an audit line is shorter than a button row, and shorter
           again when there is no decider avatar), reflowing the thread under it. */}
       <div className='flex min-h-[44px] items-center justify-between gap-3 px-3 py-2'>
-        {/* A decided card shows the audit line only. No connect prompt in either
-            phase — it belongs with the capability chips, which this card no
-            longer renders; the expanded preview still surfaces both. */}
-        {decided ? auditNode : actionControls}
+        {/* A decided card shows the audit line, plus the chat entry point once the
+            agent exists. No connect prompt in either phase — it belongs with the
+            capability chips, which this card no longer renders; the expanded
+            preview still surfaces both. */}
+        {decided ? decidedFooter : actionControls}
       </div>
 
       <AgentPreview
@@ -280,7 +289,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         note={props.note}
         statePill={statePill}
         conversationId={conversationId ?? undefined}
-        footer={decided ? auditNode : actionControls}
+        footer={decided ? decidedFooter : actionControls}
       />
     </CardShell>
   );

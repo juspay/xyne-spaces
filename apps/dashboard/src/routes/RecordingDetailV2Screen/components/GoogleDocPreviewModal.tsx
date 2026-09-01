@@ -326,7 +326,13 @@ export function GoogleDocPreviewModal({
                 ? 'A new doc is created as a separate copy — the existing one stays as it is.'
                 : null}
             </p>
-            <Button variant='outline' onClick={onClose} disabled={isExporting}>
+            <Button
+              variant='outline'
+              onClick={onClose}
+              data-track-category='RecordingDetailV2'
+              data-track-name='cancel_google_doc_export'
+              disabled={isExporting}
+            >
               Cancel
             </Button>
             <Button

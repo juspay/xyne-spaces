@@ -555,6 +555,8 @@ export function RequestsTab({
                 size='sm'
                 disabled={busy}
                 onClick={() => row.onReject(rejectNote.trim() || undefined)}
+                data-track-category='Claw Admin'
+                data-track-name='Confirm reject request'
               >
                 Confirm reject
               </Button>

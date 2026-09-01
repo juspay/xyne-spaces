@@ -697,6 +697,10 @@ export const ThreadMessages = ({
   const initialMessageSender = useUser(initialMessage?.senderId || '');
   const setThreadTypes = useSetThreadTypes(derivedConversationId);
   const { showThreadTags } = useShowThreadTags();
+  // Which tag's evidence is on screen. Owned here because this component renders both the
+  // chips and the message list; cleared on thread change so it never leaks across threads.
+  const [inspectedTag, setInspectedTag] = useState<string | null>(null);
+  useEffect(() => setInspectedTag(null), [derivedConversationId]);
 
   const threadInfo: ThreadInfo | null = useMemo(() => {
     if (!derivedConversationId || !initialMessage) return null;
@@ -1094,6 +1098,7 @@ export const ThreadMessages = ({
             className='flex-1 flex flex-col overflow-hidden data-[state=inactive]:hidden'
           >
             <ThreadList
+              inspectedTag={inspectedTag}
               channelId={derivedChannelId || ''}
               conversationId={derivedConversationId || ''}
               threadMessages={messages}
@@ -1471,6 +1476,7 @@ export const ThreadMessages = ({
               ) : (
                 <>
                   <ThreadList
+                    inspectedTag={inspectedTag}
                     channelId={derivedChannelId || ''}
                     conversationId={derivedConversationId || ''}
                     threadMessages={messages}
@@ -1603,6 +1609,8 @@ export const ThreadMessages = ({
                       conversationId={derivedConversationId}
                       threadType={conversation?.threadType}
                       canEdit
+                      inspectedTag={inspectedTag}
+                      onInspect={setInspectedTag}
                     />
                   )}
                   {!simpleView && focusedChannelBreadcrumb}
@@ -1793,6 +1801,7 @@ export const ThreadMessages = ({
             ) : (
               <>
                 <ThreadList
+                  inspectedTag={inspectedTag}
                   channelId={derivedChannelId || ''}
                   conversationId={derivedConversationId || ''}
                   threadMessages={messages}

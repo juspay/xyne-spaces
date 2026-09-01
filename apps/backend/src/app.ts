@@ -35,6 +35,7 @@ import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
+import threadTypeVocabularyRoutes from '@/routes/threadTypeVocabulary';
 import conversationLabelRoutes from '@/routes/conversationLabels';
 import radarExecutionRoutes from '@/routes/radarExecution';
 import organizationRoutes from '@/routes/organizations';
@@ -705,6 +706,7 @@ export class App {
     // New chat schema routes
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
+    this.app.use('/api/thread-type-vocabulary', authMiddleware.authenticate, threadTypeVocabularyRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)

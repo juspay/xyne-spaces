@@ -30,6 +30,7 @@ import {
   Bot,
   RocketShip,
   type PikaIconProps,
+  Tag,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
 
@@ -105,6 +106,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   },
   { path: '/roles', label: 'Roles', icon: ShieldCheck, iconSize: 18, popout: true },
   { path: '/workspace-management', label: 'Workspace Management', icon: Settings01, popout: true },
+  { path: '/tag-review', label: 'Tag Review', icon: Tag, iconSize: 18, popout: true },
   { path: '/organisations', label: 'Organisations', icon: BuildingApartmentTwo, popout: true },
   { path: '/analytics', label: 'Analytics', icon: GraphTrendLine, popout: true },
   { path: '/forms', label: 'Forms', icon: ClipboardDefault, popout: true },

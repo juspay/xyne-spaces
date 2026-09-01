@@ -209,6 +209,16 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'Tags must be a comma-separated string'
   }),
 
+  // Thread classification. threadType matches a thread's ROOT message (one hit per thread);
+  // messageActs matches the individual messages cited as evidence for a type.
+  threadType: Joi.string().optional().messages({
+    'string.base': 'threadType must be a comma-separated string'
+  }),
+
+  messageActs: Joi.string().optional().messages({
+    'string.base': 'messageActs must be a comma-separated string'
+  }),
+
   dynamicFieldValues: Joi.alternatives()
     .try(
       Joi.array().items(Joi.string()),

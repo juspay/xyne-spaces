@@ -40,6 +40,8 @@ type ThreadListProps = {
   conversationParticipant?: { lastReadAt?: number | null };
   /** Scroll to and highlight this specific message on mount. Overrides URL-hash-based scroll. */
   matchedMessageId?: string | null;
+  /** Tag being inspected from the thread header. Passed straight through to the bubbles. */
+  inspectedTag?: string | null;
   /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
   onUserClick?: ((userId: string) => void) | undefined;
 };
@@ -68,6 +70,7 @@ const ThreadList = ({
   isMessagesLoaded = true,
   conversationParticipant,
   matchedMessageId,
+  inspectedTag = null,
   onUserClick,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
@@ -513,6 +516,7 @@ const ThreadList = ({
                       {...(disableAskAI !== undefined && { disableAskAI })}
                       {...(conversation && { conversation })}
                       highlightMessageId={matchedMessageId ?? null}
+                      inspectedTag={inspectedTag}
                     />
                   </div>
                   {messageIndex === 0 && threadMessages.length > 1 && (
@@ -611,6 +615,7 @@ const ThreadList = ({
                     {...(disableAskAI !== undefined && { disableAskAI })}
                     {...(conversation && { conversation })}
                     highlightMessageId={matchedMessageId ?? null}
+                    inspectedTag={inspectedTag}
                   />
                 </div>
                 {!enableCollapsing &&

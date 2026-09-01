@@ -246,7 +246,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
                     editor?.commands.focus();
                   }
                 }}
-                data-track-category='calls'
+                data-track-category='CALLS'
                 data-track-name='focus-invitation-message'
                 className='cursor-text overflow-y-auto overflow-x-hidden overscroll-contain min-w-0'
                 style={{ minHeight: 220, maxHeight: 340 }}
@@ -285,7 +285,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
         <Button
           variant='ghost'
           onClick={onBack}
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='BACK_FROM_INVITATION_PREVIEW'
           disabled={isSubmitting}
         >
@@ -298,7 +298,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
           </p>
           <Button
             onClick={onSend}
-            data-track-category='calls'
+            data-track-category='CALLS'
             data-track-name='SEND_CALL_INVITATION'
             disabled={isSubmitting}
           >
@@ -345,7 +345,7 @@ const LabeledInput: React.FC<{
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      data-track-category='calls'
+      data-track-category='CALLS'
       data-track-name='edit-invitation-field'
       className='h-8 px-2.5 text-[13px] border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-foreground/40'
     />

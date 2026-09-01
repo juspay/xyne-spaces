@@ -82,10 +82,12 @@ export function RecordingTicketLink({
     [isUpdating, searchResults],
   );
 
-  /* A recording lives outside any project, so the ticket carries its own route. */
-  const ticketHref = linkedTicket
-    ? `/projects/${linkedTicket.projectId}/${linkedTicket.boardId}/${linkedTicket.id}`
-    : null;
+  /* The channel thread — where the rest of the app opens tickets; the
+     `/projects/:projectId/:boardId/:ticketId` route drops the channel context. */
+  const ticketHref =
+    linkedTicket?.channelId && linkedTicket.conversationId
+      ? `/chat/dir/${linkedTicket.channelId}/${linkedTicket.conversationId}/${linkedTicket.id}?selectedTab=details`
+      : null;
 
   const handleSelect = (ticketId: string | null): void => {
     if (isUpdating) return;

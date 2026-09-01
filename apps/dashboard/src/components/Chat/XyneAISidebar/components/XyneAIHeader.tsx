@@ -84,7 +84,7 @@ export const XyneAIHeader = ({
         <DropdownMenuItem
           className='gap-2'
           onClick={() => setIsAgentInfoModalOpen(true)}
-          data-track-category='XYNE_AI'
+          data-track-category='XyneAI'
           data-track-name='OpenAgentInfo'
         >
           <InformationCircle size={16} className='shrink-0' />
@@ -117,7 +117,7 @@ export const XyneAIHeader = ({
       <DropdownMenuItem
         className='gap-2'
         onClick={() => setIsSettingsModalOpen(true)}
-        data-track-category='XYNE_AI'
+        data-track-category='XyneAI'
         data-track-name='OpenSettings'
       >
         <Settings01 size={16} className='shrink-0' />

@@ -14,6 +14,7 @@ import {
   verifyEmailPassword,
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
+import { config } from '@/config/env';
 import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
 import {
@@ -24,6 +25,10 @@ import {
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { logger } from '@/utils/logger';
+
+const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
+const workspaceOutcome = (count: number): string =>
+  count === 0 ? 'no_workspace' : count === 1 ? 'single_workspace' : 'multi_workspace';
 
 interface ResetCodePayload {
   code: string;
@@ -72,10 +77,16 @@ export class EmailAuthController {
    * issues JWT + cookies, and returns workspace info identical to OAuth flow.
    */
   login = async (req: Request, res: Response): Promise<void> => {
+    const flowId = crypto.randomUUID();
+    const tag = (): string => authTag(flowId);
+
     try {
+      logger.info(`${tag()} Email login received`);
+
       const { email, password, invitationId } = req.body;
 
       if (!email || !password) {
+        logger.warn(`${tag()} Email login rejected (reason=missing_credentials)`);
         res.status(400).json({
           error: 'Missing credentials',
           message: 'email and password are required',
@@ -84,6 +95,7 @@ export class EmailAuthController {
       }
 
       if (password.length > 128) {
+        logger.warn(`${tag()} Email login rejected (reason=password_too_long)`);
         res.status(400).json({
           error: 'Invalid credentials',
           message: 'Password must be 128 characters or fewer',
@@ -102,6 +114,7 @@ export class EmailAuthController {
           res.setHeader('Retry-After', retryAfterSeconds.toString());
         }
 
+        logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
         res.status(429).json({
           error: 'Rate limited',
           message: 'Too many failed login attempts. Please try again later.',
@@ -116,6 +129,7 @@ export class EmailAuthController {
 
       if (!orgMember || orgMember.leftAt) {
         // Keep this response identical to the wrong-password response below.
+        logger.warn(`${tag()} Email login rejected (reason=invalid_credentials)`);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -124,6 +138,7 @@ export class EmailAuthController {
       }
 
       if (!orgMember.passwordHash) {
+        logger.warn(`${tag()} Email login rejected (reason=invalid_credentials)`);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -145,6 +160,7 @@ export class EmailAuthController {
             redisService.set(loginLockKey, '1', LOGIN_LOCKOUT_SECONDS),
             redisService.del(loginAttemptKey),
           ]);
+          logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
           res.setHeader('Retry-After', LOGIN_LOCKOUT_SECONDS.toString());
           res.status(429).json({
             error: 'Rate limited',
@@ -153,6 +169,7 @@ export class EmailAuthController {
           return;
         }
 
+        logger.warn(`${tag()} Email login rejected (reason=invalid_credentials)`);
         res.status(401).json({
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
@@ -173,6 +190,7 @@ export class EmailAuthController {
       // user who set a password via the reset flow from bypassing SSO.
       const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
       if (existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL) {
+        logger.warn(`${tag()} Email login rejected (reason=provider_mismatch, existingProvider=${existingIdentity.authProvider})`);
         res.status(403).json({
           error: 'provider_mismatch',
           message: 'This account uses a different login method. Please continue with your original sign-in method.',
@@ -180,6 +198,8 @@ export class EmailAuthController {
         });
         return;
       }
+
+      logger.info(`${tag()} Email auth success for: ${normalizedEmail}`);
 
       // Password is correct — immediately clear rate-limit state so a
       // subsequent network/DB failure doesn't leave the user locked out.
@@ -194,6 +214,7 @@ export class EmailAuthController {
         orderBy: { createdAt: 'desc' },
         include: { workspace: true },
       });
+      logger.info(`${tag()} User has ${workspaceUsers.length} workspace(s) before invitation check`);
 
       // Invitation handling is keyed only by an explicit invitationId from the
       // auth URL. Regular email login should not be diverted by unrelated
@@ -225,13 +246,6 @@ export class EmailAuthController {
           // signal the frontend to complete the join for this workspace.
           const approvedJoinRequest = approvedJoinRequests[0];
           const userName = normalizedEmail.split('@')[0];
-          const pendingAuthJwtId = crypto.randomUUID();
-
-          await redisService.set(
-            `pendingauth:jwtid:${pendingAuthJwtId}`,
-            normalizedEmail,
-            10 * 60,
-          );
 
           const isProduction = process.env.NODE_ENV === 'production';
           const cookieBase = {
@@ -251,7 +265,6 @@ export class EmailAuthController {
                 provider: 'EMAIL',
                 refreshToken: null,
                 accessToken: null,
-                jwtId: pendingAuthJwtId,
               },
               process.env.JWT_SECRET!,
               { expiresIn: '10m' },
@@ -262,6 +275,7 @@ export class EmailAuthController {
             },
           );
 
+          logger.info(`${tag()} Email login succeeded (outcome=approved_join, count=0)`);
           res.status(200).json({
             success: true,
             workspaces: [],
@@ -281,13 +295,6 @@ export class EmailAuthController {
           });
           const workspaceMap = new Map(workspaces.map(w => [w.id, w.name]));
           const userName = normalizedEmail.split('@')[0];
-          const pendingAuthJwtId = crypto.randomUUID();
-
-          await redisService.set(
-            `pendingauth:jwtid:${pendingAuthJwtId}`,
-            normalizedEmail,
-            10 * 60,
-          );
 
           const isProduction = process.env.NODE_ENV === 'production';
           const cookieBase = {
@@ -307,7 +314,6 @@ export class EmailAuthController {
                 provider: 'EMAIL',
                 refreshToken: null,
                 accessToken: null,
-                jwtId: pendingAuthJwtId,
               },
               process.env.JWT_SECRET!,
               { expiresIn: '10m' },
@@ -318,6 +324,7 @@ export class EmailAuthController {
             },
           );
 
+          logger.info(`${tag()} Email login succeeded (outcome=approved_join_selection, count=${approvedJoinRequests.length})`);
           res.status(200).json({
             success: true,
             workspaces: approvedJoinRequests.map(r => ({
@@ -338,6 +345,7 @@ export class EmailAuthController {
         });
 
         if (pendingJoinRequest) {
+          logger.warn(`${tag()} Email login rejected (reason=join_request_pending)`);
           res.status(403).json({
             error: 'Join request pending',
             message: 'Your request to join the community workspace is pending approval.',
@@ -345,6 +353,7 @@ export class EmailAuthController {
           return;
         }
 
+        logger.warn(`${tag()} Email login rejected (reason=no_workspace_access)`);
         res.status(403).json({
           error: 'No workspace access',
           message: 'You do not have access to any workspace. Please contact your administrator.',
@@ -365,15 +374,6 @@ export class EmailAuthController {
         // Invited user hasn't accepted yet — set pending auth cookie (mirrors OAuth flow)
         // and return a signal so the frontend redirects to the invite page.
         const userName = normalizedEmail.split('@')[0];
-        const pendingAuthJwtId = crypto.randomUUID();
-
-        // Store the pending-auth token ID in Redis with 10-minute TTL.
-        // acceptInvitation will verify this entry exists before proceeding.
-        await redisService.set(
-          `pendingauth:jwtid:${pendingAuthJwtId}`,
-          normalizedEmail,
-          10 * 60, // 10 minutes
-        );
 
         res.cookie(
           'google_access_token',
@@ -385,7 +385,6 @@ export class EmailAuthController {
               provider: 'EMAIL',
               refreshToken: null,
               accessToken: null,
-              jwtId: pendingAuthJwtId,
             },
             process.env.JWT_SECRET!,
             { expiresIn: '10m' },
@@ -396,6 +395,7 @@ export class EmailAuthController {
           },
         );
 
+        logger.info(`${tag()} Email login succeeded (outcome=pending_invitation, invitationId=${pendingInvitation.invitationId})`);
         res.status(200).json({
           success: true,
           invitationPending: true,
@@ -408,53 +408,27 @@ export class EmailAuthController {
       }
 
       const workspaceUser = workspaceUsers[0];
+      const userName = workspaceUser.name || normalizedEmail.split('@')[0];
 
-      // 5. Create session
-      const refreshToken = crypto.randomUUID();
-      const refreshTokenExpiry = new Date();
-      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
-
-      const session = await this.userSessionService.createSession({
-        userId: workspaceUser.id,
-        refreshToken,
-        refreshTokenExpiry,
-        deviceInfo: JSON.stringify({
-          userAgent: req.headers['user-agent'],
-          timestamp: new Date().toISOString(),
-        }),
-        ipAddress: req.ip || req.connection.remoteAddress || undefined,
-      });
-
-      // 6. Generate JWT
-      const jwtToken = jwtService.generateToken({
-        sub: workspaceUser.id,
-        email: workspaceUser.email,
-        name: workspaceUser.name,
-        workspaceId: workspaceUser.workspaceId,
-        memberId: workspaceUser.orgMemberId,
-        providerUserId: `email-${workspaceUser.email}`,
-        provider: AuthProvider.EMAIL,
-      });
-
-      res.cookie('google_access_token', jwtToken, {
-        ...cookieBase,
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      });
-
-      res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
-        ...cookieBase,
-        maxAge: 24 * 60 * 60 * 1000,
-      });
-
-      res.cookie('user_session_id', session.id, {
-        ...cookieBase,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
-
-      res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
-        ...cookieBase,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
+      res.cookie(
+        'google_access_token',
+        jwt.sign(
+          {
+            email: normalizedEmail,
+            name: userName,
+            providerUserId: `email-${normalizedEmail}`,
+            provider: 'EMAIL',
+            refreshToken: null,
+            accessToken: null,
+          },
+          process.env.JWT_SECRET!,
+          { expiresIn: '10m' },
+        ),
+        {
+          ...cookieBase,
+          maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
+        },
+      );
 
       // Build workspaces array for frontend auth machine
       const workspaces = workspaceUsers.map(u => ({
@@ -463,27 +437,65 @@ export class EmailAuthController {
         role: u.role,
       }));
 
-      // 8. Success response — shape matches what useAuth.signInWithEmail expects
-      res.status(200).json({
-        success: true,
-        user: {
-          id: workspaceUser.id,
+      if (workspaceUsers.length === 1) {
+        const refreshToken = crypto.randomUUID();
+        const refreshTokenExpiry = new Date();
+        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+
+        const session = await this.userSessionService.createSession({
+          userId: workspaceUser.id,
+          refreshToken,
+          refreshTokenExpiry,
+          deviceInfo: JSON.stringify({
+            userAgent: req.headers['user-agent'],
+            timestamp: new Date().toISOString(),
+          }),
+          ipAddress: req.ip || req.connection.remoteAddress || undefined,
+        });
+
+        const jwtToken = jwtService.generateToken({
+          sub: workspaceUser.id,
           email: workspaceUser.email,
           name: workspaceUser.name,
           workspaceId: workspaceUser.workspaceId,
-          role: workspaceUser.role,
-          orgRole: orgMember.role,
-          memberId: orgMember.memberId,
-          authProvider: AuthProvider.EMAIL,
-        },
+          memberId: workspaceUser.orgMemberId,
+          providerUserId: `email-${workspaceUser.email}`,
+          provider: AuthProvider.EMAIL,
+        });
+
+        res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
+          ...cookieBase,
+          maxAge: config.jwt.expirationSeconds * 1000,
+        });
+        res.cookie('user_session_id', session.id, {
+          ...cookieBase,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+        res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
+          ...cookieBase,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+
+        logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);
+        res.status(200).json({
+          success: true,
+          workspaces,
+          pendingUserData: { email: normalizedEmail, name: userName },
+          userExistsButRemoved: false,
+          autoLoginWorkspace: workspaceUser.workspaceId,
+        });
+        return;
+      }
+
+      logger.info(`${tag()} Email login succeeded (outcome=${workspaceOutcome(workspaceUsers.length)}, count=${workspaceUsers.length})`);
+      res.status(200).json({
+        success: true,
         workspaces,
-        pendingUserData: {
-          email: workspaceUser.email,
-          name: workspaceUser.name,
-        },
+        pendingUserData: { email: normalizedEmail, name: userName },
         userExistsButRemoved: false,
       });
     } catch (error) {
+      logger.error(`${tag()} Email login failed:`, error);
       res.status(500).json({
         error: 'Login failed',
         message: `An unexpected error occurred during login. Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -775,6 +787,8 @@ export class EmailAuthController {
    */
   register = async (req: Request, res: Response): Promise<void> => {
     try {
+      logger.info(`[AUTH] Email registration received`);
+
       const { email, hashedPassword, name } = req.body;
       const workspaceId: string | undefined = req.body.workspaceId;
       const invitationId: string | undefined = typeof req.body.invitationId === 'string'
@@ -873,7 +887,7 @@ export class EmailAuthController {
         const reason = isAlreadyRegistered
           ? 'already registered'
           : `SSO provider mismatch (${existingIdentity?.authProvider})`;
-        logger.info(`[EmailAuthController] Registration blocked for ${normalizedEmail}: ${reason}`);
+        logger.info(`[AUTH] Email registration blocked for ${normalizedEmail}: ${reason}`);
         res.status(200).json({
           success: true,
           message: REGISTER_REQUEST_MESSAGE,
@@ -944,12 +958,14 @@ export class EmailAuthController {
         return;
       }
 
+      logger.info(`[AUTH] Email registration code sent`);
       res.status(200).json({
         success: true,
         message: REGISTER_REQUEST_MESSAGE,
         email: normalizedEmail,
       });
     } catch (error) {
+      logger.error(`[AUTH] Email registration failed:`, error);
       res.status(500).json({
         error: 'Registration failed',
         message: `An unexpected error occurred. Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -970,6 +986,8 @@ export class EmailAuthController {
    */
   verifyEmail = async (req: Request, res: Response): Promise<void> => {
     try {
+      logger.info(`[AUTH] Email verification received`);
+
       const { email, code } = req.body;
 
       if (!email || !code) {
@@ -1020,6 +1038,7 @@ export class EmailAuthController {
 
       const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
       if (existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL) {
+        logger.warn(`[AUTH] Email verification rejected (reason=provider_mismatch, existingProvider=${existingIdentity.authProvider})`);
         res.status(403).json({
           error: 'provider_mismatch',
           message: 'This account uses a different login method. Please continue with your original sign-in method.',
@@ -1130,13 +1149,6 @@ export class EmailAuthController {
 
       // Issue pending-auth cookie — same mechanism as OAuth callback.
       const userName = name || normalizedEmail.split('@')[0];
-      const pendingAuthJwtId = crypto.randomUUID();
-
-      await redisService.set(
-        `pendingauth:jwtid:${pendingAuthJwtId}`,
-        normalizedEmail,
-        10 * 60,
-      );
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieBase = {
@@ -1156,7 +1168,6 @@ export class EmailAuthController {
             provider: 'EMAIL',
             refreshToken: null,
             accessToken: null,
-            jwtId: pendingAuthJwtId,
           },
           process.env.JWT_SECRET!,
           { expiresIn: '10m' },
@@ -1172,6 +1183,7 @@ export class EmailAuthController {
       // triggers the joinWorkspace actor (handles community/enterprise join).
       // If not, return existing workspaces + domain conflict info (same as OAuth).
       if (workspaceId) {
+        logger.info(`[AUTH] Email registration verified (outcome=${invitationId ? 'pending_invitation' : 'workspace_scoped'})`);
         res.status(200).json({
           success: true,
           ...(invitationId ? { invitationPending: true, invitationId } : {}),
@@ -1211,6 +1223,7 @@ export class EmailAuthController {
         }
       }
 
+      logger.info(`[AUTH] Email registration verified (outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
       res.status(200).json({
         success: true,
         workspaces: workspaces.map(w => ({ id: w.id, name: w.name, role: w.role })),
@@ -1222,6 +1235,7 @@ export class EmailAuthController {
         ...(publicEmailDomainError ? { publicEmailDomainError } : {}),
       });
     } catch (error) {
+      logger.error(`[AUTH] Email verification failed:`, error);
       res.status(500).json({
         error: 'Verification failed',
         message: `An unexpected error occurred. Error: ${error instanceof Error ? error.message : String(error)}`,
