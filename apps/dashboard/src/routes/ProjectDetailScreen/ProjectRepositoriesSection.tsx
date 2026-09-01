@@ -88,7 +88,13 @@ export function ProjectRepositoriesSection(props: {
     return (
       <div className='rounded-lg border border-destructive/30 p-6 text-center'>
         <p className='text-sm text-destructive'>{error}</p>
-        <Button className='mt-3' variant='outline' onClick={() => void load()}>
+        <Button
+          className='mt-3'
+          variant='outline'
+          onClick={() => void load()}
+          data-track-category='ProjectRepos'
+          data-track-name='RetryLoadRepositories'
+        >
           Retry
         </Button>
       </div>
@@ -102,7 +108,12 @@ export function ProjectRepositoriesSection(props: {
         <p className='mt-1 text-sm text-muted-foreground'>
           Attach a public or private GitHub.com repository.
         </p>
-        <Button className='mt-4' onClick={props.onAdd}>
+        <Button
+          className='mt-4'
+          onClick={props.onAdd}
+          data-track-category='ProjectRepos'
+          data-track-name='AddRepositoryClicked'
+        >
           Add Repository
         </Button>
       </div>
@@ -167,10 +178,20 @@ function RepositoryCard(props: {
           </p>
         </div>
         <div className='flex flex-wrap gap-2'>
-          <Button variant='outline' loading={props.checking} onClick={props.onCheck}>
+          <Button
+            variant='outline'
+            loading={props.checking}
+            onClick={props.onCheck}
+            data-track-category='ProjectRepos'
+            data-track-name='RunAccessCheck'
+          >
             <RefreshCw className='h-4 w-4' /> Refresh now
           </Button>
-          <Button onClick={props.onOpen}>
+          <Button
+            onClick={props.onOpen}
+            data-track-category='ProjectRepos'
+            data-track-name='OpenSdlcOverview'
+          >
             <ExternalLink className='h-4 w-4' /> Open SDLC
           </Button>
         </div>

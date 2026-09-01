@@ -52,6 +52,8 @@ export const QAOwnerPicker = ({
     <button
       type='button'
       onClick={e => e.stopPropagation()}
+      data-track-category='Release'
+      data-track-name='OPEN_QA_OWNER_PICKER'
       onKeyDown={e => e.stopPropagation()}
       className='text-xs px-2 py-1 rounded border border-border hover:bg-muted transition-colors truncate max-w-[120px]'
       title={currentUserName ?? 'Unassigned'}

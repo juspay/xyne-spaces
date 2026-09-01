@@ -1123,7 +1123,11 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                 <FolderOpen className='h-4 w-4' strokeWidth={1.75} />
                 Upload folder
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setDriveLinkOpen(true)}>
+              <DropdownMenuItem
+                onClick={() => setDriveLinkOpen(true)}
+                data-track-category='knowledge-base'
+                data-track-name='add-from-drive'
+              >
                 <Link2 className='h-4 w-4' strokeWidth={1.75} />
                 Add from Drive
               </DropdownMenuItem>
@@ -1272,9 +1276,20 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align='end'>
-                  <DropdownMenuItem onClick={() => setTypeFilter('ALL')}>All</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setTypeFilter('ALL')}
+                    data-track-category='knowledge-base'
+                    data-track-name='kb-type-filter-all'
+                  >
+                    All
+                  </DropdownMenuItem>
                   {availableTypeFilters.map(opt => (
-                    <DropdownMenuItem key={opt.value} onClick={() => setTypeFilter(opt.value)}>
+                    <DropdownMenuItem
+                      key={opt.value}
+                      onClick={() => setTypeFilter(opt.value)}
+                      data-track-category='knowledge-base'
+                      data-track-name='kb-type-filter-select'
+                    >
                       <span className='flex items-center gap-2'>
                         {typeFilterIcon(opt.value)}
                         {opt.label}
@@ -1325,9 +1340,20 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align='end'>
-                  <DropdownMenuItem onClick={() => setStatusFilter('ALL')}>All</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setStatusFilter('ALL')}
+                    data-track-category='knowledge-base'
+                    data-track-name='kb-status-filter-all'
+                  >
+                    All
+                  </DropdownMenuItem>
                   {STATUS_FILTER_OPTIONS.map(opt => (
-                    <DropdownMenuItem key={opt.value} onClick={() => setStatusFilter(opt.value)}>
+                    <DropdownMenuItem
+                      key={opt.value}
+                      onClick={() => setStatusFilter(opt.value)}
+                      data-track-category='knowledge-base'
+                      data-track-name='kb-status-filter-select'
+                    >
                       <span className='flex items-center gap-2'>
                         {statusFilterIcon(opt.value)}
                         {opt.label}

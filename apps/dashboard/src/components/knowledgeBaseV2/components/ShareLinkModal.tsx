@@ -82,7 +82,13 @@ export const ShareLinkModal = ({
             <Link2 size={16} />
             Copy link
           </button>
-          <Button onClick={onClose}>Done</Button>
+          <Button
+            onClick={onClose}
+            data-track-category='knowledge-base'
+            data-track-name='share-link-modal-done'
+          >
+            Done
+          </Button>
         </div>
       </div>
     </Dialog>
