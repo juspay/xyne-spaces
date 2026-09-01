@@ -11,6 +11,30 @@ const TICKET_ACTIVITY_PREFIX = 'ticket_';
 const GROUP_WINDOW_MS = 30 * 1000; // 30 seconds
 
 /**
+ * Counts activities per bucket the way the feed renders them: each bucket is
+ * filtered, then grouped, then counted, so a set of ticket activities that
+ * renders as one grouped card contributes 1 — not N — to its badge.
+ *
+ * Deliberately reuses `groupActivities` rather than reimplementing the
+ * grouping rule: a second copy of that rule is exactly how badges drifted
+ * from the feed in the first place. This mirrors the render path, which also
+ * filters before grouping (see ActivityListView).
+ *
+ * `activities` must be sorted the same way the rendered feed is (newest
+ * first) for "consecutive" to mean the same thing in both places.
+ */
+export function countGroupedActivities<K extends string>(
+  activities: readonly ActivityWithRelated[],
+  buckets: Record<K, (activity: ActivityWithRelated) => boolean>,
+): Record<K, number> {
+  const counts = {} as Record<K, number>;
+  for (const key of Object.keys(buckets) as K[]) {
+    counts[key] = groupActivities(activities.filter(buckets[key])).length;
+  }
+  return counts;
+}
+
+/**
  * Group consecutive ticket-related activities from the same actor on the same ticket
  * within a 30-second window.
  *

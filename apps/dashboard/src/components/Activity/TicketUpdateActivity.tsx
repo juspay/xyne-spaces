@@ -32,6 +32,7 @@ interface ActivityConfig {
 const getActivityConfig = (actorAction: string): ActivityConfig => {
   switch (actorAction) {
     case 'ticket_status':
+    case 'ticket_status_v2':
       return {
         icon: <TicketToken className='size-3 text-green-600' />,
         badgeColor: 'bg-green-100',

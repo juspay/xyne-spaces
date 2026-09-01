@@ -66,9 +66,13 @@ export const GroupedTicketActivity = ({
       ? `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`
       : labels[0] || 'fields';
 
+  // A grouped card is unread as long as any underlying activity is unread —
+  // matches markManyAsRead, which clears every id in the group together.
+  const groupIsRead = activities.every(a => a.isRead);
+
   const content = (
     <span className='text-sm'>
-      <span className={first.isRead ? 'text-muted-foreground' : 'font-semibold'}>
+      <span className={groupIsRead ? 'text-muted-foreground' : 'font-semibold'}>
         {ticketXyneId}
       </span>
       <span className='text-muted-foreground'> {labelList} updated</span>
@@ -81,6 +85,7 @@ export const GroupedTicketActivity = ({
         {
           ...first,
           actorAction: 'ticket_multi_updated',
+          isRead: groupIsRead,
         } as ActivityWithRelated
       }
       actorId={actorId}
@@ -93,6 +98,7 @@ export const GroupedTicketActivity = ({
       focusThread
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
+      groupActivityIds={activities.map(a => a.id)}
     >
       {content}
     </ActivityItemCard>

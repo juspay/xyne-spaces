@@ -56,33 +56,39 @@ async function handleUnreadCountInner(
     } else {
       await Promise.all(
         statuses.map(async (status) => {
+          // Only unread message activities count toward a channel badge;
+          // ticket/canvas/call activities never do.
           const activities = await db.activity.findMany({
             where: {
               userId: status.userId,
               channelId,
               isRead: false,
               actionSource: 'message',
-              actorAction: { not: 'added_v2' },
+              actorAction: { notIn: ['added', 'added_v2', 'removed'] },
+              classification: { not: 'SKIP' },
             },
             select: {
-              id: true,
+              messageId: true,
               actionSourceId: true
             }
           });
 
-          const messageIds = activities.map(a => a.actionSourceId);
+          // Dedupe by message so several activities on the same top-level
+          // message (e.g. a reply plus a mention) still count once.
+          const uniqueMessageIds = [
+            ...new Set(activities.map(a => a.messageId ?? a.actionSourceId)),
+          ];
 
           let unreadActivitiesCount = 0;
-          if (messageIds.length > 0) {
-            for (const messageId of messageIds) {
-              const conversation = await db.conversation.findFirst({
-                where: { initialMessageId: messageId },
-                select: { conversationId: true }
-              });
-              if (conversation) {
-                unreadActivitiesCount++;
-              }
-            }
+          if (uniqueMessageIds.length > 0) {
+            const topLevelMessages = await db.conversation.findMany({
+              where: { initialMessageId: { in: uniqueMessageIds } },
+              select: { initialMessageId: true }
+            });
+            // initialMessageId is indexed but not unique, so dedupe again.
+            unreadActivitiesCount = new Set(
+              topLevelMessages.map(c => c.initialMessageId),
+            ).size;
           }
 
           if (unreadActivitiesCount !== status.unreadCount) {

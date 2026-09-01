@@ -1619,22 +1619,34 @@ export function createMutators(
             });
           }
 
+          // Only message-domain activities are cleared by viewing a channel —
+          // ticket/canvas/call activities are never marked read here.
           const unreadActivities = await tx.run(
             zql.activities
               .where('userId', authData.sub)
               .where('isRead', false)
-              .where('channelId', channelId),
+              .where('channelId', channelId)
+              .where('actionSource', 'message'),
           );
 
           if (unreadActivities.length === 0) {
             return;
           }
 
-
-          const activityBySourceId = new Map(
-            unreadActivities.map(a => [a.actionSourceId, a]),
-          );
-          const uniqueSourceIds = [...activityBySourceId.keys()];
+          // Group by source message id — several activities (e.g. a mention
+          // plus a reply) can share the same top-level message and must all
+          // be marked read together when that message is viewed.
+          const activitiesBySourceId = new Map<string, typeof unreadActivities>();
+          for (const activity of unreadActivities) {
+            const sourceId = activity.messageId ?? activity.actionSourceId;
+            const existing = activitiesBySourceId.get(sourceId);
+            if (existing) {
+              existing.push(activity);
+            } else {
+              activitiesBySourceId.set(sourceId, [activity]);
+            }
+          }
+          const uniqueSourceIds = [...activitiesBySourceId.keys()];
 
           const messages = await tx.run(
             zql.messages
@@ -1646,13 +1658,17 @@ export function createMutators(
             messages.map(m => [m.messageId, m]),
           );
 
-          for (const [sourceId, activity] of activityBySourceId) {
+          for (const [sourceId, activities] of activitiesBySourceId) {
             const message = messageByMessageId.get(sourceId);
             if (message?.conversation?.initialMessageId === message?.messageId) {
-              await tx.mutate.activities.update({
-                id: activity.id,
-                isRead: true,
-              });
+              await Promise.all(
+                activities.map(activity =>
+                  tx.mutate.activities.update({
+                    id: activity.id,
+                    isRead: true,
+                  }),
+                ),
+              );
             }
           }
         },
@@ -5161,6 +5177,37 @@ export function createMutators(
             id: activityId,
             isRead: true,
           });
+        },
+      ),
+      // KEEP IN SYNC with shared/src/zero/mutators.ts activities.markManyAsRead.
+      // Batch sibling of markAsRead, for cards that stand in for several
+      // activities (grouped ticket updates). Like markAsRead — and unlike
+      // markAsReadByFilter — it deliberately leaves channel_user_status alone:
+      // its callers pass ticket activities, which never contribute to a channel
+      // badge (both useUnreadCount and handleUnreadCountInner count only
+      // actionSource 'message'), so decrementing here would subtract from a
+      // counter these rows never incremented.
+      markManyAsRead: defineMutator(
+        z.object({ activityIds: z.array(z.string()) }),
+        async ({ tx, args: { activityIds } }) => {
+          if (activityIds.length === 0) {
+            return;
+          }
+
+          const activities = await tx.run(
+            zql.activities.where('id', 'IN', activityIds).where('userId', authData.sub),
+          );
+
+          await Promise.all(
+            activities
+              .filter(activity => !activity.isRead)
+              .map(activity =>
+                tx.mutate.activities.update({
+                  id: activity.id,
+                  isRead: true,
+                }),
+              ),
+          );
         },
       ),
       markAsReadByFilter: defineMutator(

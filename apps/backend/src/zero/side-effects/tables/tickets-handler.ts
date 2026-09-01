@@ -342,8 +342,14 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     }
 
     // Create activities for ALL changes (including title/description/board/userGroup)
+    // When a single update changes both stageName and statusV2 together (the common case,
+    // since stage transitions set statusV2 in the same write), only emit ticket_status —
+    // otherwise a plain status change produces a duplicate ticket_status_v2 row. A
+    // statusV2-only change (no stageName change) still emits its own ticket_status_v2.
+    const hasStatusChange = activities.some(a => a.activityType === 'STATUS');
     const relevantActivities = activities.filter(a =>
       ['STATUS', 'STATUS_V2', 'PRIORITY', 'ETA', 'BOARD', 'ASSIGNED', 'USER_GROUP', 'TITLE', 'DESCRIPTION'].includes(a.activityType)
+      && !(hasStatusChange && a.activityType === 'STATUS_V2')
     );
 
     if (activityRecipients.length === 0 || relevantActivities.length === 0) {

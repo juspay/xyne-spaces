@@ -84,6 +84,7 @@ export const ActivityItem = memo(function ActivityItem({
       return <TicketAssignmentActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'ticket_status':
+    case 'ticket_status_v2':
     case 'ticket_eta':
     case 'ticket_board':
     case 'ticket_assigned_to':
