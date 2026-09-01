@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { Prisma } from '@prisma/client';
 import { InviteExperience } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { authMiddleware } from '@/middleware/auth';
@@ -39,22 +38,34 @@ router.patch(
     }
 
     try {
-      const workspace = await prisma.workspace.update({
+      const existing = await prisma.workspace.findUnique({
         where: { id: workspaceId },
-        data: { inviteExperience },
-        select: { id: true, inviteExperience: true },
+        select: { metadata: true },
       });
 
-      res.status(200).json({
-        workspaceId: workspace.id,
-        inviteExperience: workspace.inviteExperience,
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      if (!existing) {
         res.status(404).json({ error: 'Workspace not found' });
         return;
       }
 
+      // metadata is a shared JSON bag — merge rather than overwrite, so this
+      // toggle doesn't clobber any other key already stored there.
+      const currentMetadata =
+        existing.metadata && typeof existing.metadata === 'object' && !Array.isArray(existing.metadata)
+          ? (existing.metadata as Record<string, unknown>)
+          : {};
+
+      const workspace = await prisma.workspace.update({
+        where: { id: workspaceId },
+        data: { metadata: { ...currentMetadata, inviteExperience } },
+        select: { id: true },
+      });
+
+      res.status(200).json({
+        workspaceId: workspace.id,
+        inviteExperience,
+      });
+    } catch (error) {
       logger.error('[WorkspaceSettingsRoutes] Failed to update inviteExperience:', error);
       res.status(500).json({ error: 'Failed to update workspace setting' });
     }

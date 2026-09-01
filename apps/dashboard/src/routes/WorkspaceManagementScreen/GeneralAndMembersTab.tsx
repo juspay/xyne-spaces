@@ -103,7 +103,10 @@ export const GeneralAndMembersTab = ({
       setName(workspace.name || '');
       setDescription(workspace.description || '');
       setHasChanges(false);
-      setInviteExperience(workspace.inviteExperience === 'BROWSER' ? 'BROWSER' : 'DESKTOP');
+      const workspaceMetadata = workspace.metadata as Record<string, unknown> | null | undefined;
+      setInviteExperience(
+        workspaceMetadata?.['inviteExperience'] === 'BROWSER' ? 'BROWSER' : 'DESKTOP',
+      );
     }
   }, [workspace]);
 
