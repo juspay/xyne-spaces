@@ -153,9 +153,6 @@ export class GithubManager implements IGitProvider {
     }
   }
 
-  /**
-   * Raise a pull request on GitHub
-   */
   /** Never throws: on failure it reports false, so a lookup problem cannot post
    *  a status we did not intend. */
   async hasCommitStatus(
@@ -173,6 +170,7 @@ export class GithubManager implements IGitProvider {
     try {
       const response = await axios.get<Array<{ context?: string }>>(url, {
         headers: this.getHeaders(),
+        // Newest first; a commit will not have more contexts than this.
         params: { per_page: 100 },
       });
       return response.data.some(status => status.context === context);
@@ -185,6 +183,9 @@ export class GithubManager implements IGitProvider {
     }
   }
 
+  /**
+   * Raise a pull request on GitHub
+   */
   async raisePr(
     repoUrl: string,
     _executionId: string,

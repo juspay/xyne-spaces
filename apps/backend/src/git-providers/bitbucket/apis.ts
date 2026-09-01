@@ -246,6 +246,21 @@ export class BitbucketManager {
     }
   }
 
+  /** Never throws: on failure it reports false, so a lookup problem cannot post
+   *  a status we did not intend. */
+  async hasBuildStatus(commitHash: string, key: string): Promise<boolean> {
+    try {
+      const url = `${config.bitbucket.baseUrl}/rest/build-status/1.0/commits/${commitHash}`;
+      const response = await fetch(url, { headers: this.getAuthHeaders() });
+      if (!response.ok) return false;
+      const body = (await response.json()) as { values?: Array<{ key?: string }> };
+      return (body.values ?? []).some(status => status.key === key);
+    } catch (error) {
+      logger.warn('[Bitbucket-API] Could not read build statuses:', error);
+      return false;
+    }
+  }
+
   async postBuildStatus(
     commitHash: string,
     state: 'INPROGRESS' | 'SUCCESSFUL' | 'FAILED',

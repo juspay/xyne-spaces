@@ -481,9 +481,12 @@ export class PullRequestValidationService {
   private async resolveSpecCheckConfig(
     target: BuildStatusTarget,
     workspaceId: string
-  ): Promise<{ enabled: boolean; sections: string[] }> {
+  ): Promise<{ enabled: boolean; configured: boolean; sections: string[] }> {
+    // `configured` distinguishes a workspace that switched the check off from one
+    // that never set the key: only the former can have a status left to clear.
     const fallback = {
       enabled: false,
+      configured: false,
       sections: [...PR_VALIDATION_CONFIG.REQUIRED_SPEC_SECTIONS],
     };
 
@@ -508,11 +511,22 @@ export class PullRequestValidationService {
         'spec-check config',
       );
 
-      const enabledValue = details[PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED]?.value;
-      const enabled = typeof enabledValue === 'boolean' ? enabledValue : fallback.enabled;
-      if (!enabled) return { enabled: false, sections: fallback.sections };
+      // The provider returns a flat map, the repo's type says wrapped. Both other
+      // consumers unwrap defensively (agents/config.ts, cacConfigService); assuming
+      // either shape makes the check silently never activate.
+      const unwrap = (key: string): unknown => {
+        const entry: unknown = details[key];
+        return entry && typeof entry === 'object' && 'value' in entry
+          ? (entry as { value: unknown }).value
+          : entry;
+      };
 
-      const sectionsValue = details[PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS]?.value;
+      const enabledValue = unwrap(PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED);
+      const configured = enabledValue !== undefined && enabledValue !== null;
+      const enabled = typeof enabledValue === 'boolean' ? enabledValue : fallback.enabled;
+      if (!enabled) return { enabled: false, configured, sections: fallback.sections };
+
+      const sectionsValue = unwrap(PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS);
       const rawSections =
         typeof sectionsValue === 'string' ? sectionsValue : fallback.sections.join(',');
 
@@ -527,27 +541,31 @@ export class PullRequestValidationService {
           `[PR-Validation] ${PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS} has no ` +
             `enforceable section, using defaults: ${sanitizeForLog(rawSections)}`
         );
-        return { enabled, sections: fallback.sections };
+        return { enabled, configured, sections: fallback.sections };
       }
 
-      return { enabled, sections };
+      return { enabled, configured, sections };
     } catch (error) {
       logger.warn('[PR-Validation] Superposition lookup failed, spec check stays off:', error);
       return fallback;
     }
   }
 
-  /** Bitbucket is not a target for this check, so only GitHub is inspected. */
   private async hasSpecStatus(
     target: BuildStatusTarget,
     commitHash: string
   ): Promise<boolean> {
-    if (target.provider !== VCSProviderType.GITHUB) return false;
-    return githubManager.hasCommitStatus(
-      target.owner,
-      target.repo,
+    if (target.provider === VCSProviderType.GITHUB) {
+      return githubManager.hasCommitStatus(
+        target.owner,
+        target.repo,
+        commitHash,
+        PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME,
+      );
+    }
+    return this.bitbucketManager.hasBuildStatus(
       commitHash,
-      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME,
+      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.KEY,
     );
   }
 
@@ -563,13 +581,16 @@ export class PullRequestValidationService {
   ): Promise<void> {
     const { ticketDescription, xyneId } = result;
     const resolvable = ticketDescription !== undefined && xyneId !== undefined;
-    const { enabled, sections } = await this.resolveSpecCheckConfig(target, workspaceId);
+    const { enabled, configured, sections } = await this.resolveSpecCheckConfig(
+      target,
+      workspaceId,
+    );
     const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
 
     // Clear a verdict left from when the check was on; stay silent on commits
     // that never had one.
     if (!enabled) {
-      if (await this.hasSpecStatus(target, commitHash)) {
+      if (configured && (await this.hasSpecStatus(target, commitHash))) {
         await this.postBuildStatus(
           target,
           commitHash,
