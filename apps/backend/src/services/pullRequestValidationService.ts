@@ -41,10 +41,11 @@ const PR_VALIDATION_CONFIG = {
     // Display name: Bitbucket build-status `name`, GitHub commit-status `context`.
     NAME: 'Ticket Validation',
   },
-  // No Bitbucket key: this check is GitHub only, and GitHub identifies a status
-  // by its context alone.
+  // Keyed by PR, not just commit: statuses live on the commit, so several open
+  // PRs sharing a head would overwrite each other under one fixed context - and
+  // they usually name different tickets. No Bitbucket key: this check is GitHub only.
   SPEC_BUILD_STATUS: {
-    NAME: 'Spec Validation',
+    NAME: (prId: number) => `Spec Validation (#${prId})`,
   },
   SPEC_FLAGS: {
     ENABLED: 'pr_spec_check_enabled',
@@ -132,12 +133,12 @@ export class PullRequestValidationService {
 
   async validatePullRequest(params: ValidatePullRequestParams): Promise<ValidationResult> {
     const target = params.target ?? DEFAULT_BUILD_STATUS_TARGET;
-    const { commitHash, workspaceId } = params;
+    const { commitHash, prId, workspaceId } = params;
     const result = await this.runTicketValidation(params, target);
     // Awaited so two events for the same commit cannot post out of order; the
     // config read inside is time-bounded. Called here so no early return in
     // runTicketValidation skips it.
-    await this.postSpecBuildStatus(target, commitHash, workspaceId, result);
+    await this.postSpecBuildStatus(target, commitHash, prId, workspaceId, result);
     return result;
   }
 
@@ -412,14 +413,15 @@ export class PullRequestValidationService {
 
   private async hasSpecStatus(
     target: BuildStatusTarget,
-    commitHash: string
+    commitHash: string,
+    prId: number
   ): Promise<boolean> {
     if (target.provider !== VCSProviderType.GITHUB) return false;
     return githubManager.hasCommitStatus(
       target.owner,
       target.repo,
       commitHash,
-      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME,
+      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME(prId),
     );
   }
 
@@ -430,6 +432,7 @@ export class PullRequestValidationService {
   private async postSpecBuildStatus(
     target: BuildStatusTarget,
     commitHash: string,
+    prId: number,
     workspaceId: string,
     result: ValidationResult
   ): Promise<void> {
@@ -444,12 +447,12 @@ export class PullRequestValidationService {
       target,
       workspaceId,
     );
-    const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
+    const specStatus = { NAME: PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME(prId) };
 
     // Clear a verdict left from when the check was on; stay silent on commits
     // that never had one.
     if (!enabled) {
-      if (configured && (await this.hasSpecStatus(target, commitHash))) {
+      if (configured && (await this.hasSpecStatus(target, commitHash, prId))) {
         await this.postBuildStatus(
           target,
           commitHash,
