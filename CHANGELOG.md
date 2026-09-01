@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.13](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.12...v1.239.0-release-20260827.13) (2026-09-01)
+
+
+### Bug Fixes
+
+* Improve events tracking accuracy ([#1234](https://github.com/juspay/xyne-spaces/issues/1234)) ([#1315](https://github.com/juspay/xyne-spaces/issues/1315)) ([50f36fa](https://github.com/juspay/xyne-spaces/commit/50f36fa3a2156a62d0f649726235ab200073b91b))
+
 ## [1.239.0-release-20260827.12](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.11...v1.239.0-release-20260827.12) (2026-09-01)
 
 
