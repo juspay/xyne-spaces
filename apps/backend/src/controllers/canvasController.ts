@@ -928,6 +928,7 @@ export class CanvasController {
           approver?.displayName || approver?.name || 'Someone',
           CanvasRole.EDITOR,
           'canvas_shared',
+          workspaceId,
         );
         await activityService.createActivities([
           {
