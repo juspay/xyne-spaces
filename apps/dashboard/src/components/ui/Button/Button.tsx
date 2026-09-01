@@ -3,36 +3,31 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../../utils/classNames';
 import { Loader2 } from 'lucide-react';
-import {
-  posthogService,
-  type EventProperties,
-} from '../../../services/Analytics/posthogService';
+import { type EventProperties } from '../../../services/Analytics/posthogService';
 
 /**
- * Derive a human-readable label for a button click event.
- * Prefers an explicit data-track-name, then aria-label/title, then text content.
+ * Convert tracking metadata into PostHog-native capture attributes. Any element
+ * attribute prefixed `data-ph-capture-attribute-*` is automatically attached to
+ * the autocaptured click event by PostHog, so we surface the button's purpose
+ * without emitting a separate custom event.
  */
-function deriveButtonLabel(
-  props: Record<string, unknown>,
-  children: React.ReactNode,
-): string {
-  const explicit =
-    (props['data-track-name'] as string | undefined) ??
-    (props['aria-label'] as string | undefined) ??
-    (props['title'] as string | undefined);
-  if (explicit && explicit.trim() !== '') {
-    return explicit;
+function buildCaptureAttributes(
+  trackId: string | undefined,
+  trackProps: EventProperties | undefined,
+): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (trackId && trackId.trim() !== '') {
+    attrs['data-ph-capture-attribute-track-id'] = trackId;
   }
-  if (typeof children === 'string' && children.trim() !== '') {
-    return children.trim();
-  }
-  if (Array.isArray(children)) {
-    const text = children.find(child => typeof child === 'string');
-    if (typeof text === 'string' && text.trim() !== '') {
-      return text.trim();
+  if (trackProps) {
+    for (const [key, value] of Object.entries(trackProps)) {
+      if (value !== undefined && value !== null) {
+        attrs[`data-ph-capture-attribute-${key}`] =
+          typeof value === 'object' ? JSON.stringify(value) : String(value);
+      }
     }
   }
-  return 'unlabeled';
+  return attrs;
 }
 
 const buttonVariants = cva(
@@ -71,22 +66,26 @@ interface ButtonProps extends React.ComponentProps<'button'>, VariantProps<typeo
   loading?: boolean;
   /**
    * Stable id describing this button's PURPOSE (e.g. `send_message`,
-   * `delete_channel`). When set, the button records `<trackId>_click` in PostHog,
-   * and — if `trackAction` is provided — `<trackId>_success` / `<trackId>_failure`
-   * so the outcome of the mutation is monitored.
+   * `delete_channel`). Surfaced to PostHog autocapture as the
+   * `data-ph-capture-attribute-track-id` element attribute so the autocaptured
+   * click carries a readable, queryable purpose.
    */
   trackId?: string;
   /**
-   * The action this button performs. When provided, the Button runs it, shows a
-   * loading spinner while it is pending, and records the pass/fail outcome in
-   * PostHog under `trackId`. Sync or async; thrown errors are captured as a
-   * failure (and swallowed so analytics never breaks the UI — the action itself
-   * should surface user-facing errors, e.g. via toasts).
+   * The action this button performs. When provided, the Button runs it and shows
+   * a loading spinner while it is pending, blocking double-submits. Sync or
+   * async; thrown errors are swallowed so a failing action never leaves the
+   * button stuck spinning — the action itself is responsible for user-facing
+   * error handling (e.g. toasts). Note: when set, `onClick` is not called; move
+   * the click work into `trackAction`.
    */
   trackAction?: (
     event: React.MouseEvent<HTMLButtonElement>,
   ) => void | Promise<void>;
-  /** Extra metadata attached to every tracking event for this button. */
+  /**
+   * Extra metadata surfaced to PostHog autocapture as
+   * `data-ph-capture-attribute-<key>` element attributes.
+   */
   trackProps?: EventProperties;
 }
 
@@ -108,49 +107,34 @@ function Button({
   const [pending, setPending] = React.useState(false);
   const isDisabled = disabled || loading || pending;
 
-  const handleClick = React.useCallback(
-    async (event: React.MouseEvent<HTMLButtonElement>): Promise<void> => {
-      // Monitor every button click in PostHog with a readable label. This runs
-      // alongside PostHog autocapture and never blocks the original handler.
-      try {
-        posthogService.captureButtonClick(deriveButtonLabel(props, children), {
-          variant: variant ?? 'default',
-          size: size ?? 'default',
-          ...(trackId ? { trackId } : {}),
-          ...trackProps,
-        });
-        if (trackId) {
-          posthogService.captureActionOutcome(trackId, 'click', trackProps);
-        }
-      } catch {
-        // Never let analytics break a click.
-      }
+  const captureAttributes = React.useMemo(
+    () => buildCaptureAttributes(trackId, trackProps),
+    [trackId, trackProps],
+  );
 
-      // When a trackAction is supplied, the Button owns the pass/fail lifecycle.
+  const handleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>): void => {
+      // Clicks are recorded by PostHog autocapture; the Button only owns the
+      // action lifecycle here. When a trackAction is supplied, run it with a
+      // pending spinner that blocks double-submits.
       if (trackAction) {
         setPending(true);
-        try {
-          await trackAction(event);
-          if (trackId) {
-            posthogService.captureActionOutcome(trackId, 'success', trackProps);
+        void (async (): Promise<void> => {
+          try {
+            await trackAction(event);
+          } catch {
+            // Swallow: the action is responsible for user-facing error handling;
+            // this only clears the spinner so the button never gets stuck.
+          } finally {
+            setPending(false);
           }
-        } catch (error) {
-          if (trackId) {
-            posthogService.captureActionOutcome(trackId, 'failure', {
-              ...trackProps,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-          // Swallow: the action is responsible for user-facing error handling.
-        } finally {
-          setPending(false);
-        }
+        })();
         return;
       }
 
       onClick?.(event);
     },
-    [onClick, props, children, variant, size, trackId, trackAction, trackProps],
+    [onClick, trackAction],
   );
 
   return (
@@ -159,6 +143,7 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       disabled={isDisabled}
       onClick={handleClick}
+      {...captureAttributes}
       {...props}
     >
       {(loading || pending) && <Loader2 className='size-4 animate-spin' />}

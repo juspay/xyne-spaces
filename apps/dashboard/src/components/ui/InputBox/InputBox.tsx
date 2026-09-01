@@ -827,7 +827,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
-              void handleSend();
+              void handleSend('keyboard');
               return true;
             }
             event.preventDefault();
@@ -981,7 +981,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
-            void handleSend();
+            void handleSend('keyboard');
             return true;
           }
 
@@ -1252,7 +1252,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
     );
 
-    const handleSend = useCallback(async () => {
+    const handleSend = useCallback(async (trigger: 'keyboard' | 'button' = 'button') => {
       if (!editor || isSending) return;
       if (sendDisabled) {
         // The button is disabled, but Enter still lands here — say why rather than
@@ -1312,6 +1312,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           return;
         }
       }
+
+      // Record how the message was sent (Enter key vs. send button). Autocapture
+      // sees the button click but is blind to keyboard sends, so most sends would
+      // otherwise be invisible; this makes the Enter-vs-button split measurable.
+      posthogService.capture('message_send', { trigger, composer: 'chat' });
 
       setIsSending(true);
       try {

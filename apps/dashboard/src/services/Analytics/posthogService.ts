@@ -74,8 +74,10 @@ class PostHogService {
         // Record the full session so the journey can be replayed.
         disable_session_recording: false,
         session_recording: {
+          // Chat/email/ticket bodies are sensitive — mask ALL text and inputs by
+          // default. Opt specific safe elements back in with `.ph-no-mask`.
           maskAllInputs: true,
-          maskTextSelector: '[data-ph-mask]',
+          maskTextSelector: '*',
         },
       });
       /* eslint-enable @typescript-eslint/naming-convention */
@@ -138,23 +140,15 @@ class PostHogService {
   }
 
   /**
-   * Capture a button click as an explicit, richly-labelled event. Used by the
-   * shared Button component so every button click is monitored with a readable
-   * label in addition to autocapture.
-   */
-  captureButtonClick(label: string, properties?: EventProperties): void {
-    this.capture('button_click', { label, ...properties });
-  }
-
-  /**
-   * Capture the outcome of an action triggered by a button. Emits
-   * `<trackId>_<status>` (e.g. `send_message_success` / `send_message_failure`)
-   * so each button records whether its mutation passed or failed. Used by the
-   * shared Button component's `trackAction` flow.
+   * Capture the outcome of an action. Emits `<trackId>_<status>` (e.g.
+   * `save_call_summary_prompt_success` / `_failure`) so a mutation's pass/fail is
+   * recorded — a signal autocapture cannot produce, since it only sees the click,
+   * not the async result. Clicks themselves are covered by autocapture, so this
+   * intentionally has no `click` status.
    */
   captureActionOutcome(
     trackId: string,
-    status: 'click' | 'success' | 'failure',
+    status: 'success' | 'failure',
     properties?: EventProperties,
   ): void {
     if (!trackId || trackId.trim() === '') {
