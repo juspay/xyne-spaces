@@ -16,7 +16,7 @@ import {
   type PanelImperativeHandle,
 } from '../ui/Resizable/Resizable';
 
-const KB_CONTENTS_DEFAULT_WIDTH = 240;
+const KB_CONTENTS_DEFAULT_WIDTH = 300;
 const KB_CONTENTS_MIN_WIDTH = 180;
 const KB_CONTENTS_MAX_WIDTH = 600;
 const KB_CONTENTS_COLLAPSED_WIDTH = 40;
