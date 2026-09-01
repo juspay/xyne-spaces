@@ -1346,6 +1346,10 @@ class WebSocketService {
 
         // Send to each subscribed socket
         for (const socketId of subscribedSockets) {
+          if (message.visibleTo) {
+            const socket = this.io?.sockets.sockets.get(socketId) as AuthenticatedSocket | undefined;
+            if (socket?.userId !== message.visibleTo) continue;
+          }
           this.io?.to(socketId).emit('session_activity', {
             sessionId,
             message,

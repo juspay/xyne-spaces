@@ -99,6 +99,7 @@ import { ThreadRecordingButton } from '../Call/ThreadRecordingButton/ThreadRecor
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
+import { useEphemeralMessages, type EphemeralMessage } from '../../hooks/useEphemeralMessages';
 
 type TabType = 'thread' | 'details' | 'files' | 'rca';
 type UnderTicketTabType = 'replies' | 'rca';
@@ -286,11 +287,48 @@ export const ThreadMessages = ({
   const queryDetails = conversationDetails;
 
   // Use pre-fetched messages if provided, otherwise use queried
-  const messages = useMemo(
+  const dbMessages = useMemo(
     () => propThreadMessages ?? queriedMessages ?? [],
     [propThreadMessages, queriedMessages],
   );
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
+  // Ephemeral messages: WebSocket-only, not persisted, visible only to current user.
+  // The hook is channel-scoped, so narrow to this thread: the backend falls back to the
+  // channel id when an ephemeral targets no particular thread, and those belong in the
+  // channel feed rather than in every thread that happens to be open.
+  const channelEphemerals = useEphemeralMessages(derivedChannelId);
+  const ephemeralMessages = useMemo(
+    () => channelEphemerals.filter(em => em.conversationId === derivedConversationId),
+    [channelEphemerals, derivedConversationId],
+  );
+  const messages = useMemo(() => {
+    if (ephemeralMessages.length === 0) return dbMessages;
+    const converted = ephemeralMessages.map(
+      (em: EphemeralMessage) =>
+        ({
+          messageId: em.messageId,
+          conversationId: em.conversationId,
+          senderId: em.senderId,
+          content: em.content,
+          msgType: em.msgType as MessageType,
+          hasAttachment: em.hasAttachment ?? false,
+          edited: false,
+          isDeleted: false,
+          showInChannel: false,
+          visibleTo: em.visibleTo ?? null,
+          createdAt: new Date(em.createdAt).getTime(),
+          metadata: (em.metadata ?? null) as (typeof dbMessages)[number]['metadata'],
+          nudgeCount: null,
+          isSent: true,
+          reactions_md: null,
+          link_preview_md: null,
+          childConversationId: null,
+          attachments: [] as (typeof dbMessages)[number]['attachments'],
+          nudgeCounts: [] as (typeof dbMessages)[number]['nudgeCounts'],
+        }) as (typeof dbMessages)[number],
+    );
+    return [...dbMessages, ...converted].sort((a, b) => a.createdAt - b.createdAt);
+  }, [dbMessages, ephemeralMessages]);
   const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
 
   const threadParticipantIds = useMemo(() => {

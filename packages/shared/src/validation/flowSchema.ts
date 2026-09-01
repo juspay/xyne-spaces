@@ -159,6 +159,10 @@ export const dropdownComponentSchema = baseComponentSchema.extend({
     options: selectOptionsField,
     required: z.boolean().optional(),
     action: flowActionSchema.optional(),
+    // Renders a searchable pill dropdown instead of the single-value Select, and
+    // changes the submitted value for this field from `string` to `string[]`.
+    // `multiselect` stays the checkbox-group variant.
+    multiple: z.boolean().optional(),
   }).strict(),
 });
 

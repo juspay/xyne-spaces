@@ -27,7 +27,9 @@ import { formatDatePill } from '../../../utils/dateUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, Eye } from 'lucide-react';
+import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import type { EphemeralMessage } from '../../../hooks/useEphemeralMessages';
 import { mutators } from '../../../zero/mutators';
 import { queryCacheActor, flushQueryCachePersistence } from '../../../machines/queryCacheMachine';
 import { browserPanelActor } from '../../../machines/browserPanelMachine';
@@ -48,11 +50,32 @@ export type ChatListProps = {
   linkedConversationId?: string | null;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
+  ephemeralMessages?: EphemeralMessage[];
 };
 
 type Anchor = {
   createdAt: number;
 };
+
+const EphemeralRow: React.FC<{ em: EphemeralMessage }> = ({ em }) => (
+  <div className='pt-4 pb-1'>
+    <div className='group relative px-5 py-1'>
+      <div className='flex items-center gap-2 mb-1'>
+        <Eye className='w-3 h-3 text-muted-foreground' />
+        <span className='text-xs text-muted-foreground'>Only visible to you</span>
+      </div>
+      <div className='jp-message-html whitespace-pre-wrap break-words inline-block'>
+        {/* Both ids are required for flow actions — FlowRenderer refuses to
+            dispatch without them. */}
+        <RenderMessageWithHTML
+          message={em.content}
+          messageId={em.messageId}
+          conversationId={em.conversationId}
+        />
+      </div>
+    </div>
+  </div>
+);
 
 type UpdatedConveresationsAnchor = {
   direction: 'forward' | 'backward';
@@ -201,6 +224,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
+  ephemeralMessages,
 }) => {
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
@@ -387,6 +411,31 @@ const ChatListV4: React.FC<ChatListProps> = ({
     const isLastFewItems = item.index >= instance.options.count - 5;
     return (isNearBottom && isLastFewItems) || virtualizer.scrollDirection === 'backward';
   };
+
+  const { ephemeralsByAnchorIndex, leadingEphemerals } = useMemo(() => {
+    const byAnchor = new Map<number, EphemeralMessage[]>();
+    const leading: EphemeralMessage[] = [];
+    for (const em of ephemeralMessages ?? []) {
+      // Channel-level ephemerals only. The backend falls back to the channel id when no
+      // thread was targeted, so anything else is addressed to a thread and belongs in
+      // ThreadPannel, not in the main feed.
+      if (em.conversationId !== channelId) continue;
+      const t = new Date(em.createdAt).getTime();
+      let anchor = -1;
+      for (let i = 0; i < combinedMessages.length; i++) {
+        if (combinedMessages[i]!.createdAt.getTime() <= t) anchor = i;
+        else break;
+      }
+      if (anchor === -1) {
+        leading.push(em);
+      } else {
+        const arr = byAnchor.get(anchor) ?? [];
+        arr.push(em);
+        byAnchor.set(anchor, arr);
+      }
+    }
+    return { ephemeralsByAnchorIndex: byAnchor, leadingEphemerals: leading };
+  }, [ephemeralMessages, combinedMessages, channelId]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const isConversationFullyVisible = useCallback(
@@ -1359,6 +1408,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
             justifyContent: 'flex-end',
           }}
         >
+          {leadingEphemerals.length > 0 && (
+            <div className='flex flex-col'>
+              {leadingEphemerals.map(em => (
+                <EphemeralRow key={em.messageId} em={em} />
+              ))}
+            </div>
+          )}
           <div
             ref={virtualizer.containerRef}
             style={{
@@ -1433,6 +1489,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
                       handleOpenThread={handleOpenThread}
                       linkedConversationId={linkedConversationId ?? null}
                     />
+                    {ephemeralsByAnchorIndex.get(virtualItem.index)?.map(em => (
+                      <EphemeralRow key={em.messageId} em={em} />
+                    ))}
                   </div>
                 </div>
               );

@@ -35,6 +35,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
+import { useEphemeralMessages } from '../../../hooks/useEphemeralMessages';
 
 // Stable empty array — an inline `[]` here would be a new reference on every
 // render, causing useChannelSubscription's effect to unsubscribe/resubscribe
@@ -185,6 +186,8 @@ const ConversationPanelV2 = ({
     skipMarkAsReadRef.current = skip;
   }, []);
 
+  const ephemeralMessages = useEphemeralMessages(channelId);
+
   useChannelSubscription(channelId, NO_CONVERSATION_IDS);
   useScope('channel', !!channelId);
   useShortcutById('global.openCanvasTab', () => {
@@ -262,6 +265,7 @@ const ConversationPanelV2 = ({
                   projectId={channel?.projectId}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
+                  ephemeralMessages={ephemeralMessages}
                 ></ChatListV4>
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (

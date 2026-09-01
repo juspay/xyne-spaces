@@ -47,6 +47,7 @@ import {
 	transformUsersLookupByEmail,
 } from "./request-transformers/users";
 import {
+	transformPostEphemeralResponse,
 	transformPostMessageResponse,
 	transformUpdateResponse,
 } from "./response-transformers/chat";
@@ -133,6 +134,26 @@ const PostMessageSchema = z
 		mrkdwn: SlackBooleanSchema.default(true),
 		metadata: SlackRecordSchema,
 		username: SlackOptionalStringSchema,
+	})
+	.refine(
+		(data) =>
+			!!data.text ||
+			(data.blocks && data.blocks.length > 0) ||
+			(data.attachments && data.attachments.length > 0),
+		{
+			message: "Either text, blocks, or attachments is required",
+			path: ["text"],
+		},
+	);
+const PostEphemeralSchema = z
+	.object({
+		channel: z.string().min(1, "channel is required"),
+		user: z.string().min(1, "user is required"),
+		text: z.string().optional(),
+		blocks: SlackArraySchema,
+		attachments: SlackArraySchema,
+		thread_ts: SlackOptionalStringSchema,
+		as_user: SlackBooleanSchema,
 	})
 	.refine(
 		(data) =>
@@ -408,6 +429,80 @@ export class SlackController {
 			})();
 		}
 	});
+
+	chatPostEphemeral = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = PostEphemeralSchema.safeParse(req.body);
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		const channelId = getResolvedChannelId(req);
+		const targetUserId = parsed.data.user;
+		const targetUser =
+			(await repositories.users.findById(targetUserId)) ??
+			(await repositories.users.findByMetadataField(
+				"slackId",
+				targetUserId,
+				context.workspaceId,
+			));
+		if (!targetUser) {
+			res.status(200).json({ ok: false, error: "user_not_in_channel" });
+			return;
+		}
+
+		// slackChannelValidation only covers the bot's own access to the channel. The
+		// recipient needs checking too, the way the native route does at
+		// chatController.postEphemeral — otherwise an app can address a message at
+		// someone with no part in the channel it claims to come from.
+		const isParticipant = await repositories.channelParticipants.isParticipant(
+			channelId,
+			targetUser.id,
+		);
+		if (!isParticipant) {
+			res.status(200).json({ ok: false, error: "user_not_in_channel" });
+			return;
+		}
+
+		const args = await transformPostMessage(
+			{ ...parsed.data, channel: channelId },
+			context,
+		);
+		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
+
+		const messageId = uuidv4();
+
+		// Same transport as the native chat.postEphemeral: user rooms are joined at
+		// connect time, so delivery no longer depends on the recipient having this
+		// channel open.
+		await redisService.broadcastUserEvent(targetUser.id, {
+			type: "ephemeral_message",
+			userId: targetUser.id,
+			data: {
+				channelId,
+				message: {
+					messageId,
+					conversationId: args.conversationId ?? channelId,
+					senderId: context.userId,
+					senderName: parsed.data.as_user ? "" : context.appId,
+					content: args.content,
+					msgType: MessageType.BOT,
+					createdAt: new Date(),
+					visibleTo: targetUser.id,
+					ephemeral: true,
+				},
+			},
+			timestamp: new Date(),
+		});
+
+		const slackResponse = transformPostEphemeralResponse(messageId);
+		res.status(200).json(slackResponse);
+	});
+
 
 	chatUpdate = wrapSlackHandler(async (req: Request, res: Response) => {
 		const parsed = UpdateSchema.safeParse(req.body);

@@ -38,6 +38,13 @@ router.post(
 	controller.chatUpdate,
 );
 
+router.post(
+	"/chat.postEphemeral",
+	requirePermission("chat:write"),
+	slackChannelValidation("body"),
+	controller.chatPostEphemeral,
+);
+
 router.get(
 	"/conversations.history",
 	requirePermission("channels:read"),

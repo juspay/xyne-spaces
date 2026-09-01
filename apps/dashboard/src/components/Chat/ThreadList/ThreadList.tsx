@@ -14,7 +14,7 @@ import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.typ
 import { useEditContext } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
-import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronUp, Eye } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -51,6 +51,26 @@ type ThreadListProps = {
     ChatListV4. Applied as padding-bottom on the scroll container, so scroll-to-bottom
     (`scrollHeight - clientHeight`) naturally lands with the last message clear of it. */
 const ACTIVITY_BAR_PADDING = 28;
+
+/**
+ * Messages carrying `visibleTo` are shown to one person only — ephemerals, and the
+ * command responses persisted by commandController. The channel feed labels them
+ * (ChatListV4's EphemeralRow); without this the thread renders them as ordinary
+ * bubbles, and it's easy to reply assuming everyone else saw it.
+ */
+const VisibleOnlyToYouLabel = ({
+  message,
+}: {
+  message: { visibleTo?: string | null };
+}): ReactElement | null => {
+  if (!message.visibleTo) return null;
+  return (
+    <div className='flex items-center gap-2 px-5 pt-2'>
+      <Eye className='w-3 h-3 text-muted-foreground' />
+      <span className='text-xs text-muted-foreground'>Only visible to you</span>
+    </div>
+  );
+};
 
 const ThreadList = ({
   channelId,
@@ -498,6 +518,7 @@ const ThreadList = ({
               return (
                 <div key={threadMessage.messageId}>
                   <div id={`thread-message-${conversationId}-${threadMessage.messageId}`}>
+                    <VisibleOnlyToYouLabel message={threadMessage} />
                     <ChatBubble
                       message={threadMessage}
                       channelId={channelId}
@@ -599,6 +620,7 @@ const ThreadList = ({
                   </div>
                 )}
                 <div id={`thread-message-${conversationId}-${threadMessage.messageId}`}>
+                  <VisibleOnlyToYouLabel message={threadMessage} />
                   <ChatBubble
                     message={threadMessage}
                     channelId={channelId}

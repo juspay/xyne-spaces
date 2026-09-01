@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
+import { getEphemeralFlow, deleteEphemeralFlow } from '../utils/ephemeralFlowStore';
+import { redisService } from '@/services/redisService';
 import { SsrfBlockedError } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
@@ -62,14 +64,29 @@ export class FlowController {
     }
 
     try {
-      // 3. Look up the message to get the appId (stored in <xyne-flow> content tag)
+      // 3. Look up the message to get the appId (stored in <xyne-flow> content tag).
+      // Ephemeral messages are never persisted, so fall back to the store written
+      // at post time — which also names the one user allowed to act on them.
       const message = await repositories.messages.findById(messageId);
-      if (!message) {
-        res.status(404).json({ error: `Message not found: ${messageId}` });
-        return;
+      let content = message?.content;
+      // Non-null only for ephemerals — it doubles as the "this was never persisted" flag
+      // and as the one user the card was delivered to.
+      let ephemeralVisibleTo: string | null = null;
+      if (!content) {
+        const ephemeral = await getEphemeralFlow(messageId);
+        if (!ephemeral) {
+          res.status(404).json({ error: `Message not found: ${messageId}` });
+          return;
+        }
+        if (ephemeral.visibleTo !== userId) {
+          res.status(403).json({ error: 'Not permitted to act on this message' });
+          return;
+        }
+        content = ephemeral.content;
+        ephemeralVisibleTo = ephemeral.visibleTo;
       }
 
-      const appId = parseAppIdFromContent(message.content);
+      const appId = parseAppIdFromContent(content);
       if (!appId) {
         res.status(400).json({ error: 'Message is not a flow UI message or missing appId' });
         return;
@@ -197,6 +214,32 @@ export class FlowController {
             details: formatValidationErrors(screenResult),
           });
           return;
+        }
+      }
+
+      // Ephemerals are one-shot: once the app says the interaction is over, take the card
+      // away on every device this user has open and drop the authorization record, so the
+      // Submit button can't be pressed a second time inside the 30-minute TTL.
+      // Screen-advancing replies keep the card — the flow is still running — and so does
+      // `error`, so the user can retry. inputChange never dismisses: it fires on every
+      // keystroke of a cascading form.
+      if (
+        ephemeralVisibleTo &&
+        type === 'submit' &&
+        (appData.type === 'close_screen' || appData.type === 'ack')
+      ) {
+        try {
+          await deleteEphemeralFlow(messageId);
+          await redisService.broadcastUserEvent(ephemeralVisibleTo, {
+            type: 'ephemeral_dismissed',
+            userId: ephemeralVisibleTo,
+            data: { messageId },
+            timestamp: new Date(),
+          });
+        } catch (dismissError) {
+          // The action itself succeeded — a Redis hiccup must not turn that into a 500.
+          // Worst case the card lingers until reload, exactly as it did before.
+          logger.error('[FLOW-ACTION] Failed to dismiss ephemeral', { messageId, error: dismissError });
         }
       }
 
