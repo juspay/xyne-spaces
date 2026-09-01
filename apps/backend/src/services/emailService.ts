@@ -1110,14 +1110,19 @@ export class EmailService {
             sourceName,
             domain: context.domain,
             email: emailFrom,
+            externalMessageId,
             isBlocked,
           });
 
           if (isBlocked) {
-            logger.warn('[EmailService] Blocking Zoho ingestion (no conversation/ticket/email)', {
+            const details = await superpositionClient.resolveAllConfigDetails(context);
+            logger.warn('[EmailService] Blocking ingestion (no conversation/ticket/email)', {
               sourceName,
               domain: context.domain,
               email: emailFrom,
+              externalMessageId,
+              variant: details.blocked?.variant,
+              reason: details.blocked?.reason,
             });
             return { blocked: true };
           }
