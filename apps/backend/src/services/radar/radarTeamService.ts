@@ -111,7 +111,7 @@ class RadarTeamService {
     const items = await prisma.executionItem.findMany({
       where: {
         workspaceId: auth.workspaceId,
-        status: 'open',
+        status: 'OPEN',
         AND: [
           { requestedBy: { hasSome: team.memberIds } },
           {

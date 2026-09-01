@@ -437,7 +437,7 @@ class RadarExecutionService {
 
   private async loadOpenItems(conversationId: string): Promise<ParserOpenItem[]> {
     const items = await prisma.executionItem.findMany({
-      where: { conversationId, status: 'open' },
+      where: { conversationId, status: 'OPEN' },
       select: {
         id: true,
         title: true,

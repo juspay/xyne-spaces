@@ -62,6 +62,7 @@ import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
+import { RunOriginChip } from './RunOriginChip';
 import HuddleIcon from '../../icons/HuddleIcon';
 import { MicOn } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
@@ -850,6 +851,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         data-component='MessageBubble'
         className={messageBubbleClassName}
         onClick={onClick}
+        {...(onClick
+          ? {
+              'data-track-category': 'MESSAGE',
+              'data-track-name': 'OPEN_MESSAGE_BUBBLE',
+              // Static label: the auto-label would capture message content.
+              'data-track-label': 'message_bubble',
+            }
+          : {})}
         onKeyDown={
           onClick
             ? (e): void => {
@@ -1187,6 +1196,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {metadata?.['clawRunOrigin'] ? (
+                <RunOriginChip origin={metadata['clawRunOrigin']} />
+              ) : null}
               {headerContent}
             </div>
           )}
@@ -1894,6 +1906,8 @@ export const ReactionView = ({
                 type='button'
                 className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
                 onClick={e => e.stopPropagation()}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_EMOJI_PICKER'
               >
                 <span className='text-sm font-medium'>+</span>
               </button>

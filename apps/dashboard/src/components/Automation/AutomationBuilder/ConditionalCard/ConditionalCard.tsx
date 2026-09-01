@@ -231,11 +231,15 @@ export function ConditionalCard({
                       setTagConditionError(null);
                       setEditorOpen(false);
                     }}
+                    data-track-category='automation-builder'
+                    data-track-name='conditional-cancel-condition'
                   >
                     Cancel
                   </Button>
                   <Button
                     size='sm'
+                    data-track-category='automation-builder'
+                    data-track-name='conditional-save-condition'
                     onClick={() => {
                       if (hasInvalidTagCondition(draftCondition)) {
                         setTagConditionError(

@@ -47,11 +47,13 @@ export function TranscriptDispositionModal({
           onClick: onClose,
           variant: 'outline',
           disabled: submitting,
+          trackName: 'CANCEL_TRANSCRIPT_DISPOSITION',
         },
         {
           label: submitting ? 'Ending…' : 'End call',
           onClick: onConfirm,
           disabled: submitting,
+          trackName: 'END_CALL_CONFIRM_SOLO',
           className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
         },
       ]}
