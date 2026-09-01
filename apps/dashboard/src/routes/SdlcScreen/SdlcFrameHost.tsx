@@ -59,9 +59,9 @@ const SdlcFrameHost = (): ReactElement | null => {
   // :workspaceId, so at mount the location is usually a different screen.
   useEffect(() => {
     if (!viewport || initialSrcRef.current || !workspaceId) return;
-    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${location.pathname}${location.search}`;
+    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${location.pathname}${location.search}${location.hash}`;
     setHasActivated(true);
-  }, [viewport, workspaceId, location.pathname, location.search]);
+  }, [viewport, workspaceId, location.pathname, location.search, location.hash]);
 
   // frame → parent
   useEffect(() => {
@@ -105,7 +105,7 @@ const SdlcFrameHost = (): ReactElement | null => {
 
       lastFromFrameRef.current = message.path;
       // Only while on screen — a hidden frame must not move the address bar.
-      const current = `${location.pathname}${location.search}`;
+      const current = `${location.pathname}${location.search}${location.hash}`;
       if (viewport && isSdlcPath(message.path) && message.path !== current) {
         void navigate(message.path, { replace: true });
       }
@@ -113,7 +113,7 @@ const SdlcFrameHost = (): ReactElement | null => {
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [location.pathname, location.search, navigate, viewport, workspaceId]);
+  }, [location.pathname, location.search, location.hash, navigate, viewport, workspaceId]);
 
   // parent → frame
   useEffect(() => {
@@ -121,13 +121,14 @@ const SdlcFrameHost = (): ReactElement | null => {
     const target = iframeRef.current?.contentWindow;
     if (!target) return;
 
-    const path = `${location.pathname}${location.search}`;
+    // The hash carries #origin/#messageId scroll targets, so it must ride along.
+    const path = `${location.pathname}${location.search}${location.hash}`;
     if (!isSdlcPath(location.pathname)) return;
     if (path === lastFromFrameRef.current || path === lastToFrameRef.current) return;
 
     lastToFrameRef.current = path;
     target.postMessage({ type: SDLC_FRAME_MESSAGE.navigate, path }, window.location.origin);
-  }, [isReady, viewport, location.pathname, location.search]);
+  }, [isReady, viewport, location.pathname, location.search, location.hash]);
 
   if (!container || !hasActivated || !initialSrcRef.current) return null;
 

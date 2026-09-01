@@ -47,8 +47,6 @@ import {
   NotificationType, AutoDraftStatus, AutoDraftMode } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
-import { superpositionClient } from './superpositionClient';
-import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
@@ -117,7 +115,6 @@ export interface CreateConversationWithEmailParams {
   rfcMessageId?: string | null;
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
-  sourceName?: string; // External source name for Superposition context
   receivedAt?: Date;
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
@@ -205,7 +202,6 @@ export interface IngestEmailThreadParams {
     uploadedFiles?: UploadedFileResult[];
   }>;
   ticketMetadata?: Record<string, unknown>;
-  sourceName?: string;
   referencedMessageIds?: string[];
 }
 
@@ -1065,7 +1061,6 @@ export class EmailService {
       rfcMessageId,
       ticketMetadata,
       uploadedFiles = [],
-      sourceName,
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
@@ -1086,49 +1081,6 @@ export class EmailService {
       await this.channelRepository.update(channelId, {
         type: ChannelType.EMAIL,
       });
-    }
-
-    // Step 0: Superposition guard — bail out before creating anything
-    if (sourceName) {
-      try {
-        const context = createBlockingContext({
-          sourceName: sourceName,
-          email: emailFrom,
-          emailSubject: emailSubject,
-        });
-
-        if (!superpositionClient.isReady()) {
-          logger.warn('[EmailService] SuperpositionClient not ready, proceeding without blocking check', {
-            sourceName,
-            email: emailFrom,
-            domain: context.domain,
-          });
-        } else {
-          const isBlocked = await superpositionClient.getBooleanValue('blocked', false, context);
-          
-          logger.info('[EmailService] Superposition check result', {
-            sourceName,
-            domain: context.domain,
-            email: emailFrom,
-            isBlocked,
-          });
-
-          if (isBlocked) {
-            logger.warn('[EmailService] Blocking Zoho ingestion (no conversation/ticket/email)', {
-              sourceName,
-              domain: context.domain,
-              email: emailFrom,
-            });
-            return { blocked: true };
-          }
-        }
-      } catch (error) {
-        logger.error('[EmailService] Error checking Superposition flag, proceeding with ticket creation', {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          sourceName,
-        });
-        // If Superposition check fails, proceed with ticket creation (fail-open)
-      }
     }
 
     // Fetch boardId from EmailChannelPreference table
@@ -2065,7 +2017,6 @@ export class EmailService {
       externalSourceId,
       userId,
       ticketMetadata,
-      sourceName,
     } = params;
 
     if (params.emails.length === 0) {
@@ -2085,26 +2036,6 @@ export class EmailService {
       throw new Error(
         `[EmailService] refusing to ingest into non-EMAIL channel ${channelId} (type=${channel.type})`,
       );
-    }
-
-    if (sourceName) {
-      try {
-        const ctx = createBlockingContext({
-          sourceName,
-          email: firstEmail.from,
-          emailSubject: firstEmail.subject,
-        });
-        if (
-          superpositionClient.isReady() &&
-          (await superpositionClient.getBooleanValue('blocked', false, ctx))
-        ) {
-          return { conversationId: '', inserted: 0, duplicates: 0, isNew: false, blocked: true };
-        }
-      } catch (error) {
-        logger.error('[EmailService] Superposition check failed, proceeding', {
-          error: error,
-        });
-      }
     }
 
     const existingFirstEmail = await this.emailRepository.findFirstByThreadAndChannel(

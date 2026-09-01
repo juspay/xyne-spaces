@@ -2,6 +2,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useContext,
   useMemo,
   forwardRef,
   useRef,
@@ -14,7 +15,6 @@ import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 
 import { InputBox } from '../../ui/InputBox';
 import {
-  type SdlcDiscussion,
   MessageType,
   ChannelScopeType,
   ChannelVisibility,
@@ -41,6 +41,7 @@ import { saveDraft, useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
+import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
 import {
   mixpanelService,
   EVENTS,
@@ -129,8 +130,6 @@ interface ChatInputProps {
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
-  /** SDLC discussion binding: new channel conversations are linked to this owner. */
-  sdlcDiscussion?: Omit<SdlcDiscussion, 'linkId'>;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -152,13 +151,13 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       threadParticipantIds,
       dockSlot,
       twinEdit,
-      sdlcDiscussion,
     },
     ref,
   ) => {
     const zero = useZero();
     const navigate = useNavigate();
     const { user } = useAuth();
+    const entityLinkScope = useContext(EntityLinkContext);
     const canCreateTicket = useCanCreateTicket();
     const { isOffline, showOfflineBanner, isReconnecting, isReconnected, refreshConnection } =
       useZeroOfflineState();
@@ -923,8 +922,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageId: newMessageId,
               timestamp: messageCreatedAt,
               ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
-              ...(sdlcDiscussion !== undefined && {
-                sdlcDiscussion: { ...sdlcDiscussion, linkId: uuidv4() },
+              ...(entityLinkScope && {
+                entityLinkContext: { ...entityLinkScope, linkId: uuidv4() },
               }),
             });
 
