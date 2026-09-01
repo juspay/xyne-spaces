@@ -7,6 +7,7 @@ import type {
   SdlcWikiPageAction,
   WriteSdlcWikiPageInput,
 } from '@xyne/shared';
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -21,6 +22,7 @@ import {
   stringifySdlcSourceReferences,
 } from '@xyne/shared';
 import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
+import { resolveSdlcChannelId } from '../sdlcChannelMembership';
 import {
   assertWikiCommitAssignment,
   beginWikiCheckpoint,
@@ -375,9 +377,11 @@ export class SdlcWikiPageStore {
 
     const repo = await this.prisma.repo.findUnique({
       where: { id: context.repoId },
-      select: { id: true, workspaceId: true, projectId: true, channelId: true, url: true },
+      select: { id: true, workspaceId: true, projectId: true, url: true },
     });
-    if (!repo?.workspaceId || !repo.projectId || !repo.channelId) {
+    const channelId =
+      context.channelId ?? (repo && (await resolveSdlcChannelId(this.prisma, repo.id)));
+    if (!repo?.workspaceId || !repo.projectId || !channelId) {
       throw new AppError('Wiki repository is unavailable', 404);
     }
     const requestedReferences = (
@@ -420,18 +424,12 @@ export class SdlcWikiPageStore {
             }),
           };
     const action = await this.resolveSectionAction({
-      repo: { channelId: repo.channelId, id: repo.id },
+      repo: { channelId, id: repo.id },
       action: pageAction,
     });
     if (action.action !== 'archive') validateWikiMermaid(action.markdown);
     const revision = await this.applyPageAction({
-      repo: repo as {
-        id: string;
-        workspaceId: string;
-        projectId: string;
-        channelId: string;
-        url: string;
-      },
+      repo: { ...repo, workspaceId: repo.workspaceId, projectId: repo.projectId, channelId },
       actorId: execution.createdBy,
       executionId: execution.id,
       sessionId: input.sessionId,
@@ -542,14 +540,16 @@ export class SdlcWikiPageStore {
     }
     const repo = await this.prisma.repo.findUnique({
       where: { id: context.repoId },
-      select: { id: true, workspaceId: true, projectId: true, channelId: true },
+      select: { id: true, workspaceId: true, projectId: true },
     });
-    if (!repo?.workspaceId || !repo.projectId || !repo.channelId) throw new AppError('Wiki repository is unavailable', 404);
+    const channelId =
+      context.channelId ?? (repo && (await resolveSdlcChannelId(this.prisma, repo.id)));
+    if (!repo?.workspaceId || !repo.projectId || !channelId) throw new AppError('Wiki repository is unavailable', 404);
     const wikiRepo = {
       id: repo.id,
       workspaceId: repo.workspaceId,
       projectId: repo.projectId,
-      channelId: repo.channelId,
+      channelId,
     };
     const source = await this.findPage(wikiRepo.channelId, wikiRepo.id, sourcePath);
     const destination = await this.findPage(wikiRepo.channelId, wikiRepo.id, destinationPath);
@@ -1083,13 +1083,14 @@ export class SdlcWikiPageStore {
     return live.length > 0 ? live : (page.content as unknown as BlockNoteBlock[]);
   }
 
+  /** Two repositories in one hub can both have a page at the same path. */
   private async findPage(
     channelId: string,
-    _repoId: string,
+    repoId: string,
     path: string
   ): Promise<WikiPageRecord | null> {
     const pages = await this.prisma.canvas.findMany({
-      where: { channelId, sdlcArtifact: { is: { artifactType: 'WIKI' } } },
+      where: { channelId, sdlcArtifact: { is: { artifactType: 'WIKI', repoId } } },
       select: {
         id: true,
         title: true,
@@ -1139,16 +1140,21 @@ export class SdlcWikiPageStore {
     workspaceId: string;
     userId: string;
   }): Promise<{ id: string; channelId: string }> {
-    const repo = await this.prisma.repo.findFirst({
+    // Membership is the read check: the actor must participate in a hub this
+    // repository belongs to.
+    const membership = await this.prisma.sdlcEntityLink.findFirst({
       where: {
-        id: input.repoId,
         workspaceId: input.workspaceId,
+        targetType: 'REPOSITORY',
+        targetId: input.repoId,
+        relationType: SDLC_MEMBERSHIP_RELATION,
         channel: { participants: { some: { userId: input.userId } } },
       },
-      select: { id: true, channelId: true },
+      orderBy: { createdAt: 'asc' },
+      select: { channelId: true },
     });
-    if (!repo?.channelId) throw new AppError('SDLC repository not found', 404);
-    return { id: repo.id, channelId: repo.channelId };
+    if (!membership?.channelId) throw new AppError('SDLC repository not found', 404);
+    return { id: input.repoId, channelId: membership.channelId };
   }
 
   private async ensureFolder(

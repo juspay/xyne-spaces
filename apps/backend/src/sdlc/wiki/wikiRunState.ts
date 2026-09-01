@@ -94,6 +94,11 @@ export const wikiExecutionContextSchema = z
     version: z.union([z.literal(1), z.literal(2)]),
     executionModel: z.literal('HISTORY_WINDOW').optional(),
     repoId: z.string().min(1),
+    /**
+         * The hub the run started from. Re-resolving later would pick the oldest
+         * and write pages into the wrong hub. Optional only for older runs.
+         */
+    channelId: z.string().min(1).nullish(),
     agentSlug: z.literal('sdlc-agent').nullable(),
     conversationId: z.string().nullable(),
     sessionId: z.string().nullable(),

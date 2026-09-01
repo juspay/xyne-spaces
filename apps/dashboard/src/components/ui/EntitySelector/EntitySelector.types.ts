@@ -120,6 +120,9 @@ export interface EntitySelectorProps {
     trackName?: string;
   };
 
+  /** Lock the dropdown to the trigger's width instead of letting content size it. */
+  matchTriggerWidth?: boolean;
+
   /** Opt in to virtualizing the options list (for large user/group lists). */
   virtualize?: boolean;
 

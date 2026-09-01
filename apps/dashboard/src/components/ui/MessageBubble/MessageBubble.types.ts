@@ -6,6 +6,7 @@ import {
   ChannelScopeType,
   Conversation,
   ConversationParticipant,
+  type ConversationAnchorType,
 } from '@xyne/shared';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 
@@ -24,6 +25,8 @@ export type MessageWithOptionalNudgeCounts = Message & {
 export interface ThreadInfo {
   preview: string;
   conversationId: string;
+  channelId?: string;
+  anchorType?: ConversationAnchorType;
 }
 
 // Conversation type extended with related fields used in the component tree

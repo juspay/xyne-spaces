@@ -34,7 +34,7 @@ export function AIEmptyState({ className }: AIEmptyStateProps): ReactElement {
   return (
     <h1
       className={
-        'animate-fadeUp text-center text-[28px] font-normal leading-tight tracking-tight text-foreground ' +
+        'animate-fadeUp text-center text-[24px] font-normal leading-tight tracking-tight text-foreground ' +
         (className ?? '')
       }
     >
