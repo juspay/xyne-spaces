@@ -774,6 +774,21 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
         />
       </div>
       <DailyBriefToggle available={state.aiLandingDefault} />
+      <div className='mt-3 border-t border-border pt-3'>
+        <div className='flex items-center justify-between gap-4'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
+            <p className='mt-0.5 text-xs text-muted-foreground'>
+              Hide the sidebar when a chat is building an app
+            </p>
+          </div>
+          <Switch
+            id='app-mode-collapse-sidebar'
+            checked={state.appModeCollapseSidebar}
+            onCheckedChange={state.setAppModeCollapseSidebar}
+          />
+        </div>
+      </div>
     </div>
     <ClawOverlayToggle />
   </div>
