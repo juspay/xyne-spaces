@@ -20,6 +20,7 @@ import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics
 import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -1854,11 +1855,9 @@ Output ONLY the processed transcript, nothing else.`;
         undefined,
         { callTitlePromise },
       ).catch((error) => {
-        logger.error(`[${callId}] detailed_summary_failed`, {
-          stage: 'detailed_summary_generation',
-          error,
-          stack: error instanceof Error ? error.stack : undefined,
-        });
+        // generateAndPostDetailedSummary logs its own failure exits; reaching
+        // here means it threw outside them, so this is the only record.
+        logDetailedSummaryFailed(callId, 'unexpected_error', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       });
 
@@ -2022,15 +2021,11 @@ Output ONLY the processed transcript, nothing else.`;
             const detailedSummaryResult = await detailedSummaryPromise;
             if (detailedSummaryResult.success) {
               logger.info(`Auto-generated detailed summary for call: ${callId}`);
-            } else {
-              logger.error(`[${callId}] detailed_summary_failed`, {
-                stage: 'detailed_summary_generation',
-                error: detailedSummaryResult.error || 'Unknown detailed summary failure',
-              });
             }
+            // A failure here was already logged by whichever exit gave up, so
+            // there is no second line and the alert counts one per recording.
           } catch (error) {
-            // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-            logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+            logDetailedSummaryFailed(callId, 'unexpected_error', error);
           }
         }
       } else {
