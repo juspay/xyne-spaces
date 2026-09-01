@@ -2,7 +2,6 @@ import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CheckTickCircle as CheckCircle2,
-  ExternalLink,
   GitBranch,
   LockClose as Lock,
   Refresh as RefreshCw,
@@ -128,7 +127,6 @@ export function ProjectRepositoriesSection(props: {
           repository={repo}
           checking={checking === repo.id}
           onCheck={() => void check(repo.id)}
-          onOpen={() => void navigate(`/sdlc/${repo.id}/overview`)}
           onSettings={() =>
             void navigate(
               workspaceId
@@ -146,7 +144,6 @@ function RepositoryCard(props: {
   repository: ProjectRepository;
   checking: boolean;
   onCheck: () => void;
-  onOpen: () => void;
   onSettings: () => void;
 }): ReactElement {
   const repo = props.repository;
@@ -186,13 +183,6 @@ function RepositoryCard(props: {
             data-track-name='RunAccessCheck'
           >
             <RefreshCw className='h-4 w-4' /> Refresh now
-          </Button>
-          <Button
-            onClick={props.onOpen}
-            data-track-category='ProjectRepos'
-            data-track-name='OpenSdlcOverview'
-          >
-            <ExternalLink className='h-4 w-4' /> Open SDLC
           </Button>
         </div>
       </div>

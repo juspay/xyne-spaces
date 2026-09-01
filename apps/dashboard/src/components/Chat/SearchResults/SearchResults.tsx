@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from '@xyne/icons';
+import { ArrowLeft, ArrowRight } from '@xyne/icons';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
@@ -15,7 +15,10 @@ import {
 } from 'lucide-react';
 
 const utcToIst = (utcString?: string): string => {
-  if (!utcString) return '';
+  // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
+  // treat it as absent — otherwise it parses to an Invalid Date and every card
+  // that doesn't pre-guard renders the string "Invalid Date".
+  if (!utcString || utcString === 'N/A') return '';
   const dateUtc = new Date(`${utcString} UTC`);
   return dateUtc.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -51,13 +54,13 @@ import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
-  formatChannelLabel,
   getDMNames,
   isDMChannel,
   isGroupDMChannel,
   groupChannelsByScope,
 } from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { formatFileSize } from '../MessageAttachment/utils';
 import {
   TabType,
   MentionType,
@@ -798,6 +801,20 @@ const SearchResults = (): ReactElement => {
           >
             <ArrowLeft size={16} />
           </button>
+          {/* Paired with Back so a step backwards is undoable — refining a query pushes
+              history entries, and without this the only way forward is retyping. Mirrors
+              Back exactly, including staying enabled: forward past the end of the stack
+              is a harmless no-op. */}
+          <button
+            type='button'
+            aria-label='Forward'
+            onClick={() => void navigate(1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_FORWARD'
+          >
+            <ArrowRight size={16} />
+          </button>
           <div className='flex-1 min-w-0'>
             <SearchQueryInput
               query={query}
@@ -858,6 +875,7 @@ const SearchResults = (): ReactElement => {
             onSelectUser={handleSelectUser}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
+            usersById={usersById}
             compareMode={compareMode}
             isGrouped={isGrouped}
             selectedIds={selectedIds}
@@ -965,6 +983,7 @@ interface ResultsBodyProps {
     category: ChannelCategory;
     searchableNames?: string[];
   }>;
+  usersById: Map<string, Parameters<typeof getUserDisplayName>[0]>;
   compareMode: boolean;
   isGrouped: boolean;
   selectedIds: Set<string>;
@@ -1105,6 +1124,7 @@ function ResultsBody({
   onSelectUser,
   channelData,
   searchableChannels,
+  usersById,
   compareMode,
   isGrouped,
   selectedIds,
@@ -1115,9 +1135,20 @@ function ResultsBody({
 }: ResultsBodyProps): ReactElement {
   const navigate = useNavigate();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  // `searchableNames` is already the rendered form: getDMNames(...).display for DMs
+  // (participant names — `channel.name` is a participant id there) and [channel.name]
+  // for everything else. That is `formatChannelLabel` without its `#`, which rows
+  // supplying their own lead-in ("in design") don't want.
   const channelLabelsById = useMemo(
     () =>
-      new Map(searchableChannels.map(channel => [channel.channel.id, formatChannelLabel(channel)])),
+      new Map(
+        searchableChannels.map(channel => [
+          channel.channel.id,
+          (channel.searchableNames?.length ? channel.searchableNames : [channel.channel.name]).join(
+            ', ',
+          ),
+        ]),
+      ),
     [searchableChannels],
   );
 
@@ -1185,7 +1216,22 @@ function ResultsBody({
       const icon = getAttachmentResultIcon(result);
       const channelId = result.searchContext?.channelId;
       const channelName = channelId ? channelLabelsById.get(channelId) : undefined;
-      const subtitle = channelName ? `File uploaded in ${channelName}` : result.subtitle;
+      const uploaderId = result.avatar;
+      const uploader = uploaderId ? usersById.get(uploaderId) : undefined;
+      const uploaderName = uploader ? getUserDisplayName(uploader) : '';
+      const shouldShowUploader = !!uploader && uploaderName !== 'Unknown';
+      const rawTs = result.metadata.timestamp;
+      const uploadedAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+      const fileSize = result.searchContext?.fileSize;
+      const fileSizeLabel = typeof fileSize === 'number' ? formatFileSize(fileSize) : '';
+      // Same shape as every other card on this screen: metadata left, timestamp
+      // right. Segments are middot-separated, except the channel, which closes
+      // the line as a phrase ("in design") and so takes no separator in front.
+      const metaLine = [shouldShowUploader ? `Uploaded by ${uploaderName}` : '', fileSizeLabel]
+        .filter(Boolean)
+        .join(' · ');
+      const infoLine = [metaLine, channelName ? `in ${channelName}` : ''].filter(Boolean).join(' ');
+
       return (
         <button
           key={key}
@@ -1198,21 +1244,22 @@ function ResultsBody({
             {icon}
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              {subtitle && (
-                <span className='truncate'>
-                  {channelName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
-                </span>
-              )}
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
+            {/* Timestamp sits on the title row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {uploadedAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {uploadedAt}
                 </span>
               )}
             </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {infoLine ||
+                (result.subtitle ? <RenderMessageWithHTML message={result.subtitle} /> : null)}
+            </span>
           </div>
         </button>
       );
@@ -1221,10 +1268,11 @@ function ResultsBody({
     // Conversation message card (type === 'conversation')
     // DESK mails navigate away; regular messages open in the side panel
     if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
-      // Mirrors cmdK's desk-mail row: subject, then sender + recipient count and
-      // timestamp, then the body snippet.
+      // Mirrors cmdK's desk-mail row: subject and timestamp, then sender +
+      // recipient count, then the body snippet.
       const senderName = result.searchContext?.senderName || result.subtitle || '';
       const recipientCount = result.searchContext?.recipientCount ?? 0;
+      const sentAt = utcToIst(result.metadata.timestamp);
       const deskTicketSubtitle = [
         result.subtitle || result.searchContext.xyneId,
         ...(result.searchContext.formFieldMatches ?? []).map(
@@ -1245,25 +1293,27 @@ function ResultsBody({
             <Mail className='size-4 text-muted-foreground' />
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
+            {/* Timestamp sits on the subject row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {sentAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {sentAt}
+                </span>
+              )}
+            </div>
             {deskTicketSubtitle && (
               <div className='text-xs text-foreground truncate'>
                 <RenderMessageWithHTML message={deskTicketSubtitle} />
               </div>
             )}
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              <span className='min-w-0 truncate'>
-                {senderName}
-                {recipientCount > 0 && ` +${recipientCount} more`}
-              </span>
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
-                </span>
-              )}
-            </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {senderName}
+              {recipientCount > 0 && ` +${recipientCount} more`}
+            </span>
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />
