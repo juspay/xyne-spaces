@@ -210,10 +210,7 @@ export const UserSubmenu = ({
 
   // Select-all / deselect-all toggle: visible user IDs from the filtered rows
   const visibleUserIds = useMemo(
-    () =>
-      rows
-        .filter((r): r is User => typeof r === 'object' && 'id' in r)
-        .map(u => u.id),
+    () => rows.filter((r): r is User => typeof r === 'object' && 'id' in r).map(u => u.id),
     [rows],
   );
   const allVisibleSelected =
@@ -371,7 +368,7 @@ export const UserSubmenu = ({
             onTouchMove={e => e.stopPropagation()}
           >
             <Virtuoso
-              data={[SELECT_ALL_MARKER, ...rows]}
+              data={[SELECT_ALL_MARKER, ...rows] as RowItem[]}
               // Row-height estimate so the scroll range is right before rows measure.
               defaultItemHeight={40}
               // Padding lives on the rows — padding on the scroller itself

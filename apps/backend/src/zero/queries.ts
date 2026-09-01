@@ -5184,6 +5184,16 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .orderBy('createdAt', 'desc');
   }),
 
+  savedConfigsSharedWithUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.kanban_board_view_access
+        .where('userId', userId)
+        .related('view', view => view.related('values'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   // Apps Queries
   // (getAllAppsPaginated removed — it returned every app across all orgs unscoped.)
 

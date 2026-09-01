@@ -11,10 +11,11 @@ export class SavedUserConfigurationsACL extends BaseQueryACL<'saved_user_configu
   canSelect<TReturn>(
     query: Query<'saved_user_configurations', Schema, TReturn>,
   ): Query<'saved_user_configurations', Schema, TReturn> {
-    return query.where(({ or, cmp }) =>
+    return query.where(({ or, cmp, exists }) =>
       or(
         cmp('userId', '=', this.ctx.userID),
         cmp('visibility', '=', SavedConfigVisibility.PUBLIC),
+        exists('viewAccess', (va) => va.where('userId', this.ctx.userID)),
       ),
     );
   }
