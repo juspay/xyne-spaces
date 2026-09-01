@@ -212,6 +212,23 @@ export type BuildStatusTarget =
 
 const DEFAULT_BUILD_STATUS_TARGET: BuildStatusTarget = { provider: VCSProviderType.BITBUCKET_SERVER };
 
+/** Named rather than positional: the middle of this list is five strings in a
+ *  row, where a transposition would typecheck and post against the wrong commit
+ *  or scope config to the wrong workspace. */
+export interface ValidatePullRequestParams {
+  prTitle: string;
+  prId: number;
+  commitHash: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  workspaceId: string;
+  repoName?: string;
+  repoUrl?: string;
+  prUrl?: string;
+  numberOfComments?: number;
+  target?: BuildStatusTarget;
+}
+
 // Superposition's own timeout is 30s; this sits on the webhook response path,
 // which GitHub gives 10s.
 const SPEC_CONFIG_TIMEOUT_MS = 2500;
@@ -251,20 +268,22 @@ export class PullRequestValidationService {
     this.bitbucketManager = new BitbucketManager();
   }
 
-  async validatePullRequest(
-    prTitle: string,
-    prId: number,
-    commitHash: string,
-    sourceBranch: string,
-    destinationBranch: string,
-    workspaceId: string,
-    repoName?: string,
-    repoUrl?: string,
-    prUrl?: string,
-    numberOfComments?: number,
-    target: BuildStatusTarget = DEFAULT_BUILD_STATUS_TARGET,
+  async validatePullRequest(params: ValidatePullRequestParams): Promise<ValidationResult> {
+    const target = params.target ?? DEFAULT_BUILD_STATUS_TARGET;
+    const { commitHash, workspaceId } = params;
+    const result = await this.runTicketValidation(params, target);
+    // Awaited so two events for the same commit cannot post out of order; the
+    // config read inside is time-bounded. Called here so no early return in
+    // runTicketValidation skips it.
+    await this.postSpecBuildStatus(target, commitHash, workspaceId, result);
+    return result;
+  }
+
+  private async runTicketValidation(
+    params: ValidatePullRequestParams,
+    target: BuildStatusTarget
   ): Promise<ValidationResult> {
-    const result = await this.runTicketValidation(
+    const {
       prTitle,
       prId,
       commitHash,
@@ -275,28 +294,7 @@ export class PullRequestValidationService {
       repoUrl,
       prUrl,
       numberOfComments,
-      target,
-    );
-    // Awaited so two events for the same commit cannot post out of order; the
-    // config read inside is time-bounded. Called here so no early return in
-    // runTicketValidation skips it.
-    await this.postSpecBuildStatus(target, commitHash, workspaceId, result);
-    return result;
-  }
-
-  private async runTicketValidation(
-    prTitle: string,
-    prId: number,
-    commitHash: string,
-    sourceBranch: string,
-    destinationBranch: string,
-    workspaceId: string,
-    repoName?: string,
-    repoUrl?: string,
-    prUrl?: string,
-    numberOfComments?: number,
-    target: BuildStatusTarget = DEFAULT_BUILD_STATUS_TARGET,
-  ): Promise<ValidationResult> {
+    } = params;
     try {
       logger.debug(`[PR-Validation] Validating PR ${prId}: ${prTitle}`);
       const normalizedTitle = prTitle.trim();
