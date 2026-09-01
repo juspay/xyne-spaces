@@ -1,3 +1,10 @@
+## [1.250.2-release-20260901.1](https://github.com/juspay/xyne-spaces/compare/v1.250.1...v1.250.2-release-20260901.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* feed projectCode on mail docs for the xyneId number tier ([#1303](https://github.com/juspay/xyne-spaces/issues/1303)) ([f856242](https://github.com/juspay/xyne-spaces/commit/f856242281ac249a2b105c9c5f62d595975a7ecf))
+
 ## [1.250.1](https://github.com/juspay/xyne-spaces/compare/v1.250.0...v1.250.1) (2026-08-31)
 
 
