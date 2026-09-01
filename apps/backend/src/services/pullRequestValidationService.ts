@@ -513,7 +513,8 @@ export class PullRequestValidationService {
     buildStatus: { NAME: string; KEY?: string }
   ): Promise<void> {
     try {
-      const targetUrl = process.env.FRONTEND_URL || '';
+      // No target_url on GitHub: the repo is public, so a status link would put
+      // the internal frontend host in front of anyone who can see the PR.
       if (target.provider === VCSProviderType.GITHUB) {
         await githubManager.postCommitStatus(
           target.owner,
@@ -522,7 +523,6 @@ export class PullRequestValidationService {
           state,
           buildStatus.NAME,
           description,
-          targetUrl || undefined,
         );
         return;
       }
@@ -537,7 +537,7 @@ export class PullRequestValidationService {
         BITBUCKET_BUILD_STATE[state],
         buildStatus.KEY,
         buildStatus.NAME,
-        targetUrl,
+        process.env.FRONTEND_URL || '',
         description,
       );
     } catch (error) {
