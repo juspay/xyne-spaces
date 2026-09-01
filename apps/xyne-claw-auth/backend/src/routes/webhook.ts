@@ -4523,8 +4523,27 @@ async function forwardResult(
     forwardFailure("refused_origin", "target origin is neither internal nor an allowed external callback — result DROPPED");
     return;
   }
+  let deliveryUrl = url;
+  if (forwardToInternal && CONFIG.spacesInternalUrl) {
+    const publicSelfOrigins = [CONFIG.spacesBackendUrl, CONFIG.selfUrl]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .map((value) => { try { return new URL(value).origin; } catch { return null; } })
+      .filter((value): value is string => value !== null);
+    if (publicSelfOrigins.includes(targetOrigin)) {
+      try {
+        const target = new URL(url);
+        const internal = new URL(CONFIG.spacesInternalUrl);
+        target.protocol = internal.protocol;
+        target.host = internal.host;
+        deliveryUrl = target.toString();
+        clog.info(`[webhook/result] resultForward rewrote public self origin to internal session=${payload.sessionId} origin=${targetOrigin} -> ${internal.origin}`);
+      } catch {
+        deliveryUrl = url;
+      }
+    }
+  }
   try {
-    const res = await fetch(url, {
+    const res = await fetch(deliveryUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

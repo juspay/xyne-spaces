@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
 import { publishHandoffSignal } from "../handoff-redis.js";
+import { buildPublishReviewRoomTool } from "../pr-review-room.js";
 import {
   runTask,
   pushAttachment,
@@ -2474,6 +2475,8 @@ async function processTask(
           customSubagents,
           directPickSuffixes,
         );
+
+    directTools.push(buildPublishReviewRoomTool(sessionId));
 
     let fastMetaTools: ToolDefinition[] = [];
 

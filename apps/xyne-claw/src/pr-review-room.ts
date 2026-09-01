@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { posix } from "node:path";
 
+import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { buildSandboxStoreKey, getSandboxSession } from "xyne-claw-shared";
 
@@ -709,6 +710,60 @@ async function generate(sessionId: string, pr: PrRoomFact, handle: LiveSessionHa
       );
     }
   }
+}
+
+export function buildPublishReviewRoomTool(sessionId: string): ToolDefinition {
+  return {
+    name: "publish-review-room",
+    label: "Publish Review Room",
+    description:
+      "Publish the review room for a pull request created during this run by any means (gh CLI, git push, a github/bitbucket subagent, or an MCP tool). Call it once, right after the PR exists, with the PR URL. Skip it if a review room was already announced for this PR.",
+    parameters: Type.Object({
+      url: Type.String({ description: "Full https URL of the newly created pull request." }),
+      title: Type.Optional(Type.String({ description: "PR title." })),
+      number: Type.Optional(Type.String({ description: "PR number, digits only." })),
+      repo: Type.Optional(Type.String({ description: "Repository, e.g. org/name." })),
+      targetBranch: Type.Optional(Type.String()),
+      sourceBranch: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId: string, params: unknown) {
+      const p = (params ?? {}) as Record<string, unknown>;
+      const url = typeof p["url"] === "string" ? p["url"].trim() : "";
+      if (!/^https?:\/\//i.test(url)) {
+        return {
+          content: [{ type: "text" as const, text: "Error: url must be the full https URL of the pull request." }],
+          details: {},
+        };
+      }
+      const host = url.toLowerCase();
+      const provider = host.includes("github")
+        ? "github"
+        : host.includes("bitbucket")
+          ? "bitbucket"
+          : host.includes("gitlab")
+            ? "gitlab"
+            : "other";
+      const str = (k: string): string | undefined => {
+        const v = p[k];
+        return typeof v === "string" && v.trim() ? v.trim() : undefined;
+      };
+      const numberFromUrl = /\/(?:pull|pull-requests|merge_requests)\/(\d+)/.exec(url)?.[1];
+      kickOffPrReviewRoom(sessionId, {
+        provider,
+        status: "created",
+        title: str("title") ?? (numberFromUrl ? `PR #${numberFromUrl}` : "Pull request"),
+        url,
+        number: str("number") ?? numberFromUrl,
+        repo: str("repo"),
+        targetBranch: str("targetBranch"),
+        sourceBranch: str("sourceBranch"),
+      });
+      return {
+        content: [{ type: "text" as const, text: `Review room generation started for ${url}. The link is posted to the thread when ready.` }],
+        details: {},
+      };
+    },
+  };
 }
 
 export function kickOffPrReviewRoom(sessionId: string, pr: PrRoomFact): void {
