@@ -1444,7 +1444,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
 
   const ticket = await db.ticket.findFirst({
     where: { conversationId: email.conversationId },
-    select: { id: true, xyneId: true },
+    select: { id: true, xyneId: true, project: { select: { code: true } } },
   });
   const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
@@ -1505,6 +1505,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     parentThreadId: email.externalThreadId || undefined,
     mailId: email.externalMessageId || undefined,
     xyneId: ticket?.xyneId ?? undefined,
+    projectCode: ticket?.project?.code ?? undefined,
     ticketFormFields,
     ticketFormFieldValues: Array.from(new Set(ticketFormFields.map(field => field.fieldValue))),
     subject: email.subject,
