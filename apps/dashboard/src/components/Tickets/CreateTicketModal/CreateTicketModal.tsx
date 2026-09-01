@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
@@ -46,6 +46,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../../hooks/useAuth';
+import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/EntityLinkContext';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
@@ -133,6 +134,8 @@ interface CreateTicketModalProps {
   releaseOnly?: boolean;
   releaseChannelIds?: string[];
   sourceConversation?: ConversationWithTicket | undefined;
+  sourceMessageId?: string | undefined;
+  entityLinkContext?: EntityLinkScope | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
   ticketSequence?: { current: number; total: number };
@@ -231,6 +234,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   ticketSequence,
   parentTicketId,
   sourceConversation,
+  sourceMessageId,
+  entityLinkContext: entityLinkContextProp,
   onBeforeCreate,
   onTicketCreated,
   standalone = false,
@@ -240,6 +245,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const zero = useZero();
   const shareableOrigin = useShareableOrigin();
   const { user } = useAuth();
+  const inheritedEntityLinkScope = useContext(EntityLinkContext);
+  const entityLinkScope = entityLinkContextProp ?? inheritedEntityLinkScope;
   const {
     addDroppedFiles: providerAddDroppedFiles,
     removeDroppedFile: providerRemoveDroppedFile,
@@ -1461,6 +1468,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           });
         }
 
+        if (sourceMessageId) {
+          formDataPayload.append('sourceMessageId', sourceMessageId);
+        }
+
+        if (entityLinkScope) {
+          formDataPayload.append('entityLinkContext', JSON.stringify(entityLinkScope));
+        }
+
         if (sourceConversation) {
           formDataPayload.append('sourceConversationId', sourceConversation.conversationId);
           if (excludedChatAttachmentIds.size > 0) {
@@ -1523,6 +1538,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),
           ...(formData.tags && formData.tags.length > 0 && { tags: formData.tags }),
           ...(sourceConversation && { sourceConversationId: sourceConversation.conversationId }),
+          ...(sourceMessageId && { sourceMessageId }),
+          ...(entityLinkScope && { entityLinkContext: entityLinkScope }),
           ...(formData.workflowType && { workflowType: formData.workflowType }),
           ...(sourceConversation &&
             excludedChatAttachmentIds.size > 0 && {
@@ -1653,6 +1670,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       ...(projectId ? { projectId } : {}),
       tab: tab || undefined,
       sourceConversationId: sourceConversation?.conversationId,
+      sourceMessageId,
+      entityLinkContext: entityLinkScope ?? undefined,
       initialMessageId: sourceConversation?.initialMessageId,
       parentTicketId,
       isFromSubTicket,

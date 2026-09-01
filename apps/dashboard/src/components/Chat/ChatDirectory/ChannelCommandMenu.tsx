@@ -1991,23 +1991,22 @@ const ChannelCommandMenu = ({
     });
   }, [syncEnterIntent, markNavigated]);
 
-  const handleFilePreview = useCallback(
-    (result: DisplaySearchResult): void => {
-      // Handle attachment preview - show file preview modal
-      if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
-        return;
-      }
+  const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
+    // Handle attachment preview - show file preview modal
+    if (result.type !== 'attachment' || !result.searchContext?.internalUrl) {
+      return;
+    }
 
-      setPreviewFile({
-        fileName: result.title,
-        fileUrl: result.searchContext.internalUrl,
-        mimeType: result.searchContext.mimeType || 'application/octet-stream',
-        fileSize: result.searchContext.fileSize || 0,
-      });
-      onOpenChange(false);
-    },
-    [onOpenChange],
-  );
+    const { attachmentId, internalUrl } = result.searchContext;
+    // Cmd+K stays open behind the preview so closing the preview returns to the
+    // results instead of dismissing the whole palette.
+    setPreviewFile({
+      fileName: result.title,
+      fileUrl: attachmentId ? `/attachments/${attachmentId}/download` : internalUrl,
+      mimeType: result.searchContext.mimeType || 'application/octet-stream',
+      fileSize: result.searchContext.fileSize || 0,
+    });
+  }, []);
 
   // Handle mouse hover over ticket and Desk items to show preview
   const handleTicketMouseEnter = useCallback(
@@ -2066,27 +2065,37 @@ const ChannelCommandMenu = ({
   };
 
   /**
-   * Channel tag for a result row (currently only ticket rows render it).
+   * Channel tag for a ticket / file result row.
    *
-   * The Vespa ticket doc denormalizes both `searchContext.channelId` and
+   * The Vespa doc denormalizes both `searchContext.channelId` and
    * `metadata.channelName`, so this needs no lookup of its own: it resolves the id
-   * against the already-loaded `allChannels` to reuse `getChannelIcon` (hashtag vs
-   * lock vs DM avatar). When the channel isn't in the local set — not a member, not
-   * yet loaded — it falls back to the denormalized name with a hashtag, mirroring
-   * FilterChipNode's `ChannelChipIcon` fallback. No network call, no per-row hook.
+   * against the already-loaded `allChannels`. No network call, no per-row hook.
+   *
+   * The row renders this as the phrase "in <name>", so a plain public channel
+   * sends no icon — a hashtag would only repeat the word. Anything the word can't
+   * say keeps its `getChannelIcon` glyph: private lock, DM avatar, group. The
+   * fallback path (channel not in the local set — not a member, not yet loaded)
+   * has only the denormalized name, so it reads as public.
    */
   const getResultChannelTag = (
     result: DisplaySearchResult,
-  ): { name: string; icon: ReactElement } | undefined => {
+  ): { name: string; icon?: ReactElement | undefined } | undefined => {
     const entry = result.searchContext?.channelId
       ? allChannels.find(item => item.channel.id === result.searchContext?.channelId)
       : undefined;
     if (entry) {
-      return { name: entry.channel.name, icon: getChannelIcon(entry.channel) };
+      const { channel } = entry;
+      const isPlainPublic =
+        !isDMChannel(channel.scopeType) &&
+        !isGroupDMChannel(channel.scopeType) &&
+        channel.visibility !== ChannelVisibility.PRIVATE;
+      return isPlainPublic
+        ? { name: channel.name }
+        : { name: channel.name, icon: getChannelIcon(channel) };
     }
     const fallbackName = result.metadata.channelName;
     if (!fallbackName) return undefined;
-    return { name: fallbackName, icon: <Hashtag size={16} /> };
+    return { name: fallbackName };
   };
 
   // Group results by type for display
@@ -2389,6 +2398,15 @@ const ChannelCommandMenu = ({
               const hiddenCount = items.length - displayItems.length;
               const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
 
+              // "See more" routes to the full results page with this section's tab
+              // pre-selected. Offered on every tab, not just All: an active filter
+              // (`assignee:`, `from:`) narrows the enabled tabs via getRelevantTabs and
+              // moves activeTab off All, and those searches still need the way out.
+              // Every section here is a capped slice, so there is more to see even when
+              // nothing was truncated locally. Screen mode keeps its narrower rule: it
+              // only offers the link when it actually cut items off.
+              const showSeeMore = !!sectionTab && (!isScreenAll || hiddenCount > 0);
+
               return (
                 <div key={groupKey} className='mb-4'>
                   <Command.Group
@@ -2418,10 +2436,10 @@ const ChannelCommandMenu = ({
                         onToggleSelect={handleToggleDeskMergeSelect}
                       />
                     ))}
-                    {isScreenAll && hiddenCount > 0 && sectionTab && (
+                    {showSeeMore && sectionTab && (
                       <SeeMoreItem
                         value={`__see-more-backend-${groupKey}__`}
-                        label={`See ${hiddenCount} more`}
+                        label={hiddenCount > 0 ? `See ${hiddenCount} more` : 'See more'}
                         onSelect={() => handleSeeMoreNavigate(sectionTab)}
                         hoverable={!isMobile}
                         trackCategory='SEARCH'
@@ -2478,6 +2496,7 @@ const ChannelCommandMenu = ({
           const displayItems =
             isUserType && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
           const hiddenCount = items.length - DISPLAY_LIMIT;
+          const sectionTab = GROUP_KEY_TO_DOC_TYPE[type];
 
           return (
             <div key={type} className='mb-4'>
@@ -2508,6 +2527,21 @@ const ChannelCommandMenu = ({
                     trackCategory='CHANNEL_SEARCH'
                     trackName='TOGGLE_BACKEND_USER_EXPANSION'
                     trackMetadata={JSON.stringify({ type, isExpanded })}
+                  />
+                )}
+                {/* Same routing link the search branch offers. This renderer runs when
+                    a filter chip is applied with no free-text query (`from:`,
+                    `assignee:`), so it needs the way out to the full results page too.
+                    Users are excluded — their row above expands in place instead. */}
+                {!isUserType && sectionTab && (
+                  <SeeMoreItem
+                    value={`__see-more-default-route-${type}__`}
+                    label='See more'
+                    onSelect={() => handleSeeMoreNavigate(sectionTab)}
+                    hoverable={!isMobile}
+                    trackCategory='SEARCH'
+                    trackName='SEE_MORE_SECTION'
+                    trackMetadata={JSON.stringify({ tab: sectionTab })}
                   />
                 )}
               </Command.Group>
@@ -2944,6 +2978,9 @@ const ChannelCommandMenu = ({
           fileUrl={previewFile.fileUrl}
           mimeType={previewFile.mimeType}
           fileSize={previewFile.fileSize}
+          // Cmd+K's own surface is z-[9999]; the preview opens on top of it and
+          // its default z-[56] would put it behind.
+          zIndexClass='z-[10002]'
         />
       )}
     </>
