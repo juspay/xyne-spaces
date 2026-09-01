@@ -1261,7 +1261,7 @@ export const queries = defineQueries({
   // Topics Explorer: one desk's tickets in a created-at window, rolled up client-side.
   // Not supportTicketsPageV3 — that pulls emailDrafts, emailReads, userMailbox and
   // formEntityValues per row, where this reads scalar columns and no relation at all.
-  // The window bounds the sync: the panel caps its range at 30 days and opens on one.
+  // The window bounds the sync: the panel caps its range at 7 days and opens on one.
   // channelId + isMember are forwarded to TicketsACL for membership gating.
   topicsExplorerTickets: defineQuery(
     z.object({

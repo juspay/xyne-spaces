@@ -28,12 +28,12 @@ const epochMsToDate = (raw: unknown): Date | null => {
 
 /**
  * Server-side ceiling on the generated-tags window. The Topics Explorer caps at
- * 30 calendar days client-side, but that is not a control: without this a
+ * 7 calendar days client-side, but that is not a control: without this a
  * hand-crafted multi-year request reads the channel's whole email table and
- * every tag row hanging off it. 31 days of milliseconds, since a 30-day
- * inclusive range runs 00:00 on day one to 23:59 on day thirty.
+ * every tag row hanging off it. A 7-day inclusive range runs 00:00 on day one
+ * to 23:59 on day seven, so it measures one millisecond under the cap.
  */
-const MAX_TAG_RANGE_MS = 31 * 24 * 60 * 60 * 1000;
+const MAX_TAG_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class DeskTagsConfigController {
   private channelParticipantRepo = new ChannelParticipantRepository();

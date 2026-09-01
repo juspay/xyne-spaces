@@ -3,7 +3,7 @@ import type { TicketFilters } from '../../Tickets/TicketFilters/types';
 
 // The rollup runs client-side over synced rows, so the window stays short
 // enough that one desk's tickets fit in the browser.
-export const MAX_RANGE_DAYS = 30;
+export const MAX_RANGE_DAYS = 7;
 export const MAX_DEPTH = 4;
 export const MS_PER_DAY = 86_400_000;
 /** Key used when a ticket has no value for a dimension. */
