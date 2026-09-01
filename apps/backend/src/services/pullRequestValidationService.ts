@@ -22,6 +22,7 @@ const PR_VALIDATION_CONFIG = {
     MISSING: (ticketId: string) => `No specification on ${ticketId} - run /spec on the ticket`,
     INCOMPLETE: (ticketId: string, missing: string) => `${ticketId} spec missing: ${missing}`,
     NOT_CHECKED: 'Ticket not resolved - spec not checked',
+    NOT_EVALUATED: 'Spec not evaluated - validation error',
     VALIDATION_PASSED: 'Specification complete',
   },
   BUILD_STATUS: {
@@ -205,12 +206,33 @@ export type BuildStatusTarget =
 
 const DEFAULT_BUILD_STATUS_TARGET: BuildStatusTarget = { provider: VCSProviderType.BITBUCKET_SERVER };
 
-type BuildStatusState = 'success' | 'failure' | 'pending';
+// Superposition's own timeout is 30s and the lookups sit on the webhook response
+// path, which GitHub gives 10s. Slow config means the check stays off, not that
+// the delivery fails.
+const SPEC_CONFIG_TIMEOUT_MS = 2500;
 
-const BITBUCKET_BUILD_STATE: Record<BuildStatusState, 'SUCCESSFUL' | 'FAILED' | 'INPROGRESS'> = {
+const withTimeout = async <T>(work: Promise<T>, fallback: T, label: string): Promise<T> => {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>(resolve => {
+        timer = setTimeout(() => {
+          logger.warn(`[PR-Validation] ${label} timed out after ${SPEC_CONFIG_TIMEOUT_MS}ms`);
+          resolve(fallback);
+        }, SPEC_CONFIG_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+type BuildStatusState = 'success' | 'failure';
+
+const BITBUCKET_BUILD_STATE: Record<BuildStatusState, 'SUCCESSFUL' | 'FAILED'> = {
   success: 'SUCCESSFUL',
   failure: 'FAILED',
-  pending: 'INPROGRESS',
 };
 
 export class PullRequestValidationService {
@@ -250,9 +272,11 @@ export class PullRequestValidationService {
       numberOfComments,
       target,
     );
-    void this.postSpecBuildStatus(target, commitHash, workspaceId, result).catch(error =>
-      logger.error('[PR-Validation] Spec status posting failed:', error)
-    );
+    // Awaited so two events for the same commit cannot post out of order. The
+    // config lookups inside are time-bounded, so this cannot eat GitHub's 10s
+    // webhook window. Called here so no early return in runTicketValidation
+    // skips it.
+    await this.postSpecBuildStatus(target, commitHash, workspaceId, result);
     return result;
   }
 
@@ -475,18 +499,26 @@ export class PullRequestValidationService {
           : {}),
       };
 
-      const enabled = await superpositionClient.getBooleanValue(
-        PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED,
+      const enabled = await withTimeout(
+        superpositionClient.getBooleanValue(
+          PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED,
+          fallback.enabled,
+          context,
+        ),
         fallback.enabled,
-        context,
+        PR_VALIDATION_CONFIG.SPEC_FLAGS.ENABLED,
       );
       // Each lookup is a full config fetch, so skip the list where it is unused.
       if (!enabled || !needSections) return { enabled, sections: fallback.sections };
 
-      const rawSections = await superpositionClient.getStringValue(
-        PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS,
+      const rawSections = await withTimeout(
+        superpositionClient.getStringValue(
+          PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS,
+          fallback.sections.join(','),
+          context,
+        ),
         fallback.sections.join(','),
-        context,
+        PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS,
       );
 
       const sections = rawSections
@@ -532,17 +564,15 @@ export class PullRequestValidationService {
 
     const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
 
-    // Pending, not failed: the spec has not been looked at, not found wanting.
+    // Once enabled, every path posts one terminal status. A non-verdict is a
+    // pass: the spec was never judged, so it must not hold up a merge, and an
+    // unfinalized state would linger on the commit.
     if (!resolvable) {
-      // Bitbucket would leave an INPROGRESS build nothing ever finalizes.
-      if (target.provider === VCSProviderType.BITBUCKET_SERVER) return;
-      await this.postBuildStatus(
-        target,
-        commitHash,
-        'pending',
-        PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_CHECKED,
-        specStatus,
-      );
+      const reason =
+        result.errorMessage === PR_VALIDATION_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR
+          ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_EVALUATED
+          : PR_VALIDATION_CONFIG.SPEC_MESSAGES.NOT_CHECKED;
+      await this.postBuildStatus(target, commitHash, 'success', reason, specStatus);
       return;
     }
 
