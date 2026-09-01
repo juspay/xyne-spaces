@@ -195,6 +195,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideVoiceInput = false,
       compact = false,
       sendDisabled = false,
+      sendDisabledReason,
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
@@ -1179,7 +1180,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const handleSend = useCallback(async () => {
-      if (!editor || isSending || sendDisabled) return;
+      if (!editor || isSending) return;
+      if (sendDisabled) {
+        // The button is disabled, but Enter still lands here — say why rather than
+        // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+        // tooltip carrying the same reason never opens.
+        if (sendDisabledReason) toast.warning(sendDisabledReason);
+        return;
+      }
 
       // If a voice stream is active, finalize it for send first: this strips any
       // unfinalized interim text and aborts the stream (discarding in-flight results)
@@ -1270,6 +1278,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       attachedCanvas,
       hasSendableContent,
       sendDisabled,
+      sendDisabledReason,
       commandItems,
       onCommandSelect,
       disableDraftUpload,
@@ -1998,7 +2007,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2083,7 +2092,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2149,7 +2158,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         </div>
                       ) : (
                         <Tooltip
-                          content='Send message'
+                          content={sendDisabledReason ?? 'Send message'}
                           side='top'
                           delayDuration={1000}
                           skipDelayDuration={1000}
