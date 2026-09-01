@@ -39,6 +39,21 @@ export const PrioritySubmenu = ({
     }
   };
 
+  const allSelected =
+    prioritiesToShow.length > 0 &&
+    prioritiesToShow.every(([key]) => selectedPriorities.includes(key as TicketPriority));
+
+  const handleSelectAllToggle = (): void => {
+    if (allSelected) {
+      const visibleSet = new Set(prioritiesToShow.map(([key]) => key));
+      onChange(selectedPriorities.filter(p => !visibleSet.has(p)));
+    } else {
+      const all = prioritiesToShow.map(([key]) => key as TicketPriority);
+      const merged = new Set<TicketPriority>([...selectedPriorities, ...all]);
+      onChange([...merged]);
+    }
+  };
+
   return (
     <div className='w-56 bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
       <div
@@ -47,7 +62,22 @@ export const PrioritySubmenu = ({
         onTouchMove={e => e.stopPropagation()}
       >
         {prioritiesToShow.length > 0 ? (
-          prioritiesToShow.map(([priority, config]) => {
+          <>
+            <button
+              type='button'
+              onClick={handleSelectAllToggle}
+              className={`flex items-center justify-between w-full px-3 py-2 transition-colors rounded-md border-b border-border/50
+                ${allSelected ? 'bg-accent text-foreground' : 'hover:bg-muted text-foreground'}
+              `}
+              data-track-category='Tickets'
+              data-track-name='ToggleSelectAllPriorities'
+            >
+              <span className='text-sm font-medium text-primary'>
+                {allSelected ? 'Deselect all' : 'Select all'}
+              </span>
+              {allSelected && <Check className='w-4 h-4 text-primary shrink-0' />}
+            </button>
+            {prioritiesToShow.map(([priority, config]) => {
             const isSelected = selectedPriorities.includes(priority as TicketPriority);
 
             return (
@@ -72,8 +102,9 @@ export const PrioritySubmenu = ({
 
                 {isSelected && <Check className='w-5 h-5 text-foreground' strokeWidth={2.5} />}
               </button>
-            );
-          })
+              );
+            })}
+          </>
         ) : (
           <div className='px-4 py-3 text-sm text-muted-foreground'>
             No priority options available

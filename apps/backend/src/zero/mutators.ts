@@ -5821,7 +5821,7 @@ export function createMutators(
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
 
-          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
+          if ((isAssigneeChanging || isEtaChanging || isBoardChanging) && ticket.userGroupId) {
             // Get board to check if transfer is restricted
             const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
 

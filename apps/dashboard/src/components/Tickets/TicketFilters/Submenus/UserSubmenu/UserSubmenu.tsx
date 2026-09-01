@@ -39,8 +39,10 @@ interface UserSubmenuProps {
   demoteDeactivated?: boolean;
 }
 
+const SELECT_ALL_MARKER = '__SELECT_ALL__';
+
 // A row is either a user or the pinned "Unassigned" option.
-type RowItem = User | typeof UNASSIGNED_FILTER_VALUE;
+type RowItem = User | typeof UNASSIGNED_FILTER_VALUE | typeof SELECT_ALL_MARKER;
 
 // Virtualize once the list is big enough to matter; below this a plain list
 // avoids the Virtuoso overhead. Height matches the previous max-h-80 cap.
@@ -206,6 +208,29 @@ export const UserSubmenu = ({
     );
   };
 
+  // Select-all / deselect-all toggle: visible user IDs from the filtered rows
+  const visibleUserIds = useMemo(
+    () =>
+      rows
+        .filter((r): r is User => typeof r === 'object' && 'id' in r)
+        .map(u => u.id),
+    [rows],
+  );
+  const allVisibleSelected =
+    visibleUserIds.length > 0 && visibleUserIds.every(id => selectedUsers.includes(id));
+
+  const handleSelectAllToggle = (): void => {
+    if (allVisibleSelected) {
+      emitChange(
+        selectedUsers.filter(id => !visibleUserIds.includes(id)),
+        isInverted,
+      );
+    } else {
+      const merged = new Set([...selectedUsers, ...visibleUserIds]);
+      emitChange([...merged], isInverted);
+    }
+  };
+
   const isVirtualized = rows.length > VIRTUALIZE_THRESHOLD;
 
   const renderUnassignedRow = (): ReactElement => {
@@ -234,8 +259,32 @@ export const UserSubmenu = ({
     );
   };
 
+  const renderSelectAllRow = (): ReactElement => (
+    <button
+      key={SELECT_ALL_MARKER}
+      type='button'
+      onClick={handleSelectAllToggle}
+      className={`
+        w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
+        ${allVisibleSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+        focus-visible:ring-2 focus-visible:ring-ring
+      `}
+      data-track-category='Tickets'
+      data-track-name='ToggleSelectAllUsers'
+    >
+      <span className='flex-1 text-left text-sm font-medium text-primary'>
+        {allVisibleSelected ? 'Deselect all' : 'Select all'}
+      </span>
+      {allVisibleSelected && <Check className='w-4 h-4 text-primary shrink-0' />}
+    </button>
+  );
+
   const renderRow = (item: RowItem): ReactElement =>
-    item === UNASSIGNED_FILTER_VALUE ? renderUnassignedRow() : renderUserRow(item);
+    item === SELECT_ALL_MARKER
+      ? renderSelectAllRow()
+      : item === UNASSIGNED_FILTER_VALUE
+        ? renderUnassignedRow()
+        : renderUserRow(item);
 
   const renderUserRow = (user: User): ReactElement => {
     const isSelected = selectedUsers.includes(user.id);
@@ -322,7 +371,7 @@ export const UserSubmenu = ({
             onTouchMove={e => e.stopPropagation()}
           >
             <Virtuoso
-              data={rows}
+              data={[SELECT_ALL_MARKER, ...rows]}
               // Row-height estimate so the scroll range is right before rows measure.
               defaultItemHeight={40}
               // Padding lives on the rows — padding on the scroller itself
@@ -341,7 +390,10 @@ export const UserSubmenu = ({
             onWheel={e => e.stopPropagation()}
             onTouchMove={e => e.stopPropagation()}
           >
-            <div className='space-y-0.5'>{rows.map(item => renderRow(item))}</div>
+            <div className='space-y-0.5'>
+              <div className='border-b border-border/50'>{renderSelectAllRow()}</div>
+              {rows.map(item => renderRow(item))}
+            </div>
           </div>
         )
       ) : (
