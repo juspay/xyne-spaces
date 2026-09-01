@@ -67,6 +67,7 @@ import {
   hasCreateTicketFlag,
 } from '../../components/Tickets/CreateTicketModal/createTicket.utils';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
+import { ShareViewDialog } from '../../components/Project/ShareViewDialog/ShareViewDialog';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
@@ -740,8 +741,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // so opening that submenu enables this fetch too.
     enabled:
       viewMode === 'my-tickets' &&
-        (isBoardDropdownOpen || isSourceChannelsOpen || isFiltersDropdownOpen) &&
-        !!user?.id,
+      (isBoardDropdownOpen || isSourceChannelsOpen || isFiltersDropdownOpen) &&
+      !!user?.id,
     staleTime: 60_000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -1039,20 +1040,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     void persistWorkspaceView(name);
   }, [workspaceViewNameDraft, persistWorkspaceView]);
 
+  const [isShareViewDialogOpen, setIsShareViewDialogOpen] = useState(false);
+
   const handleShareWorkspaceView = useCallback((): void => {
-    if (!filters.boards?.length) {
-      toast.error('Pick at least one board to share');
+    if (!viewId) {
+      toast.error('Save the view before sharing');
       return;
     }
-    const cfg = { name: initialName ?? '', filters, groupBy: groupByKey };
-    const encoded = btoa(encodeURIComponent(JSON.stringify(cfg)));
-    const base = window.location.pathname.split('/projects')[0];
-    const link = `${window.location.origin}${base}/projects/views/new#cfg=${encoded}`;
-    void navigator.clipboard.writeText(link).then(
-      () => toast.success('Share link copied to clipboard'),
-      () => toast.error('Failed to copy link'),
-    );
-  }, [filters, groupByKey, initialName]);
+    setIsShareViewDialogOpen(true);
+  }, [viewId]);
 
   // Setup sensors for drag and drop
   const sensors = useSensors(
@@ -1523,6 +1519,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       channelId?: string;
       projectId?: string;
       boardId?: string;
+      boardIds?: string[];
       userId?: string;
       groupId?: string;
       formEntityValueFieldIds?: string[];
@@ -1538,6 +1535,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // my-tickets can still scope by boardId, but it should never receive projectId.
     if (filters.boards && filters.boards.length === 1 && filters.boards[0]) {
       params.boardId = filters.boards[0];
+    }
+
+    // A workspace view has no projectId, so several selected boards can only be
+    // scoped by listing them — otherwise the query fans out across the workspace.
+    // Other view modes already scope by projectId, so leave them alone.
+    const selectedBoards = filters.boards;
+    if (isWorkspaceView && !params.boardId && selectedBoards && selectedBoards.length > 1) {
+      params.boardIds = selectedBoards;
     }
 
     // Pass projectId ONLY if:
@@ -1569,6 +1574,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [
     viewMode,
     queryViewMode,
+    isWorkspaceView,
     boardId,
     effectiveProjectId,
     filterByUserId,
@@ -1586,6 +1592,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         !isKanbanLayout &&
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
+          // A workspace view has no channel or project to key on; `workspaceViewReady`
+          // is the equivalent guard (at least one board picked), the same one the
+          // kanban pagination path uses. Without this clause the table, calendar and
+          // flow layouts render no rows at all in a saved view.
+          (isWorkspaceView && workspaceViewReady) ||
           viewMode === 'my-tickets' ||
           (viewMode === 'user-tickets' && !!filterByUserId) ||
           (viewMode === 'group-tickets' && !!filterByGroupId)),
@@ -3197,26 +3208,35 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Handle ticket creation success
   const handleTicketCreated = useCallback(
-    (ticket: { id: string; conversationId?: string }) => {
-      if (!channel) return;
-
+    (ticket: { id: string; conversationId?: string; channelId?: string }) => {
+      const ticketChannelId = ticket.channelId || channel?.id;
       toast.success('Ticket created successfully', {
         action: {
           label: 'View Details',
           onClick: () => {
-            void navigate(
-              buildChannelRoute(channel.id, {
-                tab: 'tickets',
-                ticketId: ticket.id,
-                conversationId: ticket.conversationId || '',
-              }),
-            );
+            if (ticketChannelId && ticket.conversationId) {
+              void navigate(
+                buildChannelRoute(`${ticketChannelId}/${ticket.conversationId}/${ticket.id}`, {
+                  selectedTab: 'details',
+                }),
+              );
+            } else if (ticketChannelId) {
+              void navigate(
+                buildChannelRoute(ticketChannelId, {
+                  tab: 'tickets',
+                  ticketId: ticket.id,
+                  conversationId: ticket.conversationId || '',
+                }),
+              );
+            } else {
+              void navigate(`${baseRoute}/tickets/${ticket.id}`);
+            }
           },
         },
         duration: 5000,
       });
     },
-    [navigate, channel, buildChannelRoute],
+    [navigate, channel, buildChannelRoute, baseRoute],
   );
 
   // Board context for create ticket modal. When creating from a board route or
@@ -3414,8 +3434,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         MEDIUM: 2,
         LOW: 3,
       };
-      const getOrder = (key: string): number =>
-        PRIORITY_SORT_ORDER[key] ?? Number.MAX_SAFE_INTEGER;
+      const getOrder = (key: string): number => PRIORITY_SORT_ORDER[key] ?? Number.MAX_SAFE_INTEGER;
       mapped.sort((a, b) => {
         const orderA = getOrder(a.key);
         const orderB = getOrder(b.key);
@@ -3445,6 +3464,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     kanbanColumnQueryKey,
     hasMatchingLastKnownKanbanGroups,
   ]);
+
+  // The table renders one AG-Grid per group and suppresses AG-Grid's own no-rows
+  // overlay, so with no tickets it used to show a bare header strip (groupBy 'none')
+  // or nothing at all (any other groupBy). Say why the table is empty instead.
+  const isTableEmpty = processedGroups.every(group => group.allTickets.length === 0);
+  const tableGroups = isTableEmpty ? [] : processedGroups;
 
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
@@ -3651,7 +3676,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               </Popover>
             </div>
           )}
-          {canCreateTicket && channel && !channel.isArchived && (
+          {canCreateTicket && ((channel && !channel.isArchived) || isMyTicketsView) && (
             <button
               data-testid='kanban-create-ticket-button'
               data-track-event='BUTTON_CLICK'
@@ -4096,25 +4121,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           groupBy.type === 'formField' &&
                           groupBy.fieldId === value.fieldId;
                     return (
-                    <DropdownMenu.CheckboxItem
-                      key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
-                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
+                      <DropdownMenu.CheckboxItem
+                        key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
+                        className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
       transition-colors
       data-[highlighted]:bg-muted data-[highlighted]:text-foreground
       data-[state=checked]:bg-accent data-[state=checked]:text-foreground data-[state=checked]:font-semibold'
-                      checked={isSelected}
-                      onCheckedChange={() =>
-                        handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
-                      }
-                      data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
-                          {icon}
-                        </span>
-                        <span className='font-medium'>{label.replace('Group by: ', '')}</span>
-                      </div>
-                    </DropdownMenu.CheckboxItem>
+                        checked={isSelected}
+                        onCheckedChange={() =>
+                          handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
+                        }
+                        data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
+                      >
+                        <div className='flex items-center gap-3'>
+                          <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
+                            {icon}
+                          </span>
+                          <span className='font-medium'>{label.replace('Group by: ', '')}</span>
+                        </div>
+                      </DropdownMenu.CheckboxItem>
                     );
                   })}
                 </DropdownMenu.Content>
@@ -4868,7 +4893,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         </div>
       ) : layoutView === 'table' ? (
         <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'>
-          {processedGroups.map(group => {
+          {isTableEmpty && (
+            <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
+              {isTicketsSyncing ? 'Loading tickets…' : 'No tickets match the current filters.'}
+            </div>
+          )}
+          {tableGroups.map(group => {
             const isExpanded = expandedGroups.has(group.key);
             const showGroupHeader = groupBy !== 'none';
             return (
@@ -5099,6 +5129,33 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
           onTicketCreated={handleTicketCreated}
+        />
+      )}
+
+      {/* Create Ticket Modal — my-tickets view (no channel context, user picks channel + board) */}
+      {isMyTicketsView && !channel && isCreateModalOpen && (
+        <CreateTicketModal
+          isOpen={isCreateModalOpen}
+          onClose={() => {
+            setIsCreateModalOpen(false);
+            setCreateTicketSeed(null);
+          }}
+          channelId=''
+          isFromSubTicket
+          initialStatus={createTicketSeed?.status ?? null}
+          initialStageName={createTicketSeed?.stageName ?? null}
+          initialAssignee={createTicketSeed?.assignee ?? null}
+          onTicketCreated={handleTicketCreated}
+        />
+      )}
+
+      {/* Share View Dialog */}
+      {isShareViewDialogOpen && viewId && (
+        <ShareViewDialog
+          isOpen={isShareViewDialogOpen}
+          onClose={() => setIsShareViewDialogOpen(false)}
+          viewId={viewId}
+          viewName={initialName ?? ''}
         />
       )}
 

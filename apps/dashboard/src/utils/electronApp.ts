@@ -285,6 +285,7 @@ const POPOUT_TICKET_CHANNEL = 'xyne-create-ticket-popout';
 export interface PopOutTicketResult {
   id: string;
   conversationId?: string;
+  channelId?: string;
   xyneId?: string;
   workflowType?: string;
 }

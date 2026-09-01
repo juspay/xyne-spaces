@@ -139,6 +139,7 @@ interface CreateTicketModalProps {
   onTicketCreated?: (ticket: {
     id: string;
     conversationId?: string;
+    channelId?: string;
     xyneId?: string;
     workflowType?: string;
   }) => void;
@@ -1041,16 +1042,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const processTicketCreationResponse = (
     response: { data?: TicketResponse },
     workflowType: string,
+    channelId?: string,
   ): void => {
     if (onTicketCreated && response.data?.id) {
       const ticketData: {
         id: string;
         conversationId: string;
+        channelId?: string;
         xyneId?: string;
         workflowType?: string;
       } = {
         id: response.data.id,
         conversationId: response.data.conversationId || '',
+        ...(channelId && { channelId }),
         ...(response.data.xyneId && { xyneId: response.data.xyneId }),
       };
 
@@ -1312,7 +1316,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
-        processTicketCreationResponse(response, formData.workflowType);
+        processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
       } else {
         // No files, use JSON
         response = await apiInstance.post<TicketResponse>('/tickets', {
@@ -1345,7 +1349,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         });
 
         createdTicketResponse = response.data;
-        processTicketCreationResponse(response, formData.workflowType);
+        processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
       }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {

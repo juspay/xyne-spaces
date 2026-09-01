@@ -984,6 +984,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
       projectId: z.string().optional(),
       boardId: z.string().optional(),
+      boardIds: z.array(z.string()).optional(),
       userId: z.string().optional(),
       groupId: z.string().optional(),
       ...flowStepVisibilitySchemaShape,
@@ -995,6 +996,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         viewMode,
         projectId,
         boardId,
+        boardIds,
         userId,
         groupId,
         excludeFlowSteps,
@@ -1007,6 +1009,12 @@ export const queries: AnyQueryRegistry = defineQueries({
       // boardId implicitly scopes to project, so no need for separate projectId filter
       if (boardId && viewMode !== 'my-tickets') {
         query = query.where('boardId', boardId);
+      }
+
+      // Scope by selected boards server-side (mirrors kanbanTicketsPageV3) so a
+      // saved view spanning several boards stays bounded without a projectId.
+      if (!boardId && viewMode !== 'my-tickets' && boardIds?.length) {
+        query = query.where('boardId', 'IN', boardIds);
       }
 
       // Apply projectId filter ONLY if:
@@ -5175,6 +5183,16 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('values')
       .orderBy('createdAt', 'desc');
   }),
+
+  savedConfigsSharedWithUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.kanban_board_view_access
+        .where('userId', userId)
+        .related('view', view => view.related('values'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   // Apps Queries
   // (getAllAppsPaginated removed — it returned every app across all orgs unscoped.)

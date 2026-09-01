@@ -2185,6 +2185,17 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
   })
   .primaryKey('id');
 
+export const kanbanBoardViewAccessTable = table('kanban_board_view_access')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    userId: string(),
+    sharedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 
 // Knowledge Base / Collection tables
 
@@ -4621,6 +4632,27 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['configId'],
       destSchema: savedUserConfigurationValueTable,
     }),
+    viewAccess: many({
+      sourceField: ['id'],
+      destField: ['viewId'],
+      destSchema: kanbanBoardViewAccessTable,
+    }),
+  }),
+);
+
+export const kanbanBoardViewAccessTableRelationships = relationships(
+  kanbanBoardViewAccessTable,
+  ({ one }) => ({
+    view: one({
+      sourceField: ['viewId'],
+      destField: ['id'],
+      destSchema: savedUserConfigurationTable,
+    }),
+    user: one({
+      sourceField: ['userId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
   }),
 );
 
@@ -4861,6 +4893,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTable,
     savedUserConfigurationValueTable,
+    kanbanBoardViewAccessTable,
     // Knowledge Base
     collectionTable,
     collectionItemTable,
@@ -4994,6 +5027,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTableRelationships,
     savedUserConfigurationValueTableRelationships,
+    kanbanBoardViewAccessTableRelationships,
     // Knowledge Base
     collectionTableRelationships,
     collectionItemTableRelationships,
@@ -5138,6 +5172,7 @@ export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type KanbanBoardViewAccess = Row<typeof schema.tables.kanban_board_view_access>;
 
 // Knowledge Base Types
 export type Collection = Row<typeof schema.tables.collections>;
