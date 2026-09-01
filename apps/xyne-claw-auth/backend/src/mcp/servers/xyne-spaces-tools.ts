@@ -5494,7 +5494,19 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
         method: "POST",
         headers: { "x-xyne-acting-user-id": ctx.userId },
         body: JSON.stringify(args),
-      }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
+      }, sdlcSpacesAuth())) as {
+        artifact: { canvasId: string; viewAccessId?: string; url?: string; parked?: boolean; pendingChanges?: number };
+      };
+      // Parked = queued as suggestions a human must accept in the canvas; the
+      // document is NOT updated yet. Say so, or the model reports it as done.
+      if (data.artifact.parked) {
+        const n = data.artifact.pendingChanges ?? 0;
+        return ok(
+          n === 0
+            ? `No changes detected — the artifact already matches. ${JSON.stringify(data.artifact)}`
+            : `Queued ${n} change(s) for human review in the canvas — not applied until accepted. ${JSON.stringify(data.artifact)}`,
+        );
+      }
       return ok(JSON.stringify(data.artifact));
     } catch (e) {
       return err(`Update SDLC artifact error: ${errMsg(e)}`);
