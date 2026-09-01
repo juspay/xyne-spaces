@@ -1519,6 +1519,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       channelId?: string;
       projectId?: string;
       boardId?: string;
+      boardIds?: string[];
       userId?: string;
       groupId?: string;
       formEntityValueFieldIds?: string[];
@@ -1534,6 +1535,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // my-tickets can still scope by boardId, but it should never receive projectId.
     if (filters.boards && filters.boards.length === 1 && filters.boards[0]) {
       params.boardId = filters.boards[0];
+    }
+
+    // A workspace view has no projectId, so several selected boards can only be
+    // scoped by listing them — otherwise the query fans out across the workspace.
+    // Other view modes already scope by projectId, so leave them alone.
+    const selectedBoards = filters.boards;
+    if (isWorkspaceView && !params.boardId && selectedBoards && selectedBoards.length > 1) {
+      params.boardIds = selectedBoards;
     }
 
     // Pass projectId ONLY if:
@@ -1565,6 +1574,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [
     viewMode,
     queryViewMode,
+    isWorkspaceView,
     boardId,
     effectiveProjectId,
     filterByUserId,
@@ -1582,6 +1592,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         !isKanbanLayout &&
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
+          // A workspace view has no channel or project to key on; `workspaceViewReady`
+          // is the equivalent guard (at least one board picked), the same one the
+          // kanban pagination path uses. Without this clause the table, calendar and
+          // flow layouts render no rows at all in a saved view.
+          (isWorkspaceView && workspaceViewReady) ||
           viewMode === 'my-tickets' ||
           (viewMode === 'user-tickets' && !!filterByUserId) ||
           (viewMode === 'group-tickets' && !!filterByGroupId)),
@@ -3450,6 +3465,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     hasMatchingLastKnownKanbanGroups,
   ]);
 
+  // The table renders one AG-Grid per group and suppresses AG-Grid's own no-rows
+  // overlay, so with no tickets it used to show a bare header strip (groupBy 'none')
+  // or nothing at all (any other groupBy). Say why the table is empty instead.
+  const isTableEmpty = processedGroups.every(group => group.allTickets.length === 0);
+  const tableGroups = isTableEmpty ? [] : processedGroups;
+
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
@@ -4872,7 +4893,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         </div>
       ) : layoutView === 'table' ? (
         <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'>
-          {processedGroups.map(group => {
+          {isTableEmpty && (
+            <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
+              {isTicketsSyncing ? 'Loading tickets…' : 'No tickets match the current filters.'}
+            </div>
+          )}
+          {tableGroups.map(group => {
             const isExpanded = expandedGroups.has(group.key);
             const showGroupHeader = groupBy !== 'none';
             return (
