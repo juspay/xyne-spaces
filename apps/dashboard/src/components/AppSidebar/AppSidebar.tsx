@@ -316,8 +316,8 @@ const AppSidebar = (): ReactElement => {
     );
   }, [visibleChannels, unreadCounts]);
 
-  const handleNavigationClick = (label: string): void => {
-    posthogService.capture(EVENTS.NAVIGATION, { item: label });
+  const handleNavigationClick = (label: string, openedInNewWindow = false): void => {
+    posthogService.capture(EVENTS.NAVIGATION, { item: label, openedInNewWindow });
   };
 
   const railShortcuts = railShortcutsAvailable();
