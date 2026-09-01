@@ -534,6 +534,15 @@
     background-image: var(--wallpaper-image);
   }
 
+  /* On a `bleed` ground the wallpaper runs unbroken from the sidenav through the
+     stream, and the rail's 1px border then reads as a seam ruled across one
+     continuous wash. Set from StreamsScreen while that ground is active, and only
+     then: on `theme` or `paper` there is a real surface butting up against the
+     rail and the edge is doing its job again. */
+  [data-stream-ground="bleed"] .app-sidenav-frame {
+    border-color: transparent;
+  }
+
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {
     filter: brightness(0) invert(1);
     opacity: 0.85;

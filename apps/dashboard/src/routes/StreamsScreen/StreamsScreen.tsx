@@ -523,6 +523,20 @@ const StreamsScreen = (): ReactElement => {
   // that. Reaching it means a flag on the document rather than a prop — and a
   // flag that is cleaned up, unlike the wallpaper choice, because the rail must
   // get its edge back the moment you leave Streams or dial the ground away.
+  // On `bleed` the app's wallpaper runs straight through the stream, and the
+  // sidenav's 1px border then reads as a seam across one continuous wash. Reaching
+  // it means a flag on the document rather than a prop — and a flag that is cleaned
+  // up, because the rail must get its edge back the moment you leave Streams.
+  useEffect(() => {
+    if (dev.ground !== 'bleed') return;
+    // Bracketed, not dotted: `noPropertyAccessFromIndexSignature` is on in
+    // `tsconfig.app.json`, and `DOMStringMap` is an index signature.
+    document.documentElement.dataset['streamGround'] = 'bleed';
+    return (): void => {
+      delete document.documentElement.dataset['streamGround'];
+    };
+  }, [dev.ground]);
+
   /** The width a new column takes, and what "reset width" resets to. */
   const widthForSource = useCallback(
     (source: ColumnSource): number => Math.max(dev.defaultWidth, surfaceFor(source).minWidth),
@@ -1891,6 +1905,14 @@ const StreamsScreen = (): ReactElement => {
   const openAdd = useCallback((): void => {
     if (!focusMode) {
       setPaletteOpen(true);
+      // The palette opens *in place*, as the last citizen of the strip. Asking for
+      // it from the header while scrolled to the other end would open it off-screen,
+      // so the strip goes to meet it — the same courtesy focus mode already extends.
+      // Deferred a frame, so the palette has replaced the slot and `scrollWidth` is final.
+      const strip = stripRef.current;
+      if (strip) {
+        requestAnimationFrame(() => tweenScroll(strip, strip.scrollWidth - strip.clientWidth));
+      }
       return;
     }
     const strip = stripRef.current;
@@ -2243,7 +2265,10 @@ const StreamsScreen = (): ReactElement => {
             tabIndex={-1}
             className={cn(
               'relative flex h-full flex-col overflow-hidden outline-none',
-              'bg-background',
+              // `bleed` paints nothing, so the fixed wallpaper layer behind the whole
+              // app carries through the stream instead of stopping at its edge.
+              dev.ground === 'theme' && 'bg-background',
+              dev.ground === 'paper' && 'bg-[#fafafa]',
             )}
             data-testid='streams-screen'
             onPointerDownCapture={noteComposerIntent}
@@ -2398,7 +2423,7 @@ const StreamsScreen = (): ReactElement => {
                     <Button
                       variant='ghost'
                       size='sm'
-                      onClick={() => setPaletteOpen(true)}
+                      onClick={openAdd}
                       aria-label='Add a column'
                       className={cn(STREAM_ACTION, STREAM_ACTION_IDLE)}
                       data-track-category='Streams'
@@ -2609,7 +2634,7 @@ const StreamsScreen = (): ReactElement => {
                     ) : (
                       <button
                         type='button'
-                        onClick={() => setPaletteOpen(true)}
+                        onClick={openAdd}
                         // Radius from the same dial every column reads, never a
                         // `rounded-*` class — a utility would win over the style
                         // and leave the one empty slot a different shape from the

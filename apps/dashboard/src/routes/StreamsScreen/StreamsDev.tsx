@@ -196,9 +196,23 @@ export interface StreamsDevSettings {
   columnRadius: number;
   /** Which end of the column header the focus button sits at. */
   focusSide: FocusSide;
+  /** What the stream sits on. See `StreamGround`. */
+  ground: StreamGround;
 }
 
 export type MarkReadPolicy = 'never' | 'on-leave' | 'on-focus';
+
+/**
+ * What the stream sits on.
+ *
+ * `theme` — the app's own opaque page colour, like every other screen.
+ * `paper` — a flat off-white, slightly lifted from the theme.
+ * `bleed` — nothing at all, so the fixed wallpaper layer behind the whole app,
+ * the one the sidenav floats on, carries straight through the stream instead
+ * of stopping at its edge. The columns then read as cards laid on the page
+ * rather than panes cut out of a slab.
+ */
+export type StreamGround = 'theme' | 'paper' | 'bleed';
 
 /**
  * `activity` — a notification: only columns with something new.
@@ -335,6 +349,7 @@ export const DEV_DEFAULTS: StreamsDevSettings = {
   // rest of the stream is built on.
   columnRadius: 20,
   focusSide: 'right',
+  ground: 'bleed',
 };
 
 const StreamsDevContext = createContext<StreamsDevSettings>(DEV_DEFAULTS);

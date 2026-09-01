@@ -212,7 +212,7 @@ export interface StreamsLayout {
  * third are on screen at once. The point of a stream is seeing several things, so
  * a default that fills the viewport defeats it.
  */
-export const DEFAULT_WIDTH = 640;
+export const DEFAULT_WIDTH = 360;
 /** Hard floor and ceiling for a dragged column, whatever the surface asks for. */
 /**
  * The narrowest each surface stays usable at.
