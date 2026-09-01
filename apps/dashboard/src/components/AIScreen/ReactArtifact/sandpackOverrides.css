@@ -37,6 +37,16 @@
   border-radius: 0;
 }
 
+/* SandpackPreview always renders its own boot overlay — there is no prop to
+   turn it off — and ArtifactBootOverlay draws the Xyne mark over the same
+   frame. Without this, theirs fades out over 400ms starting at `done` while
+   ours unmounts instantly, flashing the CodeSandbox loader on every boot.
+   Scoped to `.sp-loading`: the timeout and runtime-error overlays use
+   `.sp-error` and must stay visible. */
+.xyne-artifact-sandpack .sp-overlay.sp-loading {
+  display: none;
+}
+
 /* SandpackPreview listens for the bundler's `resize` message and writes the
    app's own content height onto the iframe as an INLINE style; `!important` is
    the only thing that outranks it. `min/max-height` are cleared too — the base

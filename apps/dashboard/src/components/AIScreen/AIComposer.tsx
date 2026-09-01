@@ -698,12 +698,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       />
       <div
         className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
-        style={isVoiceRecording ? { borderRadius: '1.6rem' } : undefined}
+        style={isVoiceRecording ? { borderRadius: '1.125rem' } : undefined}
       >
         <div
           ref={wrapperRef}
           className={cn(
-            'ai-composer-wrapper group flex flex-col gap-1 rounded-3xl border border-[#c0bcb4] bg-[#f5f4f0] px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:border-[#a09c94] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
+            'ai-composer-wrapper group flex flex-col gap-1 rounded-2xl border border-chat-composer-border-active bg-background px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
           )}
         >
           {hasPills && (
@@ -971,7 +971,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         </div>
       </div>
       {hideDisclaimer ? null : (
-        <p className='mt-2 text-center text-[11px] text-muted-foreground/80'>
+        <p className='mt-1.5 text-center text-[11px] text-muted-foreground/80'>
           Xyne can make mistakes. Verify important details.
         </p>
       )}

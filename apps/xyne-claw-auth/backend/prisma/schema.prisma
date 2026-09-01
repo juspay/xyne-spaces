@@ -1259,6 +1259,7 @@ model ArtifactApp {
 
   versions  ArtifactAppVersion[]
   agentRuns ArtifactAppAgentRun[]
+  restores  ArtifactAppRestore[]
 
   @@index([workspaceId, visibility])
   @@index([ownerUserId])
@@ -1297,6 +1298,44 @@ model ArtifactAppVersion {
   @@index([appId, createdAt])
   @@index([workspaceId])
   @@map("artifact_app_versions")
+}
+
+/// One "head moved backward" event — the durable record of a restore.
+///
+/// A restore leaves no trace in the data it touches: `headVersionId` is a
+/// pointer, so after the move the app looks exactly as it would have if that
+/// version had always been current. Nothing in `artifact_app_versions` changed
+/// and no chat message was written. Without this table, "why is the thread's
+/// newest build not the one on screen?" is unanswerable an hour later.
+///
+/// Deliberately NOT a `chat_messages` row. Those form the branching tree the
+/// transcript projects (parentId, sibling pagers, regenerate), so injecting a
+/// non-conversational node would make a restore a selectable branch and put a
+/// third value into a role column the client models as user|assistant. This is
+/// an event stream the thread merges in by time instead.
+model ArtifactAppRestore {
+  id          String @id @default(cuid())
+  /// Denormalized tenant key, stamped from the parent app on insert — same
+  /// discipline as ArtifactAppVersion.
+  workspaceId String
+  appId       String
+  /// The version head moved TO.
+  versionId     String
+  versionNumber Int
+  /// The version head moved FROM. Null only for an app that had no head yet,
+  /// which is why this column — not the pointer — is the record of what was
+  /// left behind.
+  fromVersionId     String?
+  fromVersionNumber Int?
+  /// Who restored. Owner-only today; kept because Step 4 opens apps to a group.
+  userId    String
+  createdAt DateTime @default(now())
+
+  app ArtifactApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, createdAt])
+  @@index([workspaceId])
+  @@map("artifact_app_restores")
 }
 
 /// One agent run triggered from inside an artifact app.
