@@ -1,3 +1,15 @@
+## [1.251.0-release-20260901.1](https://github.com/juspay/xyne-spaces/compare/v1.250.2-release-20260901.3...v1.251.0-release-20260901.1) (2026-09-01)
+
+
+### Features
+
+* add PPTX viewer and search-text extraction ([#1330](https://github.com/juspay/xyne-spaces/issues/1330)) ([7fd741d](https://github.com/juspay/xyne-spaces/commit/7fd741d37be07d850d602b6ac7d48a89db6d5058))
+
+
+### Bug Fixes
+
+* resolve KB collection scope and widen Contents panel ([#1332](https://github.com/juspay/xyne-spaces/issues/1332)) ([6d199b4](https://github.com/juspay/xyne-spaces/commit/6d199b41032fa4721a97a72323a2df7ee778eb60))
+
 ## [1.250.2-release-20260901.3](https://github.com/juspay/xyne-spaces/compare/v1.250.2-release-20260901.2...v1.250.2-release-20260901.3) (2026-09-01)
 
 
