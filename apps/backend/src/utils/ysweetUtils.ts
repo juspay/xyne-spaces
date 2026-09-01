@@ -43,6 +43,7 @@ const canvasCommentThreadStyleSpec = createStyleSpec(
   },
 );
 
+// Register a style spec for canvas tickets
 const canvasTicketStyleSpec = createStyleSpec(
   {
     type: 'canvasTicket',
