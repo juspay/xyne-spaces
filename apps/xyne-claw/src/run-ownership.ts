@@ -6,8 +6,10 @@
  * alive-but-choked rather than dead: when it un-chokes, its callback, its GCS
  * session flush and its progress posts would clobber the new runner's newer
  * state. Ownership beats arrival order — a run holds `claw:run-owner:<sessionId>`
- * with a heartbeated 120s TTL, and the moment the key stops being ours every
- * output channel goes silent (see the fenced-session set below).
+ * with a heartbeated 120s TTL, and the moment the key is held by ANOTHER runner
+ * every output channel goes silent (see the fenced-session set below). A missing
+ * key is re-claimed by the heartbeat, never treated as a loss — a claim that
+ * failed open (Redis briefly unreachable) must not fence its own run.
  *
  * The 120s TTL matches lockDuration: a dead pod's key expires around the same
  * time BullMQ redelivers, so a real takeover may defer a few 15s hops until the
@@ -59,7 +61,6 @@ function getClient(): Redis | null {
       connectTimeout: 3_000,
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
-      lazyConnect: true,
     });
     client.on("error", (err: Error) => {
       clog.warn(`[run-ownership] connection error: ${err.message}`);
@@ -91,8 +92,10 @@ export async function claimOwnership(sessionId: string, ownerToken: string): Pro
 }
 
 const REFRESH_SCRIPT = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  return redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) and 1 or 0
+local current = redis.call('GET', KEYS[1])
+if current == false or current == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
 end
 return 0`;
 
