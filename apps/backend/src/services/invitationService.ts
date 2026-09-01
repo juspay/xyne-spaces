@@ -42,6 +42,7 @@ export interface CreateInvitationParams {
 export interface InvitationWithDetails extends Invitation {
   workspace: {
     name: string;
+    inviteExperience: string | null;
   } | null;
   organization: {
     name: string;
@@ -262,7 +263,7 @@ export class InvitationService {
       },
       include: {
         workspace: {
-          select: { name: true },
+          select: { name: true, inviteExperience: true },
         },
         organization: {
           select: { name: true },
@@ -283,7 +284,7 @@ export class InvitationService {
       where: { id },
       include: {
         workspace: {
-          select: { name: true },
+          select: { name: true, inviteExperience: true },
         },
         organization: {
           select: { name: true },
@@ -300,7 +301,7 @@ export class InvitationService {
       where: { invitationId },
       include: {
         workspace: {
-          select: { name: true },
+          select: { name: true, inviteExperience: true },
         },
         organization: {
           select: { name: true },
@@ -357,8 +358,9 @@ export class InvitationService {
     invitationLink: string;
     invitationId: string;
     tempPassword?: string;
+    inviteExperience?: string | null;
   }): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    const { to, inviterName, workspaceName, invitationLink, invitationId, tempPassword } = params;
+    const { to, inviterName, workspaceName, invitationLink, invitationId, tempPassword, inviteExperience } = params;
 
     const result = await emailService.sendInvitationEmail({
       to,
@@ -367,6 +369,7 @@ export class InvitationService {
       invitationLink,
       invitationId,
       tempPassword,
+      inviteExperience,
     });
 
     if (result.success) {

@@ -230,6 +230,13 @@ export const WorkspaceJoinPolicy = {
 
 export type WorkspaceJoinPolicy = typeof WorkspaceJoinPolicy[keyof typeof WorkspaceJoinPolicy];
 
+export const InviteExperience = {
+  DESKTOP: 'DESKTOP',
+  BROWSER: 'BROWSER',
+} as const;
+
+export type InviteExperience = typeof InviteExperience[keyof typeof InviteExperience];
+
 export const CommunityJoinResultStatus = {
   JOINED: 'JOINED',
   REQUEST_PENDING: 'REQUEST_PENDING',
