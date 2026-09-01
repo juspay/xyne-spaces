@@ -139,7 +139,7 @@
     "@xyflow/react": "^12.11.2",
     "@xyne/icons": "workspace:*",
     "@xyne/shared": "workspace:*",
-    "@xyne/workflow-sdk": "3.2.35",
+    "@xyne/workflow-sdk": "3.2.36",
     "@xyne/workflow-ui": "1.3.32",
     "@y-sweet/client": "^0.9.1",
     "ag-grid-community": "^35.0.0",

@@ -20,5 +20,6 @@ declare module '@xyne/workflow-sdk' {
       folder: XyneResourceAttrs;
       credential: XyneResourceAttrs;
     };
+    authContext: XyneCtx;
   }
 }
