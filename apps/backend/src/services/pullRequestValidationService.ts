@@ -35,8 +35,9 @@ const PR_VALIDATION_CONFIG = {
     // Display name: Bitbucket build-status `name`, GitHub commit-status `context`.
     NAME: 'Ticket Validation',
   },
+  // No Bitbucket key: this check is GitHub only, and GitHub identifies a status
+  // by its context alone.
   SPEC_BUILD_STATUS: {
-    KEY: 'xyne-spec-check',
     NAME: 'Spec Validation',
   },
   REQUIRED_SPEC_SECTIONS: ['Problem statement', 'Solutioning', 'Test cases'],
@@ -649,8 +650,9 @@ export class PullRequestValidationService {
     commitHash: string,
     state: BuildStatusState,
     description: string,
-    // Required: a default here would silently post under the wrong context.
-    buildStatus: { KEY: string; NAME: string }
+    // Required: a default here would silently post under the wrong context. KEY is
+    // optional because a GitHub-only status has no Bitbucket build-status key.
+    buildStatus: { NAME: string; KEY?: string }
   ): Promise<void> {
     try {
       const targetUrl = process.env.FRONTEND_URL || '';
@@ -663,6 +665,12 @@ export class PullRequestValidationService {
           buildStatus.NAME,
           description,
           targetUrl || undefined,
+        );
+        return;
+      }
+      if (!buildStatus.KEY) {
+        logger.error(
+          `[PR-Validation] ${buildStatus.NAME} has no Bitbucket key, not posted`
         );
         return;
       }
