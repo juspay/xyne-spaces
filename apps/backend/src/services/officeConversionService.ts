@@ -1,8 +1,9 @@
 import { spawn } from "child_process"
-import { createHash } from "crypto"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "fs/promises"
+import { createHash, randomBytes } from "crypto"
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import path from "path"
+import pLimit from "p-limit"
 import { logger } from "@/utils/logger"
 import { storageService } from "@/services/storage"
 import { isPreconditionFailed } from "@xyne/storage"
@@ -24,6 +25,15 @@ import { isPreconditionFailed } from "@xyne/storage"
 
 const SOFFICE_BINARY = process.env.SOFFICE_PATH || "soffice"
 const CONVERSION_TIMEOUT_MS = 60_000
+
+// Each soffice invocation is a real process with a non-trivial memory
+// footprint; an uncapped flood of requests for files the cache hasn't seen
+// yet (e.g. many first-time opens at once) would spawn one soffice per
+// request and risk OOM-ing the pod. Bounds how many run at once per pod —
+// excess requests queue behind this limiter rather than all spawning
+// immediately.
+const SOFFICE_MAX_CONCURRENCY = Number(process.env.SOFFICE_MAX_CONCURRENCY) || 3
+const conversionLimit = pLimit(SOFFICE_MAX_CONCURRENCY)
 
 // Two-tier cache, both keyed on the content hash (this endpoint is
 // stateless — no file/collection id, just bytes, so content is the only key
@@ -50,23 +60,38 @@ export class OfficeConversionError extends Error {
 }
 
 async function readLocalCache(cachePath: string): Promise<Buffer | null> {
+    // Stat and read via the same open file handle (not by path) so the
+    // freshness check and the read see the same inode — a path-based
+    // stat-then-readFile has a window where the file can be replaced or
+    // deleted in between the two calls.
+    let handle
     try {
-        const stats = await stat(cachePath)
+        handle = await open(cachePath, "r")
+        const stats = await handle.stat()
         if (Date.now() - stats.mtimeMs > CACHE_MAX_AGE_MS) return null
-        return await readFile(cachePath)
+        return await handle.readFile()
     } catch {
         return null
+    } finally {
+        await handle?.close().catch(() => {})
     }
 }
 
 async function writeLocalCache(cachePath: string, buffer: Buffer, contentHash: string): Promise<void> {
+    // Write to a randomly-named file (exclusive create, so we never write
+    // through a pre-existing file/symlink an attacker planted at a
+    // predictable path) and rename it into place atomically, rather than
+    // writing straight to the guessable content-addressed cachePath.
+    const tmpPath = `${cachePath}.${randomBytes(8).toString("hex")}.tmp`
     await mkdir(CACHE_DIR, { recursive: true })
-        .then(() => writeFile(cachePath, buffer))
+        .then(() => writeFile(tmpPath, buffer, { flag: "wx" }))
+        .then(() => rename(tmpPath, cachePath))
         .catch(err => {
             logger.warn("[OfficeConversion] Failed to write local cache entry", {
                 contentHash,
                 error: err instanceof Error ? err.message : String(err),
             })
+            return rm(tmpPath, { force: true }).catch(() => {})
         })
 }
 
@@ -121,14 +146,19 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
 
     const workDir = await mkdtemp(path.join(tmpdir(), "office-convert-"))
     const profileDir = path.join(workDir, "profile")
-    const ext = path.extname(originalFilename) || ".bin"
+    // originalFilename is attacker-controlled (the client-supplied upload
+    // name); only accept a plain alphanumeric extension so nothing in it
+    // (path separators, "..", null bytes, ...) can influence where
+    // inputPath actually lands on disk.
+    const rawExt = path.extname(originalFilename)
+    const ext = /^\.[a-zA-Z0-9]{1,10}$/.test(rawExt) ? rawExt : ".bin"
     const inputPath = path.join(workDir, `input${ext}`)
     const outputPath = path.join(workDir, "input.pdf")
 
     try {
         await writeFile(inputPath, buffer)
 
-        await new Promise<void>((resolve, reject) => {
+        await conversionLimit(() => new Promise<void>((resolve, reject) => {
             const args = [
                 "--headless",
                 "--norestore",
@@ -185,7 +215,7 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
                     )
                 }
             })
-        })
+        }))
 
         const result = await readFile(outputPath)
 
