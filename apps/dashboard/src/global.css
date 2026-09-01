@@ -3125,7 +3125,7 @@ img.inline-emoji,
 
 /* Base markdown content styling with text wrapping for overflow prevention.
    Typography sits in `components` so a surface that sets its own size on the
-   wrapper (e.g. AIChatThread's `text-[15px] leading-7`) still wins. */
+   wrapper still wins over this baseline. */
 @layer components {
   .bot-markdown-content,
   .bot-markdown-content-call-summary {

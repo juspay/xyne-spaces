@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Zero } from '@rocicorp/zero';
 import { MessageType } from '../zero/schema.js';
-import type { SdlcDiscussion } from '../sdlc.js';
+import type { EntityLinkContextInput } from '../sdlc.js';
 import { mutators } from '../zero/mutators.js';
 import type { ConversationRef } from './conversationRef.js';
 import { clearDraft } from './draft.js';
@@ -25,8 +25,7 @@ export type SendPayload = {
   conversationId?: string;
   timestamp?: number;
   attachments?: PendingAttachment[];
-  /** SDLC discussion binding: channel sends create a DISCUSSION-linked conversation. */
-  sdlcDiscussion?: SdlcDiscussion;
+  entityLinkContext?: EntityLinkContextInput;
 };
 
 export type SendResult = {
@@ -75,7 +74,7 @@ export function sendMessage(
     }),
     ...(childConversationId !== undefined && { childConversationId }),
     ...(attachments.length > 0 && { attachments }),
-    ...(payload.sdlcDiscussion !== undefined && { sdlcDiscussion: payload.sdlcDiscussion }),
+    ...(payload.entityLinkContext !== undefined && { entityLinkContext: payload.entityLinkContext }),
     sessionId: getCurrentSessionId(),
     zeroStateAtSend,
     mutatorFired: false,
@@ -118,7 +117,9 @@ export function sendMessage(
             timestamp: fireTimestamp,
             type,
             ...(attachmentIds.length > 0 && { attachmentIds }),
-            ...(payload.sdlcDiscussion !== undefined && { sdlcDiscussion: payload.sdlcDiscussion }),
+            ...(payload.entityLinkContext !== undefined && {
+              entityLinkContext: payload.entityLinkContext,
+            }),
           }),
         )
       : zero.mutate(
