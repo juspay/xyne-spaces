@@ -1897,6 +1897,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }
                     field.handleChange(e.target.value);
                   }}
+                  onKeyDown={e => {
+                    // Enter in the single-line title moves focus to the
+                    // description instead of submitting / firing native
+                    // "Please fill out this field" validation.
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      descriptionTextareaRef.current?.focus();
+                    }
+                  }}
                   aria-label='Ticket Title'
                   placeholder='Enter Ticket Title...'
                   data-testid='ticket-title-input'
