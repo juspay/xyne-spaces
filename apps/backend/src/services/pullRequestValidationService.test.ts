@@ -331,14 +331,84 @@ Real content.
     expect(validateSpecSections(bulleted).isValid).toBe(true);
   });
 
-  it('accepts a section and its body on one line', () => {
+  // Bare "Name: body" is not a marker: prose starting with a section name would
+  // otherwise be consumed and truncate the section it sits in.
+  it('accepts a section and its body on one line when the line has markup', () => {
     const inline = `Specification
 
-Problem statement: users cannot log in
-Solutioning: add a login screen
-Test cases: sign in with a valid password
+### Problem statement: users cannot log in
+### Solutioning: add a login screen
+### Test cases: sign in with a valid password
 `;
     expect(validateSpecSections(inline).isValid).toBe(true);
+  });
+
+  it('does not consume prose that starts with a section name', () => {
+    const prose = `## Specification
+
+### Problem statement
+
+Solutioning: we will discuss later, but the real problem is X.
+
+### Solutioning
+
+B.
+
+### Test cases
+
+C.
+`;
+    expect(validateSpecSections(prose).isValid).toBe(true);
+  });
+
+  it('accepts a section whose second occurrence carries the content', () => {
+    const duplicated = `## Specification
+
+### Problem statement
+### Problem statement
+
+Actually explained here.
+
+### Solutioning
+
+Fix.
+
+### Test cases
+
+One.
+`;
+    expect(validateSpecSections(duplicated).isValid).toBe(true);
+  });
+
+  it('does not let an indented backtick line close a fence', () => {
+    const nested = `## Specification
+
+### Problem statement
+
+\`\`\`
+code
+    \`\`\`
+more code
+\`\`\`
+
+### Solutioning
+
+B.
+
+### Test cases
+
+C.
+`;
+    expect(validateSpecSections(nested).isValid).toBe(true);
+  });
+
+  it('ignores the wrapper name if it appears in the required list', () => {
+    expect(
+      validateSpecSections('Specification\nProblem statement\nA.\n', [
+        'Specification',
+        'Problem statement',
+      ]).isValid
+    ).toBe(true);
   });
 
   it('accepts bold labels with an inline body', () => {

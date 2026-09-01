@@ -74,9 +74,14 @@ const matchMarker = (
 ): { name: string; hasInlineBody: boolean } | null => {
   if (LIST_ITEM.test(line.replace(/^>+\s*/, ''))) return null;
 
-  const text = line.replace(/^>+\s*/, '').replace(/^#{1,6}\s*/, '');
+  const bare = line.replace(/^>+\s*/, '');
+  const text = bare.replace(/^#{1,6}\s*/, '');
   const whole = normalizeHeading(text);
   if (sectionNames.has(whole)) return { name: whole, hasInlineBody: false };
+
+  // Inline "Name: body" needs heading or bold markup. Bare prose starting with a
+  // section name is ordinary text, and consuming it truncates the real section.
+  if (!/^(#{1,6}\s|[*_])/.test(bare)) return null;
 
   const separator = text.search(/[:–—]|\s-\s/);
   if (separator > 0) {
@@ -93,7 +98,7 @@ const parseMarkers = (lines: string[], sectionNames: Set<string>): SpecMarker[] 
 
   lines.forEach((raw, index) => {
     // An indented line can neither open nor close a fence.
-    if (!fence && INDENTED_CODE.test(raw)) return;
+    if (INDENTED_CODE.test(raw)) return;
 
     const line = raw.trim().replace(/^>+\s*/, '');
     const fenceMatch = line.match(FENCE);
@@ -121,7 +126,8 @@ export function validateSpecSections(
   description: string | null | undefined,
   sections: readonly string[] = PR_VALIDATION_CONFIG.REQUIRED_SPEC_SECTIONS
 ): SpecValidationResult {
-  const required = [...sections];
+  // The wrapper name can never be satisfied as a section: narrowing removes it.
+  const required = [...sections].filter(section => normalizeHeading(section) !== SPEC_SECTION);
   if (!required.length) return { isValid: false, missing: [], hasSpecHeading: false };
   if (!description || !description.trim()) {
     return { isValid: false, missing: required, hasSpecHeading: false };
@@ -144,15 +150,22 @@ export function validateSpecSections(
       ? markers.slice(wrapper + 1)
       : markers;
 
-  const missing = required.filter(section => {
-    const target = normalizeHeading(section);
-    const index = scope.findIndex(marker => marker.name === target);
-    if (index === -1) return true;
-    if (scope[index]!.hasInlineBody) return false;
+  const hasBody = (index: number): boolean => {
+    if (scope[index]!.hasInlineBody) return true;
     // Content runs to the next section name, or to the end of the description.
     const bodyStart = scope[index]!.line + 1;
     const bodyEnd = index + 1 < scope.length ? scope[index + 1]!.line : lines.length;
-    return !lines.slice(bodyStart, bodyEnd).some(line => line.trim().length > 0);
+    return lines.slice(bodyStart, bodyEnd).some(line => line.trim().length > 0);
+  };
+
+  // Any occurrence with content satisfies the section: a heading duplicated by a
+  // stray edit must not fail a spec whose content is under the second copy.
+  const missing = required.filter(section => {
+    const target = normalizeHeading(section);
+    const occurrences = scope
+      .map((marker, index) => (marker.name === target ? index : -1))
+      .filter(index => index !== -1);
+    return !occurrences.some(hasBody);
   });
 
   return { isValid: missing.length === 0, missing, hasSpecHeading };
@@ -429,7 +442,8 @@ export class PullRequestValidationService {
    */
   private async resolveSpecCheckConfig(
     target: BuildStatusTarget,
-    workspaceId: string
+    workspaceId: string,
+    needSections: boolean
   ): Promise<{ enabled: boolean; sections: string[] }> {
     const fallback = {
       enabled: false,
@@ -455,7 +469,8 @@ export class PullRequestValidationService {
         fallback.enabled,
         context,
       );
-      if (!enabled) return { enabled: false, sections: fallback.sections };
+      // Each lookup is a full config fetch, so skip the list where it is unused.
+      if (!enabled || !needSections) return { enabled, sections: fallback.sections };
 
       const rawSections = await superpositionClient.getStringValue(
         PR_VALIDATION_CONFIG.SPEC_FLAGS.REQUIRED_SECTIONS,
@@ -485,13 +500,20 @@ export class PullRequestValidationService {
     workspaceId: string,
     result: ValidationResult
   ): Promise<void> {
-    const { enabled, sections } = await this.resolveSpecCheckConfig(target, workspaceId);
+    // Destructured consts so the guard below narrows both for the rest of the method.
+    const { ticketDescription, xyneId } = result;
+    const resolvable = ticketDescription !== undefined && xyneId !== undefined;
+    const { enabled, sections } = await this.resolveSpecCheckConfig(
+      target,
+      workspaceId,
+      resolvable,
+    );
     if (!enabled) return;
 
     const specStatus = PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS;
 
     // Pending, not failed: the spec has not been looked at, not found wanting.
-    if (result.ticketDescription === undefined || !result.xyneId) {
+    if (!resolvable) {
       // Bitbucket would leave an INPROGRESS build nothing ever finalizes.
       if (target.provider === VCSProviderType.BITBUCKET_SERVER) return;
       await this.postBuildStatus(
@@ -504,8 +526,7 @@ export class PullRequestValidationService {
       return;
     }
 
-    const ticketId = result.xyneId;
-    const spec = validateSpecSections(result.ticketDescription, sections);
+    const spec = validateSpecSections(ticketDescription, sections);
 
     if (spec.isValid) {
       await this.postBuildStatus(
@@ -520,13 +541,13 @@ export class PullRequestValidationService {
 
     const allMissing = spec.missing.length === sections.length && !spec.hasSpecHeading;
     const errorMessage = allMissing
-      ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.MISSING(ticketId)
+      ? PR_VALIDATION_CONFIG.SPEC_MESSAGES.MISSING(xyneId)
       : PR_VALIDATION_CONFIG.SPEC_MESSAGES.INCOMPLETE(
-          ticketId,
+          xyneId,
           formatMissingSections(spec.missing),
         );
     logger.info(
-      `[PR-Validation] Spec check failed for ${sanitizeForLog(ticketId)}: ` +
+      `[PR-Validation] Spec check failed for ${sanitizeForLog(xyneId)}: ` +
         `missing ${sanitizeForLog(spec.missing.join(', '))}`
     );
     await this.postBuildStatus(target, commitHash, 'failure', errorMessage, specStatus);
