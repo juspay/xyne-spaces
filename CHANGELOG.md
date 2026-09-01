@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.17](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.16...v1.239.0-release-20260827.17) (2026-09-01)
+
+
+### Features
+
+* add restore logic for apps ([#1384](https://github.com/juspay/xyne-spaces/issues/1384)) ([fe0925c](https://github.com/juspay/xyne-spaces/commit/fe0925c89ed7713eea501afd9166d37748756130)), closes [#1370](https://github.com/juspay/xyne-spaces/issues/1370)
+
 ## [1.239.0-release-20260827.16](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.15...v1.239.0-release-20260827.16) (2026-09-01)
 
 
