@@ -481,20 +481,20 @@ const AppRoot = (): ReactElement => {
 
   // Get current location to check if we're on onboarding
   const location = useLocation();
-  const sdlcRepoId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
+  const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
   // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
   // must not also render one (that would double it).
   const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
-  const previousSdlcRepoIdRef = useRef<string | null>(null);
+  const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const previousRepoId = previousSdlcRepoIdRef.current;
-    if (previousRepoId && previousRepoId !== sdlcRepoId) {
+    const previousChannelId = previousSdlcChannelIdRef.current;
+    if (previousChannelId && previousChannelId !== sdlcChannelId) {
       useExternalDebuggerStore.getState().close();
       setIsXyneDebuggerOpen(false);
     }
-    previousSdlcRepoIdRef.current = sdlcRepoId;
-  }, [sdlcRepoId]);
+    previousSdlcChannelIdRef.current = sdlcChannelId;
+  }, [sdlcChannelId]);
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
@@ -540,12 +540,9 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
-  // The external SDLC debugger takes the right panel over Ask AI. On an
-  // /sdlc/<repoId> route SdlcScreen renders its own assistant + debugger, so
-  // neither app-shell panel should appear there.
-  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcRepoId === null;
+  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcChannelId === null;
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
-  // so the host must not also show one (covers both /sdlc and /sdlc/<repoId>).
+  // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
     isXyneAIDrawerOpen &&
     !isMobile &&
@@ -1579,7 +1576,7 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'sdlc/:repoId',
+                  path: 'sdlc/:channelId',
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
@@ -1587,7 +1584,7 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'sdlc/:repoId/:section',
+                  path: 'sdlc/:channelId/:section',
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
@@ -1948,7 +1945,7 @@ export const router = createBrowserRouter(
           ],
         },
         {
-          path: '/newWindow/sdlc/:workspaceId/:repoId/:section',
+          path: '/newWindow/sdlc/:workspaceId/:channelId/:section',
           element: (
             <EncryptionBootstrapProvider>
               <ZeroProvider>
