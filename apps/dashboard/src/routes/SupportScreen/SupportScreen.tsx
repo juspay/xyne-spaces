@@ -566,6 +566,9 @@ const SupportScreen = (): ReactElement => {
   }>();
   const supportBase = workspaceId ? `/${workspaceId}/support` : '/support';
   const navigate = useNavigate();
+  // Stamped by the desk list when it pushes a ticket: the list is the entry directly
+  // behind the detail, so closing the detail pops instead of stacking a second list.
+  const detailRouterState = useLocation().state as { fromDeskList?: boolean } | null;
   // Gate the Tickets shortcut the same way the main rail gates '/projects'.
   const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -3455,6 +3458,10 @@ const SupportScreen = (): ReactElement => {
                             size='sm'
                             variant='ghost'
                             onClick={() => {
+                              if (detailRouterState?.fromDeskList) {
+                                void navigate(-1);
+                                return;
+                              }
                               const back = selectedChannelId
                                 ? `${supportBase}/${selectedChannelId}`
                                 : supportBase;
@@ -4167,7 +4174,14 @@ export const SupportTicketDetail = ({
             : undefined,
         });
         if (sourceTicketXyneId && channelIdParam) {
-          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
+          // Same in-place swap as prev/next — the opener stays directly behind us.
+          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`, {
+            replace: true,
+            state: {
+              ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
+            },
+          });
         }
       } catch (err) {
         toast.error('Unmerge Failed', {
@@ -4176,7 +4190,14 @@ export const SupportTicketDetail = ({
         });
       }
     },
-    [channelIdParam, navigate, navBasePath, supportBase],
+    [
+      channelIdParam,
+      navigate,
+      navBasePath,
+      routerState?.fromDeskList,
+      routerState?.returnToUrl,
+      supportBase,
+    ],
   );
 
   const [allEmails] = useCachedQuery(
@@ -4327,10 +4348,15 @@ export const SupportTicketDetail = ({
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
+    // Swap the ticket in place: pushing would bury the opener under the ticket chain
+    // and leave the back arrow one entry short of it.
     void navigate(`${navBasePath ?? supportBase}/${nextChannelId}/${t.xyneId}`, {
+      replace: true,
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
+        ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+        ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
   };
@@ -4386,15 +4412,17 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
+    // The desk list is the entry directly behind us, so pop it — navigating to the
+    // list instead would leave the ticket sitting one Back away.
+    if (routerState?.fromDeskList) {
+      void navigate(-1);
+      return;
+    }
     // Ticket boards (Kanban, My Tickets) hand us the URL they came from, so
     // "back" returns to that board instead of dumping the user in the channel
     // inbox they never visited. Only same-origin paths are honoured — reject
     // absolute URLs and the "//host" / "/\host" protocol-relative forms so
     // router state can't drive an off-site redirect.
-    if (routerState?.fromDeskList) {
-      void navigate(-1);
-      return;
-    }
     const returnToUrl = routerState?.returnToUrl;
     if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
       void navigate(returnToUrl, { replace: true });
