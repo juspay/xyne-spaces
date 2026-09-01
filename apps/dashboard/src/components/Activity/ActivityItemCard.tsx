@@ -122,12 +122,7 @@ export const ActivityItemCard = ({
       return;
     }
     if (groupActivityIds && groupActivityIds.length > 0) {
-      void zero.mutate(
-        mutators.activities.markManyAsRead({
-          activityIds: groupActivityIds,
-          timestamp: Date.now(),
-        }),
-      );
+      void zero.mutate(mutators.activities.markManyAsRead({ activityIds: groupActivityIds }));
     } else {
       void zero.mutate(mutators.activities.markAsRead({ activityId: activity.id }));
     }

@@ -5179,9 +5179,17 @@ export function createMutators(
           });
         },
       ),
+      // KEEP IN SYNC with shared/src/zero/mutators.ts activities.markManyAsRead.
+      // Batch sibling of markAsRead, for cards that stand in for several
+      // activities (grouped ticket updates). Like markAsRead — and unlike
+      // markAsReadByFilter — it deliberately leaves channel_user_status alone:
+      // its callers pass ticket activities, which never contribute to a channel
+      // badge (both useUnreadCount and handleUnreadCountInner count only
+      // actionSource 'message'), so decrementing here would subtract from a
+      // counter these rows never incremented.
       markManyAsRead: defineMutator(
-        z.object({ activityIds: z.array(z.string()), timestamp: z.number() }),
-        async ({ tx, args: { activityIds, timestamp } }) => {
+        z.object({ activityIds: z.array(z.string()) }),
+        async ({ tx, args: { activityIds } }) => {
           if (activityIds.length === 0) {
             return;
           }
@@ -5190,49 +5198,15 @@ export function createMutators(
             zql.activities.where('id', 'IN', activityIds).where('userId', authData.sub),
           );
 
-          const unreadActivities = activities.filter(activity => !activity.isRead);
-          if (unreadActivities.length === 0) {
-            return;
-          }
-
           await Promise.all(
-            unreadActivities.map(activity =>
-              tx.mutate.activities.update({
-                id: activity.id,
-                isRead: true,
-              }),
-            ),
-          );
-
-          const channelIdCounts = new Map<string, number>();
-          unreadActivities.forEach(activity => {
-            if (activity.channelId) {
-              const currentCount = channelIdCounts.get(activity.channelId) || 0;
-              channelIdCounts.set(activity.channelId, currentCount + 1);
-            }
-          });
-
-          const uniqueChannelIds = Array.from(channelIdCounts.keys());
-          if (uniqueChannelIds.length === 0) {
-            return;
-          }
-
-          const channelUserStatuses = await tx.run(
-            zql.channel_user_status
-              .where('userId', authData.sub)
-              .where('channelId', 'IN', uniqueChannelIds)
-              .where('isDeleted', false),
-          );
-          await Promise.all(
-            channelUserStatuses.map(channelStatus => {
-              const readCount = channelIdCounts.get(channelStatus.channelId) || 0;
-              const newUnreadCount = Math.max(0, channelStatus.unreadCount - readCount);
-              return tx.mutate.channel_user_status.update({
-                id: channelStatus.id,
-                unreadCount: newUnreadCount,
-                updatedAt: timestamp,
-              });
-            }),
+            activities
+              .filter(activity => !activity.isRead)
+              .map(activity =>
+                tx.mutate.activities.update({
+                  id: activity.id,
+                  isRead: true,
+                }),
+              ),
           );
         },
       ),

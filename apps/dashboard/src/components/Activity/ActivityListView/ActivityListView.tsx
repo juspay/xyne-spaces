@@ -19,7 +19,11 @@ import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, UserUser02 } from '@xyne/icons';
-import { groupActivities, countGroupedActivities, type ActivityFeedItem } from '../activityGrouping';
+import {
+  groupActivities,
+  countGroupedActivities,
+  type ActivityFeedItem,
+} from '../activityGrouping';
 import {
   mixpanelService,
   EVENTS,
@@ -736,33 +740,14 @@ const ActivityListView = (): ReactElement => {
   // Read unread activities from state machine (populated by DeferredLoader)
   const unreadActivities = useSelector(stateMachineActor, state => state.context.unreadActivities);
 
-  const activityCounts = useMemo(() => {
-    const emptyCounts: Record<ActivityTab, number> = {
-      all: 0,
-      your_mentions: 0,
-      replies: 0,
-      reactions: 0,
-      tickets: 0,
-      canvas: 0,
-      calls: 0,
-      actionable: 0,
-      fyi: 0,
-      group_mentions: 0,
-    };
-
-    if (!unreadActivities) {
-      return emptyCounts;
-    }
-
-    // Single pass over unreadActivities; each bucket collapses consecutive
-    // same-actor/same-ticket ticket_* activities within the grouping window
-    // into one count, matching what the grouped feed renders as one card.
-    // Cast to ActivityWithRelated in bucket predicates that reuse tab filters
-    // built for the fetched-feed shape — unreadActivities (state machine) has
-    // a slightly different shape, but these predicates only touch fields
-    // present on both.
-    const counts = countGroupedActivities(unreadActivities, {
-      all: activity => isAllVisibleActivity(activity as unknown as ActivityWithRelated),
+  const activityCounts = useMemo((): Record<ActivityTab, number> => {
+    // Each bucket is filtered then grouped then counted, so a run of ticket
+    // activities that renders as one grouped card counts once here too.
+    // unreadActivities (state machine) is a lighter row than the fetched feed;
+    // the cast is safe because both grouping and these predicates only touch
+    // fields present on both shapes.
+    return countGroupedActivities((unreadActivities ?? []) as unknown as ActivityWithRelated[], {
+      all: isAllVisibleActivity,
       your_mentions: activity => activity.actorAction === 'mentioned_user',
       group_mentions: activity => activity.actorAction === 'group_mention',
       // added to maintain backward compat for now, to be deprecated
@@ -783,15 +768,13 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
         (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
-      calls: activity => CALL_ACTIVITY_TYPES.some(type => type === activity.actorAction),
+      calls: isCallActivity,
       actionable: activity =>
         (activity.classification ?? ActivityClassification.PENDING) ===
         ActivityClassification.ACTIONABLE,
       fyi: activity =>
         (activity.classification ?? ActivityClassification.PENDING) === ActivityClassification.FYI,
     });
-
-    return { ...emptyCounts, ...counts };
   }, [unreadActivities]);
 
   const renderActivityList = (feedItems: ActivityFeedItem[]): ReactElement => {

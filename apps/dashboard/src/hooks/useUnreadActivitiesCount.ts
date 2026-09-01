@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import { ActivityClassification } from '@xyne/shared';
 import { stateMachineActor } from '../machines/stateMachine';
-import { countGroupedActivities } from '../components/Activity/activityGrouping';
+import { groupActivities } from '../components/Activity/activityGrouping';
+import type { ActivityWithRelated } from '../types/activity';
 
 /**
  * Hook to get unread activities count with cancelled reactions filtered out
@@ -22,24 +23,25 @@ export const useUnreadActivitiesCount = (): number => {
       return 0;
     }
 
-    const counts = countGroupedActivities(unreadActivities, {
-      visible: activity => {
-        if (activity.actorAction === 'added_v2') return false;
-        if (activity.actorAction === 'removed') return false;
-        if (activity.actionSource === 'call' && activity.actorAction === 'missed_call')
-          return false;
-        const classification = activity.classification ?? ActivityClassification.PENDING;
-        if (classification === ActivityClassification.SKIP) return false;
-        if (activity.actorAction === 'direct_message') {
-          return (
-            classification === ActivityClassification.ACTIONABLE ||
-            classification === ActivityClassification.FYI
-          );
-        }
-        return true;
-      },
+    // Filter then group then count — the same order the Activity feed renders
+    // in, so a run of ticket activities shown as one grouped card counts once.
+    // The cast is safe: grouping and this predicate only touch fields present
+    // on both the state-machine row and the fetched-feed shape.
+    const visible = (unreadActivities as unknown as ActivityWithRelated[]).filter(activity => {
+      if (activity.actorAction === 'added_v2') return false;
+      if (activity.actorAction === 'removed') return false;
+      if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') return false;
+      const classification = activity.classification ?? ActivityClassification.PENDING;
+      if (classification === ActivityClassification.SKIP) return false;
+      if (activity.actorAction === 'direct_message') {
+        return (
+          classification === ActivityClassification.ACTIONABLE ||
+          classification === ActivityClassification.FYI
+        );
+      }
+      return true;
     });
 
-    return counts['visible'] ?? 0;
+    return groupActivities(visible).length;
   }, [unreadActivities]);
 };
