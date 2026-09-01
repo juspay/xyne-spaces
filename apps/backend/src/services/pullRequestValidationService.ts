@@ -89,9 +89,11 @@ export interface ValidatePullRequestParams {
   target?: BuildStatusTarget;
 }
 
-// Superposition's own timeout is 30s; this sits on the webhook response path,
-// which GitHub gives 10s.
-const SPEC_CONFIG_TIMEOUT_MS = 2500;
+// Superposition has no request timeout of its own - SUPERPOSITION_TIMEOUT is
+// plumbed into refreshStrategy.timeout, which the provider never reads, and the
+// bundled HTTP handler defaults to unbounded. This sits on the webhook response
+// path, which GitHub gives 10s, so it needs its own bound.
+const SPEC_CONFIG_TIMEOUT_MS = 2500; 
 
 const withTimeout = async <T>(work: Promise<T>, fallback: T, label: string): Promise<T> => {
   let timer: NodeJS.Timeout | undefined;
