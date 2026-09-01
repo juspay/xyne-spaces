@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.14](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.13...v1.239.0-release-20260827.14) (2026-09-01)
+
+
+### Bug Fixes
+
+* resolve KB collection scope and widen Contents panel ([#1312](https://github.com/juspay/xyne-spaces/issues/1312)) ([24b953d](https://github.com/juspay/xyne-spaces/commit/24b953dd93945c0bf3d80300a80982dd3ab97d44))
+
 ## [1.239.0-release-20260827.13](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.12...v1.239.0-release-20260827.13) (2026-09-01)
 
 
