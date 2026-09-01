@@ -3197,26 +3197,36 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Handle ticket creation success
   const handleTicketCreated = useCallback(
-    (ticket: { id: string; conversationId?: string }) => {
-      if (!channel) return;
-
+    (ticket: { id: string; conversationId?: string; channelId?: string }) => {
+      const ticketChannelId = ticket.channelId || channel?.id;
       toast.success('Ticket created successfully', {
         action: {
           label: 'View Details',
           onClick: () => {
-            void navigate(
-              buildChannelRoute(channel.id, {
-                tab: 'tickets',
-                ticketId: ticket.id,
-                conversationId: ticket.conversationId || '',
-              }),
-            );
+            if (ticketChannelId && ticket.conversationId) {
+              navigate(
+                buildChannelRoute(
+                  `${ticketChannelId}/${ticket.conversationId}/${ticket.id}`,
+                  { selectedTab: 'details' },
+                ),
+              );
+            } else if (ticketChannelId) {
+              navigate(
+                buildChannelRoute(ticketChannelId, {
+                  tab: 'tickets',
+                  ticketId: ticket.id,
+                  conversationId: ticket.conversationId || '',
+                }),
+              );
+            } else {
+              navigate(`${baseRoute}/tickets/${ticket.id}`);
+            }
           },
         },
         duration: 5000,
       });
     },
-    [navigate, channel, buildChannelRoute],
+    [navigate, channel, buildChannelRoute, baseRoute],
   );
 
   // Board context for create ticket modal. When creating from a board route or
@@ -3651,7 +3661,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               </Popover>
             </div>
           )}
-          {canCreateTicket && channel && !channel.isArchived && (
+          {canCreateTicket && ((channel && !channel.isArchived) || isMyTicketsView) && (
             <button
               data-testid='kanban-create-ticket-button'
               data-track-event='BUTTON_CLICK'
@@ -5094,6 +5104,23 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           channelId={channel.id}
           projectId={effectiveProjectId}
           selectedBoardId={currentBoardId}
+          initialStatus={createTicketSeed?.status ?? null}
+          initialStageName={createTicketSeed?.stageName ?? null}
+          initialAssignee={createTicketSeed?.assignee ?? null}
+          onTicketCreated={handleTicketCreated}
+        />
+      )}
+
+      {/* Create Ticket Modal — my-tickets view (no channel context, user picks channel + board) */}
+      {isMyTicketsView && !channel && isCreateModalOpen && (
+        <CreateTicketModal
+          isOpen={isCreateModalOpen}
+          onClose={() => {
+            setIsCreateModalOpen(false);
+            setCreateTicketSeed(null);
+          }}
+          channelId=''
+          isFromSubTicket
           initialStatus={createTicketSeed?.status ?? null}
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
