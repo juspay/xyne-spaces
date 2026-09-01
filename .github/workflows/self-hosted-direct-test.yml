@@ -1,0 +1,9 @@
+name: self-hosted-direct-test
+
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: [self-hosted, github-builds-runners]
+    steps:
+      - run: echo "hello from self-hosted runner"
