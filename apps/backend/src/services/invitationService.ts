@@ -3,7 +3,7 @@
  * Handles invitation creation, sending emails, and acceptance
  */
 
-import { PrismaClient, Invitation, User } from '@prisma/client';
+import { PrismaClient, Invitation, User, Prisma } from '@prisma/client';
 import {
   GuestEntity,
   WorkspaceRole,
@@ -42,7 +42,7 @@ export interface CreateInvitationParams {
 export interface InvitationWithDetails extends Invitation {
   workspace: {
     name: string;
-    inviteExperience: string | null;
+    metadata: Prisma.JsonValue | null;
   } | null;
   organization: {
     name: string;
@@ -263,7 +263,7 @@ export class InvitationService {
       },
       include: {
         workspace: {
-          select: { name: true, inviteExperience: true },
+          select: { name: true, metadata: true },
         },
         organization: {
           select: { name: true },
@@ -284,7 +284,7 @@ export class InvitationService {
       where: { id },
       include: {
         workspace: {
-          select: { name: true, inviteExperience: true },
+          select: { name: true, metadata: true },
         },
         organization: {
           select: { name: true },
@@ -301,7 +301,7 @@ export class InvitationService {
       where: { invitationId },
       include: {
         workspace: {
-          select: { name: true, inviteExperience: true },
+          select: { name: true, metadata: true },
         },
         organization: {
           select: { name: true },

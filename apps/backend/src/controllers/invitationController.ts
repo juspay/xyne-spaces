@@ -31,6 +31,20 @@ function extractDomainFromOrigin(origin: string): string | null {
 }
 
 /**
+ * Read the invite-onboarding mode out of a workspace's `metadata` JSON blob.
+ * Stored there (rather than a dedicated column) so toggling it needs no migration.
+ * Anything other than an explicit "BROWSER" — unset, malformed, or any other
+ * value — resolves to the existing desktop-app-required flow.
+ */
+function resolveInviteExperience(metadata: unknown): InviteExperience {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    const value = (metadata as Record<string, unknown>).inviteExperience;
+    if (value === InviteExperience.BROWSER) return InviteExperience.BROWSER;
+  }
+  return InviteExperience.DESKTOP;
+}
+
+/**
  * Build an invitation link resolving the frontend URL via CAC per-domain.
  *
  * 1. Extract the domain from the request Origin header
@@ -136,7 +150,7 @@ export class InvitationController {
       }
 
       const publicInvitationId = invitation.invitationId || invitation.id;
-      const inviteExperience = invitation.workspace?.inviteExperience;
+      const inviteExperience = resolveInviteExperience(invitation.workspace?.metadata);
       const invitationLink = await buildInvitationLink({
         req,
         workspaceId,
@@ -287,10 +301,7 @@ export class InvitationController {
       }
 
       // Invitation is valid
-      const inviteExperience =
-        invitation.workspace?.inviteExperience === InviteExperience.BROWSER
-          ? InviteExperience.BROWSER
-          : InviteExperience.DESKTOP;
+      const inviteExperience = resolveInviteExperience(invitation.workspace?.metadata);
 
       res.status(200).json({
         valid: true,
@@ -588,7 +599,7 @@ export class InvitationController {
         req,
         workspaceId: workspace.id,
         invitationId,
-        inviteExperience: workspace.inviteExperience,
+        inviteExperience: resolveInviteExperience(workspace.metadata),
       });
       const emailResult = await invitationService.sendInvitationEmail({
         to: normalizedOwnerEmail,
@@ -596,7 +607,7 @@ export class InvitationController {
         workspaceName: workspaceName.trim(),
         invitationLink: provisionInvitationLink,
         invitationId,
-        inviteExperience: workspace.inviteExperience,
+        inviteExperience: resolveInviteExperience(workspace.metadata),
       });
 
       if (!emailResult.success) {
