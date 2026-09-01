@@ -27,6 +27,8 @@ interface SearchParticipantsProps {
     allUserIds?: string[],
   ) => void;
   exclusiveSelection?: boolean;
+  /** Already-selected values that cannot be deselected (no X, no backspace, no clear-all). */
+  lockedValues?: ReadonlySet<string>;
   /**
    * Skip the built-in `label.includes(query)` substring filter. Set this when the
    * caller has already ranked `options` with the shared participant matcher
@@ -51,6 +53,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   hoistSelectedChannelMembers = false,
   toggleExcludedChannelMember,
   exclusiveSelection = true,
+  lockedValues,
   disableClientFiltering = false,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
@@ -91,12 +94,12 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   const filteredOptions = useMemo(() => {
     let opts = options;
 
-    // Filter out channels, user groups if a user or user group is already selected
-    // (only applies in exclusive mode — non-exclusive mode allows any mix).
+    // A channel-scoped selection is its own mode (it unfurls a member checklist), so
+    // once any individual is picked the channel options drop out. User groups are NOT
+    // exclusive: callers expand a group into its members on select, so picking one is
+    // the same as picking those users by hand and must not hide the remaining groups.
     if (exclusiveSelection && (hasUserSelected || hasGroupSelected)) {
-      opts = opts.filter(
-        opt => !opt.value.startsWith('channel:') && !opt.value.startsWith('user_group:'),
-      );
+      opts = opts.filter(opt => !opt.value.startsWith('channel:'));
     }
 
     if (disableClientFiltering || !searchQuery.trim()) return opts;
@@ -160,14 +163,16 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   ]);
 
   const toggleValue = (value: string) => {
+    if (lockedValues?.has(value) && selectedValues.includes(value)) return;
+
     const isChannel = value.startsWith('channel:');
-    const isUserGroup = value.startsWith('user_group:');
 
     if (!selectedValues.includes(value) && hasChannelSelected && !isChannel) {
       return;
     }
 
-    if (!selectedValues.includes(value) && hasGroupSelected && (isChannel || isUserGroup)) {
+    // Groups and channels still don't mix, but group + group does.
+    if (!selectedValues.includes(value) && hasGroupSelected && isChannel) {
       return;
     }
 
@@ -177,17 +182,6 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
       }
       void onMultiSelect([value]);
-      setSearchQuery('');
-      setIsOpen(false);
-      return;
-    }
-
-    if (exclusiveSelection && isUserGroup && !selectedValues.includes(value)) {
-      const option = options.find(opt => opt.value === value);
-      if (option) {
-        setSelectedOptionsMap(prev => new Map(prev).set(value, option));
-      }
-      void onMultiSelect([...selectedValues.filter(v => !v.startsWith('user_group:')), value]);
       setSearchQuery('');
       setIsOpen(false);
       return;
@@ -613,24 +607,26 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               >
                 {option.icon && <span>{option.icon}</span>}
                 <span className='truncate max-w-60 text-foreground'>{option.label}</span>
-                <button
-                  type='button'
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleValue(option.value);
-                  }}
-                  className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
-                  data-track-category='CALLS'
-                  data-track-name='remove-participant'
-                >
-                  <X className='size-3' />
-                </button>
+                {!lockedValues?.has(option.value) && (
+                  <button
+                    type='button'
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleValue(option.value);
+                    }}
+                    className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
+                    data-track-category='CALLS'
+                    data-track-name='remove-participant'
+                  >
+                    <X className='size-3' />
+                  </button>
+                )}
               </div>
             ))}
           </div>
           <button
             type='button'
-            onClick={() => void onMultiSelect([])}
+            onClick={() => void onMultiSelect(selectedValues.filter(v => lockedValues?.has(v)))}
             className='ml-2 shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5'
             data-track-category='CALLS'
             data-track-name='clear-all-participants'

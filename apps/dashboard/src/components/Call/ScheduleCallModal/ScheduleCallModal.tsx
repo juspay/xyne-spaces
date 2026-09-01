@@ -133,6 +133,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   // and whether the exclusion set has been initialized from the channel member list.
   const selectiveEditParticipantIdsRef = useRef<Set<string> | null>(null);
   const selectiveExclusionsInitializedRef = useRef<boolean>(false);
+  // groupId → member user IDs, cached when a group is expanded on select. A picked
+  // group leaves no `user_group:` value behind (it becomes `user:` pills), so this is
+  // the only way to know a group is already represented and hide it from the list.
+  const expandedGroupMembersRef = useRef<Map<string, string[]>>(new Map());
 
   // Fetch recurring call series data via Zero — only when the modal is open and
   // in edit mode for a recurring call, so the query doesn't run when the popup is closed.
@@ -438,15 +442,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       type: 'user_group' as const,
     }));
 
-    // In edit mode, the call's existing channel may be a DM (filtered out of `channels`).
-    // Inject it into options so it remains searchable/selectable.
+    // In edit mode, the call's existing channel may be filtered out of `channels`
+    // (e.g. a Desk channel). Inject it into options so it remains searchable/selectable.
+    // DM/GROUP_DM-backed calls are excluded: they prefill individual participants from
+    // call_participants rather than a channel pill (see useScheduleCallInitialization),
+    // and their `name` is raw user IDs, so injecting one puts a UUID in the picker.
     if (isEditMode && initialCall?.channelId) {
       const alreadyIncluded = channelOptions.some(
         c => c.value === `channel:${initialCall.channelId}`,
       );
       if (!alreadyIncluded) {
         const existingChannel = allVisibleChannels.find(c => c.id === initialCall.channelId);
-        if (existingChannel) {
+        if (
+          existingChannel &&
+          existingChannel.scopeType !== ChannelScopeType.DM &&
+          existingChannel.scopeType !== ChannelScopeType.GROUP_DM
+        ) {
           channelOptions.push({
             ...existingChannel,
             label: existingChannel.name,
@@ -504,10 +515,43 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     fullUserList,
   ]);
 
-  const rankedParticipantOptions = useMemo(
-    () => rankParticipantOptions(inviteUserOrChannelOptions, searchQuery),
-    [inviteUserOrChannelOptions, searchQuery],
+  // Drop groups whose every member is already picked. Re-reading the ref is safe here:
+  // expansion always writes it before updating `participants`, which re-runs this memo.
+  // Removing any one member drops the group back into the list.
+  // A non-organizer participant may only add/remove people (and only on a DM/GROUP_DM
+  // call, which is what gates the entry point). Mirrors the backend rule in
+  // scheduleCallController.updateScheduledCall, which rejects any other field from them.
+  const participantsOnly =
+    isEditMode &&
+    !!initialCall?.organizerUserId &&
+    !!user?.id &&
+    initialCall.organizerUserId !== user.id;
+
+  // Restricted editors may only add, so everyone already on the call is pinned.
+  const lockedParticipantValues = useMemo(
+    () =>
+      participantsOnly && initialCall
+        ? new Set(
+            initialCall.participants
+              .filter(p => !p.isExternal && p.userId !== user?.id)
+              .map(p => `user:${p.userId}`),
+          )
+        : undefined,
+    [participantsOnly, initialCall, user?.id],
   );
+
+  const rankedParticipantOptions = useMemo(() => {
+    const selectedUserIds = new Set(
+      participants.filter(v => v.startsWith('user:')).map(v => v.replace('user:', '')),
+    );
+    const remaining = inviteUserOrChannelOptions.filter(option => {
+      if (!option.value.startsWith('user_group:')) return true;
+      const members = expandedGroupMembersRef.current.get(option.value.replace('user_group:', ''));
+      if (!members?.length) return true;
+      return !members.every(id => selectedUserIds.has(id));
+    });
+    return rankParticipantOptions(remaining, searchQuery);
+  }, [inviteUserOrChannelOptions, searchQuery, participants]);
 
   const handleStartTimeChange = useCallback(
     (timeString: string): void => {
@@ -689,16 +733,24 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             duration: 3000,
           });
         } else {
-          // Edit single occurrence
-          await callService.updateScheduledCall(initialCall.externalId, {
-            title: data.title,
-            startsAt: new Date(data.startsAt).getTime(),
-            endsAt: new Date(data.endsAt).getTime(),
-            ...(postCallUpdates && updateChannelId ? { callUpdatesChannel: updateChannelId } : {}),
-            ...(channelId ? { channelId } : {}),
-            ...(userIds.length > 0 && { targetUserIds: userIds }),
-            externalInvitees: effExternals,
-          });
+          // Edit single occurrence. A participant editor may send nothing but the
+          // invite list — the backend rejects the request outright otherwise.
+          await callService.updateScheduledCall(
+            initialCall.externalId,
+            participantsOnly
+              ? { targetUserIds: userIds }
+              : {
+                  title: data.title,
+                  startsAt: new Date(data.startsAt).getTime(),
+                  endsAt: new Date(data.endsAt).getTime(),
+                  ...(postCallUpdates && updateChannelId
+                    ? { callUpdatesChannel: updateChannelId }
+                    : {}),
+                  ...(channelId ? { channelId } : {}),
+                  ...(userIds.length > 0 && { targetUserIds: userIds }),
+                  externalInvitees: effExternals,
+                },
+          );
           toast.success('Call Updated', {
             description: 'This occurrence has been updated.',
             duration: 3000,
@@ -839,6 +891,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           const memberIds = mappings
             .map((m: { userId: string }) => m.userId)
             .filter((id: string) => id !== user?.id);
+          expandedGroupMembersRef.current.set(groupId, memberIds);
           for (const id of memberIds) {
             expanded.add(`user:${id}`);
           }
@@ -1056,6 +1109,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       id='call-title'
                       type='text'
                       placeholder='Enter call title'
+                      disabled={participantsOnly}
                       tabIndex={0}
                       className={cn(
                         '!text-[22px] truncate',
@@ -1078,7 +1132,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   <p className='text-red-500 text-xs mt-1'>{errors.title.message}</p>
                 )}
               </div>
-              <div className='flex flex-col gap-3'>
+              <div className={cn('flex flex-col gap-3', participantsOnly && 'hidden')}>
                 {isRecurring ? (
                   /* ── Recurring mode: date on its own row, times side-by-side below ── */
                   <>
@@ -1880,6 +1934,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       }
                       {...(channelMembersOptions ? { channelMembersOptions } : {})}
                       excludedChannelMembers={excludedChannelMembers}
+                      {...(lockedParticipantValues
+                        ? { lockedValues: lockedParticipantValues }
+                        : {})}
                       hoistSelectedChannelMembers={isEditMode}
                       toggleExcludedChannelMember={toggleExcludedChannelMember}
                     />
@@ -1895,7 +1952,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 )}
               </div>
 
-              {canUseExternalInvitees && (
+              {canUseExternalInvitees && !participantsOnly && (
                 <div className='space-y-2 -mb-3'>
                   <div className='flex items-baseline justify-between'>
                     <p className='text-muted-foreground text-[13px] leading-5'>External Users</p>
@@ -1919,7 +1976,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
               )}
 
               {/* Edit entire series checkbox — only for recurring calls in edit mode */}
-              {isEditMode && initialCall?.recurringSeriesId && (
+              {isEditMode && initialCall?.recurringSeriesId && !participantsOnly && (
                 <Checkbox
                   checked={editEntireSeries}
                   onChange={setEditEntireSeries}
@@ -1931,7 +1988,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
               {/* Post call updates to channel — shown whenever participants are added; the broadcast
                   channel is independent of the call's own channel. */}
-              {showPostCallUpdates && (
+              {showPostCallUpdates && !participantsOnly && (
                 <div className='space-y-4'>
                   <div className='flex items-center gap-1.5 w-full'>
                     <Checkbox
