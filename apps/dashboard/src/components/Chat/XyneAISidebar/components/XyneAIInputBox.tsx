@@ -1645,6 +1645,45 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onContextSelectionsChange?.(next);
     };
 
+    /**
+     * Fold a whole list of channels into the selection in one push.
+     *
+     * Not a loop over `handlePickerToggleChannel`: that reads `selectedChannels`
+     * from the render it was created in, so every iteration would start from the
+     * same state and the last write would win — attaching one channel out of N.
+     * Building the array once and pushing it once is the only correct shape while
+     * the selection lives above this component.
+     *
+     * The 5-channel cap is applied to the combined list, and a list that overruns
+     * it attaches what fits rather than failing whole — the button says "attach
+     * all 5 from this stream", so attaching four of them is the honest outcome.
+     */
+    const handlePickerAttachChannels = (
+      items: readonly { channel: Channel; displayName: string }[],
+    ): void => {
+      const next = currentSelections();
+      const have = new Set(selectedChannels.map(c => c.id));
+      const room = 5 - selectedChannels.length;
+      if (room <= 0) {
+        toast.error('Maximum 5 channels can be selected', { duration: 2000 });
+        return;
+      }
+      const additions = items
+        .filter(({ channel }) => !have.has(channel.id))
+        .slice(0, room)
+        .map(({ channel, displayName }) => ({
+          id: channel.id,
+          name: displayName,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+        }));
+      if (additions.length === 0) return;
+      next.channels = [...selectedChannels, ...additions];
+      onContextSelectionsChange?.(next);
+      if (additions.length < items.length) {
+        toast.error('Maximum 5 channels can be selected', { duration: 2000 });
+      }
+    };
+
     const handlePickerToggleResult = (result: DisplaySearchResult, tab: TabType): void => {
       // Same raw-id + title conventions as ContextPickerPanel: attachment id
       // wins for dedupe, and Vespa's <hi> highlight tags never reach a pill.
@@ -1730,6 +1769,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           showContextPicker={showContextPicker}
           onCloseContextPicker={closeContextPicker}
           onPickerToggleChannel={handlePickerToggleChannel}
+          onPickerAttachChannels={handlePickerAttachChannels}
           onPickerToggleResult={handlePickerToggleResult}
           threadInfo={activeThreadInfo}
           onThreadClick={handleThreadPillClick}

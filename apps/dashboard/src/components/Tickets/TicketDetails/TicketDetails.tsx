@@ -128,6 +128,7 @@ import {
   type ResolvedBoardAdditionalField,
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
+import { AddToStreamButton } from '../../../routes/StreamsScreen/AddToStreamMenu';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -459,6 +460,14 @@ interface TicketDetailsProps {
   ticketId: string;
   onNavigateToTicket?: (ticketId: string) => void;
   expandedView?: boolean;
+  /**
+   * Drop the back chevron and the ticket id from the expanded header.
+   *
+   * For hosts that already name the ticket in their own chrome and have no
+   * "back" to offer — a Streams column is the ticket, so the id would read
+   * twice and the chevron would point nowhere.
+   */
+  hideBackNav?: boolean;
   onFillRCA?: () => void;
   /** Display the current stage without exposing manual lifecycle transitions. */
   stageReadOnly?: boolean;
@@ -574,6 +583,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   ticketId,
   onNavigateToTicket,
   expandedView = false,
+  hideBackNav = false,
   onFillRCA,
   stageReadOnly = false,
 }) => {
@@ -3258,19 +3268,38 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       {expandedView && (
         <div className='flex items-center justify-between mb-6'>
           <div className='flex items-center gap-x-1/2'>
-            <button
-              onClick={handleBackFromExpandedView}
-              data-track-category='Tickets'
-              data-track-name='BackFromExpandedView'
-            >
-              <ChevronLeft size={18} className='text-foreground' />
-            </button>
-            <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
-              {ticket.xyneId}
-            </span>
+            {!hideBackNav && (
+              <>
+                <button
+                  onClick={handleBackFromExpandedView}
+                  data-track-category='Tickets'
+                  data-track-name='BackFromExpandedView'
+                >
+                  <ChevronLeft size={18} className='text-foreground' />
+                </button>
+                <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
+                  {ticket.xyneId}
+                </span>
+              </>
+            )}
           </div>
           <div className='flex items-center gap-x-2'>
             <BoardTicketNav ticketId={ticketId} />
+            {/* A control of its own rather than an item in an overflow menu,
+                because this header has no overflow menu to put it in. Carries
+                the channel and conversation so the column has a way across to
+                the discussion under the ticket — a ticket column without them
+                renders fine and dead-ends, which is the thing a stream exists
+                not to be. */}
+            <AddToStreamButton
+              source={{
+                kind: 'ticket',
+                ticketId,
+                ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
+                ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
+              }}
+              className='h-8 w-8 rounded-lg border border-border'
+            />
             <Tooltip content='Copy Ticket Link'>
               <Button
                 className='p-2 border border-border rounded-lg h-8 w-8'

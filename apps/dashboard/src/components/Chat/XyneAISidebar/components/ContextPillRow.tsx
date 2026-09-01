@@ -148,6 +148,8 @@ export interface ContextPillRowProps {
   onCloseContextPicker?: () => void;
   /** Toggle a channel into/out of the attached context. */
   onPickerToggleChannel?: ComponentProps<typeof ContextPicker>['onToggleChannel'];
+  /** Attach several stream channels at once ("Attach all N"). */
+  onPickerAttachChannels?: ComponentProps<typeof ContextPicker>['onAttachChannels'];
   /** Toggle a backend result into/out of the attached context. */
   onPickerToggleResult?: ComponentProps<typeof ContextPicker>['onToggleResult'];
 
@@ -231,6 +233,7 @@ export const ContextPillRow = ({
   showContextPicker = false,
   onCloseContextPicker,
   onPickerToggleChannel,
+  onPickerAttachChannels,
   onPickerToggleResult,
   threadInfo,
   onThreadClick,
@@ -950,6 +953,7 @@ export const ContextPillRow = ({
                 recordings: new Set(rowRecordings.map(r => r.id)),
               }}
               {...(onPickerToggleChannel && { onToggleChannel: onPickerToggleChannel })}
+              {...(onPickerAttachChannels && { onAttachChannels: onPickerAttachChannels })}
               {...(onPickerToggleResult && { onToggleResult: onPickerToggleResult })}
               {...(onCloseContextPicker && { onClose: onCloseContextPicker })}
             />

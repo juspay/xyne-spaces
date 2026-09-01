@@ -22,6 +22,7 @@ import {
   Video,
 } from 'lucide-react';
 import { Menu } from '@base-ui/react/menu';
+import { AddToStreamBaseUiMenuItem } from '../../../routes/StreamsScreen/AddToStreamMenu';
 import {
   formatFileSize,
   getFileExtension,
@@ -1046,6 +1047,12 @@ const InlineVideoPlayer: React.FC<{
                   <DeleteButton fileName={fileName} onDelete={handleDelete} showLabel />
                 </Menu.Item>
               )}
+              {/* Name and mime type are stored on the column rather than looked
+                  up, because the file viewer picks a renderer before anything is
+                  fetched — see the `file` case in Streams.types. */}
+              <AddToStreamBaseUiMenuItem
+                source={{ kind: 'file', attachmentId, fileName, mimeType, fileSize }}
+              />
             </div>
           </Menu.Popup>
         </Menu.Positioner>

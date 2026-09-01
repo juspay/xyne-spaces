@@ -50,6 +50,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { AddToStreamMenuItem } from '../../../routes/StreamsScreen/AddToStreamMenu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -447,6 +448,7 @@ const ConversationHeader = ({
                   <ExternalLinkSquare size={16} className='shrink-0' />
                   Open all links
                 </DropdownMenuItem>
+                <AddToStreamMenuItem source={{ kind: 'channel', channelId }} />
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className='gap-2'>
                     <FolderArrowRight size={16} className='shrink-0' />
