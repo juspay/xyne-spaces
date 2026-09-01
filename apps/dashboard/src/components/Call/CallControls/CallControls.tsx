@@ -187,13 +187,13 @@ export function CallControls({
     return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
   }, [activeCalls, externalId]);
   const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
+  // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
-    if (!isHost) return 0;
     return (
       currentCall?.participants?.filter(p => p.response === InvitationResponse.REQUESTED).length ??
       0
     );
-  }, [currentCall?.participants, isHost]);
+  }, [currentCall?.participants]);
   const audioTurnedOffByHost = !isHost && hostControls.turnOffAudio;
   const cameraTurnedOffByHost = !isHost && hostControls.turnOffCamera;
   const screenShareTurnedOffByHost = !isHost && hostControls.turnOffScreenShare;
@@ -486,7 +486,7 @@ export function CallControls({
                 onClick={() => setShowMicMenu(!showMicMenu)}
                 className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select audio devices'
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='Toggle_Mic_Menu'
                 data-track-metadata={JSON.stringify({ showMicMenu: !showMicMenu, callId })}
               >
@@ -605,7 +605,7 @@ export function CallControls({
                 }}
                 className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select camera'
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='Toggle_Camera_Menu'
                 data-track-metadata={JSON.stringify({ showCameraMenu: !showCameraMenu, callId })}
               >

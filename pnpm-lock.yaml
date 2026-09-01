@@ -460,8 +460,8 @@ importers:
         specifier: ^1.0.0
         version: 1.1.1
       superposition-provider:
-        specifier: ^0.97.0
-        version: 0.97.4(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))
+        specifier: ^0.117.2
+        version: 0.117.2(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0))
       undici:
         specifier: 7.29.0
         version: 7.29.0
@@ -1769,6 +1769,9 @@ importers:
       express:
         specifier: ^4.21.0
         version: 4.22.2
+      express-rate-limit:
+        specifier: 8.5.2
+        version: 8.5.2(express@4.22.2)
       ioredis:
         specifier: ^5.8.2
         version: 5.11.1
@@ -18753,8 +18756,8 @@ packages:
     engines: {node: '>=6.4.0 <13 || >=14'}
     deprecated: Please upgrade to superagent v10.2.2+, see release notes at https://github.com/forwardemail/superagent/releases/tag/v10.2.2 - maintenance is supported by Forward Email @ https://forwardemail.net
 
-  superposition-provider@0.97.4:
-    resolution: {integrity: sha512-0+/RYIbmNjjMYcl7FJ0UBwagYpaLsMd5eQcukyJgVGx7MkR41zJTPPlEjQ/RYcqe7zz0y3f9kxHbb8gN3d5cDQ==}
+  superposition-provider@0.117.2:
+    resolution: {integrity: sha512-eCj6ICmIXAOGM/M93dMu5tirRy7pdhJ4GAvwrQ9Kftj1Kx73EWf3Hvw3RIu90iIj3t4DeCpkMF0z+kxZlne/Cg==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       '@openfeature/server-sdk': ^1.13.0
@@ -22677,6 +22680,7 @@ snapshots:
       onnxruntime-node: 1.24.3
       onnxruntime-web: 1.26.0-dev.20260416-b7804b056c
       sharp: 0.35.0
+    optional: true
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -40732,7 +40736,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  superposition-provider@0.97.4(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0)):
+  superposition-provider@0.117.2(@openfeature/server-sdk@1.23.0(@openfeature/core@1.12.0)):
     dependencies:
       '@openfeature/server-sdk': 1.23.0(@openfeature/core@1.12.0)
       koffi: 2.16.3

@@ -25,6 +25,7 @@ import {
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
@@ -322,6 +323,10 @@ export const NotificationHandler: React.FC = () => {
             action: {
               label: 'View',
               onClick: (): void => {
+                globalClickTracker.trackManualEvent(
+                  'NOTIFICATIONS',
+                  'CLICK_NOTIFICATION_TOAST_VIEW',
+                );
                 void handleNotificationClick(resolvedActionUrl, notificationWorkspaceId);
               },
             },
@@ -579,6 +584,12 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (isElectron && window.electronAPI && typeof window.electronAPI.onNavigateTo === 'function') {
       const handleNavigate = (url: string, workspaceId?: string): void => {
+        // The navigate-to IPC fires for notifications, deep links, tray and
+        // overlay navigations alike — the renderer cannot tell them apart, so
+        // this is recorded as a generic externally-triggered navigation.
+        globalClickTracker.trackManualEvent('NAVIGATION', 'ELECTRON_NAVIGATE', undefined, {
+          to: url,
+        });
         void handleNotificationClick(url, workspaceId);
       };
 

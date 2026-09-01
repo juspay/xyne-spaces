@@ -14,6 +14,7 @@ export { userProviderCredentialsRepository } from "./userProviderCredentialsRepo
 export { agentProviderCredentialsRepository } from "./agentProviderCredentialsRepository.js";
 export { sharedProviderCredentialRepository } from "./sharedProviderCredentialRepository.js";
 export { userSubagentConfigRepository } from "./userSubagentConfigRepository.js";
+export { localHarnessRepository } from "./localHarnessRepository.js";
 export { userRepository } from "./userRepository.js";
 export { skillRepository } from "./skillRepository.js";
 export { subagentDefinitionRepository } from "./subagentDefinitionRepository.js";

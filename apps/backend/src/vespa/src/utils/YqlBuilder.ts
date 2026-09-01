@@ -51,6 +51,12 @@ export interface SlackFilters {
   // or reference a channel (channelMentions field). Both are exact attribute membership filters.
   mentionedUserIds?: string[];
   mentionedChannelIds?: string[];
+  // Thread classification. threadType lives ONLY on a thread's root message, so filtering it
+  // yields one hit per matching thread — "show me the ISSUE threads". messageActs lives on
+  // each message the classifier cited as evidence, so filtering that yields the individual
+  // messages that justified a tag. Different questions; both exact attribute filters.
+  threadType?: string[];
+  messageActs?: string[];
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -794,6 +800,24 @@ export class YqlBuilder {
       conditions.push(`(${mentionedChannels})`);
     }
 
+    // Thread-type filter - the root messages of threads carrying these types.
+    if (filters.threadType && filters.threadType.length > 0) {
+      const threadTypes = filters.threadType
+        .map((type) => `threadType contains ${params.bind('threadType', type.trim())}`)
+        .join(' or ');
+      conditions.push(`(${threadTypes})`);
+    }
+
+    // Message-act filter - the individual messages the classifier cited as evidence for
+    // these types. Separate from threadType on purpose: OR-ing the two would return a
+    // thread's root AND its evidence messages as if they were unrelated hits.
+    if (filters.messageActs && filters.messageActs.length > 0) {
+      const acts = filters.messageActs
+        .map((act) => `messageActs contains ${params.bind('messageActs', act.trim())}`)
+        .join(' or ');
+      conditions.push(`(${acts})`);
+    }
+
     if (filters.createdBefore) {
       const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
       if (timestamp) conditions.push(`createdAtTimestamp < ${timestamp}`);
@@ -1349,12 +1373,16 @@ export class YqlBuilder {
    *                                    (imported as channelRef.docId)
    *   docType           -> docType   : every schema ('all')
    *   date / hour       -> createdAt : every schema except mail (mail uses `timestamp`)
+   *   threadType        -> threadType: chat_message only, and only on a thread's ROOT
+   *                                    message — so one group entry is one thread, with no
+   *                                    dedupe needed
    */
   private static readonly GROUP_FIELD_SCHEMAS: Record<string, VespaSchema[] | 'all'> = {
     senderId: [messageSchema, attachmentSchema],
     userId: [messageSchema, attachmentSchema],
     channelId: [messageSchema, attachmentSchema, ticketSchema, fileSchema, mailSchema],
     docType: 'all',
+    threadType: [messageSchema],
     date: [messageSchema, channelSchema, attachmentSchema, ticketSchema, fileSchema, userSchema],
     hour: [messageSchema, channelSchema, attachmentSchema, ticketSchema, fileSchema, userSchema],
   };
@@ -1414,6 +1442,15 @@ export class YqlBuilder {
       case 'hour':
         // Group by hour
         return `all(group(time.hourofday(createdAt)) max(24) each(max(10) each(output(summary()))))`;
+
+      case 'threadType':
+        // Counts only — no `each(...)` emitting summaries. This answers "how many threads
+        // carry each tag" for the whole vocabulary in ONE round trip; asking per name would
+        // be a query per candidate on a page that lists them all.
+        //
+        // threadType lives only on a thread's root message, so a group's count IS a thread
+        // count with no dedupe.
+        return `all(group(threadType) max(${maxGroups}) each(output(count(), max(createdAtTimestamp))))`;
 
       default:
         // Unknown groupBy field — return empty to avoid injecting arbitrary field names
