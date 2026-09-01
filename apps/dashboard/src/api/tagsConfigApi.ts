@@ -61,9 +61,16 @@ export const tagsConfigApi = {
     return res.data.tags;
   },
 
-  getAllGeneratedTags: async (channelId: string): Promise<ChannelGeneratedTagItem[]> => {
-    const res = await apiInstance.get<{ tags: ChannelGeneratedTagItem[] }>(
-      `/channels/${channelId}/tags-config/all-generated-tags`,
+  getGeneratedTagCategories: async (channelId: string): Promise<string[]> => {
+    const res = await apiInstance.get<{ categories: string[] }>(
+      `/channels/${channelId}/tags-config/generated-tag-categories`,
+    );
+    return res.data.categories;
+  },
+
+  getGeneratedTagsByCategory: async (channelId: string, tagCategory: string): Promise<string[]> => {
+    const res = await apiInstance.get<{ tags: string[] }>(
+      `/channels/${channelId}/tags-config/generated-tags/${encodeURIComponent(tagCategory)}`,
     );
     return res.data.tags;
   },
