@@ -48,6 +48,7 @@ import { callShareService } from '@/services/callShareService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
+import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 
@@ -725,25 +726,15 @@ export class CallController {
         const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
         if (parsedSdlcLink.success) {
           const link = parsedSdlcLink.data;
-          const sdlcRepo = await db.repo.findFirst({
-            where: { id: link.repoId, channelId: channel.id },
-            select: { id: true },
-          });
-          const linkTargetValid = sdlcRepo
-            ? link.ownerType === 'CANVAS'
+          const linkTargetValid =
+            link.ownerType === 'CANVAS'
               ? Boolean(
                   await db.canvas.findFirst({
                     where: { id: link.ownerId, channelId: channel.id },
                     select: { id: true },
                   }),
                 )
-              : Boolean(
-                  await db.sdlcTrack.findFirst({
-                    where: { id: link.ownerId, repoId: link.repoId },
-                    select: { id: true },
-                  }),
-                )
-            : false;
+              : await isTrackInChannel(db, link.ownerId, channel.id);
           if (linkTargetValid) {
             validatedSdlcLink = link;
           } else {

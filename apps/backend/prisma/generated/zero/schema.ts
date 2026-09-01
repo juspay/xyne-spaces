@@ -85,6 +85,7 @@ export const ticketTable = table("tickets")
     statusUpdatedAt: number(),
     merchantId: string().optional(),
     conversationId: string(),
+    messageId: string().optional(),
     channelId: string(),
     eta: number().optional(),
     firstRespondedAt: number().optional(),
@@ -1173,6 +1174,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(),
     initial_message_md: string().optional(),
     parent_message_md: string().optional(),
+    sub_tickets_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
     threadType: string().optional(),
@@ -1996,7 +1998,8 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   .columns({
     id: string(),
     workspaceId: string(),
-    repoId: string(),
+    repoId: string().optional(),
+    channelId: string(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
@@ -2011,7 +2014,7 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
     artifactId: string(),
-    repoId: string(),
+    repoId: string().optional(),
     artifactType: string(),
     artifactStatus: string(),
     workflowExecutionId: string().optional(),
@@ -2028,7 +2031,7 @@ export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
     workspaceId: string(),
     id: string(),
-    repoId: string(),
+    repoId: string().optional(),
     name: string(),
     description: string().optional(),
     status: string(),
@@ -4059,6 +4062,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ["channelId"],
     destSchema: repoTable,
   }),
+  sdlcEntityLinks: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: sdlcEntityLinkTable,
+  }),
   collectionPermissions: many({
     sourceField: ["id"],
     destField: ["channelId"],
@@ -4490,6 +4498,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     sourceField: ["repoId"],
     destField: ["id"],
     destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 

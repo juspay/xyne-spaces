@@ -39,6 +39,8 @@ import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
+import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
+import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
@@ -227,6 +229,7 @@ export class TicketController {
     metadata?: Record<string, any>;
     messageContent?: string;
     messageSubtype?: string;
+    entityLinkContext?: EntityLinkOwner;
   }): Promise<Ticket> {
     const {
       title,
@@ -242,9 +245,8 @@ export class TicketController {
       metadata = {},
       messageContent,
       messageSubtype = 'ai_ticket',
+      entityLinkContext,
     } = params;
-
-    const db = DatabaseClient.getInstance();
 
     const ticket = await prisma.$transaction(async (tx) => {
       // Get channelId from conversation
@@ -260,10 +262,13 @@ export class TicketController {
       // Generate xyneId using project-scoped format
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
+      const creationMessageId = randomUUID();
+
       // Create ticket
       const ticket = await this.ticketRepository.createTicket({
         title,
         description,
+        sourceMessageId: creationMessageId,
         createdBy,
         updatedBy,
         assignedTo: assignedTo || undefined,
@@ -279,9 +284,9 @@ export class TicketController {
 
       // Post ticket notification as SYSTEM message in conversation
       const now = new Date();
-      await db.message.create({
+      await tx.message.create({
         data: {
-          messageId: randomUUID(),
+          messageId: creationMessageId,
           conversationId,
           senderId: createdBy,
           workspaceId: channelWorkspaceId,
@@ -299,7 +304,7 @@ export class TicketController {
       });
 
       // Update conversation reply count and set ticketId
-      await db.conversation.update({
+      await tx.conversation.update({
         where: { conversationId },
         data: {
           replyCount: { increment: 1 },
@@ -309,13 +314,13 @@ export class TicketController {
       });
 
       // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
-      await db.conversationParticipant.updateMany({
+      await tx.conversationParticipant.updateMany({
         where: { conversationId },
         data: { lastReplyAt: now },
       });
 
       // Add/update ticket creator as MENTIONED participant (subscribed by default)
-      await db.conversationParticipant.upsert({
+      await tx.conversationParticipant.upsert({
         where: {
           conversationId_userId: {
             conversationId,
@@ -337,6 +342,15 @@ export class TicketController {
           isSubscribed: true,
         },
       });
+
+      const linkOwner = entityLinkContext ?? (await resolveInheritedOwner(tx, conversationId));
+      if (linkOwner) {
+        await linkCreatedEntities(
+          tx,
+          { owner: linkOwner, channelId, conversationId, ticketId: ticket.id },
+          { workspaceId: channelWorkspaceId, userId: createdBy },
+        );
+      }
 
       await this.channelRepository.updateLastActivity(channelId);
 
@@ -504,6 +518,7 @@ export class TicketController {
         closedAt,
         closedBy,
         sourceConversationId,
+        sourceMessageId,
         channelId,
         excludedChatAttachmentIds,
         draftAttachmentIds,
@@ -546,6 +561,20 @@ export class TicketController {
       }
 
       // Extract dynamic fields if present (support both string and string[] for MULTI_SELECT)
+      let entityLinkOwner: EntityLinkOwner | undefined;
+      if (req.body.entityLinkContext) {
+        try {
+          const rawStamp =
+            typeof req.body.entityLinkContext === 'string'
+              ? JSON.parse(req.body.entityLinkContext)
+              : req.body.entityLinkContext;
+          entityLinkOwner = entityLinkOwnerSchema.parse(rawStamp);
+        } catch {
+          res.status(400).json({ error: 'Invalid entityLinkContext' });
+          return;
+        }
+      }
+
       const dynamicFields = (req.body.dynamicFields as Record<string, string | string[]>) || {};
       const requiredFields = { title, description, projectId };
       for (const [field, value] of Object.entries(requiredFields)) {
@@ -700,6 +729,24 @@ export class TicketController {
         }
       }
 
+      if (sourceMessageId) {
+        const sourceMessage = await this.messageRepository.findById(sourceMessageId);
+        if (!sourceMessage || sourceMessage.workspaceId !== req.user.workspaceId) {
+          res.status(400).json({ error: 'Source message not found' });
+          return;
+        }
+        const existingFromMessage = await prisma.ticket.findUnique({
+          where: { messageId: sourceMessageId },
+          select: { xyneId: true },
+        });
+        if (existingFromMessage) {
+          res.status(409).json({
+            error: `A ticket (${existingFromMessage.xyneId}) was already created from this message`,
+          });
+          return;
+        }
+      }
+
       // Auto-assign ticket if userGroupId is provided but assignedTo is not
       let finalAssignedTo = assignedTo;
       let pendingFullRoleAssignment = false;
@@ -795,6 +842,7 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
+            sourceMessageId: sourceMessageId ?? existingConversation.initialMessageId ?? undefined,
             ticketType: effectiveTicketType,
             stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
@@ -890,6 +938,21 @@ export class TicketController {
 
           // If there were any excluded attachments, they remain as CHAT attachments
           // (they won't be deleted since the conversation still exists)
+
+          const linkOwner =
+            entityLinkOwner ?? (await resolveInheritedOwner(tx, conversationId));
+          if (linkOwner) {
+            await linkCreatedEntities(
+              tx,
+              {
+                owner: linkOwner,
+                channelId: channelIdFromConversation,
+                conversationId,
+                ticketId: ticket.id,
+              },
+              { workspaceId: existingConversationWorkspaceId, userId },
+            );
+          }
         } else {
           let doNotPostToChannel = false;
           if (fromTicketsTab) {
@@ -931,6 +994,7 @@ export class TicketController {
             closedBy,
             merchantId,
             xyneId,
+            sourceMessageId: sourceMessageId ?? initialMessageId,
             ticketType: effectiveTicketType,
             stageName: effectiveStageName,
             dynamicFields: dynamicFields as Record<string, string>,
@@ -997,6 +1061,29 @@ export class TicketController {
               isSubscribed: true,
             },
           });
+
+          let newConversationLinkOwner = entityLinkOwner;
+          if (!newConversationLinkOwner && sourceMessageId) {
+            const stampSourceMessage = await this.messageRepository.findById(sourceMessageId);
+            if (stampSourceMessage?.conversationId) {
+              newConversationLinkOwner = (await resolveInheritedOwner(
+                tx,
+                stampSourceMessage.conversationId,
+              )) ?? undefined;
+            }
+          }
+          if (newConversationLinkOwner) {
+            await linkCreatedEntities(
+              tx,
+              {
+                owner: newConversationLinkOwner,
+                channelId: channelId!,
+                conversationId,
+                ticketId: ticket.id,
+              },
+              { workspaceId: newConversationWorkspaceId, userId },
+            );
+          }
         }
 
         // Get workspaceId from channel for attachments
@@ -1416,6 +1503,13 @@ export class TicketController {
       if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
           const target = error.meta?.target as string[];
+          if (target && target.includes('messageId')) {
+            res.status(409).json({
+              error: 'A ticket was already created from this message',
+              code: 'DUPLICATE_SOURCE_MESSAGE',
+            });
+            return;
+          }
           if (target && target.includes('xyneId')) {
             res.status(409).json({
               error: 'Ticket ID conflict. Please try again.',

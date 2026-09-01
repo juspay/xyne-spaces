@@ -225,6 +225,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const userGroups = useUserGroups();
 
   const theme = themeQuartz.withParams({
+    backgroundColor: 'hsl(var(--background))',
+    foregroundColor: 'hsl(var(--foreground))',
+    chromeBackgroundColor: 'hsl(var(--card))',
     headerBackgroundColor: 'hsl(var(--card))',
     headerTextColor: 'hsl(var(--muted-foreground))',
     headerFontWeight: '600',
@@ -264,6 +267,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         headerName: 'Ticket name',
         field: 'title',
         minWidth: isComfortView ? 340 : 300,
+        flex: 1,
         editable: true,
         cellEditor: 'agTextCellEditor',
         cellEditorParams: {
