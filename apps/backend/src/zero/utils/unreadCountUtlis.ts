@@ -56,8 +56,8 @@ async function handleUnreadCountInner(
     } else {
       await Promise.all(
         statuses.map(async (status) => {
-          // Only unread top-level message activities count toward a channel
-          // badge; ticket/canvas/call activities and thread replies never do.
+          // Only unread message activities count toward a channel badge;
+          // ticket/canvas/call activities never do.
           const activities = await db.activity.findMany({
             where: {
               userId: status.userId,
@@ -66,7 +66,6 @@ async function handleUnreadCountInner(
               actionSource: 'message',
               actorAction: { notIn: ['added', 'added_v2', 'removed'] },
               classification: { not: 'SKIP' },
-              isThreadActivity: { not: true },
             },
             select: {
               messageId: true,
@@ -76,8 +75,21 @@ async function handleUnreadCountInner(
 
           // Dedupe by message so several activities on the same top-level
           // message (e.g. a reply plus a mention) still count once.
-          const uniqueMessageIds = new Set(activities.map(a => a.messageId ?? a.actionSourceId));
-          const unreadActivitiesCount = uniqueMessageIds.size;
+          const uniqueMessageIds = [
+            ...new Set(activities.map(a => a.messageId ?? a.actionSourceId)),
+          ];
+
+          let unreadActivitiesCount = 0;
+          if (uniqueMessageIds.length > 0) {
+            const topLevelMessages = await db.conversation.findMany({
+              where: { initialMessageId: { in: uniqueMessageIds } },
+              select: { initialMessageId: true }
+            });
+            // initialMessageId is indexed but not unique, so dedupe again.
+            unreadActivitiesCount = new Set(
+              topLevelMessages.map(c => c.initialMessageId),
+            ).size;
+          }
 
           if (unreadActivitiesCount !== status.unreadCount) {
             await db.channelUserStatus.update({
