@@ -1,3 +1,10 @@
+## [1.251.0](https://github.com/juspay/xyne-spaces/compare/v1.250.6...v1.251.0) (2026-09-01)
+
+
+### Features
+
+* make templates private ([#1280](https://github.com/juspay/xyne-spaces/issues/1280)) ([33348e2](https://github.com/juspay/xyne-spaces/commit/33348e20161da270ab3018c357a4c3cd91bef8b2))
+
 ## [1.250.6](https://github.com/juspay/xyne-spaces/compare/v1.250.5...v1.250.6) (2026-09-01)
 
 
