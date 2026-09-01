@@ -776,7 +776,6 @@ export const prThreadLinkTable = table("pr_thread_links")
 export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_ingestion_batches_v2")
   .columns({
     id: string(),
-    orgId: string().optional(),
     reportDate: number(),
     source: string(),
     idempotencyKey: string(),
@@ -800,7 +799,7 @@ export const teamIntelligenceIngestionBatchV2Table = table("team_intelligence_in
 
 export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_user_ingestions_v2")
   .columns({
-    orgId: string().optional(),
+    workspaceId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -827,7 +826,7 @@ export const teamIntelligenceUserIngestionV2Table = table("team_intelligence_use
 
 export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_summaries_v2")
   .columns({
-    orgId: string().optional(),
+    workspaceId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -855,7 +854,7 @@ export const teamIntelligenceTeamSummaryV2Table = table("team_intelligence_team_
 
 export const teamIntelligenceOrgSummaryV2Table = table("team_intelligence_org_summaries_v2")
   .columns({
-    orgId: string().optional(),
+    workspaceId: string().optional(),
     id: string(),
     batchId: string(),
     reportDate: number(),
@@ -1346,9 +1345,6 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
-    deskReportEnabled: boolean().optional(),
-    deskReportAgentSlug: string().optional(),
-    deskReportRangeDays: number().optional(),
   })
   .primaryKey("channelId");
 
