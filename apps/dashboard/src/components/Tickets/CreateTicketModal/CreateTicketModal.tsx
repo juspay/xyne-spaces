@@ -2334,12 +2334,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         )}
 
         {/* Channel and Board Selection */}
-        <div
-          className={cn(
-            'flex items-center gap-2.5 pb-2',
-            subTickets.length > 0 && 'pt-4',
-          )}
-        >
+        <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
           {/* Channel Selection */}
           {(isFromSubTicket || isFromAI || releaseOnly) && (
             <form.Field

@@ -40,7 +40,6 @@ const INPUT_CLASS =
 const LABEL_CLASS = 'block text-xs font-medium mb-0.5';
 const HELP_CLASS = 'text-[11px] text-muted-foreground mt-0.5';
 
-
 const RELEASE_TRACKING_MODES: Array<{
   value: ReleaseTrackingModeValue;
   label: string;
@@ -106,7 +105,6 @@ const SelectionCard = ({
     </div>
   </button>
 );
-
 
 // ─── Step 2: Applications + Channel ─────────────────────────────────────────
 
@@ -649,8 +647,7 @@ const ReleaseConfigWizardForm = ({
     [existingConfig],
   );
 
-  const canProceed =
-    !!form.sharedRepoUrl.trim() && form.applications.some(app => app.name.trim());
+  const canProceed = !!form.sharedRepoUrl.trim() && form.applications.some(app => app.name.trim());
 
   // In add mode, gate on the new row itself being filled — the group already
   // has named services, so the generic "some app has a name" check is always

@@ -161,7 +161,12 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
   if (showTodo && mandatoryTodo && !formValues?.status) return 'Status is required';
   if (!releaseOnly && showDueDate && mandatoryDueDate && !formValues?.eta)
     return 'Due Date is required';
-  if (!releaseOnly && showLabels && mandatoryLabels && (!formValues?.tags || formValues.tags.length === 0))
+  if (
+    !releaseOnly &&
+    showLabels &&
+    mandatoryLabels &&
+    (!formValues?.tags || formValues.tags.length === 0)
+  )
     return 'Labels are required';
   if (showMerchantId && mandatoryMerchantId && !formValues?.merchantId?.trim())
     return 'Merchant ID is required';

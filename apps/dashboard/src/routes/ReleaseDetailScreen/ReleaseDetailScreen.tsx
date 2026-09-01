@@ -584,8 +584,7 @@ const ReleaseDetailScreen = (): ReactElement => {
   const releaseTicketConversationId = (
     releaseTicket as { conversationId?: string | null } | undefined
   )?.conversationId;
-  const canGoToTicket =
-    !!returnToUrl || !!(releaseTicketChannelId && releaseTicketConversationId);
+  const canGoToTicket = !!returnToUrl || !!(releaseTicketChannelId && releaseTicketConversationId);
   const goToReleaseTicket = (): void => {
     if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
       void navigate(returnToUrl);
@@ -1207,8 +1206,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                 ) : (
                   <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
                     <p className='text-sm text-muted-foreground'>
-                      No release notes yet. They appear here once commit analysis has run for
-                      this release — use “Re-run Analysis” on the Dev Tickets tab to generate them.
+                      No release notes yet. They appear here once commit analysis has run for this
+                      release — use “Re-run Analysis” on the Dev Tickets tab to generate them.
                     </p>
                   </div>
                 )}
