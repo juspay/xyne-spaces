@@ -6,6 +6,8 @@ on:
 
 jobs:
   test:
-    runs-on: [self-hosted, github-builds-runners]
+    runs-on:
+      group: Default
+      labels: [self-hosted, github-builds-runners]
     steps:
       - run: echo "hello from self-hosted runner"
