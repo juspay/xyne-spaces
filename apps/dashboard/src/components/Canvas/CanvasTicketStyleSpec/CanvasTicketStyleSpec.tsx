@@ -36,6 +36,8 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
   const [previewText, setPreviewText] = useState('');
   const statusLabel = ticket?.stageName?.trim() || formatTicketStatus(ticket?.statusV2);
   const isUnavailable = ticketDetails.type === 'complete' && !ticket;
+  const accessState = ticket ? 'available' : isUnavailable ? 'unavailable' : 'loading';
+  const isInteractive = accessState === 'available';
   const assigneeLabel = ticket?.assignedTo
     ? assignedUser
       ? getUserDisplayName(assignedUser)
@@ -66,10 +68,18 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
       data-canvas-ticket-channel-id={ticket?.channelId ?? undefined}
       data-canvas-ticket-conversation-id={ticket?.conversationId ?? undefined}
       data-canvas-ticket-status={ticket?.statusV2 ?? undefined}
+      data-canvas-ticket-access={accessState}
       className='canvas-ticket-anchor'
-      role='link'
-      tabIndex={0}
-      aria-label={ticket ? `Open ${ticket.xyneId}: ${ticket.title}` : 'Open ticket'}
+      role={isInteractive ? 'link' : undefined}
+      tabIndex={isInteractive ? 0 : -1}
+      aria-disabled={!isInteractive || undefined}
+      aria-label={
+        isUnavailable
+          ? 'Ticket unavailable or you do not have access'
+          : ticket
+            ? `Open ${ticket.xyneId}: ${ticket.title}`
+            : 'Ticket details are loading'
+      }
     >
       {ticket?.xyneId && (
         <span className='canvas-ticket-anchor__id' contentEditable={false}>
@@ -103,7 +113,7 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
       )}
       {isUnavailable && (
         <span className='canvas-ticket-anchor__unavailable' contentEditable={false}>
-          Ticket unavailable
+          Ticket unavailable or no access
         </span>
       )}
     </span>

@@ -98,6 +98,7 @@ export function useCanvasTicketEditorBridge({
       if (!(target instanceof Element)) return null;
       const anchor = target.closest<HTMLElement>(CANVAS_TICKET_SELECTOR);
       if (!anchor || !container.contains(anchor)) return null;
+      if (anchor.dataset['canvasTicketAccess'] !== 'available') return null;
       return anchor;
     };
 

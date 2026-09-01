@@ -2697,12 +2697,17 @@ html .bn-code-block-source-popup-ok-button:hover {
     box-shadow 150ms ease;
 }
 
-.canvas-ticket-anchor[data-canvas-ticket-id]:hover,
-.canvas-ticket-anchor[data-canvas-ticket-id]:focus-visible {
+.canvas-ticket-anchor[data-canvas-ticket-access="available"]:hover,
+.canvas-ticket-anchor[data-canvas-ticket-access="available"]:focus-visible {
   border-color: hsl(var(--border));
   background: hsl(var(--card));
   box-shadow: 0 1px 2px hsl(var(--foreground) / 0.05);
   outline: none;
+}
+
+.canvas-ticket-anchor[data-canvas-ticket-access="loading"],
+.canvas-ticket-anchor[data-canvas-ticket-access="unavailable"] {
+  cursor: default;
 }
 
 .canvas-ticket-anchor__id {
