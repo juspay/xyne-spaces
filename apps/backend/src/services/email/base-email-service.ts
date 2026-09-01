@@ -30,6 +30,7 @@ export interface SendInvitationEmailParams {
   invitationId: string;
   tempPassword?: string;
   frontendUrl?: string;
+  inviteExperience?: string | null;
 }
 
 /**
@@ -60,12 +61,12 @@ export abstract class BaseEmailService {
    * Override in a concrete provider to use a provider-native template engine.
    */
   async sendInvitationEmail(params: SendInvitationEmailParams): Promise<EmailResult> {
-    const { to, inviterName, workspaceName, invitationLink, tempPassword } = params;
+    const { to, inviterName, workspaceName, invitationLink, tempPassword, inviteExperience } = params;
 
     const subject = `You've been invited to join ${workspaceName} on Xyne Spaces`;
     const frontendUrl = params.frontendUrl ?? config.frontendUrl;
-    const html = invitationEmailHtml({ inviterName, workspaceName, invitationLink, tempPassword, frontendUrl });
-    const text = invitationEmailText({ inviterName, workspaceName, invitationLink, tempPassword, frontendUrl });
+    const html = invitationEmailHtml({ inviterName, workspaceName, invitationLink, tempPassword, frontendUrl, inviteExperience });
+    const text = invitationEmailText({ inviterName, workspaceName, invitationLink, tempPassword, frontendUrl, inviteExperience });
 
     return this.sendEmail({ to, subject, html, text });
   }

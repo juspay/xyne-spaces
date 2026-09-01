@@ -1498,6 +1498,7 @@ model Workspace {
   workspaceType String?
   joinPolicy    String?
   landingChannelId String?
+  inviteExperience String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
