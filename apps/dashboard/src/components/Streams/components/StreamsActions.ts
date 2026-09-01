@@ -1,4 +1,3 @@
-import { createContext, useContext } from 'react';
 import type { ColumnActivity } from '../hooks/useColumnActivity';
 import type { ColumnSource } from '../utils/Streams.types';
 
@@ -41,16 +40,3 @@ export interface StreamsActions {
    */
   closeColumn: (columnId: string) => void;
 }
-
-const NOOP: StreamsActions = {
-  openBeside: () => {},
-  updateSource: () => {},
-  reportActivity: () => {},
-  closeColumn: () => {},
-};
-
-const StreamsActionsContext = createContext<StreamsActions>(NOOP);
-
-export const StreamsActionsProvider = StreamsActionsContext.Provider;
-
-export const useStreamsActions = (): StreamsActions => useContext(StreamsActionsContext);

@@ -32,8 +32,7 @@ import { useColumnDrag, type MarkerRect } from './hooks/useColumnDrag';
 import { useStreamActivity } from './hooks/useStreamActivity';
 import { useAttachmentColumns } from './hooks/useAttachmentColumns';
 import { IDLE, type ColumnActivity } from './hooks/useColumnActivity';
-import { StreamsActionsProvider } from './components/StreamsActions';
-import { StreamsDevProvider, DEV_DEFAULTS } from './components/StreamsDev';
+import { DEV_DEFAULTS } from './components/StreamsDev';
 import { surfaceFor } from './components/surfaces';
 import { toast } from 'sonner';
 import ColumnResizeHandle from './components/ColumnResizeHandle';
@@ -83,7 +82,7 @@ import {
   STRIP_LEAD,
   STRIP_PAD,
 } from './utils/Streams.types';
-import { StreamChannelsProvider } from '../../contexts/StreamContext';
+import { streamsActor } from '../../machines/streamsMachine';
 import { questionFor, type StreamItem } from './utils/streamsDnd';
 import type { Column, ColumnSeed, ColumnSource, StreamsLayout } from './utils/Streams.types';
 import { cn } from '../../utils/classNames';
@@ -1316,6 +1315,28 @@ const StreamsScreen = (): ReactElement => {
   );
 
   /**
+   * Publish the stream's channels to the rest of the app.
+   *
+   * Ask AI's context picker reads this to offer what the stream is already
+   * showing, and it lives outside Streams entirely — so the two meet on the
+   * actor rather than on an import in either direction.
+   *
+   * Cleared on unmount, not left standing: Ask AI outlives this screen, and a
+   * stale "in this stream" group offering channels from a screen the user has
+   * left is worse than no group at all.
+   */
+  useEffect(() => {
+    streamsActor.send({ type: 'CHANNELS_CHANGED', channelIds: streamChannelIds });
+  }, [streamChannelIds]);
+
+  useEffect(
+    () => () => {
+      streamsActor.send({ type: 'STREAM_CLOSED' });
+    },
+    [],
+  );
+
+  /**
    * Raise or drop the veil over the stream, straight on the DOM.
    *
    * Not React state. This fires on every pointer entry to the tab row, and the
@@ -2163,6 +2184,7 @@ const StreamsScreen = (): ReactElement => {
           }
           flash={flashId === column.id}
           activity={streamActivity[column.id] ?? IDLE}
+          actions={actions}
           // Both halves, or the pane keeps the base z-index while `z-30` lifts
           // only its parent — so the next column paints straight over the pane
           // and the lifted pair looks sliced down the middle.
@@ -2257,84 +2279,81 @@ const StreamsScreen = (): ReactElement => {
   };
 
   return (
-    <StreamsActionsProvider value={actions}>
-      <StreamChannelsProvider value={streamChannelIds}>
-        <StreamsDevProvider value={dev}>
-          <div
-            ref={panelRef}
-            tabIndex={-1}
-            className={cn(
-              'relative flex h-full flex-col overflow-hidden outline-none',
-              // `bleed` paints nothing, so the fixed wallpaper layer behind the whole
-              // app carries through the stream instead of stopping at its edge.
-              dev.ground === 'theme' && 'bg-background',
-              dev.ground === 'paper' && 'bg-[#fafafa]',
-            )}
-            data-testid='streams-screen'
-            onPointerDownCapture={noteComposerIntent}
-            // The veil's dials — on the same element `data-nav-veiled` lands on
-            // — and the index row's geometry, which is read by tabs several
-            // levels down and so has to be set above both of the row's two
-            // possible homes. Cast because CSSProperties has no index signature
-            // for custom properties.
-            style={
-              {
-                '--stream-veil-dim': dev.veilDim / 100,
-                '--stream-veil-blur': `${dev.veilBlur}px`,
-                '--tick-pitch': `${dev.tickPitch}px`,
-                '--tick-w': `${dev.tickW}px`,
-                // Unitless — the tick's scale is a ratio of these three, and CSS
-                // cannot divide by a length. See `--tick-scale` in global.css.
-                '--tick-h-off': String(dev.tickOff),
-                '--tick-h-on': String(dev.tickOn),
-                '--tick-h-hover': String(dev.tickHover),
-                // One dial, two properties: where the mark sits in its target and
-                // which edge it grows from. They have to move together, or a
-                // top-anchored tick would hang from the middle of the row.
-                '--tick-align': dev.tickAnchor === 'top' ? 'flex-start' : 'center',
-                '--tick-origin': dev.tickAnchor === 'top' ? 'top' : 'center',
-              } as CSSProperties
-            }
-          >
-            {/* One marker for both layouts, outside either of them. It is measured
+    <div
+      ref={panelRef}
+      tabIndex={-1}
+      className={cn(
+        'relative flex h-full flex-col overflow-hidden outline-none',
+        // `bleed` paints nothing, so the fixed wallpaper layer behind the whole
+        // app carries through the stream instead of stopping at its edge.
+        dev.ground === 'theme' && 'bg-background',
+        dev.ground === 'paper' && 'bg-[#fafafa]',
+      )}
+      data-testid='streams-screen'
+      onPointerDownCapture={noteComposerIntent}
+      // The veil's dials — on the same element `data-nav-veiled` lands on
+      // — and the index row's geometry, which is read by tabs several
+      // levels down and so has to be set above both of the row's two
+      // possible homes. Cast because CSSProperties has no index signature
+      // for custom properties.
+      style={
+        {
+          '--stream-veil-dim': dev.veilDim / 100,
+          '--stream-veil-blur': `${dev.veilBlur}px`,
+          '--tick-pitch': `${dev.tickPitch}px`,
+          '--tick-w': `${dev.tickW}px`,
+          // Unitless — the tick's scale is a ratio of these three, and CSS
+          // cannot divide by a length. See `--tick-scale` in global.css.
+          '--tick-h-off': String(dev.tickOff),
+          '--tick-h-on': String(dev.tickOn),
+          '--tick-h-hover': String(dev.tickHover),
+          // One dial, two properties: where the mark sits in its target and
+          // which edge it grows from. They have to move together, or a
+          // top-anchored tick would hang from the middle of the row.
+          '--tick-align': dev.tickAnchor === 'top' ? 'flex-start' : 'center',
+          '--tick-origin': dev.tickAnchor === 'top' ? 'top' : 'center',
+        } as CSSProperties
+      }
+    >
+      {/* One marker for both layouts, outside either of them. It is measured
               in viewport coordinates, so it must not sit inside the scroller —
               the strip would carry it along as it scrolls. */}
-            {marker && <InsertionMarker rect={marker} />}
+      {marker && <InsertionMarker rect={marker} />}
 
-            {/* Renders nothing. One subscription per column, feeding the single
+      {/* Renders nothing. One subscription per column, feeding the single
           activity map the headers, the overview and the jump pills all read. */}
-            {activityProbes}
+      {activityProbes}
 
-            {/* No divider and no extra height: the columns below already have their own
+      {/* No divider and no extra height: the columns below already have their own
           borders, so a rule here just adds a second horizontal line in a view
           that is mostly horizontal lines. */}
-            {/* Inset to `HEADER_INSET`, not an arbitrary `px-3`: the title lines up
+      {/* Inset to `HEADER_INSET`, not an arbitrary `px-3`: the title lines up
                 with the first column's title rather than landing three pixels
                 short of it. Height without a `pt-*` — padding on one side of a
                 fixed-height box sits its contents off-centre, which is what made
                 the row read as sitting low in its own space. */}
-            <header
-              // `gap-2`, not the 6 this had: the tabs now run the whole width of
-              // the title group, so this gap is the distance between the last tab
-              // and the first verb. At 24px the two groups read as separate bars.
-              // It only shows when the tabs are actually there — with them off the
-              // title group still stretches, so the space between the title and
-              // the verbs is flex slack, not this.
-              className='relative flex shrink-0 items-center gap-2'
-              // Asymmetric on purpose, because the space *below* the header is
-              // not the header's alone: the strip wrapper adds `STRIP_PAD` and
-              // the scroller adds `RING_GUTTER` before the first card. Paying
-              // the full 12px on both sides therefore spent 20px underneath
-              // against 14 above — measured — which is the gap that reads as
-              // heavier than the one over the title. The bottom pays the
-              // remainder so the two come out equal.
-              style={{
-                paddingInline: HEADER_INSET,
-                paddingTop: dev.headerPad,
-                paddingBottom: dev.headerPad - STRIP_LEAD,
-              }}
-            >
-              {/* One group, flex-1, so the actions sit against the right edge
+      <header
+        // `gap-2`, not the 6 this had: the tabs now run the whole width of
+        // the title group, so this gap is the distance between the last tab
+        // and the first verb. At 24px the two groups read as separate bars.
+        // It only shows when the tabs are actually there — with them off the
+        // title group still stretches, so the space between the title and
+        // the verbs is flex slack, not this.
+        className='relative flex shrink-0 items-center gap-2'
+        // Asymmetric on purpose, because the space *below* the header is
+        // not the header's alone: the strip wrapper adds `STRIP_PAD` and
+        // the scroller adds `RING_GUTTER` before the first card. Paying
+        // the full 12px on both sides therefore spent 20px underneath
+        // against 14 above — measured — which is the gap that reads as
+        // heavier than the one over the title. The bottom pays the
+        // remainder so the two come out equal.
+        style={{
+          paddingInline: HEADER_INSET,
+          paddingTop: dev.headerPad,
+          paddingBottom: dev.headerPad - STRIP_LEAD,
+        }}
+      >
+        {/* One group, flex-1, so the actions sit against the right edge
                   without an `ml-auto` on a sibling — the same shape a channel
                   header uses, and the reason its spacing is even.
 
@@ -2342,8 +2361,8 @@ const StreamsScreen = (): ReactElement => {
                   is mounted. The nav is the only 32px child — the switcher is
                   23.5px — so an empty stream drew a header 8.5px shorter and the
                   whole strip jumped down the moment you added the first column. */}
-              <div className='flex min-h-8 min-w-0 flex-1 items-center gap-2'>
-                {/* The screen's title, and there is no separate one.
+        <div className='flex min-h-8 min-w-0 flex-1 items-center gap-2'>
+          {/* The screen's title, and there is no separate one.
 
                     A constant "Streams" label used to hold this slot, with the
                     stream name beside it — two things competing for the same
@@ -2352,7 +2371,7 @@ const StreamsScreen = (): ReactElement => {
                     in, and that is also the thing you navigate by, so it takes
                     the title's weight and the title's place. The heading *is*
                     the control. */}
-                {/* `streamActivity`, deliberately, and NOT `navActivity` like every
+          {/* `streamActivity`, deliberately, and NOT `navActivity` like every
                     other consumer. The switcher rolls each stream up by summing
                     over that stream's own `columns`, which still contains attached
                     panes — so the raw per-column map is the correct input.
@@ -2361,18 +2380,18 @@ const StreamsScreen = (): ReactElement => {
                     list that has dropped the pane's row and wrong for anything
                     that sums the whole map. Swapping it here silently doubles
                     every attached pane's unread. */}
-                <StreamSwitcher
-                  layout={layout}
-                  activity={streamActivity}
-                  onSwitch={chooseStream}
-                  onCreate={newStream}
-                  onRestore={unarchiveStream}
-                  onRename={nameStream}
-                  onArchive={putStreamAway}
-                  onDelete={dropStream}
-                />
+          <StreamSwitcher
+            layout={layout}
+            activity={streamActivity}
+            onSwitch={chooseStream}
+            onCreate={newStream}
+            onRestore={unarchiveStream}
+            onRename={nameStream}
+            onArchive={putStreamAway}
+            onDelete={dropStream}
+          />
 
-                {/* On the title row rather than in a lane of its own, which is
+          {/* On the title row rather than in a lane of its own, which is
                     where it started. A lane costs vertical space the stream wants
                     and, more to the point, it read as a second header — the stream
                     already has one, and this belongs to it. Beside the title it
@@ -2384,68 +2403,66 @@ const StreamsScreen = (): ReactElement => {
 
                     Kept in focus mode — the strip there is a real snap
                     carousel, which is the shape this was drawn for. */}
-                {dev.navPlacement === 'top' &&
-                  dev.topNav !== 'off' &&
-                  !centredNav &&
-                  columns.length > 0 && (
-                    <StreamTopNav
-                      variant={dev.topNav}
-                      pinned={navPinned}
-                      scrolling={navScrolling}
-                      activity={navActivity}
-                      stripRef={stripRef}
-                      onJump={jumpTo}
-                      onAdd={openAdd}
-                      alerts={dev.tickAlerts}
-                      // Only in focus mode. The wide stream shows five columns at
-                      // once, so marking one is answering a question the screen
-                      // does not pose.
-                      currentId={
-                        // Through `hostFor`, because a pane has no tab of its own —
-                        // the row folds a pair into its parent. Naming the pane
-                        // named a column that was not in the row, so opening one
-                        // simply cleared the highlight until you closed it again.
-                        focusMode
-                          ? hostFor(columns, columns[stream.focus]?.id ?? '')?.id
-                          : undefined
-                      }
-                    />
-                  )}
-              </div>
-              {/* The stream's verbs, as one group, at the same `gap-1` a channel
+          {dev.navPlacement === 'top' &&
+            dev.topNav !== 'off' &&
+            !centredNav &&
+            columns.length > 0 && (
+              <StreamTopNav
+                variant={dev.topNav}
+                pinned={navPinned}
+                scrolling={navScrolling}
+                activity={navActivity}
+                stripRef={stripRef}
+                onJump={jumpTo}
+                onAdd={openAdd}
+                alerts={dev.tickAlerts}
+                // Only in focus mode. The wide stream shows five columns at
+                // once, so marking one is answering a question the screen
+                // does not pose.
+                currentId={
+                  // Through `hostFor`, because a pane has no tab of its own —
+                  // the row folds a pair into its parent. Naming the pane
+                  // named a column that was not in the row, so opening one
+                  // simply cleared the highlight until you closed it again.
+                  focusMode ? hostFor(columns, columns[stream.focus]?.id ?? '')?.id : undefined
+                }
+              />
+            )}
+        </div>
+        {/* The stream's verbs, as one group, at the same `gap-1` a channel
                   header puts between its own icon buttons. */}
-              <div className='flex shrink-0 items-center gap-1'>
-                {/* Only when the tab row is not carrying it.
+        <div className='flex shrink-0 items-center gap-1'>
+          {/* Only when the tab row is not carrying it.
                     A row of tabs owns its own add button, the way a browser's
                     tab bar does: it rides the end of the run while the tabs fit
                     and comes to rest at the end of the bar once they do not.
                     With no tab row — or with the window variant, whose row is
                     masked to an aperture and would spend most of its life fading
                     the button out — it belongs here, at the head of the verbs. */}
-                {(dev.navPlacement !== 'top' || dev.topNav === 'off' || centredNav) && (
-                  <Tooltip content='Add a column'>
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      onClick={openAdd}
-                      aria-label='Add a column'
-                      className={cn(STREAM_ACTION, STREAM_ACTION_IDLE)}
-                      data-track-category='Streams'
-                      data-track-name='OpenAddPalette'
-                    >
-                      <PlusDefault size={16} />
-                    </Button>
-                  </Tooltip>
-                )}
+          {(dev.navPlacement !== 'top' || dev.topNav === 'off' || centredNav) && (
+            <Tooltip content='Add a column'>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={openAdd}
+                aria-label='Add a column'
+                className={cn(STREAM_ACTION, STREAM_ACTION_IDLE)}
+                data-track-category='Streams'
+                data-track-name='OpenAddPalette'
+              >
+                <PlusDefault size={16} />
+              </Button>
+            </Tooltip>
+          )}
 
-                {/* No overflow menu. It held exactly two rows — reset every width,
+          {/* No overflow menu. It held exactly two rows — reset every width,
                     and a Share that was never wired — and a ⋯ that opens two
                     items, one of them dead, costs more attention than it saves.
                     Reset-all-widths survives as the dev panel's `Apply to every
                     column`; Share comes back as its own verb when there is
                     something behind it. */}
-              </div>
-              {/* Centred on the viewport, not on the space left over between the
+        </div>
+        {/* Centred on the viewport, not on the space left over between the
                   title and the verbs — that space starts wherever the stream's
                   name happens to end, so laying this out in the row would centre
                   it on the header rather than on the strip it describes. Taken
@@ -2460,148 +2477,148 @@ const StreamsScreen = (): ReactElement => {
                   to hold the run of columns you can see has nothing to say about
                   a run of one, while a map of the whole stream is *most* useful
                   when you can only see one of it. */}
-              {centredNav &&
-                columns.length > 0 &&
-                dev.navPlacement === 'top' &&
-                (dev.topNav === 'index' || !focusMode) && (
-                  <div
-                    className='pointer-events-none absolute inset-y-0 left-1/2 z-10 flex -translate-x-1/2 items-center'
-                    // The header's own padding, repeated. `inset-y-0` spans the
-                    // header's *padding box*, so centring in here centres on its
-                    // outer box — while everything laid out inside the header
-                    // centres on its content box. Those are not the same place:
-                    // the header pays `HEADER_PAD` above and
-                    // `HEADER_PAD - STRIP_LEAD` below, deliberately, because the
-                    // space beneath it is shared with the strip. So an absolutely
-                    // positioned row sat 3px high, which reads exactly as less
-                    // room above the ticks than below.
-                    style={{ paddingTop: dev.headerPad, paddingBottom: dev.headerPad - STRIP_LEAD }}
-                  >
-                    <StreamTopNav
-                      variant={dev.topNav === 'index' ? 'index' : 'window'}
-                      pinned={navPinned}
-                      scrolling={navScrolling}
-                      activity={navActivity}
-                      stripRef={stripRef}
-                      onJump={jumpTo}
-                      alerts={dev.tickAlerts}
-                    />
-                  </div>
-                )}
-            </header>
-
+        {centredNav &&
+          columns.length > 0 &&
+          dev.navPlacement === 'top' &&
+          (dev.topNav === 'index' || !focusMode) && (
             <div
-              className='flex min-h-0 flex-1 flex-col gap-2'
-              // Left is its own number, and not the same one. See `STREAM_LEFT_INSET`:
-              // the space between the nav rail and the first column belongs to the
-              // rail's symmetry, while the right and bottom are the stream against
-              // the window and want the frame.
-              style={{
-                paddingLeft: STREAM_LEFT_INSET,
-                paddingRight: STRIP_PAD,
-                paddingBottom: STRIP_PAD,
-                paddingTop: 2,
-              }}
+              className='pointer-events-none absolute inset-y-0 left-1/2 z-10 flex -translate-x-1/2 items-center'
+              // The header's own padding, repeated. `inset-y-0` spans the
+              // header's *padding box*, so centring in here centres on its
+              // outer box — while everything laid out inside the header
+              // centres on its content box. Those are not the same place:
+              // the header pays `HEADER_PAD` above and
+              // `HEADER_PAD - STRIP_LEAD` below, deliberately, because the
+              // space beneath it is shared with the strip. So an absolutely
+              // positioned row sat 3px high, which reads exactly as less
+              // room above the ticks than below.
+              style={{ paddingTop: dev.headerPad, paddingBottom: dev.headerPad - STRIP_LEAD }}
             >
-              {/* No gap between the pinned run and the scroller: each column already
+              <StreamTopNav
+                variant={dev.topNav === 'index' ? 'index' : 'window'}
+                pinned={navPinned}
+                scrolling={navScrolling}
+                activity={navActivity}
+                stripRef={stripRef}
+                onJump={jumpTo}
+                alerts={dev.tickAlerts}
+              />
+            </div>
+          )}
+      </header>
+
+      <div
+        className='flex min-h-0 flex-1 flex-col gap-2'
+        // Left is its own number, and not the same one. See `STREAM_LEFT_INSET`:
+        // the space between the nav rail and the first column belongs to the
+        // rail's symmetry, while the right and bottom are the stream against
+        // the window and want the frame.
+        style={{
+          paddingLeft: STREAM_LEFT_INSET,
+          paddingRight: STRIP_PAD,
+          paddingBottom: STRIP_PAD,
+          paddingTop: 2,
+        }}
+      >
+        {/* No gap between the pinned run and the scroller: each column already
               ends in a resize handle, so an extra gap here stacked handle +
               padding + gap + padding into a dead band wide enough to read as the
               scrolling column being clipped. The handle is the separator. */}
-              <div className='relative flex min-h-0 flex-1'>
-                {/* Pinned columns sit outside the scroller, so they cannot drift.
+        <div className='relative flex min-h-0 flex-1'>
+          {/* Pinned columns sit outside the scroller, so they cannot drift.
               Gap is 0 within a column run: the resize handle between each pair
               supplies the spacing, so grabbing it never means aiming at a gap.
               The padding is the focus ring's lane — the ring paints outside the
               border box and every side of this is an overflow edge. */}
-                {pinned.length > 0 && (
-                  <div
-                    className='flex shrink-0'
-                    style={{ paddingBlock: RING_GUTTER, paddingLeft: STREAM_LEFT_INSET }}
-                  >
-                    {pinned.map(renderColumn)}
-                  </div>
-                )}
+          {pinned.length > 0 && (
+            <div
+              className='flex shrink-0'
+              style={{ paddingBlock: RING_GUTTER, paddingLeft: STREAM_LEFT_INSET }}
+            >
+              {pinned.map(renderColumn)}
+            </div>
+          )}
 
-                {/* The browser's own scrollbar, given a visible rail via `.streams-strip`
+          {/* The browser's own scrollbar, given a visible rail via `.streams-strip`
               in global.css. A hand-built thumb was tried and reverted: it has to
               re-derive geometry the browser already owns, and every source of
               drift between the two showed up as jump. */}
-                <div className='relative flex min-w-0 flex-1'>
-                  <div
-                    ref={stripRef}
-                    className={cn(
-                      'streams-strip flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden',
-                      'scroll-smooth',
-                      // Fades, not gutters. A column that ends at a hard edge
-                      // reads as broken; a fade says "this continues". Each side
-                      // only appears once something is actually hidden there —
-                      // an always-on fade dims the first column at rest and
-                      // looks like a bug. The left one doubles as the boundary
-                      // with the pinned run, which is why there is no separate
-                      // fade on the pinned columns themselves.
-                      //
-                      // A mask on the scroller rather than two gradient overlays
-                      // over it. `from-background` could only impersonate the
-                      // backdrop while the backdrop was flat: against a
-                      // wallpaper it painted an opaque slab of the wrong colour
-                      // across both ends. Fading the content itself is the only
-                      // version that is correct for *any* backdrop, and it costs
-                      // one CSS class instead of two elements and a re-render
-                      // per edge crossing. See `.streams-fade-x` in global.css.
-                      //
-                      // Always mounted. Toggling the class on and off made the
-                      // mask appear and vanish between two frames — a hard cut
-                      // exactly where the point was to soften one. The class
-                      // stays; what changes is the fade's *width*, tweened from
-                      // zero, which is only possible because `--fade-x-*` are
-                      // `@property`-registered lengths.
-                      'streams-fade-x',
-                      // Paging, not panning. `mandatory` rather than `proximity`:
-                      // the whole promise of focus mode is that you are looking
-                      // at one column, and proximity lets the scroller come to
-                      // rest halfway between two of them.
-                      // Engaged through the transition too, not just at rest.
-                      // This is what keeps the focused column centred while every
-                      // width on the row changes — and it does it *in the same
-                      // frame as layout*, which no amount of `requestAnimationFrame`
-                      // can. rAF callbacks run before style recalculation, so a
-                      // scroll correction written there is always computed against
-                      // the previous frame's widths: the row shifts, and the fix
-                      // lands one frame later. That one-frame lag is the wobble.
-                      focusMode && 'snap-x snap-mandatory',
-                    )}
-                    // The dial steers the left edge only; the right keeps the
-                    // shared `--fade-x`. Cast because CSSProperties has no index
-                    // signature for custom properties.
-                    style={
-                      {
-                        paddingBlock: RING_GUTTER,
-                        paddingRight: RING_GUTTER,
-                        // Zero, and only when there are no pinned columns holding
-                        // the edge — see `STREAM_LEFT_INSET`. When there are, the
-                        // pinned run owns the left edge and this is an interior
-                        // seam between two runs, where the gutter is right.
-                        paddingLeft: pinned.length > 0 ? RING_GUTTER : STREAM_LEFT_INSET,
-                        '--fade-x-start': `${dev.leftFade}px`,
-                        // Focus mode drives the fade's width rather than its
-                        // presence. `off` and a resting `scrolling` collapse both
-                        // edges to zero; scrolling opens them again. Tweened, so
-                        // the mask grows and shrinks instead of blinking.
-                        ...(focusMode &&
-                          !(
-                            dev.focusFade === 'always' ||
-                            (dev.focusFade === 'scrolling' && stripScrolling)
-                          ) && { '--fade-x-start': '0px', '--fade-x-end': '0px' }),
-                        ...(focusMode && {
-                          transition: `--fade-x-start 200ms ${STREAMS_EASE}, --fade-x-end 200ms ${STREAMS_EASE}`,
-                        }),
-                      } as CSSProperties
-                    }
-                    data-testid='streams-strip'
-                  >
-                    {scrolling.map(renderColumn)}
+          <div className='relative flex min-w-0 flex-1'>
+            <div
+              ref={stripRef}
+              className={cn(
+                'streams-strip flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden',
+                'scroll-smooth',
+                // Fades, not gutters. A column that ends at a hard edge
+                // reads as broken; a fade says "this continues". Each side
+                // only appears once something is actually hidden there —
+                // an always-on fade dims the first column at rest and
+                // looks like a bug. The left one doubles as the boundary
+                // with the pinned run, which is why there is no separate
+                // fade on the pinned columns themselves.
+                //
+                // A mask on the scroller rather than two gradient overlays
+                // over it. `from-background` could only impersonate the
+                // backdrop while the backdrop was flat: against a
+                // wallpaper it painted an opaque slab of the wrong colour
+                // across both ends. Fading the content itself is the only
+                // version that is correct for *any* backdrop, and it costs
+                // one CSS class instead of two elements and a re-render
+                // per edge crossing. See `.streams-fade-x` in global.css.
+                //
+                // Always mounted. Toggling the class on and off made the
+                // mask appear and vanish between two frames — a hard cut
+                // exactly where the point was to soften one. The class
+                // stays; what changes is the fade's *width*, tweened from
+                // zero, which is only possible because `--fade-x-*` are
+                // `@property`-registered lengths.
+                'streams-fade-x',
+                // Paging, not panning. `mandatory` rather than `proximity`:
+                // the whole promise of focus mode is that you are looking
+                // at one column, and proximity lets the scroller come to
+                // rest halfway between two of them.
+                // Engaged through the transition too, not just at rest.
+                // This is what keeps the focused column centred while every
+                // width on the row changes — and it does it *in the same
+                // frame as layout*, which no amount of `requestAnimationFrame`
+                // can. rAF callbacks run before style recalculation, so a
+                // scroll correction written there is always computed against
+                // the previous frame's widths: the row shifts, and the fix
+                // lands one frame later. That one-frame lag is the wobble.
+                focusMode && 'snap-x snap-mandatory',
+              )}
+              // The dial steers the left edge only; the right keeps the
+              // shared `--fade-x`. Cast because CSSProperties has no index
+              // signature for custom properties.
+              style={
+                {
+                  paddingBlock: RING_GUTTER,
+                  paddingRight: RING_GUTTER,
+                  // Zero, and only when there are no pinned columns holding
+                  // the edge — see `STREAM_LEFT_INSET`. When there are, the
+                  // pinned run owns the left edge and this is an interior
+                  // seam between two runs, where the gutter is right.
+                  paddingLeft: pinned.length > 0 ? RING_GUTTER : STREAM_LEFT_INSET,
+                  '--fade-x-start': `${dev.leftFade}px`,
+                  // Focus mode drives the fade's width rather than its
+                  // presence. `off` and a resting `scrolling` collapse both
+                  // edges to zero; scrolling opens them again. Tweened, so
+                  // the mask grows and shrinks instead of blinking.
+                  ...(focusMode &&
+                    !(
+                      dev.focusFade === 'always' ||
+                      (dev.focusFade === 'scrolling' && stripScrolling)
+                    ) && { '--fade-x-start': '0px', '--fade-x-end': '0px' }),
+                  ...(focusMode && {
+                    transition: `--fade-x-start 200ms ${STREAMS_EASE}, --fade-x-end 200ms ${STREAMS_EASE}`,
+                  }),
+                } as CSSProperties
+              }
+              data-testid='streams-strip'
+            >
+              {scrolling.map(renderColumn)}
 
-                    {/* The add slot is a column-sized citizen of the strip, not a chip
+              {/* The add slot is a column-sized citizen of the strip, not a chip
               tacked onto the end — it is where the next column will appear.
 
               In focus mode it is a page like any other, and it has to be: with
@@ -2612,7 +2629,7 @@ const StreamsScreen = (): ReactElement => {
               Arc does the same thing at the end of its spaces — keep going and
               the "new space" page comes to meet you rather than refusing. Here
               the page already existed; it just was not a stop. */}
-                    {/* In focus mode the add page is a permanent citizen of the
+              {/* In focus mode the add page is a permanent citizen of the
                         carousel and the palette opens *inside* it — same width,
                         same snap point, contents cross-fading. It used to be two
                         siblings trading places, which is why arriving there cut
@@ -2620,58 +2637,55 @@ const StreamsScreen = (): ReactElement => {
 
                         The wide stream keeps the older behaviour: there is no
                         gesture arriving at it, so there is nothing to grow. */}
-                    {focusMode ? (
-                      <FocusAddPage
-                        ref={addPageRef}
-                        present={presentSources}
-                        onPick={addColumn}
-                        onDismiss={() => setPaletteOpen(false)}
-                      />
-                    ) : paletteOpen ? (
-                      <AddColumnPalette
-                        width={addSlotWidth}
-                        present={presentSources}
-                        onPick={addColumn}
-                        onDismiss={() => setPaletteOpen(false)}
-                      />
-                    ) : (
-                      <button
-                        type='button'
-                        onClick={openAdd}
-                        // Radius from the same dial every column reads, never a
-                        // `rounded-*` class — a utility would win over the style
-                        // and leave the one empty slot a different shape from the
-                        // cards beside it.
-                        style={{ width: `${addSlotWidth}px`, borderRadius: dev.columnRadius }}
-                        // A 1px `border-border` dashed outline over a wallpaper was
-                        // very nearly invisible: the slot has no fill of its own, so
-                        // the only thing drawing it was a hairline the same value as
-                        // the background behind it. A faint card fill gives it a body,
-                        // and the dashes are darkened enough to survive on both
-                        // wallpapers — still grey, still clearly an empty slot rather
-                        // than a column that is already there.
-                        className='streams-press-row flex h-full shrink-0 flex-col items-center justify-center gap-2 border-2 border-dashed border-muted-foreground/30 bg-card/40 text-muted-foreground hover:border-muted-foreground/60 hover:bg-card/70 hover:text-foreground'
-                        data-track-category='Streams'
-                        data-track-name='OpenAddPaletteSlot'
-                      >
-                        <PlusDefault size={20} />
-                        <span className='text-xs'>Add a column</span>
-                        {columns.length === 0 && (
-                          <span className='max-w-[15rem] px-6 text-center text-[11px] leading-relaxed text-muted-foreground/70'>
-                            A stream is the handful of things you want to watch at once: channels, a
-                            board, threads, a topic feed.
-                          </span>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
+              {focusMode ? (
+                <FocusAddPage
+                  ref={addPageRef}
+                  present={presentSources}
+                  onPick={addColumn}
+                  onDismiss={() => setPaletteOpen(false)}
+                />
+              ) : paletteOpen ? (
+                <AddColumnPalette
+                  width={addSlotWidth}
+                  present={presentSources}
+                  onPick={addColumn}
+                  onDismiss={() => setPaletteOpen(false)}
+                />
+              ) : (
+                <button
+                  type='button'
+                  onClick={openAdd}
+                  // Radius from the same dial every column reads, never a
+                  // `rounded-*` class — a utility would win over the style
+                  // and leave the one empty slot a different shape from the
+                  // cards beside it.
+                  style={{ width: `${addSlotWidth}px`, borderRadius: dev.columnRadius }}
+                  // A 1px `border-border` dashed outline over a wallpaper was
+                  // very nearly invisible: the slot has no fill of its own, so
+                  // the only thing drawing it was a hairline the same value as
+                  // the background behind it. A faint card fill gives it a body,
+                  // and the dashes are darkened enough to survive on both
+                  // wallpapers — still grey, still clearly an empty slot rather
+                  // than a column that is already there.
+                  className='streams-press-row flex h-full shrink-0 flex-col items-center justify-center gap-2 border-2 border-dashed border-muted-foreground/30 bg-card/40 text-muted-foreground hover:border-muted-foreground/60 hover:bg-card/70 hover:text-foreground'
+                  data-track-category='Streams'
+                  data-track-name='OpenAddPaletteSlot'
+                >
+                  <PlusDefault size={20} />
+                  <span className='text-xs'>Add a column</span>
+                  {columns.length === 0 && (
+                    <span className='max-w-[15rem] px-6 text-center text-[11px] leading-relaxed text-muted-foreground/70'>
+                      A stream is the handful of things you want to watch at once: channels, a
+                      board, threads, a topic feed.
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
-        </StreamsDevProvider>
-      </StreamChannelsProvider>
-    </StreamsActionsProvider>
+        </div>
+      </div>
+    </div>
   );
 };
 

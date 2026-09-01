@@ -14,7 +14,7 @@ import XyneAISidebar from '../../Chat/XyneAISidebar/XyneAISidebar';
 import CanvasScreen from '../../Canvas/CanvasScreen/CanvasScreen';
 import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
 import FileColumn from './FileColumn';
-import { useStreamsActions } from './StreamsActions';
+import type { StreamsActions } from './StreamsActions';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import { useChannel } from '../../../hooks/useChannels';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -62,6 +62,14 @@ interface BodyProps {
   columnId: string;
   /** Set when something was dropped on this column. See `streamsDnd`. */
   seed?: ColumnSeed | undefined;
+  /**
+   * What this surface may do to the stream around it.
+   *
+   * Every kind receives the same bundle whether it uses it or not, so the
+   * registry's `Body` signature stays uniform and a surface that starts acting
+   * on the stream needs no change to how it is mounted.
+   */
+  actions: StreamsActions;
 }
 
 /**
@@ -188,8 +196,8 @@ const AgentTitle = ({ source }: TitleProps): ReactElement => {
  * narrow column, so it is the honest fit, and it takes an optional `channelId`
  * so an Ask AI column can carry the context it was opened from.
  */
-const AgentBody = ({ source, columnId, seed }: BodyProps): ReactElement => {
-  const { closeColumn } = useStreamsActions();
+const AgentBody = ({ source, columnId, seed, actions }: BodyProps): ReactElement => {
+  const { closeColumn } = actions;
   return (
     <XyneAISidebar
       channelId={source.kind === 'agent' ? (source.channelId ?? null) : null}
@@ -247,8 +255,8 @@ const TicketTitle = ({ source }: TitleProps): ReactElement => {
  * the app's compromise would give you two unusable halves of something the stream
  * can show side by side properly.
  */
-const TicketBody = ({ source, columnId }: BodyProps): ReactElement => {
-  const { openBeside } = useStreamsActions();
+const TicketBody = ({ source, columnId, actions }: BodyProps): ReactElement => {
+  const { openBeside } = actions;
   if (source.kind !== 'ticket') return <></>;
   return (
     <div className='h-full overflow-y-auto'>

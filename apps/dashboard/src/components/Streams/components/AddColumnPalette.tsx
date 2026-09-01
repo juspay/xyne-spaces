@@ -6,7 +6,7 @@ import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
 import type { ContextItem } from '../../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
-import { useStreamsDev } from './StreamsDev';
+import { DEV_DEFAULTS } from './StreamsDev';
 import { allowsDuplicates, sourceKey } from '../utils/Streams.utils';
 import { columnFromResult, contextIdForKey } from '../utils/columnFromResult';
 import { cn } from '../../../utils/classNames';
@@ -138,7 +138,7 @@ const AddColumnPalette = ({
   onDismiss,
 }: AddColumnPaletteProps): ReactElement => {
   const channels = useAllChannels();
-  const dev = useStreamsDev();
+  const dev = DEV_DEFAULTS;
 
   /**
    * Mount the command menu on arrival, not on existence.

@@ -14,7 +14,7 @@ import { surfaceFor } from './surfaces';
 import { ActivityDot } from './ActivityDot';
 import { type ColumnActivity, IDLE, isUnread } from '../hooks/useColumnActivity';
 import { cn } from '../../../utils/classNames';
-import { useStreamsDev } from './StreamsDev';
+import { DEV_DEFAULTS } from './StreamsDev';
 import type { StreamActivity } from '../hooks/useStreamActivity';
 import { STREAM_ACTION, STREAM_ACTION_IDLE, STREAMS_EASE } from '../utils/Streams.types';
 import type { Column } from '../utils/Streams.types';
@@ -522,7 +522,7 @@ const StreamTopNav = ({
   // Straight from the dev context rather than through a prop: it is a dial, the
   // provider sits above this whole screen, and threading it would mean editing
   // StreamsScreen, which other sessions are regularly holding.
-  const { navBadges, navFlat, navSidebar } = useStreamsDev();
+  const { navBadges, navFlat, navSidebar } = DEV_DEFAULTS;
   const trackRef = useRef<HTMLDivElement>(null);
   const spansRef = useRef<Span[]>([]);
   const frameRef = useRef<number | null>(null);

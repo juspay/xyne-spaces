@@ -1,4 +1,3 @@
-import { createContext, useContext } from 'react';
 // Shipped as a separate entry point, and the panel is unusable without it — the
 // controls render as raw block elements at page width and shove the app down.
 import { DEFAULT_WIDTH } from '../utils/Streams.types';
@@ -351,9 +350,3 @@ export const DEV_DEFAULTS: StreamsDevSettings = {
   focusSide: 'right',
   ground: 'bleed',
 };
-
-const StreamsDevContext = createContext<StreamsDevSettings>(DEV_DEFAULTS);
-
-export const StreamsDevProvider = StreamsDevContext.Provider;
-
-export const useStreamsDev = (): StreamsDevSettings => useContext(StreamsDevContext);

@@ -15,8 +15,8 @@ import StreamRouterScope from './StreamRouterScope';
 import { ActivityDot } from './ActivityDot';
 import { columnIntentFor } from '../utils/columnIntent';
 import { isUnread } from '../hooks/useColumnActivity';
-import { useStreamsActions } from './StreamsActions';
-import { useStreamsDev } from './StreamsDev';
+import type { StreamsActions } from './StreamsActions';
+import { DEV_DEFAULTS } from './StreamsDev';
 import { surfaceFor } from './surfaces';
 import { hasDragItem, readDragItem, type StreamItem } from '../utils/streamsDnd';
 import { cn } from '../../../utils/classNames';
@@ -82,6 +82,13 @@ export interface StreamColumnProps {
   flash: boolean;
   /** Supplied by the stream, which owns one activity map for every column. */
   activity: ColumnActivity;
+  /**
+   * What this column's surface may do to the stream around it.
+   *
+   * Supplied by the stream and passed straight through to `Body`. One stable
+   * object for every column, so handing it down costs no extra render.
+   */
+  actions: StreamsActions;
   dragging: boolean;
   workspaceId: string;
   onFocus: () => void;
@@ -208,6 +215,7 @@ const StreamColumn = ({
   focused,
   flash,
   activity,
+  actions,
   dragging,
   workspaceId,
   onFocus,
@@ -230,8 +238,8 @@ const StreamColumn = ({
   widthMs,
 }: StreamColumnProps): ReactElement => {
   const surface = surfaceFor(column.source);
-  const dev = useStreamsDev();
-  const { openBeside } = useStreamsActions();
+  const dev = DEV_DEFAULTS;
+  const { openBeside } = actions;
   const { Title, Body, icon: Icon } = surface;
   const hasActivity = isUnread(activity);
 
@@ -280,8 +288,16 @@ const StreamColumn = ({
    * costs anything. The chrome is cheap; the panel is not.
    */
   const body = useMemo(
-    () => <Body source={column.source} focused={focused} columnId={column.id} seed={seed} />,
-    [Body, column.source, column.id, focused, seed],
+    () => (
+      <Body
+        source={column.source}
+        focused={focused}
+        columnId={column.id}
+        seed={seed}
+        actions={actions}
+      />
+    ),
+    [Body, column.source, column.id, focused, seed, actions],
   );
 
   /**

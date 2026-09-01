@@ -1,7 +1,7 @@
 import { ReactElement, forwardRef } from 'react';
 import AddColumnPalette from './AddColumnPalette';
 import { FOCUS_PEEK } from '../utils/Streams.types';
-import { useStreamsDev } from './StreamsDev';
+import { DEV_DEFAULTS } from './StreamsDev';
 import type { ColumnSource } from '../utils/Streams.types';
 
 export interface FocusAddPageProps {
@@ -30,7 +30,7 @@ export interface FocusAddPageProps {
  */
 const FocusAddPage = forwardRef<HTMLDivElement, FocusAddPageProps>(
   ({ present, onPick, onDismiss }, ref): ReactElement => {
-    const dev = useStreamsDev();
+    const dev = DEV_DEFAULTS;
     return (
       <div
         ref={ref}

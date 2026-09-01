@@ -25,7 +25,8 @@ import {
 import { useAllUnreadCount } from '../../../../hooks/useUnreadCount';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../../hooks/useAuth';
-import { useStreamChannels } from '../../../../contexts/StreamContext';
+import { useSelector } from '@xstate/react';
+import { streamsActor } from '../../../../machines/streamsMachine';
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import type { DisplaySearchResult } from '../../../../types/search';
 
@@ -325,7 +326,7 @@ export const ContextPicker = ({
    *
    * Empty everywhere else, so the group simply does not render.
    */
-  const streamChannelIds = useStreamChannels();
+  const streamChannelIds = useSelector(streamsActor, state => state.context.channelIds);
   const streamChannels = useMemo(() => {
     if (streamChannelIds.length === 0) return [];
     const inStream = new Set(streamChannelIds);
