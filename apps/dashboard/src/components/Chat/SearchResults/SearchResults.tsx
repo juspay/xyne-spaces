@@ -54,7 +54,6 @@ import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
-  formatChannelLabel,
   getDMNames,
   isDMChannel,
   isGroupDMChannel,
@@ -1119,9 +1118,20 @@ function ResultsBody({
 }: ResultsBodyProps): ReactElement {
   const navigate = useNavigate();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  // `searchableNames` is already the rendered form: getDMNames(...).display for DMs
+  // (participant names — `channel.name` is a participant id there) and [channel.name]
+  // for everything else. That is `formatChannelLabel` without its `#`, which rows
+  // supplying their own lead-in ("in design") don't want.
   const channelLabelsById = useMemo(
     () =>
-      new Map(searchableChannels.map(channel => [channel.channel.id, formatChannelLabel(channel)])),
+      new Map(
+        searchableChannels.map(channel => [
+          channel.channel.id,
+          (channel.searchableNames?.length ? channel.searchableNames : [channel.channel.name]).join(
+            ', ',
+          ),
+        ]),
+      ),
     [searchableChannels],
   );
 
@@ -1188,15 +1198,7 @@ function ResultsBody({
     if (result.type === 'attachment') {
       const icon = getAttachmentResultIcon(result);
       const channelId = result.searchContext?.channelId;
-      // `formatChannelLabel` renders the shared display form, `#name`. This row
-      // says "in <name>", which supplies its own preposition, so the hash would
-      // just repeat it — strip it here rather than change the shared helper,
-      // which pickers and mentions rely on. DM labels are participant names with
-      // no hash, so they pass through untouched.
-      const channelName = (channelId ? channelLabelsById.get(channelId) : undefined)?.replace(
-        /^#/,
-        '',
-      );
+      const channelName = channelId ? channelLabelsById.get(channelId) : undefined;
       const uploaderId = result.avatar;
       const uploader = uploaderId ? usersById.get(uploaderId) : undefined;
       const uploaderName = uploader ? getUserDisplayName(uploader) : '';
