@@ -247,6 +247,7 @@ import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
+import AIDigitalTwinScreen from './AIScreen/screens/AIDigitalTwinScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
@@ -1139,22 +1140,10 @@ export const router = createBrowserRouter(
                         </RequireOrgManager>
                       ),
                     },
+                    { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
                     {
                       element: <AISectionLayout />,
                       children: [
-                        {
-                          path: 'digital-twin',
-                          element: <ClawDigitalTwinScreen />,
-                          children: [
-                            { index: true, element: <DigitalTwinMemoriesTab /> },
-                            { path: 'hot', element: <DigitalTwinHotTab /> },
-                            { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                            { path: 'recall', element: <DigitalTwinRecallTab /> },
-                            { path: 'graph', element: <DigitalTwinGraphTab /> },
-                            { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                            { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                          ],
-                        },
                         { path: 'metrics', element: <ClawMetricsScreen /> },
                         { path: 'settings', element: <ClawSettingsScreen /> },
                       ],
