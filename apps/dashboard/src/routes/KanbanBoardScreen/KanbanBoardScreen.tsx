@@ -199,6 +199,7 @@ import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { readViewDraft, writeViewDraft, clearViewDraft } from './viewDraft';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../utils/apiError';
 
@@ -279,6 +280,13 @@ function filtersToValues(
   if (groupBy && groupBy !== 'none') addTicket('__groupBy', groupBy);
   if (columns) addTicket('__columns', columns.join(','));
   return values;
+}
+
+function viewSignature(filters: TicketFilters, groupBy: string, columns: string[]): string {
+  return filtersToValues(filters, groupBy, columns)
+    .map(v => `${v.entityName}|${v.fieldName}|${v.fieldValue}`)
+    .sort()
+    .join('\n');
 }
 
 interface BoardKanbanScreenProps {
@@ -487,8 +495,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // click and route desk/support tickets to the Support desk instead of chat.
   const allChannels = useAllChannels();
   const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
-    initialColumns ? new Set(initialColumns) : new Set(DEFAULT_VISIBLE_COLUMNS),
+  // Unsaved edits to a saved view survive the unmount that opening a ticket causes.
+  // Columns live only here (never in the URL), so the draft is their only way back.
+  const viewDraftKey = viewId ?? 'new';
+  const initialDraft = useMemo(
+    () => (viewModeProp === 'workspace-view' ? readViewDraft(viewDraftKey) : null),
+    [viewModeProp, viewDraftKey],
+  );
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
+    () => new Set(initialDraft?.columns ?? initialColumns ?? DEFAULT_VISIBLE_COLUMNS),
   );
   // The tickets table always surfaces the Stage column (parity with the Support
   // desk table, which renders TicketTable with its stage-inclusive defaults).
@@ -790,12 +805,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       projectId: projectIdParam,
       boardId: boardId,
       viewMode: viewMode,
+      viewId: viewId,
       enabled: true,
       selectedBoardIdFromDb,
       searchParams,
       setSearchParams,
     });
-  }, [send, channelId, projectIdParam, boardId, viewMode, selectedBoardIdFromDb]);
+  }, [send, channelId, projectIdParam, boardId, viewMode, viewId, selectedBoardIdFromDb]);
 
   // Sync URL changes to machine (browser back/forward)
   useEffect(() => {
@@ -950,19 +966,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   // Seed filters/groupBy once when a workspace view mounts.
-  const hasSeededViewRef = useRef(false);
+  // Precedence: URL > unsaved draft > saved definition. Falling straight through to
+  // the saved definition is what used to discard an in-progress edit whenever the
+  // view was re-entered without its query string (sidebar click, refresh, deep link).
+  const [hasSeededView, setHasSeededView] = useState(false);
   useEffect(() => {
-    if (!isWorkspaceView || hasSeededViewRef.current) return;
+    if (!isWorkspaceView || hasSeededView) return;
     if (state.value !== 'initialized') return;
-    hasSeededViewRef.current = true;
+    setHasSeededView(true);
     const urlHasFilters = Object.keys(state.context.urlFilters ?? {}).length > 0;
     if (urlHasFilters) return;
+    if (initialDraft) {
+      setFilters({ ...initialDraft.filters });
+      setGroupBy(parseGroupBy(initialDraft.groupBy));
+      return;
+    }
     setFilters(initialFilters ? { ...initialFilters } : {});
     setGroupBy(initialGroupBy ? parseGroupBy(initialGroupBy) : 'none');
   }, [
     isWorkspaceView,
+    hasSeededView,
     state.value,
     state.context.urlFilters,
+    initialDraft,
     initialFilters,
     initialGroupBy,
     setFilters,
@@ -973,13 +999,58 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [isSavePopoverOpen, setIsSavePopoverOpen] = useState(false);
   const [workspaceViewNameDraft, setWorkspaceViewNameDraft] = useState('');
 
+  const savableColumns = useMemo(
+    () =>
+      Array.from(visibleColumns)
+        .filter(key => !DERIVED_COLUMNS.includes(key))
+        .sort(),
+    [visibleColumns],
+  );
+
+  const savedViewSignature = useMemo(
+    () =>
+      viewSignature(
+        initialFilters ?? {},
+        initialGroupBy ?? 'none',
+        (initialColumns ?? DEFAULT_VISIBLE_COLUMNS)
+          .filter(key => !DERIVED_COLUMNS.includes(key))
+          .sort(),
+      ),
+    [initialFilters, initialGroupBy, initialColumns],
+  );
+
+  const currentViewSignature = useMemo(
+    () => viewSignature(filters, groupByKey, savableColumns),
+    [filters, groupByKey, savableColumns],
+  );
+
+  const isViewDirty =
+    isWorkspaceView && hasSeededView && currentViewSignature !== savedViewSignature;
+
+  useEffect(() => {
+    if (!isWorkspaceView || !hasSeededView) return;
+    if (isViewDirty) {
+      writeViewDraft(viewDraftKey, {
+        filters,
+        groupBy: groupByKey,
+        columns: savableColumns,
+      });
+    } else {
+      clearViewDraft(viewDraftKey);
+    }
+  }, [
+    isWorkspaceView,
+    hasSeededView,
+    isViewDirty,
+    viewDraftKey,
+    filters,
+    groupByKey,
+    savableColumns,
+  ]);
+
   const persistWorkspaceView = useCallback(
     async (name: string): Promise<void> => {
-      const values = filtersToValues(
-        filters,
-        groupByKey,
-        Array.from(visibleColumns).filter(key => !DERIVED_COLUMNS.includes(key)),
-      );
+      const values = filtersToValues(filters, groupByKey, savableColumns);
       setIsSavingWorkspaceView(true);
       try {
         if (viewId) {
@@ -992,7 +1063,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             }),
           ).server;
           if (res.type === 'error') toast.error(res.error?.message ?? 'Failed to save view');
-          else toast.success('View updated');
+          else {
+            clearViewDraft(viewDraftKey);
+            toast.success('View updated');
+          }
         } else {
           const newId = uuidv4();
           const res = await zero.mutate(
@@ -1010,6 +1084,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           if (res.type === 'error') {
             toast.error(res.error?.message ?? 'Failed to save view');
           } else {
+            clearViewDraft(viewDraftKey);
             toast.success('View saved');
             void navigate(`/projects/views/${newId}`);
           }
@@ -1020,7 +1095,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         setIsSavingWorkspaceView(false);
       }
     },
-    [filters, groupByKey, visibleColumns, viewId, workspaceId, zero, navigate],
+    [filters, groupByKey, savableColumns, viewDraftKey, viewId, workspaceId, zero, navigate],
   );
 
   const handleSavePopoverOpenChange = useCallback(
@@ -1038,6 +1113,21 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setWorkspaceViewNameDraft('');
     void persistWorkspaceView(name);
   }, [workspaceViewNameDraft, persistWorkspaceView]);
+
+  const savedViewName = initialName?.trim() ?? '';
+  const canSaveInPlace = !!viewId && !!savedViewName;
+
+  const handleSaveExistingView = useCallback((): void => {
+    if (!savedViewName) return;
+    void persistWorkspaceView(savedViewName);
+  }, [savedViewName, persistWorkspaceView]);
+
+  const handleResetWorkspaceView = useCallback((): void => {
+    clearViewDraft(viewDraftKey);
+    setFilters(initialFilters ? { ...initialFilters } : {});
+    setGroupBy(initialGroupBy ? parseGroupBy(initialGroupBy) : 'none');
+    setVisibleColumns(prev => mergeSavedColumns(prev, initialColumns ?? DEFAULT_VISIBLE_COLUMNS));
+  }, [viewDraftKey, initialFilters, initialGroupBy, initialColumns, setFilters, setGroupBy]);
 
   const handleShareWorkspaceView = useCallback((): void => {
     if (!filters.boards?.length) {
@@ -3578,6 +3668,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         <div className='flex flex-wrap lg:flex-col md:items-end gap-3 ml-auto md:ml-0'>
           {isWorkspaceView && (
             <div className='flex items-center gap-2'>
+              {isViewDirty && (
+                <>
+                  <span className='text-[13px] text-muted-foreground whitespace-nowrap'>
+                    Unsaved changes
+                  </span>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={handleResetWorkspaceView}
+                    className='rounded-[10px]'
+                    aria-label='Discard unsaved changes'
+                    data-track-category='Projects'
+                    data-track-name='ResetView'
+                  >
+                    Reset
+                  </Button>
+                </>
+              )}
               <Button
                 variant='outline'
                 size='sm'
@@ -3591,64 +3699,78 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 <Share2 className='w-3 h-3 text-muted-foreground' />
                 <span>Share</span>
               </Button>
-              <Popover
-                open={isSavePopoverOpen}
-                onOpenChange={handleSavePopoverOpenChange}
-                align='end'
-                className='w-64 p-3'
-                trigger={
-                  <Button
-                    size='sm'
-                    disabled={!workspaceViewReady || isSavingWorkspaceView}
-                    className='rounded-[10px]'
-                    data-track-category='Projects'
-                    data-track-name='SaveView'
-                  >
-                    <Bookmark className='w-3 h-3' />
-                    <span>{viewId ? 'Save' : 'Save view'}</span>
-                  </Button>
-                }
-              >
-                <div className='flex flex-col gap-2'>
-                  <span className='text-[13px] font-medium text-foreground'>Name this view</span>
-                  <input
-                    autoFocus
-                    value={workspaceViewNameDraft}
-                    onChange={e => setWorkspaceViewNameDraft(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
-                    }}
-                    placeholder='e.g. My open PRs'
-                    data-track-category='Projects'
-                    data-track-name='SaveViewNameInput'
-                    className={cn(
-                      'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
-                      'text-foreground outline-none placeholder:text-muted-foreground',
-                      'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                    )}
-                  />
-                  <div className='flex justify-end gap-2 pt-1'>
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      onClick={() => setIsSavePopoverOpen(false)}
-                      data-track-category='Tickets'
-                      data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
-                    >
-                      Cancel
-                    </Button>
+              {canSaveInPlace ? (
+                <Button
+                  size='sm'
+                  onClick={handleSaveExistingView}
+                  disabled={!workspaceViewReady || isSavingWorkspaceView || !isViewDirty}
+                  className='rounded-[10px]'
+                  data-track-category='Projects'
+                  data-track-name='SaveView'
+                >
+                  <Bookmark className='w-3 h-3' />
+                  <span>Save</span>
+                </Button>
+              ) : (
+                <Popover
+                  open={isSavePopoverOpen}
+                  onOpenChange={handleSavePopoverOpenChange}
+                  align='end'
+                  className='w-64 p-3'
+                  trigger={
                     <Button
                       size='sm'
-                      onClick={handleConfirmSaveWorkspaceView}
-                      data-track-category='Tickets'
-                      data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
-                      disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
+                      disabled={!workspaceViewReady || isSavingWorkspaceView}
+                      className='rounded-[10px]'
+                      data-track-category='Projects'
+                      data-track-name='SaveView'
                     >
-                      Save
+                      <Bookmark className='w-3 h-3' />
+                      <span>{viewId ? 'Save' : 'Save view'}</span>
                     </Button>
+                  }
+                >
+                  <div className='flex flex-col gap-2'>
+                    <span className='text-[13px] font-medium text-foreground'>Name this view</span>
+                    <input
+                      autoFocus
+                      value={workspaceViewNameDraft}
+                      onChange={e => setWorkspaceViewNameDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
+                      }}
+                      placeholder='e.g. My open PRs'
+                      data-track-category='Projects'
+                      data-track-name='SaveViewNameInput'
+                      className={cn(
+                        'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
+                        'text-foreground outline-none placeholder:text-muted-foreground',
+                        'focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                      )}
+                    />
+                    <div className='flex justify-end gap-2 pt-1'>
+                      <Button
+                        variant='ghost'
+                        size='sm'
+                        onClick={() => setIsSavePopoverOpen(false)}
+                        data-track-category='Tickets'
+                        data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size='sm'
+                        onClick={handleConfirmSaveWorkspaceView}
+                        data-track-category='Tickets'
+                        data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
+                        disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
+                      >
+                        Save
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              </Popover>
+                </Popover>
+              )}
             </div>
           )}
           {canCreateTicket && channel && !channel.isArchived && (
