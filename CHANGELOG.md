@@ -1,3 +1,10 @@
+## [1.254.0](https://github.com/juspay/xyne-spaces/compare/v1.253.0...v1.254.0) (2026-09-01)
+
+
+### Features
+
+* rebuild the Xyne AI Digital Twin screen ([#890](https://github.com/juspay/xyne-spaces/issues/890)) ([394fdbb](https://github.com/juspay/xyne-spaces/commit/394fdbba2e39fb4be6f5f2f177c16fb8e5fb7e56))
+
 ## [1.253.0](https://github.com/juspay/xyne-spaces/compare/v1.252.1...v1.253.0) (2026-09-01)
 
 

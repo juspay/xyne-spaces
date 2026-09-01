@@ -1,6 +1,7 @@
 /**
  * Tells cards deep in the transcript that the app is already on screen in the
- * right-hand pane — and lets them drive which version it shows.
+ * right-hand pane — and lets them drive which version it shows, and which
+ * version is current.
  *
  * Without this, App Creation mode runs the same app TWICE: the pane and every
  * inline card each mount their own Sandpack iframe, their own `useXyneData`
@@ -13,6 +14,7 @@
  */
 
 import { createContext, useContext } from 'react';
+import type { ArtifactAppRestoreEvent } from '../../../services/claw/artifactAppsService';
 
 export interface AppCreationModeSignal {
   /** True while the split-view pane is rendering this thread's app. */
@@ -21,15 +23,30 @@ export interface AppCreationModeSignal {
   appId: string | null;
   /** The build currently in the pane, so a card can show itself as selected. */
   viewingVersionId: string | null;
+  /** The build that IS the app right now — what the agent's next update builds
+   *  on. A card offers Restore precisely when it is not this. */
+  headVersionId: string | null;
+  /** Recorded restores, oldest first, so the transcript can show them in place.
+   *  Available whether or not the pane is open: closing a panel must not erase
+   *  history from the thread. */
+  restores: ArtifactAppRestoreEvent[];
   /** Point the pane at a version. A VIEW, not a restore — head does not move. */
   viewVersion: (versionId: string | null) => void;
+  /** Make a version current. Durable, and recorded in the thread. */
+  restoreVersion: (versionId: string) => void;
+  /** True while a restore is in flight, so cards can disable themselves. */
+  restoring: boolean;
 }
 
 const AppCreationModeContext = createContext<AppCreationModeSignal>({
   active: false,
   appId: null,
   viewingVersionId: null,
+  headVersionId: null,
+  restores: [],
   viewVersion: () => undefined,
+  restoreVersion: () => undefined,
+  restoring: false,
 });
 
 export const AppCreationModeProvider = AppCreationModeContext.Provider;
