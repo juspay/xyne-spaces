@@ -185,6 +185,7 @@ export class TagRepository {
       distinct: ['tagCategory'],
       select: { tagCategory: true },
       orderBy: { tagCategory: 'asc' },
+      take: 200,
     });
   }
 
@@ -197,6 +198,7 @@ export class TagRepository {
       distinct: ['tag'],
       select: { tag: true },
       orderBy: { tag: 'asc' },
+      take: 2000,
     });
   }
 

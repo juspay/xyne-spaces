@@ -2905,21 +2905,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
 
     const handleRowClick = (): void => {
-      if (mappedTicketId && mappedTicket) {
-        const channelType = channelTypeMap.get(mappedTicket.channelId);
-        if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
-          const pathParts = location.pathname.split('/');
-          const workspaceId = pathParts[1];
-          void navigate(
-            `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
-          );
-        } else {
-          const base = buildChannelRoute(
-            `${mappedTicket.channelId}/${mappedTicket.conversationId}/${mappedTicket.id}`,
-            { selectedTab: 'thread' },
-          );
-          void navigate(`${base}#origin=${mappedTicket.conversationId}`);
+      if (mappedTicketId) {
+        if (mappedTicket) {
+          const channelType = channelTypeMap.get(mappedTicket.channelId);
+          if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
+            const pathParts = location.pathname.split('/');
+            const workspaceId = pathParts[1];
+            void navigate(
+              `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+            );
+          } else {
+            const base = buildChannelRoute(
+              `${mappedTicket.channelId}/${mappedTicket.conversationId}/${mappedTicket.id}`,
+              { selectedTab: 'thread' },
+            );
+            void navigate(`${base}#origin=${mappedTicket.conversationId}`);
+          }
         }
+        // mappedTicketId is set — a ticket already exists even if not yet synced; never open Create modal.
         return;
       }
 

@@ -8,7 +8,6 @@ import {
   NotificationLevel,
   AutoDraftStatus,
   MailboxState,
-  ChannelRole,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -644,12 +643,9 @@ const SupportScreen = (): ReactElement => {
     applySavedView: applyTicketSavedView,
   } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
 
-  const [channelParticipantsForTickets] = useCachedQuery(
-    queries.channelParticipants({ channelId: ticketViewsChannelId }),
-    { enabled: !!ticketViewsChannelId },
-  );
-  const isTicketViewsChannelAdmin = (channelParticipantsForTickets ?? []).some(
-    p => p.userId === userID && p.role === ChannelRole.ADMIN,
+  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isTicketViewsChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === ticketViewsChannelId,
   );
 
   const [activeTicketViewId, setActiveTicketViewId] = useState<string | null>(null);

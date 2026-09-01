@@ -242,15 +242,36 @@ const DESK_METRICS_FIELD_WHITELIST = new Set([
   'activeTab',
 ]);
 
-function validateDeskMetricsValue(fieldName: string): void {
+const DESK_METRICS_CHART_VIEWS = new Set(['priority', 'trend', 'assignee', 'tags']);
+const DESK_METRICS_ACTIVE_TABS = new Set(['overview', 'agents', 'desks']);
+const DESK_METRICS_RANGE_LABELS = new Set([
+  'Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'Last 60 days', 'Last 90 days', 'custom',
+]);
+
+function validateDeskMetricsValue(fieldName: string, fieldValue: string): void {
+  const table = 'saved_user_configuration_values' as const;
+
   // Custom field values are serialized as "selectedCustomFieldValues.<fieldId>"
   if (fieldName.startsWith('selectedCustomFieldValues.')) return;
+
   if (!DESK_METRICS_FIELD_WHITELIST.has(fieldName)) {
-    throw new MutationACLError(
-      `Invalid desk metrics field: ${fieldName}`,
-      'saved_user_configuration_values',
-    );
+    throw new MutationACLError(`Invalid desk metrics field: ${fieldName}`, table);
   }
+
+  if (!fieldValue) {
+    throw new MutationACLError(`Field value cannot be empty for field: ${fieldName}`, table);
+  }
+
+  if (fieldName === 'chartView' && !DESK_METRICS_CHART_VIEWS.has(fieldValue)) {
+    throw new MutationACLError(`Invalid chartView value: "${fieldValue}"`, table);
+  }
+  if (fieldName === 'activeTab' && !DESK_METRICS_ACTIVE_TABS.has(fieldValue)) {
+    throw new MutationACLError(`Invalid activeTab value: "${fieldValue}"`, table);
+  }
+  if (fieldName === 'rangeLabel' && !DESK_METRICS_RANGE_LABELS.has(fieldValue)) {
+    throw new MutationACLError(`Invalid rangeLabel value: "${fieldValue}"`, table);
+  }
+  // All other whitelisted fields are free-form strings; non-empty is sufficient.
 }
 
 export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configuration_values'> {
@@ -290,7 +311,7 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
         await validateFormEntityValue(args.fieldName, args.fieldValue, tx);
         break;
       case SavedConfigEntityName.DESK_METRICS:
-        validateDeskMetricsValue(args.fieldName);
+        validateDeskMetricsValue(args.fieldName, args.fieldValue);
         break;
       default:
         throw new MutationACLError(
@@ -323,7 +344,7 @@ export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configu
           await validateFormEntityValue(args.fieldName, args.fieldValue, tx);
           break;
         case SavedConfigEntityName.DESK_METRICS:
-          validateDeskMetricsValue(args.fieldName);
+          validateDeskMetricsValue(args.fieldName, args.fieldValue);
           break;
         default:
           throw new MutationACLError(

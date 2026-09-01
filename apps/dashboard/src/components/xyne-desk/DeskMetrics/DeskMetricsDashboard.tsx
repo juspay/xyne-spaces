@@ -68,7 +68,6 @@ import { cn } from '../../../utils/classNames';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { useDeskMetricsSavedViews } from '../../../hooks/useDeskMetricsSavedViews';
-import { ChannelRole } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { DeskSavedViewsControls } from '../DeskSavedViewsControls';
@@ -1003,11 +1002,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     applyView,
   );
 
-  const [channelParticipants] = useCachedQuery(queries.channelParticipants({ channelId }), {
-    enabled: !!channelId,
-  });
-  const isChannelAdmin = (channelParticipants ?? []).some(
-    p => p.userId === user?.id && p.role === ChannelRole.ADMIN,
+  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === channelId,
   );
 
   // Restore active view once savedViews loads (useCachedQuery starts empty)

@@ -10678,7 +10678,14 @@ export const mutators = defineMutators({
             .where('contextType', contextType)
             .where('contextId', contextId),
         );
-        if (allUserConfigs.some(c => c.name === name)) {
+        // Desk contexts are case-sensitive; board views keep case-insensitive matching.
+        const isDeskContext =
+          contextType === SavedConfigContextType.DESK_METRICS ||
+          contextType === SavedConfigContextType.DESK_TICKET;
+        const nameConflict = isDeskContext
+          ? allUserConfigs.some(c => c.name === name)
+          : allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase());
+        if (nameConflict) {
           throw new Error('A saved view with this name already exists');
         }
 
@@ -10735,15 +10742,27 @@ export const mutators = defineMutators({
           throw new Error('You can only edit your own saved views');
         }
 
-        if (name && name !== config.name) {
-          const allUserConfigs = await tx.run(
-            zql.saved_user_configurations
-              .where('userId', ctx.userID)
-              .where('contextType', config.contextType)
-              .where('contextId', config.contextId),
-          );
-          if (allUserConfigs.some(c => c.id !== configId && c.name === name)) {
-            throw new Error('A saved view with this name already exists');
+        // Desk contexts are case-sensitive; board views keep case-insensitive matching.
+        const isDeskUpdate =
+          config.contextType === SavedConfigContextType.DESK_METRICS ||
+          config.contextType === SavedConfigContextType.DESK_TICKET;
+        if (name) {
+          const nameChanged = isDeskUpdate
+            ? name !== config.name
+            : name.toLowerCase() !== config.name.toLowerCase();
+          if (nameChanged) {
+            const allUserConfigs = await tx.run(
+              zql.saved_user_configurations
+                .where('userId', ctx.userID)
+                .where('contextType', config.contextType)
+                .where('contextId', config.contextId),
+            );
+            const updateConflict = isDeskUpdate
+              ? allUserConfigs.some(c => c.id !== configId && c.name === name)
+              : allUserConfigs.some(c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase());
+            if (updateConflict) {
+              throw new Error('A saved view with this name already exists');
+            }
           }
         }
 

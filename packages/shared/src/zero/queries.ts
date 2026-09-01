@@ -1262,8 +1262,7 @@ export const queries = defineQueries({
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('formEntityValues', fev =>
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
-        )
-        .related('subTicketMappings');
+        );
     },
   ),
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
@@ -1525,7 +1524,6 @@ export const queries = defineQueries({
           .related('formEntityValues', fev =>
             relateSupportDynamicFieldValues(fev, dynamicFieldFilters),
           )
-          .related('subTicketMappings')
       );
     },
   ),

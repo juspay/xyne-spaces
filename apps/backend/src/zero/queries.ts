@@ -1433,8 +1433,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('emailReads', (q) => q.where('userId', ctx.userID))
         .related('formEntityValues', (fev) =>
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
-        )
-        .related('subTicketMappings');
+        );
     }
   ),
 
@@ -1867,8 +1866,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('userMailbox', q => q.where('userId', ctx.userID))
         .related('formEntityValues', (fev) =>
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters),
-        )
-        .related('subTicketMappings');
+        );
     }
   ),
   supportTicketsPageV4: defineQuery(
