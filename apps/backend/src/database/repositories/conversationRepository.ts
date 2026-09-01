@@ -385,6 +385,44 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       this.db.releaseEvent.updateMany({
         where: { conversationId: { in: conversationIds } },
         data: { channelId: targetChannelId }
+      }),
+    
+      this.db.activity.updateMany({
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.messageArtifact.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.executionItem.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.delayedMessage.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.prThreadLink.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.email.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.emailDraft.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      // these point at a conversation that just left the channel
+      this.db.channelParticipant.updateMany({
+        where: { channelId: sourceChannelId, lastViewedConversationId: { in: conversationIds } },
+        data: { lastViewedConversationId: null }
+      }),
+      this.db.channelUserStatus.updateMany({
+        where: { channelId: sourceChannelId, lastViewedConversationId: { in: conversationIds } },
+        data: { lastViewedConversationId: null }
       })
     ]);
 
