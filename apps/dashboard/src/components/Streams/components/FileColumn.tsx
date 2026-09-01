@@ -1,7 +1,7 @@
 import { ReactElement, useEffect, useState } from 'react';
 import { DownloadDown } from '@xyne/icons';
-import { detectFileType, formatFileSize } from '../../components/FileViewer/utils';
-import { downloadFile, fetchFile } from '../../services/clients/fileFetchService';
+import { detectFileType, formatFileSize } from '../../FileViewer/utils';
+import { downloadFile, fetchFile } from '../../../services/clients/fileFetchService';
 
 /**
  * One attachment, rendered inside a column.

@@ -1,16 +1,16 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
-import { SparkleAi } from '../../components/icons/SparkleAi';
+import { SparkleAi } from '../../icons/SparkleAi';
 import { toast } from 'sonner';
-import GlobalCommandMenu from '../../components/GlobalCommandMenu/GlobalCommandMenu';
-import { TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
-import type { ContextItem } from '../../components/Chat/ThreadContextPanel/ThreadContextPanel.types';
-import { useAllChannels } from '../../hooks/useChannels';
-import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
+import GlobalCommandMenu from '../../GlobalCommandMenu/GlobalCommandMenu';
+import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
+import type { ContextItem } from '../../Chat/ThreadContextPanel/ThreadContextPanel.types';
+import { useAllChannels } from '../../../hooks/useChannels';
+import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { useStreamsDev } from './StreamsDev';
-import { allowsDuplicates, sourceKey } from './Streams.utils';
-import { columnFromResult, contextIdForKey } from './columnFromResult';
-import { cn } from '../../utils/classNames';
-import type { ColumnSource } from './Streams.types';
+import { allowsDuplicates, sourceKey } from '../utils/Streams.utils';
+import { columnFromResult, contextIdForKey } from '../utils/columnFromResult';
+import { cn } from '../../../utils/classNames';
+import type { ColumnSource } from '../utils/Streams.types';
 
 /**
  * Which of cmd+K's categories can become a column.

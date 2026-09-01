@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { cn } from '../../utils/classNames';
-import { COLUMN_CLOSE_MS, STREAMS_EASE } from './Streams.types';
+import { cn } from '../../../utils/classNames';
+import { COLUMN_CLOSE_MS, STREAMS_EASE } from '../utils/Streams.types';
 
 export interface ColumnResizeHandleProps {
   /** Current width in pixels, so the drag can work in the same units as the eye. */

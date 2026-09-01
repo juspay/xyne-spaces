@@ -25,7 +25,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '../../ui/dropdown-menu';
-import { AddToStreamMenuItem } from '../../../routes/StreamsScreen/AddToStreamMenu';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu';
 import { Dialog } from '../../ui/Dialog';
 import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';

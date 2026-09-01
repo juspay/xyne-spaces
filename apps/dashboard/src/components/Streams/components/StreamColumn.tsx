@@ -10,26 +10,26 @@ import {
 // even though the rest of this header's controls come from lucide — matching the
 // *verb* across the two places it lives beats matching the icon family within one
 // row, because the two buttons do the identical thing to the identical state.
-import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import StreamRouterScope from './StreamRouterScope';
 import { ActivityDot } from './ActivityDot';
-import { columnIntentFor } from './columnIntent';
-import { isUnread } from './useColumnActivity';
+import { columnIntentFor } from '../utils/columnIntent';
+import { isUnread } from '../hooks/useColumnActivity';
 import { useStreamsActions } from './StreamsActions';
 import { useStreamsDev } from './StreamsDev';
 import { surfaceFor } from './surfaces';
-import { hasDragItem, readDragItem, type StreamItem } from './streamsDnd';
-import { cn } from '../../utils/classNames';
-import { prefersReducedMotion } from './Streams.utils';
-import type { ColumnActivity } from './useColumnActivity';
+import { hasDragItem, readDragItem, type StreamItem } from '../utils/streamsDnd';
+import { cn } from '../../../utils/classNames';
+import { prefersReducedMotion } from '../utils/Streams.utils';
+import type { ColumnActivity } from '../hooks/useColumnActivity';
 import {
   COLUMN_CLOSE_MS,
   COLUMN_OPEN_MS,
   FOCUS_EASE,
   FOCUS_PEEK,
   STREAMS_EASE,
-} from './Streams.types';
-import type { Column, ColumnSeed } from './Streams.types';
+} from '../utils/Streams.types';
+import type { Column, ColumnSeed } from '../utils/Streams.types';
 
 /**
  * The focus ring, as a box-shadow that changes *spread* rather than opacity.

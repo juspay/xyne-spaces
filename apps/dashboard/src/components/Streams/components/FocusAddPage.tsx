@@ -1,8 +1,8 @@
 import { ReactElement, forwardRef } from 'react';
 import AddColumnPalette from './AddColumnPalette';
-import { FOCUS_PEEK } from './Streams.types';
+import { FOCUS_PEEK } from '../utils/Streams.types';
 import { useStreamsDev } from './StreamsDev';
-import type { ColumnSource } from './Streams.types';
+import type { ColumnSource } from '../utils/Streams.types';
 
 export interface FocusAddPageProps {
   present: ReadonlySet<string>;

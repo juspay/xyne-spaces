@@ -1,6 +1,6 @@
 import type { ChannelScopeType } from '@xyne/shared';
-import { isDMChannel } from '../../components/Chat/ChatDirectory/ChatDirectory.utils';
-import type { DisplayEntityType, DisplaySearchResult } from '../../types/search';
+import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
+import type { DisplayEntityType, DisplaySearchResult } from '../../../types/search';
 import type { ColumnSource } from './Streams.types';
 
 /**

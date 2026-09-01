@@ -39,7 +39,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '../ui/dropdown-menu';
-import { AddToStreamMenuItem } from '../../routes/StreamsScreen/AddToStreamMenu';
+import { AddToStreamMenuItem } from '../Streams/components/AddToStreamMenu';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';

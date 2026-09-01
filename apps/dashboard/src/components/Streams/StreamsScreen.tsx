@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
+import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,25 +18,25 @@ import { v4 as uuidv4 } from 'uuid';
 // channel header — different stroke weight, different corner treatment, at the
 // same size.
 import { PlusDefault } from '@xyne/icons';
-import { Button } from '../../components/ui/Button/Button';
+import { Button } from '../ui/Button/Button';
 import { useZero } from '../../hooks/useZero';
 import { getDraft } from '../../hooks/useDraft';
 import { mutators } from '../../zero/mutators';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useScope, useShortcut } from '../../shortcuts';
-import StreamColumn from './StreamColumn';
-import AddColumnPalette from './AddColumnPalette';
-import StreamTopNav from './StreamTopNav';
-import StreamSwitcher from './StreamSwitcher';
-import { useColumnDrag, type MarkerRect } from './useColumnDrag';
-import { useStreamActivity } from './useStreamActivity';
-import { useAttachmentColumns } from './useAttachmentColumns';
-import { IDLE, type ColumnActivity } from './useColumnActivity';
-import { StreamsActionsProvider } from './StreamsActions';
-import { StreamsDevProvider, DEV_DEFAULTS } from './StreamsDev';
-import { surfaceFor } from './surfaces';
+import StreamColumn from './components/StreamColumn';
+import AddColumnPalette from './components/AddColumnPalette';
+import StreamTopNav from './components/StreamTopNav';
+import StreamSwitcher from './components/StreamSwitcher';
+import { useColumnDrag, type MarkerRect } from './hooks/useColumnDrag';
+import { useStreamActivity } from './hooks/useStreamActivity';
+import { useAttachmentColumns } from './hooks/useAttachmentColumns';
+import { IDLE, type ColumnActivity } from './hooks/useColumnActivity';
+import { StreamsActionsProvider } from './components/StreamsActions';
+import { StreamsDevProvider, DEV_DEFAULTS } from './components/StreamsDev';
+import { surfaceFor } from './components/surfaces';
 import { toast } from 'sonner';
-import ColumnResizeHandle from './ColumnResizeHandle';
+import ColumnResizeHandle from './components/ColumnResizeHandle';
 import {
   activeStream,
   archiveStream,
@@ -53,8 +53,8 @@ import {
   saveFocusMode,
   saveLayout,
   switchStream,
-} from './streamsLayout';
-import FocusAddPage from './FocusAddPage';
+} from './utils/streamsLayout';
+import FocusAddPage from './components/FocusAddPage';
 import {
   acceptsAttachment,
   allowsDuplicates,
@@ -64,7 +64,7 @@ import {
   isAttachingSource,
   scrollBehavior,
   sourceKey,
-} from './Streams.utils';
+} from './utils/Streams.utils';
 import {
   ADD_COMMIT_AT,
   STREAM_ACTION,
@@ -82,10 +82,10 @@ import {
   RING_GUTTER,
   STRIP_LEAD,
   STRIP_PAD,
-} from './Streams.types';
+} from './utils/Streams.types';
 import { StreamChannelsProvider } from '../../contexts/StreamContext';
-import { questionFor, type StreamItem } from './streamsDnd';
-import type { Column, ColumnSeed, ColumnSource, StreamsLayout } from './Streams.types';
+import { questionFor, type StreamItem } from './utils/streamsDnd';
+import type { Column, ColumnSeed, ColumnSource, StreamsLayout } from './utils/Streams.types';
 import { cn } from '../../utils/classNames';
 
 const SCOPE = 'streams';

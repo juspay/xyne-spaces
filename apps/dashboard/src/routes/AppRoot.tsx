@@ -224,7 +224,7 @@ import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
-import StreamsScreen from './StreamsScreen/StreamsScreen.tsx';
+import StreamsScreen from '../components/Streams/StreamsScreen';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';

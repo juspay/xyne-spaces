@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
-import { cn } from '../../utils/classNames';
-import type { ColumnActivity } from './useColumnActivity';
+import { cn } from '../../../utils/classNames';
+import type { ColumnActivity } from '../hooks/useColumnActivity';
 
 /**
  * What is new in a column, in the two tiers the rest of Xyne already uses.

@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useEffect, useMemo, useReducer } from 'react';
 import { IDLE, useColumnActivity, type ColumnActivity } from './useColumnActivity';
-import type { Column, ColumnSource } from './Streams.types';
+import type { Column, ColumnSource } from '../utils/Streams.types';
 
 /** Every column's activity, keyed by column id. */
 export type StreamActivity = Readonly<Record<string, ColumnActivity>>;

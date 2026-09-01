@@ -1,9 +1,20 @@
 import { useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { DEFAULT_WIDTH, SURFACE_MIN_WIDTHS, type ColumnSource, type Stream } from './Streams.types';
-import { allowsDuplicates, sourceKey } from './Streams.utils';
-import { createStream, liveStreams, loadLayout, makeColumn, saveLayout } from './streamsLayout';
+import {
+  DEFAULT_WIDTH,
+  SURFACE_MIN_WIDTHS,
+  type ColumnSource,
+  type Stream,
+} from '../utils/Streams.types';
+import { allowsDuplicates, sourceKey } from '../utils/Streams.utils';
+import {
+  createStream,
+  liveStreams,
+  loadLayout,
+  makeColumn,
+  saveLayout,
+} from '../utils/streamsLayout';
 
 /** A stream as the picker needs it: something to name and something to add to. */
 export interface StreamTarget {

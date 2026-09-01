@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
 import type { RefObject } from 'react';
-import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
-import type { ColumnSource } from './Streams.types';
+import {
+  attachmentViewerActor,
+  type AttachmentRef,
+} from '../../../machines/attachmentViewerMachine';
+import type { ColumnSource } from '../utils/Streams.types';
 
 /**
  * Files, redirected from the app's viewer into a column.

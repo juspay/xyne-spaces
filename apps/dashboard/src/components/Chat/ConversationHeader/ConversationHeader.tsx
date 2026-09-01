@@ -50,7 +50,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
-import { AddToStreamMenuItem } from '../../../routes/StreamsScreen/AddToStreamMenu';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu';
 import {
   DropdownMenu,
   DropdownMenuContent,

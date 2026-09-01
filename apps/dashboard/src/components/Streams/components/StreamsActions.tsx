@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
-import type { ColumnActivity } from './useColumnActivity';
-import type { ColumnSource } from './Streams.types';
+import type { ColumnActivity } from '../hooks/useColumnActivity';
+import type { ColumnSource } from '../utils/Streams.types';
 
 export interface StreamsActions {
   /**

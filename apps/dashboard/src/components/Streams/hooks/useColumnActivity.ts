@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { useAllUnreadCount } from '../../hooks/useUnreadCount';
-import { useAllVisibleChannels, useGetChannelUserStatus } from '../../hooks/useChannels';
-import type { ColumnSource } from './Streams.types';
+import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
+import { useAllVisibleChannels, useGetChannelUserStatus } from '../../../hooks/useChannels';
+import type { ColumnSource } from '../utils/Streams.types';
 
 export interface ColumnActivity {
   /** Things addressed to you: mentions, DMs, assignments. Rendered as a count. */

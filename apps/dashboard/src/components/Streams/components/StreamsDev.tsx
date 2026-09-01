@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 // Shipped as a separate entry point, and the panel is unusable without it — the
 // controls render as raw block elements at page width and shove the app down.
-import { DEFAULT_WIDTH } from './Streams.types';
+import { DEFAULT_WIDTH } from '../utils/Streams.types';
 import type { StreamNavVariant } from './StreamTopNav';
 
 /**

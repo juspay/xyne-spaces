@@ -10,11 +10,11 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from '../../components/ui/dropdown-menu';
-import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
-import { cn } from '../../utils/classNames';
-import type { ColumnSource } from './Streams.types';
-import { useAddToStream, type StreamTarget } from './useAddToStream';
+} from '../../ui/dropdown-menu';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { cn } from '../../../utils/classNames';
+import type { ColumnSource } from '../utils/Streams.types';
+import { useAddToStream, type StreamTarget } from '../hooks/useAddToStream';
 
 /**
  * The stream list, mounted only once the menu is open.
