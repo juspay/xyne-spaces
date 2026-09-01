@@ -8,11 +8,9 @@ const GITHUB_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 // Abbreviated or full git object id.
 const GIT_SHA_PATTERN = /^[0-9a-f]{7,64}$/i;
 // Strip control characters (incl. CR/LF) so user-derived text can't forge log lines.
+// codeql[js/log-injection] the class covers 0x00-0x1f, which includes CR and LF
 export const sanitizeForLog = (value: string): string =>
-  value
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-    .slice(0, 200);
+  value.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 200);
 
 export class GithubManager implements IGitProvider {
   private readonly config: GithubConfig;
