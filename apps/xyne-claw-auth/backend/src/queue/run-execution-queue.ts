@@ -1,6 +1,9 @@
 import { Queue } from "bullmq";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("run-execution-queue");
 
 export type RunExecutionJobData = Record<string, unknown> & { sessionId: string };
 
@@ -15,8 +18,11 @@ let queue: Queue<RunExecutionJobData> | undefined;
 
 export function getRunExecutionQueue(): Queue<RunExecutionJobData> {
   if (!queue) {
+    const connection = redisService.getConnection();
+    const opts = (connection as { options?: { host?: string; port?: number } }).options;
+    log.info(`[run-queue] queue bound queue=${QUEUE_NAME} redis=${opts?.host ?? "?"}:${opts?.port ?? "?"}`);
     queue = new Queue<RunExecutionJobData>(QUEUE_NAME, {
-      connection: redisService.getConnection(),
+      connection,
       defaultJobOptions: {
         attempts: maxAttempts(),
         backoff: { type: "exponential", delay: 15_000 },
@@ -29,7 +35,15 @@ export function getRunExecutionQueue(): Queue<RunExecutionJobData> {
 }
 
 export async function enqueueRun(payload: RunExecutionJobData): Promise<void> {
-  await getRunExecutionQueue().add(payload.sessionId, payload, { jobId: payload.sessionId });
+  const q = getRunExecutionQueue();
+  const existing = await q.getJob(payload.sessionId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === "completed" || state === "failed") {
+      await existing.remove();
+    }
+  }
+  await q.add(payload.sessionId, payload, { jobId: payload.sessionId });
 }
 
 export const RUN_EXECUTION_QUEUE_NAME = QUEUE_NAME;

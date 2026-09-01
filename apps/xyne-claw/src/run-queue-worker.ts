@@ -230,6 +230,6 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
     }
   }, PRESSURE_CHECK_INTERVAL_MS).unref();
 
-  clog.info(`[run-queue] worker started queue=${RUN_EXECUTION_QUEUE_NAME} concurrency=10000`);
+  clog.info(`[run-queue] worker started queue=${RUN_EXECUTION_QUEUE_NAME} redis=${connection.host}:${connection.port} concurrency=10000`);
   return worker;
 }
