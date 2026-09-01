@@ -508,6 +508,39 @@
                     max-height: calc(100vh - 16px);
                 }
             }
+            /* Instant hover tooltip for table headers (native title has a fixed delay).
+               Placed below the header so the scroll container does not clip it. */
+            .has-tip {
+                cursor: help;
+                border-bottom: 1px dotted #9aa3af;
+            }
+            .has-tip::after {
+                content: attr(data-tip);
+                position: absolute;
+                top: calc(100% + 8px);
+                left: 0;
+                width: 260px;
+                padding: 9px 11px;
+                border-radius: 7px;
+                background: var(--navy-deep);
+                color: #edf1fa;
+                font-size: 11.5px;
+                font-weight: 400;
+                line-height: 1.45;
+                letter-spacing: 0;
+                text-transform: none;
+                white-space: normal;
+                box-shadow: 0 8px 20px rgba(10, 20, 45, 0.25);
+                opacity: 0;
+                visibility: hidden;
+                transition: opacity 0.12s ease;
+                z-index: 80;
+                pointer-events: none;
+            }
+            .has-tip:hover::after {
+                opacity: 1;
+                visibility: visible;
+            }
         </style>
     </head>
     <body>
@@ -612,7 +645,7 @@
                     <div class="metric-label">Identifiers</div>
                     <div class="metric-value" id="kpiIdentifiers">—</div>
                     <div class="metric-note">
-                        Latest cluster identifier snapshot
+                        Reported in selected dates
                     </div>
                 </article>
                 <article class="card kpi">
@@ -818,8 +851,8 @@
                                     <th>Party</th>
                                     <th>Reports</th>
                                     <th>Identifiers</th>
-                                    <th>External entities</th>
-                                    <th>Clusters</th>
+                                    <th class="has-tip" data-tip="External entities matched by this party's reports, counted per day and summed over the selected dates. An entity matched on several days counts each time, so this is report activity, not the registry total shown in the External Entities tile.">External entities</th>
+                                    <th class="has-tip" data-tip="Clusters matched by this party's reports, counted per day and summed over the selected dates. A cluster matched on several days counts each time, so this is report activity, not the registry total shown in the Clusters tile.">Clusters</th>
                                     <th>Screenings</th>
                                     <th>Report days</th>
                                     <th>Screening days</th>
@@ -1921,17 +1954,10 @@
 
                     const totalReports = sum(aggregateReports, "reports_count");
                     const totalScreenings = sum(screenings, "count");
-                    const totalIdentifiers = party
-                        ? weightedSum(
-                              externalIdentifiers,
-                              "external_entity_count",
-                              "num_identifiers",
-                          )
-                        : weightedSum(
-                              clusterIdentifiers,
-                              "cluster_count",
-                              "num_identifiers",
-                          );
+                    const totalIdentifiers = sum(
+                        aggregateReports,
+                        "identifiers_count",
+                    );
                     const totalExternalEntities = sum(
                         externalIdentifiers,
                         "external_entity_count",
@@ -1976,19 +2002,14 @@
                     );
                     const identifiersByParty = sortedEntries(
                         aggregate(
-                            externalIdentifiers.map((row) => ({
-                                party_id: row.party_id,
-                                identifiers_count:
-                                    safeNumber(row.external_entity_count) *
-                                    safeNumber(row.num_identifiers),
-                            })),
+                            aggregateReports,
                             "party_id",
                             "identifiers_count",
                         ),
                     );
                     const identifierTypes = sortedEntries(
                         aggregate(
-                            reports.filter((row) => {
+                            metricReports.filter((row) => {
                                 const identifierType = String(
                                     row.identifier_type ?? "",
                                 )

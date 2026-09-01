@@ -171,10 +171,6 @@ Replace content inside the <template id="dpip-email-body"> element.
 
     assert.match(
       identifierTypeChartSource,
-      /aggregate\(\s*reports\.filter/,
-    );
-    assert.doesNotMatch(
-      identifierTypeChartSource,
       /aggregate\(\s*metricReports\.filter/,
     );
     assert.match(
