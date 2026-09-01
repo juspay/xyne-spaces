@@ -4,6 +4,7 @@ import type {
   InlineContentSchema,
   StyleSchema,
 } from '@blocknote/core';
+import { CellSelection } from '@tiptap/pm/tables';
 import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -38,26 +39,54 @@ interface UseCanvasTicketEditorBridgeResult {
   handleTicketCreated: (ticket: { id: string }) => void;
 }
 
+interface ResolvedSelectionPositionLike {
+  parent: { textContent: string };
+  sameParent: (other: ResolvedSelectionPositionLike) => boolean;
+}
+
 interface TiptapEditorLike {
   state: {
     selection: {
       from: number;
       to: number;
       empty?: boolean;
-      $from: { parent: { textContent: string } };
+      $from: ResolvedSelectionPositionLike;
+      $to: ResolvedSelectionPositionLike;
     };
     doc: {
       textBetween: (from: number, to: number, blockSeparator?: string) => string;
+      descendants: (
+        callback: (
+          node: {
+            isText?: boolean;
+            text?: string | null;
+            nodeSize: number;
+            marks?: Array<{ type: { name: string }; attrs?: { stringValue?: string } }>;
+          },
+          position: number,
+        ) => void,
+      ) => void;
       nodesBetween: (
         from: number,
         to: number,
         callback: (node: { marks?: Array<{ type: { name: string } }> }) => void,
       ) => void;
     };
+    schema: { marks: { canvasTicket?: unknown } };
+    tr: {
+      removeMark: (from: number, to: number, markType: unknown) => TiptapEditorLike['state']['tr'];
+      setMeta: (key: string, value: unknown) => TiptapEditorLike['state']['tr'];
+    };
   };
+  view: { dispatch: (transaction: TiptapEditorLike['state']['tr']) => void };
   commands: {
     setTextSelection: (range: { from: number; to: number }) => boolean;
   };
+}
+
+interface TicketMarkedTextSnapshot {
+  text: string;
+  ranges: Array<{ from: number; to: number }>;
 }
 
 const getTiptapEditor = (editor: CanvasEditorLike): TiptapEditorLike | null =>
@@ -75,6 +104,86 @@ const rangeHasTicketStyle = (editor: TiptapEditorLike, from: number, to: number)
   return hasTicketStyle;
 };
 
+const rangeHasCodeStyle = (editor: TiptapEditorLike, from: number, to: number): boolean => {
+  let hasCodeStyle = false;
+  editor.state.doc.nodesBetween(from, to, node => {
+    if (node.marks?.some(mark => mark.type.name === 'code')) {
+      hasCodeStyle = true;
+    }
+  });
+  return hasCodeStyle;
+};
+
+const getTicketMarkedTextSnapshots = (
+  editor: TiptapEditorLike,
+): Map<string, TicketMarkedTextSnapshot> => {
+  const snapshots = new Map<string, TicketMarkedTextSnapshot>();
+
+  editor.state.doc.descendants((node, position) => {
+    if (!node.isText || !node.text) return;
+    const ticketMark = node.marks?.find(mark => mark.type.name === 'canvasTicket');
+    const ticketId = ticketMark?.attrs?.stringValue;
+    if (!ticketId) return;
+
+    const existing = snapshots.get(ticketId) ?? { text: '', ranges: [] };
+    existing.text += node.text;
+    const from = position;
+    const to = position + node.nodeSize;
+    const previousRange = existing.ranges.at(-1);
+    if (previousRange?.to === from) {
+      previousRange.to = to;
+    } else {
+      existing.ranges.push({ from, to });
+    }
+    snapshots.set(ticketId, existing);
+  });
+
+  return snapshots;
+};
+
+const removeChangedTicketStyles = (
+  editor: TiptapEditorLike,
+  previousSnapshots: Map<string, TicketMarkedTextSnapshot>,
+  currentSnapshots: Map<string, TicketMarkedTextSnapshot>,
+): boolean => {
+  const ticketMarkType = editor.state.schema.marks.canvasTicket;
+  if (!ticketMarkType) return false;
+
+  const rangesToUnlink: Array<{ from: number; to: number }> = [];
+  for (const [ticketId, currentSnapshot] of currentSnapshots) {
+    const previousSnapshot = previousSnapshots.get(ticketId);
+    if (previousSnapshot && previousSnapshot.text !== currentSnapshot.text) {
+      rangesToUnlink.push(...currentSnapshot.ranges);
+    }
+  }
+  if (rangesToUnlink.length === 0) return false;
+
+  let transaction = editor.state.tr;
+  for (const range of rangesToUnlink) {
+    transaction = transaction.removeMark(range.from, range.to, ticketMarkType);
+  }
+  transaction.setMeta('addToHistory', false);
+  editor.view.dispatch(transaction);
+  return true;
+};
+
+const getClosestCanvasBlock = (node: Node | null): HTMLElement | null => {
+  const element = node instanceof Element ? node : node?.parentElement;
+  return element?.closest<HTMLElement>('.bn-block-content[data-content-type]') ?? null;
+};
+
+const domSelectionSpansMultipleBlocks = (container: HTMLElement | null): boolean => {
+  const selection = window.getSelection();
+  if (!container || !selection || selection.rangeCount === 0) return false;
+
+  const anchorBlock = getClosestCanvasBlock(selection.anchorNode);
+  const focusBlock = getClosestCanvasBlock(selection.focusNode);
+  if (!anchorBlock || !focusBlock) return false;
+  if (!container.contains(anchorBlock) || !container.contains(focusBlock)) return false;
+
+  return anchorBlock !== focusBlock;
+};
+
 export function useCanvasTicketEditorBridge({
   channelId,
   containerRef,
@@ -89,6 +198,28 @@ export function useCanvasTicketEditorBridge({
   useEffect(() => {
     setActiveTicketAnchor(null);
   }, [channelId]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const editor = getEditor();
+    const tiptapEditor = editor ? getTiptapEditor(editor) : null;
+    if (!editor || !tiptapEditor) return;
+
+    let previousSnapshots = getTicketMarkedTextSnapshots(tiptapEditor);
+    const unsubscribe = editor.onChange(() => {
+      const currentSnapshots = getTicketMarkedTextSnapshots(tiptapEditor);
+      const removedStyle = removeChangedTicketStyles(
+        tiptapEditor,
+        previousSnapshots,
+        currentSnapshots,
+      );
+      previousSnapshots = removedStyle
+        ? getTicketMarkedTextSnapshots(tiptapEditor)
+        : currentSnapshots;
+    });
+
+    return unsubscribe;
+  }, [getEditor, ready]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -158,14 +289,35 @@ export function useCanvasTicketEditorBridge({
     if (!editor) return;
 
     try {
-      const blockId = editor.getTextCursorPosition().block?.id;
+      const currentBlock = editor.getTextCursorPosition().block;
+      const blockId = currentBlock?.id;
       const tiptapEditor = getTiptapEditor(editor);
       if (!blockId || !tiptapEditor || tiptapEditor.state.selection.empty) {
         toast.error('Select text to create a ticket');
         return;
       }
 
+      const { $from, $to } = tiptapEditor.state.selection;
+      const selectedBlocks = editor.getSelection()?.blocks;
+      if (tiptapEditor.state.selection instanceof CellSelection) {
+        toast.error('Select text within a single table cell to create a ticket');
+        return;
+      }
+      if (
+        !$from.sameParent($to) ||
+        (selectedBlocks?.length ?? 0) > 1 ||
+        domSelectionSpansMultipleBlocks(containerRef.current)
+      ) {
+        toast.error('Select text within a single block to create a ticket');
+        return;
+      }
+
       const { from, to } = tiptapEditor.state.selection;
+      if (rangeHasCodeStyle(tiptapEditor, from, to)) {
+        toast.error('Tickets cannot be created from code-formatted text');
+        return;
+      }
+
       const anchorText = tiptapEditor.state.doc.textBetween(from, to, ' ').trim();
       if (!anchorText) {
         toast.error('Select text to create a ticket');
@@ -187,7 +339,7 @@ export function useCanvasTicketEditorBridge({
     } catch {
       toast.error('Unable to use the selected canvas text');
     }
-  }, [channel?.isArchived, getEditor, ready]);
+  }, [channel?.isArchived, containerRef, getEditor, ready]);
 
   const closeTicketModal = useCallback((): void => {
     setActiveTicketAnchor(null);
