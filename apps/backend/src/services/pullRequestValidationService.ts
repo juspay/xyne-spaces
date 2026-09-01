@@ -555,17 +555,12 @@ export class PullRequestValidationService {
     target: BuildStatusTarget,
     commitHash: string
   ): Promise<boolean> {
-    if (target.provider === VCSProviderType.GITHUB) {
-      return githubManager.hasCommitStatus(
-        target.owner,
-        target.repo,
-        commitHash,
-        PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME,
-      );
-    }
-    return this.bitbucketManager.hasBuildStatus(
+    if (target.provider !== VCSProviderType.GITHUB) return false;
+    return githubManager.hasCommitStatus(
+      target.owner,
+      target.repo,
       commitHash,
-      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.KEY,
+      PR_VALIDATION_CONFIG.SPEC_BUILD_STATUS.NAME,
     );
   }
 
@@ -579,6 +574,11 @@ export class PullRequestValidationService {
     workspaceId: string,
     result: ValidationResult
   ): Promise<void> {
+    // GitHub only. A Bitbucket build status can feed merge gates directly, while
+    // a GitHub status is inert until added to a ruleset, so this check is not
+    // posted there at all - which also means it can leave nothing stale behind.
+    if (target.provider !== VCSProviderType.GITHUB) return;
+
     const { ticketDescription, xyneId } = result;
     const resolvable = ticketDescription !== undefined && xyneId !== undefined;
     const { enabled, configured, sections } = await this.resolveSpecCheckConfig(
