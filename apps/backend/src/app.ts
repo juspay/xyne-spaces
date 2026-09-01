@@ -136,6 +136,7 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -587,6 +588,14 @@ export class App {
       '/api/internal/sdlc/claw-callback/:executionId/:step',
       validateS2SKey,
       handleSdlcClawCallback,
+    );
+    // Claw's completion callback for a parked RUN_AGENT step. The session — not
+    // the node path — identifies which attempt reported back; the handler
+    // resolves the gate from it.
+    this.app.post(
+      '/api/internal/workflows-v2/claw-callback/:executionId',
+      validateS2SKey,
+      handleWorkflowClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);

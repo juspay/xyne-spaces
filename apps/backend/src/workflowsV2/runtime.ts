@@ -19,11 +19,12 @@ import {
   WorkflowRuntime,
   type ExecutorLogger,
 } from '@xyne/workflow-sdk';
-import { AgentStep, AgentToolRegistry, PiMonoRuntime } from '@xyne/workflow-sdk/agents';
+import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
+import { ClawAgentProvider } from './agents/claw-provider';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
@@ -50,31 +51,35 @@ const steps = new StepRegistry();
 const triggers = new TriggerRegistry();
 
 /**
- * RUN_AGENT — INTERIM. See docs/guidelines/workflows/AGENTS.md.
+ * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
  *
- * This runs the SDK's bundled pi-mono runtime against LiteLLM, mirroring xyne-search. It should run
- * on xyne-claw instead: claw is where this product's agents, tools, MCP connections and approvals
- * already live, so an author here picks a model and writes a prompt rather than picking one of the
- * org's agents. The claw design is analysed in that doc — `ClawAgentRuntime extends BaseAgentRuntime`,
- * translating claw's SSE stream, which works because claw is itself a pi-mono agent.
+ * Claw is where this product's agents live: their prompts, tools, MCP connections, model policy and
+ * approvals are all configured there. So a workflow author picks one of the org's agents and gives
+ * it a task, rather than assembling an agent inline.
  *
- * Capability-gated: no LLM config means RUN_AGENT is absent from the step picker rather than present
- * and failing mid-run — the same rule DEDUP and the WEBHOOK trigger break, being auto-registered by
- * the SDK with no way to opt out.
+ * Dispatch-and-callback, not streaming — the step parks and its worker slot is released for the
+ * duration of the run. Claw reports back to `/api/internal/workflows-v2/claw-callback`.
+ *
+ * This replaced an interim step that drove the SDK's bundled pi-mono runtime against LiteLLM. That
+ * removal is what lets the backend drop the pi peer dependencies: `@xyne/workflow-sdk/agents/host`
+ * is pi-free, and nothing else here imports the pi-ful `/agents` barrel.
+ *
+ * Capability-gated: no claw config means no agent step in the picker, rather than one that is
+ * present and fails mid-run — the same rule DEDUP and the WEBHOOK trigger break, being
+ * auto-registered by the SDK with no way to opt out.
  */
-const llmBaseUrl = config.llm.litellmBaseUrl?.replace(/\/$/, '') ?? '';
-const llmApiKey = config.llm.litellmApiKey ?? '';
-
-if (llmBaseUrl && llmApiKey) {
+if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
   steps.register(
-    new AgentStep(
-      new PiMonoRuntime({ baseUrl: llmBaseUrl, apiKey: llmApiKey, api: 'openai-completions' }),
-      new AgentToolRegistry(),
-    ),
+    new HostAgentStep(new ClawAgentProvider(), {
+      type: 'RUN_AGENT',
+      name: 'Run Agent',
+      description: "Run one of your workspace's agents and use its response",
+      category: 'ai',
+    }),
   );
-  logger.info('[workflows] RUN_AGENT registered (interim: pi-mono over LiteLLM)');
+  logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
 } else {
-  logger.warn('[workflows] LiteLLM not configured — RUN_AGENT will not be available');
+  logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
 }
 
 const executor = new WorkflowExecutor(persistence, steps, triggers, services, {
