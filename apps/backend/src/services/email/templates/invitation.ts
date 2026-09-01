@@ -57,6 +57,19 @@ export function invitationEmailHtml({
                 </tr>
               </table>
 
+              ${tempPassword ? `
+              <!-- Temp Password Banner -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+                <tr>
+                  <td style="background:#ecfdf5;border:1px solid #10b981;border-radius:8px;padding:12px 16px;">
+                    <span style="display:block;color:#065f46;font-size:13px;margin-bottom:8px;">Sign in with Google/Microsoft SSO, or use this temporary password to sign in with your email — it will remain your password until you set it manually.</span>
+                    <strong style="display:block;color:#065f46;font-size:13px;margin-bottom:4px;">🔑 Your Temporary Password</strong>
+                    <p style="font-size:18px;font-weight:bold;color:#047857;margin:8px 0 0 0;letter-spacing:1px;">${tempPassword}</p>
+                  </td>
+                </tr>
+              </table>
+              ` : ''}
+
               <!-- Desktop app mention -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
@@ -66,19 +79,6 @@ export function invitationEmailHtml({
                   </td>
                 </tr>
               </table>
-
-              ${tempPassword ? `
-              <!-- Temp Password Banner -->
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;">
-                <tr>
-                  <td style="background:#ecfdf5;border:1px solid #10b981;border-radius:8px;padding:12px 16px;">
-                    <strong style="display:block;color:#065f46;font-size:13px;margin-bottom:4px;">🔑 Your Temporary Password</strong>
-                    <span style="color:#065f46;font-size:13px;">Sign in with Google/Microsoft SSO, or use this temporary password to sign in with your email — it will remain your password until you set it manually.</span>
-                    <p style="font-size:18px;font-weight:bold;color:#047857;margin:8px 0 0 0;letter-spacing:1px;">${tempPassword}</p>
-                  </td>
-                </tr>
-              </table>
-              ` : ''}
 
               <!-- Footer -->
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -120,17 +120,17 @@ JOIN XYNE
 ──────────────────────────────────────────
   ${invitationLink}
 
+${tempPassword ? `──────────────────────────────────────────
+Sign in with Google/Microsoft SSO, or use this temporary password to sign in with your email — it will remain your password until you set it manually.
+
+🔑 YOUR TEMPORARY PASSWORD
+──────────────────────────────────────────
+  ${tempPassword}
+` : ''}
 Want the full desktop experience? Download the app:
 
   ${frontendUrl}/apps/downloads
 
-${tempPassword ? `──────────────────────────────────────────
-🔑 YOUR TEMPORARY PASSWORD
-──────────────────────────────────────────
-Sign in with Google/Microsoft SSO, or use this temporary password to sign in with your email — it will remain your password until you set it manually.
-
-  ${tempPassword}
-` : ''}
 ──────────────────────────────────────────
 This invitation was sent by Xyne Spaces. If you weren't expecting this email, you can safely ignore it.
   `.trim();
