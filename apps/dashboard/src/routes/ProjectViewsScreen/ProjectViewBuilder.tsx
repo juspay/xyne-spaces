@@ -98,6 +98,7 @@ const ProjectViewBuilder = (): ReactElement => {
       viewMode='workspace-view'
       {...(user?.workspaceId ? { workspaceId: user.workspaceId } : {})}
       {...(isExistingView && viewId ? { viewId } : {})}
+      {...(sharedConfig ? { hasSharedSeed: true } : {})}
       {...(seed?.name ? { initialName: seed.name } : {})}
       {...(seed?.filters ? { initialFilters: seed.filters } : {})}
       {...(seed?.groupBy ? { initialGroupBy: seed.groupBy } : {})}

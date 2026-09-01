@@ -263,6 +263,10 @@ function filtersToValues(
   for (const key of WORKSPACE_VIEW_ARRAY_KEYS) {
     (filters[key] as string[] | undefined)?.forEach(v => addTicket(key, v));
   }
+  filters.roleAssignments?.forEach(ra => {
+    if (!ra.userIds.length) return;
+    addTicket('roleAssignments', `${ra.roleId}|${ra.userIds.join(',')}`);
+  });
   for (const key of WORKSPACE_VIEW_NUMERIC_KEYS) {
     const v = filters[key];
     if (v !== undefined) addTicket(key, String(v));
@@ -290,6 +294,12 @@ function viewSignature(filters: TicketFilters, groupBy: string, columns: string[
 }
 
 interface BoardKanbanScreenProps {
+  /**
+   * Seed came from a share link's #cfg= hash. Hash config never reaches
+   * `urlFilters` (which parses query params only), so it must be treated as
+   * URL-level precedence explicitly or a stale draft would shadow it.
+   */
+  hasSharedSeed?: boolean;
   viewMode?:
     | 'my-tickets'
     | 'user-tickets'
@@ -408,6 +418,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   initialFilters,
   initialGroupBy,
   initialColumns,
+  hasSharedSeed,
 }) => {
   const { projectId: projectIdParam, boardId } = useParams<{
     projectId?: string;
@@ -499,8 +510,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Columns live only here (never in the URL), so the draft is their only way back.
   const viewDraftKey = viewId ?? 'new';
   const initialDraft = useMemo(
-    () => (viewModeProp === 'workspace-view' ? readViewDraft(viewDraftKey) : null),
-    [viewModeProp, viewDraftKey],
+    () =>
+      viewModeProp === 'workspace-view' && !hasSharedSeed ? readViewDraft(viewDraftKey) : null,
+    [viewModeProp, viewDraftKey, hasSharedSeed],
   );
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
     () => new Set(initialDraft?.columns ?? initialColumns ?? DEFAULT_VISIBLE_COLUMNS),

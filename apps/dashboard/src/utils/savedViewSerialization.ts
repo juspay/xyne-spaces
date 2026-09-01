@@ -54,6 +54,15 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
       case 'tags':
         result.tags = [...(result.tags ?? []), fieldValue];
         break;
+      case 'roleAssignments': {
+        const [roleId, userIds] = fieldValue.split('|');
+        if (!roleId) break;
+        result.roleAssignments = [
+          ...(result.roleAssignments ?? []),
+          { roleId, userIds: (userIds ?? '').split(',').filter(Boolean) },
+        ];
+        break;
+      }
       case 'stages':
         result.stages = [...(result.stages ?? []), fieldValue];
         break;
