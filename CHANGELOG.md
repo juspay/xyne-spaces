@@ -1,3 +1,10 @@
+## [1.250.4](https://github.com/juspay/xyne-spaces/compare/v1.250.3...v1.250.4) (2026-09-01)
+
+
+### Bug Fixes
+
+* Improve events tracking accuracy ([#1234](https://github.com/juspay/xyne-spaces/issues/1234)) ([b08ffeb](https://github.com/juspay/xyne-spaces/commit/b08ffeba55ad9cc6774e230f2d53818d928e6952))
+
 ## [1.250.3](https://github.com/juspay/xyne-spaces/compare/v1.250.2...v1.250.3) (2026-09-01)
 
 
