@@ -38,7 +38,6 @@ function sanitizeUrl(url: string): string {
   );
 }
 
-
 // Create the main Axios instance with interceptors
 const apiConfig: AxiosInstance = axios.create({
   baseURL: BASE_URL,

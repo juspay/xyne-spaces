@@ -79,9 +79,7 @@ interface ButtonProps extends React.ComponentProps<'button'>, VariantProps<typeo
    * error handling (e.g. toasts). Note: when set, `onClick` is not called; move
    * the click work into `trackAction`.
    */
-  trackAction?: (
-    event: React.MouseEvent<HTMLButtonElement>,
-  ) => void | Promise<void>;
+  trackAction?: (event: React.MouseEvent<HTMLButtonElement>) => void | Promise<void>;
   /**
    * Extra metadata surfaced to PostHog autocapture as
    * `data-ph-capture-attribute-<key>` element attributes.
