@@ -233,6 +233,24 @@ export async function gcsListDebugRuns(storeKey: string): Promise<string[] | nul
   }
 }
 
+/**
+ * Download an arbitrary object by its full name. Used to pull run attachments
+ * that claw-auth parked in the store instead of base64-inlining them into the
+ * /run body (`gcsRef`). Returns null on error/disabled so the caller can decide
+ * whether the attachment is droppable.
+ */
+export async function gcsDownloadObject(objectName: string): Promise<Buffer | null> {
+  const client = getStorage();
+  if (!client) return null;
+  try {
+    return await client.getFileBuffer(objectName);
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] object download failed for ${objectName}:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
 /** Download one per-run debug snapshot. Returns null on error/missing. */
 export async function gcsDownloadDebugRun(storeKey: string, fileName: string): Promise<Buffer | null> {
   const client = getStorage();

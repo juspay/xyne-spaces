@@ -32,9 +32,9 @@ export interface ModelProviderDraft {
   /** Preference order — first entry is the parent provider, the rest form the
    *  quota-fallback chain. Empty = platform default only. */
   providerOrder: string[];
-  /** true (Always On) — the agent's provider serves every run; false (On
-   *  /upgrade) — runs default to the platform model unless the user opts in. */
-  alwaysOn: boolean;
+  /** true (Always On) — the agent's provider serves every run; false (Platform
+   *  default) — runs use the user's personal provider if configured, otherwise the
+   *  platform model. */
   /** Which provider the agent's subagents run on. */
   subagentMode: 'parent' | 'spaces';
   /** Model run params (strings for form binding; validated before save). */
@@ -49,7 +49,6 @@ type ConfigBag = Record<string, unknown> | undefined | null;
 interface ProviderConfigShape {
   provider?: unknown;
   providerOrder?: unknown;
-  providerAlwaysOn?: unknown;
   subagentProviderMode?: unknown;
   modelSettings?: {
     model?: unknown;
@@ -70,7 +69,6 @@ export function readModelProviderDraft(config: ConfigBag): ModelProviderDraft {
   const ms = c.modelSettings ?? {};
   return {
     providerOrder: order,
-    alwaysOn: c.providerAlwaysOn !== false,
     subagentMode: c.subagentProviderMode === 'parent' ? 'parent' : 'spaces',
     temperature: typeof ms.temperature === 'number' ? String(ms.temperature) : '',
     maxTokens: typeof ms.maxTokens === 'number' ? String(ms.maxTokens) : '',
@@ -127,8 +125,7 @@ export function applyModelProvider(
   delete next['provider'];
 
   // Omit when it matches the backend backfill default (true) to keep JSON minimal.
-  if (draft.alwaysOn) delete next['providerAlwaysOn'];
-  else next['providerAlwaysOn'] = false;
+  delete next['providerAlwaysOn'];
 
   if (draft.subagentMode === 'parent') next['subagentProviderMode'] = 'parent';
   else delete next['subagentProviderMode'];

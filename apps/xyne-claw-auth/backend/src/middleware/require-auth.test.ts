@@ -403,7 +403,7 @@ describe("allowReadAccessToken scope barrier", () => {
 describe("main.ts requireAuth mount policy", () => {
   it("keeps requireNoAccessToken on every requireAuth mount except runRouter", () => {
     const testDir = dirname(fileURLToPath(import.meta.url));
-    const mainSource = readFileSync(resolve(testDir, "../main.ts"), "utf8");
+    const mainSource = readFileSync(resolve(testDir, "../http/routes.ts"), "utf8");
     const mounts = extractAppUseMounts(mainSource);
 
     expect(mounts.length).toBeGreaterThan(0);

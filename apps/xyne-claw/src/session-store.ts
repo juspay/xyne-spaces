@@ -35,7 +35,7 @@ const log = createLogger("session-store");
 const SESSION_TTL_HOURS = Number(process.env["SESSION_TTL_HOURS"] ?? 6);
 const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 15 * 60 * 1000; // 15 min — also the disk-pressure check cadence
-const ARCHIVE_TIMEOUT_MS = 120_000; // 2 min — sessions can be tens of MB
+const ARCHIVE_TIMEOUT_MS = Math.max(1, Number(process.env["SESSION_ARCHIVE_TIMEOUT_MS"] ?? 120_000)); // 2 min — sessions can be tens of MB
 const ARCHIVE_RETRY_ATTEMPTS = Math.max(1, Number(process.env["SESSION_ARCHIVE_RETRY_ATTEMPTS"] ?? 3));
 const ARCHIVE_RETRY_BACKOFF_MS = Math.max(0, Number(process.env["SESSION_ARCHIVE_RETRY_BACKOFF_MS"] ?? 1_000));
 // Disk-pressure backstop: when the sessions volume crosses the high-water
@@ -1048,40 +1048,53 @@ export async function cleanupSessions(): Promise<void> {
     const now = Date.now();
     let cleaned = 0;
     let archiveFailed = 0;
+    let skippedActive = 0;
 
     for (const entry of entries) {
-      const dir = path.join(root, entry);
       try {
-        // Leftover ensureFreshSession rollback backups are not sessions —
-        // never archive them under their bogus ".stale-" name; just delete.
-        if (entry.includes(".stale-")) {
-          await rm(dir, { recursive: true, force: true });
-          continue;
+        if (!entry.includes(".stale-")) {
+          const stats = await stat(path.join(root, entry));
+          if (now - stats.mtimeMs <= SESSION_TTL_MS) continue;
         }
-        const stats = await stat(dir);
-        if (now - stats.mtimeMs <= SESSION_TTL_MS) continue;
-
-        const archived = await archiveSessionToGcsWithRetries(entry);
-        if (!archived) {
-          archiveFailed++;
-          continue; // leave on disk, next sweep retries
-        }
-
-        await rm(dir, { recursive: true, force: true });
-        cleaned++;
+        const outcome = await disposeSessionDir(entry);
+        if (outcome === "archived") cleaned++;
+        else if (outcome === "archive-failed") archiveFailed++;
+        else if (outcome === "skipped-active") skippedActive++;
       } catch {
         // skip unreadable entries
       }
     }
 
-    if (cleaned > 0 || archiveFailed > 0) {
-      log.info(`[session-store] Sweep: archived+deleted=${cleaned}, archive-failed=${archiveFailed} (left on disk for retry)`);
+    if (cleaned > 0 || archiveFailed > 0 || skippedActive > 0) {
+      log.info(`[session-store] Sweep: archived+deleted=${cleaned}, archive-failed=${archiveFailed} (left on disk for retry), skipped-active=${skippedActive}`);
     }
   } catch {
     // root dir may not exist yet
   }
 
   await evictForDiskPressure().catch(() => {});
+}
+
+type DisposeOutcome = "skipped-active" | "removed-stale" | "archived" | "archive-failed";
+
+/**
+ * The single disposal action both sweeps share. Selection policy (TTL vs
+ * LRU-under-pressure) stays with the callers; the invariants live here:
+ * never touch a dir backing an active run, never archive `.stale-` rollback
+ * debris (delete it), and never delete anything that failed to archive.
+ */
+async function disposeSessionDir(name: string): Promise<DisposeOutcome> {
+  if (isActiveSessionOrBareSpillDir(name)) return "skipped-active";
+  const dir = path.join(sessionsRoot(), name);
+  if (name.includes(".stale-")) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    return "removed-stale";
+  }
+  if (await archiveSessionToGcsWithRetries(name)) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    return "archived";
+  }
+  return "archive-failed";
 }
 
 /** Used fraction (0–100) of the filesystem holding the sessions root, or null. */
@@ -1132,21 +1145,9 @@ async function evictForDiskPressure(): Promise<void> {
   for (const entry of entries) {
     usedPct = await sessionsVolumeUsedPct();
     if (usedPct === null || usedPct <= DISK_LOW_WATER_PCT) break;
-    if (isActiveSessionOrBareSpillDir(entry.name)) {
-      skipped++;
-      continue; // never evict under a running session
-    }
-    const dir = path.join(root, entry.name);
-    if (entry.name.includes(".stale-")) {
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
-      continue;
-    }
-    if (await archiveSessionToGcsWithRetries(entry.name)) {
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
-      evicted++;
-    } else {
-      skipped++; // archive failed — keep on disk, never drop unarchived data
-    }
+    const outcome = await disposeSessionDir(entry.name);
+    if (outcome === "archived") evicted++;
+    else if (outcome === "skipped-active" || outcome === "archive-failed") skipped++;
   }
   metric.count("session_disk_pressure", { stage: "done" });
   log.warn(

@@ -13,9 +13,6 @@ import {
   agentRepository,
   userRepository,
   userAgentConfigRepository,
-  userProviderCredentialsRepository,
-  agentProviderCredentialsRepository,
-  userSubagentConfigRepository,
   agentShareRepository,
   agentRunRepository,
   chatMessageRepository,
@@ -34,10 +31,17 @@ import {
   unknownToolsNote,
   type DraftAgentSpec,
 } from "../lib/agent-card.js";
-import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
-import { getValidCodexBearer } from "../lib/codex-oauth-refresh.js";
-import { resolveAgentProviderConfigs, resolveSubagentProviderMode, KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { getDigitalTwinAgent, type ResolvedAgent } from "../lib/digital-twin-agent.js";
+import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
+import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
+import { isTransientUpstream } from "../lib/claw-fetch.js";
+import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension } from "xyne-claw-shared";
+import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
+import { type RunDispatchResult } from "../lib/dispatch-run.js";
+import { startRun } from "../lib/start-run.js";
+import { runAttachmentRefsEnabled, uploadRunAttachment } from "../lib/run-attachment-store.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "../services/twinRespondGate.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
 
@@ -45,15 +49,11 @@ import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/m
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { coerceAutomationForwardResult } from "../lib/automation-result.js";
-import { parseSlashCommand } from "../lib/parseSlashCommand.js";
-import { buildExperimentProofBundle } from "../lib/experiment-bundle.js";
-import { resolveAuthForUser } from "../services/userMemoryFetcher.js";
-import { parseExperimentCommand, formatDuration, dispatchExperimentEpoch, dispatchExperimentChecker, EXPERIMENT_PROVIDERS, buildFindingsMarkdown, cancelRunSession, seedUnderstandingFrontier } from "../lib/experiment.js";
-import { resolveFastMode, setFastModeOverride } from "../lib/fast-mode.js";
+import { dispatchExperimentEpoch, dispatchExperimentChecker } from "../lib/experiment.js";
+import { resolveFastMode } from "../lib/fast-mode.js";
 import { acquireTwinSlot, renameTwinSlot, releaseTwinSlot } from "../lib/twin-limiter.js";
-import { handleSlashCommandBeforeRun, normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
+import { normalizeGoalCondition, persistGoalStart, recordTurnAndDecide } from "../services/goalRelooper.js";
 import {
-  QUEUE_ENABLED,
   QUEUE_CAP,
   tryAcquireSlot,
   releaseSlot,
@@ -62,8 +62,6 @@ import {
   getSlotOwner,
   enqueueMessage,
   dequeueMessage,
-  queueDepth,
-  peekQueue,
   clearQueue,
   type QueuedMessage,
 } from "../lib/message-queue.js";
@@ -103,7 +101,6 @@ import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getW
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
-import { isClawAdmin } from "../middleware/agent-acl.js";
 import { renderAttachmentsToPdf } from "../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
@@ -132,7 +129,6 @@ import {
   buildTicketProposalFlow,
   buildTwinApprovalFlow,
   buildUserQuestionFlow,
-  buildPromoteProviderFlow,
   buildCapacityRetryFlow,
   buildGoalSuggestionFlow,
   buildPlanFlow,
@@ -153,6 +149,7 @@ import {
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
 import { isAgentInvocableBy } from "xyne-claw-shared";
+import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { connectorTypesFromText, connectorTypesUserAskedToConnect } from "../lib/connector-hints.js";
@@ -177,8 +174,7 @@ function isCapacityFailure(payload: { status?: string; error?: unknown; emptyRea
  *
  * Interactive → post a card and poll with it; automation → poll silently and
  * only surface if it gives up. Scoped to the platform provider (litellm/spaces):
- * a BYO provider that hit capacity is better served by promote-provider
- * (switch), and re-dispatching BYO needs cred reconstruction we defer. Returns
+ * re-dispatching a BYO provider needs cred reconstruction we defer. Returns
  * true if a retry was scheduled (interactive callers use it to suppress the
  * generic failure notice).
  */
@@ -254,13 +250,6 @@ async function scheduleCapacityRetryIfNeeded(
   return true;
 }
 
-// Feature flag: when Spaces has the XYNE-12145 fix deployed
-// (POST /api/apps/chat/agentProgress with the authenticateApp middleware), flip
-// this to "true" to use the ephemeral <AgentSpinner /> signal path. Default
-// false: claw posts a real placeholder message and edits it in-place — works
-// on every Spaces version. Once the Spaces fix is live in prod, set
-// SPACES_SUPPORTS_AGENT_PROGRESS=true in the deployment env, no code change.
-const USE_EPHEMERAL_PROGRESS = true;
 
 // Per-process dedup for the one-shot sandbox preview announce. Claw also
 // guards against re-emit on its side; this Set is the second layer in case
@@ -547,6 +536,10 @@ import {
   withSpaces5xxRetry,
   decryptStoredField,
 } from "../surfaces/spaces/client.js";
+import { postAgentMessage } from "../surfaces/spaces/post-message.js";
+import { postGoalPhase, USE_EPHEMERAL_PROGRESS } from "../lib/goal-phase.js";
+import { postGeneratedMarkdownFile } from "../lib/spaces-generated-file.js";
+import { handleWebhookCommands, type PendingGoalStart } from "../lib/webhook-commands/index.js";
 import {
   MAX_MESSAGE_CHARS,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -589,105 +582,6 @@ async function agentOwnerCredit(
 }
 
 
-function experimentCounts(findings: Array<{ status: string }>): { conjecture: number; proved: number; refuted: number } {
-  return {
-    conjecture: findings.filter((f) => f.status === "conjecture").length,
-    proved: findings.filter((f) => f.status === "proved").length,
-    refuted: findings.filter((f) => f.status === "refuted").length,
-  };
-}
-
-const EXPERIMENT_FINDINGS_MAX_BYTES = 200 * 1024;
-
-function capExperimentFindingsMarkdown(markdown: string): string {
-  if (Buffer.byteLength(markdown, "utf8") <= EXPERIMENT_FINDINGS_MAX_BYTES) return markdown;
-  const suffix = "\n\n---\n\n_Report truncated at 200KB for Spaces file delivery._\n";
-  let capped = markdown;
-  while (Buffer.byteLength(capped + suffix, "utf8") > EXPERIMENT_FINDINGS_MAX_BYTES && capped.length > 0) {
-    capped = capped.slice(0, Math.max(0, capped.length - 4096));
-  }
-  return `${capped.trimEnd()}${suffix}`;
-}
-
-function experimentFindingsFilename(agentSlug: string, date = new Date()): string {
-  const safeSlug = agentSlug.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "agent";
-  const stamp = date.toISOString().replace(/\.\d{3}Z$/, "").replace(/:/g, "-");
-  return `experiment-findings-${safeSlug}-${stamp}.md`;
-}
-
-/**
- * Upload a generated markdown document as a thread attachment.
- *
- * FILE ONLY — deliberately no `flow` parameter. `/files/filesUpload`
- * (filesController.uploadFiles) does not read a flow field, so a card passed
- * here is silently dropped and no Approve/Decline buttons ever render. Post
- * approval cards separately via `/chat/postMessage` with `flow: <FlowDefinition>`.
- */
-async function postGeneratedMarkdownFile(args: {
-  channelId: string;
-  conversationId: string;
-  workspaceId?: string | null;
-  userId: string;
-  appToken: string;
-  filename: string;
-  /** Text body, or raw bytes when `mimeType` says the payload is binary. */
-  markdown: string | Uint8Array;
-  mimeType?: string;
-  /** Additional files to attach to the SAME message (Spaces' filesUpload takes
-   *  repeated `files` parts). Used by /experiment findings, which ships the
-   *  proof zip AND the readable .md side by side — the zip is the archive, the
-   *  markdown is what people actually open in the thread. */
-  extraFiles?: Array<{ filename: string; content: string | Uint8Array; mimeType?: string }>;
-  summary: string;
-}): Promise<void> {
-  const form = new FormData();
-  const mimeType = args.mimeType ?? "text/markdown";
-  const body = typeof args.markdown === "string"
-    ? [args.markdown]
-    : [new Uint8Array(args.markdown)];
-  form.append("files", new Blob(body, { type: mimeType }), args.filename);
-  for (const extra of args.extraFiles ?? []) {
-    const extraBody = typeof extra.content === "string"
-      ? [extra.content]
-      : [new Uint8Array(extra.content)];
-    form.append("files", new Blob(extraBody, { type: extra.mimeType ?? "text/markdown" }), extra.filename);
-  }
-  form.append("channelId", args.channelId);
-  form.append("conversationId", args.conversationId);
-  form.append("userId", args.userId);
-  if (args.workspaceId) form.append("workspaceId", args.workspaceId);
-  form.append("markdownText", args.summary);
-  form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
-  await spacesAppFetchMultipart("/files/filesUpload", form, args.appToken);
-}
-
-function formatExperimentStatus(
-  run: Awaited<ReturnType<typeof experimentRepository.findActiveByConversation>>,
-  findings: Array<{ status: string; title: string; epoch: number; createdAt: Date }>,
-): string {
-  if (!run) return "No active /experiment in this thread.";
-  const elapsedMs = Date.now() - run.createdAt.getTime();
-  const remainingMs = Math.max(0, run.deadlineAt.getTime() - Date.now());
-  const counts = experimentCounts(findings);
-  const recent = [...findings]
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, 5);
-  const icon = (status: string) => status === "proved" ? "✓" : status === "refuted" ? "✗" : "◉";
-  return [
-    `**/experiment status** — epoch ${run.epoch}`,
-    `Elapsed: ${formatDuration(elapsedMs)} · Remaining: ${formatDuration(remainingMs)}`,
-    ...(run.provider ? [`Model: ${formatExperimentModel(run.provider, run.modelId)}`] : []),
-    `Now: ${run.currentHypothesis?.trim() || "(no current hypothesis recorded)"}`,
-    `Findings: ${counts.conjecture} open · ${counts.proved} proved · ${counts.refuted} refuted`,
-    recent.length
-      ? ["", ...recent.map((f) => `${icon(f.status)} [epoch ${f.epoch}] ${f.title}`)].join("\n")
-      : "\nNo findings recorded yet.",
-  ].join("\n");
-}
-
-function formatExperimentModel(provider: string, modelId?: string | null): string {
-  return modelId?.trim() ? `${provider}/${modelId.trim()}` : `${provider} (default)`;
-}
 
 async function continueExperimentAfterResult(ctx: SessionContext, sessionId: string): Promise<boolean> {
   const active = await experimentRepository.findActiveByConversation(ctx.conversationId);
@@ -1087,74 +981,7 @@ async function sendTwinReplyDraft(
   await deleteSession(sessionId);
 }
 
-/**
- * Surface a /goal lifecycle phase (Starting…, Turn N/M…) as an EPHEMERAL
- * progress signal instead of a permanent chat message — same surface tool
- * calls use, so the loop's per-turn chatter rides the agent's activity spinner
- * rather than spamming the thread with one message per turn. Terminal outcomes
- * (/goal complete|stopped — reason) deliberately stay real posted messages so
- * the user sees how and why the loop ended.
- *
- * Fire-and-forget; best-effort. When USE_EPHEMERAL_PROGRESS is off (no Spaces
- * agentProgress support), falls back to a normal message so the phase isn't
- * silently lost in that mode.
- */
-async function postGoalPhase(
-  fields: { conversationId: string; channelId?: string | undefined; agentSlug?: string | undefined; spacesAppUserId: string; appToken: string },
-  label: string,
-): Promise<void> {
-  try {
-    if (USE_EPHEMERAL_PROGRESS) {
-      await spacesAppFetch("/chat/agentProgress", {
-        conversationId: fields.conversationId,
-        ...(fields.channelId ? { channelId: fields.channelId } : {}),
-        ...(fields.agentSlug ? { agentSlug: fields.agentSlug } : {}),
-        userId: fields.spacesAppUserId,
-        toolLabel: label,
-        status: "working",
-      }, fields.appToken);
-    } else {
-      await spacesAppFetch("/chat/postMessage", {
-        ...(fields.channelId ? { channelId: fields.channelId } : {}),
-        conversationId: fields.conversationId,
-        markdownText: label,
-        userId: fields.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, fields.appToken);
-    }
-  } catch {
-    // Best-effort: a missed progress signal must never break the goal loop.
-  }
-}
 
-interface ResolvedAgent {
-  id: string;
-  slug: string;
-  /** Display name — the text a leftover "@Display Name" mention carries. */
-  name: string;
-  orgId: string;
-  appToken: string;
-  spacesAppId: string;
-  spacesAppUserId: string;
-  isDefault: boolean;
-}
-
-/**
- * Strip a leftover leading "@<agent mention>" so a slash command lands at byte
- * zero. Matches only the given names verbatim (display name first, slug as
- * fallback) — never a generic @-token+words pattern, which cannot distinguish
- * a multi-word display name from the user's own prose.
- */
-function stripLeadingAgentMention(text: string, names: Array<string | null | undefined>): string {
-  for (const raw of names) {
-    const name = raw?.trim();
-    if (!name) continue;
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`^@${escaped}(?=\\s|$)`, "i");
-    if (re.test(text)) return text.replace(re, "").trimStart();
-  }
-  return text;
-}
 
 async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent | null> {
   const agent = await agentRepository.findByAppUserId(appUserId);
@@ -1175,22 +1002,6 @@ async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent
   return null;
 }
 
-async function getDefaultAgent(): Promise<ResolvedAgent | null> {
-  const agent = await agentRepository.findDefault();
-
-  if (!agent?.spacesAppToken || !agent.spacesAppId) return null;
-
-  return {
-    slug: agent.slug,
-    id: agent.id,
-    name: agent.name ?? agent.slug,
-    orgId: agent.orgId,
-    appToken: decryptStoredField(agent.spacesAppToken),
-    spacesAppId: agent.spacesAppId,
-    spacesAppUserId: agent.spacesAppUserId ?? "",
-    isDefault: true,
-  };
-}
 
 export async function fetchConversationHistory(
   conversationId: string,
@@ -1236,7 +1047,21 @@ export async function fetchConversationHistory(
         : `human-user:${m.userId}`;
       return `[${new Date(m.createdAt).toISOString()}] ${speaker}: ${m.cleanContent}`;
     });
-    return `Thread history (oldest → newest):\n${lines.join("\n")}`;
+
+    const wordLimit = CONFIG.webhookHistoryWordLimit;
+    const kept: string[] = [];
+    let words = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const lineWords = lines[i]!.split(/\s+/).length;
+      if (kept.length > 0 && words + lineWords > wordLimit) break;
+      kept.unshift(lines[i]!);
+      words += lineWords;
+    }
+    const omitted = lines.length - kept.length;
+    const header = omitted > 0
+      ? `Thread history (oldest → newest; ${omitted} older message${omitted === 1 ? "" : "s"} omitted to fit ~${wordLimit} words — read the FULL thread with the Xyne Spaces messages tool, conversationId ${conversationId}):`
+      : `Thread history (oldest → newest):`;
+    return `${header}\n${kept.join("\n")}`;
   } catch (err) {
     clog.warn("[webhook] Failed to fetch conversation history:", err);
     return undefined;
@@ -1519,43 +1344,41 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const event = req.body as WebhookEvent;
   const { eventType, payload } = event;
 
-  // Only handle mention events
-  if (eventType !== "USER_MENTIONED" && eventType !== "APP_MENTIONED" && eventType !== "DIRECT_MESSAGE") {
+  if (!["USER_MENTIONED", "APP_MENTIONED", "DIRECT_MESSAGE"].includes(eventType)) {
     res.json({ success: true });
     return;
   }
 
-  // Digital Twin (USER_MENTIONED) is gated PER-USER below — only users who
-  // explicitly flipped `User.digitalTwinEnabled = true` via POST
-  // /digital-twin/enable get a Twin response. The DB default is `false`, so
-  // every existing user is opted out unless they opt in.
-  //
-  // This replaces the previous `XYNE_DIGITAL_TWIN_DISABLED` global env-flag
-  // kill switch — the per-user gate provides equivalent (or stronger)
-  // protection. To mass-disable, set `User.digitalTwinEnabled = false`
-  // across all users.
-
-  // For APP_MENTIONED: the agent identity comes from the URL param (app id for
-  // new webhooks, slug for legacy webhooks).
-  // For USER_MENTIONED: resolve from mentionedUserIds
   let agent: ResolvedAgent | null = null;
 
-  // workspaceId of the mentioned user is resolved PER-USER in the twin dispatch
-  // loop and passed into dispatchRunForTarget as a parameter (threaded through
-  // SessionContext + the Flow UI data context so flow-action.ts can pass it to
-  // /api/internal/postAsUser — Spaces refuses to post for the user without it).
-  // No longer a shared function-scope variable.
-
-  // Set to true once we've verified this is a USER_MENTIONED on the default
-  // agent (assistant) AND the mentioned user has opted into Digital Twin.
-  // At /run dispatch we swap the agentSlug to "digital-twin" so the dedicated
-  // Twin agent (with user-memory recall + Twin system prompt) actually
-  // processes the reply. The assistant's Spaces App still owns the DM
-  // channel — we only swap which agent's brain runs, not where the reply
-  // posts.
   let runAsTwin = false;
 
   const { agentSlug: agentSlugFromUrl, spacesAppId: spacesAppIdFromUrl } = req.params as { agentSlug?: string; spacesAppId?: string };
+  const mentionedUserIds = (payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? [];
+
+  const toResolvedAgent = (row: {
+    id: string;
+    slug: string;
+    name: string | null;
+    orgId: string;
+    spacesAppToken: string | null;
+    spacesAppId: string | null;
+    spacesAppUserId: string | null;
+    isDefault: boolean;
+  }): typeof agent =>
+    row.spacesAppToken && row.spacesAppId
+      ? {
+          id: row.id,
+          slug: row.slug,
+          name: row.name ?? row.slug,
+          orgId: row.orgId,
+          appToken: decryptStoredField(row.spacesAppToken),
+          spacesAppId: row.spacesAppId,
+          spacesAppUserId: row.spacesAppUserId ?? "",
+          isDefault: row.isDefault,
+        }
+      : null;
+
   if (spacesAppIdFromUrl) {
     const agentRow = await agentRepository.findBySpacesAppId(spacesAppIdFromUrl);
     if (!agentRow) {
@@ -1563,32 +1386,13 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    if (agentRow.spacesAppToken && agentRow.spacesAppId) {
-      agent = {
-        id: agentRow.id,
-        slug: agentRow.slug,
-        name: agentRow.name ?? agentRow.slug,
-        orgId: agentRow.orgId ?? null,
-        appToken: decryptStoredField(agentRow.spacesAppToken),
-        spacesAppId: agentRow.spacesAppId,
-        spacesAppUserId: agentRow.spacesAppUserId ?? "",
-        isDefault: agentRow.isDefault,
-      };
-    }
     if (eventType === "USER_MENTIONED" && agentRow.slug !== "digital-twin") {
       log.info(`Ignoring USER_MENTIONED on app/${spacesAppIdFromUrl} (${agentRow.slug}) — Twin handles this exclusively via digital-twin`);
       res.json({ success: true });
       return;
     }
-    if (eventType === "USER_MENTIONED") {
-      // Per-user eligibility (registered + digitalTwinEnabled + resolvable
-      // workspaceId) is resolved AFTER the ack, ONCE PER mentioned user, in the
-      // twin dispatch loop below — so a message mentioning MULTIPLE users fires
-      // one twin run per eligible user instead of being dropped. Here we only
-      // flag that this (twin-only) route has at least one mention to act on.
-      const mentionedUserIds = (payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? [];
-      runAsTwin = mentionedUserIds.length > 0;
-    }
+    if (eventType === "USER_MENTIONED") runAsTwin = mentionedUserIds.length > 0;
+    agent = toResolvedAgent(agentRow);
   } else if (agentSlugFromUrl) {
     const legacyMatches = await prisma.agent.findMany({
       where: { slug: agentSlugFromUrl },
@@ -1600,7 +1404,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       return;
     }
     const agentRow = legacyMatches[0] ?? null;
-    const mentionerOrgId = await orgIdForSpacesUser(payload.userId, "webhook", agentRow?.orgId ?? undefined);
+    // JIT-mirrors the mentioning user (ensureUserExists inside) — the return
+    // value is unused but the side effect must run before the mention gate's
+    // early return below.
+    await orgIdForSpacesUser(payload.userId, "webhook", agentRow?.orgId ?? undefined);
 
     // USER_MENTIONED is **digital-twin-only**. Spaces fans the mention to
     // every agent installed in the channel; we accept it on exactly ONE
@@ -1632,24 +1439,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // user, so multi-user mentions each fire their own twin run. Digital Twin
       // is still OFF by default — the loop enforces digitalTwinEnabled per user
       // (the prod-OOM guard) before dispatching anything.
-      const mentionedUserIds = (payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? [];
       runAsTwin = mentionedUserIds.length > 0;
     }
 
-    if (agentRow?.spacesAppToken && agentRow.spacesAppId) {
-      agent = {
-        id: agentRow.id,
-        slug: agentRow.slug,
-        name: agentRow.name ?? agentRow.slug,
-        orgId: agentRow.orgId ?? null,
-        appToken: decryptStoredField(agentRow.spacesAppToken),
-        spacesAppId: agentRow.spacesAppId,
-        spacesAppUserId: agentRow.spacesAppUserId ?? "",
-        isDefault: agentRow.isDefault,
-      };
-    }
+    if (agentRow) agent = toResolvedAgent(agentRow);
   } else if (eventType === "USER_MENTIONED") {
-    const mentionedUserIds = (payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? [];
     if (mentionedUserIds.length > 0) {
       // First check if the mentioned user is an agent bot
       agent = await resolveAgentByAppUserId(mentionedUserIds[0]!);
@@ -1673,14 +1467,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     }
   }
 
-  // Fall back to default agent
-  if (!agent) {
-    agent = await getDefaultAgent();
+  const isTwinMentionFallthrough =
+    !agent && !spacesAppIdFromUrl && !agentSlugFromUrl && eventType === "USER_MENTIONED";
+  if (isTwinMentionFallthrough) {
+    agent = await getDigitalTwinAgent();
   }
 
   if (!agent) {
-    log.error("No agent found and no default agent registered");
-    res.json({ success: true });
+    log.error(
+      `[webhook] agent unresolved route=${spacesAppIdFromUrl ? `app/${spacesAppIdFromUrl}` : agentSlugFromUrl ? `/${agentSlugFromUrl}` : "(bare)"} eventType=${eventType} — refusing to dispatch as the default agent`,
+    );
+    res.status(404).json({ success: false, error: "Agent not resolved" });
     return;
   }
 
@@ -1695,13 +1492,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (eventType === "DIRECT_MESSAGE") {
       log.info(`Sender ${payload.userId} not registered — sending setup template`);
       res.json({ success: true });
-      spacesAppFetch("/chat/postMessage", {
-        channelId: payload.channelId,
-        conversationId: payload.conversationId,
-        markdownText: UNREGISTERED_USER_TEMPLATE,
-        userId: agent.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, agent.appToken).catch((err) => {
+      postAgentMessage(
+        { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+        {
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          markdownText: UNREGISTERED_USER_TEMPLATE,
+          metadata: { contentFormat: "markdown" },
+        }
+      ).catch((err) => {
         log.error("Failed to send unregistered-user template", {
           error: errMsg(err),
         });
@@ -1713,6 +1512,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  if (!agent.orgId) {
+    log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
+    res.status(422).json({ success: false, error: "Agent misconfigured (no organization)" });
+    return;
+  }
+
   log.info(`${eventType} from user ${payload.userId} → agent ${agent.slug}`);
 
   // Acknowledge immediately
@@ -1720,38 +1525,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
   const userText = payload.cleanContent?.trim();
   if (!userText) return;
-  // Commands whose leading slash is an execution contract in xyne-claw. Keep
-  // them out of auto-goal/plan mode: both transforms strip or suspend the
-  // command before the runtime can mount its command-owned tools.
-  // cleanContent usually removes the bot mention, but some Spaces event
-  // producers leave a leading "@Display Name" behind. Strip ONLY this agent's
-  // own mention (exact display name, or slug as fallback). A generic
-  // "@word word..." strip is unanchorable: word-classes can't tell display-name
-  // tokens from the user's prose, so "@Bot how do I use /explainer" would lose
-  // "how do I use" and force command mode on a question.
+  // Task commands must reach claw verbatim at byte zero, so strip only THIS
+  // agent's leading mention (a generic @-strip would eat user prose) and keep
+  // these messages out of the auto-goal/plan transforms below. The command
+  // set lives in xyne-claw-shared (task-command-names.ts), shared with claw's
+  // TASK_COMMANDS registry.
   const taskCommandText = stripLeadingAgentMention(userText, [agent.name, agent.slug]);
-  // KEEP IN SYNC with TASK_COMMANDS in apps/xyne-claw/src/task-commands.ts —
-  // a command missing here ships with the mention un-stripped, so claw never
-  // sees it at byte zero and the whole contract silently degrades (bit /design
-  // in prod 2026-08-08). Proper fix: shared registry in xyne-claw-shared.
-  const immediateTaskCommand = /^\/(?:explainer|record-skill|design|dashboard|spec)(?:\s|$)/i.test(taskCommandText);
-  const recordSkillCommand = /^\/record-skill(?:\s|$)/i.test(taskCommandText);
-  if (!agent.orgId) {
-    log.error(`Agent ${agent.slug} has no orgId; refusing webhook dispatch`);
-    return;
-  }
+  const immediateTaskCommand = IMMEDIATE_TASK_COMMAND_RE.test(taskCommandText);
+  const recordSkillCommand = RECORD_SKILL_COMMAND_RE.test(taskCommandText);
 
-  // ── Auto-goal: when agent.config.autoGoal === true, every non-slash
-  //   message is automatically wrapped as `/goal <text>` before parsing.
-  //   The user can still send explicit `/stop` or `/goal status` controls
-  //   — those start with `/` so they bypass the wrap and reach the normal
-  //   parser unchanged. Failure to load the config is non-fatal: we just
-  //   fall through to ordinary slash-command handling.
+  // ── Config flags. autoGoal wraps every non-slash message as `/goal <text>`;
+  //   planMode starts non-twin thread mentions in propose-plan-await-approval
+  //   mode. A failed config load leaves both off.
   let autoGoalEnabled = false;
-  // Plan mode: when agent.config.planMode === true, non-twin thread mentions
-  // start in plan mode (the agent proposes a plan and awaits approval before
-  // executing). Read alongside autoGoal so it is visible where the
-  // dispatchPayload + sessionContext are assembled below. Default OFF.
   let planModeEnabled = false;
   try {
     const cfgRow = await agentRepository.findBySlug(agent.slug, agent.orgId ?? undefined);
@@ -1762,593 +1548,40 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       error: errMsg(err),
     });
   }
-  // ── /goal slash command interception ─────────────────────────────────────
-  // Recognised forms: `/goal <condition>`, `/goal status`, `/goal clear`,
-  // `/stop`. Status/clear short-circuit before claw is invoked; goal-start
-  // rewrites the worker's first-turn task to the relooper template and
-  // stashes context for subsequent loop turns (recording happens after
-  // run-dispatch below, once dispatchPayload is assembled).
-  //
-  // Parse the RAW message first: an explicit control command anywhere in the
-  // text (e.g. "@Agent /stop") must win over autoGoal. Only when the user
-  // typed no command do we auto-wrap the message as a `/goal <text>` start.
-  // Without this, autoGoal turns "/stop" into "/goal … /stop" (a new goal),
-  // making the thread impossible to stop.
-  const rawSlash = parseSlashCommand(userText);
-  const slash =
-    rawSlash ??
-    (autoGoalEnabled && !immediateTaskCommand ? parseSlashCommand(`/goal ${userText}`) : null);
-  const experimentCommand = parseExperimentCommand(userText);
-
-  if (experimentCommand) {
-    const postExperimentReply = (markdownText: string) => spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
+  const commandAgent = agent;
+  const commandOutcome = await handleWebhookCommands({
+    agent: commandAgent,
+    payload: {
       conversationId: payload.conversationId,
-      markdownText,
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /experiment reply", { error: errMsg(err) });
-    });
-
-    if (experimentCommand.sub === "unknown") {
-      await postExperimentReply([
-        "/experiment <duration> [provider=…] [model=…] [focus…]",
-        "/understanding [duration cap] [focus…] — coverage-gated: runs until the code-path frontier is exhausted",
-        "/experiment status",
-        "/experiment list",
-        "/experiment findings [id]",
-        "/experiment stop",
-      ].join("\n"));
-      return;
-    }
-
-    if (experimentCommand.sub === "status") {
-      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
-      const findings = run ? await experimentRepository.listFindings(run.id) : [];
-      await postExperimentReply(formatExperimentStatus(run, findings));
-      return;
-    }
-
-    if (experimentCommand.sub === "stop") {
-      const run = await experimentRepository.findActiveByConversation(payload.conversationId);
-      if (!run) {
-        await postExperimentReply("No active /experiment to stop.");
-        return;
-      }
-      const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
-      if (!allowed) {
-        await postExperimentReply("Only the requester or a claw admin can stop this /experiment.");
-        return;
-      }
-      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
-      // Cancel in-flight CHECKER sessions too. They never claim
-      // currentSessionId (claiming it would chain the next epoch off their
-      // completion), so before this they survived stop and kept posting into
-      // the thread after the run was already aborted.
-      let cancelledCheckers = 0;
-      for (const checkerSessionId of run.checkerSessionIds ?? []) {
-        try {
-          await cancelRunSession(checkerSessionId, run.userId);
-          cancelledCheckers++;
-        } catch {
-          // Already finished or unknown to claw — nothing to cancel.
-        }
-      }
-      let cancelledEpoch = false;
-      if (run.currentSessionId) {
-        try {
-          await cancelRunSession(run.currentSessionId, run.userId);
-          cancelledEpoch = true;
-        } catch (err) {
-          log.warn("[experiment] failed to cancel running epoch", {
-            experimentId: run.id,
-            sessionId: run.currentSessionId,
-            error: errMsg(err),
-          });
-        }
-      }
-      const stoppedParts = [
-        ...(cancelledEpoch ? ["cancelled the running epoch"] : []),
-        ...(cancelledCheckers > 0 ? [`cancelled ${cancelledCheckers} checker run${cancelledCheckers === 1 ? "" : "s"}`] : []),
-      ];
-      await postExperimentReply(stoppedParts.length > 0
-        ? `Stopped /experiment (${stoppedParts.join(", ")}).`
-        : "Stopped /experiment.");
-      return;
-    }
-
-    if (experimentCommand.sub === "list") {
-      // Thread-scoped, no ownership gate — same visibility as /experiment
-      // status. The run ids printed here are what `/experiment findings <id>`
-      // takes, and THAT path does gate on owner/admin.
-      const runs = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId, 15);
-      if (runs.length === 0) {
-        await postExperimentReply("No /experiment has run in this thread.");
-        return;
-      }
-      const rows = runs.map((run) => {
-        const started = run.createdAt.toISOString().slice(0, 16).replace("T", " ");
-        const model = run.provider ? ` · ${formatExperimentModel(run.provider, run.modelId)}` : "";
-        const live = run.status === "running" || run.status === "finishing" ? " ← active" : "";
-        return `\`${run.id}\` — ${run.status}, ${run._count.findings} findings, epoch ${run.epoch}${model} · ${started}${live}`;
-      });
-      await postExperimentReply([
-        `**/experiment list** — ${runs.length} run${runs.length === 1 ? "" : "s"} in this thread`,
-        "",
-        ...rows,
-        "",
-        "Pull any one with `/experiment findings <id>`.",
-      ].join("\n"));
-      return;
-    }
-
-    if (experimentCommand.sub === "findings") {
-      const run = experimentCommand.id
-        ? await experimentRepository.findById(experimentCommand.id)
-        : await experimentRepository.findBestForFindings(payload.conversationId);
-      if (!run) {
-        await postExperimentReply(experimentCommand.id
-          ? "Experiment not found."
-          : "No /experiment has run in this thread.");
-        return;
-      }
-      if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
-        await postExperimentReply("Not your experiment.");
-        return;
-      }
-      const [findings, reviews] = await Promise.all([
-        experimentRepository.listFindings(run.id),
-        experimentRepository.listReviews(run.id),
-      ]);
-      const recentRuns = await experimentRepository.listRecentByConversationWithFindingCounts(payload.conversationId);
-      const counts = experimentCounts(findings);
-      const summaryLines = [
-        `**/experiment findings** — ${run.agentSlug}`,
-        `Status: ${run.status} · Epoch: ${run.epoch} · Findings: ${counts.proved} proved, ${counts.conjecture} open, ${counts.refuted} refuted`,
-      ];
-      if (!experimentCommand.id && recentRuns[0] && recentRuns[0].id !== run.id) {
-        summaryLines.push(`(showing experiment ${run.id} — the most recent run in this thread had no findings)`);
-      }
-      const otherRuns = recentRuns.filter((candidate) => candidate.id !== run.id).slice(0, 5);
-      if (recentRuns.length > 1 && otherRuns.length > 0) {
-        summaryLines.push(`Other runs in this thread: ${otherRuns.map((candidate) =>
-          `${candidate.id} (${candidate.status}, ${candidate._count.findings} findings, ${candidate.createdAt.toISOString().slice(0, 10)})`
-        ).join(" · ")}`);
-      }
-      const markdown = capExperimentFindingsMarkdown(buildFindingsMarkdown(run, findings, reviews));
-      const filename = experimentFindingsFilename(run.agentSlug);
-
-      // Prefer ONE zip laid out by epoch over a bare .md: the proof artifacts
-      // are otherwise scattered across hours of thread messages, and a proof
-      // you can't locate is a proof you don't have. Falls back to the markdown
-      // when the thread has no attachments or Spaces is unreachable.
-      let bundle: Awaited<ReturnType<typeof buildExperimentProofBundle>> = null;
-      try {
-        // Reads the thread's attachments as the REQUESTER, so the bundle can
-        // never contain a file they couldn't already open in the thread.
-        const bundleAuth = await resolveAuthForUser(payload.userId);
-        if (!bundleAuth) {
-          log.warn("[experiment] no Spaces credentials for requester; findings will be markdown-only", {
-            userId: payload.userId,
-          });
-        } else {
-          bundle = await buildExperimentProofBundle({
-            run,
-            findings,
-            findingsMarkdown: markdown,
-            conversationId: payload.conversationId,
-            auth: bundleAuth,
-          });
-        }
-      } catch (err) {
-        log.warn("[experiment] proof bundle failed; falling back to markdown only", {
-          error: errMsg(err),
-        });
-      }
-      if (bundle) {
-        summaryLines.push(
-          `Proof bundle: ${bundle.includedCount} of ${bundle.entries.length} findings have their artifact attached` +
-          (bundle.missingCount > 0 ? ` · ${bundle.missingCount} missing (see MANIFEST.md)` : "") +
-          ` — organised by epoch inside the zip. The findings write-up is also attached as ${filename}.`,
-        );
-      }
-      const summary = summaryLines.join("\n");
-      try {
-        await postGeneratedMarkdownFile({
+      channelId: payload.channelId,
+      userId: payload.userId,
+    },
+    log,
+    userText,
+    taskCommandText,
+    immediateTaskCommand,
+    autoGoalEnabled,
+    reply: async (markdownText, failureLabel) => {
+      await postAgentMessage(
+        { spacesAppUserId: commandAgent.spacesAppUserId, appToken: commandAgent.appToken },
+        {
           channelId: payload.channelId,
           conversationId: payload.conversationId,
-          userId: agent.spacesAppUserId,
-          appToken: agent.appToken,
-          filename: bundle ? bundle.filename : filename,
-          markdown: bundle ? bundle.buffer : markdown,
-          ...(bundle ? { mimeType: "application/zip" } : {}),
-          // Ship the readable findings .md alongside the zip. The zip is the
-          // complete archive (proof artifacts organised by epoch), but nobody
-          // wants to download-and-unzip just to read the write-up — so the
-          // markdown rides the same message, exactly as it did before bundling.
-          ...(bundle ? { extraFiles: [{ filename, content: markdown, mimeType: "text/markdown" }] } : {}),
-          summary,
-        });
-      } catch (err) {
-        log.warn("[experiment] findings file upload failed; posting inline fallback", {
-          error: errMsg(err),
-        });
-        await postExperimentReply(`${summary}\n\n⚠️ _Couldn't attach ${bundle ? bundle.filename : filename} (upload failed); posting the markdown inline._\n\n${markdown}`);
-      }
-      return;
-    }
-
-    if (experimentCommand.invalidProvider !== undefined) {
-      await postExperimentReply([
-        `Invalid /experiment provider: ${experimentCommand.invalidProvider || "(empty)"}`,
-        `Valid providers: ${Array.from(EXPERIMENT_PROVIDERS).join(", ")}`,
-      ].join("\n"));
-      return;
-    }
-
-    const existing = await experimentRepository.findActiveByConversation(payload.conversationId);
-    if (existing) {
-      await postExperimentReply("An active /experiment is already running in this thread. Use `/experiment status` or `/experiment stop`.");
-      return;
-    }
-    const run = await experimentRepository.createRun({
-      conversationId: payload.conversationId,
-      channelId: payload.channelId,
-      agentSlug: agent.slug,
-      userId: payload.userId,
-      orgId: agent.orgId,
-      focus: experimentCommand.focus ?? null,
-      provider: experimentCommand.provider ?? null,
-      modelId: experimentCommand.model ?? null,
-      kind: experimentCommand.kind ?? null,
-      deadlineAt: new Date(Date.now() + experimentCommand.durationMs),
-    });
-    const isUnderstanding = experimentCommand.kind === "understanding";
-    // Seed the frontier from a list the user already gave us (e.g. 57 table
-    // names). Ground truth beats model enumeration: with the paths pre-recorded
-    // the run cannot exit by imagining fewer of them.
-    const seededPaths = isUnderstanding
-      ? await seedUnderstandingFrontier(run.id, experimentCommand.focus).catch(() => 0)
-      : 0;
-    await postExperimentReply([
-      isUnderstanding ? "**/understanding started**" : "**/experiment started**",
-      isUnderstanding
-        ? `Mode: coverage-gated understanding loop (ends when the code-path frontier is exhausted)`
-        : `Mode: time-boxed autonomous exploration`,
-      `${isUnderstanding ? "Safety cap" : "Duration"}: ${formatDuration(experimentCommand.durationMs)}`,
-      ...(experimentCommand.provider ? [`Model: ${formatExperimentModel(experimentCommand.provider, experimentCommand.model)}`] : []),
-      seededPaths > 0
-        ? `Frontier: ${seededPaths} path(s) seeded from your list — the run ends when all of them are closed.`
-        : `Focus: ${experimentCommand.focus?.trim() || "(none)"}`,
-      // Never drop part of the user's scope in silence: the old cap cut a
-      // 57-table list mid-word and the run explored a narrower scope than the
-      // user believed they had asked for.
-      ...(experimentCommand.droppedFocus
-        ? [`⚠️ Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
-        : []),
-      `Use \`/experiment status\` to inspect progress.`,
-    ].join("\n"));
-    try {
-      await dispatchExperimentEpoch(run);
-    } catch (err) {
-      // A silent failure here strands a zombie "active" run that blocks every
-      // future /experiment in this thread. Abort it and tell the user why.
-      const msg = errMsg(err);
-      log.warn("[experiment] initial dispatch failed", { error: msg });
-      await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
-      await postExperimentReply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`);
-    }
-    return;
-  }
-
-  // ── /queue ── show messages waiting behind the active run, then stop.
-  if (slash?.kind === "queueShow") {
-    const convId = payload.conversationId;
-    const depth = convId ? await queueDepth(convId, agent.slug) : 0;
-    const waiting = convId ? await peekQueue(convId, agent.slug) : [];
-    const lines =
-      depth === 0
-        ? ["🕒 **Message queue** — empty. Nothing is waiting behind the current run."]
-        : [
-            `🕒 **Message queue** — ${depth} message${depth === 1 ? "" : "s"} waiting behind the active run:`,
-            ...waiting.map((m, i) => {
-              const preview = m.task.replace(/\s+/g, " ").slice(0, 80);
-              return `${i + 1}. ${preview}${m.task.length > 80 ? "…" : ""}`;
-            }),
-          ];
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText: lines.join("\n"),
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /queue reply", { error: errMsg(err) });
-    });
-    return;
-  }
-
-  // ── /help ── list the available slash commands, then stop.
-  if (slash?.kind === "help") {
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText: [
-        // KEEP IN SYNC with what actually parses: parseSlashCommand (this
-        // file's control commands), parseExperimentCommand (lib/experiment.ts)
-        // and TASK_COMMANDS (apps/xyne-claw/src/task-commands.ts). Every entry
-        // below is routable today; a command that works but is missing here is
-        // a command nobody discovers — /design, /dashboard, /explainer and
-        // /record-skill shipped unlisted for months.
-        "**Slash commands**",
-        "",
-        "*Autonomy*",
-        "- `/goal <condition>` — work autonomously until the condition is met · `/goal status`",
-        "- `/experiment <duration> [provider=… model=…] [focus...]` — explore until the deadline",
-        "   ↳ duration is `<number><m|h|d>` — e.g. `/experiment 90m`, `/experiment 8h`, `/experiment 14d`. Omit it for 1h; anything longer than the 30d cap is clamped to 30d.",
-        "- `/understanding [duration cap] [focus...]` — explain every path in scope; ends when the frontier is exhausted, not on the clock",
-        "- `/experiment status` · `/experiment list` · `/experiment findings [id]` · `/experiment stop`",
-        "",
-        "*Producing something*",
-        "- `/design <brief>` — design-studio run: produces a self-contained HTML artifact",
-        "- `/dashboard <brief>` — live-data dashboard snapshot, refreshable on a schedule",
-        "- `/explainer <topic>` — narrated explainer video",
-        "- `/record-skill` — turn a recorded walkthrough into a reusable skill",
-        "- `/spec <ticket>` — interview you, then write the specification onto the ticket",
-        "",
-        "*Controlling this thread*",
-        "- `/stop` (or `/goal clear`) — stop the current run, drop queued messages, and clear any active goal",
-        "- `/clear` — wipe this thread's context and start fresh",
-        "- `/compact [focus]` — summarize & shrink the context, then continue",
-        "- `/queue` — show messages waiting behind the current run · `/queue <message>` — run it after the current run without interrupting · `/queue clear` — drop waiting messages",
-        "- `/upgrade [task]` — use the premium model for this conversation",
-        "- `/fast [task]` / `/fast off` — fast mode: the agent calls tools directly instead of delegating to subagents (quicker for short asks; use normal mode for deep investigations)",
-        "- `/help` — show this list",
-      ].join("\n"),
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /help reply", { error: errMsg(err) });
-    });
-    return;
-  }
-
-  if (slash?.kind === "fastModeUsage") {
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText: "Usage: `/fast` · `/fast off` · `/fast <task>` (turn on fast mode and run the task)",
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /fast reply", { error: errMsg(err) });
-    });
-    return;
-  }
-
-  if (slash?.kind === "fastMode") {
-    // This slash handler runs only for normal mention/DM webhooks; scheduled
-    // automation runs can only be detected here by their one-shot conversation id.
-    const isAutomationThread = payload.conversationId?.startsWith("scheduled_") === true;
-    let markdownText = isAutomationThread
-      ? "⚡ `/fast` does not persist for scheduled/automation firings because each firing uses a new conversation. Set `fastMode: true` on the agent instead."
-      : slash.enabled
-        ? "⚡ fast mode on — tools load on demand, no subagent delegation."
-        : "⚡ fast mode off — subagent delegation restored for the next run.";
-    if (!isAutomationThread) {
-      try {
-        await setFastModeOverride(payload.conversationId, agent.slug, slash.enabled);
-      } catch (err) {
-        log.warn("Failed to set /fast override", { error: errMsg(err) });
-        markdownText = "⚠️ couldn't persist fast mode — try again";
-      }
-    }
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText,
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /fast reply", { error: errMsg(err) });
-    });
-    return;
-  }
-
-  // ── /clear ── wipe this thread's agent session in claw-pod, then ack and
-  // stop. The agent forgets all prior context; the next message starts fresh.
-  if (slash?.kind === "clear") {
-    let cleared = false;
-    try {
-      const r = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/clear-session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
-        body: JSON.stringify({ userId: payload.userId, conversationId: payload.conversationId, agentSlug: agent.slug }),
+          markdownText,
+          metadata: { contentFormat: "markdown" },
+        }
+      ).catch((err) => {
+        log.warn(failureLabel, { error: errMsg(err) });
       });
-      cleared = (r as unknown as { ok: boolean }).ok;
-    } catch (err) {
-      log.warn("Failed to clear claw session", { error: errMsg(err) });
-    }
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText: cleared
-        ? "🧹 Cleared this thread's context — I'll start fresh on your next message."
-        : "⚠️ Couldn't clear the conversation context. Please try again.",
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /clear reply", { error: errMsg(err) });
-    });
-    return;
-  }
+    },
+    reconcileStoppedRuns,
+  });
+  if (commandOutcome.kind === "handled") return;
 
-  // ── /queue clear ── drop the messages waiting behind the active run. Does
-  // NOT stop the current run (that's /stop) — the active run keeps going and
-  // will simply have nothing to drain when it finishes.
-  if (slash?.kind === "queueClear") {
-    const convId = payload.conversationId;
-    const discarded = convId ? await clearQueue(convId, agent.slug) : 0;
-    const reply =
-      discarded > 0
-        ? `🧹 Cleared the queue — dropped ${discarded} waiting message${discarded === 1 ? "" : "s"}. The current run continues.`
-        : "The queue is already empty.";
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText: reply,
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /queue clear reply", { error: errMsg(err) });
-    });
-    return;
-  }
+  const { compactBeforeRun, explicitQueueOnly } = commandOutcome;
+  const pendingGoalStart: PendingGoalStart | null = commandOutcome.pendingGoalStart;
+  let task = commandOutcome.task;
 
-  // ── /stop (and /goal clear) ── halt EVERYTHING active in this thread: cancel
-  // the in-flight run, drop queued messages, and clear any active goal. Queued
-  // messages must go too — the cancel's failure result drains the queue
-  // immediately, so keeping them would restart work the instant it stopped.
-  // Any thread participant may stop (same permissive model as /goal clear).
-  if (slash?.kind === "goalClear") {
-    const convId = payload.conversationId;
-    let goalWasActive = false;
-    if (convId) {
-      const g = await activeGoalRepository.findActiveByConversation(convId).catch(() => null);
-      if (g) {
-        goalWasActive = true;
-        await activeGoalRepository.terminate(convId, "cancelled", "user_stopped").catch(() => {});
-      }
-    }
-    const stopResult = convId
-      ? await reconcileStoppedRuns(convId, agent.slug)
-      : { stopped: 0, cleaned: 0, queued: 0, hadRunningRows: false };
-
-    const parts: string[] = [];
-    parts.push(`Stopped ${stopResult.stopped} running run${stopResult.stopped === 1 ? "" : "s"}`);
-    parts.push(`cleaned ${stopResult.cleaned} stale run${stopResult.cleaned === 1 ? "" : "s"}`);
-    parts.push(`dropped ${stopResult.queued} queued message${stopResult.queued === 1 ? "" : "s"}`);
-    if (goalWasActive) parts.push("cleared the active /goal");
-    const reply =
-      stopResult.hadRunningRows || goalWasActive || stopResult.queued > 0
-        ? `🛑 ${parts.join(" - ")}.`
-        : "Nothing is currently running in this thread.";
-
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText: reply,
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /stop reply", { error: errMsg(err) });
-    });
-    return;
-  }
-
-  // ── /compact ── compact (summarize) this thread's context before the run.
-  // Not a short-circuit: it dispatches a normal turn with compactBeforeRun set,
-  // so the agent compacts the resumed session and replies with a summary.
-  const compactBeforeRun = slash?.kind === "compact";
-  const explicitQueueOnly = slash?.kind === "queueAdd";
-
-  // Only goal commands reach the goal relooper; stop/clear/compact are handled
-  // here (goalClear was short-circuited above into the full /stop path).
-  const goalCommand =
-    slash && (slash.kind === "goalStart" || slash.kind === "goalStatus")
-      ? slash
-      : null;
-  const intercept = await handleSlashCommandBeforeRun({ command: goalCommand, conversationId: payload.conversationId });
-  let pendingGoalStart: { condition: string; providerOverride?: { provider: string; model?: string } } | null = null;
-  let task: string;
-  if (intercept.kind === "goalStatusReply" || intercept.kind === "goalCleared") {
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: payload.channelId,
-      conversationId: payload.conversationId,
-      markdownText: intercept.replyToUser,
-      userId: agent.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, agent.appToken).catch((err) => {
-      log.warn("Failed to post /goal control reply", { error: errMsg(err) });
-    });
-    return;
-  } else if (slash?.kind === "queueAdd") {
-    // `/queue <message>` is an explicit opt-out from same-user interrupt-with-reply.
-    // If a run is active the slot gate below will enqueue it without touching the
-    // active run; if nothing is active we just run the message now.
-    task = slash.message;
-  } else if (compactBeforeRun) {
-    // The run resumes the session, forces a compaction, and answers this task —
-    // a short summary for the user while the context shrinks.
-    task =
-      slash?.kind === "compact" && slash.instructions
-        ? `The user ran /compact. Summarize the conversation so far concisely, focusing on: ${slash.instructions}. Then we continue.`
-        : "The user ran /compact. Give a concise summary of the conversation so far so we can continue with a smaller context.";
-  } else if (intercept.kind === "goalStarted") {
-    pendingGoalStart = {
-      condition: intercept.condition,
-      ...(intercept.providerOverride ? { providerOverride: intercept.providerOverride } : {}),
-    };
-    task = intercept.firstTurnTask;
-    // Show "Starting /goal…" on the ephemeral progress spinner (same surface as
-    // tool calls), not as a permanent chat message — the goal loop's meta lines
-    // shouldn't clutter the thread. The terminal outcome stays a real message.
-    await postGoalPhase(
-      { conversationId: payload.conversationId, channelId: payload.channelId, agentSlug: agent.slug, spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
-      intercept.replyToUser,
-    );
-  } else {
-    task = immediateTaskCommand ? taskCommandText : userText;
-  }
-
-  // `/upgrade` — explicit user opt-in to the agent's premium provider for
-  // this conversation. Not handled by parseSlashCommand (that's goal-only).
-  // Two shapes:
-  //   "/upgrade"        → flip the flag, post an ack, no run dispatch.
-  //   "/upgrade <task>" → flip the flag AND dispatch the remainder with the
-  //                       escalated provider in one shot.
-  // The flag persists on SessionContext.escalatedProvider (Redis convKey
-  // index) for the lifetime of the conversation. Resolution happens further
-  // down in the dispatch block — this only records intent.
-  //
-  // Strip leading @mentions before matching — Spaces' cleanContent doesn't
-  // always remove them, and the user typically writes "@Xyne Doctor /upgrade".
-  // Mirrors LEADING_MENTIONS in parseSlashCommand.ts so display names with
-  // spaces ("@Xyne Doctor") match the same way as the /goal parser.
-  const LEADING_MENTIONS_RE = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
-  const taskWithoutMentions = task.replace(LEADING_MENTIONS_RE, "");
-  const UPGRADE_RE = /^\s*\/upgrade(?:\s+([\s\S]+))?\s*$/i;
-  const upgradeMatch = UPGRADE_RE.exec(taskWithoutMentions);
-  const userRequestedUpgrade = upgradeMatch !== null;
-  if (userRequestedUpgrade) {
-    task = upgradeMatch[1]?.trim() ?? "";
-  }
-
-  // `/fast <task>` — enable fast mode AND dispatch the remainder in one shot,
-  // mirroring `/upgrade <task>`. Bare `/fast`, `/fast on|off`, and on/off
-  // typos were already handled (ack-only) by the parseSlashCommand branch
-  // above, so only the with-task shape reaches this regex. `/fast off <task>`
-  // disables fast mode and still runs the task.
-  const FAST_TASK_RE = /^\s*\/fast\s+([\s\S]+?)\s*$/i;
-  const fastTaskMatch = FAST_TASK_RE.exec(taskWithoutMentions);
-  if (fastTaskMatch) {
-    let rest = fastTaskMatch[1]!.trim();
-    let fastEnable = true;
-    if (/^off\b/i.test(rest)) {
-      fastEnable = false;
-      rest = rest.replace(/^off\b/i, "").trim();
-    }
-    task = rest;
-    if (payload.conversationId) {
-      try {
-        await setFastModeOverride(payload.conversationId, agent.slug, fastEnable);
-      } catch (err) {
-        // Run the task anyway — resolveFastMode falls back to agent config.
-        log.warn("Failed to set /fast override for /fast <task>", { error: errMsg(err) });
-      }
-    }
-  }
 
   // For USER_MENTIONED: run as the mentioned user (their tools, their twin).
   const allMentionedIds = (payload as { mentionedUserIds?: string[] }).mentionedUserIds ?? [];
@@ -2367,8 +1600,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   let slotToken: string | null = null;
 
   // Claim the conversation slot before slow provider/history/attachment setup.
-  // Bare `/upgrade` is an ack-only command, so it must not reserve a run slot.
-  if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId && task) {
+  // Ack-only commands must not reserve a run slot.
+  if (eventType !== "USER_MENTIONED" && payload.conversationId && task) {
     const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug, undefined, targetUserId);
     slotToken = slot;
     if (!slot) {
@@ -2427,13 +1660,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             : enq.full
               ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
               : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: payload.channelId,
-        conversationId: payload.conversationId,
-        markdownText: notice,
-        userId: agent.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, agent.appToken).catch((err) => {
+      await postAgentMessage(
+        { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+        {
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          markdownText: notice,
+          metadata: { contentFormat: "markdown" },
+        }
+      ).catch((err) => {
         log.warn("Failed to post queue notice", { error: errMsg(err) });
       });
       log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} reason=${queuedMsg.queueReason} interruptRequested=${interruptRequested} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
@@ -2442,16 +1677,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    // Fetch thread history to give the agent context (exclude own messages to avoid duplication on resume)
     const history = await fetchConversationHistory(payload.conversationId, agent.appToken, agent.spacesAppUserId);
-
-    // Resolve agent config (skills) — shared across every dispatched target.
     const agentRow = await agentRepository.findBySlugWithRelations(agent.slug, agent.orgId ?? undefined);
-    // Forward each skill's attached files (e.g. cam-templates/template.pdf)
-    // alongside SKILL.md content. Without `files`, fill-pdf-form &
-    // inspect-pdf-form get ENOENT because session-skills.ts has nothing to
-    // materialize. Files arrive as base64 in SkillFile.content for binary
-    // contentTypes; session-skills.ts handles the decode on disk write.
     const agentSkills = agentRow?.skills?.map((s) => ({
       name: s.skill.name,
       content: s.skill.content,
@@ -2466,401 +1693,41 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         : {}),
     }));
 
-    // Per-target dispatch unit. Runs provider resolution against the TARGET
-    // user's own credentials, downloads attachments, fires /run, and registers
-    // the session + run-recovery. Called ONCE for conversation-mode events (as
-    // the sender), or ONCE PER eligible mentioned user for the Digital Twin
-    // (each gets a private claw session via buildSandboxStoreKey + a per-user
-    // conv index). Every per-user local (provider resolution, escalation, /run,
-    // setSession) lives INSIDE so two twins in one thread never share state.
+
     const dispatchRunForTarget = async (
       targetUserId: string,
       twinWorkspaceId: string | undefined,
     ): Promise<void> => {
 
-    // Per-agent: which provider to use as the parent agent LLM.
-    // "spaces" is the LiteLLM/Kimi platform sentinel, not a personal credential
-    // choice — historically the GET /user-config endpoint returned `"spaces"`
-    // as a default-display value, which led users to "Save" it and pin it as
-    // an override that blocked agent-level providerOrder. Treat it as "no
-    // personal preference" so the resolver falls through to the agent-level
-    // chain. Only truthy non-"spaces" picks (codex/claude/copilot/openrouter)
-    // count as a real personal override.
-    const userAgentConfig = agent.orgId
-      ? await userAgentConfigRepository.findByUserAndAgent(targetUserId, agent.orgId, agent.slug).catch(() => null)
-      : null;
-    const rawPersonalProvider = userAgentConfig?.provider;
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
-      ? rawPersonalProvider
-      : undefined;
+    const {
+      resolvedParentProvider,
+      runtimeProviderOrder,
+      providerConfigs,
+      subagentProviders,
+      subagentProviderMode,
+    } = await resolveProvidersForDispatch({
+      targetUserId,
+      agent,
+      agentRow,
+      conversationId: payload.conversationId,
+      log,
+    });
 
-    // Agent-level fallback: shared keys the agent's owner/admin configured.
-    // Anurag's framing: "If someone configures codex at xyne doctor level then
-    // if quota is there it will use codex … If user has there own provider
-    // that will take preference." Resolution chain becomes:
-    //   1. personal provider (user picked in agent settings + has own creds)
-    //   2. agent-level provider (agent.config.provider + agentProviderCredentials)
-    //   3. "spaces" / LiteLLM platform default
-    // Agent-default fast mode may resolve against its own provider profile
-    // (config.fastModeProfile) — see lib/agent-provider-config.ts.
-    const mentionSpeed = agentDefaultSpeed(agentRow?.config);
-    const mentionSpeedConfig = providerConfigForSpeed(agentRow?.config, mentionSpeed);
-    const agentLevelProvider = mentionSpeedConfig["provider"] as string | undefined;
-    // Owners can also pin an ordered preference list under config.providerOrder.
-    // We use it (a) to pick which agent-level provider to bind as the parent
-    // model, and (b) to thread the full fallback chain into the runtime so
-    // claw can walk it on quota exhaustion instead of dropping straight to
-    // LiteLLM. Validation: keep only known provider strings.
-    const rawProviderOrder = mentionSpeedConfig["providerOrder"];
-    const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
-      ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
-      : [];
-    const userProvider = personalProvider ?? agentLevelProvider;
+    const userSpacesAuth = await resolveUserSpacesAuth(payload.userId, "webhook");
+    const userSpacesToken = userSpacesAuth?.token;
+    const userSpacesSessionId = userSpacesAuth?.sessionId;
+    const userSpacesWorkspaceId = userSpacesAuth?.workspaceId;
+    const userCookieHeader = userSpacesAuth?.cookieHeader;
 
-    // User-level: all provider credentials (copilot/claude) owned by this user
-    const allCreds = await userProviderCredentialsRepository.listByUser(targetUserId).catch(() => []);
-    const credsByProvider = new Map(allCreds.map((c) => [c.provider, c] as const));
-
-    // Agent-level: all provider credentials configured on the agent itself
-    const agentCreds = agentRow?.id
-      ? await agentProviderCredentialsRepository.listByAgent(agentRow.id).catch(() => [])
-      : [];
-    const agentCredsByProvider = new Map(agentCreds.map((c) => [c.provider, c] as const));
-
-    // User-level: per-subagent provider routing overrides
-    const subagentConfigs = await userSubagentConfigRepository.listByUser(targetUserId).catch(() => []);
-    const subagentProviders: Record<string, string> = {};
-    for (const s of subagentConfigs) subagentProviders[s.subagentName] = s.provider;
-
-    // Agent-level: default provider for subagents WITHOUT an explicit override
-    // above — "parent" (inherit the parent's provider, legacy default) or
-    // "spaces" (run subagents on the Spaces platform default). See
-    // resolveSubagentProviderMode. The runtime applies this only to subagents not
-    // present in `subagentProviders`.
-    const subagentProviderMode = resolveSubagentProviderMode(agentRow?.config);
-
-    // buildProviderConfig + KNOWN_PROVIDERS come from the shared resolver module
-    // (lib/agent-provider-config.ts) — one source of truth for the per-provider
-    // default models + OAuth-bundle extraction, so adding a provider is a
-    // one-place change (these inline copies used to drift).
-
-    // Build providerConfigs.
-    //
-    // Normally the user's personal credentials take preference, and agent-level
-    // creds fill any gaps. BUT if the user has explicitly picked "spaces" for
-    // this agent, they're opting OUT of their personal providers and deferring
-    // to the agent's configuration ENTIRELY — keys included. In that case we
-    // skip the user-level credential preference so the resolved (agent-level)
-    // provider runs on the AGENT's credentials, not the user's. Without this, a
-    // user who picked "spaces" but happens to have a personal codex key would
-    // still silently run on their own codex instead of the agent's.
-    const userDeferredToAgent = rawPersonalProvider === "spaces";
-    const providerConfigs: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string; reasoningEffort?: string }> = {};
-    const providerScope: Record<string, "user" | "agent"> = {};
-    if (!userDeferredToAgent) {
-      for (const [provider, row] of credsByProvider) {
-        const cfg = buildProviderConfig(provider, row);
-        if (cfg) {
-          providerConfigs[provider] = cfg;
-          providerScope[provider] = "user";
-        }
-      }
-    }
-    for (const [provider, row] of agentCredsByProvider) {
-      if (providerConfigs[provider]) continue; // user has personal — keep theirs
-      const cfg = buildProviderConfig(provider, row);
-      if (cfg) {
-        providerConfigs[provider] = cfg;
-        providerScope[provider] = "agent";
-      }
-    }
-    applyFastModeModels(providerConfigs, agentRow?.config, mentionSpeed);
-
-    // Refresh the Claude OAuth token before use — it's short-lived. Codex
-    // already stores+refreshes a bundle; Claude historically stored a raw token
-    // that simply expired → 401 → silent Spaces fallback. getValidClaudeBearer
-    // refreshes (when expired) and persists the rotated token back to the
-    // owning cred row, returning a fresh bearer. Bare-token / api_key creds and
-    // not-yet-expired tokens pass through unchanged (no network call).
-    const claudeCfg = providerConfigs["claude"];
-    if (claudeCfg && claudeCfg.authType === "oauth_token") {
-      const scope = providerScope["claude"];
-      const credRow = scope === "agent" ? agentCredsByProvider.get("claude") : credsByProvider.get("claude");
-      const ownerId = scope === "agent" ? agentRow?.id : targetUserId;
-      if (credRow && ownerId) {
-        // Rows in EITHER scope may be BINDINGS to a shared org credential —
-        // the refresh must then single-flight + persist against the shared
-        // row (one live OAuth session across every binding), not the copy.
-        const target = scope === "agent" && agentRow?.id
-          ? agentCredRefreshTarget(agentRow.id, "claude", credRow as { sharedCredentialId?: string | null })
-          : userCredRefreshTarget(targetUserId, "claude", credRow as { sharedCredentialId?: string | null });
-        try {
-          claudeCfg.apiKey = await getValidClaudeBearer(target.credKey, credRow, target.persist);
-        } catch (err) {
-          // Refresh failed (expired + no/invalid refresh token). Leave the stale
-          // token; the run will 401 and surface via the error path. Logged so
-          // it's visible rather than a mystery empty-completion.
-          log.warn("Claude OAuth refresh failed — credential likely needs reconnect", {
-            scope,
-            error: errMsg(err),
-          });
-        }
-      }
-    }
-
-    // Refresh the Codex OAuth token before use — same shape as Claude above.
-    // Codex stores a {access_token, refresh_token, expires_at} bundle but
-    // historically NOTHING refreshed it: the access token simply expired → 401
-    // "authentication token is expired" → always-on codex agents (and their
-    // codex-inheriting subagents) failed until a manual reconnect.
-    // getValidCodexBearer refreshes (when expired) via the stored refresh_token
-    // and persists the rotated bundle. api_key creds / not-yet-expired tokens
-    // pass through unchanged (no network call).
-    const codexCfg = providerConfigs["codex"];
-    if (codexCfg && codexCfg.authType === "oauth_token") {
-      const scope = providerScope["codex"];
-      const credRow = scope === "agent" ? agentCredsByProvider.get("codex") : credsByProvider.get("codex");
-      const ownerId = scope === "agent" ? agentRow?.id : targetUserId;
-      if (credRow && ownerId) {
-        // Same shared-binding awareness as the Claude block above.
-        const target = scope === "agent" && agentRow?.id
-          ? agentCredRefreshTarget(agentRow.id, "codex", credRow as { sharedCredentialId?: string | null })
-          : userCredRefreshTarget(targetUserId, "codex", credRow as { sharedCredentialId?: string | null });
-        try {
-          codexCfg.apiKey = await getValidCodexBearer(target.credKey, credRow, target.persist);
-        } catch (err) {
-          // Refresh failed (expired + no/invalid refresh token). Leave the stale
-          // token; the run will 401 and surface via the error path. Logged so
-          // it's visible rather than a mystery empty-completion.
-          log.warn("Codex OAuth refresh failed — credential likely needs reconnect", {
-            scope,
-            error: errMsg(err),
-          });
-        }
-      }
-    }
-
-    // Resolution chain — kimi-first, agent-level providers are escalation-only.
-    //
-    // Order:
-    //   1. Personal provider — user's own paid creds always win when configured.
-    //   2. Conversation-scoped escalation — set by an earlier accepted FlowUI
-    //      promote-provider prompt or by `/upgrade` in the user's message.
-    //      Once set on SessionContext (convKey index), all subsequent turns
-    //      in the same conversation use the escalated provider directly.
-    //   3. Undefined → claw falls through to spaces/LiteLLM (Kimi) default.
-    //
-    // Agent-level providers (agent.config.provider + agentProviderCredentials)
-    // are NO LONGER consulted as a default. They are the escalation pool only:
-    // — `escalationCandidate` (below) names the first one with resolved creds,
-    //   used to drive `/upgrade` and the failure-prompt's "Retry with X?" copy.
-    // — Their creds stay in `providerConfigs` so claw can use them when the
-    //   resolver picks one via escalation; runtimeProviderOrder gates which
-    //   ones claw is allowed to walk on quota exhaustion.
-    //
-    // Key invariant unchanged: we never promote a provider that lacks creds.
-    const priorSession = payload.conversationId
-      ? await getSessionByConv(payload.conversationId, agent.slug, targetUserId).catch(() => null)
-      : null;
-    const priorEscalation = priorSession?.escalatedProvider;
-
-    // First agent-level provider with resolved creds — the candidate for both
-    // `/upgrade` (auto-accept) and the failure-prompt (named in the question).
-    const escalationCandidate: string | undefined =
-      agentProviderOrder.find((p) => providerConfigs[p] && providerScope[p] === "agent")
-      ?? (agentLevelProvider && providerConfigs[agentLevelProvider] && providerScope[agentLevelProvider] === "agent"
-          ? agentLevelProvider
-          : undefined);
-
-    let escalatedProvider: string | undefined;
-    if (priorEscalation && providerConfigs[priorEscalation]) {
-      escalatedProvider = priorEscalation;
-    } else if (userRequestedUpgrade && escalationCandidate) {
-      escalatedProvider = escalationCandidate;
-    }
-
-    // Per-agent policy switch:
-    //   `agent.config.providerAlwaysOn === false` → kimi-first / escalate-on-demand
-    //                                                (the new flow above).
-    //   anything else (true or undefined)        → agent-first resolution
-    //                                                (the legacy behavior; backfill
-    //                                                default so existing agents
-    //                                                keep working exactly as they
-    //                                                used to until an owner opts
-    //                                                in to the new flow).
-    const providerAlwaysOnRaw = (agentRow?.config as Record<string, unknown> | null)?.["providerAlwaysOn"];
-    const providerAlwaysOn = providerAlwaysOnRaw !== false;
-
-    let resolvedParentProvider: string | undefined;
-    let runtimeProviderOrder: string[];
-
-    if (providerAlwaysOn) {
-      // Legacy "always on" — agent's configured provider wins by default.
-      // Identical to the pre-feature resolution: providerOrder → legacy
-      // agent.config.provider → personal (tiebreaker) → any-with-creds.
-      if (agentProviderOrder.length > 0) {
-        resolvedParentProvider = agentProviderOrder.find((p) => providerConfigs[p]);
-      }
-      if (!resolvedParentProvider && agentLevelProvider && providerConfigs[agentLevelProvider]) {
-        resolvedParentProvider = agentLevelProvider;
-      }
-      if (!resolvedParentProvider && personalProvider && providerConfigs[personalProvider]) {
-        resolvedParentProvider = personalProvider;
-      }
-      if (!resolvedParentProvider) {
-        const available = Object.keys(providerConfigs);
-        if (available.length > 0) resolvedParentProvider = available[0];
-      }
-      runtimeProviderOrder = agentProviderOrder.length > 0
-        ? agentProviderOrder
-        : (resolvedParentProvider ? [resolvedParentProvider] : []);
-    } else {
-      // Kimi-first / escalate-on-demand — see comment block above the chain.
-      if (personalProvider && providerConfigs[personalProvider]) {
-        resolvedParentProvider = personalProvider;
-      }
-      if (!resolvedParentProvider && escalatedProvider) {
-        resolvedParentProvider = escalatedProvider;
-      }
-      // No further fallback — leave undefined so claw uses spaces/LiteLLM.
-      runtimeProviderOrder = resolvedParentProvider ? [resolvedParentProvider] : [];
-    }
-
-    log.info(`Provider resolution: mode=${providerAlwaysOn ? "always-on" : "kimi-first"} parent=${resolvedParentProvider ?? "spaces"} scope=${resolvedParentProvider ? (providerScope[resolvedParentProvider] ?? "fallback") : "platform"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${runtimeProviderOrder.join(",")}] escalated=${escalatedProvider ?? "(none)"} userUpgrade=${userRequestedUpgrade} subagentOverrides=${JSON.stringify(subagentProviders)} subagentProviderMode=${subagentProviderMode}`);
-
-    // Handle bare `/upgrade` (no task remainder). We just need to flip the
-    // conversation flag and ack the user; no run to dispatch.
-    if (userRequestedUpgrade && !task) {
-      // In always-on mode the agent provider is already the default — /upgrade
-      // is a no-op. Tell the user instead of silently flipping a flag that
-      // wouldn't change anything.
-      if (providerAlwaysOn) {
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: payload.channelId,
-          conversationId: payload.conversationId,
-          markdownText: escalationCandidate
-            ? `✓ Already using **${escalationCandidate}** by default for this agent (always-on is enabled).`
-            : "✓ No premium provider is configured, and always-on is enabled — there's nothing to switch to.",
-          userId: agent.spacesAppUserId,
-          metadata: { contentFormat: "markdown" },
-        }, agent.appToken).catch(() => {});
-        return;
-      }
-      if (escalatedProvider) {
-        // Persist the flag on the convKey index so the NEXT message in this
-        // conversation picks it up via the resolution chain above.
-        // setSession writes both the per-session AND per-conv indexes; the
-        // session: key is irrelevant here but harmless (TTLs out in 24h).
-        const ackSessionId = `upgrade-ack-${createTraceId()}`;
-          const ackContext: SessionContext = {
-            mentionedUserId: agent.spacesAppUserId,
-            senderId: payload.userId,
-          senderName: payload.senderName ?? payload.userId,
-          channelId: payload.channelId,
-          channelName: payload.channelName ?? payload.channelId,
-            conversationId: payload.conversationId,
-            task: "/upgrade",
-            agentId: agent.id,
-            agentOrgId: agent.orgId,
-            agentSlug: agent.slug,
-          responseMode: "conversation",
-          appToken: agent.appToken,
-          spacesAppId: agent.spacesAppId,
-          spacesAppUserId: agent.spacesAppUserId,
-          traceId,
-          rootAgentSlug: agent.slug,
-          triggerSource: "spaces",
-          escalatedProvider,
-          // Preserve other prior-session fields where helpful.
-          ...(priorSession?.workflowId ? { workflowId: priorSession.workflowId } : {}),
-        };
-        await setSession(ackSessionId, ackContext);
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: payload.channelId,
-          conversationId: payload.conversationId,
-          markdownText: `✅ Upgraded to **${escalatedProvider}** for this conversation. Send your next message and I'll use it.`,
-          userId: agent.spacesAppUserId,
-          metadata: { contentFormat: "markdown" },
-        }, agent.appToken).catch((err) => {
-          log.warn("Failed to post /upgrade ack", { error: errMsg(err) });
-        });
-        log.info(`/upgrade flipped escalation to ${escalatedProvider} for conv ${payload.conversationId}`);
-      } else {
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: payload.channelId,
-          conversationId: payload.conversationId,
-          markdownText: "⚠️ No premium provider configured for this agent. Ask an admin to add one in the agent's Provider Credentials.",
-          userId: agent.spacesAppUserId,
-          metadata: { contentFormat: "markdown" },
-        }, agent.appToken).catch(() => {});
-        log.info(`/upgrade requested but no escalationCandidate available for agent ${agent.slug}`);
-      }
-      return;
-    }
-
-    // Download image attachments from Spaces (if any) to pass to the agent.
-    // Spaces' attachment routes use user-session auth and reject app tokens
-    // (HTTP 401), so we use the *sender's* xyne-spaces MCP token (stored
-    // encrypted in userMcpConnection by users.ts:autoConfigureSpaces). That
-    // token authenticates as the actual user who sent the message.
-    //
-    // Source order:
-    //   1. Direct fetch of `att.fileUrl` (signed/public URL — no auth)
-    //   2. Spaces user-session route with the sender's MCP token
-    //   3. Spaces apps-route with agent appToken (last resort)
-    let userSpacesToken: string | undefined;
-    let userSpacesSessionId: string | undefined;
-    let userSpacesWorkspaceId: string | undefined;
-    // Prefer a live read from the Spaces DB (always fresh). Falls back to the
-    // cached userMcpConnection copy when SPACES_DB_URL is unset or the user
-    // has no active session row.
-    const liveSpaces = await getSpacesAuthForUser(payload.userId, "webhook");
-    if (liveSpaces) {
-      userSpacesToken = liveSpaces.token;
-      userSpacesSessionId = liveSpaces.sessionId;
-      userSpacesWorkspaceId = liveSpaces.workspaceId;
-      log.info(`Resolved Spaces creds from live DB for user ${payload.userId} workspaceId=${liveSpaces.workspaceId}`);
-    } else {
-      try {
-        const conn = await prisma.userMcpConnection.findFirst({
-          where: { userId: payload.userId, mcpServer: { type: "xyne-spaces" } },
-        });
-        if (conn) {
-          const decrypted = decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey);
-          const parsed = JSON.parse(decrypted) as { token?: string; sessionId?: string; workspaceId?: string };
-          if (parsed.token) userSpacesToken = parsed.token;
-          if (parsed.sessionId) userSpacesSessionId = parsed.sessionId;
-          if (parsed.workspaceId) userSpacesWorkspaceId = parsed.workspaceId;
-        }
-      } catch (err) {
-        log.warn(`Failed to load user Spaces token for ${payload.userId}: ${errMsg(err)}`);
-      }
-    }
-    if (userSpacesToken && !userSpacesWorkspaceId) {
-      const workspaceId = await getWorkspaceIdForUser(payload.userId, "webhook").catch(() => null);
-      if (workspaceId) {
-        userSpacesWorkspaceId = workspaceId;
-        log.info(`Resolved Spaces workspaceId=${workspaceId} from user row for cached webhook auth user ${payload.userId}`);
-      }
-    }
-
-    // Spaces auth middleware (backend/src/middleware/auth.ts) needs the JWT
-    // AND a session cookie to silently refresh expired JWTs. Pure Bearer-only
-    // 401s the moment the JWT TTL elapses. We cover all three cookie name
-    // aliases (legacy + workspace + V2) so any of Spaces' middleware variants
-    // can find what it needs.
-    const userCookieParts: string[] = [];
-    if (userSpacesToken) {
-      userCookieParts.push(`google_access_token=${userSpacesToken}`);
-    }
-    if (userSpacesSessionId) {
-      userCookieParts.push(`user_session_id=${userSpacesSessionId}`);
-      userCookieParts.push(`xyne_session=${userSpacesSessionId}`);
-    }
-    if (userSpacesWorkspaceId) userCookieParts.push(`xyne_last_workspace=${userSpacesWorkspaceId}`);
-    const userCookieHeader = userCookieParts.length > 0 ? userCookieParts.join("; ") : undefined;
-
-    const inboundAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    const inboundAttachments: Array<{
+      fileName: string;
+      mimeType: string;
+      data?: string;
+      gcsRef?: string;
+      sizeBytes?: number;
+    }> = [];
+    const refAttachments = runAttachmentRefsEnabled();
+    const attachmentScopeId = payload.conversationId || payload.channelId || "unscoped";
     // Large /record-skill videos travel as authenticated references. The
     // internal /run proxy binds these to its newly minted session; xyne-claw
     // later streams the bytes through claw-auth into the sandbox in bounded
@@ -2871,70 +1738,33 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       mimeType: string;
       fileSize: number;
     }> = [];
-    // Mime allow-list for what xyne-claw's /run can consume. Must stay in
-    // sync with TEXT_ATTACHMENT_MIME_TYPES / TEXT_ATTACHMENT_EXTENSIONS and
-    // the xlsx/pdf detectors in xyne-claw/src/routes/run.ts — claw-auth
-    // filters here, claw filters again on receipt; both lists must agree.
-    //   image/*               → passed to LLM as ImageContent
-    //   text/* + structured   → written to .context/<file>, agent reads via Read tool
-    //   application/pdf       → server-side text-extracted via unpdf, written as <file>.md
-    const isAllowedAttachment = (att: WebhookAttachment): boolean => {
-      const mime = att.mimeType?.toLowerCase() ?? "";
-      if (mime.startsWith("image/")) return true;
-      // Video — extracted to a frame-by-frame narrative + keyframes by
-      // videoBufferToContext in xyne-claw/src/video-attachment.ts before the
-      // agent sees it (the model can't ingest video, only frames).
-      if (mime.startsWith("video/")) return true;
-      if (mime === "text/plain" || mime === "text/markdown") return true;
-      if (mime === "application/json" || mime === "text/csv") return true;
-      if (mime === "application/yaml" || mime === "text/yaml") return true;
-      if (mime === "application/xml" || mime === "text/xml") return true;
-      // HTML — written verbatim to .context/<file>.html so the model can
-      // reason about structure inline (no DOM stripping). See html-attachment.ts.
-      if (mime === "text/html" || mime === "application/xhtml+xml") return true;
-      if (mime === "application/pdf") return true;
-      // xlsx / xlsm — extracted to multi-sheet markdown by xlsxBufferToMarkdown
-      // in xyne-claw/src/xlsx-attachment.ts before the agent sees it.
-      if (mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return true;
-      if (mime === "application/vnd.ms-excel.sheet.macroenabled.12") return true;
-      // docx / pptx — converted to markdown by mammoth / JSZip+XML parsing.
-      if (mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return true;
-      if (mime === "application/vnd.openxmlformats-officedocument.presentationml.presentation") return true;
-      // ZIP — unzipped server-side; each entry routes through the same
-      // per-type pipeline. Nested zips are skipped (logged in manifest).
-      // See xyne-claw/src/zip-attachment.ts for safety caps (200 entries,
-      // 50 MB/entry, 200 MB total).
-      if (mime === "application/zip" || mime === "application/x-zip-compressed" || mime === "application/x-zip") return true;
-      // Extension fallback for clients that send octet-stream / no mimetype.
-      const lowerName = att.fileName?.toLowerCase() ?? "";
-      if (/\.(txt|md|json|csv|yml|yaml|xml|log|pdf|xlsx|xlsm|docx|pptx|html|htm|xhtml|zip)$/.test(lowerName)) return true;
-      if (/\.(mov|mp4|m4v|webm|avi|mkv|mpg|mpeg|wmv|flv)$/.test(lowerName)) return true;
-      return false;
-    };
+    const skippedRecordingNames: string[] = [];
+    const failedAttachmentNames: string[] = [];
+    const isAllowedAttachment = (att: WebhookAttachment): boolean =>
+      isSupportedInboundAttachment(att.fileName ?? "", att.mimeType);
     if (payload.attachments?.length) {
       for (const att of payload.attachments) {
         if (!isAllowedAttachment(att)) {
           log.warn(
-            `Skipping attachment ${att.attachmentId} (${att.fileName}, ${att.mimeType}) — not in claw-auth allow-list. Update isAllowedAttachment in webhook.ts.`,
+            `Skipping attachment ${att.attachmentId} (${att.fileName}, ${att.mimeType}) — not in the inbound attachment allow-list. Update INBOUND_ATTACHMENT_FAMILIES in xyne-claw-shared/src/attachment-types.ts.`,
           );
           continue;
         }
-        const videoExtMatch = /\.(mov|mp4|m4v|webm|avi|mkv|mpg|mpeg|wmv|flv)$/i.exec(att.fileName ?? "");
-        const isVideoRecording = att.mimeType?.toLowerCase().startsWith("video/") || videoExtMatch !== null;
+        const videoExt = videoFileExtension(att.fileName);
+        const isVideoRecording = isVideoAttachment(att.fileName, att.mimeType);
         if (recordSkillCommand && isVideoRecording) {
-          // A dropped recording must TELL the user — a /record-skill run that
-          // silently loses its video still force-mounts analyze-skill-recording
-          // and pressures the model to draft a skill from nothing.
-          const notifyRecordingDropped = (reason: string) => {
+            const notifyRecordingDropped = (reason: string) => {
             log.warn(`Skipping /record-skill recording ${att.attachmentId} (${att.fileName}) — ${reason}`);
             if (!payload.conversationId) return;
-            void spacesAppFetch("/chat/postMessage", {
-              channelId: payload.channelId,
-              conversationId: payload.conversationId,
-              markdownText: `⚠️ Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
-              userId: agent.spacesAppUserId,
-              metadata: { contentFormat: "markdown" },
-            }, agent.appToken).catch(() => {});
+            void postAgentMessage(
+              { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+              {
+                channelId: payload.channelId,
+                conversationId: payload.conversationId,
+                markdownText: `⚠️ Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
+                metadata: { contentFormat: "markdown" },
+              }
+            ).catch(() => {});
           };
           const fileSize = Number(att.fileSize);
           if (!Number.isFinite(fileSize) || fileSize <= 0) {
@@ -2945,16 +1775,13 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             notifyRecordingDropped("it exceeds the 1 GB recording limit");
             continue;
           }
-          // claw-auth's /run consumer validates each ref strictly; normalize
-          // HERE (the producer) so a client that stored a .mov as
-          // application/octet-stream doesn't get rejected downstream.
           if (inboundRecordingRefs.length >= 4) {
             notifyRecordingDropped("at most 4 recordings are analyzed per run");
             continue;
           }
           const normalizedMime = att.mimeType?.toLowerCase().startsWith("video/")
             ? att.mimeType
-            : `video/${(videoExtMatch?.[1] ?? "mp4").toLowerCase()}`;
+            : `video/${videoExt ?? "mp4"}`;
           const safeFileName = (att.fileName ?? `recording-${att.attachmentId}`)
             .replace(/[/\\]/g, "_")
             .slice(0, 255);
@@ -2967,6 +1794,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           log.info(
             `Deferred /record-skill recording ${att.attachmentId} (${safeFileName}, ${fileSize} bytes, ${normalizedMime}) to sandbox stream`,
           );
+          continue;
+        }
+        if (isVideoRecording) {
+          skippedRecordingNames.push(att.fileName ?? att.attachmentId);
+          log.info(`Skipping video recording ${att.attachmentId} (${att.fileName}) — recording processing disabled for non-/record-skill runs`);
           continue;
         }
         log.info(
@@ -3004,16 +1836,33 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         for (const src of sources) {
           try {
             const dlRes = await fetch(src.url, {
-              signal: AbortSignal.timeout(15_000),
+              signal: AbortSignal.timeout(CONFIG.attachmentDownloadTimeoutMs),
               ...(src.headers ? { headers: src.headers } : {}),
             });
             if (dlRes.ok) {
               const buffer = Buffer.from(await dlRes.arrayBuffer());
-              inboundAttachments.push({
-                fileName: att.fileName,
-                mimeType: att.mimeType,
-                data: buffer.toString("base64"),
-              });
+              const uploaded = refAttachments
+                ? await uploadRunAttachment(
+                    attachmentScopeId,
+                    att.attachmentId,
+                    buffer,
+                    att.mimeType,
+                  )
+                : null;
+              if (uploaded) {
+                inboundAttachments.push({
+                  fileName: att.fileName,
+                  mimeType: att.mimeType,
+                  gcsRef: uploaded.gcsRef,
+                  sizeBytes: uploaded.sizeBytes,
+                });
+              } else {
+                inboundAttachments.push({
+                  fileName: att.fileName,
+                  mimeType: att.mimeType,
+                  data: buffer.toString("base64"),
+                });
+              }
               log.info(
                 `Downloaded attachment ${att.attachmentId} (${att.fileName}, ${att.mimeType}, ${buffer.length} bytes) via ${src.label}`,
               );
@@ -3027,11 +1876,18 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           }
         }
         if (!downloaded) {
+          failedAttachmentNames.push(att.fileName ?? att.attachmentId);
           log.warn(
             `Failed to download attachment ${att.attachmentId} (${att.fileName}); tried ${sources.length} source(s): ${failures.join(" | ")}`,
           );
         }
       }
+    }
+    if (skippedRecordingNames.length > 0) {
+      task = `${task}\n\n[${skippedRecordingNames.length} video recording(s) attached (${skippedRecordingNames.join(", ")}) were not processed due to compute constraints — tell the user if the recording content matters for their request.]`;
+    }
+    if (failedAttachmentNames.length > 0) {
+      task = `${task}\n\n[${failedAttachmentNames.length} attachment(s) (${failedAttachmentNames.join(", ")}) could not be downloaded — tell the user their content is missing from this run.]`;
     }
 
     const fastModeEnabled = await resolveFastMode(payload.conversationId, runAgentSlug, agentRow?.config);
@@ -3040,18 +1896,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // acquired further down, AFTER the new per-user FIFO gate, so a queued
     // follow-up tag never burns a fleet-wide slot. See globalTwinSlotToken.)
 
-    // Digital Twin (USER_MENTIONED): make WHO mentioned the user and WHERE
-    // explicit in the run context. The thread history labels the sender only by
-    // id, so the twin can't otherwise reason about who's asking / where to reply.
-    //
-    // CRITICAL: build this ONCE here and reuse it for BOTH the live
-    // /internal/run dispatch (fetchRun below) AND the run-recovery / goal-replay
-    // payload (dispatchPayload). A prior split built the live-run context inline
-    // (thread-awareness only) while a SEPARATE dispatchContext carried the
-    // mention note — so the first/live run shipped WITHOUT the "@mentioned by"
-    // block and only the recovery copy had it. Single source of truth = no drift.
     const twinMentionNote =
-      eventType === "USER_MENTIONED"
+      runAsTwin
         ? `## You were @mentioned\nYou were @mentioned by **${payload.senderName ?? "someone"}**${payload.channelName ? ` in **#${payload.channelName}**` : ""}. Their message is the Query below — decide how you'd respond to them, there.`
         : "";
     const threadAwarenessBlock = history
@@ -3059,20 +1905,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       : "";
     const dispatchContext = [twinMentionNote, threadAwarenessBlock].filter(Boolean).join("\n\n");
 
-    // Suppress the bot placeholder + DM and forward the result to this URL when a
-    // Spaces email auto-draft synthesized an APP_MENTIONED (see /webhook/result).
-    // Moved up: the pre-dispatch sessionContext + the placeholder gate both read it.
+    // Email auto-draft forward target — suppresses placeholder+DM (see /webhook/result).
     const resultForwardUrl =
       ((payload as { metadata?: Record<string, unknown> }).metadata?.["resultForwardUrl"] as string | undefined) || undefined;
 
-    // Build the /internal/run body + the SessionContext ONCE, UP FRONT — before
-    // any dispatch decision — so the per-user twin FIFO can enqueue a fully-formed
-    // replay blob when the owner already has a run in flight. A queued tag then
-    // creates NO /internal/run, NO AgentRun and NO user ChatMessage until it drains
-    // (this is what fixes the branched-UI: one query + reply at a time). Neither
-    // object depends on the run's sessionId (that's only ever the setSession key),
-    // so building them here is safe, and it collapses the old duplicate
-    // fetchRun-body / dispatchPayload into a single source of truth.
+    // Built once pre-dispatch so a queued twin tag can replay it verbatim on drain.
     const dispatchPayload = {
       userId: targetUserId,
       task,
@@ -3084,8 +1921,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: payload.channelId,
-      // WHO/WHERE for the twin_deliver mandate's who/where line (run.ts reads
-      // these to populate "You were mentioned by X in #Y" in the SYSTEM prompt).
       ...(payload.senderName ? { senderName: payload.senderName } : {}),
       ...(payload.channelName ? { channelName: payload.channelName } : {}),
       ...(payload.projectId ? { projectId: payload.projectId } : {}),
@@ -3095,41 +1930,20 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
       ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
-      // Default provider for subagents not listed in `subagentProviders`:
-      // "parent" (inherit parent's provider) or "spaces" (platform default).
       subagentProviderMode,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
-      // `/goal provider=… model=…` pins every turn of the autonomous loop.
-      // The full dispatch body is persisted below and re-used by the relooper.
       ...(pendingGoalStart?.providerOverride ? { providerOverride: pendingGoalStart.providerOverride } : {}),
       ...(inboundAttachments.length > 0 ? { attachments: inboundAttachments } : {}),
       ...(inboundRecordingRefs.length > 0 ? { recordingRefs: inboundRecordingRefs } : {}),
-      // Ship the agent's JSONB config so xyne-claw can enable per-agent
-      // features that read from it: memoryEnabled (memory-search tool),
-      // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
-      // and custom-tool config values (PPT_API_KEY etc). Without this,
-      // those features silently default to "off"/"allow" on Spaces mentions.
       ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
       fastMode: fastModeEnabled,
-      // `/compact` — force a one-shot compaction of the resumed session
-      // before this turn so the thread continues with a smaller context.
       ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
-      // Plan mode: only a non-twin interactive thread mention on a planMode
-      // agent starts in plan mode (agent proposes a plan and stops for approval).
-      // Gated on eventType !== "USER_MENTIONED" (INVARIANT B: twin never plans)
-      // and on the planMode opt-in (INVARIANT A: unchanged when off). This
-      // /webhook path only serves interactive mentions (USER_MENTIONED /
-      // APP_MENTIONED / DIRECT_MESSAGE); scheduled/automation runs arrive via the
-      // separate S2S handler and must NOT be configured with planMode.
+      // Plan mode: interactive non-twin mentions only (twin never plans).
       ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
-    // progressMessageId is the ONLY session field not knowable pre-dispatch — it's
-    // assigned after the placeholder post below (conversation-mode only), just
-    // before setSession. Everything else is final here.
+    // progressMessageId is assigned post-placeholder below; everything else is final here.
     const sessionContext: SessionContext = {
-      // Per-user: for the twin this is THIS iteration's mentioned user
-      // (targetUserId) so the approve/decline DM + per-user conv index route right.
       mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
       targetUserId,
       senderId: payload.userId,
@@ -3150,26 +1964,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       rootAgentSlug: agent.slug,
       triggerSource: "spaces",
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
-      ...(escalatedProvider ? { escalatedProvider } : {}),
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
       ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
       ...(resultForwardUrl ? { resultForwardUrl } : {}),
-      // Plan mode (see dispatchPayload): 'plan' only when the agent opts in AND
-      // this is a non-twin interactive mention. Absent ⇒ 'auto' (today's flow).
-      // The plan-approval flow-action flips this to 'auto' for Turn 2.
       ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
-    // ── Per-user twin FIFO gate ───────────────────────────────────────────────
-    // Serialize same-owner tags on this conversation: if this owner already has a
-    // twin run in flight here, enqueue THIS tag (fully-built payload) and return
-    // BEFORE dispatch — no /internal/run, no AgentRun, no user message until it
-    // drains on the active run's completion. Different owners use different keys
-    // (scoped by targetUserId) so they still run in parallel. MUST precede the
-    // global limiter so a queued tag never burns a fleet-wide slot.
+    // Per-user twin FIFO: same-owner tags serialize; queued tags replay the
+    // prebuilt payload on drain. MUST precede the global limiter.
     const twinUserScope = runAsTwin ? targetUserId : undefined;
     let twinConvSlotToken: string | null = null;
-    if (runAsTwin && QUEUE_ENABLED && payload.conversationId && task) {
+    if (runAsTwin && payload.conversationId && task) {
       twinConvSlotToken = await tryAcquireSlot(payload.conversationId, runAgentSlug, twinUserScope);
       if (!twinConvSlotToken) {
         const queuedMsg: QueuedMessage = {
@@ -3184,7 +1989,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
           task,
           eventType,
-          ...(twinUserScope ? { userScopeId: twinUserScope } : {}),
+          ...(twinUserScope ? { twinUserScopeId: twinUserScope } : {}),
           responseMode: "approval" as const,
           dispatchPayload,
           sessionContext: sessionContext as unknown as Record<string, unknown>,
@@ -3196,9 +2001,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // Global twin concurrency cap (fleet-wide LiteLLM limiter). Acquired AFTER the
-    // per-user gate; re-keyed to the run's sessionId below and freed by
-    // /webhook/result on any terminal callback (TTL backstop in the lib).
+    // Fleet-wide twin cap; re-keyed to the sessionId below, freed by /webhook/result.
     let globalTwinSlotToken: string | null = null;
     if (runAsTwin) {
       globalTwinSlotToken = await acquireTwinSlot();
@@ -3212,64 +2015,27 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
     }
 
-    const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
-    // eslint-disable-next-line no-inner-declarations
-    const fetchRun = () => fetch(runUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      },
-      body: JSON.stringify(dispatchPayload),
-    });
-
-    // A dispatch that dies on a TRANSIENT upstream failure (envoy 502/503/504
-    // "no healthy upstream" during a claw rollout, a connection refusal against
-    // a terminating pod) is retryable — the run never started, so nothing is
-    // duplicated by trying again. Without this, a routine claw deploy turns
-    // every in-flight mention into a user-visible "I couldn't start this
-    // request: no healthy upstream" (observed prod 2026-08-05) even though a
-    // retry two seconds later would have succeeded. Mirrors the retry the /run
-    // proxy already does (routes/run.ts fetchClawRunWithRetry).
-    //
-    // The ladder must OUTLAST a claw rollout, not just a blip: envoy keeps
-    // returning 503 for the full pod-boot window (image pull + boot +
-    // readiness, 1–3 min observed prod 2026-08-06 — a 2s×2 ladder exhausted in
-    // 4.5s and still posted the "briefly unavailable" notice for every mention
-    // landing mid-deploy). This runs after the webhook was ack'd, so waiting
-    // here blocks no caller; the message is already acked and the queue slot
-    // is held for this conversation.
-    const DISPATCH_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000, 45_000, 60_000];
-    const isTransientUpstream = (status: number, body: string): boolean =>
-      status === 502 || status === 503 || status === 504 ||
-      /no healthy upstream|upstream connect error|connection (refused|reset)|EAI_AGAIN|ECONNREFUSED|fetch failed/i.test(body);
-
-    const fetchRunWithRetry = async (): Promise<Awaited<ReturnType<typeof fetchRun>>> => {
-      let lastRes: Awaited<ReturnType<typeof fetchRun>> | undefined;
-      const attempts = DISPATCH_RETRY_DELAYS_MS.length + 1;
-      for (let attempt = 0; attempt < attempts; attempt++) {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, DISPATCH_RETRY_DELAYS_MS[attempt - 1]));
-        const res = await fetchRun();
-        if (res.ok) return res;
-        // Peek at the body WITHOUT consuming the caller's copy.
-        const peek = await res.clone().text().catch(() => "");
-        if (!isTransientUpstream(res.status, peek)) return res;
-        lastRes = res;
-        log.warn(
-          `Dispatch attempt ${attempt + 1}/${attempts} hit transient upstream (${res.status}) for agent=${agent.slug}` +
-          (attempt < attempts - 1 ? ` — retrying in ${DISPATCH_RETRY_DELAYS_MS[attempt]! / 1000}s` : " — giving up"),
-        );
-      }
-      return lastRes!;
-    };
-
-    let runRes: Awaited<ReturnType<typeof fetchRun>>;
+    let body: RunDispatchResult;
     try {
-      runRes = await fetchRunWithRetry();
+      const started = await startRun(
+        {
+          body: dispatchPayload as unknown as Record<string, unknown>,
+          isInternalRun: true,
+          isInternalS2SCaller: true,
+          wantsSse: false,
+        },
+        {},
+      );
+      body = started.ok
+        ? {
+            success: true,
+            sessionId: started.sessionId,
+            status: 200,
+            ...(started.queued ? { queued: true } : {}),
+            ...(typeof started.queuePosition === "number" ? { queuePosition: started.queuePosition } : {}),
+          }
+        : { success: false, error: started.error, status: started.status };
     } catch (err) {
-      // Dispatch never happened — free the global twin slot, and drain/free the
-      // per-user FIFO slot so a queued follow-up tag isn't wedged behind a run
-      // that never started.
       if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
       if (twinConvSlotToken !== null && payload.conversationId) {
         await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
@@ -3277,10 +2043,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       throw err;
     }
 
-    const body = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
-
-    // Re-key the GLOBAL twin slot to the real sessionId (released by
-    // /webhook/result); free it immediately if the dispatch didn't produce a run.
     if (globalTwinSlotToken !== null) {
       if (body.success && body.sessionId) {
         void renameTwinSlot(globalTwinSlotToken, body.sessionId);
@@ -3298,6 +2060,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // undefined on the twin path. `resultForwardUrl` was resolved pre-dispatch.
       let progressMessageId: string | undefined;
       if (eventType !== "USER_MENTIONED" && !resultForwardUrl) {
+        const initialProgressLabel = body.queued
+          ? body.queuePosition && body.queuePosition > 0
+            ? `🕒 Queued — waiting for a runner (position ~${body.queuePosition})`
+            : "🕒 Queued — waiting for a runner"
+          : "Working on it...";
         try {
           if (USE_EPHEMERAL_PROGRESS) {
             await spacesAppFetch("/chat/agentProgress", {
@@ -3305,17 +2072,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               channelId: payload.channelId,
               agentSlug: agent.slug,
               userId: agent.spacesAppUserId,
-              toolLabel: "Working on it...",
+              toolLabel: initialProgressLabel,
               status: "working",
             }, agent.appToken);
           } else {
-            const placeholderRes = (await spacesAppFetch("/chat/postMessage", {
-              channelId: payload.channelId,
-              conversationId: payload.conversationId,
-              markdownText: "⏳ Working on it...",
-              userId: agent.spacesAppUserId,
-              metadata: { contentFormat: "markdown" },
-            }, agent.appToken)) as { messageId?: string };
+            const placeholderRes = await postAgentMessage(
+              { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+              {
+                channelId: payload.channelId,
+                conversationId: payload.conversationId,
+                markdownText: `⏳ ${initialProgressLabel}`,
+                metadata: { contentFormat: "markdown" },
+              }
+            );
             progressMessageId = placeholderRes?.messageId;
             log.info(`Posted progress placeholder, messageId=${progressMessageId}`);
           }
@@ -3371,11 +2140,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // in prod logs before this dedupe. Leave it to /run.
 
       log.info(`Forwarded to xyne-claw, sessionId=${body.sessionId}`);
-    } else if (runAsTwin && QUEUE_ENABLED && payload.conversationId) {
+    } else if (runAsTwin && payload.conversationId) {
       // Twin runtime produced no run — drain this owner's per-user queue so a
       // follow-up tag isn't wedged behind a phantom slot.
       await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
-    } else if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId) {
+    } else if (eventType !== "USER_MENTIONED" && payload.conversationId) {
       // Runtime rejected the dispatch — drain any queued follow-up (or release
       // the slot) so the conversation isn’t wedged until the busy TTL expires.
       // We hold the token here, so release is owner-checked.
@@ -3395,16 +2164,18 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       // reads as an agent fault and tells the user nothing actionable.
       const notice = /disabled/i.test(refusal)
         ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : isTransientUpstream(runRes.status, refusal)
+        : isTransientUpstream(body.status, refusal)
           ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
           : `⚠️ I couldn't start this request: ${refusal}`;
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: payload.channelId,
-        conversationId: payload.conversationId,
-        markdownText: notice,
-        userId: agent.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, agent.appToken).catch((err) =>
+      await postAgentMessage(
+        { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+        {
+          channelId: payload.channelId,
+          conversationId: payload.conversationId,
+          markdownText: notice,
+          metadata: { contentFormat: "markdown" },
+        }
+      ).catch((err) =>
         log.warn("Failed to post dispatch-refusal notice", { error: errMsg(err) }),
       );
       log.warn(`Dispatch refused for agent=${agent.slug} conv=${payload.conversationId}: ${refusal}`);
@@ -3523,17 +2294,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       if (invocRow && !isAgentInvocableBy(invocRow.config as Record<string, unknown> | null, payload.userId)) {
         log.warn(`Invocation denied (not whitelisted) agent=${agent.slug} userId=${payload.userId} conv=${payload.conversationId}`);
         if (payload.conversationId) {
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: payload.channelId,
-            conversationId: payload.conversationId,
-            markdownText: `🚫 **${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
-            userId: agent.spacesAppUserId,
-            metadata: { contentFormat: "markdown" },
-          }, agent.appToken).catch((err) =>
+          await postAgentMessage(
+            { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+            {
+              channelId: payload.channelId,
+              conversationId: payload.conversationId,
+              markdownText: `🚫 **${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
+              metadata: { contentFormat: "markdown" },
+            }
+          ).catch((err) =>
             log.warn("Failed to post invocation-denied notice", { error: errMsg(err) }),
           );
         }
-        if (QUEUE_ENABLED && payload.conversationId) {
+        if (payload.conversationId) {
           await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
         }
         return;
@@ -3542,7 +2315,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     await dispatchRunForTarget(payload.userId, undefined);
   } catch (err) {
     log.error("Error forwarding:", { error: errMsg(err) });
-    if (QUEUE_ENABLED && eventType !== "USER_MENTIONED" && payload.conversationId) {
+    if (eventType !== "USER_MENTIONED" && payload.conversationId) {
       await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
     }
   }
@@ -3767,11 +2540,11 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
 // is refreshed so a long drain-chain can't let the marker expire mid-flight; it
 // is released only when nothing remains to run. Release is owner-checked when a
 // `token` is supplied, so a late finalizer can't delete a newer run's slot.
-export async function drainNextQueued(conversationId: string, agentSlug: string, token?: string | null, userScopeId?: string): Promise<void> {
-  if (!QUEUE_ENABLED || !conversationId || !agentSlug) return;
-  const next = await dequeueMessage(conversationId, agentSlug, userScopeId);
+export async function drainNextQueued(conversationId: string, agentSlug: string, token?: string | null, twinUserScopeId?: string): Promise<void> {
+  if (!conversationId || !agentSlug) return;
+  const next = await dequeueMessage(conversationId, agentSlug, twinUserScopeId);
   if (!next) {
-    await releaseSlot(conversationId, agentSlug, token ?? undefined, userScopeId);
+    await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
     return;
   }
   try {
@@ -3787,11 +2560,11 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     // Hand the slot to the freshly re-dispatched run: bump the TTL so it owns
     // the conversation for a full window rather than inheriting the remaining
     // time from the run that just finished.
-    await refreshSlot(conversationId, agentSlug, undefined, userScopeId);
-    clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${userScopeId ? ` owner ${userScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
+    await refreshSlot(conversationId, agentSlug, undefined, twinUserScopeId);
+    clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${twinUserScopeId ? ` owner ${twinUserScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
   } catch (err) {
     clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${errMsg(err)}`);
-    await releaseSlot(conversationId, agentSlug, token ?? undefined, userScopeId);
+    await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
   }
 }
 
@@ -3816,7 +2589,7 @@ async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
   });
   const body = (await res.json().catch(() => null)) as { success?: boolean; sessionId?: string } | null;
   if (!res.ok || !body?.success || !body.sessionId) {
-    throw new Error(`/internal/run for queued twin message returned no sessionId conv=${msg.conversationId} owner=${msg.userScopeId ?? "?"}`);
+    throw new Error(`/internal/run for queued twin message returned no sessionId conv=${msg.conversationId} owner=${msg.twinUserScopeId ?? "?"}`);
   }
   const sessionContext = { ...(msg.sessionContext as unknown as SessionContext), traceId };
   await setSession(body.sessionId, sessionContext);
@@ -3828,7 +2601,7 @@ async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
     dispatchPayload: dispatch as unknown as Parameters<typeof registerRunRecovery>[0]["dispatchPayload"],
     sessionContext,
   });
-  clog.info(`[twin-queue] redispatched queued twin sessionId=${body.sessionId} conv=${msg.conversationId} owner=${msg.userScopeId ?? "?"}`);
+  clog.info(`[twin-queue] redispatched queued twin sessionId=${body.sessionId} conv=${msg.conversationId} owner=${msg.twinUserScopeId ?? "?"}`);
 }
 
 // ── S2S automation webhook handler for /webhook/:agentSlug ────────────────
@@ -4034,7 +2807,7 @@ export async function handleAutomationWebhook(
       await drainNextQueued(payload.conversationId, agentSlug, automationSlotToken).catch(() => {});
     }
   };
-  if (QUEUE_ENABLED && interpose && payload.conversationId) {
+  if (interpose && payload.conversationId) {
     const slot = await tryAcquireSlot(payload.conversationId, agentSlug);
     automationSlotToken = slot;
     if (!slot) {
@@ -4271,7 +3044,6 @@ export async function handleAutomationWebhook(
 
   // Resolve the agent's configured provider so an automation run uses the same
   // (premium) model a human chat would — not the platform default. Headless:
-  // agent-level creds only, honoring the agent's providerAlwaysOn policy.
   // [AUTODBG] instrument the whole dispatch window — automations were observed
   // stalling silently right after [agent-run] start (no forward, no error).
   clog.info(
@@ -4619,13 +3391,15 @@ async function publishThreadArtifactShare(
       expiresAt: null,
     });
     const link = designShareUrl(share.sharePath);
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: ctx.channelId,
-      conversationId: ctx.conversationId,
-      markdownText: `🔗 **Live ${command}:** ${link}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
-      userId: ctx.spacesAppUserId,
-      metadata: { contentFormat: "markdown" },
-    }, ctx.appToken);
+    await postAgentMessage(
+      { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+      {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        markdownText: `🔗 **Live ${command}:** ${link}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
+        metadata: { contentFormat: "markdown" },
+      }
+    );
     clog.info(`[webhook/result] posted design share link shareId=${share.id} conv=${ctx.conversationId}`);
   } catch (err) {
     clog.warn(`[webhook/result] design share publish failed (non-fatal): ${errMsg(err)}`);
@@ -4709,15 +3483,17 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
     const link = designShareUrl(share.sharePath);
 
     if (ctx.responseMode === "conversation") {
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        markdownText:
-          `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
-          `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`,
-        userId: ctx.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, ctx.appToken);
+      await postAgentMessage(
+        { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+        {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText:
+            `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
+            `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`,
+          metadata: { contentFormat: "markdown" },
+        }
+      );
     }
 
     clog.info(`[webhook/review-room] published shareId=${share.id} room=${roomConversationId} session=${sessionId}`);
@@ -5273,7 +4049,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // without it targets the 2-part conv:digital-twin key, misses the real
     // 3-part marker, and the twin slot leaks for the full 20m TTL — every new
     // twin tag then queues behind a phantom "active run" (observed 2026-08-19).
-    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug) {
+    if (resultConversationId && resultAgentSlug) {
       await releaseSlot(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
     return;
@@ -5399,11 +4175,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
 
     // Track whether the failure was surfaced to the user by ANY branch below
-    // (escalation message, promote-provider prompt). If none fires, we post a
-    // generic notice before returning — a failed run must never leave the
-    // thread silent (prod 2026-06-11: an always-on agent's copilot-quota 429
-    // failed with no chain and no promote-prompt, so the user saw nothing and
-    // asked "why no reply"). Cancellations are intentional and stay silent.
+    // (chain escalation message, capacity auto-retry card). If none fires, we
+    // post a generic notice before returning — a failed run must never leave
+    // the thread silent (prod 2026-06-11: an always-on agent's copilot-quota
+    // 429 failed with no chain, so the user saw nothing and asked "why no
+    // reply"). Cancellations are intentional and stay silent.
     let failureSurfaced = false;
     const rawErr = String(payload.error ?? "");
     // SHUTDOWN_DRAIN-prefixed failures are pod-restart kills (claw's drain
@@ -5429,13 +4205,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
         if (chain?.onFailure?.escalate) {
           const token = ctx.appToken;
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: `⚠️ **Agent chain escalation**: \`${ctx.agentSlug}\` failed. Error: ${payload.error ?? "unknown"}. Manual intervention needed.`,
-            userId: ctx.spacesAppUserId,
-            metadata: { contentFormat: "markdown" },
-          }, token).catch(() => {});
+          await postAgentMessage(
+            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            {
+              channelId: ctx.channelId,
+              conversationId: ctx.conversationId,
+              markdownText: `⚠️ **Agent chain escalation**: \`${ctx.agentSlug}\` failed. Error: ${payload.error ?? "unknown"}. Manual intervention needed.`,
+              metadata: { contentFormat: "markdown" },
+            }
+          ).catch(() => {});
           failureSurfaced = true;
         }
 
@@ -5515,73 +4293,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
     }
 
-    // Promote-provider prompt: kimi/spaces was the parent provider (no
-    // escalatedProvider set on ctx → resolution fell through to platform
-    // default) AND the agent has a premium provider configured. Offer the
-    // user a one-tap retry. Single prompt per conversation; once accepted
-    // (or declined) the conversation continues without re-asking.
-    if (
-      payload.status === "failed" &&
-      ctx &&
-      !ctx.escalatedProvider &&
-      ctx.agentSlug &&
-      ctx.agentOrgId &&
-      ctx.conversationId &&
-      ctx.channelId
-    ) {
-      try {
-        const agentRow = await agentRepository.findBySlug(ctx.agentSlug, ctx.agentOrgId);
-        if (agentRow) {
-          // Skip the prompt entirely when the agent is in always-on mode —
-          // the premium provider is already the default, so the failure
-          // wasn't a "kimi couldn't" situation. No use suggesting an
-          // escalation that's already in place.
-          const alwaysOnRaw = (agentRow.config as Record<string, unknown> | null)?.["providerAlwaysOn"];
-          const isAlwaysOn = alwaysOnRaw !== false;
-          if (!isAlwaysOn) {
-            const agentCreds = await agentProviderCredentialsRepository.listByAgent(agentRow.id).catch(() => []);
-            const hasCreds = (p: string) => {
-              const row = agentCreds.find((c) => c.provider === p);
-              return !!(row?.encryptedKey && row.iv && row.authTag);
-            };
-            const KNOWN = new Set(["codex", "claude", "copilot", "openrouter", "litellm"]);
-            const rawOrder = (agentRow.config as Record<string, unknown> | null)?.["providerOrder"];
-            const order: string[] = Array.isArray(rawOrder)
-              ? rawOrder.filter((p): p is string => typeof p === "string" && KNOWN.has(p))
-              : [];
-            const legacy = (agentRow.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
-            const candidate =
-              order.find(hasCreds) ??
-              (legacy && KNOWN.has(legacy) && hasCreds(legacy) ? legacy : undefined);
-            if (candidate) {
-              const flow = withSpacesAppId(buildPromoteProviderFlow(candidate, {
-                agentSlug: ctx.agentSlug,
-                channelId: ctx.channelId,
-                conversationId: ctx.conversationId,
-                userId: ctx.senderId,
-                originalTask: ctx.task,
-              }), ctx.spacesAppId);
-              await spacesAppFetch("/chat/postMessage", {
-                channelId: ctx.channelId,
-                conversationId: ctx.conversationId,
-                flow,
-                userId: ctx.spacesAppUserId,
-              }, ctx.appToken).catch((err) => {
-                clog.warn("[webhook/result] failed to post promote-provider prompt:", err instanceof Error ? err.message : err);
-              });
-              failureSurfaced = true;
-              clog.info(`[webhook/result] posted promote-provider prompt for conv ${ctx.conversationId} (provider=${candidate})`);
-            }
-          }
-        }
-      } catch (err) {
-        clog.warn("[webhook/result] promote-provider prompt error (non-fatal):", err instanceof Error ? err.message : err);
-      }
-    }
-
-    // Capacity auto-retry (interactive): only when promote-provider did NOT fire
-    // — switching to a working provider is the better offer when one exists;
-    // this "wait for the same model to come back" card is for when it doesn't.
+    // Capacity auto-retry (interactive): a "wait for the same model to come
+    // back" card when nothing above has already surfaced the failure.
     // Shutdown drains are pod restarts, not capacity — run-recovery refires them.
     if (!failureSurfaced && !isShutdownDrain && ctx) {
       const scheduled = await scheduleCapacityRetryIfNeeded(ctx, payload, true).catch(() => false);
@@ -5614,13 +4327,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const notice = isQuota
         ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
         : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        markdownText: notice,
-        userId: ctx.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, ctx.appToken).catch((err) =>
+      await postAgentMessage(
+        { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+        {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: notice,
+          metadata: { contentFormat: "markdown" },
+        }
+      ).catch((err) =>
         clog.warn("[webhook/result] failed to post failure notice:", err instanceof Error ? err.message : err),
       );
       clog.info(`[webhook/result] posted generic failure notice for conv ${ctx.conversationId} (quota=${isQuota})`);
@@ -6436,13 +5151,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Fail loudly on the card rather than silently creating a mis-slugged
       // agent: the pod normalizes, so an invalid slug here means drift.
       if (!isValidAgentSlug(spec.slug)) {
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          markdownText: `⚠️ I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
-          userId: ctx.spacesAppUserId,
-          metadata: { contentFormat: "markdown" },
-        }, token);
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: `⚠️ I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
+            metadata: { contentFormat: "markdown" },
+          }
+        );
         log.warn(`[agent-card] rejected draft with invalid slug "${spec.slug}" conv=${ctx.conversationId}`);
         await deleteSession(sessionId).catch(() => {});
         return;
@@ -6452,13 +5169,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // instead of at approval time when the user has already committed.
       const existing = await agentRepository.findBySlug(spec.slug, orgId);
       if (existing) {
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          markdownText: `⚠️ An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
-          userId: ctx.spacesAppUserId,
-          metadata: { contentFormat: "markdown" },
-        }, token);
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: `⚠️ An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
+            metadata: { contentFormat: "markdown" },
+          }
+        );
         log.info(`[agent-card] draft dropped — slug ${spec.slug} already exists in org ${orgId}`);
         await deleteSession(sessionId).catch(() => {});
         return;
@@ -6495,13 +5214,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         spec.summary?.trim() ||
         `I've drafted an agent for this — have a look and approve it below if it's right.`;
       try {
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          markdownText: leadIn,
-          userId: ctx.spacesAppUserId,
-          metadata: { contentFormat: "markdown" },
-        }, token);
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: leadIn,
+            metadata: { contentFormat: "markdown" },
+          }
+        );
       } catch (e) {
         // Non-fatal: the card is the deliverable and still posts below.
         log.warn("Failed to post agent-draft lead-in (non-fatal)", {
@@ -6570,13 +5291,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         slug: spec.slug,
       });
       try {
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          markdownText: "⚠️ I drafted the agent but couldn't post it for approval. Please try again.",
-          userId: ctx.spacesAppUserId,
-          metadata: { contentFormat: "markdown" },
-        }, token);
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: "⚠️ I drafted the agent but couldn't post it for approval. Please try again.",
+            metadata: { contentFormat: "markdown" },
+          }
+        );
       } catch {
         // The user already lost this turn; don't compound it with a throw.
       }
@@ -6669,13 +5392,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         : usedTools
           ? "Sorry — I completed some steps but didn't have a final answer to show. Please try rephrasing, or send your message again."
           : "Sorry, I wasn't able to produce a response. Please try sending your message again.";
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        markdownText: sorryText,
-        userId: ctx.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, token);
+      await postAgentMessage(
+        { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+        {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: sorryText,
+          metadata: { contentFormat: "markdown" },
+        }
+      );
     } catch (err) {
       log.error("Failed to send empty-result notice", { error: errMsg(err) });
     }
@@ -6944,13 +5669,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             });
 
             log.info(`Chain: ${ctx.agentSlug} → ${targetAgentSlug} (step ${currentDepth + 1}/${maxDepth}, workflow ${binding.workflowId})`);
-            await spacesAppFetch("/chat/postMessage", {
-              channelId: ctx.channelId,
-              conversationId: ctx.conversationId,
-              markdownText: `⛓️ **Agent workflow**: \`${ctx.agentSlug}\` → \`${targetAgentSlug}\` (step ${currentDepth + 1}/${maxDepth})`,
-              userId: ctx.spacesAppUserId,
-              metadata: { contentFormat: "markdown" },
-            }, token).catch(() => {});
+            await postAgentMessage(
+              { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+              {
+                channelId: ctx.channelId,
+                conversationId: ctx.conversationId,
+                markdownText: `⛓️ **Agent workflow**: \`${ctx.agentSlug}\` → \`${targetAgentSlug}\` (step ${currentDepth + 1}/${maxDepth})`,
+                metadata: { contentFormat: "markdown" },
+              }
+            ).catch(() => {});
           } else if (!runBody.success) {
             log.error(`Chain: failed to trigger ${targetAgentSlug}: ${runBody.error ?? "unknown"}`);
           }
@@ -7046,25 +5773,29 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           const fallbackText = prepared.text?.trim()
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: fallbackText,
-            userId: ctx.spacesAppUserId,
-            metadata: buildPostMetadata(fallbackText),
-          }, token);
+          await postAgentMessage(
+            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            {
+              channelId: ctx.channelId,
+              conversationId: ctx.conversationId,
+              markdownText: fallbackText,
+              metadata: buildPostMetadata(fallbackText),
+            }
+          );
           log.info(`Copilot: posted text-only fallback after attachment upload failure in thread ${ctx.conversationId}`);
         }
       } else {
         for (const pr of payload.pendingResponses) {
           const prText = await resolvePendingMentions(pr.message);
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: prText,
-            userId: ctx.spacesAppUserId,
-            metadata: buildPostMetadata(prText),
-          }, token);
+          await postAgentMessage(
+            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            {
+              channelId: ctx.channelId,
+              conversationId: ctx.conversationId,
+              markdownText: prText,
+              metadata: buildPostMetadata(prText),
+            }
+          );
         }
         log.info(`Copilot: posted ${payload.pendingResponses.length} response(s) in thread ${ctx.conversationId}`);
       }
@@ -7214,13 +5945,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           const fallbackText = prepared.text?.trim()
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: fallbackText,
-            userId: ctx.spacesAppUserId,
-            metadata: convMetadata,
-          }, token);
+          await postAgentMessage(
+            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            {
+              channelId: ctx.channelId,
+              conversationId: ctx.conversationId,
+              markdownText: fallbackText,
+              metadata: convMetadata,
+            }
+          );
           log.info(`Agent ${ctx.agentSlug}: posted text-only fallback after attachment upload failure in thread ${ctx.conversationId}`);
         }
       } else {
@@ -7247,19 +5980,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         }
         if (!posted) {
           log.info(`Posting result: channelId=${ctx.channelId} conversationId=${ctx.conversationId} resultLen=${prepared.text.length} userId=${ctx.spacesAppUserId}`);
-          await spacesAppFetch("/chat/postMessage", {
-            channelId: ctx.channelId,
-            // Channel-bound, thread-less runs (API/event-triggered) carry an
-            // empty conversationId. Sending "" explicitly fails Spaces'
-            // ChannelValidationSchema (conversationId is .min(1).optional() —
-            // "" is a string, not undefined, so it trips .min(1) → 400
-            // "Validation error"). Omit it when empty so Spaces treats the post
-            // as a top-level channel message and creates a fresh thread.
-            ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
-            markdownText: prepared.text,
-            userId: ctx.spacesAppUserId,
-            metadata: convMetadata,
-          }, token);
+          await postAgentMessage(
+            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            {
+              channelId: ctx.channelId,
+              // Channel-bound, thread-less runs (API/event-triggered) carry an
+              // empty conversationId. Sending "" explicitly fails Spaces'
+              // ChannelValidationSchema (conversationId is .min(1).optional() —
+              // "" is a string, not undefined, so it trips .min(1) → 400
+              // "Validation error"). Omit it when empty so Spaces treats the post
+              // as a top-level channel message and creates a fresh thread.
+              ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+              markdownText: prepared.text,
+              metadata: convMetadata,
+            }
+          );
           log.info(`Agent ${ctx.agentSlug}: replied in thread ${ctx.conversationId}`);
         }
       }
@@ -7303,13 +6038,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             ...(turnAttachments.length > 0 ? { attachmentsThisTurn: turnAttachments } : {}),
           });
           if (decision.kind === "terminated") {
-            await spacesAppFetch("/chat/postMessage", {
-              channelId: ctx.channelId,
-              conversationId: ctx.conversationId,
-              markdownText: decision.replyToUser,
-              userId: ctx.spacesAppUserId,
-              metadata: { contentFormat: "markdown" },
-            }, token).catch(() => {});
+            await postAgentMessage(
+              { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+              {
+                channelId: ctx.channelId,
+                conversationId: ctx.conversationId,
+                markdownText: decision.replyToUser,
+                metadata: { contentFormat: "markdown" },
+              }
+            ).catch(() => {});
             log.info(`[goal] terminated for conv ${ctx.conversationId}: ${decision.reason}`);
           } else if (decision.kind === "continue") {
             // Per-turn "Turn N/M — reason" rides the ephemeral progress spinner
@@ -7360,80 +6097,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           log.warn("[goal] relooper hook errored — leaving goal in current state", {
             error: errMsg(err),
           });
-        }
-      }
-    }
-
-    // ── Promote-provider prompt: detect soft refusal on a kimi/spaces run ──
-    // Mirrors the failure-curator "agent_unable_to_do_work" bucket but applied
-    // inline here so the user gets the prompt immediately instead of after the
-    // batch worker tick. Two heuristics, joined by OR:
-    //   1. result matches the soft-refusal regex (polite-refusal phrasings).
-    //   2. very-short completion (<250 chars) with no tools used — the agent
-    //      stubbed out instead of doing the work.
-    // Gated on: ctx.escalatedProvider unset (kimi/spaces was the parent
-    // provider) AND no toolsUsed (a result with real tool work isn't a
-    // refusal, even if it's terse). Single prompt per conversation: once
-    // accepted/declined the next turn's ctx carries escalatedProvider so this
-    // branch skips.
-    if (
-      payload.status === "completed" &&
-      !ctx.escalatedProvider &&
-      ctx.agentSlug &&
-      ctx.agentOrgId &&
-      resultWithCitations
-    ) {
-      const SOFT_REFUSAL_RE =
-        /\b(I\s+(?:can(?:no|'|’)?t|couldn'?t|don'?t\s+(?:have|know))|unable\s+to|out\s+of\s+scope|no\s+findings|without\s+(?:more|additional)|insufficient\s+(?:data|context|information)|I\s+do(?:n'?t)?\s+have\s+access|not\s+enough\s+(?:data|context|information))\b/i;
-      const toolsUsedCount = Array.isArray(payload.toolsUsed) ? payload.toolsUsed.length : 0;
-      const result = resultWithCitations.trim();
-      const looksSoftRefusal =
-        SOFT_REFUSAL_RE.test(result) ||
-        (result.length < 250 && toolsUsedCount === 0);
-      if (looksSoftRefusal) {
-        try {
-          const agentRow = await agentRepository.findBySlug(ctx.agentSlug, ctx.agentOrgId);
-          if (agentRow) {
-            // Same always-on gate as the hard-failure prompt. No point
-            // asking the user to escalate when the agent provider is
-            // already the default.
-            const alwaysOnRaw = (agentRow.config as Record<string, unknown> | null)?.["providerAlwaysOn"];
-            const isAlwaysOn = alwaysOnRaw !== false;
-            const agentCreds = isAlwaysOn ? [] : await agentProviderCredentialsRepository.listByAgent(agentRow.id).catch(() => []);
-            const hasCreds = (p: string) => {
-              const row = agentCreds.find((c) => c.provider === p);
-              return !!(row?.encryptedKey && row.iv && row.authTag);
-            };
-            const KNOWN = new Set(["codex", "claude", "copilot", "openrouter", "litellm"]);
-            const rawOrder = (agentRow.config as Record<string, unknown> | null)?.["providerOrder"];
-            const order: string[] = Array.isArray(rawOrder)
-              ? rawOrder.filter((p): p is string => typeof p === "string" && KNOWN.has(p))
-              : [];
-            const legacy = (agentRow.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
-            const candidate = isAlwaysOn
-              ? undefined
-              : (order.find(hasCreds) ?? (legacy && KNOWN.has(legacy) && hasCreds(legacy) ? legacy : undefined));
-            if (candidate) {
-              const flow = withSpacesAppId(buildPromoteProviderFlow(candidate, {
-                agentSlug: ctx.agentSlug,
-                channelId: ctx.channelId,
-                conversationId: ctx.conversationId,
-                userId: ctx.senderId,
-                originalTask: ctx.task,
-              }), ctx.spacesAppId);
-              await spacesAppFetch("/chat/postMessage", {
-                channelId: ctx.channelId,
-                conversationId: ctx.conversationId,
-                flow,
-                userId: ctx.spacesAppUserId,
-              }, token).catch((err) => {
-                log.warn("Failed to post promote-provider prompt (soft refusal)", { error: errMsg(err) });
-              });
-              log.info(`Posted promote-provider prompt for conv ${ctx.conversationId} (soft refusal, provider=${candidate})`);
-            }
-          }
-        } catch (err) {
-          log.warn("promote-provider prompt (soft refusal) error (non-fatal)", { error: errMsg(err) });
         }
       }
     }
@@ -7567,7 +6230,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // Best-effort cleanup; the ingress key also has a TTL.
       }
     }
-    if (QUEUE_ENABLED && resultConversationId && resultAgentSlug && !goalContinues && !experimentContinues && !skipQueueDrain) {
+    if (resultConversationId && resultAgentSlug && !goalContinues && !experimentContinues && !skipQueueDrain) {
       await drainNextQueued(resultConversationId, resultAgentSlug, undefined, resultUserScope || undefined).catch(() => {});
     }
   }
@@ -8250,7 +6913,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   // conversation's run is still active, so refresh the busy TTL. This is what
   // prevents a long run from TTL-expiring its slot and letting a second message
   // acquire concurrently (and a late finalizer from releasing the wrong slot).
-  if (QUEUE_ENABLED && conversationId && agentSlug) {
+  if (conversationId && agentSlug) {
     // A twin's busy marker is PER-USER, so a plain refreshSlot(conv, agent) would
     // PEXPIRE the wrong (unscoped) key and let the real per-user marker TTL-expire
     // → a queued same-owner tag could then SET NX its way in as a second
@@ -8389,13 +7052,15 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     if (!ctx || ctx.responseMode !== "conversation") return;
     const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
     try {
-      await spacesAppFetch("/chat/postMessage", {
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        markdownText: `🖥️ **Live preview** — agent is working in this room. Anyone in this channel can watch (and drive) chromium over noVNC.\n\n👉 ${sandboxPreviewUrl}${sandboxCodePreviewUrl ? `\n\nCode Changes available at ${sandboxCodePreviewUrl}/` : ""}`,
-        userId: ctx.spacesAppUserId,
-        metadata: { contentFormat: "markdown" },
-      }, ctx.appToken);
+      await postAgentMessage(
+        { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+        {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          markdownText: `🖥️ **Live preview** — agent is working in this room. Anyone in this channel can watch (and drive) chromium over noVNC.\n\n👉 ${sandboxPreviewUrl}${sandboxCodePreviewUrl ? `\n\nCode Changes available at ${sandboxCodePreviewUrl}/` : ""}`,
+          metadata: { contentFormat: "markdown" },
+        }
+      );
       log.info(`Sandbox preview announced: ${sandboxPreviewUrl} (sandboxId=${sandboxId})`);
     } catch (err) {
       log.warn("Failed to announce sandbox preview", { error: errMsg(err) });

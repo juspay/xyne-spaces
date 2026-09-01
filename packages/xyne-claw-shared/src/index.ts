@@ -26,7 +26,7 @@ export {
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildPromoteProviderFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
@@ -122,3 +122,27 @@ export {
 } from "./logger.js";
 export type { LogContext, Logger } from "./logger.js";
 export { AGENT_INTROSPECT_TOOL_DEFS } from "./tools/agent-introspect/index.js";
+export {
+  TASK_COMMAND_NAMES,
+  IMMEDIATE_TASK_COMMAND_RE,
+  RECORD_SKILL_COMMAND_RE,
+} from "./task-command-names.js";
+export type { TaskCommandName } from "./task-command-names.js";
+export {
+  matchesAttachmentType,
+  isSupportedInboundAttachment,
+  INBOUND_ATTACHMENT_FAMILIES,
+  IMAGE_ATTACHMENT,
+  VIDEO_ATTACHMENT,
+  VIDEO_MIME_PREFIX,
+  TEXT_LIKE_ATTACHMENT,
+  HTML_ATTACHMENT,
+  PDF_ATTACHMENT,
+  XLSX_ATTACHMENT,
+  DOCX_ATTACHMENT,
+  PPTX_ATTACHMENT,
+  ZIP_ATTACHMENT,
+  isVideoAttachment,
+  videoFileExtension,
+} from "./attachment-types.js";
+export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";

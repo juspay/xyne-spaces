@@ -248,23 +248,6 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
         )}
       </Section>
 
-      <Section title='Provider policy'>
-        <div className='grid gap-2 sm:grid-cols-2'>
-          <RadioOption
-            selected={draft.alwaysOn}
-            onSelect={() => set({ alwaysOn: true })}
-            title='Always on'
-            description='The agent’s provider serves every run.'
-          />
-          <RadioOption
-            selected={!draft.alwaysOn}
-            onSelect={() => set({ alwaysOn: false })}
-            title='On /upgrade'
-            description='Runs default to the platform model unless the user opts in.'
-          />
-        </div>
-      </Section>
-
       <Section title='Subagent provider'>
         <div className='grid gap-2 sm:grid-cols-2'>
           <RadioOption

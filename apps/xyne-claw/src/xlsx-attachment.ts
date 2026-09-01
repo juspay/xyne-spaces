@@ -13,21 +13,18 @@
  * blob so the agent can still see the filename and skip cleanly.
  */
 import ExcelJS from "exceljs";
-import { matchesAttachmentType } from "./attachment-matcher.js";
+import { matchesAttachmentType, XLSX_ATTACHMENT } from "xyne-claw-shared";
 
 const MAX_SHEETS = 20;
 const MAX_ROWS_PER_SHEET = 1000;
 const MAX_COLS_PER_SHEET = 50;
 const MAX_CELL_CHARS = 300;
 
-export const XLSX_MIME_TYPES = new Set([
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel.sheet.macroEnabled.12",
-]);
-export const XLSX_EXTENSIONS = new Set([".xlsx", ".xlsm"]);
+export const XLSX_MIME_TYPES = XLSX_ATTACHMENT.mimeTypes;
+export const XLSX_EXTENSIONS = XLSX_ATTACHMENT.extensions;
 
 export function isXlsxAttachment(fileName: string, mimeType?: string | null): boolean {
-  return matchesAttachmentType(fileName, mimeType, XLSX_MIME_TYPES, XLSX_EXTENSIONS);
+  return matchesAttachmentType(fileName, mimeType, XLSX_ATTACHMENT.mimeTypes, XLSX_ATTACHMENT.extensions);
 }
 
 function cellToString(cell: ExcelJS.Cell): string {

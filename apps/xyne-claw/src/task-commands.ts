@@ -37,6 +37,8 @@ export interface TaskCommand {
   missingToolInstruction?: string;
 }
 
+import { TASK_COMMAND_NAMES } from "xyne-claw-shared";
+
 export const DESIGN_SYSTEM_MAX_CHARS = 32_000;
 
 export interface DesignSystemPromptInjection {
@@ -258,6 +260,17 @@ const TASK_COMMANDS: TaskCommand[] = [
       "DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
   },
 ];
+
+{
+  const shared = new Set<string>(TASK_COMMAND_NAMES);
+  const registered = new Set(TASK_COMMANDS.map((c) => c.command.slice(1)));
+  for (const name of shared) {
+    if (!registered.has(name)) throw new Error(`TASK_COMMANDS out of sync with xyne-claw-shared TASK_COMMAND_NAMES: missing /${name}`);
+  }
+  for (const name of registered) {
+    if (!shared.has(name)) throw new Error(`TASK_COMMANDS out of sync with xyne-claw-shared TASK_COMMAND_NAMES: unlisted /${name}`);
+  }
+}
 
 /** The command a task invokes, or null. Matches `/name` at the very start,
  *  followed by whitespace or end-of-string (so "/explainers" never matches). */

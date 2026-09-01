@@ -10,13 +10,12 @@
  *
  * Sibling of pdf-attachment.ts, xlsx-attachment.ts, video-attachment.ts.
  */
-import { matchesAttachmentType } from "./attachment-matcher.js";
+import { matchesAttachmentType, HTML_ATTACHMENT } from "xyne-claw-shared";
 
-const HTML_MIME_TYPES = new Set(["text/html", "application/xhtml+xml"]);
-export const HTML_EXTENSIONS = new Set([".html", ".htm", ".xhtml"]);
+export const HTML_EXTENSIONS = HTML_ATTACHMENT.extensions;
 
 export function isHtmlAttachment(fileName: string, mimeType?: string | null): boolean {
-  return matchesAttachmentType(fileName, mimeType, HTML_MIME_TYPES, HTML_EXTENSIONS);
+  return matchesAttachmentType(fileName, mimeType, HTML_ATTACHMENT.mimeTypes, HTML_ATTACHMENT.extensions);
 }
 
 /** Cap total HTML size we write into context — anything bigger is truncated

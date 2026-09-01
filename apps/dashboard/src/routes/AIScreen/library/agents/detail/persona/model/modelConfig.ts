@@ -33,11 +33,6 @@ export function modelCardDirty(
   return JSON.stringify(readModelCardDraft(config)) !== JSON.stringify(draft);
 }
 
-export const ALWAYS_ON_OPTIONS = [
-  { value: 'always', label: 'Always on' },
-  { value: 'upgrade', label: 'On /upgrade' },
-] as const;
-
 export const SUBAGENT_OPTIONS = [
   { value: 'spaces', label: 'Spaces default' },
   { value: 'parent', label: 'Follow parent' },

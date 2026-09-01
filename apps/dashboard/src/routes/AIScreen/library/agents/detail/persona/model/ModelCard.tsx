@@ -27,7 +27,6 @@ import { ProviderOrderDialog } from './ProviderOrderDialog';
 import {
   applyModelCard,
   AUTOMATION_OPTIONS,
-  ALWAYS_ON_OPTIONS,
   readModelCardDraft,
   SUBAGENT_OPTIONS,
   type ModelCardDraft,
@@ -130,19 +129,6 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
               <PencilEditLine className='size-4' aria-hidden />
             </button>
           )}
-        </DetailRow>
-
-        <DetailRow title='Applies To' hint='When the provider order takes effect'>
-          <RowSelect
-            value={draft.alwaysOn ? 'always' : 'upgrade'}
-            options={ALWAYS_ON_OPTIONS}
-            editable={canEdit && !saving}
-            label="When to use the agent's premium provider"
-            trackName='Agent detail v2: set provider applies-to'
-            onChange={next =>
-              void persist({ ...draft, alwaysOn: next === 'always' }, 'Provider policy updated')
-            }
-          />
         </DetailRow>
 
         <DetailRow title='Subagents' hint='A per-subagent override always wins over this'>

@@ -71,7 +71,16 @@ interface RecoveryDispatchPayload {
   subagentProviders?: Record<string, string>;
   providerConfigs?: Record<string, { apiKey: string; model: string; baseUrl?: string; authType?: string }>;
   sessionToken?: string;
-  attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
+  // Two shapes: `data` (base64, inlined) or `gcsRef` (bytes parked in object
+  // storage behind XYNE_RUN_ATTACHMENT_REFS). A replayed payload carrying
+  // either one still ingests — xyne-claw accepts both unconditionally.
+  attachments?: Array<{
+    fileName: string;
+    mimeType: string;
+    data?: string | undefined;
+    gcsRef?: string | undefined;
+    sizeBytes?: number | undefined;
+  }>;
   workspaceId?: string;
   resultForwardUrl?: string;
   resolveMentions?: boolean;

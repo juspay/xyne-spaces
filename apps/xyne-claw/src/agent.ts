@@ -16,6 +16,7 @@ import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction
 import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
+import { isFencedSession } from "./run-ownership.js";
 import { compactionExtension } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
@@ -1622,6 +1623,7 @@ function createProgressReporter(
   let keepAliveTimer: ReturnType<typeof setTimeout> | null = null;
 
   function send(toolLabel: string): void {
+    if (isFencedSession(sessionId)) return;
     if (isEmitter(dest)) {
       const meta: ClawStreamMeta = {};
       if (progressMeta?.conversationId !== undefined) meta.conversationId = progressMeta.conversationId;
@@ -4005,7 +4007,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       if (handoff?.isCapAborted() === true) {
         await waitForCapAbortIdle?.();
       }
-      if (sessionReadyForFinalArchive) {
+      if (isFencedSession(sessionId)) {
+        log.warn(`[agent] Skipping final archive for ${conversationId}; ownership lost to a newer runner`);
+        metric.count("run_stale_flush_suppressed", { session: sessionId });
+      } else if (sessionReadyForFinalArchive) {
         const archived = await flushSessionNow(conversationId);
         if (!archived) {
           log.error(`[agent] Final session archive failed for ${conversationId}; local session retained`);

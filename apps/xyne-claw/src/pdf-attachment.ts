@@ -16,17 +16,17 @@
  * whole run aborting.
  */
 import { extractText } from "unpdf";
-import { matchesAttachmentType } from "./attachment-matcher.js";
+import { matchesAttachmentType, PDF_ATTACHMENT } from "xyne-claw-shared";
 
 const MAX_PAGES = 100;
 const MAX_CHARS_PER_PAGE = 10_000;
 const MAX_TOTAL_CHARS = 200_000;
 
-export const PDF_MIME_TYPES = new Set(["application/pdf"]);
-export const PDF_EXTENSIONS = new Set([".pdf"]);
+export const PDF_MIME_TYPES = PDF_ATTACHMENT.mimeTypes;
+export const PDF_EXTENSIONS = PDF_ATTACHMENT.extensions;
 
 export function isPdfAttachment(fileName: string, mimeType?: string | null): boolean {
-  return matchesAttachmentType(fileName, mimeType, PDF_MIME_TYPES, PDF_EXTENSIONS);
+  return matchesAttachmentType(fileName, mimeType, PDF_ATTACHMENT.mimeTypes, PDF_ATTACHMENT.extensions);
 }
 
 function clampText(s: string, cap: number): { out: string; truncated: boolean } {

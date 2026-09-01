@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
 import { publishHandoffSignal } from "../handoff-redis.js";
+import { isFencedSession } from "../run-ownership.js";
 import { buildPublishReviewRoomTool } from "../pr-review-room.js";
 import {
   runTask,
@@ -46,6 +47,11 @@ import { trustedSdlcToolBindings } from "../sdlc-wiki-tool-bindings.js";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
+import {
+  executeRunFromPayload,
+  type InternalRunPayload,
+  type RunExecutionState,
+} from "../run-execution.js";
 import {
   buildVerifiedResponseTool,
   SUBMIT_RESPONSE_SYSTEM_INSTRUCTION,
@@ -160,7 +166,7 @@ const UNDERSTANDING_SKILL_PATH = "understanding-skills";
 
 const router = Router();
 
-interface ActiveRunControl {
+export interface ActiveRunControl {
   abortController: AbortController;
   /** Owner of the run. Used to reject cross-user cancellation. */
   userId: string;
@@ -195,6 +201,29 @@ interface ActiveRunControl {
 }
 
 const activeRuns = new Map<string, ActiveRunControl>();
+
+export function ensureActiveRun(
+  sessionId: string,
+  payload: { userId?: string; agentSlug?: string; callbackUrl?: string },
+): ActiveRunControl {
+  const existing = activeRuns.get(sessionId);
+  if (existing) return existing;
+  const activeRun: ActiveRunControl = {
+    abortController: new AbortController(),
+    userId: (payload.userId ?? "").trim(),
+    agentSlug: payload.agentSlug ?? "unknown",
+    startedAtMs: Date.now(),
+    hasCallbackUrl: typeof payload.callbackUrl === "string" && !!payload.callbackUrl.trim(),
+  };
+  activeRuns.set(sessionId, activeRun);
+  return activeRun;
+}
+
+export function finishActiveRun(sessionId: string, activeRun: ActiveRunControl): void {
+  if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+  if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
+  activeRuns.delete(sessionId);
+}
 const configuredSseReconnectGraceMs = Number(process.env["SSE_RECONNECT_GRACE_MS"] ?? 180_000);
 const SSE_RECONNECT_GRACE_MS = Number.isFinite(configuredSseReconnectGraceMs) && configuredSseReconnectGraceMs >= 0
   ? configuredSseReconnectGraceMs
@@ -215,7 +244,7 @@ function effectiveFastMode(fastMode: boolean | undefined, agentConfig: Record<st
   return typeof fastMode === "boolean" ? fastMode : configFastModeEnabled(agentConfig);
 }
 
-function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
+export function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const obj = raw as Record<string, unknown>;
   const id = typeof obj["id"] === "string" ? obj["id"].trim() : "";
@@ -284,6 +313,17 @@ export function getActiveRunCount(): number {
 
 export function getActiveSessionIds(): string[] {
   return [...activeRuns.keys()];
+}
+
+/** Ownership fencing (run-queue path only): this pod lost the run-owner key to
+ *  a stalled-job takeover, so its in-flight copy must stop producing output. */
+export function abortRunForOwnershipLoss(sessionId: string): boolean {
+  const active = activeRuns.get(sessionId);
+  if (!active || active.abortController.signal.aborted) return false;
+  clog.warn(`[run] ownership lost — aborting superseded run sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"}`);
+  active.drainCancelled = true;
+  active.abortController.abort();
+  return true;
 }
 
 export function cancelActiveRunsForDrain(reason = "server draining"): number {
@@ -476,145 +516,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
-  } = req.body as {
-    userId?: string;
-    userName?: string;
-    userEmail?: string;
-    task?: string;
-    context?: string;
-    conversationId?: string;
-    /** When set, this OVERRIDES conversationId for the persistent-session
-     *  lookup (the PI session JSONL filename). Used by chat branching: the
-     *  conversation row stays the same so the UI keeps one thread, but the
-     *  underlying PI session lives at a branched id like
-     *  `${conversationId}__branch__${assistantMessageId}` so context from the
-     *  selected branch doesn't leak across siblings. */
-    piSessionConversationId?: string;
-    // Optional upstream-provided Spaces thread/conversation ID. Surfaced to
-    // the agent's system metadata so it can construct thread-link citations
-    // even when the agent session's own conversationId is a synthetic one
-    // (e.g. scheduled job IDs). Caller-side wiring: webhook.ts / agent-chat.ts
-    // forward this field when they have a Spaces conversation context.
-    spacesConversationId?: string;
-    callbackUrl?: string;
-    systemPrompt?: string;
-    agentConfig?: Record<string, unknown>;
-    agentSlug?: string;
-    channelId?: string;
-    cwd?: string;
-    eventType?: string;
-    scheduledJobId?: string;
-    traceId?: string;
-    skills?: {
-      slug?: string;
-      name: string;
-      description?: string;
-      content: string;
-      // Bundled skill files (scripts/, assets, …) materialized alongside
-      // SKILL.md by writeSessionSkills. Omitting this here silently dropped a
-      // skill's script folder on the top-level run path.
-      files?: { relativePath: string; content: string; contentType?: string | null }[];
-    }[];
-    provider?: string;
-    // Ordered fallback chain set by the agent owner via the Provider tab.
-    // First entry is the primary parent; subsequent entries are walked on
-    // quota exhaustion before dropping to "spaces" (LiteLLM/Kimi).
-    providerOrder?: string[];
-    subagentProviders?: Record<string, string>;
-    subagentProviderMode?: "parent" | "spaces" | "fast-model";
-    providerConfigs?: Record<
-      string,
-      {
-        apiKey: string;
-        model: string;
-        baseUrl?: string;
-        authType?: string;
-        reasoningEffort?: string;
-      }
-    >;
-    progressUrl?: string;
-    attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
-    recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
-    contextFiles?: Array<{ path: string; content: string }>;
-    /** Set by claw-auth's awakening dispatcher for an unattended run. */
-    awakening?: {
-      kind: string;
-      writePolicy: string;
-      shadow: boolean;
-      injectEnabled?: boolean;
-      windowStartMs?: number;
-      windowEndMs?: number;
-      entryPath?: string;
-    };
-    additionalInstructions?: string;
-    researchContext?: {
-      type: string;
-      id?: string;
-      name: string;
-      repositoryId?: string;
-      productId?: string;
-    };
-    customSubagents?: import("../subagent-tools.js").CustomSubagentSpec[];
-    callableAgents?: Array<CallableAgentSpec | CallableAgentLightSpec>;
-    delegationMode?: "orchestrator";
-    // claw-auth-issued per-run identifiers. sessionId is the URL-bound run id;
-    // sessionToken is an HMAC bearer used on every outbound /sessions/:sessionId/mcp/*
-    // call back to claw-auth. Both REQUIRED in production — required check below.
-    sessionId?: string;
-    sessionToken?: string;
-    ticketIds?: string[];
-    canvasIds?: string[];
-    callIds?: string[];
-    // Stable per-unit-of-work key for run idempotency. Set by the recovery
-    // worker to the rootSessionId so a re-dispatch of an already-completed run
-    // is detected (via the GCS result marker) and NOT re-executed. Absent on
-    // first dispatch (the marker is then keyed by sessionId).
-    idempotencyKey?: string;
-    // `/compact`: force a one-shot compaction of the resumed session before the
-    // first turn runs (only fires when resuming an existing session). Plumbed
-    // into the initial runAttempt below.
-    compactBeforeRun?: boolean;
-    /** Branching: when true, runTask branches the PI session at the last user
-     *  entry so the new assistant turn becomes a sibling of the previous one. */
-    isRegenerate?: boolean;
-    detached?: boolean;
-    fastMode?: boolean;
-    resumedFromHandoff?: boolean;
-    memoryBankId?: string;
-    /** Digital Twin mention flow: real reply destinations the user can post in
-     *  (their accessible channels/threads), built by claw-auth from Spaces
-     *  memberships. Injected into the mandatory twin_deliver tool as a
-     *  provider-constrained enum so the model can't invent a channel id. */
-    twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[];
-    /** Digital Twin mention flow: who @mentioned the user, and the channel name.
-     *  Fed into the twin_deliver mandate's who/where line in the SYSTEM prompt so
-     *  the model knows who's asking and where — the thread history only carries a
-     *  raw sender id. Set by claw-auth webhook.ts on USER_MENTIONED dispatches. */
-    senderName?: string;
-    channelName?: string;
-    /** Pipeline mode gate. 'plan' (agent.config.planMode) ⇒ read-only palette +
-     *  terminal propose-plan tool; the agent proposes a plan and STOPS.
-     *  'daily_brief' (agent.config.dailyBriefMode) ⇒ read-only palette + subagents
-     *  + terminal emit_brief tool; the agent gathers, emits the structured brief,
-     *  and STOPS. 'auto' (or absent) ⇒ today's behavior, unchanged. Set by
-     *  claw-auth, trust-gated on the matching agent config flag. */
-    mode?: "plan" | "auto" | "daily_brief";
-    /** /experiment autonomous exploration mode context, forwarded by claw-auth. */
-    experiment?: {
-      id?: string;
-      epoch?: number;
-      deadlineAt?: string;
-      focus?: string;
-      /** "understanding" = coverage-gated variant: exit on an exhausted
-       *  code-path frontier instead of the deadline. Set by claw-auth. */
-      kind?: "understanding" | "framework" | "security" | "repo-history";
-    };
-    /** True when this run is Turn 2 (auto) dispatched right after a plan was
-     *  approved (or a trivial plan auto-continued). Used only to emit a
-     *  mode_switch debug event; behavior is identical to any other auto run. */
-    planContinuation?: boolean;
-    generateFollowUpSuggestions?: boolean;
-  };
+  } = req.body as InternalRunPayload;
+
   const experiment = normalizeExperimentContext(rawExperiment);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
@@ -1045,67 +948,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   // scheduled jobs, etc.). It must stay byte-identical until they migrate.
   res.json({ success: true, sessionId });
 
-  // Process in background
-  processTask(
-    sessionId,
-    sessionToken.trim(),
-    userId.trim(),
-    task.trim(),
-    context,
-    userName,
-    userEmail,
-    conversationId,
-    piSessionConversationId,
-    spacesConversationId,
-    callbackUrl,
-    systemPrompt,
-    agentConfig,
-    agentSlug,
-    channelId,
-    requestCwd,
-    eventType,
-    scheduledJobId,
-    traceId,
-    skills,
-    provider,
-    providerOrder,
-    subagentProviders,
-    subagentProviderMode,
-    providerConfigs,
-    progressUrl,
-    attachments,
-    recordingRefs,
-    contextFiles,
-    additionalInstructions,
-    researchContext,
-    customSubagents,
-    callableAgents,
-    delegationMode,
-    ticketIds,
-    canvasIds,
-    callIds,
-    idempotencyKey,
-    isRegenerate,
-    abortController.signal,
-    () => abortController.abort(),
-    compactBeforeRun,
-    fastMode,
-    resumedFromHandoff,
-    memoryBankId,
-    twinDestinations,
-    senderName,
-    channelName,
-    effectiveMode,
-    experiment,
-    planContinuation,
-    shouldGenerateFollowUpSuggestions,
-    typeof callbackUrl === "string" ? callbackUrl : undefined,
-    awakening,
-  ).finally(() => {
-    if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
-    if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
-    activeRuns.delete(sessionId);
-  });
+  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId });
 });
 
 // ── SSE producer: in-process emitter that writes ClawStreamEvent frames into
@@ -1475,7 +1318,7 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
     : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
-async function processTask(
+export async function processTask(
   sessionId: string,
   sessionToken: string,
   userId: string,
@@ -1566,12 +1409,10 @@ async function processTask(
     windowEndMs?: number;
     entryPath?: string;
   },
+  execution?: RunExecutionState,
 ): Promise<void> {
-  // Query prefetch (opt-in, `agentConfig.prefetchContext`). Fired at the TOP of
-  // the run so the fast-model extractor overlaps the expensive setup that
-  // follows — session restore and the MCP tool listing — instead of adding its
-  // latency in front of the first turn. It is awaited far below, once the tool
-  // palette exists and the resolvers can run. Never rejects; see prefetch.ts.
+  // Started here so the extractor overlaps session restore + MCP listing;
+  // awaited once the tool palette exists. Never rejects (see prefetch.ts).
   const prefetchSpecPromise = prefetchEnabled(agentConfig)
     ? startPrefetchExtraction(task)
     : null;
@@ -1684,51 +1525,22 @@ async function processTask(
     }
   }
 
-  // Hoisted so the catch handler can recover pendingResponses when
-  // respond-to-user fires the abort (graceful copilot termination).
+  // Terminal tools (respond-to-user, propose-plan, propose-agent, emit_brief)
+  // end the turn via abortRun, so the run lands in the CATCH handler — these
+  // are hoisted so the catch can still recover and forward their results
+  // (signed pendingActions, plans, cards, briefs would otherwise drop silently).
   let customToolsResult: ReturnType<typeof loadCustomTools> | undefined;
-  // Hoisted so the catch handler (copilot-mode respond-to-user terminations)
-  // can still forward MCP-layer pendingActions to claw-auth. Without this,
-  // a copilot-mode agent that calls a write tool like spaces-create-ticket
-  // and then ends the turn via respond-to-user has its signed pendingAction
-  // silently dropped — claw-auth never sees it, no Approve/Decline button
-  // gets posted to the user, and the agent's text says "queued for approval"
-  // with nothing to approve. Observed 2026-06-09 with agent "triage-room"
-  // (slug used in prod) running model=claude-sonnet-4.6 via copilot.
   let mcpGetPendingActions: (() => Array<Record<string, unknown>>) | undefined;
-  // Hoisted like mcpGetPendingActions so both the success path and the catch
-  // handler can include files forwarded from MCP tools in the run's attachments.
   let mcpGetAttachments: (() => Attachment[]) | undefined;
-  // Hoisted so the catch handler (copilot-mode respond-to-user terminations)
-  // can still surface a goal suggestion the worker queued before the early
-  // abort. Filled by buildSuggestGoalTool's callback when the agent calls
-  // suggest-goal.
   let pendingGoalSuggestion: PendingGoalSuggestion | null = null;
-  // Hoisted so the catch handler can recover the proposed plan: propose-plan
-  // (plan mode's terminal tool) fires abortRun, so the run lands in the catch
-  // — never the success path — and the plan is read from ref.value there and
-  // shipped as `pendingPlan` on the callback.
   const proposePlanRef: ProposePlanRef = {};
-  // Hoisted for the same reason: propose-agent (agent-authoring's terminal tool)
-  // fires abortRun, so the drafted agent is recovered from ref.value in the catch
-  // block and shipped as `pendingAgentCard` on the callback.
   const proposeAgentRef: ProposeAgentRef = {};
-  // describe-agent is NOT terminal, so this is read on the success path; hoisted
-  // alongside the others so the catch handler can still ship a queued card when
-  // the turn ends some other way.
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
-  // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
-  // fires abortRun, so the brief is recovered from ref.value in the catch block
-  // and shipped as `dailyBrief` on the callback.
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
-  // Seed from THIS run's provider, not the litellm default. These are the
-  // values reported when a run dies before the completed-attempt block below
-  // sets them, so a hardcoded LITELLM.model made every early failure report
-  // "<real provider>/private-large-spaces" — the shape behind the 740
-  // codex/… , 461 claude/… rows in agent_runs (measured 2026-08-29). Only a
-  // spaces/unset run legitimately defaults to the platform model.
+  // Seed from THIS run's provider — a hardcoded default made every early
+  // failure report the wrong model (740 codex / 461 claude rows, 2026-08-29).
   let callbackModel: string | undefined =
     provider && provider !== "spaces" ? providerConfigs?.[provider]?.model : LITELLM.model;
   let requiresStructuredDelivery = false;
@@ -4685,6 +4497,14 @@ async function processTask(
     }
   } catch (err) {
     if (err instanceof RunHandoffError) {
+      if (execution?.hooks?.onDrainRequested) {
+        const decision = await execution.hooks.onDrainRequested();
+        if (decision === "reschedule") {
+          execution.outcome = "rescheduled";
+          log(`Run rescheduled instead of handoff-signalled: ${sessionId} lastTurn=${err.lastTurn}`);
+          return;
+        }
+      }
       await sendHandoffCallback(err.lastTurn);
       return;
     }
@@ -5122,6 +4942,12 @@ async function sendCallback(
   payload: Record<string, unknown>,
   opts?: { backoffsMs?: number[] },
 ): Promise<boolean> {
+  const fencedSid = payload["sessionId"] as string | undefined;
+  if (isFencedSession(fencedSid)) {
+    clog.warn(`[run] suppressing result for superseded run (ownership lost) session=${fencedSid}`);
+    metric.count("run_stale_result_suppressed", { session: fencedSid ?? "unknown" });
+    return false;
+  }
   // SSE mode: the final result is a `done` frame on the in-process emitter, not a POST.
   // The route handler closes the response after this returns.
   if (callbackUrl && typeof callbackUrl !== "string") {

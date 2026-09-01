@@ -21,6 +21,7 @@
     "@upstash/context7-mcp": "^2.1.7",
     "@xyne/litellm-client": "workspace:*",
     "@xyne/storage": "workspace:*",
+    "bullmq": "^5.81.2",
     "deepwiki-mcp": "^0.0.6",
     "exceljs": "^4.4.0",
     "express": "^4.21.0",

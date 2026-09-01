@@ -21,31 +21,24 @@
  * namespaces them under the archive's own filename via `<zipName>/<path>`.
  */
 import JSZip from "jszip";
-import { matchesAttachmentType } from "./attachment-matcher.js";
+import { matchesAttachmentType, ZIP_ATTACHMENT, TEXT_LIKE_ATTACHMENT } from "xyne-claw-shared";
 import { isPdfAttachment, pdfBufferToMarkdown } from "./pdf-attachment.js";
 import { isXlsxAttachment, xlsxBufferToMarkdown } from "./xlsx-attachment.js";
 import { isDocxAttachment, docxBufferToMarkdown } from "./docx-attachment.js";
 import { isPptxAttachment, pptxBufferToMarkdown } from "./pptx-attachment.js";
 import { isHtmlAttachment, htmlBufferToMarkdown } from "./html-attachment.js";
 
-const ZIP_MIMES = new Set([
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/x-zip",
-]);
-export const ZIP_EXTENSIONS = new Set([".zip"]);
+export const ZIP_EXTENSIONS = ZIP_ATTACHMENT.extensions;
 
 export function isZipAttachment(fileName: string, mimeType?: string | null): boolean {
-  return matchesAttachmentType(fileName, mimeType, ZIP_MIMES, ZIP_EXTENSIONS);
+  return matchesAttachmentType(fileName, mimeType, ZIP_ATTACHMENT.mimeTypes, ZIP_ATTACHMENT.extensions);
 }
 
 const MAX_ENTRIES = 200;
 const MAX_PER_ENTRY_BYTES = 50 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 
-const TEXT_LIKE_EXTENSIONS = new Set([
-  ".txt", ".md", ".json", ".csv", ".yml", ".yaml", ".xml", ".log",
-]);
+const TEXT_LIKE_EXTENSIONS = TEXT_LIKE_ATTACHMENT.extensions;
 
 function isTextLikeByName(name: string): boolean {
   const dot = name.lastIndexOf(".");

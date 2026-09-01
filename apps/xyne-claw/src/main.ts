@@ -17,6 +17,7 @@ import { attachmentsRouter } from "./routes/attachments.js";
 import { litellmModelsRouter } from "./routes/litellm-models.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
 import { beginDraining, isDraining } from "./drain.js";
+import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("main");
 
@@ -45,6 +46,7 @@ if (!SERVER.s2sKey) {
 
 initStore();
 startSessionCleanup();
+const runQueueWorker = startRunQueueWorker();
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -97,6 +99,13 @@ async function shutdown(signal: string): Promise<void> {
   for (const r of describeActiveRuns()) {
     log.warn(`[drain] inflight at ${signal}: session=${r.sessionId} agent=${r.agentSlug} user=${r.userId} ageS=${r.ageS}`);
   }
+  if (runQueueWorker) {
+    markRunQueueDrainPaused();
+    await runQueueWorker.pause(true).catch((err) => {
+      log.error("[xyne-claw] run queue worker pause failed:", err);
+    });
+    log.info("[xyne-claw] run queue worker paused; no longer claiming queued runs.");
+  }
   if (DRAIN_HANDOFF_ENABLED) {
     const requested = requestActiveRunHandoffs(HANDOFF_TURN_CAP_MS);
     log.warn(`[xyne-claw] drain handoff enabled; requested handoff for ${requested} active run(s) (turnCapMs=${HANDOFF_TURN_CAP_MS}).`);
@@ -115,6 +124,11 @@ async function shutdown(signal: string): Promise<void> {
   await flushAllActiveSessions(FATAL_FLUSH_TIMEOUT_MS).catch((err) => {
     log.error("[xyne-claw] flushAllActiveSessions during drain failed:", err);
   });
+  if (runQueueWorker) {
+    await runQueueWorker.close().catch((err) => {
+      log.error("[xyne-claw] run queue worker close failed:", err);
+    });
+  }
   server.close(() => process.exit(0));
 }
 
