@@ -18,7 +18,6 @@ import { RecipientAvatar, useRecipientName } from '../MessageCard/avatarHelpers'
 import { ScheduleMessageDialog } from '../../ui/ScheduleMessageDialog/ScheduleMessageDialog';
 import { useUserDelayedMessages } from '../../../hooks/useUserDelayedMessages';
 import { Button } from '../../ui/Button';
-import { posthogService } from '../../../services/Analytics/posthogService';
 
 type DelayedMessageWithAttachments = DelayedMessage & {
   attachments?: readonly MessageAttachment[] | undefined;
@@ -69,10 +68,8 @@ const DelayedMessageRow = ({
         mutators.delayedMessages.cancel({ id: delayedMessage.id, timestamp: Date.now() }),
       );
       toast.success('Message deleted');
-      posthogService.captureActionOutcome('delete_scheduled_message', 'success');
     } catch {
       toast.error('Failed to delete message');
-      posthogService.captureActionOutcome('delete_scheduled_message', 'failure');
     } finally {
       setShowDeleteConfirm(false);
     }
@@ -106,14 +103,12 @@ const DelayedMessageRow = ({
         }),
       );
       toast.success('Message sent');
-      posthogService.captureActionOutcome('send_now_scheduled_message', 'success');
       setShowSendNowConfirm(false);
       void navigate(
         `/chat/dir/${delayedMessage.channelId}${delayedMessage.conversationId ? `/${delayedMessage.conversationId}` : ''}`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to send message');
-      posthogService.captureActionOutcome('send_now_scheduled_message', 'failure');
     } finally {
       setIsSendNowLoading(false);
     }

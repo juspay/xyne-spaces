@@ -100,7 +100,7 @@ export function AskAiRatingButtons({
         data-track-name='LIKE_MESSAGE'
       >
         <ThumbsUp
-          className='h-3.5 w-3.5'
+          className='size-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isUp ? 'currentColor' : 'none'}
@@ -125,7 +125,7 @@ export function AskAiRatingButtons({
         data-track-name='DISLIKE_MESSAGE'
       >
         <ThumbsDown
-          className='h-3.5 w-3.5'
+          className='size-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isDown ? 'currentColor' : 'none'}
@@ -153,6 +153,7 @@ export function AskAiRatingButtons({
           />
           <Button
             variant='ghost'
+            size='inline'
             trackId='ask_ai_rate_comment_save'
             type='button'
             onClick={(): void => {

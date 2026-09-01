@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '../../ui/Button/Button';
-import { posthogService } from '../../../services/Analytics/posthogService';
 
 interface NameDialogV2Props {
   open: boolean;
@@ -57,11 +56,9 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
     setSubmitting(true);
     try {
       await onSubmit(trimmed);
-      posthogService.captureActionOutcome('kb_name_dialog_submit', 'success');
       setName('');
     } catch {
       // Error handled by caller (toast)
-      posthogService.captureActionOutcome('kb_name_dialog_submit', 'failure');
     } finally {
       setSubmitting(false);
     }

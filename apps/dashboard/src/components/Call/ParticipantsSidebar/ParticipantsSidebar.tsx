@@ -23,7 +23,6 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { Button } from '../../ui/Button/Button';
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { callService } from '../../../services/Call/callService';
-import { posthogService } from '../../../services/Analytics/posthogService';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 import { logger, Event } from '../../../utils/logger';
@@ -504,9 +503,7 @@ export function ParticipantsSidebar({
     setIsMuting(true);
     try {
       await callService.muteAllParticipants(callId);
-      posthogService.captureActionOutcome('mute_all_participants', 'success');
     } catch (error) {
-      posthogService.captureActionOutcome('mute_all_participants', 'failure');
       logger.error(Event.API_CALL_FAILED, {
         callId,
         context: 'ParticipantsSidebar.muteAllParticipants',
@@ -525,9 +522,7 @@ export function ParticipantsSidebar({
       setMutingParticipantId(participantUserId);
       try {
         await callService.muteParticipant(callId, participantUserId);
-        posthogService.captureActionOutcome('mute_participant', 'success');
       } catch (error) {
-        posthogService.captureActionOutcome('mute_participant', 'failure');
         logger.error(Event.API_CALL_FAILED, {
           callId,
           context: 'ParticipantsSidebar.muteParticipant',
@@ -556,9 +551,7 @@ export function ParticipantsSidebar({
       setRemovingParticipantId(participantUserId);
       try {
         await callService.removeParticipant(callId, participantUserId);
-        posthogService.captureActionOutcome('remove_participant', 'success');
       } catch (error) {
-        posthogService.captureActionOutcome('remove_participant', 'failure');
         logger.error(Event.API_CALL_FAILED, {
           callId,
           context: 'ParticipantsSidebar.removeParticipant',

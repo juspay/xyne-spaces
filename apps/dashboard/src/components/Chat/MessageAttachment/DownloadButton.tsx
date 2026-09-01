@@ -4,7 +4,6 @@ import { downloadAttachment } from './utils';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { Button } from '../../ui/Button/Button';
-import { posthogService } from '../../../services/Analytics/posthogService';
 
 type DownloadButtonVariant = 'default' | 'overlay';
 
@@ -53,14 +52,12 @@ export const DownloadButton = memo<DownloadButtonProps>(
         try {
           await downloadAttachment(attachmentId, fileName);
           onDownloadComplete?.();
-          posthogService.captureActionOutcome('download_attachment', 'success');
         } catch (error) {
           const err = error instanceof Error ? error : new Error('Download failed');
           onDownloadError?.(err);
           toast.error(`Failed to download ${fileName}`, {
             description: err.message || 'Please try again later.',
           });
-          posthogService.captureActionOutcome('download_attachment', 'failure');
         } finally {
           setIsDownloading(false);
         }

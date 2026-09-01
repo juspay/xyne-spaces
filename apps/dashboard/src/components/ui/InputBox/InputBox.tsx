@@ -84,11 +84,6 @@ import type { Canvas } from '../../Canvas';
 import { CanvasVisibility, getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
-import {
-  posthogService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/posthogService';
 import { VoiceInput } from './VoiceInput';
 import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
@@ -559,12 +554,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             fileTypes: filesArray.map(f => f.type || 'unknown'),
             totalSizeBytes: filesArray.reduce((sum, f) => sum + f.size, 0),
           });
-          posthogService.capture(EVENTS.INITIATE_ACTION, {
-            type: EVENT_PROPERTIES.ACTION_TYPES.ATTACH_FILES,
-            fileCount: filesArray.length,
-            validCount: validFiles.length,
-            rejectedCount: rejectedFiles.length,
-          });
         }
 
         // Log each rejected file
@@ -827,7 +816,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
-              void handleSend('keyboard');
+              void handleSend();
               return true;
             }
             event.preventDefault();
@@ -981,7 +970,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
-            void handleSend('keyboard');
+            void handleSend();
             return true;
           }
 
@@ -1253,7 +1242,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const handleSend = useCallback(
-      async (trigger: 'keyboard' | 'button' = 'button') => {
+      async () => {
         if (!editor || isSending) return;
         if (sendDisabled) {
           // The button is disabled, but Enter still lands here — say why rather than
@@ -1334,11 +1323,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           const finalPlainText = editor?.getText().trim() || plainText;
 
           await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
-
-          // Record a successful send after the await resolves (a throw skips
-          // this). Autocapture sees the button click but is blind to keyboard
-          // sends, so `trigger` makes the Enter-vs-button split measurable.
-          posthogService.capture(EVENTS.MESSAGE_SEND, { trigger, composer: 'chat' });
 
           editor.commands.setContent('');
           setContent('');

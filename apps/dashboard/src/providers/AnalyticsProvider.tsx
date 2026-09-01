@@ -1,5 +1,5 @@
 import React, { useEffect, ReactNode } from 'react';
-import { posthogService, EVENTS } from '../services/Analytics/posthogService';
+import { posthogService } from '../services/Analytics/posthogService';
 import { usePlatform } from '../hooks/usePlatform';
 
 interface AnalyticsProviderProps {
@@ -7,8 +7,9 @@ interface AnalyticsProviderProps {
 }
 
 /**
- * AnalyticsProvider initializes PostHog on mount.
- * Use posthogService.capture() directly in components for tracking events.
+ * AnalyticsProvider initializes PostHog on mount. Interaction tracking is
+ * handled by PostHog autocapture (clicks/changes) plus the keyboard-shortcut
+ * capture in ShortcutsProvider — no per-component capture calls in this PR.
  */
 export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }) => {
   const { platform } = usePlatform();
@@ -16,9 +17,6 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
   useEffect(() => {
     posthogService.initialize();
     posthogService.setPlatform(platform);
-
-    // Track app open for DAU/MAU metrics
-    posthogService.capture(EVENTS.APP_OPEN);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

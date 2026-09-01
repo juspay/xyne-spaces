@@ -1,5 +1,4 @@
 import { io, Socket } from 'socket.io-client';
-import { posthogService, EVENTS } from '../Analytics/posthogService';
 import { API_BASE_URL } from '../../config';
 import { logger, Logger, NotificationSocketState } from '../../utils/logger';
 import {
@@ -15,23 +14,6 @@ export interface TypingEvent {
   userId: string;
   isTyping: boolean;
   timestamp: Date;
-}
-
-function formatDurationFromMs(durationMs: number): string {
-  if (durationMs < 0) return '0 seconds';
-
-  const hours = Math.floor(durationMs / 3600000);
-  const minutes = Math.floor((durationMs % 3600000) / 60000);
-  const seconds = Math.floor((durationMs % 60000) / 1000);
-
-  const parts: string[] = [];
-  if (hours > 0) parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
-  if (minutes > 0) parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`${seconds} second${seconds !== 1 ? 's' : ''}`);
-  }
-
-  return parts.join(' ');
 }
 
 class WebSocketService {
@@ -140,17 +122,10 @@ class WebSocketService {
         // Track WebSocket disconnection
         const durationMs = this.connectionStartTime ? Date.now() - this.connectionStartTime : 0;
         this.connectionStartTime = null; // Reset to prevent incorrect calculations on subsequent disconnects
-        const durationFormatted = formatDurationFromMs(durationMs);
 
         logger.info(Logger.Event.WEBSOCKET_CONNECTION_CLOSED, {
           sessionDurationMs: durationMs,
           reason: reason,
-        });
-
-        posthogService.capture(EVENTS.WS_CONNECTION_CLOSED, {
-          reason: reason,
-          durationMs, // Exact time in milliseconds
-          durationFormatted, // Human-readable format (e.g., "1 minute 30 seconds")
         });
 
         safeRecordMetric(() => {

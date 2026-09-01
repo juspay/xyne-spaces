@@ -7,7 +7,6 @@ import { mutators } from '../../../zero/mutators';
 import { callSummaryApi } from '../../../api/callSummaryApi';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
-import { posthogService } from '../../../services/Analytics/posthogService';
 import { SummaryCanvasPreview } from './SummaryCanvasPreview';
 
 const AI_WORDS = [
@@ -102,15 +101,12 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
       );
       const serverRes = await mutation.server;
       if (serverRes.type === 'error') {
-        posthogService.captureActionOutcome('save_call_summary_prompt', 'failure');
         toast.error(serverRes.error.message || 'Failed to save call summary settings');
         return;
       }
-      posthogService.captureActionOutcome('save_call_summary_prompt', 'success');
       toast.success('Call summary settings saved');
       setExpanded(false);
     } catch {
-      posthogService.captureActionOutcome('save_call_summary_prompt', 'failure');
       toast.error('Failed to save call summary settings');
     } finally {
       setSaving(false);
@@ -129,10 +125,8 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
       const updated = await callSummaryApi.editPromptWithAI(channelId, draft, instruction);
       setDraft(updated);
       setAiInstruction('');
-      posthogService.captureActionOutcome('edit_call_summary_with_ai', 'success');
       toast.success('Template updated with AI');
     } catch (error) {
-      posthogService.captureActionOutcome('edit_call_summary_with_ai', 'failure');
       toast.error(error instanceof Error ? error.message : 'AI edit failed. Try again.');
     } finally {
       setAiLoading(false);

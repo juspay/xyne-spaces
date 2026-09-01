@@ -32,8 +32,6 @@ import {
 import { callService } from '../services/Call/callService';
 import { openLink } from '../utils/openLink';
 import { CallType } from '@xyne/shared';
-import { posthogService } from '../services/Analytics/posthogService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/events';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 import { isCallUrlApiAllowed, type CallUrlOverrides } from '../utils/callUrlOverrides';
 import { toast } from 'sonner';
@@ -2480,19 +2478,6 @@ export const roomMachine = setup({
         NATIVE_CALL_ENDED: {
           target: 'idle',
           actions: [
-            // Track analytics for native-initiated call end
-            ({ event, context }): void => {
-              if (event.type !== 'NATIVE_CALL_ENDED') return;
-              const durationSeconds = Math.floor(event.durationMs / 1000);
-              posthogService.capture(EVENTS.INITIATE_ACTION, {
-                type: EVENT_PROPERTIES.ACTION_TYPES.END_CALL,
-                callType: event.callType,
-                durationSeconds,
-                isInitiator: context.isInitiator,
-                initiatedBy: event.initiatedBy,
-                platform: 'native',
-              });
-            },
             // Play exit sound
             (): void => {
               playAudio(AUDIO_PATHS.CALL_EXIT);
@@ -2506,16 +2491,6 @@ export const roomMachine = setup({
       entry: [
         ({ context }): void => {
           logRoomMachineEvent(context.externalId ?? context.callId, 'disconnecting_state_entered');
-        },
-        ({ context }): void => {
-          // Track call ended (no sensitive data - only metadata)
-          const duration = context.callStartTime ? Date.now() - context.callStartTime : 0;
-          posthogService.capture(EVENTS.INITIATE_ACTION, {
-            type: EVENT_PROPERTIES.ACTION_TYPES.END_CALL,
-            callType: context.callType,
-            durationSeconds: Math.floor(duration / 1000),
-            isInitiator: context.isInitiator,
-          });
         },
         // Play sound when exiting the call
         (): void => {

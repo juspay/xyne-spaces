@@ -3,7 +3,7 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
-import { posthogService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/posthogService';
+import { posthogService } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
@@ -1325,15 +1325,9 @@ export const authMachine = createMachine(
       trackLoginSuccess: ({ context }) => {
         if (context.user?.id) {
           posthogService.identify(context.user);
-          posthogService.capture(EVENTS.AUTHENTICATION, {
-            type: EVENT_PROPERTIES.AUTH_TYPES.LOGIN,
-          });
         }
       },
       trackLogoutSuccess: () => {
-        posthogService.capture(EVENTS.AUTHENTICATION, {
-          type: EVENT_PROPERTIES.AUTH_TYPES.LOGOUT,
-        });
         posthogService.reset();
       },
     },

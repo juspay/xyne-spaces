@@ -11,8 +11,6 @@ import {
 import { setupElectronAuthListeners } from '../utils/electronAuth';
 import { usePlatform } from '../hooks/usePlatform';
 import { apiInstance } from '../services/clients/apiClient';
-import { posthogService } from '../services/Analytics/posthogService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/events';
 import {
   registerNativePushToken,
   unregisterNativePushToken,
@@ -248,11 +246,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const user = await fetchUserFromSession();
         if (user?.id) {
           authActor.send({ type: 'SESSION_VALIDATED', user });
-
-          posthogService.capture(EVENTS.APP_REFRESH, {
-            trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.AUTH_SUCCESS_REDIRECT,
-            url: window.location.href,
-          });
 
           logger.info(LoggerEvent.APP_REFRESH, {
             url: window.location.href,

@@ -6,7 +6,6 @@ import { XyneAIStar } from '../../icons/xyne-ai';
 import { detectFileType, FILE_TYPE_CONFIG } from '../../FileViewer/utils';
 import { fetchFile, downloadFile } from '../../../services/clients/fileFetchService';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { posthogService } from '../../../services/Analytics/posthogService';
 import { useProjectCollections } from '../hooks/useProjectCollections';
 import { KbCodeViewer } from './KbCodeViewer';
 import { KbTxtViewer } from './KbTxtViewer';
@@ -315,9 +314,7 @@ export const FileViewerPanel: React.FC<{
     try {
       if (!fileId || !file) return;
       await downloadFile(`/collections/items/${fileId}/download`, file.name);
-      posthogService.captureActionOutcome('download_document', 'success');
     } catch {
-      posthogService.captureActionOutcome('download_document', 'failure');
       setError('Failed to download file. Please try again.');
     }
   };

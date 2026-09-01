@@ -27,7 +27,6 @@ import {
 } from '../../../../api/automationsApi';
 import { VariablePicker } from '../VariablePicker/VariablePicker';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
-import { posthogService } from '../../../../services/Analytics/posthogService';
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -149,9 +148,7 @@ export function TemplateAttachmentsField({
       toast.success(
         editorSession.kind === 'new' ? 'File created and attached' : 'File changes applied',
       );
-      posthogService.captureActionOutcome('automation_template_save', 'success');
     } catch (error) {
-      posthogService.captureActionOutcome('automation_template_save', 'failure');
       toast.error(error instanceof Error ? error.message : 'Could not save the file');
     } finally {
       setEditorSaving(false);

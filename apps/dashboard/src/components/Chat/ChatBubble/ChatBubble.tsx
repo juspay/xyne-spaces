@@ -54,11 +54,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import {
-  posthogService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/posthogService';
-import {
   extractOriginFromHash,
   extractMessageIdFromHash,
   createMessagePreview,
@@ -455,9 +450,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         channelId,
         conversationId: message['conversationId'],
       });
-      posthogService.capture(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,
-      });
       toast.success('Message deleted', {
         description: 'Your message has been deleted successfully',
         duration: 3000,
@@ -532,10 +524,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           );
         })
         .catch(() => undefined);
-
-      posthogService.capture(EVENTS.INITIATE_ACTION, {
-        type: 'addBookmark',
-      });
     } catch {
       toast.error('Action failed', {
         description: 'Could not add bookmark',
@@ -555,9 +543,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             markAsDone: false,
           }),
         );
-        posthogService.capture(EVENTS.INITIATE_ACTION, {
-          type: 'removeBookmark',
-        });
       } catch {
         toast.error('Action failed', {
           description: 'Could not remove bookmark',
@@ -703,10 +688,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleCopyMessage = (): void => {
     if (message?.content) {
-      posthogService.capture(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.COPY_MESSAGE,
-        msgType: message.msgType,
-      });
       // Check if this is markdown content (e.g., call summaries)
       const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
 

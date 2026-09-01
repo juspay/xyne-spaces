@@ -12,7 +12,6 @@ import { useClawAgentDetail } from '../../../../hooks/useClawAgentDetail';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { Button } from '../../../ui/Button/Button';
-import { posthogService } from '../../../../services/Analytics/posthogService';
 import KnowledgeTab from '../../../../routes/ClawAgentsScreen/tabs/KnowledgeTab';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import type { AIFeaturesSubTabId } from '../DeskSettings';
@@ -548,12 +547,10 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
           { id: toastId },
         );
       }
-      posthogService.captureActionOutcome('run_ai_sync', 'success');
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number; data?: { error?: string } } };
       if (axiosErr?.response?.status === 429) setSyncCooldownUntil(Date.now() + 10 * 60 * 1000);
       toast.error(axiosErr?.response?.data?.error ?? 'AI Sync failed', { id: toastId });
-      posthogService.captureActionOutcome('run_ai_sync', 'failure');
     } finally {
       setSyncLoading(false);
     }

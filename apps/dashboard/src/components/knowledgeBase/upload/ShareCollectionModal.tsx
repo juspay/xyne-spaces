@@ -30,7 +30,6 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { posthogService } from '../../../services/Analytics/posthogService';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -448,11 +447,9 @@ export const ShareCollectionModal = ({
       } else if (visibilityChanged) {
         toast.success(`"${collectionName}" is now ${visibility}`);
       }
-      posthogService.captureActionOutcome('share_collection', 'success');
       handleClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update collection';
-      posthogService.captureActionOutcome('share_collection', 'failure', { error: msg });
       toast.error(msg);
     } finally {
       setIsLoading(false);

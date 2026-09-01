@@ -7,7 +7,6 @@ import { useAuth } from '../../../hooks/useAuth';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { AgentSpinner } from '../../ui/AgentSpinner';
 import { Button } from '../../ui/Button/Button';
-import { posthogService } from '../../../services/Analytics/posthogService';
 
 const rowStyle: CSSProperties = {
   display: 'inline-flex',
@@ -63,9 +62,7 @@ export function AgentProgressIndicator({
       window.dispatchEvent(
         new CustomEvent('agent-progress-cleared', { detail: { conversationId } }),
       );
-      posthogService.captureActionOutcome('stop_agent', 'success');
     } catch (err) {
-      posthogService.captureActionOutcome('stop_agent', 'failure');
       logger.error(LogEvent.FRONTEND_ERROR, {
         type: 'migrated_console_error',
         message: String('[AgentProgressIndicator] cancel failed:'),

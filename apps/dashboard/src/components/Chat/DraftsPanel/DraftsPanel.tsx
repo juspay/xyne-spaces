@@ -14,7 +14,6 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
 import { MessageCard, RecipientAvatar, useRecipientName } from '../MessageCard';
 import { ScheduleMessageDialog } from '../../ui/ScheduleMessageDialog/ScheduleMessageDialog';
-import { posthogService } from '../../../services/Analytics/posthogService';
 
 type DraftWithAttachments = DraftMessageDB & {
   attachments?: readonly MessageAttachment[] | undefined;
@@ -52,9 +51,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
       void zero.mutate(mutators.draftMessages.delete({ id: draft.id }));
       setConfirmDialog(null);
       toast.success('Draft deleted');
-      posthogService.captureActionOutcome('delete_draft', 'success');
     } catch (err) {
-      posthogService.captureActionOutcome('delete_draft', 'failure');
       toast.error(err instanceof Error ? err.message : 'Failed to delete draft');
     }
   };
@@ -66,12 +63,10 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
       void zero.mutate(mutators.draftMessages.send({ id: draft.id, timestamp: Date.now() }));
       setConfirmDialog(null);
       toast.success('Message sent');
-      posthogService.captureActionOutcome('send_draft', 'success');
       void navigate(
         `/chat/dir/${draft.channelId}${draft.conversationId ? `/${draft.conversationId}` : ''}`,
       );
     } catch (err) {
-      posthogService.captureActionOutcome('send_draft', 'failure');
       toast.error(err instanceof Error ? err.message : 'Failed to send draft');
     }
   };

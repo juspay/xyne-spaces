@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { Edit2, Trash2, Plus, Eye, X } from 'lucide-react';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { Button } from '../../../ui/Button/Button';
-import { posthogService } from '../../../../services/Analytics/posthogService';
 
 interface Skill {
   name: string;
@@ -144,11 +143,9 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
       });
       setOriginalInstruction(instruction);
       toast.success('Custom instructions saved!');
-      posthogService.captureActionOutcome('save_custom_instructions', 'success');
       onClose();
     } catch {
       toast.error('Failed to save custom instructions');
-      posthogService.captureActionOutcome('save_custom_instructions', 'failure');
     } finally {
       setIsSavingInstruction(false);
     }
@@ -165,10 +162,8 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
       setInstruction('');
       setOriginalInstruction('');
       toast.success('Custom instructions cleared');
-      posthogService.captureActionOutcome('clear_custom_instructions', 'success');
     } catch {
       toast.error('Failed to clear custom instructions');
-      posthogService.captureActionOutcome('clear_custom_instructions', 'failure');
     } finally {
       setIsSavingInstruction(false);
     }
@@ -274,18 +269,10 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
 
       await loadSkills();
       resetSkillForm();
-      posthogService.captureActionOutcome(
-        editingSkillName ? 'update_skill' : 'create_skill',
-        'success',
-      );
     } catch (error: unknown) {
       // Show specific error message from backend
       const errorMessage = error instanceof Error ? error.message : 'Failed to save skill';
       toast.error(errorMessage);
-      posthogService.captureActionOutcome(
-        editingSkillName ? 'update_skill' : 'create_skill',
-        'failure',
-      );
     } finally {
       setIsSavingSkill(false);
     }
@@ -301,10 +288,8 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
       await apiInstance.delete(`/user-skills/${encodeURIComponent(skillName)}`);
       await loadSkills();
       toast.success('Skill deleted');
-      posthogService.captureActionOutcome('delete_skill', 'success');
     } catch {
       toast.error('Failed to delete skill');
-      posthogService.captureActionOutcome('delete_skill', 'failure');
     } finally {
       setIsSavingSkill(false);
     }

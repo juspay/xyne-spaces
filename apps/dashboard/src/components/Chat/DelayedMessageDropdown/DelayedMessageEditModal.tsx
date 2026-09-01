@@ -6,7 +6,6 @@ import type { DelayedMessage } from '@xyne/shared';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { InputBox } from '../../ui/InputBox';
 import { Button } from '../../ui/Button';
-import { posthogService } from '../../../services/Analytics/posthogService';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { sanitizeHtmlContent } from '../ChatInput/ChatInput.utils';
@@ -53,14 +52,12 @@ export const DelayedMessageEditModal = ({
         }),
       );
       toast.success('Scheduled message updated');
-      posthogService.captureActionOutcome('edit_scheduled_message', 'success');
       onClose();
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Please try again.';
       toast.error('Failed to update scheduled message', {
         description: errorMessage,
       });
-      posthogService.captureActionOutcome('edit_scheduled_message', 'failure');
     } finally {
       setIsSaving(false);
     }

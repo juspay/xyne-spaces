@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { Button } from '../../ui/Button/Button';
 import { callService } from '../../../services/Call/callService';
-import { posthogService } from '../../../services/Analytics/posthogService';
 import { logger, Logger } from '../../../utils/logger';
 import {
   addCallWhiteboardStroke,
@@ -535,10 +534,8 @@ export function CallWhiteboard({
 
         await callService.saveWhiteboard(callId, png);
         toast.success('Whiteboard page saved');
-        posthogService.captureActionOutcome('whiteboard_delete_page_save_confirm', 'success');
         deletePageById(pageIdToDelete, true);
       } catch (error) {
-        posthogService.captureActionOutcome('whiteboard_delete_page_save_confirm', 'failure');
         toast.error('Whiteboard page could not be saved');
         logger.error(Logger.Event.FRONTEND_ERROR, {
           feature: 'call-whiteboard',

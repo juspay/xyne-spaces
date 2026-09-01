@@ -20,11 +20,6 @@ import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
 import { Bot, UserUser02 } from '@xyne/icons';
 import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
-import {
-  posthogService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/posthogService';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
 import { useShortcut } from '../../../shortcuts';
@@ -294,20 +289,12 @@ const ActivityListView = (): ReactElement => {
 
   const handleTabChange = useCallback(
     (value: string): void => {
-      posthogService.capture(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_TAB_CHANGED,
-        tab: value as ActivityTab,
-        showUnreadOnly: showUnreadOnly,
-      });
       setActiveTab(value as ActivityTab);
     },
     [showUnreadOnly],
   );
 
   const handleUnreadToggle = useCallback((checked: boolean): void => {
-    posthogService.capture(EVENTS.INITIATE_ACTION, {
-      type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_UNREAD_TOGGLED,
-    });
     setShowUnreadOnly(checked);
     window.localStorage.setItem('activity_unread_toggle', String(checked));
     activityVirtuosoRef.current?.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });

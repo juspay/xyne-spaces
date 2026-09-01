@@ -21,8 +21,6 @@ import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
-import { posthogService } from '../services/Analytics/posthogService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/events';
 import { dropZeroDatabases } from '../zero/dropZeroDatabases';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
@@ -203,14 +201,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
           platformName: logger.platformName,
           reason: err instanceof Error ? err.message : 'Unknown error',
         });
-      });
-
-      // Track app refresh before reload
-      posthogService.capture(EVENTS.APP_REFRESH, {
-        trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.ZERO_SYNC_AUTH_INVALIDATED,
-        errorMessage: 'ReAuth triggered',
-        url: window.location.href,
-        sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
       });
 
       // Clear this lane's Zero local databases

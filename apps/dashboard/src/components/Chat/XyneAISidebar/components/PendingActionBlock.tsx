@@ -7,7 +7,6 @@ import {
   subscribeToPendingActionResolutions,
 } from '../../../../services/XyneAI/XyneAIPendingActionStore';
 import { Button } from '../../../ui/Button/Button';
-import { posthogService } from '../../../../services/Analytics/posthogService';
 
 interface PendingActionBlockProps {
   actions: PendingAction[];
@@ -84,11 +83,9 @@ function PendingActionItem({
     try {
       await onApprove(action, index);
       setState('approved');
-      posthogService.captureActionOutcome('approve_pending_action', 'success');
     } catch (err) {
       setState('error');
       setError(err instanceof Error ? err.message : String(err));
-      posthogService.captureActionOutcome('approve_pending_action', 'failure');
     }
   };
 
@@ -99,11 +96,9 @@ function PendingActionItem({
     try {
       await onDecline(action, index);
       setState('declined');
-      posthogService.captureActionOutcome('decline_pending_action', 'success');
     } catch (err) {
       setState('error');
       setError(err instanceof Error ? err.message : String(err));
-      posthogService.captureActionOutcome('decline_pending_action', 'failure');
     }
   };
 

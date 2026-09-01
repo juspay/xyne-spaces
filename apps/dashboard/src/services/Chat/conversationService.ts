@@ -1,8 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { apiInstance } from '../clients/apiClient';
 import { AxiosError } from 'axios';
-import { posthogService } from '../Analytics/posthogService';
-import { EVENTS, EVENT_PROPERTIES } from '../Analytics/events';
 import { getFilesDimensions } from '../../components/ui/utils/files';
 
 // ============================================================================
@@ -171,27 +169,6 @@ export class ConversationService {
   }
 
   /**
-   * Private helper to track file upload analytics (no sensitive data)
-   */
-  private trackFileUpload(
-    files: File[],
-    uploadContext: 'NewConversation' | 'ConversationReply',
-  ): void {
-    if (files && files.length > 0) {
-      const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-      const fileTypes = files.map(file => file.type);
-
-      posthogService.capture(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.FILE_UPLOADED,
-        uploadContext,
-        fileCount: files.length,
-        totalSizeBytes: totalSize,
-        fileTypes,
-      });
-    }
-  }
-
-  /**
    * Create a new conversation with optional file attachments
    * Uses multipart/form-data for file uploads
    */
@@ -352,11 +329,6 @@ export class ConversationService {
         ],
       });
 
-      // Track file upload using helper (no sensitive data - only metadata)
-      if (data.files && data.files.length > 0) {
-        this.trackFileUpload(data.files, 'NewConversation');
-      }
-
       return response.data;
     } catch (error) {
       // Handle Axios errors with proper typing
@@ -458,11 +430,6 @@ export class ConversationService {
         `/conversations/${conversationId}/messages`,
         formData,
       );
-
-      // Track file upload using helper (no sensitive data - only metadata)
-      if (data.files && data.files.length > 0) {
-        this.trackFileUpload(data.files, 'ConversationReply');
-      }
 
       return response.data;
     } catch (error) {

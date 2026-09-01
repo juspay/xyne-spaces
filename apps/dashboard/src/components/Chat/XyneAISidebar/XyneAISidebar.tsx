@@ -1,10 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
-  posthogService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/posthogService';
-import {
   ReactElement,
   useState,
   useRef,
@@ -1835,13 +1830,6 @@ const XyneAISidebar = ({
     const userTagsForMessage =
       Object.keys(currentUserTags).length > 0 ? currentUserTags : undefined;
 
-    posthogService.capture(EVENTS.INITIATE_ACTION, {
-      type: EVENT_PROPERTIES.ACTION_TYPES.AI_QUERY_SUBMITTED,
-      queryLength: displayContent.length,
-      attachmentCount: currentAttachments.length,
-      activityCount: selectedActivities.length,
-    });
-
     await submitQuery(
       query,
       messageAttachments,
@@ -1950,9 +1938,6 @@ const XyneAISidebar = ({
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
     onAbort: () => {
-      posthogService.capture(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.AI_GENERATION_STOPPED,
-      });
       abortCurrentRequest();
     },
     webSearchEnabled,

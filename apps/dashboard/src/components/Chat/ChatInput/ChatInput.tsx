@@ -43,11 +43,6 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
-import {
-  posthogService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/posthogService';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
 import { getSlashCommandArtifactDefinition } from '@xyne/shared';
@@ -701,10 +696,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             description: '@channel and @here are disabled in thread replies.',
           });
         }
-        const scopeType =
-          channel?.scopeType && channel.scopeType !== ChannelScopeType.DEFAULT
-            ? channel.scopeType
-            : 'Channel';
 
         // Zero normalizes every server mutation failure to { type: 'app' | 'zero', message }.
         // - 'zero' = protocol / connection / out-of-order error. The connection resets and
@@ -838,9 +829,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             isEdit: true,
             messageLength: processedHtml.length,
           });
-          posthogService.capture(EVENTS.INITIATE_ACTION, {
-            type: EVENT_PROPERTIES.ACTION_TYPES.EDIT,
-          });
         } else if (conversationId) {
           try {
             const messageCreatedAt = Date.now();
@@ -885,11 +873,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageLength: processedHtml.length,
             });
 
-            posthogService.capture(EVENTS.INITIATE_ACTION, {
-              type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_REPLY,
-              scopeType,
-              hasAttachments: hasFiles,
-            });
             setAlsoSendToChannel(false);
             // Invalidate summary cache when reply is sent
             onMessageChange(conversationId, channelId);
@@ -904,12 +887,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               conversationId,
               isReply: true,
               error: errorMessage,
-            });
-
-            posthogService.capture(EVENTS.MESSAGE_SEND_FAILED, {
-              errorCode: 'CONVERSATION_SEND_ERROR',
-              scopeType,
-              errorReason: errorMessage,
             });
           }
         } else {
@@ -973,11 +950,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageLength: processedHtml.length,
             });
 
-            posthogService.capture(EVENTS.INITIATE_ACTION, {
-              type: EVENT_PROPERTIES.ACTION_TYPES.DIRECT_MESSAGE,
-              scopeType,
-              hasAttachments: hasFiles,
-            });
             // Invalidate channel summary cache when new conversation is created
             // Note: We only invalidate channel summaries, not thread (no conversationId yet)
             onMessageChange('', channelId);
@@ -992,12 +964,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               channelId,
               isNewConversation: true,
               error: errorMessage,
-            });
-
-            posthogService.capture(EVENTS.MESSAGE_SEND_FAILED, {
-              errorCode: 'CHANNEL_SEND_ERROR',
-              scopeType,
-              errorReason: errorMessage,
             });
           }
         }
@@ -1095,11 +1061,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             description: `Will be sent at ${new Date(scheduledFor).toLocaleString()}`,
           });
           setRecentScheduledFor(scheduledFor);
-          posthogService.capture(EVENTS.INITIATE_ACTION, {
-            type: EVENT_PROPERTIES.ACTION_TYPES.SCHEDULE_MESSAGE,
-            hasAttachments: hasFiles,
-            isThreadReply: !!conversationId,
-          });
         } catch (error: unknown) {
           const errorMessage = error instanceof Error ? error.message : 'Please try again.';
           toast.error('Failed to schedule message', { description: errorMessage });

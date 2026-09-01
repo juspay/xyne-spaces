@@ -1,7 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { posthogService, EVENTS, EVENT_PROPERTIES } from '../Analytics/posthogService';
 import { API_BASE_URL, APP_BASE_PATH } from '../../config';
 import { logger, Logger } from '../../utils/logger';
 import {
@@ -226,14 +225,6 @@ apiConfig.interceptors.response.use(
         message: 'Received 401 Unauthorized. Logging out.',
         serverError: responseData?.error,
         serverMessage: responseData?.message,
-      });
-
-      // Track app refresh before reload
-      posthogService.capture(EVENTS.APP_REFRESH, {
-        trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.API_SESSION_EXPIRED,
-        errorMessage: 'Session refresh failed - please re-authenticate',
-        url: window.location.href,
-        sessionDuration: Date.now() - (window.performance?.timing?.navigationStart || 0),
       });
 
       clearAuthTokens();

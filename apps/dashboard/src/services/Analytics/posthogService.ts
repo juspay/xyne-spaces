@@ -231,6 +231,3 @@ export const posthogService = new PostHogService();
 
 // Export types
 export type { PosthogUser, EventProperties };
-
-// Re-export event constants (optional to use)
-export { EVENTS, EVENT_PROPERTIES } from './events';

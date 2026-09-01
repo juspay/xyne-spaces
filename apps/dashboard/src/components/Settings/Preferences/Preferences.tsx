@@ -77,7 +77,6 @@ import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
-import { posthogService } from '../../../services/Analytics/posthogService';
 import { toast } from 'sonner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -550,10 +549,8 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
     setIsDisconnecting(true);
     try {
       await disconnectCalendar('GOOGLE');
-      posthogService.captureActionOutcome('disconnect_calendar', 'success');
       toast.success('Calendar disconnected. Reconnect to grant updated permissions.');
     } catch {
-      posthogService.captureActionOutcome('disconnect_calendar', 'failure');
       toast.error('Failed to disconnect calendar. Please try again.');
     } finally {
       setIsDisconnecting(false);
@@ -882,13 +879,11 @@ const PasswordSection: FC = () => {
     setIsSubmitting(true);
     try {
       await apiInstance.post('/v2/auth/email/change-password', { currentPassword, newPassword });
-      posthogService.captureActionOutcome('update_password', 'success');
       setSuccess('Password updated successfully');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
-      posthogService.captureActionOutcome('update_password', 'failure');
       if (err instanceof Error && err.message) {
         setError(err.message);
       } else {

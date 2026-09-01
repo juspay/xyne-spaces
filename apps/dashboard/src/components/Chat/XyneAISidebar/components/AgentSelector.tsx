@@ -3,11 +3,6 @@ import { ChevronDown, Bot, SearchDefault } from '@xyne/icons';
 import { Popover } from '../../../ui/Popover';
 import { cn } from '../../../../utils/classNames';
 import { usePlatform } from '../../../../hooks/usePlatform';
-import {
-  posthogService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../../services/Analytics/posthogService';
 
 /** Get initials from a name (e.g., "Xyne Grafana" -> "XG", "Assistant" -> "As") */
 const getInitials = (name: string): string => {
@@ -167,10 +162,6 @@ export const AgentSelector = ({
           <button
             onClick={() => {
               if (disabled) return;
-              posthogService.capture(EVENTS.INITIATE_ACTION, {
-                type: EVENT_PROPERTIES.ACTION_TYPES.AGENT_SWITCHED,
-                agentSlug: 'ask-ai',
-              });
               onSelect(null);
               setOpen(false);
             }}
@@ -202,10 +193,6 @@ export const AgentSelector = ({
                 key={agent.slug}
                 onClick={() => {
                   if (disabled) return;
-                  posthogService.capture(EVENTS.INITIATE_ACTION, {
-                    type: EVENT_PROPERTIES.ACTION_TYPES.AGENT_SWITCHED,
-                    agentSlug: agent.slug,
-                  });
                   onSelect(agent.slug);
                   setOpen(false);
                 }}

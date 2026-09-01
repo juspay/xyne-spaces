@@ -21,7 +21,6 @@ import {
 import Input from '../ui/Input';
 import { Textarea } from '../ui/Textarea';
 import { Button } from '../ui/Button/Button';
-import { posthogService } from '../../services/Analytics/posthogService';
 import { CaCertificateField } from './CaCertificateField';
 import { SOURCE_TYPES, type SourceType } from './dataSources.constants';
 import {
@@ -191,14 +190,12 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
     setSaving(true);
     try {
       await createDataSource({ ...apiInput, includedTables });
-      posthogService.captureActionOutcome('create_data_source', 'success');
       toast.success(
         `Data source created — ingesting ${includedTables.length} ${includedTables.length === 1 ? 'table' : 'tables'}`,
       );
       invalidateList();
       onClose();
     } catch (err) {
-      posthogService.captureActionOutcome('create_data_source', 'failure');
       toast.error(extractApiErrorMessage(err, 'Failed to create data source'));
     } finally {
       setSaving(false);

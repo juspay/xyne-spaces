@@ -1,7 +1,6 @@
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './global.css';
-import { posthogService } from './services/Analytics/posthogService';
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
 import { logger, Event } from './utils/logger';
@@ -30,7 +29,6 @@ const handleConsoleError = (args: unknown[]): void => {
       message: errorMessage,
       ...getCommonErrorProperties(),
     };
-    posthogService.capture('Frontend Error', properties);
     logger.error(Event.FRONTEND_ERROR, { ...properties, error });
   } catch (trackingError) {
     originalConsoleError('Failed to track browser console error to PostHog:', trackingError);
@@ -52,7 +50,6 @@ const handleWindowError = (event: ErrorEvent): void => {
       errorMessage: error?.message,
       ...getCommonErrorProperties(),
     };
-    posthogService.capture('Frontend Error', properties);
     logger.error(Event.FRONTEND_ERROR, { ...properties, error });
   } catch (trackingError) {
     originalConsoleError('Failed to track error to PostHog:', trackingError);
@@ -78,7 +75,6 @@ const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
       reason: reasonString,
       ...getCommonErrorProperties(),
     };
-    posthogService.capture('Frontend Error', properties);
     logger.error(Event.FRONTEND_ERROR, { ...properties, error: reason });
   } catch (trackingError) {
     originalConsoleError('Failed to track promise rejection to PostHog:', trackingError);

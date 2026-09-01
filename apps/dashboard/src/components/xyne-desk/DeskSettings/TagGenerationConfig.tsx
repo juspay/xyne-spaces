@@ -22,7 +22,6 @@ import type {
 import { TestClassificationForm } from './TestClassificationForm';
 import { TagChip, CategoryLabel } from '../../tags/TagsBadge';
 import { Button } from '../../ui/Button/Button';
-import { posthogService } from '../../../services/Analytics/posthogService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -257,10 +256,8 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
 
     try {
       await saveCategories(next);
-      posthogService.captureActionOutcome('save_tag_category', 'success');
       cancelEdit();
     } catch {
-      posthogService.captureActionOutcome('save_tag_category', 'failure');
       /* hook sets error */
     }
   };
@@ -270,10 +267,8 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
     delete next[name];
     try {
       await saveCategories(next);
-      posthogService.captureActionOutcome('delete_tag_category', 'success');
       if (editingName === name) cancelEdit();
     } catch {
-      posthogService.captureActionOutcome('delete_tag_category', 'failure');
       /* hook sets error */
     }
   };
