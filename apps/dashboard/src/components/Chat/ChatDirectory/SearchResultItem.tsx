@@ -148,7 +148,10 @@ const ChannelSegment = ({
         {channelTag.icon}
       </span>
     )}
-    <span className='truncate'>{channelTag.name}</span>
+    {/* `ch` ≈ one "0" glyph, so this caps the name near 30 characters instead of
+        letting it take whatever the row has spare. It's a ceiling, not a width:
+        a narrow row still shrinks it further and truncates. */}
+    <span className='min-w-0 max-w-[30ch] truncate'>{channelTag.name}</span>
   </span>
 );
 
@@ -189,7 +192,7 @@ const TicketAssigneeSegment = ({
   const resolved = assignee ? getUserDisplayName(assignee) : '';
   const name = (resolved && resolved !== 'Unknown' ? resolved : assigneeName) || 'Unassigned';
 
-  return <span className='min-w-0 truncate'>{name}</span>;
+  return <span className='min-w-0 max-w-[30ch] truncate'>{name}</span>;
 };
 
 const AttachmentSearchResultItem = ({
@@ -229,8 +232,11 @@ const AttachmentSearchResultItem = ({
   if (shouldShowUploader) {
     // Reads the same as the file card on the full search screen.
     metaSegments.push(
-      <span key='uploader' className='min-w-0 truncate'>
-        Uploaded by {uploaderName}
+      // The prefix is held outside the cap so the 30ch applies to the name itself
+      // rather than being eaten by "Uploaded by ".
+      <span key='uploader' className='flex min-w-0 items-center gap-1'>
+        <span className='shrink-0'>Uploaded by</span>
+        <span className='min-w-0 max-w-[30ch] truncate'>{uploaderName}</span>
       </span>,
     );
   }
