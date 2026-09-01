@@ -67,6 +67,7 @@ import {
   hasCreateTicketFlag,
 } from '../../components/Tickets/CreateTicketModal/createTicket.utils';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
+import { ShareViewDialog } from '../../components/Project/ShareViewDialog/ShareViewDialog';
 import { useMachine } from '@xstate/react';
 import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
@@ -743,8 +744,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // so opening that submenu enables this fetch too.
     enabled:
       viewMode === 'my-tickets' &&
-        (isBoardDropdownOpen || isSourceChannelsOpen || isFiltersDropdownOpen) &&
-        !!user?.id,
+      (isBoardDropdownOpen || isSourceChannelsOpen || isFiltersDropdownOpen) &&
+      !!user?.id,
     staleTime: 60_000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -1074,20 +1075,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     void persistWorkspaceView(name);
   }, [workspaceViewNameDraft, persistWorkspaceView]);
 
+  const [isShareViewDialogOpen, setIsShareViewDialogOpen] = useState(false);
+
   const handleShareWorkspaceView = useCallback((): void => {
-    if (!filters.boards?.length) {
-      toast.error('Pick at least one board to share');
+    if (!viewId) {
+      toast.error('Save the view before sharing');
       return;
     }
-    const cfg = { name: initialName ?? '', filters, groupBy: groupByKey };
-    const encoded = btoa(encodeURIComponent(JSON.stringify(cfg)));
-    const base = window.location.pathname.split('/projects')[0];
-    const link = `${window.location.origin}${base}/projects/views/new#cfg=${encoded}`;
-    void navigator.clipboard.writeText(link).then(
-      () => toast.success('Share link copied to clipboard'),
-      () => toast.error('Failed to copy link'),
-    );
-  }, [filters, groupByKey, initialName]);
+    setIsShareViewDialogOpen(true);
+  }, [viewId]);
 
   // Setup sensors for drag and drop
   const sensors = useSensors(
@@ -3265,14 +3261,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           label: 'View Details',
           onClick: () => {
             if (ticketChannelId && ticket.conversationId) {
-              navigate(
-                buildChannelRoute(
-                  `${ticketChannelId}/${ticket.conversationId}/${ticket.id}`,
-                  { selectedTab: 'details' },
-                ),
+              void navigate(
+                buildChannelRoute(`${ticketChannelId}/${ticket.conversationId}/${ticket.id}`, {
+                  selectedTab: 'details',
+                }),
               );
             } else if (ticketChannelId) {
-              navigate(
+              void navigate(
                 buildChannelRoute(ticketChannelId, {
                   tab: 'tickets',
                   ticketId: ticket.id,
@@ -3280,7 +3275,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 }),
               );
             } else {
-              navigate(`${baseRoute}/tickets/${ticket.id}`);
+              void navigate(`${baseRoute}/tickets/${ticket.id}`);
             }
           },
         },
@@ -3486,8 +3481,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         MEDIUM: 2,
         LOW: 3,
       };
-      const getOrder = (key: string): number =>
-        PRIORITY_SORT_ORDER[key] ?? Number.MAX_SAFE_INTEGER;
+      const getOrder = (key: string): number => PRIORITY_SORT_ORDER[key] ?? Number.MAX_SAFE_INTEGER;
       mapped.sort((a, b) => {
         const orderA = getOrder(a.key);
         const orderB = getOrder(b.key);
@@ -4174,25 +4168,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           groupBy.type === 'formField' &&
                           groupBy.fieldId === value.fieldId;
                     return (
-                    <DropdownMenu.CheckboxItem
-                      key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
-                      className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
+                      <DropdownMenu.CheckboxItem
+                        key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
+                        className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
       transition-colors
       data-[highlighted]:bg-muted data-[highlighted]:text-foreground
       data-[state=checked]:bg-accent data-[state=checked]:text-foreground data-[state=checked]:font-semibold'
-                      checked={isSelected}
-                      onCheckedChange={() =>
-                        handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
-                      }
-                      data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
-                          {icon}
-                        </span>
-                        <span className='font-medium'>{label.replace('Group by: ', '')}</span>
-                      </div>
-                    </DropdownMenu.CheckboxItem>
+                        checked={isSelected}
+                        onCheckedChange={() =>
+                          handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
+                        }
+                        data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
+                      >
+                        <div className='flex items-center gap-3'>
+                          <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
+                            {icon}
+                          </span>
+                          <span className='font-medium'>{label.replace('Group by: ', '')}</span>
+                        </div>
+                      </DropdownMenu.CheckboxItem>
                     );
                   })}
                 </DropdownMenu.Content>
@@ -5198,6 +5192,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
           onTicketCreated={handleTicketCreated}
+        />
+      )}
+
+      {/* Share View Dialog */}
+      {isShareViewDialogOpen && viewId && (
+        <ShareViewDialog
+          isOpen={isShareViewDialogOpen}
+          onClose={() => setIsShareViewDialogOpen(false)}
+          viewId={viewId}
+          viewName={initialName ?? ''}
         />
       )}
 

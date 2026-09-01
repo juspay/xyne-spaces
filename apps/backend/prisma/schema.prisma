@@ -829,6 +829,7 @@ model User {
   // Relations
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
   resourceAccess            ResourceAccess[]
+  viewAccess                KanbanBoardViewAccess[]
   auditLogs                 ACLAuditLog[]
   sessions                  UserSession[]           // User can have multiple sessions (multi-device support)
   apiKeys                   ApiKey[]                // User can have multiple API keys
@@ -4175,6 +4176,7 @@ model SavedUserConfiguration {
   updatedAt   DateTime
 
   values      SavedUserConfigurationValue[]
+  viewAccess  KanbanBoardViewAccess[]
 
   @@unique([userId, contextId, name])
   @@index([contextType, contextId])
@@ -4197,6 +4199,23 @@ model SavedUserConfigurationValue {
 
   @@index([configId])
   @@map("saved_user_configuration_values")
+  @@schema("public")
+}
+
+model KanbanBoardViewAccess {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String                @id @default(cuid())
+  viewId      String
+  userId      String
+  sharedBy    String
+  createdAt   DateTime              @default(now())
+
+  view        SavedUserConfiguration @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, viewId])
+  @@index([viewId])
+  @@map("kanban_board_view_access")
   @@schema("public")
 }
 

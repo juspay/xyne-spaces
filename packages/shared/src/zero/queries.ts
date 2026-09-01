@@ -4333,6 +4333,16 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc');
   }),
 
+  savedConfigsSharedWithUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ args: { userId } }) => {
+      return zql.kanban_board_view_access
+        .where('userId', userId)
+        .related('view', view => view.related('values'))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   getWorkspaceById: defineQuery(
     z.object({ workspaceId: z.string() }),
     ({ args: { workspaceId } }) => {
