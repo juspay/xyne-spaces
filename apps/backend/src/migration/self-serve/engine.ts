@@ -17,6 +17,7 @@ import {
   findOrCreateApp,
   ingestConversationSlack,
 } from '@/migration/scripts/ingestConversationSlack';
+import { bulkIngestConversationSlack } from '@/migration/scripts/bulkIngestConversationSlack';
 import {
   transformMessage,
   collectRawFiles,
@@ -33,7 +34,7 @@ import { ChannelInput, MigrationJob, MigrationType } from './types';
 
 const PAGE = 1000;
 const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
-const FILE_CONCURRENCY = 5;
+const FILE_CONCURRENCY = config.slackMigration.fileConcurrency;
 const PUBLIC_CHANNELS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 // Timing knobs (validated in config/env.ts): pageDelayMs (throttle paged Slack calls),
 // fileTimeoutMs (per-attachment), requestTimeoutMs (per Slack request), ingestMessageDelayMs (per-message DB/Vespa upper bound).
@@ -139,6 +140,43 @@ export class SlackMigrationEngine {
       throw new Error('MIGRATION_GCS_BUCKET is not configured — self-serve migration requires a dedicated bucket');
     }
     return getStorageService(bucket);
+  }
+
+  // Parallel ingest: each worker builds the offline reference + manifest ONCE per migration and reuses them across
+  // every conversation it drains (instead of once per conversation). Bounded by TTL; entries fall out after a job ends.
+  private readonly offlineRefCache = new Map<string, { at: number; ref: SlackOfflineReference }>();
+  private readonly manifestCache = new Map<string, { at: number; convs: CollectedConversation[] }>();
+  private static readonly WORKER_CACHE_TTL_MS = 30 * 60 * 1000;
+
+  async getOfflineReference(migrationId: string, gcsPrefix: string): Promise<SlackOfflineReference> {
+    let hit = this.offlineRefCache.get(migrationId);
+    if (!hit || Date.now() - hit.at >= SlackMigrationEngine.WORKER_CACHE_TTL_MS) {
+      hit = { at: Date.now(), ref: await this.buildOfflineReference(gcsPrefix) };
+      this.offlineRefCache.set(migrationId, hit);
+      this.evictStaleCache(this.offlineRefCache);
+    }
+    // Fresh shallow clone per call: concurrent loadConversation calls share the read-only users/groups/channels maps
+    // but each gets its own object so they don't race on the mutable `createUser` field loadConversation assigns.
+    return { users: hit.ref.users, groups: hit.ref.groups, channels: hit.ref.channels };
+  }
+
+  async getManifest(migrationId: string, gcsPrefix: string): Promise<CollectedConversation[]> {
+    let hit = this.manifestCache.get(migrationId);
+    if (!hit || Date.now() - hit.at >= SlackMigrationEngine.WORKER_CACHE_TTL_MS) {
+      hit = { at: Date.now(), convs: await this.readManifest(gcsPrefix) };
+      this.manifestCache.set(migrationId, hit);
+      this.evictStaleCache(this.manifestCache);
+    }
+    return hit.convs;
+  }
+
+  async getManifestConversation(migrationId: string, gcsPrefix: string, conversationId: string): Promise<CollectedConversation | undefined> {
+    return (await this.getManifest(migrationId, gcsPrefix)).find((c) => c.id === conversationId);
+  }
+
+  private evictStaleCache<T extends { at: number }>(cache: Map<string, T>): void {
+    const cutoff = Date.now() - SlackMigrationEngine.WORKER_CACHE_TTL_MS;
+    for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
   }
 
   async collectDirectory(token: string, gcsPrefix: string): Promise<Record<string, DirUser>> {
@@ -532,7 +570,7 @@ export class SlackMigrationEngine {
         if (newest) await channelRepo.setLastActivity(channelId, newest);
       }
 
-      const ingestResult = await ingestConversationSlack({
+      const ingestInput = {
         slackMessages: messages,
         externalSourceName: `${isChannel ? 'channelMigration' : 'dmMigration'}-${channelId}`,
         channelId,
@@ -540,7 +578,11 @@ export class SlackMigrationEngine {
         botToken: 'slack-migration-offline',
         interMessageDelayMs: INGEST_MESSAGE_DELAY_MS,
         onProgress,
-      });
+      };
+      // Opt-in bulk path (createMany) — off by default; A/B against the per-message path before trusting it.
+      const ingestResult = config.slackMigration.ingestBulk
+        ? await bulkIngestConversationSlack(ingestInput)
+        : await ingestConversationSlack(ingestInput);
       await channelRepo.recalculateLastActivityFromMessages(channelId);
       return { ingested: messages.length, failed: ingestResult.errorDetails?.length ?? 0 };
     });
@@ -585,6 +627,11 @@ export class SlackMigrationEngine {
 
   readManifest(gcsPrefix: string): Promise<CollectedConversation[]> {
     return this.readJson<CollectedConversation[]>(paths.manifest(gcsPrefix));
+  }
+
+  /** Light read of the collected users dump (no Slack) — used to label skipped/truncated conversations for the UI. */
+  readDirectory(gcsPrefix: string): Promise<Record<string, DirUser>> {
+    return this.readJson<Record<string, DirUser>>(paths.users(gcsPrefix)).catch(() => ({} as Record<string, DirUser>));
   }
 
   manifestExists(gcsPrefix: string): Promise<boolean> {
