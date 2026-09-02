@@ -558,7 +558,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
     // Prefer the explicit status when the backend has published it; the boolean
     // fallback keeps this working for recordings that predate the status field.
     const readyFromStatus = recording?.detailedSummaryStatus === 'ready';
-    const readyFromLegacyFlag = !!recording?.detailedSummaryReady;
+    const hasExplicitSummaryStatus =
+      recording?.detailedSummaryStatus === 'pending' ||
+      recording?.detailedSummaryStatus === 'ready' ||
+      recording?.detailedSummaryStatus === 'failed';
+    const readyFromLegacyFlag = !hasExplicitSummaryStatus && !!recording?.detailedSummaryReady;
     const isReady = readyFromStatus || readyFromLegacyFlag;
     const requestedSummaryIsReady = request.templateId
       ? recording?.summaryTemplateId === request.templateId && isReady
@@ -751,6 +755,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       // Drop the placeholder too: a failed request leaves nothing on its way, and
       // leaving the mark set would restore the skeleton on the next visit.
       setAwaitingSummary(false);
+      setPendingSummaryTemplateId(null);
       setSummaryFailed(true);
       clearSummaryRequested(recordingId);
       const message = axios.isAxiosError(err)
@@ -760,7 +765,6 @@ export default function RecordingDetailV2Screen(): ReactElement {
         description: message ?? 'Please try again.',
       });
     } finally {
-      setPendingSummaryTemplateId(null);
       setIsRegeneratingSummary(false);
     }
   };
@@ -968,10 +972,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
         icon: getTemplateIcon(template.name),
       })),
   ];
-  const activeSummaryTemplateId = pendingSummaryTemplateId ?? storedSummaryTemplateId;
+  const selectedSummaryTemplateId = storedSummaryTemplateId;
+  const regeneratingSummaryTemplateId =
+    (pendingSummaryTemplateId ?? selectedSummaryTemplateId) || DEFAULT_SUMMARY_TEMPLATE_OPTION.id;
   const selectedSummaryTemplate: RecordingSummaryTemplate =
-    summaryTemplateOptions.find(template => template.id === activeSummaryTemplateId) ??
-    (storedSummaryTemplate?.id === activeSummaryTemplateId
+    summaryTemplateOptions.find(template => template.id === selectedSummaryTemplateId) ??
+    (storedSummaryTemplate?.id === selectedSummaryTemplateId
       ? {
           id: storedSummaryTemplate.id,
           name: storedSummaryTemplate.name,
@@ -1169,6 +1175,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       // backend-published 'pending' (e.g. auto-generation after
                       // the call ended, or a regen started from another tab).
                       isRegenerating: isRegeneratingSummary || showSummaryShimmer,
+                      regeneratingTemplateId: regeneratingSummaryTemplateId,
                       templates: summaryTemplateOptions,
                       templatesLoading: summaryTemplatesLoading,
                       onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
@@ -1329,7 +1336,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   </Tooltip>
                 ) : null}
               </div>
-              {hasDetailedSummary && !awaitingSummary ? (
+              {hasDetailedSummary ? (
                 <>
                   <DetailedSummaryCanvas
                     key={`${recording.detailedSummaryCanvasId}:${summaryCanvasNonce}`}

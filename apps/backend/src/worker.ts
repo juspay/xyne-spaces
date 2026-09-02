@@ -38,6 +38,8 @@ import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
+import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
+import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
@@ -291,6 +293,19 @@ class WorkerService {
         await emailFetchWorker.start();
       }
 
+      // Calendar sync consumers. The API owns the Google/Microsoft webhook
+      // endpoints and only enqueues; the paging, upserts and cursor bookkeeping
+      // run here so a webhook burst never lands on the request path.
+      if (appConfig.enableCalendarSyncWorker) {
+        logger.info('Starting Google Calendar sync worker...');
+        await googleCalendarSyncQueue.startProcessing();
+
+        logger.info('Starting Microsoft Calendar sync worker...');
+        await microsoftCalendarSyncQueue.startProcessing();
+      } else {
+        logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
+      }
+
       if (appConfig.enableTeamIntelligenceWorker) {
         logger.info('Starting team intelligence worker...');
         await teamIntelligenceWorker.start();
@@ -510,6 +525,11 @@ class WorkerService {
 
       if (appConfig.enableEmailFetchWorker) {
         await emailFetchWorker.shutdown();
+      }
+
+      if (appConfig.enableCalendarSyncWorker) {
+        await googleCalendarSyncQueue.close();
+        await microsoftCalendarSyncQueue.close();
       }
 
       if (appConfig.enableTeamIntelligenceWorker) {
