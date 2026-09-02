@@ -517,6 +517,16 @@ export class XyneAIControllerV2 {
         select: { id: true, name: true, email: true },
       });
 
+      // Load the user's Ask AI custom instructions (set via the sidebar
+      // Settings modal). These are stored on userPreference but were never
+      // forwarded to the claw agent — surface them through the ClawRunRequest
+      // so the agent actually honours them.
+      const userPreference = await db.userPreference.findUnique({
+        where: { userId },
+        select: { askai_custom_instruction: true },
+      });
+      const customInstructions = userPreference?.askai_custom_instruction ?? null;
+
       // Track metrics: context channels count
       getAskAIContextChannels().record(effectiveChannelIds.length);
 
@@ -594,6 +604,7 @@ export class XyneAIControllerV2 {
         const runReq: ClawRunRequest = {
           userId,
           spacesWorkspaceId: req.user?.workspaceId,
+          customInstructions,
           userName: user?.name || 'Unknown',
           userEmail: user?.email || '',
           query,

@@ -121,6 +121,11 @@ export interface ClawRunRequest {
    *  /run/stream, which merges it over the agent's modelSettings for this run.
    *  Absent = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  /** User's Ask AI "Custom Instructions" (userPreference.askai_custom_instruction),
+   *  set via the Xyne AI sidebar Settings modal. Loaded per-run in the v2
+   *  controller and surfaced to the agent through additionalInstructions.
+   *  Empty/null = user has none. */
+  customInstructions?: string | null;
 }
 
 export interface ClawRunStreamResult {
@@ -519,6 +524,15 @@ function normalizeAttachmentsForRun(
 // "## Additional Instructions" heading and duplicate that block.
 function buildAdditionalInstructions(req: ClawRunRequest): string | undefined {
   const parts: string[] = [];
+
+  const customInstructions = req.customInstructions?.trim();
+  if (customInstructions) {
+    parts.push(
+      `The user has configured the following custom instructions for Ask AI. ` +
+        `Follow them for behaviour, style, and tone unless they conflict with a safety, ` +
+        `grounding, or tool-usage rule:\n\n${customInstructions}`
+    );
+  }
 
   if (req.researchContext) {
     parts.push(
