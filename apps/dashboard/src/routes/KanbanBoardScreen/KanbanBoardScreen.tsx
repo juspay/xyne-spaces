@@ -5300,6 +5300,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                               }
                             : {})}
                           slaPolicies={kanbanSlaPolicies}
+                          formValuesByTicketId={formValuesByTicketId}
+                          userNamesById={userNamesById}
                         />
                       </div>
                     )}
