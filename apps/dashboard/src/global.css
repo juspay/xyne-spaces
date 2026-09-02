@@ -4811,18 +4811,19 @@ img.inline-emoji,
 
 :root {
   --tab-off: 0.4;
-  --tab-hover-dur: 140ms;
 }
 
 .streams-nav {
   --tab-hover: 0;
   transition: --tab-hover 0s;
 }
+
 .streams-nav:hover,
 .streams-nav:has(:focus-visible) {
   --tab-hover: 1;
-  transition: --tab-hover var(--tab-hover-dur) var(--jump-ease);
+  transition: --tab-hover 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
+
 @media (prefers-reduced-motion: reduce) {
   .streams-nav {
     transition: none;
@@ -4837,15 +4838,6 @@ img.inline-emoji,
     hsl(var(--foreground)) calc(max(var(--tab-on), var(--tab-hover)) * 100%)
   );
   transition-property: transform;
-}
-
-.streams-nav-badge {
-  filter: grayscale(calc(1 - var(--tab-hover)));
-}
-@media (prefers-reduced-motion: reduce) {
-  .streams-nav-badge {
-    transition: none;
-  }
 }
 
 @property --fade-x-start {

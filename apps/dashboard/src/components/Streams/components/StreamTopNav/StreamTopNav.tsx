@@ -235,7 +235,7 @@ const NavPill = ({
         // laid out from its labels and a three-digit badge would take a name's
         // worth of width off whichever column happened to be busiest.
         state.count > 0 && (
-          <span className='streams-nav-badge flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-[4px] text-[11px] font-semibold text-primary-foreground'>
+          <span className='[filter:grayscale(calc(1-var(--tab-hover)))] motion-reduce:[transition:none] flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-[4px] text-[11px] font-semibold text-primary-foreground'>
             {state.count > 9 ? '9+' : state.count}
           </span>
         )
@@ -372,7 +372,7 @@ const OverflowMark = ({
           transition: `transform ${shown ? 180 : 130}ms ${STREAMS_EASE}, opacity ${shown ? 180 : 130}ms ${STREAMS_EASE}`,
         }}
         className={cn(
-          'streams-nav-badge flex h-[18px] shrink-0',
+          '[filter:grayscale(calc(1-var(--tab-hover)))] motion-reduce:[transition:none] flex h-[18px] shrink-0',
           'items-center gap-0.5 rounded-full border border-primary-foreground/40',
           'bg-primary px-1 text-[11px] font-semibold text-primary-foreground',
           'absolute top-1/2 z-10',
