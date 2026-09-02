@@ -1,3 +1,10 @@
+## [1.264.1](https://github.com/juspay/xyne-spaces/compare/v1.264.0...v1.264.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* allow cross-org workspace members to read their workspace row ([#1431](https://github.com/juspay/xyne-spaces/issues/1431)) ([3355e95](https://github.com/juspay/xyne-spaces/commit/3355e952e2c6b47370a0d00f34d564ccecb32784))
+
 ## [1.264.0](https://github.com/juspay/xyne-spaces/compare/v1.263.1...v1.264.0) (2026-09-02)
 
 
