@@ -18,7 +18,7 @@ import { Router, type Request, type Response } from "express";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
 import { getRequesterId, isOrgAdmin, isOrgOwner } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
-import { findUserByAnyId } from "../lib/users-jit.js";
+import { findUserByAnyId, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { agentScope, CHANNELS_POST_SCOPE, generateServiceToken, SERVICE_TOKEN_SCOPES } from "../lib/service-tokens.js";
 
 import { createLogger } from "../logger.js";
@@ -371,8 +371,7 @@ router.patch("/:id/members/:userId", asyncHandler(async (req: Request, res: Resp
 
   // The URL parameter may be a canonical Claw id OR a Spaces alias —
   // normalize when resolvable; otherwise the membership lookup reports not-found.
-  const targetUserId = (await findUserByAnyId(req.params["userId"] as string))?.id
-    ?? (req.params["userId"] as string);
+  const targetUserId = await resolveCanonicalUserIdOrSelf(req.params["userId"] as string);
 
   const role = (req.body as { role?: string }).role;
   if (role !== "OWNER" && role !== "ADMIN" && role !== "MEMBER") {
@@ -432,8 +431,7 @@ router.delete("/:id/members/:userId", asyncHandler(async (req: Request, res: Res
 
   // The URL parameter may be a canonical Claw id OR a Spaces alias —
   // normalize when resolvable; otherwise the membership lookup reports not-found.
-  const targetUserId = (await findUserByAnyId(req.params["userId"] as string))?.id
-    ?? (req.params["userId"] as string);
+  const targetUserId = await resolveCanonicalUserIdOrSelf(req.params["userId"] as string);
 
   const target = await prisma.orgMember.findUnique({
     where: { userId_orgId: { userId: targetUserId, orgId } },
