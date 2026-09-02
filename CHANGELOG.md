@@ -1,3 +1,10 @@
+## [1.259.1](https://github.com/juspay/xyne-spaces/compare/v1.259.0...v1.259.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* ysweet authorization for very first connection ([#1185](https://github.com/juspay/xyne-spaces/issues/1185)) ([75ce57b](https://github.com/juspay/xyne-spaces/commit/75ce57bd58082717160336f38438f4fc49b4d198))
+
 ## [1.259.0](https://github.com/juspay/xyne-spaces/compare/v1.258.1...v1.259.0) (2026-09-02)
 
 
