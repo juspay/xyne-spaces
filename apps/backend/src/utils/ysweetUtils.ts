@@ -43,6 +43,40 @@ const canvasCommentThreadStyleSpec = createStyleSpec(
   },
 );
 
+// Register a style spec for canvas tickets
+const canvasTicketStyleSpec = createStyleSpec(
+  {
+    type: 'canvasTicket',
+    propSchema: 'string',
+  },
+  {
+    render: () => {
+      const doc = (globalThis as unknown as {
+        document?: { createElement: (tagName: string) => unknown };
+      }).document;
+      const span = doc?.createElement('span') ?? {};
+      return {
+        dom: span,
+        contentDOM: span,
+      } as never;
+    },
+    parse: element =>
+      (element as unknown as { getAttribute?: (name: string) => string | null }).getAttribute?.(
+        'data-canvas-ticket-id',
+      ) ?? undefined,
+    runsBefore: [
+      'bold',
+      'italic',
+      'underline',
+      'strike',
+      'code',
+      'textColor',
+      'backgroundColor',
+      'canvasCommentThread',
+    ],
+  },
+);
+
 function createServerSchema() {
   return BlockNoteSchema.create({
     blockSpecs: defaultBlockSpecs,
@@ -56,6 +90,7 @@ function createServerSchema() {
     styleSpecs: {
       ...defaultStyleSpecs,
       canvasCommentThread: canvasCommentThreadStyleSpec,
+      canvasTicket: canvasTicketStyleSpec,
     },
   });
 }

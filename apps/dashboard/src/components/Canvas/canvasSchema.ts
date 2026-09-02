@@ -11,6 +11,7 @@ import { mentionInlineContentSpec } from './CanvasMentionSpec';
 import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
+import { canvasTicketStyleSpec } from './CanvasTicketStyleSpec/CanvasTicketStyleSpec';
 import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
 import { CANVAS_EMBED_TYPE, canvasEmbedSpec } from './CanvasEmbedSpec';
 import { canvasFileBlockSpec } from './CanvasFileBlockSpec';
@@ -41,6 +42,7 @@ function createCanvasSchema() {
     },
     styleSpecs: {
       canvasCommentThread: canvasCommentThreadStyleSpec,
+      canvasTicket: canvasTicketStyleSpec,
     },
   });
 }

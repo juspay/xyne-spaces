@@ -42,7 +42,7 @@ import {
 } from './canvasSidebarWidth';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { cn } from '../../../utils/classNames';
-import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
+import { APP_NO_DRAG_STYLE, standaloneNavigate } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -193,15 +193,12 @@ const CanvasPanel = (): ReactElement => {
         return;
       }
 
-      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       // Navigate to the canvas in the right panel
       const canvasUrl = `/chat/canvas/${canvas.id}`;
-      // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
-      if (!isMobile && isCmdClick) {
-        window.open(canvasUrl, '_blank');
-      } else {
-        void navigate(canvasUrl, { state: { canvas } });
-      }
+      standaloneNavigate(navigate, canvasUrl, {
+        event: !isMobile && 'button' in e ? e : undefined,
+        state: { canvas },
+      });
     },
     [navigate, isMobile],
   );

@@ -2530,8 +2530,8 @@ html .bn-code-block-source-popup-ok-button:hover {
    BlockNote menus in chat, previews, and other editor surfaces keep their own
    layout. */
 .canvas-formatting-menu.bn-formatting-toolbar {
-  width: 200px;
-  min-width: 200px;
+  width: 270px;
+  min-width: 270px;
   flex-direction: column;
   align-items: stretch;
   gap: 0;
@@ -2654,6 +2654,11 @@ html .bn-code-block-source-popup-ok-button:hover {
   border-radius: 8px 0 0 8px;
 }
 
+.canvas-formatting-menu__attached-button--middle {
+  border-right-width: 0;
+  border-radius: 0;
+}
+
 .canvas-formatting-menu__attached-button--right {
   border-radius: 0 8px 8px 0;
 }
@@ -2666,6 +2671,153 @@ html .bn-code-block-source-popup-ok-button:hover {
 .canvas-formatting-menu__attached-button svg {
   width: 14px;
   height: 14px;
+}
+
+.canvas-ticket-anchor[data-canvas-ticket-id] {
+  display: inline-flex;
+  width: 490px;
+  max-width: 100%;
+  min-height: 30px;
+  box-sizing: border-box;
+  align-items: center;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.05);
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 4px 2px 9px;
+  line-height: 1.25;
+  vertical-align: middle;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.canvas-ticket-anchor[data-canvas-ticket-id]:hover,
+.canvas-ticket-anchor[data-canvas-ticket-id]:focus-visible {
+  border-color: hsl(var(--border));
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.05);
+  outline: none;
+}
+
+.canvas-ticket-anchor__id {
+  flex: 0 0 auto;
+  margin-right: 10px;
+  color: hsl(var(--muted-foreground));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76em;
+  font-weight: 500;
+  letter-spacing: 0.015em;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.canvas-ticket-anchor__text {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-ticket-anchor__status,
+.canvas-ticket-anchor__assignee,
+.canvas-ticket-anchor__unavailable {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.canvas-ticket-anchor__status {
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 24px;
+  color: hsl(var(--primary));
+  font-size: 0.82em;
+  font-weight: 500;
+}
+
+.canvas-ticket-anchor__status svg {
+  width: 13px;
+  height: 13px;
+}
+
+.canvas-ticket-anchor__assignee {
+  flex: 0 0 auto;
+  margin-left: 10px;
+}
+
+.canvas-ticket-anchor__avatar {
+  width: 24px;
+  height: 24px;
+}
+
+.canvas-ticket-anchor__avatar [data-slot="avatar"] {
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-ticket-avatar,
+.canvas-ticket-avatar [data-slot="avatar"],
+.canvas-ticket-avatar [data-slot="avatar-image"],
+.canvas-ticket-avatar [data-slot="avatar-fallback"] {
+  border-radius: 9999px;
+}
+
+.canvas-ticket-avatar [data-slot="avatar"],
+.canvas-ticket-avatar [data-slot="avatar-fallback"] {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.canvas-ticket-anchor__assignee--unassigned {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  border: 1px dashed hsl(var(--muted-foreground) / 0.45);
+  border-radius: 7px;
+  color: hsl(var(--muted-foreground));
+}
+
+.canvas-ticket-anchor__assignee--unassigned svg {
+  width: 13px;
+  height: 13px;
+}
+
+.canvas-ticket-anchor__unavailable {
+  margin-left: 8px;
+  color: hsl(var(--destructive));
+  font-size: 0.78em;
+  font-weight: 500;
+}
+
+.canvas-ticket-anchor[data-canvas-ticket-status="COMPLETED"] .canvas-ticket-anchor__status {
+  color: var(--status-success);
+}
+
+.canvas-ticket-anchor[data-canvas-ticket-status="CANCELLED"] .canvas-ticket-anchor__status {
+  color: hsl(var(--muted-foreground));
+}
+
+[data-theme="midnight"] .canvas-ticket-anchor[data-canvas-ticket-id] {
+  background: hsl(var(--card));
+  border-color: hsl(var(--border));
+}
+
+@media (max-width: 640px) {
+  .canvas-ticket-anchor__status,
+  .canvas-ticket-anchor__assignee {
+    display: none;
+  }
 }
 
 .canvas-inline-comment-composer button[aria-label="Mention channel"] {

@@ -69,6 +69,7 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getAvatarColorClassNames } from '../../ui/Avatar/Avatar';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { canvasMatchesSharedByFilter } from '../canvasListFilters';
+import { isElectronApp, toStandalonePath } from '../../../utils/electronApp';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -1603,7 +1604,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   );
 
   const handleOpenCanvasInNewTab = useCallback((canvas: Canvas): void => {
-    window.open(`/chat/canvas/${canvas.id}`, '_blank');
+    const canvasPath = `/chat/canvas/${canvas.id}`;
+    window.open(isElectronApp() ? toStandalonePath(canvasPath) : canvasPath, '_blank');
   }, []);
 
   const renderCanvasItem = (canvas: Canvas): React.ReactNode => {
