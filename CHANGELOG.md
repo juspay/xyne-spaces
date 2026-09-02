@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.18](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.17...v1.239.0-release-20260827.18) (2026-09-02)
+
+
+### Features
+
+* add Topics Explorer to the desk support screen ([#1374](https://github.com/juspay/xyne-spaces/issues/1374)) ([91eb337](https://github.com/juspay/xyne-spaces/commit/91eb3371f1dff4205ffe7d203acdd8f5e1ce83b8))
+
 ## [1.239.0-release-20260827.17](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.16...v1.239.0-release-20260827.17) (2026-09-01)
 
 
