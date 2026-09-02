@@ -98,6 +98,13 @@ export const chatMessageRepository = {
   findByUserAndAgent: (userId: string, agentSlug: string) =>
     prisma.chatMessage.findMany({ where: { userId, agentSlug }, orderBy: { createdAt: "asc" } }),
 
+  /** Messages for every user for ONE agent in ONE org. Used by elevated agent
+   *  editors/contributors when the Conversations tab explicitly requests the
+   *  cross-user inspector view. Keep orgId in the predicate so a shared slug
+   *  across orgs cannot merge conversation history. */
+  findByAgent: (agentSlug: string, orgId: string) =>
+    prisma.chatMessage.findMany({ where: { agentSlug, orgId }, orderBy: { createdAt: "asc" } }),
+
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat
    *  even if they guess a conversationId. Returns the delete count. */

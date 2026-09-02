@@ -718,9 +718,10 @@ export class XyneAIControllerV2 {
     }
 
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+    const allRuns = req.query.allRuns === '1';
 
     try {
-      const result = await listClawConversations({ headers: req.headers, userId }, agentSlug);
+      const result = await listClawConversations({ headers: req.headers, userId }, agentSlug, { allRuns });
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
@@ -747,9 +748,10 @@ export class XyneAIControllerV2 {
     }
 
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+    const allRuns = req.query.allRuns === '1';
 
     try {
-      const result = await getClawConversationMessages({ headers: req.headers, userId }, convId, agentSlug);
+      const result = await getClawConversationMessages({ headers: req.headers, userId }, convId, agentSlug, { allRuns });
       res.json({
         ...result,
         ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
@@ -819,6 +821,7 @@ export class XyneAIControllerV2 {
       return;
     }
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+    const allRuns = req.query.allRuns === '1';
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -842,7 +845,7 @@ export class XyneAIControllerV2 {
     });
 
     try {
-      await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, { signal: upstreamAbort.signal });
+      await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, { signal: upstreamAbort.signal, allRuns });
     } catch (error) {
       logger.error('[XyneAIv2] live proxy error:', error);
     } finally {

@@ -109,7 +109,7 @@ export function ClawConversationProvider({
     data: sessionsData,
     isLoading: sessionsLoading,
     refetch: refetchSessionsQuery,
-  } = useV2SessionsList(historyAgentSlug, isOpen);
+  } = useV2SessionsList(historyAgentSlug, isOpen, { allRuns: true });
   const sessions = sessionsData ?? EMPTY_SESSIONS;
   const { invalidateSessions } = useV2SessionInvalidator();
 
@@ -196,7 +196,12 @@ export function ClawConversationProvider({
           setHasUnseenAnswer(false);
           return true;
         }
-        const fetched = await fetchV2ConversationMessages(conversation.sessionId, historyAgentSlug);
+        const fetched = await fetchV2ConversationMessages(
+          conversation.sessionId,
+          historyAgentSlug,
+          undefined,
+          { allRuns: true },
+        );
 
         if (loadRequestRef.current !== requestId) return false;
         setStreamThreadKey(conversation.sessionId);
