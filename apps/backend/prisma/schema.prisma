@@ -1242,6 +1242,7 @@ model PullRequests {
 
   @@index([workflowExecutionId])
   @@index([date])
+  @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
   @@map("pull_requests")
   @@schema("public")
 }
@@ -3786,6 +3787,24 @@ model ApplicationReleaseTicket {
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "application_release_tickets_releaseId_createdAt_id_idx")
   @@map("application_release_tickets")
   @@schema("public")
+}
+
+model ReleaseRepository {
+  workspaceId        String
+  id                 String    @id @default(cuid())
+  releaseId          String
+  mainReleaseBoardId String
+  branch             String
+  deployedCommit     String
+  newCommit          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime? @updatedAt
+
+  @@unique([releaseId, mainReleaseBoardId])
+  @@index([releaseId])
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_repositories_releaseId_createdAt_id_idx")
+  @@map("release_repositories")
+  @@schema("non_zero")
 }
 
 // Captures all events tied to the release for audit trail
