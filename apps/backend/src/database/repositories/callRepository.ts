@@ -1339,12 +1339,22 @@ export class CallRepository {
           },
         });
       } else {
-        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE
+        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE.
+        //
+        // Do NOT overwrite startedAt here. It was set to the real first-join time by the
+        // first-activation branch above; a scheduled call's default startedAt (schedule time)
+        // has already been corrected at that point. Overwriting it with the reconnect time
+        // collapses the call's duration to the length of the latest tiny reconnect (this is
+        // the "18 seconds vs 49 minute transcript" bug). Preserving it keeps the call's
+        // duration spanning the whole scheduled-window envelope (first join -> last leave).
+        //
+        // Clear the stale endedAt that the previous session's revert-to-SCHEDULED wrote, since
+        // the call is live again; the final end path rewrites endedAt to the true last-leave time.
         await tx.call.update({
           where: { id: call.id },
           data: {
             status: CallStatus.ACTIVE,
-            startedAt: now,
+            endedAt: null,
             lastActivityAt: now,
             updatedAt: now,
           },
