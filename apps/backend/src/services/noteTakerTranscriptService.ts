@@ -10,6 +10,7 @@ import { transcriptService, type TranscriptEntry } from '@/services/transcriptSe
 import type { SummaryModelType } from '@/services/callLlmRetry';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
@@ -224,6 +225,9 @@ class NoteTakerTranscriptService {
         resolvedModelType,
       );
     } catch (error) {
+      // generateDetailedSummaryCanvas swallows its own failures, so reaching
+      // here means something outside it threw and nothing has logged yet.
+      logDetailedSummaryFailed(call.externalId, 'unexpected_error', error);
       await this.markDetailedSummaryStatus(call, 'failed');
       throw error;
     }
@@ -718,19 +722,13 @@ class NoteTakerTranscriptService {
           modelType,
         );
         if (!generated) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'generation_failed',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'generation_failed');
           return null;
         }
 
         const xyneAutomaticBot = await xyneAutomaticBotPromise;
         if (!xyneAutomaticBot) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'bot_not_found',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'bot_not_found');
           return null;
         }
 
@@ -753,10 +751,7 @@ class NoteTakerTranscriptService {
           workspaceId,
         );
         if (!canvasId) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'canvas_update_failed',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'canvas_update_failed');
           return null;
         }
 
@@ -891,10 +886,7 @@ class NoteTakerTranscriptService {
       }
 
       if (!generated) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'generation_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'generation_failed');
         return null;
       }
 
@@ -907,19 +899,13 @@ class NoteTakerTranscriptService {
 
       const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: initializationFailure?.message ?? 'canvas_create_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'canvas_create_failed', initializationFailure);
         return null;
       }
 
       const xyneAutomaticBot = await xyneAutomaticBotPromise;
       if (!xyneAutomaticBot) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'bot_not_found',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'bot_not_found');
         return null;
       }
 
@@ -940,10 +926,7 @@ class NoteTakerTranscriptService {
         citationCtx,
       );
       if (!finalized) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'canvas_finalize_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
         return null;
       }
 
@@ -953,12 +936,7 @@ class NoteTakerTranscriptService {
         markedItems: generated.markedItems,
       };
     } catch (error) {
-      logger.error(`[${callId}] detailed_summary_failed`, {
-        stage: 'detailed_summary_generation',
-        path: 'note_taker',
-        error,
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      logDetailedSummaryFailed(callId, 'unexpected_error', error);
       return null;
     }
   }
