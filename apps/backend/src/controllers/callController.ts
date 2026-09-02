@@ -41,6 +41,9 @@ import {
   NotificationType,
   RecordingType,
   AttachmentEntityType,
+  SUPPORTED_TRANSCRIPT_LANGUAGES,
+  ORIGINAL_TRANSCRIPT_LANGUAGE,
+  type TranscriptTranslation,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
@@ -1327,25 +1330,51 @@ export class CallController {
         return;
       }
 
-      // Fetch transcript content from GCS URL if available
+      // ?scope=status: polled every 10s for hasRecording/durationMs only.
+      const scope = req.query.scope as string | undefined;
+      if (scope === 'status') {
+        const uploadedRecording = await repositories.callRecordings
+          .findLatestUploadedByCallId(call.id)
+          .catch(() => null);
+        res.json({
+          success: true,
+          recording: {
+            hasRecording: !!uploadedRecording,
+            durationMs: call.endedAt
+              ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
+              : null,
+          },
+        });
+        return;
+      }
+
+      // ?scope=metadata only needs presence, not text — skip the GCS reads below.
       let transcriptContent: string | null = null;
       let identifiedTranscriptContent: string | null = null;
+      let hasIdentifiedTranscript: boolean;
 
-      if (call.transcript) {
-        try {
-          // Fetch transcript content from storage (handles both legacy gs:// URIs and plain paths)
-          transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
-        } catch (fetchError) {
-          logger.warn(`Failed to fetch transcript from storage: ${fetchError}`);
+      if (scope === 'metadata') {
+        hasIdentifiedTranscript = await transcriptService.identifiedTranscriptExists(call.externalId);
+      } else {
+        if (call.transcript) {
+          try {
+            // Fetch transcript content from storage (handles both legacy gs:// URIs and plain paths)
+            transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+          } catch (fetchError) {
+            logger.warn(`Failed to fetch transcript from storage: ${fetchError}`);
+          }
         }
+
+        // Fetch real-time identified transcript (written during call by the Python agent)
+        try {
+          identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
+        } catch (fetchError) {
+          logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+        }
+        hasIdentifiedTranscript = !!identifiedTranscriptContent;
       }
 
-      // Fetch real-time identified transcript (written during call by the Python agent)
-      try {
-        identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
-      } catch (fetchError) {
-        logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
-      }
+      const hasTranscript = scope === 'metadata' ? !!call.transcript : !!transcriptContent;
 
       // Determine AI summary format (markdown if starts with ## or has no HTML tags)
       let aiSummaryFormat: 'markdown' | 'html' | undefined;
@@ -1437,11 +1466,11 @@ export class CallController {
           durationMs: call.endedAt
             ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
             : null,
-          hasTranscript: !!transcriptContent,
+          hasTranscript,
           hasSummary: !!call.aiSummary,
           transcript: transcriptContent,
           identifiedTranscript: identifiedTranscriptContent,
-          hasIdentifiedTranscript: !!identifiedTranscriptContent,
+          hasIdentifiedTranscript,
           aiSummary: call.aiSummary,
           aiSummaryFormat,
           labels: call.labels,
@@ -1827,6 +1856,138 @@ export class CallController {
     } catch (error) {
       logger.error(`[${callId}] download_transcript_failed | user_id=${userId}, error=${error}`);
       res.status(500).json({ success: false, error: 'Failed to download transcript' });
+    }
+  };
+
+  // POST /api/calls/:callId/translate-transcript — synchronous: returns the cached text (GCS
+  // hit) or translates now, writes GCS + metadata, and returns the result — always one call.
+  translateTranscript = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { language, variant } = (req.body ?? {}) as { language?: string; variant?: 'identified' };
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    // 'original' = no LLM, exempt from the whitelist below.
+    const isOriginal = language === ORIGINAL_TRANSCRIPT_LANGUAGE;
+
+    // Whitelist-only: this value is interpolated into the LLM prompt.
+    const supportedLanguage = isOriginal
+      ? undefined
+      : SUPPORTED_TRANSCRIPT_LANGUAGES.find(l => l.code === language);
+    if (!isOriginal && !supportedLanguage) {
+      res.status(400).json({ success: false, error: 'Unsupported language' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (!(await this.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      if (isOriginal) {
+        let text: string | null;
+        let generation: string | null = null;
+        if (variant === 'identified') {
+          text = await transcriptService.getIdentifiedTranscriptContent(callId);
+        } else {
+          const fetched = await transcriptService.getTranscriptContentWithGeneration(callId);
+          text = fetched?.text ?? null;
+          generation = fetched?.generation ?? null;
+        }
+        if (text === null) {
+          res.status(404).json({ success: false, error: 'Transcript not available for this call' });
+          return;
+        }
+        res.status(200).json({
+          success: true,
+          status: 'ready',
+          text,
+          ...(generation ? { generation } : {}),
+        });
+        return;
+      }
+
+      // Non-null: whitelist check above already returned otherwise.
+      const languageCode = supportedLanguage!.code;
+
+      const fetched = await transcriptService.getTranscriptContentWithGeneration(callId);
+      if (!fetched) {
+        res.status(404).json({ success: false, error: 'Transcript not available for this call' });
+        return;
+      }
+
+      const callMetadata = call.metadata as { translations?: Record<string, TranscriptTranslation> } | null;
+      const existing = callMetadata?.translations?.[languageCode];
+      const sameGeneration = !!fetched.generation && existing?.generation === fetched.generation;
+
+      const generationField = fetched.generation ? { generation: fetched.generation } : {};
+
+      if (existing?.status === 'ready' && sameGeneration) {
+        const text = await transcriptService.getTranslatedTranscript(
+          callId,
+          languageCode,
+          fetched.generation,
+        );
+        // Metadata says ready but the GCS file is gone — fall through and re-translate.
+        if (text !== null) {
+          res.status(200).json({
+            success: true,
+            status: 'ready',
+            text,
+            partial: existing.partial ?? false,
+            ...generationField,
+          });
+          return;
+        }
+      }
+
+      const { text, partial } = await transcriptService.translateTranscript(
+        fetched.text,
+        supportedLanguage!.label,
+        call.externalId,
+      );
+      const finalText = text ?? fetched.text;
+      // partial = LLM failed, don't cache the fallback or an outage permanently poisons this language.
+      if (!partial) {
+        await transcriptService.uploadTranslatedTranscript(
+          call.externalId,
+          languageCode,
+          fetched.generation,
+          finalText,
+        );
+        await repositories.calls.setTranslationStatus(call.id, languageCode, {
+          status: 'ready',
+          partial,
+          ...generationField,
+        });
+      }
+
+      res.status(200).json({ success: true, status: 'ready', text: finalText, partial, ...generationField });
+    } catch (error) {
+      logger.error(`[${callId}] Failed to translate transcript`, error);
+      res.status(500).json({ success: false, error: 'Failed to translate transcript' });
     }
   };
 

@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority, type TranscriptTranslation } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
@@ -26,6 +26,8 @@ import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
+
+export type TranslateTranscriptResult = Pick<TranscriptTranslation, 'text' | 'partial'>;
 
 export interface TranscriptEntry {
   user: string;
@@ -257,6 +259,26 @@ No explanations.
 
 TRANSCRIPT:
 {transcript}
+`;
+
+// Translation prompt for translateTranscript(); {targetLanguage} is filled in per-call.
+const TRANSCRIPT_TRANSLATION_PROMPT = `
+You are translating a call transcript into {targetLanguage}. Your ONLY task is to translate the spoken text into the target language.
+
+IMPORTANT:
+- Keep ALL timestamps exactly as they are: [MM:SS] format
+- Keep ALL speaker names exactly as they are, untranslated
+- Only translate the spoken text into the target language
+- Do not translate brand names, product names, or numbers
+- Do not modify, fix, or improve the text beyond translation
+- Do not add new lines or remove existing ones
+- Do not add commentary or explanations
+- Do not use placeholders like "[...]" or "[content continues]"
+- Preserve the exact line-by-line structure: [MM:SS] Speaker Name: text
+- Translate EVERY line completely, do not skip or truncate any content
+- If a line is already written in the target language, return it unchanged
+
+Output ONLY the translated transcript, nothing else.
 `;
 
 export interface TicketSuggestion {
@@ -797,32 +819,82 @@ export class TranscriptService {
    * @returns Formatted transcript text or null if not found
    */
   async getTranscriptContent(callId: string): Promise<string | null> {
-    try {
-      // Try to fetch formatted transcript first
-      const formattedPath = `attachments/${callId}_formatted.txt`;
+    return (await this.getTranscriptContentWithGeneration(callId))?.text ?? null;
+  }
 
+  // Same as getTranscriptContent, plus the formatted object's GCS `generation` (null if unavailable).
+  async getTranscriptContentWithGeneration(
+    callId: string,
+  ): Promise<{ text: string; generation: string | null } | null> {
+    try {
+      const formattedPath = `attachments/${callId}_formatted.txt`;
       const formattedExists = await this.transcriptStorage.fileExists(formattedPath);
 
       if (formattedExists) {
-        const buffer = await this.transcriptStorage.getFileBuffer(formattedPath);
-        return buffer.toString('utf-8');
+        const [buffer, metadata] = await Promise.all([
+          this.transcriptStorage.getFileBuffer(formattedPath),
+          this.transcriptStorage.getFileMetadata(formattedPath).catch(() => null),
+        ]);
+        const generation = (metadata as Record<string, unknown> | null)?.['generation'];
+        return {
+          text: buffer.toString('utf-8'),
+          generation:
+            typeof generation === 'string' || typeof generation === 'number'
+              ? String(generation)
+              : null,
+        };
       }
 
-      // Fall back to raw JSONL and format it
       const rawContent = await this.retrieveTranscript(callId);
-      if (!rawContent) {
-        return null;
-      }
+      if (!rawContent) return null;
 
       const entries = this.parseTranscriptEntries(rawContent);
-      if (entries.length === 0) {
-        return null;
-      }
+      if (entries.length === 0) return null;
 
-      return this.formatTranscript(entries, callId);
+      return { text: this.formatTranscript(entries, callId), generation: null };
     } catch (error) {
-      logger.error(`Failed to get transcript content for ${callId}:`, error);
+      logger.error(`Failed to get transcript content with generation for ${callId}:`, error);
       return null;
+    }
+  }
+
+  private translatedTranscriptPath(callId: string, language: string, generation: string | null): string {
+    return `attachments/${callId}_translated_${language}_${generation ?? 'unversioned'}.txt`;
+  }
+
+  async uploadTranslatedTranscript(
+    callId: string,
+    language: string,
+    generation: string | null,
+    text: string,
+  ): Promise<void> {
+    await this.transcriptStorage.uploadFileV2(Buffer.from(text, 'utf-8'), {
+      path: this.translatedTranscriptPath(callId, language, generation),
+      contentType: 'text/plain',
+      metadata: { callId, type: 'translated_transcript', language },
+    });
+  }
+
+  async getTranslatedTranscript(
+    callId: string,
+    language: string,
+    generation: string | null,
+  ): Promise<string | null> {
+    const path = this.translatedTranscriptPath(callId, language, generation);
+    const exists = await this.transcriptStorage.fileExists(path);
+    if (!exists) return null;
+    const buffer = await this.transcriptStorage.getFileBuffer(path);
+    return buffer.toString('utf-8');
+  }
+
+  // fileExists()-only check, no download and no raw-JSONL fallback (unlike getIdentifiedTranscriptContent).
+  // ponytail: formatted-file-only, add raw-JSONL fallback if that gap turns out to matter.
+  async identifiedTranscriptExists(callId: string): Promise<boolean> {
+    try {
+      return await this.transcriptStorage.fileExists(`attachments/${callId}_identified_formatted.txt`);
+    } catch (error) {
+      logger.error(`Failed to check identified transcript existence for ${callId}:`, error);
+      return false;
     }
   }
 
@@ -978,6 +1050,31 @@ BRAND NAME CORRECTION:
 
 Output ONLY the processed transcript, nothing else.`;
 
+  const { text } = await this.runChunkedTranslation(
+      transcript,
+      systemInstructions,
+      'transcript_translation',
+      callId,
+    );
+    return text ?? transcript;
+  }
+
+  async translateTranscript(
+    transcript: string,
+    targetLanguageName: string,
+    callId?: string,
+  ): Promise<TranslateTranscriptResult> {
+    const systemInstructions = TRANSCRIPT_TRANSLATION_PROMPT.replace('{targetLanguage}', targetLanguageName);
+    return this.runChunkedTranslation(transcript, systemInstructions, 'transcript_translation_user_language', callId);
+  }
+
+  // Shared chunking/streaming core for postProcessTranscript and translateTranscript.
+  private async runChunkedTranslation(
+    transcript: string,
+    systemInstructions: string,
+    operation: string,
+    callId?: string,
+  ): Promise<TranslateTranscriptResult> {
     try {
       const lines = transcript.split('\n').filter((l) => l.trim());
       const MAX_LINES_PER_CHUNK = 100;
@@ -986,28 +1083,28 @@ Output ONLY the processed transcript, nothing else.`;
         const translated = await executeStreamingLlmRequest({
           userPrompt: transcript,
           systemPrompt: systemInstructions,
-          operation: 'transcript_translation',
+          operation,
           callId,
         });
 
         if (!translated.ok) {
-          logger.warn(`post_process_transcript_failed | reason=${translated.reason} | using_original=true`);
-          return transcript;
+          logger.warn(`${operation}_failed | reason=${translated.reason} | using_original=true`);
+          return { text: transcript, partial: true };
         }
 
-        logger.info('Successfully post-processed transcript (streaming translation)');
-        return translated.content;
+        logger.info(`Successfully processed transcript via ${operation} (streaming)`);
+        return { text: translated.content, partial: false };
       }
 
       // For long transcripts, process in chunks with LIMITED CONCURRENCY.
       // Each chunk is a separate streaming request; a bounded worker pool keeps
-      // the number of concurrent streams in check (the previous unbounded
+      // the number of concurrent streams in check (an earlier unbounded
       // Promise.all overwhelmed the LiteLLM deployment).
       const CHUNK_CONCURRENCY = 3;
       const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
 
       logger.info(
-        `Transcript has ${lines.length} lines, processing in ${totalChunks} chunks of ${MAX_LINES_PER_CHUNK} (concurrency ${CHUNK_CONCURRENCY})`
+        `Transcript has ${lines.length} lines, processing via ${operation} in ${totalChunks} chunks of ${MAX_LINES_PER_CHUNK} (concurrency ${CHUNK_CONCURRENCY})`
       );
 
       // Build chunk metadata up front so results can be reassembled in order.
@@ -1023,24 +1120,26 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       const results: string[] = new Array(chunks.length);
+      const chunkFellBack: boolean[] = new Array(chunks.length).fill(false);
       let nextIndex = 0;
 
       const processChunk = async (chunk: typeof chunks[0], index: number): Promise<void> => {
         logger.info(
-          `Processing chunk ${chunk.chunkIndex}/${totalChunks} (lines ${chunk.startLine}-${chunk.endLine})`
+          `Processing chunk ${chunk.chunkIndex}/${totalChunks} via ${operation} (lines ${chunk.startLine}-${chunk.endLine})`
         );
 
         try {
           const translated = await executeStreamingLlmRequest({
             userPrompt: chunk.chunkText,
             systemPrompt: systemInstructions,
-            operation: 'transcript_translation',
+            operation,
             callId,
           });
 
           if (!translated.ok) {
-            logger.warn(`post_process_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
+            logger.warn(`${operation}_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
             results[index] = chunk.chunkText;
+            chunkFellBack[index] = true;
             return;
           }
 
@@ -1049,6 +1148,7 @@ Output ONLY the processed transcript, nothing else.`;
         } catch (error) {
           logger.error(`Error processing chunk ${chunk.chunkIndex}:`, error);
           results[index] = chunk.chunkText;
+          chunkFellBack[index] = true;
         }
       };
 
@@ -1066,14 +1166,15 @@ Output ONLY the processed transcript, nothing else.`;
 
       await Promise.all(workers);
 
-      const processedTranscript = results.join('\n');
+      const text = results.join('\n');
+      const partial = chunkFellBack.some(Boolean);
       logger.info(
-        `Successfully post-processed transcript in ${results.length} chunks (streaming translation)`
+        `Successfully processed transcript via ${operation} in ${results.length} chunks${partial ? ' (partial)' : ''}`
       );
-      return processedTranscript;
+      return { text, partial };
     } catch (error) {
-      logger.error('Error during transcript post-processing:', error);
-      return transcript; // Fallback to original if processing fails
+      logger.error(`Error during ${operation}:`, error);
+      return { text: transcript, partial: true }; // Fallback to original if processing fails
     }
   }
 
@@ -1719,6 +1820,16 @@ Output ONLY the processed transcript, nothing else.`;
       } catch (error) {
         logger.warn(`[${callId}] transcript_artifact_delete_failed`, { path, error });
       }
+    }
+
+    try {
+      const translated = await this.transcriptStorage.listFiles(`attachments/${callId}_translated_`);
+      for (const file of translated) {
+        await this.transcriptStorage.deleteFile(file.name);
+        logger.info(`[${callId}] transcript_artifact_deleted`, { path: file.name });
+      }
+    } catch (error) {
+      logger.warn(`[${callId}] translated_transcript_artifacts_delete_failed`, { error });
     }
   }
 
