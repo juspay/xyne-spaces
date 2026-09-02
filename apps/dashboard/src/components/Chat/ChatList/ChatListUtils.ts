@@ -20,74 +20,16 @@ export type CombinedMessageItem =
       data: ThreadMessage;
       createdAt: Date;
     };
-/**
- * Extract origin conversation ID from URL hash
- * Example: #origin=9d305bdb-2a05-4833-8bd2-1d4e911db695 → 9d305bdb-2a05-4833-8bd2-1d4e911db695
- */
-export const extractOriginFromHash = (hash: string): string | null => {
-  if (!hash) return null;
-
-  const match = hash.match(/origin=([^&]+)/);
-  return match?.[1] ?? null;
-};
-
-/**
- * Extract message ID from URL hash
- * Example: #origin=abc123&messageId=xyz789 → xyz789
- */
-export const extractMessageIdFromHash = (hash: string): string | null => {
-  if (!hash) return null;
-
-  const match = hash.match(/messageId=([^&]+)/);
-  return match?.[1] ?? null;
-};
-
-/**
- * Extract the temporal anchor (epoch ms) from a message deep-link hash.
- * Example: #origin=abc&createdAt=1712345678901 -> 1712345678901
- * Mirrors the receiver parsing in ConversationPanelV2 so the copy-link
- * producer and the link consumer stay in sync.
- */
-export const extractCreatedAtFromHash = (hash: string): number | null => {
-  if (!hash) return null;
-
-  const match = hash.match(/createdAt=([^&#]+)/);
-  if (!match?.[1]) return null;
-  const parsed = parseInt(match[1], 10);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-export type MessageLinkContext = 'thread' | 'channel';
-
-/**
- * Build a shareable deep link to a message.
- *
- * The `createdAt` temporal anchor is what lets the receiver load the message
- * window directly (getChannelConversationsSnapshot) instead of resolving the
- * target time through a Zero-cache ID lookup (getConversationByIdWithChannel),
- * which is slow or misses for OLDER messages that are not in the local cache —
- * the cause of links landing at the bottom of the channel instead of on the
- * linked message.
- */
-export const buildMessageLink = (params: {
-  shareableOrigin: string;
-  channelId: string;
-  conversationId: string;
-  messageId: string;
-  createdAt?: number | null;
-  context: MessageLinkContext;
-}): string => {
-  const { shareableOrigin, channelId, conversationId, messageId, createdAt, context } = params;
-  const createdAtParam =
-    typeof createdAt === 'number' && Number.isFinite(createdAt) ? `&createdAt=${createdAt}` : '';
-
-  if (context === 'thread') {
-    // Thread message: full path with conversation + messageId + createdAt in hash.
-    return `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}${createdAtParam}`;
-  }
-  // Channel message: channel in path, conversation + createdAt in hash.
-  return `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}${createdAtParam}`;
-};
+// Message deep-link helpers live in a dependency-free module so the copy-link
+// contract can be unit-tested in isolation. Re-exported here to preserve the
+// existing import paths used across the Chat components.
+export {
+  extractOriginFromHash,
+  extractMessageIdFromHash,
+  extractCreatedAtFromHash,
+  buildMessageLink,
+} from './messageLink';
+export type { MessageLinkContext } from './messageLink';
 
 /**
  * Helper function to determine if avatar should be shown
