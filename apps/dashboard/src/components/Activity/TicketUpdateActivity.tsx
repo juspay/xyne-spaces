@@ -247,7 +247,8 @@ export const TicketUpdateActivity = ({
     <div className='flex flex-col gap-1 mt-2'>
       <div className='text-sm font-medium break-words whitespace-normal'>
         {' '}
-        {isPRAction || isReleaseAction ? config.label.toLowerCase() : `${config.label} updated`} for ticket &ldquo;
+        {isPRAction || isReleaseAction ? config.label.toLowerCase() : `${config.label} updated`} for
+        ticket &ldquo;
         {ticket.title}&rdquo;
       </div>
       <div className='text-xs text-muted-foreground break-words whitespace-normal'>
@@ -263,7 +264,9 @@ export const TicketUpdateActivity = ({
       </span>
       <span className='text-muted-foreground'>
         {' '}
-        {isPRAction || isReleaseAction ? config.label.toLowerCase() : `${config.label.toLowerCase()} updated`}
+        {isPRAction || isReleaseAction
+          ? config.label.toLowerCase()
+          : `${config.label.toLowerCase()} updated`}
       </span>
     </span>
   );
