@@ -393,6 +393,9 @@ export class AutomationExecutor {
       const stepName = `step_${i}`;
       const isResuming = resumeAtIndex === i;
 
+      const store = automationContextStorage.getStore();
+      if (store) store.currentStepName = stepName;
+
       if (!isResuming) {
         await this.upsertStepRow(runId, stepName, step, 'RUNNING', null);
       }
@@ -427,7 +430,11 @@ export class AutomationExecutor {
     steps: AutomationStepConfig[],
     context: AutomationContext,
   ): Promise<void> {
+    const store = automationContextStorage.getStore();
     for (const step of steps) {
+      // Nested steps have no persisted row identity of their own — drop the
+      // caller's step name so nothing inside a branch can inherit a stale one.
+      if (store) delete store.currentStepName;
       try {
         await this.executeStep(step, context, {
           runId: '',

@@ -4,6 +4,7 @@ export interface AutomationContextStore {
   runId: string;
   automationId: string;
   chain: readonly string[];
+  currentStepName?: string;
 }
 
 export const automationContextStorage = new AsyncLocalStorage<AutomationContextStore>();
