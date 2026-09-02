@@ -40,7 +40,7 @@ const BATCH_SLEEP_MS = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SLEEP_MS ||
 
 // Batching for the planning-risk reconciliation pass, which does per-ticket writes
 // (metadata + timeline + notifications) rather than a bulk `updateMany`.
-const STAGE_ETA_REMINDER_BATCH_SIZE = 50;
+const STAGE_ETA_REMINDER_BATCH_SIZE = 15;
 const STAGE_ETA_REMINDER_BATCH_DELAY_MS = 1000;
 
 const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
@@ -249,11 +249,29 @@ class StageEtaDeadlineWorker {
 
   /**
    * Scheduled counterpart to the immediate planning-risk evaluation wired into every ticket
-   * mutation path (services/etaManagement). Catches risk that appears purely from time
-   * passing, with no new mutation event - e.g. a ticket due date that quietly falls behind
-   * the current stage deadline while nothing else about the ticket changes. Read-only with
-   * respect to `Ticket.eta`/forecasts: it only ever updates the persisted planning-risk
-   * state, never extends a due date.
+   * mutation path (services/etaManagement).
+   *
+   * Note it is NOT the clock that creates work here: the risk condition includes
+   * `now <= stageDeadline`, so as time passes the condition can only go true -> false. Time
+   * ends a planning risk (it becomes stage-overdue); it can never start one. What this pass
+   * catches is risk state that has gone stale against its current inputs, in the cases where
+   * the thing that changed was not a ticket mutation:
+   *
+   *   - Tickets never evaluated at all - written before this feature existed, or by a path
+   *     that doesn't run the immediate evaluation (imports, flow cascades). Their metadata
+   *     parses to state NONE even though the condition is already true.
+   *   - A board ETA-config change: it bumps `configVersion`, which changes the risk
+   *     fingerprint of every ticket on that board without touching a single ticket row, so
+   *     nothing else would ever notice it.
+   *
+   * Scope is deliberately the pre-breach window only - the loader filters `stageEta > now`,
+   * so a visit whose deadline has already passed is not seen here at all; that is
+   * stage-overdue, owned by syncStageOverdueFlags. One consequence: a risk that was ACTIVE
+   * when its deadline passed keeps that state until the ticket's next mutation. It is
+   * masked in the UI (stage-overdue outranks planning risk), but the stored state is stale.
+   *
+   * Read-only with respect to `Ticket.eta`/forecasts: it only ever updates the persisted
+   * planning-risk state, never extends a due date.
    */
   private async reconcilePlanningRisk(
     entries: Array<{

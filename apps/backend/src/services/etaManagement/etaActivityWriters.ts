@@ -1,7 +1,4 @@
 import type { Prisma } from '@prisma/client';
-import type { ReadonlyJSONValue, Transaction } from '@rocicorp/zero';
-import type { Schema } from '@xyne/shared';
-import { v4 as uuidv4 } from 'uuid';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
 import type { EtaActivityIntent } from './activityIntents';
@@ -20,6 +17,11 @@ export interface EtaActivityWriteContext {
    * least one intent to write).
    */
   systemActorId?: string;
+  /**
+   * Ticket's conversation, when it has one. Required for an intent's
+   * `systemMessageContent` to be written; without it only the timeline row is.
+   */
+  conversationId?: string | null;
 }
 
 /**
@@ -38,45 +40,32 @@ export async function writeEtaActivitiesPrisma(
   if (intents.length === 0) return;
   const systemActorId = ctx.systemActorId ?? (await getTicketBotActorId(ctx.workspaceId));
   for (const intent of intents) {
+    const writtenBy = intent.actorId ?? systemActorId;
     await recordTicketTimelineEvent(
       {
         activity: {
           ticketId: ctx.ticketId,
-          updatedBy: systemActorId,
+          updatedBy: writtenBy,
           activityType: intent.activityType,
           value: intent.value as Prisma.InputJsonValue,
           workspaceId: ctx.workspaceId,
           channelId: ctx.channelId,
           timestamp: new Date(ctx.timestamp),
         },
+        ...(intent.systemMessageContent && ctx.conversationId
+          ? {
+              message: {
+                conversationId: ctx.conversationId,
+                senderId: writtenBy,
+                content: intent.systemMessageContent,
+                activityType: intent.activityType,
+                workspaceId: ctx.workspaceId,
+                createdAt: new Date(ctx.timestamp),
+              },
+            }
+          : {}),
       },
       client,
     );
-  }
-}
-
-/**
- * Zero-mutator counterpart to {@link writeEtaActivitiesPrisma}, writing the
- * same rows with the same shapes through `tx.mutate` so the two write paths
- * can't drift.
- */
-export async function writeEtaActivitiesZero(
-  tx: Transaction<Schema>,
-  intents: ReadonlyArray<EtaActivityIntent>,
-  ctx: EtaActivityWriteContext,
-): Promise<void> {
-  if (intents.length === 0) return;
-  const systemActorId = ctx.systemActorId ?? (await getTicketBotActorId(ctx.workspaceId));
-  for (const intent of intents) {
-    await tx.mutate.ticket_activities.insert({
-      workspaceId: ctx.workspaceId,
-      id: uuidv4(),
-      ticketId: ctx.ticketId,
-      updatedBy: systemActorId,
-      timestamp: ctx.timestamp,
-      activityType: intent.activityType,
-      value: intent.value as ReadonlyJSONValue,
-      ...(ctx.channelId != null ? { channelId: ctx.channelId } : {}),
-    });
   }
 }

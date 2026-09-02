@@ -4885,12 +4885,9 @@ export const mutators = defineMutators({
 
         const current = parseBoardEtaManagement(board.metadata);
         const merged = mergeBoardEtaManagement(board.metadata, {
-          schemaVersion: 1,
           autoRecomputeEnabled,
           ...(standardPathStageIds !== undefined && { standardPathStageIds }),
           configVersion: current.configVersion + 1,
-          updatedAt: now,
-          updatedBy: ctx.userID,
         });
 
         await tx.mutate.boards.update({

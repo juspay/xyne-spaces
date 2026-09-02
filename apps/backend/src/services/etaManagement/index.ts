@@ -24,8 +24,15 @@ export { decideEtaUpdate } from './extendOnly';
 export { evaluatePlanningRisk } from './riskEvaluation';
 export { canUserModifyTicketControl } from './etaPermissions';
 export { isEtaManagementKillSwitchActive } from './featureFlag';
-export { buildEtaActivityIntents, buildRiskTransitionActivityIntents } from './activityIntents';
-export { writeEtaActivitiesPrisma, writeEtaActivitiesZero } from './etaActivityWriters';
+export {
+  buildEtaActivityIntents,
+  buildRiskTransitionActivityIntents,
+  stageEtaActivityOutbox,
+  drainEtaActivityOutbox,
+  etaSystemMessageContent,
+  drainedOutboxTimestamp,
+} from './activityIntents';
+export { writeEtaActivitiesPrisma } from './etaActivityWriters';
 export type { EtaActivityWriteContext } from './etaActivityWriters';
 export type { EtaActivityIntent, BuildActivityIntentsContext } from './activityIntents';
 export { loadBoardEtaContext, isTerminalStatus } from './prismaContext';
@@ -156,7 +163,6 @@ export function evaluateEta(input: EvaluateEtaInput): EvaluateEtaResult {
 
   const ticketEtaManagementPatch: EvaluateEtaResult['ticketEtaManagementPatch'] = {
     lastEvaluatedAt: now.getTime(),
-    lastBoardConfigVersion: boardEtaManagement.configVersion,
     forecastStatus: forecast.status,
     forecastIncompleteReason: forecast.incompleteReason,
     forecastIncompleteStageIds: forecast.incompleteStageIds,

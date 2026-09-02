@@ -91,12 +91,9 @@ export class BoardRepository {
       // NON_LINEAR/RELEASE/FLOW start disabled (Standard Path is opt-in later for
       // NON_LINEAR; RELEASE/FLOW automatic management is deferred entirely this release).
       const metadataWithEtaDefaults = mergeBoardEtaManagement(data.metadata ?? null, {
-        schemaVersion: 1,
         autoRecomputeEnabled: resolvedBoardType === BoardType.DEFAULT,
         standardPathStageIds: [],
         configVersion: 1,
-        updatedAt: Date.now(),
-        updatedBy: data.createdBy,
       });
 
       const board = await tx.board.create({

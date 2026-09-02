@@ -10,7 +10,14 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { websocketService } from '@/services/websocketService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
-import { dispatchEtaNotifications, etaSignalsFromMetadataDiff } from '@/services/etaManagement';
+import {
+  dispatchEtaNotifications,
+  drainEtaActivityOutbox,
+  drainedOutboxTimestamp,
+  etaSystemMessageContent,
+  etaSignalsFromMetadataDiff,
+  writeEtaActivitiesPrisma,
+} from '@/services/etaManagement';
 
 import {
   emitTicketUpdated,
@@ -206,6 +213,43 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
     if (!ticket) {
       logger.warn(`[TicketsSideEffectHandler] Ticket ${ticketId} not found`);
       return;
+    }
+
+    try {
+      const etaIntents = drainEtaActivityOutbox({
+        previousMetadata: prev.metadata,
+        currentMetadata: args.metadata,
+      });
+      if (etaIntents.length > 0) {
+        const messageActorIds = [
+          ...new Set(etaIntents.map(i => i.actorId).filter((id): id is string => !!id)),
+        ];
+        const messageActors = messageActorIds.length
+          ? await db.user.findMany({
+              where: { id: { in: messageActorIds } },
+              select: { id: true, name: true, displayName: true },
+            })
+          : [];
+        const actorNames = new Map(
+          messageActors.map(u => [u.id, u.displayName || u.name || 'Someone']),
+        );
+
+        const intentsWithMessages = etaIntents.map(intent => {
+          const actorName = intent.actorId ? actorNames.get(intent.actorId) : undefined;
+          const content = actorName ? etaSystemMessageContent(intent, actorName) : null;
+          return content ? { ...intent, systemMessageContent: content } : intent;
+        });
+
+        await writeEtaActivitiesPrisma(db, intentsWithMessages, {
+          ticketId,
+          workspaceId: ticket.workspaceId,
+          channelId: ticket.channelId,
+          conversationId: ticket.conversationId,
+          timestamp: drainedOutboxTimestamp(args.metadata) ?? Date.now(),
+        });
+      }
+    } catch (error) {
+      logger.error(`[TicketsSideEffectHandler] Failed to write staged ETA activities:`, error);
     }
 
     // ETA planning-risk alerts. Driven off the committed before-vs-after state rather

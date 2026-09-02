@@ -10,12 +10,9 @@ import { z } from 'zod';
 // ============================================================================
 
 export const boardEtaManagementSchema = z.object({
-  schemaVersion: z.literal(1),
   autoRecomputeEnabled: z.boolean(),
   standardPathStageIds: z.array(z.string()),
   configVersion: z.number().int().nonnegative(),
-  updatedAt: z.number(),
-  updatedBy: z.string(),
 });
 
 export type BoardEtaManagement = z.infer<typeof boardEtaManagementSchema>;
@@ -28,12 +25,9 @@ export type BoardEtaManagement = z.infer<typeof boardEtaManagementSchema>;
  * `etaManagement` object.
  */
 export const DEFAULT_BOARD_ETA_MANAGEMENT: BoardEtaManagement = {
-  schemaVersion: 1,
   autoRecomputeEnabled: false,
   standardPathStageIds: [],
   configVersion: 0,
-  updatedAt: 0,
-  updatedBy: 'system',
 };
 
 export function validateBoardEtaManagement(data: unknown) {
@@ -120,10 +114,25 @@ const planningRiskSchema = z.object({
   acknowledgmentReason: z.string().nullable(),
 });
 
+const etaActivityOutboxEntrySchema = z.object({
+  activityType: z.string(),
+  /** One of the typed Eta*ActivityValue shapes; see tickets/etaActivityValues.ts. */
+  value: z.unknown(),
+  /** Attributing user, or null for the workspace ticket bot (automatic rows). */
+  actorId: z.string().nullable(),
+});
+
+const etaActivityOutboxSchema = z.object({
+  at: z.number(),
+  entries: z.array(etaActivityOutboxEntrySchema),
+});
+
+export type EtaActivityOutboxEntry = z.infer<typeof etaActivityOutboxEntrySchema>;
+export type EtaActivityOutbox = z.infer<typeof etaActivityOutboxSchema>;
+
 export const ticketEtaManagementSchema = z.object({
-  schemaVersion: z.literal(1),
   lastEvaluatedAt: z.number().nullable(),
-  lastBoardConfigVersion: z.number().int().nullable(),
+  pendingActivities: etaActivityOutboxSchema.nullable().default(null),
   forecastStatus: z.enum(forecastStatusValues),
   forecastIncompleteReason: z.string().nullable(),
   forecastIncompleteStageIds: z.array(z.string()),
@@ -137,9 +146,8 @@ export type TicketEtaManagement = z.infer<typeof ticketEtaManagementSchema>;
 
 /** Default state for a ticket that has never been evaluated by this feature. */
 export const DEFAULT_TICKET_ETA_MANAGEMENT: TicketEtaManagement = {
-  schemaVersion: 1,
   lastEvaluatedAt: null,
-  lastBoardConfigVersion: null,
+  pendingActivities: null,
   forecastStatus: 'NOT_APPLICABLE',
   forecastIncompleteReason: null,
   forecastIncompleteStageIds: [],

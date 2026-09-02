@@ -128,12 +128,12 @@ import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
+  stageEtaActivityOutbox,
   isTerminalStatus,
   isEtaManagementKillSwitchActive,
   canUserModifyTicketControl,
   msToDate,
   dateToMs,
-  writeEtaActivitiesZero,
   loadZeroEtaContext,
 } from '@/services/etaManagement';
 import {
@@ -5977,6 +5977,7 @@ export function createMutators(
           }
 
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
+          let latestTicketMetadata: unknown = ticket.metadata;
           const activities: any[] = [];
           const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition', 'ticketType'] as const;
           const oldAssignedTo = ticket.assignedTo;
@@ -6099,16 +6100,6 @@ export function createMutators(
                 globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
               });
 
-              const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
-              await tx.mutate.tickets.update({
-                id: params.id,
-                ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
-                  ? { eta: etaResult.etaDecision.newEta.getTime() }
-                  : {}),
-                metadata: mergedMetadata as ReadonlyJSONValue,
-                updatedAt: now,
-              });
-
               const boardTransferActivityIntents = buildEtaActivityIntents(etaResult, {
                 currentStageId: firstStage.id,
                 oldEta: ticket.eta ?? null,
@@ -6117,11 +6108,18 @@ export function createMutators(
                 systemReason: `Automatic recalculation after moving ticket to board "${targetBoard?.name ?? params.boardId}"`,
                 previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
               });
-              await writeEtaActivitiesZero(tx, boardTransferActivityIntents, {
-                ticketId: params.id,
-                workspaceId: authData.workspaceId,
-                channelId: ticket.channelId,
-                timestamp: now,
+              const mergedMetadata = mergeTicketEtaManagement(latestTicketMetadata, {
+                ...etaResult.ticketEtaManagementPatch,
+                pendingActivities: stageEtaActivityOutbox(boardTransferActivityIntents, now),
+              });
+              latestTicketMetadata = mergedMetadata;
+              await tx.mutate.tickets.update({
+                id: params.id,
+                ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+                  ? { eta: etaResult.etaDecision.newEta.getTime() }
+                  : {}),
+                metadata: mergedMetadata as ReadonlyJSONValue,
+                updatedAt: now,
               });
 
             }
@@ -6544,7 +6542,7 @@ export function createMutators(
                 updateData.eta = etaResult.etaDecision.newEta.getTime();
               }
               updateData.metadata = mergeTicketEtaManagement(
-                updateData.metadata ?? ticket.metadata,
+                updateData.metadata ?? latestTicketMetadata,
                 etaResult.ticketEtaManagementPatch,
               );
 
@@ -6566,36 +6564,36 @@ export function createMutators(
           }
 
           if (isPureManualEtaChange) {
-            // User-attributed (not the system actor) - this is a direct, deliberate manual
-            // edit, distinct from the system-attributed ETA_AUTO_RECOMPUTED/ETA_RISK_* rows
-            // written below. Kept alongside the existing generic ActivityType.ETA row the
-            // `fields` loop already writes (unchanged, for existing timeline consumers) -
-            // this one carries the reason.
-            await tx.mutate.ticket_activities.insert({
-              workspaceId: authData.workspaceId,
-              id: uuidv4(),
-              ticketId: params.id,
-              updatedBy: authData.sub,
-              timestamp: Date.now(),
-              activityType: ActivityType.ETA_MANUALLY_UPDATED,
-              value: {
-                oldEta: ticket.eta ?? null,
-                newEta: params.eta as number,
-                reason: params.etaChangeReason ?? '',
-                actingUserId: authData.sub,
-              } satisfies EtaManuallyUpdatedActivityValue as ReadonlyJSONValue,
-              channelId: ticket.channelId,
+            // User-attributed, unlike the system-attributed ETA_AUTO_RECOMPUTED/ETA_RISK_*
+            // rows. Stays alongside the generic ActivityType.ETA row the `fields` loop
+            // already writes (unchanged, for existing timeline consumers) - this one carries
+            // the reason, which is a mutator param the side-effect layer cannot observe on
+            // its own and so must travel through the outbox.
+            etaActivityIntentsForTicketUpdate = [
+              ...etaActivityIntentsForTicketUpdate,
+              {
+                activityType: ActivityType.ETA_MANUALLY_UPDATED,
+                value: {
+                  oldEta: ticket.eta ?? null,
+                  newEta: params.eta as number,
+                  reason: params.etaChangeReason ?? '',
+                  actingUserId: authData.sub,
+                } satisfies EtaManuallyUpdatedActivityValue,
+                actorId: authData.sub,
+              },
+            ];
+          }
+
+          if (etaActivityIntentsForTicketUpdate.length > 0) {
+            updateData.metadata = mergeTicketEtaManagement(updateData.metadata ?? latestTicketMetadata, {
+              pendingActivities: stageEtaActivityOutbox(
+                etaActivityIntentsForTicketUpdate,
+                params.updatedAt,
+              ),
             });
           }
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
-
-          await writeEtaActivitiesZero(tx, etaActivityIntentsForTicketUpdate, {
-            ticketId: params.id,
-            workspaceId: authData.workspaceId,
-            channelId: ticket.channelId,
-            timestamp: params.updatedAt,
-          });
 
           if (
             params.statusV2 === TicketStatusV2.COMPLETED
@@ -6928,6 +6926,8 @@ export function createMutators(
           }
 
           const now = Date.now();
+          // Record + system message only - no additional notification. The record is staged
+          // for TicketsSideEffectHandler like every other ETA row, and is user-attributed.
           const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, {
             planningRisk: {
               state: 'ACKNOWLEDGED',
@@ -6935,6 +6935,21 @@ export function createMutators(
               acknowledgedBy: authData.sub,
               acknowledgmentReason: reason,
             },
+            pendingActivities: stageEtaActivityOutbox(
+              [
+                {
+                  activityType: ActivityType.ETA_RISK_ACKNOWLEDGED,
+                  value: {
+                    fingerprint: expectedFingerprint,
+                    reason,
+                    acknowledgedBy: authData.sub,
+                    acknowledgedAt: now,
+                  } satisfies EtaRiskAcknowledgedActivityValue,
+                  actorId: authData.sub,
+                },
+              ],
+              now,
+            ),
           });
 
           await tx.mutate.tickets.update({
@@ -6942,46 +6957,6 @@ export function createMutators(
             metadata: mergedMetadata as ReadonlyJSONValue,
             updatedAt: now,
           });
-
-          // Record + system message only - no additional notification.
-          await tx.mutate.ticket_activities.insert({
-            workspaceId: authData.workspaceId,
-            id: uuidv4(),
-            ticketId,
-            updatedBy: authData.sub,
-            timestamp: now,
-            activityType: ActivityType.ETA_RISK_ACKNOWLEDGED,
-            value: {
-              fingerprint: expectedFingerprint,
-              reason,
-              acknowledgedBy: authData.sub,
-              acknowledgedAt: now,
-            } satisfies EtaRiskAcknowledgedActivityValue as ReadonlyJSONValue,
-            channelId: ticket.channelId,
-          });
-
-          if (ticket.conversationId) {
-            const user = await tx.run(zql.users.where('id', authData.sub).one());
-            const userName = user?.displayName || user?.name || 'Someone';
-            await tx.mutate.messages.insert({
-              messageId: uuidv4(),
-              conversationId: ticket.conversationId,
-              workspaceId: authData.workspaceId,
-              senderId: authData.sub,
-              content: `${userName} acknowledged the planning-risk warning: ${reason}`,
-              msgType: MessageType.SYSTEM,
-              hasAttachment: false,
-              edited: false,
-              isDeleted: false,
-              isSent: true,
-              showInChannel: false,
-              createdAt: now,
-              metadata: {
-                activityType: ActivityType.ETA_RISK_ACKNOWLEDGED,
-                isTicketActivity: true,
-              },
-            });
-          }
 
           void clientTimestamp; // display-consistency hint only; server timestamp (`now`) is authoritative for persistence.
         },
@@ -7260,7 +7235,21 @@ export function createMutators(
             finalEtaMs = etaResult.etaDecision.changed ? dateToMs(etaResult.etaDecision.newEta) : undefined;
           }
 
-          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
+          // ETA evaluation audit trail (auto-recompute/risk detected/reopened/resolved),
+          // staged for TicketsSideEffectHandler to write post-commit.
+          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
+            currentStageId: ticketStageEtaEntry.stageId,
+            oldEta: ticket.eta ?? null,
+            boardConfigVersion: boardEtaManagement.configVersion,
+            trigger: 'MANUAL_STAGE_DEADLINE',
+            systemReason: `Manual stage deadline update for "${currentStage.name}"`,
+            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+          });
+
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, {
+            ...etaResult.ticketEtaManagementPatch,
+            pendingActivities: stageEtaActivityOutbox(etaActivityIntents, now),
+          });
           await tx.mutate.tickets.update({
             id: ticket.id,
             updatedAt: now,
@@ -7278,22 +7267,6 @@ export function createMutators(
             logger.info('[MUTATOR] Ticket ETA not updated', { ticketId: ticket.id });
           }
 
-          // ETA evaluation audit trail (auto-recompute/risk detected/reopened/resolved/
-          // forecast-incomplete), attributed to the system actor.
-          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
-            currentStageId: ticketStageEtaEntry.stageId,
-            oldEta: ticket.eta ?? null,
-            boardConfigVersion: boardEtaManagement.configVersion,
-            trigger: 'MANUAL_STAGE_DEADLINE',
-            systemReason: `Manual stage deadline update for "${currentStage.name}"`,
-            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
-          });
-          await writeEtaActivitiesZero(tx, etaActivityIntents, {
-            ticketId: ticket.id,
-            workspaceId: authData.workspaceId,
-            channelId: ticket.channelId,
-            timestamp: now,
-          });
 
           // 11. Create ticket activity for stage ETA change
           const newStageEta = stageEta;
@@ -8431,12 +8404,9 @@ export function createMutators(
 
           const currentEtaManagement = parseBoardEtaManagement(board.metadata);
           const mergedMetadata = mergeBoardEtaManagement(board.metadata, {
-            schemaVersion: 1,
             autoRecomputeEnabled,
             ...(standardPathStageIds !== undefined && { standardPathStageIds }),
             configVersion: currentEtaManagement.configVersion + 1,
-            updatedAt: now,
-            updatedBy: authData.sub,
           });
 
           await tx.mutate.boards.update({
@@ -17899,7 +17869,21 @@ export function createMutators(
             now: new Date(now),
             globalKillSwitchEnabled: isEtaManagementKillSwitchActive(),
           });
-          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
+          // Audit trail for the ETA evaluation, staged into the same write as the state it
+          // describes; TicketsSideEffectHandler drains it post-commit (system-actor
+          // resolution needs an async lookup that doesn't belong on the mutation path).
+          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
+            currentStageId: targetStage.id,
+            oldEta: ticket.eta ?? null,
+            boardConfigVersion: boardEtaManagement.configVersion,
+            trigger: 'STAGE_TRANSITION',
+            systemReason: `Automatic recalculation after moving to stage "${toStageName}"`,
+            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+          });
+          const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, {
+            ...etaResult.ticketEtaManagementPatch,
+            pendingActivities: stageEtaActivityOutbox(etaActivityIntents, now),
+          });
           const finalEtaMs = etaResult.etaDecision.changed ? dateToMs(etaResult.etaDecision.newEta) : undefined;
 
           await tx.mutate.tickets.update({
@@ -17913,17 +17897,6 @@ export function createMutators(
             metadata: mergedMetadata as ReadonlyJSONValue,
           });
 
-          // Audit trail for the ETA evaluation, deferred alongside the other post-commit
-          // activity/message writes below (system-actor resolution needs an async lookup that
-          // doesn't belong on the synchronous mutation path).
-          const etaActivityIntents = buildEtaActivityIntents(etaResult, {
-            currentStageId: targetStage.id,
-            oldEta: ticket.eta ?? null,
-            boardConfigVersion: boardEtaManagement.configVersion,
-            trigger: 'STAGE_TRANSITION',
-            systemReason: `Automatic recalculation after moving to stage "${toStageName}"`,
-            previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
-          });
 
           // Defer the non-transactional side-effects (post-commit, via asyncTasks). All three
           // are safe here: the ETA close only touches stageLeftAt (the ticket_stage_eta handler
@@ -18003,15 +17976,9 @@ export function createMutators(
               });
             }
 
-            await writeEtaActivitiesZero(tx, etaActivityIntents, {
-              ticketId,
-              workspaceId: authData.workspaceId,
-              channelId: ticket.channelId,
-              timestamp: now,
-            });
-
-            // ETA notifications are dispatched post-commit by TicketsSideEffectHandler,
-            // which fires off the `tx.mutate.tickets.update` this mutator performed.
+            // ETA activity rows and notifications are both written post-commit by
+            // TicketsSideEffectHandler, off the `tx.mutate.tickets.update` this mutator
+            // performed - the rows from the outbox staged into that update's metadata.
             } catch (error) {
               logger.error('stage_transition_side_effects_failed', { ticketId, targetStageId, error });
             }
