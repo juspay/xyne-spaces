@@ -385,6 +385,7 @@ const availableColumns = [
   { key: 'stage', label: 'Sub-status', icon: <CircleCheckBig className='h-4 w-4' /> },
   { key: 'createdAt', label: 'Created At', icon: <Clock className='h-4 w-4' /> },
   { key: 'createdBy', label: 'Created By', icon: <User className='h-4 w-4' /> },
+  { key: 'updatedAt', label: 'Updated At', icon: <Clock className='h-4 w-4' /> },
 ];
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
@@ -3420,11 +3421,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
       return availableColumns.filter(
-        col => !['stage', 'board', 'createdAt', 'createdBy'].includes(col.key),
+        col => !['stage', 'board', 'createdAt', 'createdBy', 'updatedAt'].includes(col.key),
       );
     }
     if (layoutView === 'calendar') {
-      return availableColumns.filter(col => !['stage', 'board', 'createdBy'].includes(col.key));
+      return availableColumns.filter(
+        col => !['stage', 'board', 'createdBy', 'updatedAt'].includes(col.key),
+      );
     }
     return availableColumns.filter(col => col.key !== 'status');
   }, [layoutView]);

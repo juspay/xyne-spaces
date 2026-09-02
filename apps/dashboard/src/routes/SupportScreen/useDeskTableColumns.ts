@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from 'react';
 export const DESK_TABLE_BUILTIN_COLUMNS = [
   { key: 'createdAt', label: 'Created at' },
   { key: 'age', label: 'Age' },
+  { key: 'updatedAt', label: 'Last updated' },
+  { key: 'createdBy', label: 'Created by' },
   { key: 'assignee', label: 'Assignee' },
   { key: 'dueDate', label: 'Due date' },
   { key: 'status', label: 'Status Category' },
@@ -15,13 +17,14 @@ const DEFAULT_COLUMN_KEYS = DESK_TABLE_BUILTIN_COLUMNS.map(column => column.key 
 
 const storageKey = (channelId: string): string => `desk-table-columns-${channelId}`;
 
-const CURRENT_COLUMNS_VERSION = 3;
+const CURRENT_COLUMNS_VERSION = 4;
 
 // Adding a builtin column means bumping the version and listing its key here,
 // or desks with saved column choices never see it.
 const COLUMNS_ADDED_IN_VERSION: ReadonlyMap<number, readonly string[]> = new Map([
   [2, ['createdAt']],
   [3, ['age']],
+  [4, ['updatedAt', 'createdBy']],
 ]);
 
 const withColumnsAddedSince = (version: number, columns: Set<string>): Set<string> => {
