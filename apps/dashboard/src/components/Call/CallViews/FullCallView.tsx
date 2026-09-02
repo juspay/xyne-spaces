@@ -89,9 +89,9 @@ interface FullCallViewProps {
   /** Optional: override current user ID */
   currentUserId?: string | null | undefined;
   /** Optional: callback when host admits a lobby participant */
-  onApproveLobbyRequest?: ((participantId: string) => void) | undefined;
+  onApproveLobbyRequest?: ((participantId: string) => void | Promise<void>) | undefined;
   /** Optional: callback when host declines a lobby participant */
-  onRejectLobbyRequest?: ((participantId: string) => void) | undefined;
+  onRejectLobbyRequest?: ((participantId: string) => void | Promise<void>) | undefined;
   /** Optional: hide invite button in sidebar */
   hideInvite?: boolean | undefined;
   /** Hide thread panel chat button (for external users) */

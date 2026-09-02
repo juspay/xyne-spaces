@@ -37,6 +37,7 @@ import { playAudio } from '../../../utils/audioPlayer';
 
 import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenShare';
 import { logger, Logger } from '../../../utils/logger';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { CallWhiteboardSync } from '../CallWhiteboard';
 import { callService } from '../../../services/Call/callService';
 import {
@@ -276,20 +277,32 @@ export function CustomLiveKitRoom({
 
   // Lobby approval handlers
   const handleApproveLobbyRequest = useCallback(
-    (participantId: string) => {
-      if (!zero || !internalCallId) return;
-      void zero.mutate(
-        mutators.calls.approveLobbyRequest({ callId: internalCallId, participantId }),
+    async (participantId: string) => {
+      if (!zero || !internalCallId) {
+        toast.error('Call is still connecting. Please try again in a moment.');
+        return;
+      }
+      await surfaceMutationError(
+        zero.mutate(
+          mutators.calls.approveLobbyRequest({ callId: internalCallId, participantId }),
+        ),
+        'Could not admit participant. Please try again.',
       );
     },
     [zero, internalCallId],
   );
 
   const handleRejectLobbyRequest = useCallback(
-    (participantId: string) => {
-      if (!zero || !internalCallId) return;
-      void zero.mutate(
-        mutators.calls.rejectLobbyRequest({ callId: internalCallId, participantId }),
+    async (participantId: string) => {
+      if (!zero || !internalCallId) {
+        toast.error('Call is still connecting. Please try again in a moment.');
+        return;
+      }
+      await surfaceMutationError(
+        zero.mutate(
+          mutators.calls.rejectLobbyRequest({ callId: internalCallId, participantId }),
+        ),
+        'Could not decline participant. Please try again.',
       );
     },
     [zero, internalCallId],

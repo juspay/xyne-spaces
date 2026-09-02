@@ -48,9 +48,9 @@ interface ParticipantsSidebarProps {
   /** If provided, used instead of useAuth().user?.id */
   currentUserId?: string | null | undefined;
   /** Callback when host admits an external participant */
-  onApproveLobbyRequest?: ((participantId: string) => void) | undefined;
+  onApproveLobbyRequest?: ((participantId: string) => void | Promise<void>) | undefined;
   /** Callback when host declines an external participant */
-  onRejectLobbyRequest?: ((participantId: string) => void) | undefined;
+  onRejectLobbyRequest?: ((participantId: string) => void | Promise<void>) | undefined;
   /** Hide "Add People" button and invite modal (e.g. for external users) */
   hideInvite?: boolean | undefined;
   /** Identities (userIds) of participants with hand raised */
@@ -587,11 +587,11 @@ export function ParticipantsSidebar({
   }, [participants]);
 
   const handleApprove = useCallback(
-    (participantId: string) => {
+    async (participantId: string) => {
       if (!onApproveLobbyRequest || approvingId) return;
       setApprovingId(participantId);
       try {
-        onApproveLobbyRequest(participantId);
+        await onApproveLobbyRequest(participantId);
       } finally {
         setApprovingId(null);
       }
@@ -600,11 +600,11 @@ export function ParticipantsSidebar({
   );
 
   const handleReject = useCallback(
-    (participantId: string) => {
+    async (participantId: string) => {
       if (!onRejectLobbyRequest || rejectingId) return;
       setRejectingId(participantId);
       try {
-        onRejectLobbyRequest(participantId);
+        await onRejectLobbyRequest(participantId);
       } finally {
         setRejectingId(null);
       }
