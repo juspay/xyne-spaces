@@ -1,3 +1,10 @@
+## [1.258.1](https://github.com/juspay/xyne-spaces/compare/v1.258.0...v1.258.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* skip vector retrieval for CAC-listed rank profiles ([#1385](https://github.com/juspay/xyne-spaces/issues/1385)) ([1de2679](https://github.com/juspay/xyne-spaces/commit/1de26798ac29400fbe382e0a4f0139d7b1e4fc9c))
+
 ## [1.258.0](https://github.com/juspay/xyne-spaces/compare/v1.257.0...v1.258.0) (2026-09-02)
 
 
