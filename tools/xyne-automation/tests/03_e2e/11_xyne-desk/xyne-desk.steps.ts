@@ -1275,7 +1275,9 @@ export default class XyneDeskSteps {
       body: `<p>New composed Desk mail from automation ${suffix}.</p>`,
       from: deskChannelDlEmails.get(channelAlias) ?? config.desk.mockDlEmail,
       to: `compose.recipient.${suffix}@example.test`,
-      cc: [`compose.cc.${suffix}@example.test`],
+      // The compose UI step below enters only To/Subject/body, so the captured
+      // mail carries no cc. Keep the fixture consistent with what is actually sent.
+      cc: [],
       bcc: [],
       threadId: `mock-compose-thread-${suffix}`,
       messageId: `mock-compose-message-${suffix}`,
