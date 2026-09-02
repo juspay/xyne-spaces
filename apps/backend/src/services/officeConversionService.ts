@@ -102,7 +102,18 @@ const RELS_XML_BUILDER = new XMLBuilder({
 // format where "linked object" references live in binary compound-file
 // streams instead). Non-zip input falls through unchanged below — the
 // registry hardening is what still covers that case.
-async function stripExternalReferences(buffer: Buffer): Promise<Buffer> {
+interface StrippedReference {
+    part: string
+    relationshipId: string
+    type: string
+    target: string
+}
+
+async function stripExternalReferences(
+    buffer: Buffer,
+    contentHash: string,
+    originalFilename: string,
+): Promise<Buffer> {
     let zip: JSZip
     try {
         zip = await JSZip.loadAsync(buffer)
@@ -111,6 +122,7 @@ async function stripExternalReferences(buffer: Buffer): Promise<Buffer> {
     }
 
     let changed = false
+    const stripped: StrippedReference[] = []
     const relsFiles = zip.file(/\.rels$/)
 
     for (const entry of relsFiles) {
@@ -129,6 +141,17 @@ async function stripExternalReferences(buffer: Buffer): Promise<Buffer> {
         let fileChanged = false
         for (const rel of relationships) {
             if (rel["@_TargetMode"] === "External") {
+                // Every relationship type (image, oleObject, attachedTemplate,
+                // externalLinkPath, ...) carries its outbound reference the
+                // same way, so this isn't filtered by @_Type — anything
+                // TargetMode="External" is, by definition, a reference that
+                // would take soffice outside the package.
+                stripped.push({
+                    part: entry.name,
+                    relationshipId: rel["@_Id"] ?? "",
+                    type: (rel["@_Type"] ?? "").split("/").pop() ?? rel["@_Type"] ?? "",
+                    target: rel["@_Target"] ?? "",
+                })
                 rel["@_Target"] = ""
                 delete rel["@_TargetMode"]
                 fileChanged = true
@@ -142,6 +165,18 @@ async function stripExternalReferences(buffer: Buffer): Promise<Buffer> {
     }
 
     if (!changed) return buffer
+
+    // Compliance/audit trail — every uploaded document that shipped an
+    // external reference, with enough detail (which part, what kind, what it
+    // pointed at) to answer "did we ever process a file that tried to reach
+    // <url>" after the fact, not just "sanitization ran."
+    logger.warn("[OfficeConversion] Stripped external references before conversion", {
+        contentHash,
+        originalFilename,
+        strippedCount: stripped.length,
+        stripped,
+    })
+
     // Match the original archive's DEFLATE compression — the default
     // (STORE, uncompressed) would otherwise silently bloat every sanitized
     // file by ~3x on its way into the GCS cache.
@@ -221,7 +256,7 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
     const outputPath = path.join(workDir, "input.pdf")
 
     try {
-        const sanitizedBuffer = await stripExternalReferences(buffer)
+        const sanitizedBuffer = await stripExternalReferences(buffer, contentHash, originalFilename)
         await writeFile(inputPath, sanitizedBuffer)
         await seedHardenedProfile(profileDir)
 
