@@ -16,7 +16,7 @@ import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import { ArrowDown } from 'lucide-react';
 import { useGetChannelConversations, useGetChannelUserStatus } from '../../../hooks/useChannels';
-import { useEditContext } from '../../../providers/EditProvider';
+import { EditSurfaceScope, useMessageEdit } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
@@ -61,7 +61,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
   // Container for the shared hover toolbar overlay (one toolbar per list).
   const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
-  const { editingMessageId, requestEdit } = useEditContext();
+  const { isEditingMessage, requestEdit } = useMessageEdit();
   const particpantionStatus = useGetChannelUserStatus(channelId);
   const [oldConversations, oldConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
@@ -136,13 +136,13 @@ const ChatListV2: React.FC<ChatListProps> = ({
       });
     };
 
-    if (editingMessageId === message.messageId) {
+    if (isEditingMessage(message.messageId)) {
       scrollToConversation();
       return;
     }
 
     requestEdit(message.messageId, scrollToConversation);
-  }, [conversations, user?.id, firstItemIndex, editingMessageId, requestEdit]);
+  }, [conversations, user?.id, firstItemIndex, isEditingMessage, requestEdit]);
 
   useShortcutById('composer.editLastMessage', handleEditLastMessage, {
     enabled: conversations.length > 0,
@@ -604,4 +604,10 @@ const ChatListV2: React.FC<ChatListProps> = ({
   );
 };
 
-export default ChatListV2;
+const ChatListV2WithEditSurface: React.FC<ChatListProps> = props => (
+  <EditSurfaceScope>
+    <ChatListV2 {...props} />
+  </EditSurfaceScope>
+);
+
+export default ChatListV2WithEditSurface;
