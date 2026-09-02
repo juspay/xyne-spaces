@@ -294,7 +294,7 @@ const ColumnResizeHandle = ({
         // page showing through.
         className={cn(
           'relative shrink-0 self-stretch overflow-hidden border-y',
-          seam ? 'border-border bg-card' : 'border-transparent bg-transparent',
+          seam ? 'border-border bg-background' : 'border-transparent bg-transparent',
         )}
         style={{
           width: collapsing ? 0 : 8,
@@ -351,14 +351,19 @@ const ColumnResizeHandle = ({
         // border here the pair's outline has a notch bitten out of it top and
         // bottom — a small break exactly where the eye expects one unbroken
         // rule. This is the piece that completes the box.
-        // Always drawn, only ever recoloured. Toggling `border-y` and `bg-card`
+        // `bg-background`, not `bg-card`: the seam sits between two halves that
+        // both paint `bg-background`, so a card fill reads as a lighter bar down
+        // the middle of the pair. Invisible in the light theme, where the two
+        // tokens are the same white.
+        //
+        // Always drawn, only ever recoloured. Toggling `border-y` and the fill
         // on and off changes border-*width*, which cannot tween — so the seam
         // popped out of existence a beat after the pane finished closing. Held
         // at 1px and faded between transparent and the real colour, it leaves on
         // the same clock as everything else. The curve is set inline below, not
         // by `transition-colors`, whose default easing is not the stream's.
         'border-y',
-        seam ? 'border-border bg-card' : 'border-transparent bg-transparent',
+        seam ? 'border-border bg-background' : 'border-transparent bg-transparent',
       )}
       // Named by the parent it seams, so a pair being dragged can pick this up
       // and lift it too. It is a sibling of both halves rather than a child of
