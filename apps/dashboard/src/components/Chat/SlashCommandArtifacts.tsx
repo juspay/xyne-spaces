@@ -28,6 +28,7 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { useFlow } from '../flowUI/FlowContext';
 import { useActiveSlashCommandArtifact } from './SlashCommandArtifactSideEffects';
+import { Button } from '../ui/Button/Button';
 
 /**
  * Composer entry for a slash-command artifact. Presentation and side-effect
@@ -443,14 +444,16 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
           </span>
         )}
         {canCloseArtifact && (
-          <button
+          <Button
             type='button'
+            variant='ghost'
             onClick={event => {
               event.preventDefault();
               event.stopPropagation();
               void handleCloseArtifact();
             }}
             disabled={isClosing}
+            trackId='close_slash_command_artifact'
             className='-mr-1 ml-auto flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
             aria-label={`Close this ${definition.bodyNoun}`}
             title={`Close this ${definition.bodyNoun}`}
@@ -460,7 +463,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
             data-track-metadata={trackingMetadata}
           >
             <X className='size-4' />
-          </button>
+          </Button>
         )}
       </div>
 
@@ -480,14 +483,16 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
                 Call ended{endedDuration ? ` · lasted ${endedDuration}` : ''} · {joinedCount} joined
               </span>
             </div>
-            <button
+            <Button
               type='button'
+              variant='ghost'
               onClick={event => {
                 event.preventDefault();
                 event.stopPropagation();
                 startNewCall();
               }}
               disabled={isInCall || !canActOnArtifact}
+              trackId='start_new_call_from_artifact'
               className='inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-semibold hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60'
               data-prevent-thread
               data-track-category='SLASH_COMMAND_ARTIFACT'
@@ -496,7 +501,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
             >
               <Phone className='size-4' />
               Start a new call
-            </button>
+            </Button>
           </>
         ) : resolvedState === 'active' ? (
           <>
@@ -530,14 +535,16 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
             </button>
           </>
         ) : (
-          <button
+          <Button
             type='button'
+            variant='ghost'
             onClick={event => {
               event.preventDefault();
               event.stopPropagation();
               startNewCall();
             }}
             disabled={!canActOnArtifact || isInCall}
+            trackId='start_call_from_artifact'
             className='inline-flex h-10 items-center gap-2 rounded-lg bg-foreground px-4 text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60'
             data-prevent-thread
             data-track-category='SLASH_COMMAND_ARTIFACT'
@@ -546,7 +553,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
           >
             <Phone className='size-4' />
             Start call
-          </button>
+          </Button>
         )}
       </div>
 

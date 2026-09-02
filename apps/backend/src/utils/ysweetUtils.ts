@@ -115,6 +115,7 @@ export class YSweetHttpError extends Error {
 
 export interface YSweetAuthRequest {
   authorization: 'full' | 'read-only';
+  userId: string;
   validForSeconds?: number;
 }
 
@@ -130,10 +131,14 @@ async function ysweetRequest(url: string, path: string, init: RequestInit): Prom
   return res;
 }
 
+function serverTokenHeaders(): Record<string, string> {
+  return config.ysweet.serverToken ? { Authorization: `Bearer ${config.ysweet.serverToken}` } : {};
+}
+
 async function ysweetJson<T>(base: string, path: string, docId: string, body: unknown): Promise<T> {
   const res = await ysweetRequest(withDocId(base, path, docId), path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...serverTokenHeaders() },
     body: JSON.stringify(body),
   });
   return (await res.json()) as T;
@@ -191,11 +196,13 @@ export async function ysweetUpdateDoc(clientToken: ClientToken, update: Uint8Arr
  *
  * @param canvasId - The document ID (canvas ID)
  * @param blocks - BlockNote blocks to initialize the document with
+ * @param userId - The actual user/bot performing this write
  * @returns true if initialization was successful, false otherwise
  */
 export async function initializeYSweetDoc(
   canvasId: string,
-  blocks: BlockNoteBlock[]
+  blocks: BlockNoteBlock[],
+  userId: string
 ): Promise<boolean> {
   try {
     const ysweetUrl = config.ysweet.url;
@@ -207,6 +214,7 @@ export async function initializeYSweetDoc(
     // Step 1: Make sure the document exists and get a write token for it
     const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
+      userId,
     });
     logger.debug(`[YSweetUtils] Created/retrieved Y-Sweet document for canvas ${canvasId}`);
 
@@ -245,9 +253,10 @@ export async function initializeYSweetDoc(
  *
  * @param canvasId - The document ID (canvas ID)
  * @param blocks - BlockNote blocks to sync to the document
+ * @param userId - The actual user/bot performing this write
  * @returns true if sync was successful, false otherwise
  */
-export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): Promise<boolean> {
+export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[], userId: string): Promise<boolean> {
   try {
     const ysweetUrl = config.ysweet.url;
     if (!ysweetUrl) {
@@ -258,6 +267,7 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
     // Get a client token with full authorization for write operations
     const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
+      userId,
     });
 
     // Override URLs before both read and write so backend uses the internal Y-Sweet service.
@@ -313,9 +323,10 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[]): 
  * This retrieves the content stored in Y-Sweet for collaborative editing.
  *
  * @param canvasId - The document ID (canvas ID)
+ * @param userId - The actual user/bot performing this read
  * @returns Array of BlockNote blocks, or empty array if unable to read
  */
-export async function readFromYSweet(canvasId: string): Promise<BlockNoteBlock[]> {
+export async function readFromYSweet(canvasId: string, userId: string): Promise<BlockNoteBlock[]> {
   try {
     const ysweetUrl = config.ysweet.url;
     if (!ysweetUrl) {
@@ -326,6 +337,7 @@ export async function readFromYSweet(canvasId: string): Promise<BlockNoteBlock[]
     // Get a client token with read-only authorization
     const clientToken = await ysweetGetClientToken(canvasId, {
       authorization: 'read-only',
+      userId,
     });
 
     // Override URLs to use direct Y-Sweet URL instead of proxy URL

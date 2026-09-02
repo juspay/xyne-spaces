@@ -48,6 +48,7 @@ import {
   RCAStatus,
   SEVERITY,
   AttachmentEntityType,
+  AttachmentUploadStatus,
   AttributionConfidence,
   BaseTicketType,
   isReleaseTicket,
@@ -125,6 +126,11 @@ import {
   validateFlowPlan,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
+import {
+  ATTACHMENT_STILL_UPLOADING,
+  isAttachmentUploaded,
+  isAttachmentUploadInFlight,
+} from '@xyne/shared/zero/mutators';
 import {
   validateFieldBranches,
   validateUniqueFieldNames,
@@ -2598,7 +2604,7 @@ export function createMutators(
             // Explicit list from a pending-message-aware caller: transfer only
             // those ids, don't touch the draft row (client's clearContent owns it).
             if (attachmentIds.length > 0) {
-              message.hasAttachment = true;
+              let attachedCount = 0;
               for (const attachmentId of attachmentIds) {
                 const attachment = await tx.run(
                   zql.message_attachments.where('id', attachmentId).one(),
@@ -2608,6 +2614,15 @@ export function createMutators(
                   attachment.entityType === AttachmentEntityType.CHAT &&
                   attachment.entityId === messageId
                 ) {
+                  attachedCount++;
+                  continue;
+                }
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId },
+                    });
+                  }
                   continue;
                 }
                 await tx.mutate.message_attachments.update({
@@ -2616,7 +2631,9 @@ export function createMutators(
                   entityType: AttachmentEntityType.CHAT,
                   conversationId,
                 });
+                attachedCount++;
               }
+              message.hasAttachment = attachedCount > 0;
             }
           } else {
             // Legacy path: scan the current draft and transfer everything.
@@ -2632,18 +2649,28 @@ export function createMutators(
                 .where('entityId', draft.id)
                 .where('entityType', AttachmentEntityType.DRAFT));
 
+              let attachedCount = 0;
               for (const attachment of draftAttachments) {
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId: attachment.id },
+                    });
+                  }
+                  continue;
+                }
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
                   entityType: AttachmentEntityType.CHAT,
                   conversationId: conversationId,
                 });
+                attachedCount++;
               }
 
               await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              message.hasAttachment = draftAttachments.length > 0;
+              message.hasAttachment = attachedCount > 0;
             }
           }
 
@@ -3313,7 +3340,7 @@ export function createMutators(
             // Explicit list from a pending-message-aware caller: transfer only
             // those ids, don't touch the draft row (client's clearContent owns it).
             if (attachmentIds.length > 0) {
-              message.hasAttachment = true;
+              let attachedCount = 0;
               for (const attachmentId of attachmentIds) {
                 const attachment = await tx.run(
                   zql.message_attachments.where('id', attachmentId).one(),
@@ -3323,6 +3350,15 @@ export function createMutators(
                   attachment.entityType === AttachmentEntityType.CHAT &&
                   attachment.entityId === messageId
                 ) {
+                  attachedCount++;
+                  continue;
+                }
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId },
+                    });
+                  }
                   continue;
                 }
                 await tx.mutate.message_attachments.update({
@@ -3331,7 +3367,9 @@ export function createMutators(
                   entityType: AttachmentEntityType.CHAT,
                   conversationId,
                 });
+                attachedCount++;
               }
+              message.hasAttachment = attachedCount > 0;
             }
           } else {
             const draft = channelDrafts.find(d => d.conversationId === conversationId);
@@ -3341,18 +3379,28 @@ export function createMutators(
                 .where('entityId', draft.id)
                 .where('entityType', AttachmentEntityType.DRAFT));
 
+              let attachedCount = 0;
               for (const attachment of draftAttachments) {
+                if (!isAttachmentUploaded(attachment)) {
+                  if (isAttachmentUploadInFlight(attachment)) {
+                    throw new ApplicationError(ATTACHMENT_STILL_UPLOADING, {
+                      details: { attachmentId: attachment.id },
+                    });
+                  }
+                  continue;
+                }
                 await tx.mutate.message_attachments.update({
                   id: attachment.id,
                   entityId: messageId,
                   entityType: AttachmentEntityType.CHAT,
                   conversationId: conversationId,
                 });
+                attachedCount++;
               }
 
               await tx.mutate.draft_messages.delete({ id: draft.id });
 
-              message.hasAttachment = draftAttachments.length > 0;
+              message.hasAttachment = attachedCount > 0;
             }
           }
 
@@ -9963,7 +10011,7 @@ export function createMutators(
           if (canvas.isCollaborative) {
             asyncTasks.push(async () => {
               try {
-                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[]);
+                await syncToYSweet(canvas.id, version.content as unknown as BlockNoteBlock[], authData.sub);
               } catch (error) {
                 logger.error('[MUTATOR-CANVAS-VERSION-RESTORE] Failed to sync Y-Sweet:', error);
               }
@@ -12739,6 +12787,7 @@ export function createMutators(
                   position: index,
                   createdBy: authData.sub,
                   url: '', // Will be populated after upload completes
+                  uploadStatus: AttachmentUploadStatus.PENDING,
                   metadata: null,
                   conversationId: conversationId || null,
                   isDeleted: false,

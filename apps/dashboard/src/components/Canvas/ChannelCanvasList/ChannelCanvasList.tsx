@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText, Folder, Plus, Search } from 'lucide-react';
 import type { Canvas, CanvasFolder } from '../Canvas.types';
 import Input from '../../ui/Input';
+import { Button } from '../../ui/Button/Button';
 import { Dialog } from '../../ui/Dialog';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasRow } from '../CanvasRow';
@@ -251,17 +252,19 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                         </span>
                       </button>
                       {onCreateCanvasInFolder && (
-                        <button
+                        <Button
+                          variant='ghost'
                           className='p-1 opacity-70 group-hover:opacity-100 hover:bg-muted rounded transition-all disabled:opacity-40'
                           onClick={() => onCreateCanvasInFolder(folderGroup.folder)}
                           disabled={isCreatingCanvas}
                           title='Create canvas in folder'
                           data-testid={`channel-folder-create-canvas-${folderGroup.folder.id}`}
+                          trackId='create_canvas_in_channel_folder'
                           data-track-category='CANVAS'
                           data-track-name='Create_Canvas_In_Channel_Folder'
                         >
                           <Plus className='w-4 h-4 text-muted-foreground' />
-                        </button>
+                        </Button>
                       )}
                     </div>
                     {!isCollapsed &&

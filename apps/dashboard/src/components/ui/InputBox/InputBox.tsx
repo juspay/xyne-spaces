@@ -71,6 +71,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
@@ -256,6 +257,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideVoiceInput = false,
       compact = false,
       sendDisabled = false,
+      sendDisabledReason,
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
@@ -815,6 +817,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
+              // Keyboard sends are invisible to autocapture (click/change/submit
+              // only); emit it explicitly so keyboard vs button sends are visible.
+              posthogService.capture('message_send', {
+                trigger: 'keyboard',
+                keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
+              });
               void handleSend();
               return true;
             }
@@ -969,6 +977,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
+            // Keyboard sends are invisible to autocapture (click/change/submit
+            // only); emit it explicitly so keyboard vs button sends are visible.
+            posthogService.capture('message_send', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
             void handleSend();
             return true;
           }
@@ -1241,7 +1255,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const handleSend = useCallback(async () => {
-      if (!editor || isSending || sendDisabled) return;
+      if (!editor || isSending) return;
+      if (sendDisabled) {
+        // The button is disabled, but Enter still lands here — say why rather than
+        // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+        // tooltip carrying the same reason never opens.
+        if (sendDisabledReason) toast.warning(sendDisabledReason);
+        return;
+      }
 
       // If a voice stream is active, finalize it for send first: this strips any
       // unfinalized interim text and aborts the stream (discarding in-flight results)
@@ -1314,6 +1335,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const finalPlainText = editor?.getText().trim() || plainText;
 
         await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
         editor.commands.setContent('');
         setContent('');
         setAttachedCanvas(null);
@@ -1332,6 +1354,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       attachedCanvas,
       hasSendableContent,
       sendDisabled,
+      sendDisabledReason,
       commandItems,
       onCommandSelect,
       disableDraftUpload,
@@ -2060,7 +2083,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2145,7 +2168,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
@@ -2211,7 +2234,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         </div>
                       ) : (
                         <Tooltip
-                          content='Send message'
+                          content={sendDisabledReason ?? 'Send message'}
                           side='top'
                           delayDuration={1000}
                           skipDelayDuration={1000}

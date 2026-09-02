@@ -195,11 +195,13 @@ const Settings = ({
             className='w-40 p-1'
           >
             <div className='space-y-0.5'>
-              <button
+              <Button
+                variant='ghost'
                 onClick={() => {
                   setLivePresenceStatus('ONLINE');
                   setPresencePopoverOpen(false);
                 }}
+                trackId='set_presence_online'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceOnline'
@@ -209,12 +211,14 @@ const Settings = ({
                 {livePresenceStatus !== 'AWAY' && (
                   <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant='ghost'
                 onClick={() => {
                   setLivePresenceStatus('AWAY');
                   setPresencePopoverOpen(false);
                 }}
+                trackId='set_presence_away'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceAway'
@@ -224,7 +228,7 @@ const Settings = ({
                 {livePresenceStatus === 'AWAY' && (
                   <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
-              </button>
+              </Button>
             </div>
           </Popover>
         </div>
@@ -273,6 +277,7 @@ const Settings = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
+                trackId='clear_user_status'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
                 data-track-category='Settings'
@@ -308,6 +313,7 @@ const Settings = ({
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 onClick={handleResumeNotifications}
+                trackId='resume_notifications'
                 data-track-category='Settings'
                 data-track-name='ResumeNotifications'
               >
@@ -347,19 +353,22 @@ const Settings = ({
             {!showCustomDatePicker ? (
               <div className='space-y-0.5'>
                 {pauseOptions.map(option => (
-                  <button
+                  <Button
                     key={option.minutes}
+                    variant='ghost'
                     onClick={e => {
                       e.stopPropagation();
                       handlePauseNotifications(option.minutes);
                     }}
+                    trackId='pause_notifications'
+                    trackProps={{ duration: option.minutes }}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='Settings'
                     data-track-name='PauseNotifications'
                     data-track-metadata={JSON.stringify({ duration: option.minutes })}
                   >
                     <span>{option.label}</span>
-                  </button>
+                  </Button>
                 ))}
                 <button
                   onClick={e => {
@@ -424,6 +433,7 @@ const Settings = ({
           variant='ghost'
           className='text-destructive w-full text-left hover:bg-transparent hover:text-destructive rounded-md'
           onClick={handleLogout}
+          trackId='logout'
           data-track-category='Settings'
           data-track-name='Logout'
         >

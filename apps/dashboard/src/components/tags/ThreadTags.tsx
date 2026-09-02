@@ -9,6 +9,7 @@ import { useThreadTypeVocabulary } from '../../hooks/useThreadTypeVocabulary';
 import { useMyPendingTags } from '../../hooks/useTagReview';
 import { mutators } from '../../zero/mutators';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
 import { colorForTagName } from './tagColors';
 
@@ -207,9 +208,11 @@ export const ThreadTags = ({
             >
               {entry?.label ?? tag.name}
               {canEdit && (
-                <button
+                <Button
+                  variant='ghost'
                   type='button'
                   aria-label={`Remove ${entry?.label ?? tag.name}`}
+                  trackId='remove_thread_tag'
                   // Width reserved, only opacity changes, so the chip does not resize under
                   // the cursor. stopPropagation because the row opens the thread on click.
                   onClick={event => {
@@ -221,7 +224,7 @@ export const ThreadTags = ({
                   data-track-name='RemoveThreadTag'
                 >
                   <X className='size-2.5' />
-                </button>
+                </Button>
               )}
             </span>
           </Tooltip>

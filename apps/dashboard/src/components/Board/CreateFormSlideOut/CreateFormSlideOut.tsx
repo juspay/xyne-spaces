@@ -1014,7 +1014,8 @@ export const CreateFormSlideOut = ({
             <p className='text-[12px] text-muted-foreground mb-2 text-center'>{invalidReason}</p>
           )}
           <Button
-            onClick={() => void handleSave()}
+            trackId='save_board_form'
+            trackAction={handleSave}
             data-track-category='board_config'
             data-track-name='SAVE_FORM'
             disabled={!isValid || isSubmitting}
