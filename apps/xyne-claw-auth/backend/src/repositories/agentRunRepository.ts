@@ -3,6 +3,7 @@ import type { MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import { createLogger } from "../logger.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 const log = createLogger("agent-run");
 
@@ -545,7 +546,7 @@ export const agentRunRepository = {
   listByUser: (userIds: string | string[], opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
     prisma.agentRun.findMany({
       where: {
-        ...(Array.isArray(userIds) ? { userId: { in: userIds } } : { userId: userIds }),
+        ...userIdFilter(userIds),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),

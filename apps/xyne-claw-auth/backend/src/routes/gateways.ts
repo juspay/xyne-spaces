@@ -107,7 +107,7 @@ router.post("/:id/identities", asyncHandler(async (req, res) => {
       userId: user.id,
     },
     update: {
-      userId: userId.trim(),
+      userId: user.id,
     },
     include: { user: true, gateway: true },
   });

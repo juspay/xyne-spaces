@@ -1,10 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
-
-/** Build a Prisma filter matching rows owned by one id or any of several
- *  aliases (canonical Claw id + workspace-scoped Spaces id). */
-const userIdFilter = (userIds: string | string[]) =>
-  Array.isArray(userIds) ? { userId: { in: userIds } } : { userId: userIds };
+import { userIdFilter } from "./userIdFilter.js";
 
 export const chatMessageRepository = {
   create: (data: {

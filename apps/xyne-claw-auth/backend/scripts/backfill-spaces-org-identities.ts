@@ -138,6 +138,7 @@ function parseArgs(argv: string[]): Args {
   };
 }
 
+// Copied from src/lib/users-jit.ts `normalizeEmail`.
 function normalizedEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -154,6 +155,7 @@ function orgStatus(status: string): "ACTIVE" | "ARCHIVED" {
   return status === "ACTIVE" ? "ACTIVE" : "ARCHIVED";
 }
 
+// Adapted from src/routes/spaces-sync.ts `mapOrgRole`.
 function clawOrgRole(role: string | null): "OWNER" | "ADMIN" | "MEMBER" | "COMMUNITY_MEMBER" {
   if (role === "OWNER" || role === "ADMIN" || role === "MEMBER" || role === "COMMUNITY_MEMBER") return role;
   // Claw has no VIEWER/GUEST role. MEMBER is the existing sync endpoint's
@@ -170,6 +172,7 @@ function addIssue(issues: string[], message: string): void {
   console.error(`[backfill:spaces-identities] ERROR: ${message}`);
 }
 
+// Copied from the surface self-heal block in src/lib/users-jit.ts (`linkSpacesIdentity`).
 async function ensureSpacesSurface(client: PrismaClient | Prisma.TransactionClient = claw): Promise<void> {
   const byId = await client.surface.findUnique({ where: { id: "spaces" }, select: { id: true, key: true } });
   const byKey = await client.surface.findUnique({ where: { key: "spaces" }, select: { id: true } });
@@ -666,6 +669,7 @@ async function backfillOrg(
       if (existingIdentity?.userId && existingIdentity.userId !== canonicalUserId) {
         throw new Error(`Spaces identity ${sourceUser.id}/${sourceUser.workspaceId} belongs to Claw user ${existingIdentity.userId}`);
       }
+      // Identity-upsert ladder adapted from src/lib/users-jit.ts (`linkSpacesIdentity`).
       await tx.userSurfaceIdentity.upsert({
         where: {
           surfaceId_surfaceWorkspaceId_surfaceUserId: {
@@ -690,7 +694,8 @@ async function backfillOrg(
           userId: canonicalUserId,
           ...(sourceUser.orgMemberId ? { surfaceMemberId: sourceUser.orgMemberId } : {}),
           status: identityStatus,
-          linkedAt: new Date(),
+          // linkedAt is deliberately create-only: re-runs must not rewrite
+          // the original link timestamp.
           lastSeenAt: new Date(),
         },
       });

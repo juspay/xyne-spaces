@@ -1,12 +1,14 @@
 import type { Request, Response, NextFunction } from "express";
 
+import { getRequesterId } from "./agent-acl.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("pin-user-id-param");
 
-/** The canonical Claw identity established by requireAuth. */
+/** The canonical Claw identity established by requireAuth. (Same header contract
+ *  as agent-acl's getRequesterId — kept as a named alias for route files that
+ *  import it from here.) */
 export function getCanonicalRequesterId(req: Request): string | undefined {
-  const userId = req.headers["x-user-id"];
-  return typeof userId === "string" && userId ? userId : undefined;
+  return getRequesterId(req);
 }
 
 /**
