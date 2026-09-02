@@ -458,6 +458,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   } | null>(null);
   const [localTickets, setLocalTickets] = useState<Ticket[] | null>([]);
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
+  // Track which columns have reported their initial load (even if empty)
+  const [loadedColumnKeys, setLoadedColumnKeys] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [flowSelection, setFlowSelection] = useState<FlowNodeSelection | null>(null);
@@ -527,6 +529,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   } | null>(null);
 
   const handleKanbanTicketsChange = useCallback((columnKey: string, tickets: Ticket[]) => {
+    // Track that this column has loaded (even if empty)
+    setLoadedColumnKeys(prev => {
+      if (prev.has(columnKey)) return prev;
+      const next = new Set(prev);
+      next.add(columnKey);
+      return next;
+    });
+
     setKanbanTicketsByColumn(prev => {
       if (tickets.length === 0) {
         if (!(columnKey in prev)) {
@@ -1746,10 +1756,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
-  const [projectTags, projectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: effectiveProjectId || '' }),
-    { enabled: !!effectiveProjectId },
-  );
+  // projectTags query moved after kanbanCounts to trigger after tickets load
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
   // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
@@ -1803,7 +1810,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     return map;
   }, [kanbanSourceTickets]);
-  if (projectTagsDetails.type === 'complete') logEntityTiming('tags');
+  // logEntityTiming('tags') moved after projectTags query
 
   // ============================================================================
   // FORM ENTITY VALUES — fetched as related data on tickets when fevFieldIds is non-empty.
@@ -1923,11 +1930,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     showOverdueOnly,
   ]);
 
-  if (
-    shouldUseLegacyTicketsQuery &&
-    ticketsDetails.type === 'complete' &&
-    projectTagsDetails.type === 'complete'
-  ) {
+  if (shouldUseLegacyTicketsQuery && ticketsDetails.type === 'complete') {
     logEntityTiming('filteredTickets');
   }
 
@@ -2925,6 +2928,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     lastKanbanColumnQueryKeyRef.current = kanbanColumnQueryKey;
     setLocalTickets(null);
     setKanbanTicketsByColumn({});
+    setLoadedColumnKeys(new Set());
   }, [isKanbanLayout, kanbanColumnQueryKey]);
 
   useEffect(() => {
@@ -2966,16 +2970,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     if (!isKanbanLayout) {
       setKanbanTicketsByColumn({});
+      setLoadedColumnKeys(new Set());
     }
   }, [isKanbanLayout]);
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
-  const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return undefined;
-    const uniqueTags = new Set(projectTags.map(tag => tag.name));
-    return Array.from(uniqueTags).sort();
-  }, [projectTags]);
+  // availableTags moved after projectTags query (see after processedGroups)
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -3281,6 +3282,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ? !hasSearchTerm && kanbanCounts.isLoading
     : ticketsDetails.type !== 'complete';
 
+  // projectTags query moved after processedGroups for accurate column count calculation
+
   const kanbanTicketsForGrouping = useMemo(() => {
     if (localTickets && localTickets.length > 0) return localTickets;
     const lastKnownKanbanTickets = lastKnownKanbanTicketsRef.current;
@@ -3415,6 +3418,63 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     kanbanColumnQueryKey,
     hasMatchingLastKnownKanbanGroups,
   ]);
+
+  // Calculate expected number of kanban columns for EXPANDED groups only
+  // (collapsed groups don't render their columns)
+  const expectedKanbanColumnCount = useMemo(() => {
+    if (!isKanbanLayout) return 0;
+    // When groupBy is 'none', there's one implicit group that's always expanded
+    const expandedGroupCount =
+      groupBy === 'none' ? 1 : processedGroups.filter(g => expandedGroups.has(g.key)).length;
+    if (expandedGroupCount === 0) return 0;
+    const columnCount = shouldUseStatusColumns ? getStatusColumns().length : (stages?.length ?? 0);
+    return expandedGroupCount * columnCount;
+  }, [
+    isKanbanLayout,
+    groupBy,
+    processedGroups,
+    expandedGroups,
+    shouldUseStatusColumns,
+    stages?.length,
+  ]);
+
+  // Track if initial kanban load has completed (don't re-trigger on subsequent group expansions)
+  const kanbanInitialLoadCompleteRef = useRef(false);
+  if (
+    isKanbanLayout &&
+    !kanbanInitialLoadCompleteRef.current &&
+    !kanbanCounts.isLoading &&
+    expectedKanbanColumnCount > 0 &&
+    loadedColumnKeys.size >= expectedKanbanColumnCount
+  ) {
+    kanbanInitialLoadCompleteRef.current = true;
+  }
+
+  // Reset initial load flag when query key changes
+  const prevKanbanColumnQueryKeyRef = useRef(kanbanColumnQueryKey);
+  if (prevKanbanColumnQueryKeyRef.current !== kanbanColumnQueryKey) {
+    prevKanbanColumnQueryKeyRef.current = kanbanColumnQueryKey;
+    kanbanInitialLoadCompleteRef.current = false;
+  }
+
+  // Wait for initial kanban columns load (or non-kanban tickets query)
+  const areKanbanColumnsLoaded = isKanbanLayout ? kanbanInitialLoadCompleteRef.current : true;
+
+  // Fetch project tags after tickets/kanban columns complete, using delta subscription
+  const [projectTags, projectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectId({ projectId: effectiveProjectId || '' }),
+    {
+      enabled: !!effectiveProjectId && !isTicketsSyncing && areKanbanColumnsLoaded,
+      updatedAtEnabled: true,
+    },
+  );
+  if (projectTagsDetails.type === 'complete') logEntityTiming('tags');
+
+  const availableTags = useMemo(() => {
+    if (!projectTags || projectTags.length === 0) return undefined;
+    const uniqueTags = new Set(projectTags.map(tag => tag.name));
+    return Array.from(uniqueTags).sort();
+  }, [projectTags]);
 
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
