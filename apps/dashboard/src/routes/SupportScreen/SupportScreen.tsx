@@ -4469,16 +4469,7 @@ export const SupportTicketDetail = ({
     // the search results screen) as it pushes this entry, so its page is one Back
     // away — pop it rather than stacking a second copy.
     // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
-    //
-    // `idx` is react-router's position in the history stack; 0 means this entry is the
-    // first of the session, so there is nothing behind us to pop and going back would
-    // eject the user from the app. Markers only survive an in-app push, so this should
-    // not happen — it is a guard, not a code path.
-    const historyIdx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    if (
-      (routerState?.fromDeskList || routerState?.returnToUrl || routerState?.fromSearch) &&
-      historyIdx > 0
-    ) {
+    if (routerState?.fromDeskList || routerState?.returnToUrl || routerState?.fromSearch) {
       void navigate(-1);
       return;
     }
