@@ -49,6 +49,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
       activeDurationSec?: number,
       pageDurationSec?: number,
       prevPage?: string,
+      prevPagePath?: string,
     ) => {
       // Don't log if user not authenticated
       if (!user?.id) return;
@@ -65,6 +66,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
         ...(activeDurationSec !== undefined && { activeDurationSec }),
         ...(pageDurationSec !== undefined && { pageDurationSec }),
         ...(prevPage && { previousPage: prevPage }),
+        ...(prevPagePath && { previousPagePath: prevPagePath }),
         ...(triggerEvent && { triggerEvent }),
       };
 
@@ -337,6 +339,7 @@ export function useActivityTracker(currentPathname?: string): ActivityTrackerRet
           undefined,
           pageDurationSec,
           oldPageFirstSegment,
+          oldPage,
         );
 
         // Reset tracking for new page
