@@ -952,11 +952,14 @@ export class App {
       );
     }
 
-    // Initialize calendar sync queues
-    logger.info('Initializing Microsoft Calendar sync queue...');
+    // Initialize calendar sync queues as PRODUCERS only. The calendar webhook
+    // routes live here and must stay here (they are the publicly reachable
+    // endpoints Google/Microsoft push to), but the sync work they enqueue is
+    // drained by the worker process — see ENABLE_CALENDAR_SYNC_WORKER.
+    logger.info('Initializing Microsoft Calendar sync queue (producer)...');
     await microsoftCalendarSyncQueue.initialize();
 
-    logger.info('Initializing Google Calendar sync queue...');
+    logger.info('Initializing Google Calendar sync queue (producer)...');
     await googleCalendarSyncQueue.initialize();
 
     // Initialize unified watch renewal queue (replaces Gmail + Calendar renewal queues)
