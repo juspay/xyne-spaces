@@ -12,13 +12,13 @@ export interface DraftAgentOptions {
 }
 
 /**
- * Resolves the desk auto-draft agent for display.
+ * Resolves a selected desk agent — auto-draft or desk report — for display.
  *
- * `useChannelClawAgents` only returns agents that are participants of the channel,
- * but "Add agent" lets a desk owner pick any Claw agent they can access — and the
- * backend drafts with that slug. Resolving against the accessible-agent list (the
- * same cache the global agent selector fills) keeps the UI from showing the
- * "Xyne AI" default for an agent that is, in fact, selected and in use.
+ * `useChannelClawAgents` only returns agents that are participants of the channel, but
+ * "Add agent" lets a desk owner pick any Claw agent they can access, and the backend runs
+ * that slug. Resolving against the accessible-agent list (the same cache the global agent
+ * selector fills) keeps the UI from showing the built-in default for an agent that is, in
+ * fact, selected and in use.
  */
 export const useDraftAgentOptions = (
   clawAgents: ChannelClawAgent[],

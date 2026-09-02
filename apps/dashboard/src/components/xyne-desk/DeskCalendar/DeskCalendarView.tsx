@@ -29,8 +29,8 @@ type SupportTicketsArgs = Parameters<typeof queries.supportTicketsPageV3>[0];
 
 /**
  * Fetches and renders ONE span, mounted keyed by its query args: useFallbackHydratedQuery
- * holds its REST-seed state per component rather than per query hash, so a single instance
- * would seed only the first span and could serve a previous span's rows as `complete`.
+ * holds its REST-seed state per component, not per query hash, so a single instance would
+ * seed only the first span and could serve a previous span's rows as `complete`.
  */
 const RangeCalendar = ({
   args,
@@ -88,12 +88,11 @@ interface DeskCalendarViewProps {
  * DeskCalendarView — a full desk view (sibling to Kanban/List/Table) showing this
  * channel's tickets on a calendar. This is a thin data-adapter, nothing more: it fetches
  * tickets the exact same way every other Desk view does (`supportTicketsPageV3` +
- * `ticketFilter`) and renders the app's existing calendar pieces — CalendarToolbar and the
- * Month/Week/Day views from `components/Tickets/CalendarView` — rather than reimplementing a
- * month grid, day drill-down, or ticket cards. It drives those directly instead of their
- * `CalendarView` wrapper, which keeps the current date private: rows are ordered by
- * lastEmailAt while the grid buckets by createdAt, so the fetch must be scoped to the span
- * on screen or a page is just the recently active tickets, not the days rendered.
+ * `ticketFilter`) and renders the app's existing calendar pieces from
+ * `components/Tickets/CalendarView` rather than reimplementing a month grid or ticket cards.
+ * It drives the toolbar and views directly instead of their `CalendarView` wrapper, which
+ * keeps the current date private: rows are ordered by lastEmailAt while the grid buckets by
+ * createdAt, so an unscoped page is just the recently active tickets, not the days rendered.
  */
 export const DeskCalendarView = ({
   channelId,
@@ -119,15 +118,11 @@ export const DeskCalendarView = ({
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
 
-  const handleNavigate = (direction: 'prev' | 'next' | 'today'): void => {
-    const delta = direction === 'prev' ? -1 : 1;
-    setCurrentDate(prev => {
-      if (direction === 'today') return new Date();
-      if (viewMode === 'month') return addMonths(prev, delta);
-      if (viewMode === 'week') return addWeeks(prev, delta);
-      return addDays(prev, delta);
-    });
-  };
+  const step = viewMode === 'month' ? addMonths : viewMode === 'week' ? addWeeks : addDays;
+  const handleNavigate = (direction: 'prev' | 'next' | 'today'): void =>
+    setCurrentDate(prev =>
+      direction === 'today' ? new Date() : step(prev, direction === 'prev' ? -1 : 1),
+    );
 
   // Month pads to whole weeks, matching the cells MonthView builds.
   const visibleRange = useMemo(() => {

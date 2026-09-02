@@ -6,6 +6,11 @@ import { cn } from '../../../utils/classNames';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { Button } from '../../ui/Button/Button';
+import { useDraftAgentOptions } from '../../../hooks/useDraftAgentOptions';
+import type { ChannelClawAgent } from '../../../hooks/useChannelClawAgents';
+
+/** The report agent is picked from every accessible agent, not this channel's participants. */
+const NO_CHANNEL_AGENTS: ChannelClawAgent[] = [];
 
 export interface DeskReportPanelProps {
   open: boolean;
@@ -48,6 +53,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const { selectedAgent: reportAgent } = useDraftAgentOptions(NO_CHANNEL_AGENTS, report?.agentSlug);
 
   // Full-panel spinner only on first load — later refreshes update in place.
   const fetchLatest = useCallback(
@@ -167,6 +173,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                   <span>
                     Generated {new Date(report.generatedAt).toLocaleString()} · last{' '}
                     {report.rangeDays === 1 ? '1 day' : `${report.rangeDays} days`}
+                    {reportAgent ? ` · by ${reportAgent.name}` : ''}
                   </span>
                   {report.generating && (
                     <span className='flex items-center gap-1 text-desk-accent'>
