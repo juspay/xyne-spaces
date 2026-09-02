@@ -5,7 +5,7 @@ CREATE TABLE "public"."kanban_board_view_access" (
     "viewId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "sharedBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "kanban_board_view_access_pkey" PRIMARY KEY ("id")
 );
