@@ -54,6 +54,7 @@ import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
 import { EmojiSelectorExtension, emojiSelectorPluginKey } from '../TipTapExtensions';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
+import { FileReferenceExtension } from '../TipTapExtensions';
 import { TableExtensions } from '../TipTapExtensions';
 import { FormattingShortcutsExtension } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
@@ -708,6 +709,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           preserveThreadRoute,
         }),
         ChannelMentionExtension,
+        FileReferenceExtension,
         CommandsExtension,
         EmojiSelectorExtension,
         VoiceShimmerMark,

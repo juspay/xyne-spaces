@@ -4785,3 +4785,36 @@ img.inline-emoji,
 [data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
   z-index: 10;
 }
+
+/* File References (tagged existing thread files) */
+.chat-input-field .chat-input-file-reference,
+.chat-input-field span[data-file-reference],
+.chat-input-field .ProseMirror .chat-input-file-reference,
+.chat-input-field .ProseMirror span[data-file-reference],
+.ProseMirror .chat-input-file-reference,
+.ProseMirror span[data-file-reference],
+span[data-file-reference].chat-input-file-reference,
+span.chat-input-file-reference[data-file-reference] {
+  color: #6d28d9 !important;
+  background-color: rgba(109, 40, 217, 0.08) !important;
+  font-weight: 400 !important;
+  cursor: pointer !important;
+  position: relative !important;
+  display: inline !important;
+  white-space: nowrap !important;
+  text-decoration: none !important;
+  max-width: none !important;
+  vertical-align: baseline !important;
+  line-height: inherit !important;
+  padding: 2px 4px !important;
+  border-radius: 4px !important;
+}
+
+.chat-input-field .chat-input-file-reference:hover,
+.chat-input-field span[data-file-reference]:hover,
+.ProseMirror .chat-input-file-reference:hover,
+.ProseMirror span[data-file-reference]:hover,
+span[data-file-reference].chat-input-file-reference:hover {
+  color: #5b21b6 !important;
+  background-color: rgba(109, 40, 217, 0.14) !important;
+}
