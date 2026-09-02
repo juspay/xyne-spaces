@@ -974,7 +974,8 @@ export class SdlcHubService implements SdlcHub {
             content,
           };
         }),
-      syncToYSweet
+      syncToYSweet,
+      actor.userId
     );
     this.enqueueCanvasIndexing(artifact.canvasId, actor.workspaceId, actor.userId);
     return artifact;
@@ -1409,7 +1410,8 @@ export class SdlcHubService implements SdlcHub {
             content: canvas.content as unknown as BlockNoteBlock[],
           };
         }),
-      syncToYSweet
+      syncToYSweet,
+      actor.userId
     );
   }
 
@@ -1486,7 +1488,8 @@ export class SdlcHubService implements SdlcHub {
             content,
           };
         }),
-      syncToYSweet
+      syncToYSweet,
+      actor.userId
     );
   }
 

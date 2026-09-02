@@ -1322,7 +1322,7 @@ MANDATORY OUTPUT CONTRACT:
       });
 
       // Initialize Y-Sweet for collaborative editing
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, content);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, content, createdByUserId);
       if (!ysweetInitialized) {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for PRD canvas ${canvasId}`);
       }
@@ -1442,7 +1442,7 @@ MANDATORY OUTPUT CONTRACT:
       });
 
       // Initialize Y-Sweet for collaborative editing
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[], createdByUserId);
       if (!ysweetInitialized) {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for detailed summary canvas ${canvasId}`);
       }
@@ -1508,7 +1508,7 @@ MANDATORY OUTPUT CONTRACT:
       // DB version/metadata — return null so the caller reports the failure
       // instead of leaving a canvas whose recorded version doesn't match its
       // (unchanged) content.
-      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[], updatedByUserId);
       if (!ysweetSynced) {
         logger.error(`[CallDocumentService] Y-Sweet sync failed for canvas ${canvasId}; aborting update`);
         return null;
@@ -1579,7 +1579,7 @@ MANDATORY OUTPUT CONTRACT:
 
       // Y-Sweet is the source of truth; write the authoritative content first and
       // bail out if it fails rather than reporting a success that never landed.
-      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[], updatedByUserId);
       if (!ysweetSynced) {
         logger.error(`[CallDocumentService] Final Y-Sweet sync failed for canvas ${canvasId}`);
         return false;
@@ -1641,6 +1641,7 @@ MANDATORY OUTPUT CONTRACT:
   async syncStreamingDetailedSummaryCanvas(
     canvasId: string,
     markdownSummary: string,
+    updatedByUserId: string,
     citationCtx?: CitationContext,
   ): Promise<boolean> {
     try {
@@ -1654,6 +1655,7 @@ MANDATORY OUTPUT CONTRACT:
       return await syncToYSweet(
         canvasId,
         sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+        updatedByUserId,
       );
     } catch (error) {
       logger.error(
@@ -1998,6 +2000,7 @@ A comprehensive detailed summary has been generated from this call.
     canvasId: string,
     conversationId: string,
     callId: string,
+    userId: string,
   ): Promise<void> {
     logger.warn(`[CallDocumentService] Cleaning up failed detailed summary canvas ${canvasId} for call ${callId}`);
 
@@ -2022,7 +2025,7 @@ A comprehensive detailed summary has been generated from this call.
     // This is not physical deletion: CRDT history remains subject to Y-Sweet's
     // own retention policy until its SDK exposes a supported delete operation.
     try {
-      const ysweetCleared = await syncToYSweet(canvasId, []);
+      const ysweetCleared = await syncToYSweet(canvasId, [], userId);
       if (!ysweetCleared) {
         logger.warn(`[CallDocumentService] Cleanup: failed to clear Y-Sweet canvas ${canvasId}`);
       }
@@ -2143,6 +2146,9 @@ A comprehensive detailed summary has been generated from this call.
     // Tracks a brand-new, lazily-created streaming canvas so any failure after
     // its first chunk can tear down the canvas and published message.
     let newCanvasId: string | null = null;
+    // Mirrors xyneAutomaticBot.id outside the try block's scope so the outer
+    // catch can still identify the actor for cleanup after a mid-generation failure.
+    let xyneAutomaticBotId: string | undefined;
     try {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
@@ -2193,6 +2199,7 @@ A comprehensive detailed summary has been generated from this call.
       if (!xyneAutomaticBot) {
         throw new Error('Xyne Automatic bot not found');
       }
+      xyneAutomaticBotId = xyneAutomaticBot.id;
 
       let resolvedCallTitle = call.title;
       const callTitlePromise = (options.callTitlePromise ?? Promise.resolve(null))
@@ -2298,6 +2305,7 @@ A comprehensive detailed summary has been generated from this call.
             const synced = await syncToYSweet(
               newCanvasId,
               sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+              xyneAutomaticBot.id,
             );
             if (!synced) {
               throw new Error('Y-Sweet sync returned false');
@@ -2424,7 +2432,7 @@ A comprehensive detailed summary has been generated from this call.
       if (!detailedSummaryMarkdown) {
         logDetailedSummaryFailed(callId, 'generation_failed');
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBot.id);
         }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
@@ -2439,7 +2447,7 @@ A comprehensive detailed summary has been generated from this call.
       if (initializationFailure || !newCanvasId || !canvasUrl) {
         logDetailedSummaryFailed(callId, 'canvas_create_failed', initializationFailure);
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBot.id);
         }
         return {
           success: false,
@@ -2467,7 +2475,7 @@ A comprehensive detailed summary has been generated from this call.
       );
       if (!finalized) {
         logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
-        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId);
+        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId, xyneAutomaticBot.id);
         return { success: false, error: 'Failed to write final detailed summary content' };
       }
 
@@ -2498,7 +2506,12 @@ A comprehensive detailed summary has been generated from this call.
       // If a brand-new canvas + link was already published before the throw,
       // tear it down so an exception doesn't leave a dangling canvas/message.
       if (newCanvasId) {
-        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+        if (!xyneAutomaticBotId) {
+          throw new Error(
+            `[CallDocumentService] Cannot clean up canvas ${newCanvasId}: xyneAutomaticBotId was never resolved`,
+          );
+        }
+        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBotId);
       }
       return {
         success: false,

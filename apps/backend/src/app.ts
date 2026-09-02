@@ -18,6 +18,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
+import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import webhookRoutes from '@/routes/webhooks';
@@ -111,7 +112,7 @@ import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
-import ysweetRoutes from '@/routes/ysweet';
+import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
@@ -610,6 +611,9 @@ export class App {
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
 
 
+    // No user session here — the caller is the y-sweet server itself, gated
+    // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
+    this.app.use('/api/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
@@ -644,9 +648,6 @@ export class App {
     // Memory routes (auth handled internally by dualAuthenticate middleware)
     this.app.use('/api/memory', memoryRoutes);
 
-    // Y-Sweet collaboration routes. Auth already runs for every /api request via
-    // the /api attachment mounts above; applying it here again cost two more DB
-    // round-trips per canvas open.
     this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
     this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
@@ -977,6 +978,18 @@ export class App {
     } catch (error) {
       logger.error('Failed to initialize Superposition client:', error);
       logger.warn('Continuing startup without Superposition client...');
+    }
+
+    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate (requireYSweetServerToken
+    // fails closed with 401 if it's empty). A missing token here is silent at
+    // request time — every canvas connect and every 10s revalidation poll
+    // just 401s — so surface it loudly at boot instead. Warn, don't crash:
+    // an empty value is expected in local dev where nothing calls this route.
+    if (!config.ysweet.serverToken) {
+      logger.warn(
+        'Y_SWEET_SERVER_TOKEN is not set.' +
+          'if y-sweet auth validation is enabled in this environment, canvas collaboration will be down.'
+      );
     }
 
     try {

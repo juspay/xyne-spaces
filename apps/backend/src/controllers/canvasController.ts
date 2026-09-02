@@ -79,7 +79,7 @@ export class CanvasController {
         }),
       ]);
 
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, blocks);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, blocks, creatorId);
       if (!ysweetInitialized) {
         res.status(500).json({ error: 'Failed to initialize canvas content' });
         return;
@@ -438,7 +438,7 @@ export class CanvasController {
 
       // Read content from Y-Sweet
       const { readFromYSweet } = await import('../utils/ysweetUtils.js');
-      const blocks = await readFromYSweet(canvas.id);
+      const blocks = await readFromYSweet(canvas.id, userId);
       const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
 
       res.status(200).json({
@@ -492,7 +492,7 @@ export class CanvasController {
       const blocks = await convertMarkdownToBlockNote(markdown);
 
       // Sync content to Y-Sweet for collaborative editing
-      const ysweetSynced = await syncToYSweet(canvas.id, blocks);
+      const ysweetSynced = await syncToYSweet(canvas.id, blocks, userId);
       if (!ysweetSynced) {
         logger.warn(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
       }
