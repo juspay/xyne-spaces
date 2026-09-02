@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useRef, useCallback } from 'react';
+import { ReactElement, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import ChatDirectory from '../../components/Chat/ChatDirectory/ChatDirectory';
 import ConversationPrefetcher from '../../components/Chat/ConversationPrefetcher';
@@ -73,8 +73,11 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
     };
   }, [handleResizeEvent]);
 
-  // Collapse (don't unmount) the sidebar on full-screen pages — keeps rows mounted.
-  useEffect(() => {
+  // Collapse (don't unmount) the sidebar on full-screen pages before paint.
+  // Full-screen routes like /chat/dm render their own left sidebar inside the
+  // outlet, so the persistent ChatDirectory panel must not be visible even for
+  // one restored frame from the saved ResizableGroup layout.
+  useLayoutEffect(() => {
     const panel = chatSidebarPanelRef.current;
     if (!panel) return;
     if (isFullScreenPage) {
@@ -82,7 +85,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
     } else if (panel.isCollapsed()) {
       panel.expand();
     }
-  }, [isFullScreenPage]);
+  }, [isFullScreenPage, pathnameWithoutWorkspace]);
 
   // Browser-panel webview: skip the sidebar + chrome, render only the conversation.
   if (isInPanelWebview) {
