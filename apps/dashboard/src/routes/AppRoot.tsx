@@ -1042,6 +1042,10 @@ const AppRoot = (): ReactElement => {
 const SdlcRouteElement = (): ReactElement =>
   isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
 
+/** A ticket page, but still inside the hub's frame so its history stays in one router. */
+const SdlcTicketRouteElement = (): ReactElement =>
+  isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
+
 export const router = createBrowserRouter(
   [
     {
@@ -1578,6 +1582,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:channelId/tickets/:ticketId',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcTicketRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },
