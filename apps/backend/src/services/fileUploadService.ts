@@ -1,5 +1,6 @@
 import { storageService } from './storage/index.js';
 import { logger } from '../utils/logger';
+import { createRequire } from 'module';
 import { decodeUploadFilename } from '../utils/filename';
 
 export interface UploadedFileResult {
@@ -22,6 +23,66 @@ interface FileMetadata {
   height?: number; // Height in pixels (from frontend)
   duration?: number; // Duration in seconds (for videos, from frontend)
 }
+
+const require = createRequire(import.meta.url);
+const sharp = require('sharp') as (input: Buffer, options?: Record<string, unknown>) => {
+  resize(options: Record<string, unknown>): {
+    png(): { toBuffer(): Promise<Buffer> };
+  };
+};
+
+const SVG_THUMBNAIL_MAX_SIZE = 600;
+
+const isSvgMimeType = (mimeType: string): boolean => {
+  return mimeType.split(';')[0]?.trim().toLowerCase() === 'image/svg+xml';
+};
+
+const hasSvgExtension = (filename: string): boolean => filename.toLowerCase().endsWith('.svg');
+
+const isSvgUpload = (file: Express.Multer.File, decodedName: string): boolean => {
+  return isSvgMimeType(file.mimetype || '') || hasSvgExtension(decodedName);
+};
+
+const sanitizeSvgForThumbnail = (svg: string): string => {
+  const activeContentPattern = /<(?:script|foreignObject|iframe|object|embed)\b/i;
+  const externalReferencePattern = /(?:href|xlink:href|src)\s*=\s*["']\s*(?:https?:|file:|\/\/)/i;
+  const cssExternalReferencePattern = /url\s*\(\s*["']?\s*(?:https?:|file:|\/\/)/i;
+
+  if (activeContentPattern.test(svg)) {
+    throw new Error('SVG contains active content');
+  }
+
+  if (externalReferencePattern.test(svg) || cssExternalReferencePattern.test(svg)) {
+    throw new Error('SVG contains external resource references');
+  }
+
+  return svg
+    .replace(/<\?xml[^>]*>/gi, '')
+    .replace(/<!DOCTYPE[^>]*(?:\[[\s\S]*?\])?>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/gi, '');
+};
+
+const generateSvgPngThumbnail = async (file: Express.Multer.File): Promise<Buffer | null> => {
+  if (!file.buffer || file.buffer.length === 0) {
+    return null;
+  }
+
+  const sanitizedSvg = sanitizeSvgForThumbnail(file.buffer.toString('utf8'));
+
+  return sharp(Buffer.from(sanitizedSvg), {
+    animated: false,
+    failOn: 'error',
+    limitInputPixels: 4096 * 4096,
+  })
+    .resize({
+      width: SVG_THUMBNAIL_MAX_SIZE,
+      height: SVG_THUMBNAIL_MAX_SIZE,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .png()
+    .toBuffer();
+};
 
 function getExistingStoragePath(file: Express.Multer.File): string | undefined {
   if (typeof file.path === 'string' && file.path.startsWith('attachments/')) {
@@ -98,7 +159,32 @@ export async function uploadFiles(
         'text/csv',
         'text/comma-separated-values',
       ].includes(fileMimeType);
-      if ((isVideo || isDocument) && metadataMap.size > 0 && thumbnailFiles) {
+      if (isSvgUpload(file, decodedName)) {
+        try {
+          const generatedThumbnail = await generateSvgPngThumbnail(file);
+          if (generatedThumbnail) {
+            const thumbnailUpload = await storageService.uploadFile(generatedThumbnail, {
+              filename: `${decodedName}_thumb.png`,
+              contentType: 'image/png',
+              metadata: {
+                originalName: decodedName,
+                uploadedAt: new Date().toISOString(),
+                isThumbnail: 'true',
+                originalFile: filePath,
+                generatedFrom: 'svg',
+              },
+              scopeType: 'CONVERSATION',
+              scopeId: 'temp',
+            });
+            thumbnailUrl = thumbnailUpload.path;
+            logger.info(`Generated PNG thumbnail for SVG upload: ${file.originalname} -> ${thumbnailUrl}`);
+          }
+        } catch (error) {
+          logger.warn(`Failed to generate SVG thumbnail for ${file.originalname}; falling back to SVG file card`, error);
+        }
+      }
+
+      if (!thumbnailUrl && (isVideo || isDocument) && metadataMap.size > 0 && thumbnailFiles) {
         // Get metadata for this file using O(1) map lookup
         const metadata = metadataMap.get(fileIndex);
 

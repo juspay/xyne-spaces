@@ -8,7 +8,7 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { storageService, getStorageService } from '../services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
-import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
+import { setSafeDownloadHeaders, setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import { canvasAuthService } from '../services/canvasAuthService';
@@ -378,10 +378,12 @@ export class AttachmentController {
 
       const metadata = await storageService.getFileMetadata(thumbnailPath);
       const fileSize = parseInt(String(metadata.size || '0'), 10);
+      const thumbnailContentType = metadata.contentType || metadata.metadata?.contentType || 'image/jpeg';
+      const thumbnailExtension = thumbnailContentType === 'image/png' ? 'png' : 'jpg';
 
-      res.setHeader('Content-Type', 'image/jpeg');
+      setSafeInlineImageHeaders(res, thumbnailContentType);
       res.setHeader('Content-Length', fileSize);
-      res.setHeader('Content-Disposition', `inline; filename="thumbnail.jpg"`);
+      res.setHeader('Content-Disposition', `inline; filename="thumbnail.${thumbnailExtension}"`);
       res.setHeader('Cache-Control', 'private, max-age=3600');
 
       const stream = await storageService.createReadStream(thumbnailPath);

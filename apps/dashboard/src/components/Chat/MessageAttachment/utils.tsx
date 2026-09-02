@@ -232,8 +232,12 @@ export const truncateFileName = (fileName: string, maxLength: number = 25): stri
 /**
  * Check if file type is an image based on MIME type
  */
+export const isSvgFile = (mimeType: string): boolean => {
+  return mimeType.split(';')[0]?.trim().toLowerCase() === 'image/svg+xml';
+};
+
 export const isImageFile = (mimeType: string): boolean => {
-  return mimeType.startsWith('image/');
+  return mimeType.startsWith('image/') && !isSvgFile(mimeType);
 };
 
 /**
@@ -264,6 +268,7 @@ export const getFileCategory = (
   mimeType: string,
 ): 'image' | 'video' | 'audio' | 'document' | 'archive' | 'unknown' => {
   if (isImageFile(mimeType)) return 'image';
+  if (isSvgFile(mimeType)) return 'document';
   if (isVideoFile(mimeType)) return 'video';
   if (isAudioFile(mimeType)) return 'audio';
   if (
