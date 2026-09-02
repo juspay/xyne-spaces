@@ -109,9 +109,12 @@ export function useCanvasBlockShortcuts(
       event.stopPropagation();
       try {
         item.onItemClick?.();
-      } catch {
-        // These items throw on a block that holds no text, an image say. Nothing
-        // to insert into, so the key is a no-op.
+      } catch (error) {
+        // A block that holds no text, an image say, has nothing to insert into, so
+        // the key does nothing. Any other failure is real and still surfaces.
+        if (!(error instanceof Error) || !error.message.includes("doesn't contain content")) {
+          throw error;
+        }
       }
     };
 
