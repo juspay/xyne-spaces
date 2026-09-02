@@ -62,7 +62,7 @@ import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
-import { withHeadingsTogether } from '../canvasSlashMenu';
+import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
 import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
@@ -333,7 +333,9 @@ export const CollaborativeCanvasEditor = forwardRef<
       const defaultItems = getDefaultReactSlashMenuItems(
         editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>,
       );
-      return withBlockShortcutBadges(withHeadingsTogether([...defaultItems, ...customSlashItems]));
+      return withBlockShortcutBadges(
+        withHeadingsTogether([...withUnifiedUpload(defaultItems), ...customSlashItems]),
+      );
     }, [editor, customSlashItems]);
 
     const getSlashMenuItems = useCallback(

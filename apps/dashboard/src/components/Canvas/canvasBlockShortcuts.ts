@@ -11,7 +11,7 @@ import { editorView } from './canvasEditorView';
  *
  *   Mod-Alt-Shift-N  inserted blocks, numbered down the menu. 1 to 3 are the
  *                    toggle headings, mirroring Mod-Alt-1 to 3 for the headings
- *                    themselves; 4 to 7 are the Media group in its own order.
+ *                    themselves; 4 is Upload, what the Media group became.
  *   Mod-Shift-N      joins the list blocks, which hold 6 to 9, at the free end.
  *   Mod-Alt-<letter> joins Mod-Alt-C for code and Mod-Alt-Q for quote: a block
  *                    with a name rather than a place in a series.
@@ -37,10 +37,9 @@ export const BLOCK_SHORTCUTS: Readonly<Record<string, string>> = {
   'Toggle Heading 2': 'Mod-Alt-Shift-2',
   'Toggle Heading 3': 'Mod-Alt-Shift-3',
 
-  Image: 'Mod-Alt-Shift-4',
-  Video: 'Mod-Alt-Shift-5',
-  Audio: 'Mod-Alt-Shift-6',
-  File: 'Mod-Alt-Shift-7',
+  // Keeps 4 so the old image key still works; 5 to 7 left free rather than
+  // renumbering Diagram and Whiteboard.
+  Upload: 'Mod-Alt-Shift-4',
 
   Diagram: 'Mod-Alt-Shift-8',
   Whiteboard: 'Mod-Alt-Shift-9',
@@ -108,7 +107,12 @@ export function useCanvasBlockShortcuts(
 
       event.preventDefault();
       event.stopPropagation();
-      item.onItemClick?.();
+      try {
+        item.onItemClick?.();
+      } catch {
+        // These items throw on a block that holds no text, an image say. Nothing
+        // to insert into, so the key is a no-op.
+      }
     };
 
     dom.addEventListener('keydown', onKeyDown, true);
