@@ -2653,8 +2653,8 @@ model Notification {
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
   type              String
-  title             String
-  message           String
+  title             String?                     @default("")
+  message           String?                     @default("")
   status            String                      @default("UNREAD")
   deliveryMethods   String[]
   metadata          Json?                       // Additional context data
