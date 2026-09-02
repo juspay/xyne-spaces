@@ -323,6 +323,27 @@ const AIScreen = (): ReactElement => {
     },
     [appModeCollapseSidebar],
   );
+  // Entry from a card. Sets the app and opens the mode together, so the pane
+  // never depends on the message-list scan having reported the app first —
+  // that chain (scan → onAppChange → state → hook effect) was the part that
+  // made entry a coin flip. The scan still runs, for clearing on thread switch
+  // and for the freshness signal, but it is no longer on the entry path.
+  const { open: openAppMode } = appMode;
+  const enterForApp = useCallback(
+    (id: string, versionId: string | null) => {
+      setAppId(id);
+      if (versionId) setLatestVersionId(versionId);
+      openAppMode();
+    },
+    [openAppMode],
+  );
+  // Routed through the thread's handle rather than a composer ref of its own:
+  // the thread owns submit (draft recovery, branch parenting), so a fix request
+  // takes exactly the path a typed message does.
+  const submitPrompt = useCallback(
+    (text: string): boolean => chatThreadRef.current?.submitPrompt(text) ?? false,
+    [],
+  );
   // A fresh object here re-renders every context consumer — that is every
   // artifact card in the transcript — on each AIScreen render.
   const appModeSignal = useMemo(
@@ -335,6 +356,8 @@ const AIScreen = (): ReactElement => {
       viewVersion: appMode.viewVersion,
       restoreVersion: appMode.restoreVersion,
       restoring: appMode.restoring,
+      enterForApp,
+      submitPrompt,
     }),
     [
       appMode.active,
@@ -345,6 +368,8 @@ const AIScreen = (): ReactElement => {
       appMode.viewVersion,
       appMode.restoreVersion,
       appMode.restoring,
+      enterForApp,
+      submitPrompt,
     ],
   );
   // Likewise a fresh element remounts the pane's subtree each render.

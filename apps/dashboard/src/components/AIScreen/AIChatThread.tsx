@@ -73,6 +73,7 @@ import { Button } from '../ui/Button/Button';
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
 import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
+import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
 import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
 import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
 import { SidebarLeftClose, SidebarLeftOpen } from '@xyne/icons';
@@ -141,6 +142,9 @@ interface AIChatThreadProps {
 
 export interface AIChatThreadHandle {
   addFiles: (files: File[]) => void;
+  /** Submit `text` as a new turn with the composer's current context, leaving
+   *  whatever the user has drafted untouched. False if a reply is streaming. */
+  submitPrompt: (text: string) => boolean;
 }
 
 const toMessageAttachments = (attachments: AIComposerAttachment[]): MessageAttachment[] =>
@@ -1069,6 +1073,10 @@ function ChatMessageBubble({
 
   return (
     <div
+      // The rail measures these to place its ticks. Marking every message (not
+      // just user ones) keeps the attribute meaningful if the rail later shows
+      // answers too; it filters by type on its own side.
+      data-prompt-marker={isUser ? message.id : undefined}
       className={cn(
         'group w-full',
         isUser ? 'flex justify-end px-2 py-3 sm:px-4' : 'px-2 py-5 sm:px-4',
@@ -1413,6 +1421,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       addFiles: (files: File[]): void => {
         composerRef.current?.addFiles(files);
       },
+      submitPrompt: (text: string): boolean => composerRef.current?.submitPrompt(text) ?? false,
     }),
     [],
   );
@@ -1909,10 +1918,17 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // on merely opening an old thread that happens to contain an app. The set
   // resets with the component (chatKey remounts on thread switch), so history
   // can never masquerade as live.
+  // Keyed by stableKey as well as id: a streaming message carries a temp id
+  // that is swapped for the server id at completion — which is exactly when its
+  // artifact attachment arrives. Recording only the temp id meant the finished
+  // message never matched, and the first build of every thread was reported as
+  // history rather than as a live generation.
   const streamedMessageIds = useRef(new Set<string>());
   useEffect(() => {
     for (const m of displayMessages) {
-      if (m.isStreaming) streamedMessageIds.current.add(m.id);
+      if (!m.isStreaming) continue;
+      streamedMessageIds.current.add(m.id);
+      if (m.stableKey) streamedMessageIds.current.add(m.stableKey);
     }
   }, [displayMessages]);
 
@@ -1931,7 +1947,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           // this is the freshness signal: a versionId the loaded version list
           // does not contain means "a generation just landed — refetch".
           foundVersion = artifact.versionId ?? null;
-          generatedLive = Boolean(message && streamedMessageIds.current.has(message.id));
+          generatedLive = Boolean(
+            message &&
+            (streamedMessageIds.current.has(message.id) ||
+              (message.stableKey !== undefined &&
+                streamedMessageIds.current.has(message.stableKey))),
+          );
           break;
         }
       }
@@ -2231,6 +2252,17 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return byMessage;
   }, [appRestores, displayMessages]);
 
+  // Only prompts. The answers are what you scroll THROUGH; the questions are
+  // what you scroll TO — so marking both would bury the landmarks among the
+  // things being navigated.
+  const promptMarkers = useMemo<PromptMarker[]>(
+    () =>
+      displayMessages
+        .filter(m => m.type === 'user' && m.content.trim().length > 0)
+        .map(m => ({ id: m.id, text: m.content })),
+    [displayMessages],
+  );
+
   const title =
     messages.length > 0
       ? (messages.find(m => m.type === 'user')?.content.slice(0, 40) ?? 'New chat')
@@ -2261,107 +2293,114 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           sidebarCollapsed={sidebarCollapsed}
         />
 
-        {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
-          which the auto-scroll effect listens for to unstick from bottom. */}
-        <div
-          ref={scrollRef}
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-          tabIndex={0}
-          className='relative flex-1 overflow-y-auto px-2 py-6 focus:outline-none sm:px-4'
-          role='log'
-          aria-live='polite'
-          aria-label='Chat messages'
-        >
-          <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
-            <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
-              {displayMessages.map((message, idx) => {
-                const feedbackValue: FeedbackValue =
-                  message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
-                const botTurnIndex =
-                  message.type === 'bot'
-                    ? displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1
-                    : -1;
-                // Branching is disabled for legacy conversations (no parentId).
-                const branchEnabled = !isLegacyConversation;
-                const isLatestUserMessage = idx === lastUserIndex;
-                const isLatestBotMessage = idx === lastBotIndex;
-                const siblingCount = siblingCountById.get(message.id) ?? 1;
-                const branchInfo =
-                  branchEnabled && siblingCount > 1
-                    ? { index: siblingIndexById.get(message.id) ?? 0, total: siblingCount }
-                    : undefined;
-                const restoresHere = restoresByMessageId.get(message.id);
-                return (
-                  // Stable key so the bubble doesn't remount when the id swaps
-                  // temp→server at completion (which would kill the reasoning
-                  // section's transitions).
-                  <Fragment key={message.stableKey ?? message.id}>
-                    <ChatMessageBubble
-                      message={message}
-                      onCopy={() => {
-                        void navigator.clipboard.writeText(
-                          message.content || message.streamingContent || '',
-                        );
-                      }}
-                      onFeedback={(id, type) => {
-                        void handleFeedback(id, type);
-                      }}
-                      feedbackValue={feedbackValue}
-                      isV2={isV2}
-                      onRatingChange={handleRatingChange}
-                      onDebug={
-                        isV2 && message.type === 'bot'
-                          ? () => {
-                              setDebugTurnIndex(botTurnIndex);
-                              // Pin to this message's run when known (branching-safe);
-                              // null falls back to turn-index for unlinked live runs.
-                              setDebugSessionId(message.debugSessionId ?? null);
-                              setDebugFocusToolCallId(null);
-                              setShowDebugger(true);
-                            }
-                          : undefined
-                      }
-                      onOpenToolDebug={
-                        isV2 && message.type === 'bot'
-                          ? (toolCallId: string) => {
-                              setDebugTurnIndex(botTurnIndex);
-                              setDebugSessionId(message.debugSessionId ?? null);
-                              setDebugFocusToolCallId(toolCallId);
-                              setShowDebugger(true);
-                            }
-                          : undefined
-                      }
-                      onEditSubmit={
-                        branchEnabled && isLatestUserMessage
-                          ? (newContent: string) => void handleEditMessage(message.id, newContent)
-                          : undefined
-                      }
-                      onRegenerate={
-                        branchEnabled && isLatestBotMessage && !message.isStreaming
-                          ? () => void handleRegenerate()
-                          : undefined
-                      }
-                      onFollowUpSuggestionClick={
-                        isV2 && isLatestBotMessage && !message.isStreaming
-                          ? handleFollowUpSuggestion
-                          : undefined
-                      }
-                      branchInfo={branchInfo}
-                      onBranchNavigate={
-                        branchInfo
-                          ? (direction: 'prev' | 'next') =>
-                              handleBranchNavigate(message.id, direction)
-                          : undefined
-                      }
-                    />
-                    {restoresHere?.map(event => (
-                      <ArtifactRestoreNotice key={event.id} event={event} />
-                    ))}
-                  </Fragment>
-                );
-              })}
-            </ConversationToolInvocationsContext.Provider>
-            <div ref={tailRef} />
+        {/* Non-scrolling frame around the scroller. The prompt rail lives HERE,
+          as a sibling of the scroll area rather than inside it — anything
+          positioned inside an overflow container scrolls away with the content,
+          so the rail has to be anchored to the frame that stays put. */}
+        <div className='relative min-h-0 flex-1'>
+          <PromptMarkerRail markers={promptMarkers} scrollRef={scrollRef} />
+          {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
+            which the auto-scroll effect listens for to unstick from bottom. */}
+          <div
+            ref={scrollRef}
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+            tabIndex={0}
+            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4'
+            role='log'
+            aria-live='polite'
+            aria-label='Chat messages'
+          >
+            <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
+              <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
+                {displayMessages.map((message, idx) => {
+                  const feedbackValue: FeedbackValue =
+                    message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
+                  const botTurnIndex =
+                    message.type === 'bot'
+                      ? displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1
+                      : -1;
+                  // Branching is disabled for legacy conversations (no parentId).
+                  const branchEnabled = !isLegacyConversation;
+                  const isLatestUserMessage = idx === lastUserIndex;
+                  const isLatestBotMessage = idx === lastBotIndex;
+                  const siblingCount = siblingCountById.get(message.id) ?? 1;
+                  const branchInfo =
+                    branchEnabled && siblingCount > 1
+                      ? { index: siblingIndexById.get(message.id) ?? 0, total: siblingCount }
+                      : undefined;
+                  const restoresHere = restoresByMessageId.get(message.id);
+                  return (
+                    // Stable key so the bubble doesn't remount when the id swaps
+                    // temp→server at completion (which would kill the reasoning
+                    // section's transitions).
+                    <Fragment key={message.stableKey ?? message.id}>
+                      <ChatMessageBubble
+                        message={message}
+                        onCopy={() => {
+                          void navigator.clipboard.writeText(
+                            message.content || message.streamingContent || '',
+                          );
+                        }}
+                        onFeedback={(id, type) => {
+                          void handleFeedback(id, type);
+                        }}
+                        feedbackValue={feedbackValue}
+                        isV2={isV2}
+                        onRatingChange={handleRatingChange}
+                        onDebug={
+                          isV2 && message.type === 'bot'
+                            ? () => {
+                                setDebugTurnIndex(botTurnIndex);
+                                // Pin to this message's run when known (branching-safe);
+                                // null falls back to turn-index for unlinked live runs.
+                                setDebugSessionId(message.debugSessionId ?? null);
+                                setDebugFocusToolCallId(null);
+                                setShowDebugger(true);
+                              }
+                            : undefined
+                        }
+                        onOpenToolDebug={
+                          isV2 && message.type === 'bot'
+                            ? (toolCallId: string) => {
+                                setDebugTurnIndex(botTurnIndex);
+                                setDebugSessionId(message.debugSessionId ?? null);
+                                setDebugFocusToolCallId(toolCallId);
+                                setShowDebugger(true);
+                              }
+                            : undefined
+                        }
+                        onEditSubmit={
+                          branchEnabled && isLatestUserMessage
+                            ? (newContent: string) => void handleEditMessage(message.id, newContent)
+                            : undefined
+                        }
+                        onRegenerate={
+                          branchEnabled && isLatestBotMessage && !message.isStreaming
+                            ? () => void handleRegenerate()
+                            : undefined
+                        }
+                        onFollowUpSuggestionClick={
+                          isV2 && isLatestBotMessage && !message.isStreaming
+                            ? handleFollowUpSuggestion
+                            : undefined
+                        }
+                        branchInfo={branchInfo}
+                        onBranchNavigate={
+                          branchInfo
+                            ? (direction: 'prev' | 'next') =>
+                                handleBranchNavigate(message.id, direction)
+                            : undefined
+                        }
+                      />
+                      {restoresHere?.map(event => (
+                        <ArtifactRestoreNotice key={event.id} event={event} />
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </ConversationToolInvocationsContext.Provider>
+              <div ref={tailRef} />
+            </div>
           </div>
         </div>
 
