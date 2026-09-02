@@ -837,9 +837,18 @@ class NoteTakerTranscriptService {
         if (!newCanvasId || latestMarkdown === renderedMarkdown) return;
 
         const snapshot = latestMarkdown;
+        const xyneAutomaticBot = await xyneAutomaticBotPromise;
+        if (!xyneAutomaticBot) {
+          logger.warn(`[${callId}] recording_summary_canvas_stream_sync_failed`, {
+            canvas_id: newCanvasId,
+            reason: 'xyne_automatic_bot_not_found',
+          });
+          return;
+        }
         const synced = await callDocumentService.syncStreamingDetailedSummaryCanvas(
           newCanvasId,
           snapshot,
+          xyneAutomaticBot.id,
           citationCtx,
         );
         if (synced) {

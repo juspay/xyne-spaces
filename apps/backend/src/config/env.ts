@@ -226,6 +226,7 @@ const envSchema = Joi.object({
   APNS_P8_BASE64: Joi.string().allow('').default(''),
   // Y-Sweet Configuration
   Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
+  Y_SWEET_SERVER_TOKEN: Joi.string().allow('').default(''),
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -841,6 +842,7 @@ export const config = {
   },
   ysweet: {
     url: envVars.Y_SWEET_URL,
+    serverToken: envVars.Y_SWEET_SERVER_TOKEN,
   },
   entityExtraction: {
     enabled: envVars.ENABLE_ENTITY_EXTRACTION,
