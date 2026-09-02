@@ -38,7 +38,6 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
-import { isCanvasContentEmpty } from '@xyne/shared';
 import { buildHandleMap, deriveOps, parseLabelledMarkdown } from '@/services/canvas/blockLabels';
 import { deriveDiffOps } from '@/services/canvas/blockDiff';
 import { createBlockRenderer } from '@/services/canvas/blockRender';
@@ -1454,100 +1453,54 @@ export class SdlcHubService implements SdlcHub {
     });
     const content = await convertMarkdownToBlockNote(resolved.markdown);
 
-    // Suggestion gate (mirrors updateCanvas): updates to a NON-EMPTY PRD/Tech
-    // Doc are parked as suggestions for human review instead of overwriting.
-    // Labelled markdown gets the full label protocol; unlabelled regenerations
-    // fall back to an exact-text block diff. Empty canvases keep direct write.
+    // Suggestion gate (mirrors updateCanvas), no exceptions: every update to a
+    // PRD/Tech Doc parks as suggestions for human review.
     const live = await readFromYSweet(existing.id);
-    if (!isCanvasContentEmpty(live)) {
-      const nextBlocks = content as unknown as BlockNoteBlock[];
-      const renderer = await createBlockRenderer([...live, ...nextBlocks]);
-      const entries = parseLabelledMarkdown(resolved.markdown);
-      const receipt = await getReadReceipt(existing.id, actor.userId);
-      const ops = entries.some(e => e.handle !== null || e.isNew)
-        ? deriveOps({
-            current: live,
-            entries,
-            handleMap: buildHandleMap(live),
-            render: renderer.render,
-            ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
-          })
-        : deriveDiffOps(live, nextBlocks, renderer.render);
+    const nextBlocks = content as unknown as BlockNoteBlock[];
+    const renderer = await createBlockRenderer([...live, ...nextBlocks]);
+    const entries = parseLabelledMarkdown(resolved.markdown);
+    const receipt = await getReadReceipt(existing.id, actor.userId);
+    const ops = entries.some(e => e.handle !== null || e.isNew)
+      ? deriveOps({
+          current: live,
+          entries,
+          handleMap: buildHandleMap(live),
+          render: renderer.render,
+          ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
+        })
+      : deriveDiffOps(live, nextBlocks, renderer.render);
 
-      // Title and provenance are not suggestion-managed; keep them current.
-      if (input.title) {
-        await this.prisma.canvas.update({ where: { id: existing.id }, data: { title: input.title } });
-      }
-      await this.prisma.sdlcArtifact.upsert({
-        where: { artifactId: existing.id },
-        create: {
-          workspaceId: actor.workspaceId,
-          repoId: repo.id,
-          artifactId: existing.id,
-          artifactType: 'DEFAULT',
-          generationCommit,
-          sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
-          createdBy: actor.userId,
-        },
-        update: {
-          generationCommit,
-          sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
-        },
-      });
-
-      const created = ops.length
-        ? (await createSuggestionBatch({ workspaceId: actor.workspaceId, canvasId: existing.id, ops })).created
-        : 0;
-      return {
-        canvasId: existing.id,
-        viewAccessId: existing.viewAccessId ?? undefined,
-        url: `/chat/canvas/${existing.viewAccessId ?? existing.id}`,
-        parked: true,
-        pendingChanges: created,
-      };
+    // Title and provenance are not suggestion-managed; keep them current.
+    if (input.title) {
+      await this.prisma.canvas.update({ where: { id: existing.id }, data: { title: input.title } });
     }
+    await this.prisma.sdlcArtifact.upsert({
+      where: { artifactId: existing.id },
+      create: {
+        workspaceId: actor.workspaceId,
+        repoId: repo.id,
+        artifactId: existing.id,
+        artifactType: 'DEFAULT',
+        generationCommit,
+        sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
+        createdBy: actor.userId,
+      },
+      update: {
+        generationCommit,
+        sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
+      },
+    });
 
-    return commitAndSyncCanvasArtifact(
-      () =>
-        this.prisma.$transaction(async (tx) => {
-          const canvas = await tx.canvas.update({
-            where: { id: existing.id },
-            data: {
-              ...(input.title ? { title: input.title } : {}),
-              content: content as unknown as Prisma.InputJsonValue,
-              lastEditedBy: actor.userId,
-              lastEditedAt: new Date(),
-            },
-            select: { id: true, viewAccessId: true },
-          });
-          await tx.sdlcArtifact.upsert({
-            where: { artifactId: existing.id },
-            create: {
-              workspaceId: actor.workspaceId,
-              repoId: repo.id,
-              artifactId: existing.id,
-              artifactType: 'DEFAULT',
-              generationCommit,
-              sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
-              createdBy: actor.userId,
-            },
-            update: {
-              generationCommit,
-              sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
-            },
-          });
-          return {
-            artifact: {
-              canvasId: canvas.id,
-              viewAccessId: canvas.viewAccessId ?? undefined,
-              url: `/chat/canvas/${canvas.viewAccessId ?? canvas.id}`,
-            },
-            canvasId: canvas.id,
-            content,
-          };
-        }),
-      syncToYSweet
-    );
+    const created = ops.length
+      ? (await createSuggestionBatch({ workspaceId: actor.workspaceId, canvasId: existing.id, ops })).created
+      : 0;
+    return {
+      canvasId: existing.id,
+      viewAccessId: existing.viewAccessId ?? undefined,
+      url: `/chat/canvas/${existing.viewAccessId ?? existing.id}`,
+      parked: true,
+      pendingChanges: created,
+    };
   }
 
   async linkContext(
