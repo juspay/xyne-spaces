@@ -1,3 +1,10 @@
+## [1.259.2](https://github.com/juspay/xyne-spaces/compare/v1.259.1...v1.259.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* prevent desk detail back navigation loop ([#1079](https://github.com/juspay/xyne-spaces/issues/1079)) ([22b93cf](https://github.com/juspay/xyne-spaces/commit/22b93cf6efb7acdec03a57b6e08fe07e64cc0e28))
+
 ## [1.259.1](https://github.com/juspay/xyne-spaces/compare/v1.259.0...v1.259.1) (2026-09-02)
 
 
