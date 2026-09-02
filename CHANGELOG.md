@@ -1,3 +1,10 @@
+## [1.251.0-release-20260901.8](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.7...v1.251.0-release-20260901.8) (2026-09-02)
+
+
+### Bug Fixes
+
+* added new section in dm and optimized the search ([#1430](https://github.com/juspay/xyne-spaces/issues/1430)) ([dad8061](https://github.com/juspay/xyne-spaces/commit/dad806189c7eb3f3d054cb7e46db7971a507906a))
+
 ## [1.251.0-release-20260901.7](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.6...v1.251.0-release-20260901.7) (2026-09-02)
 
 
