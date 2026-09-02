@@ -2181,7 +2181,7 @@ export class AuthV2Controller {
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
-        const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
+        const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email, workspaceUser.id));
 
         setOnboardingCookie(res, isNewUser, {
           secure: isProduction,
@@ -2326,7 +2326,7 @@ export class AuthV2Controller {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
       res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-      const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
+      const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email, workspaceUser.id));
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,
         sameSite: 'strict' as const,

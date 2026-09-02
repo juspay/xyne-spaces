@@ -331,8 +331,6 @@ export class CommunityWorkspaceService {
         });
       }
 
-      const hasCompletedOnboarding = await this.userService.hasCompletedOnboarding(email);
-
       let workspaceUser = await tx.user.findUnique({
         where: {
           email_workspaceId: {
@@ -341,6 +339,8 @@ export class CommunityWorkspaceService {
           },
         },
       });
+
+      const hasCompletedOnboarding = await this.userService.hasCompletedOnboarding(email, workspaceUser?.id);
 
       const isNewUser = !hasCompletedOnboarding;
       if (workspaceUser) {

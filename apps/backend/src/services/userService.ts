@@ -53,13 +53,16 @@ export class UserService {
     this.prisma = DatabaseClient.getInstance();
   }
 
-  async hasCompletedOnboarding(email: string): Promise<boolean> {
+  async hasCompletedOnboarding(email: string, userId?: string): Promise<boolean> {
     const normalizedEmail = email.toLowerCase().trim();
     return await runAsSystem(async () => {
       const onboardingResponse = await this.prisma.questionnaireResponse.findFirst({
         where: {
           questionnaireType: 'onboarding',
-          email: normalizedEmail,
+          OR: [
+            { email: normalizedEmail },
+            ...(userId ? [{ userId }] : []),
+          ],
         },
         select: { id: true },
       });
@@ -813,7 +816,7 @@ export class UserService {
       }
 
       const normalizedAuthProvider = (userData.authProvider?.toUpperCase() as AuthProvider) || AuthProvider.GOOGLE;
-      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email);
+      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email, workspaceUser?.id);
 
       if (workspaceUser) {
         workspaceUser = await this.prisma.user.update({
