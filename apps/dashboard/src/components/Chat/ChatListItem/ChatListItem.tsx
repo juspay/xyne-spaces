@@ -10,6 +10,7 @@ import { ChannelScopeType, MessageAttachment } from '@xyne/shared';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { useAuth } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
+import { Button } from '../../ui/Button/Button';
 import {
   usePendingStatusByMessageId,
   usePendingByMessageId,
@@ -124,24 +125,28 @@ const ChatListItemComponent = ({
       {pendingStatus === 'failed' && pendingEntry && (
         <div className='flex items-center gap-3 pl-12 pt-1 text-xs text-red-500'>
           <span>Failed to send.</span>
-          <button
+          <Button
+            variant='ghost'
             type='button'
+            trackId='retry_failed_send'
             data-track-category='PENDING_MESSAGE'
             data-track-name='retry_failed_send'
             className='font-medium underline hover:opacity-80'
             onClick={() => firePendingMutator(zero, pendingEntry)}
           >
             Retry
-          </button>
-          <button
+          </Button>
+          <Button
+            variant='ghost'
             type='button'
+            trackId='delete_failed_send'
             data-track-category='PENDING_MESSAGE'
             data-track-name='delete_failed_send'
             className='font-medium underline hover:opacity-80'
             onClick={() => removePending(pendingEntry.messageId)}
           >
             Delete
-          </button>
+          </Button>
         </div>
       )}
     </div>

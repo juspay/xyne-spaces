@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, memo } from 'react';
 import { BaseViewerProps } from './utils';
+import { Button } from '../ui/Button/Button';
 
 const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -57,14 +58,16 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
             Unable to display file
           </p>
           <p className='text-red-600 dark:text-red-300 text-sm mb-3'>{error}</p>
-          <button
+          <Button
             onClick={() => void loadFile()}
+            variant='ghost'
             className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
             data-track-category='FileViewer'
             data-track-name='RetryLoadHtml'
+            trackId='retry_load_html'
           >
             Try Again
-          </button>
+          </Button>
         </div>
       </div>
     );

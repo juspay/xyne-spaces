@@ -87,6 +87,7 @@ import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendin
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AskAiRatingButtons } from '../../../AIScreen/AskAiRatingButtons';
+import { Button } from '../../../ui/Button/Button';
 
 /**
  * v3-style inline citation chip for `[clf-<toolCallId>#<chunkIndex>]` tokens.
@@ -1262,20 +1263,22 @@ export const MessageItem = React.memo(
                   >
                     Cancel
                   </button>
-                  <button
+                  <Button
+                    variant='ghost'
                     onClick={() => {
                       if (editText.trim()) {
                         onEditSubmit?.(editText.trim());
                         setIsEditing(false);
                       }
                     }}
+                    trackId='edit_message_submit'
                     disabled={!editText.trim()}
                     className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
                     data-track-category='XyneAI'
                     data-track-name='EDIT_SUBMIT'
                   >
                     Send
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : message.type === 'user' ? (
@@ -2506,8 +2509,10 @@ const MessageActions = ({
 
       {/* Regenerate Button - only on the latest bot message */}
       {onRegenerate && (
-        <button
+        <Button
+          variant='ghost'
           onClick={onRegenerate}
+          trackId='regenerate_message'
           className='p-1.5 rounded transition-colors hover:bg-accent'
           title='Regenerate response'
           data-track-category='XyneAI'
@@ -2515,7 +2520,7 @@ const MessageActions = ({
           data-track-metadata={JSON.stringify({ messageId: message.id })}
         >
           <RefreshCw size={16} className='text-current' />
-        </button>
+        </Button>
       )}
 
       {isV2 ? (
@@ -2530,8 +2535,10 @@ const MessageActions = ({
       ) : (
         <>
           {/* Like Button */}
-          <button
+          <Button
+            variant='ghost'
             onClick={() => onFeedback(message.id, 'LIKE')}
+            trackId='like_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Like'
             data-track-category='XyneAI'
@@ -2569,11 +2576,13 @@ const MessageActions = ({
                 </clipPath>
               </defs>
             </svg>
-          </button>
+          </Button>
 
           {/* Dislike Button */}
-          <button
+          <Button
+            variant='ghost'
             onClick={() => onFeedback(message.id, 'DISLIKE')}
+            trackId='dislike_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Dislike'
             data-track-category='XyneAI'
@@ -2616,7 +2625,7 @@ const MessageActions = ({
                 </clipPath>
               </defs>
             </svg>
-          </button>
+          </Button>
         </>
       )}
       {/* Participants avatars - shown for Summarizer messages */}

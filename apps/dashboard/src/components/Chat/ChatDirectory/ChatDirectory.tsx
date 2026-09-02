@@ -62,6 +62,7 @@ import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Dialog, { cn } from '../../ui/Dialog';
+import { Button } from '../../ui/Button';
 
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -1287,14 +1288,16 @@ const ChatDirectory = ({
               >
                 Cancel
               </button>
-              <button
+              <Button
+                variant='ghost'
                 onClick={handleConfirmDeleteSection}
+                trackId='delete_channel_section'
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='CONFIRM_DELETE_SECTION'
                 className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors'
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         </Dialog>
@@ -1404,7 +1407,7 @@ const ChatDirectory = ({
             label='Activity'
             {...(activityCount > 0 && { count: activityCount })}
             onClick={() => {
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              posthogService.capture(EVENTS.INITIATE_ACTION, {
                 type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_VIEWED,
               });
               void navigate('/chat/dir/activity');
@@ -1415,7 +1418,7 @@ const ChatDirectory = ({
             label='Thread'
             disabled={true}
             onClick={() => {
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              posthogService.capture(EVENTS.INITIATE_ACTION, {
                 type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_VIEWED,
               });
               void navigate('/chat/threads');

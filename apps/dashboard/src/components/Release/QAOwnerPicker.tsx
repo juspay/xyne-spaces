@@ -6,6 +6,7 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { cn } from '../../utils/classNames';
 import { Popover } from '../ui/Popover/Popover';
+import { Button } from '../ui/Button/Button';
 
 interface QAOwnerPickerProps {
   artId: string | null;
@@ -83,19 +84,22 @@ export const QAOwnerPicker = ({
       />
       <div className='max-h-48 overflow-y-auto p-1'>
         {testedBy && (
-          <button
+          <Button
+            variant='ghost'
             type='button'
             className='w-full rounded-sm px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted'
             onClick={() => handleSelect(null)}
             data-track-category='Release'
             data-track-name='CLEAR_QA_OWNER'
+            trackId='clear_qa_owner'
           >
             Clear
-          </button>
+          </Button>
         )}
         {filtered.map(u => (
-          <button
+          <Button
             key={u.id}
+            variant='ghost'
             type='button'
             className={cn(
               'w-full truncate rounded-sm px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted',
@@ -104,9 +108,10 @@ export const QAOwnerPicker = ({
             onClick={() => handleSelect(u.id)}
             data-track-category='Release'
             data-track-name='SELECT_QA_OWNER'
+            trackId='select_qa_owner'
           >
             {u.name ?? u.email}
-          </button>
+          </Button>
         ))}
         {filtered.length === 0 && (
           <p className='px-2 py-1.5 text-xs text-muted-foreground'>No users found</p>

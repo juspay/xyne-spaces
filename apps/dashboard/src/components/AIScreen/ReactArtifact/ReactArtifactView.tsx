@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCacConfig } from '@xyne/shared/hooks';
+import { Button } from '../../ui/Button/Button';
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
   loadArtifactPayload,
@@ -304,7 +305,9 @@ export const ReactArtifactView = ({
             </span>
           )}
           {payload.dataRequirements?.some(r => r.source) && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -321,10 +324,12 @@ export const ReactArtifactView = ({
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
                 aria-hidden='true'
               />
-            </button>
+            </Button>
           )}
           {onSave && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
@@ -341,7 +346,7 @@ export const ReactArtifactView = ({
               ) : (
                 <Save className='h-3.5 w-3.5' aria-hidden='true' />
               )}
-            </button>
+            </Button>
           )}
           {onExpand && (
             <button

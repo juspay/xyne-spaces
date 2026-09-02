@@ -219,16 +219,18 @@ const NotificationKeywordsCard: FC = () => {
           {keywords.map(keyword => (
             <Badge key={keyword} variant='primary' className='flex items-center gap-1.5 pr-1'>
               <span className='text-xs'>{keyword}</span>
-              <button
+              <Button
                 type='button'
+                variant='ghost'
                 onClick={() => removeKeyword(keyword)}
+                trackId='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
                 data-track-name='RemoveNotificationKeyword'
               >
                 <X className='h-3 w-3' />
-              </button>
+              </Button>
             </Badge>
           ))}
         </div>
@@ -278,9 +280,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                trackId='set_global_desktop_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -291,7 +296,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -304,9 +309,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                trackId='set_global_mobile_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -317,7 +325,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -574,6 +582,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           size='sm'
           disabled={isDisconnecting}
           onClick={() => void handleDisconnectCalendar()}
+          trackId='disconnect_calendar'
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
         >
@@ -828,6 +837,7 @@ const PasswordSection: FC = () => {
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
           className='w-full'
+          trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
         >

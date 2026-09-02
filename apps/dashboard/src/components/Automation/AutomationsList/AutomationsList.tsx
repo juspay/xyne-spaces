@@ -352,6 +352,7 @@ export function AutomationsList({
               variant='outline'
               size='sm'
               disabled={disableMutation.isPending}
+              trackId='disable_automation_keep_queued'
               onClick={() => {
                 if (pendingDisable) {
                   disableMutation.mutate({ id: pendingDisable.id, cancelQueued: false });
@@ -368,6 +369,7 @@ export function AutomationsList({
               size='sm'
               disabled={disableMutation.isPending}
               loading={disableMutation.isPending}
+              trackId='disable_automation_cancel_queued'
               onClick={() => {
                 if (pendingDisable) {
                   disableMutation.mutate({ id: pendingDisable.id, cancelQueued: true });
@@ -411,6 +413,7 @@ export function AutomationsList({
               size='sm'
               disabled={deleteMutation.isPending}
               loading={deleteMutation.isPending}
+              trackId='delete_automation_confirm'
               onClick={() => {
                 if (pendingDelete) {
                   deleteMutation.mutate(pendingDelete.id);

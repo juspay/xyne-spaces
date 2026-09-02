@@ -2839,28 +2839,32 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             )}
           </div>
           {onUnmerge && (
-            <button
+            <Button
               type='button'
+              variant='ghost'
               onClick={onUnmerge}
+              trackId='unmerge_ticket'
               className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='UnmergeTicket'
             >
               Unmerge
-            </button>
+            </Button>
           )}
           {allowEdit && (
-            <button
+            <Button
               type='button'
+              variant='ghost'
               className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
+              trackId='remove_ticket_reference'
               aria-label='Remove reference'
               data-track-category='Tickets'
               data-track-name='RemoveReference'
               data-track-metadata={JSON.stringify({ referenceId: reference.id })}
             >
               <X size={14} />
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -3443,8 +3447,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
                             {tag.tagName}
                             {
-                              <button
+                              <Button
+                                variant='ghost'
                                 onClick={() => void handleRemoveTag(tag.id)}
+                                trackId='remove_ticket_tag'
                                 className={`ml-1 p-0.5 rounded transition-colors`}
                                 aria-label='Remove label'
                                 data-track-category='Tickets'
@@ -3455,7 +3461,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 })}
                               >
                                 <X size={12} />
-                              </button>
+                              </Button>
                             }
                           </span>
                         );
@@ -3493,8 +3499,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       {/* Tag List */}
                       <div className='max-h-48 overflow-y-auto'>
                         {tagSearchQuery.trim() && !exactMatch && (
-                          <button
+                          <Button
+                            variant='ghost'
                             onClick={() => void handleToggleTag(tagSearchQuery)}
+                            trackId='create_ticket_tag'
                             className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
                             data-track-category='Tickets'
                             data-track-name='CreateTag'
@@ -3504,16 +3512,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <span className='text-foreground font-medium'>
                               Create &quot;{tagSearchQuery.trim()}&quot;
                             </span>
-                          </button>
+                          </Button>
                         )}
 
                         {filteredTags.map(tagName => {
                           const isSelected = selectedTagNames.has(tagName);
 
                           return (
-                            <button
+                            <Button
                               key={tagName}
+                              variant='ghost'
                               onClick={() => void handleToggleTag(tagName)}
+                              trackId='toggle_ticket_tag'
                               className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
                               data-track-category='Tickets'
                               data-track-name='ToggleTag'
@@ -3532,7 +3542,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   <Check size={14} />
                                 </span>
                               )}
-                            </button>
+                            </Button>
                           );
                         })}
                       </div>
@@ -4153,7 +4163,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isDraft && !item.formId && (
-                                <button
+                                <Button
+                                  variant='ghost'
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4168,13 +4179,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Request submitted for approval');
                                   }}
+                                  trackId='submit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='SubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Submit Request
-                                </button>
+                                </Button>
                               )}
                               {isSubmitted && item.formId && (
                                 <>
@@ -4340,7 +4352,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isRejected && !item.formId && (
-                                <button
+                                <Button
+                                  variant='ghost'
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4355,13 +4368,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Stage change request resubmitted for approval');
                                   }}
+                                  trackId='resubmit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Resubmit request
-                                </button>
+                                </Button>
                               )}
                             </>
                           ) : (

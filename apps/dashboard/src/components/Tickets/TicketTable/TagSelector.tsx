@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { Check, X, Plus } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
+import { Button } from '../../ui/Button/Button';
 
 interface TagSelectorProps {
   availableTags: string[];
@@ -159,8 +160,10 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 const selected = selectedTags.includes(tag);
                 const active = i === activeIdx;
                 return (
-                  <button
+                  <Button
                     key={tag}
+                    variant='ghost'
+                    trackId='ticket_toggle_tag'
                     onClick={() => {
                       toggle(tag);
                       setSearch('');
@@ -178,7 +181,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                       {tag}
                     </div>
                     {selected && <Check className='size-4 text-blue-600' />}
-                  </button>
+                  </Button>
                 );
               })
             ) : search.trim() ? (
@@ -193,7 +196,9 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
 
             {canCreate && (
               <div className='border-t border-border mt-1 pt-1'>
-                <button
+                <Button
+                  variant='ghost'
+                  trackId='ticket_create_tag'
                   onClick={create}
                   onMouseEnter={() => setActiveIdx(filtered.length)}
                   className={`flex items-center gap-2 w-full px-3 py-2 text-sm rounded font-medium ${
@@ -205,7 +210,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                 >
                   <Plus className='size-4' />
                   Create {search.trim()}
-                </button>
+                </Button>
               </div>
             )}
           </div>

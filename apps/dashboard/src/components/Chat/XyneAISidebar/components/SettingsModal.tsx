@@ -3,6 +3,7 @@ import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
 import { Edit2, Trash2, Plus, Eye, X } from 'lucide-react';
 import { usePlatform } from '../../../../hooks/usePlatform';
+import { Button } from '../../../ui/Button/Button';
 
 interface Skill {
   name: string;
@@ -660,17 +661,19 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                           >
                             <Edit2 size={16} />
                           </button>
-                          <button
+                          <Button
+                            variant='ghost'
                             onClick={() => {
                               void handleDeleteSkill(skill.name);
                             }}
+                            trackId='delete_skill'
                             className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
                             title='Delete'
                             data-track-category='XYNE_AI'
                             data-track-name='DeleteSkill'
                           >
                             <Trash2 size={16} />
-                          </button>
+                          </Button>
                         </div>
                       )}
                     </div>
@@ -686,15 +689,17 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
           {activeTab === 'custom' ? (
             // Custom Instructions Footer
             <>
-              <button
+              <Button
+                variant='ghost'
                 onClick={() => void handleClearInstruction()}
+                trackId='clear_custom_instructions'
                 className='px-4 py-2 text-sm font-medium text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors'
                 disabled={isSavingInstruction || isLoadingInstruction || !instruction}
                 data-track-category='XYNE_AI'
                 data-track-name='ClearCustomInstructions'
               >
                 Clear
-              </button>
+              </Button>
               <div className='flex gap-2'>
                 <button
                   onClick={onClose}
@@ -705,8 +710,10 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                 >
                   Cancel
                 </button>
-                <button
+                <Button
+                  variant='ghost'
                   onClick={() => void handleSaveInstruction()}
+                  trackId='save_custom_instructions'
                   className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                   disabled={
                     isSavingInstruction ||
@@ -717,7 +724,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   data-track-name='SaveCustomInstructions'
                 >
                   {isSavingInstruction ? 'Saving...' : 'Save'}
-                </button>
+                </Button>
               </div>
             </>
           ) : previewingSkill ? (
@@ -745,15 +752,17 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               >
                 Cancel
               </button>
-              <button
+              <Button
+                variant='ghost'
                 onClick={() => void handleSaveSkill()}
+                trackId={editingSkillName ? 'update_skill' : 'create_skill'}
                 className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 disabled={isSavingSkill || !skillName.trim() || !!nameError}
                 data-track-category='XYNE_AI'
                 data-track-name={editingSkillName ? 'UpdateSkill' : 'CreateSkill'}
               >
                 {isSavingSkill ? 'Saving...' : editingSkillName ? 'Update' : 'Save'}
-              </button>
+              </Button>
             </>
           ) : (
             // Skills List Footer

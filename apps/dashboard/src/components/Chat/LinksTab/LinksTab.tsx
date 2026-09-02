@@ -7,6 +7,7 @@ import { useZero } from '../../../hooks/useZero';
 import type { Link } from '@xyne/shared';
 import { LinkVisibility } from '@xyne/shared';
 import Dialog from '../../ui/Dialog';
+import Button from '../../ui/Button';
 import { browserPanelActor } from '../../../machines/browserPanelMachine';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -392,12 +393,14 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                 >
                   Cancel
                 </button>
-                <button
+                <Button
                   type='submit'
+                  variant='ghost'
                   className='flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium'
+                  trackId={linkToEdit ? 'update_channel_link' : 'create_channel_link'}
                 >
                   {linkToEdit ? 'Update Link' : 'Add Link'}
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -507,15 +510,17 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
             >
               Cancel
             </button>
-            <button
+            <Button
               type='button'
+              variant='ghost'
               onClick={confirmDelete}
               className='flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium'
               data-track-category='CHANNEL_LINKS'
               data-track-name='ConfirmDeleteLink'
+              trackId='delete_channel_link'
             >
               Delete Link
-            </button>
+            </Button>
           </div>
         </div>
       </Dialog>

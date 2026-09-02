@@ -1890,7 +1890,9 @@ const XyneAISidebar = ({
     onRemoveRecording: handleRemoveRecording,
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
-    onAbort: abortCurrentRequest,
+    onAbort: () => {
+      abortCurrentRequest();
+    },
     webSearchEnabled,
     webSearchAccessible,
     onWebSearchToggle: () => setWebSearchEnabled(!webSearchEnabled),

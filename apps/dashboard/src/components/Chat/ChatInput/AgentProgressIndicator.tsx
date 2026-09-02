@@ -6,6 +6,7 @@ import { useAgentProgress } from '../../../hooks/useAgentProgress';
 import { useAuth } from '../../../hooks/useAuth';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { AgentSpinner } from '../../ui/AgentSpinner';
+import { Button } from '../../ui/Button/Button';
 
 const rowStyle: CSSProperties = {
   display: 'inline-flex',
@@ -89,16 +90,18 @@ export function AgentProgressIndicator({
         ))}
       </div>
       {myAgent && (
-        <button
+        <Button
+          variant='ghost'
           type='button'
           onClick={() => void handleAbortAgent()}
           className='p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors shrink-0'
           aria-label='Stop agent'
+          trackId='stop_agent'
           data-track-category='CHAT_INPUT'
           data-track-name='STOP_AGENT'
         >
           <Square className='h-3 w-3 fill-current' />
-        </button>
+        </Button>
       )}
     </div>
   );
