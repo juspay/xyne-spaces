@@ -1502,7 +1502,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
           <div
-            className='flex items-center min-w-0'
+            className='flex items-center min-w-0 h-5 w-full bg-background px-[var(--composer-px)] pb-0.5'
             style={{ display: agentVisible ? 'flex' : 'none' }}
           >
             {agentSlot}
@@ -1547,6 +1547,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <button
                   type='button'
                   onClick={onCancelSlashCommandArtifact}
+                  data-track-category='CHAT_INPUT'
+                  data-track-name='CANCEL_SLASH_COMMAND_ARTIFACT'
                   className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
                   aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
                 >

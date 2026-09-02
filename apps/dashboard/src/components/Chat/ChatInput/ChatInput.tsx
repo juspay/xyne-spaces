@@ -1100,10 +1100,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </div>
         ) : (
           <>
-            <AgentProgressIndicator
-              sessionId={agentProgressConversationId ?? currentSessionId}
-              conversationId={agentProgressConversationId}
-            />
             {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>
@@ -1146,7 +1142,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                     type='button'
                     onClick={() => void navigate('/chat/scheduled')}
                     className='font-semibold text-primary hover:underline'
-                    data-track-category='chat-input'
+                    data-track-category='CHAT_INPUT'
                     data-track-name='open-delayed-messages-from-banner'
                   >
                     See all scheduled messages
@@ -1269,7 +1265,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                         onClick={() => setShortcutModalOpen(true)}
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Open shortcuts'
-                        data-track-category='chat-input'
+                        data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'
                       >
                         <Zap className='h-4 w-4 text-muted-foreground' />

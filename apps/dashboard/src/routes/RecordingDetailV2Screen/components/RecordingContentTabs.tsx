@@ -14,7 +14,7 @@
 
 import { useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { CaptionOn, ChevronBigDown, ListAiGenerated } from '@xyne/icons';
+import { CaptionOn, ChevronBigDown, ListAiGenerated, Spinner } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { Popover } from '../../../components/ui/Popover';
 import {
@@ -132,7 +132,14 @@ export const RecordingContentTabs = ({
       />
     ) : null;
 
-    const icon = <SummaryTemplateGlyph template={selectedTemplate} size='trigger' />;
+    // The doc'd contract of `isRegenerating`: the segment's glyph becomes a
+    // spinner while a generation runs, so the tab itself signals progress even
+    // when the summary pane isn't the visible one.
+    const icon = isRegenerating ? (
+      <Spinner strokeWidth={2} className='size-4 animate-spin text-primary' aria-hidden='true' />
+    ) : (
+      <SummaryTemplateGlyph template={selectedTemplate} size='trigger' />
+    );
 
     const trigger = (
       <button

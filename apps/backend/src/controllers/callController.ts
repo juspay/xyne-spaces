@@ -1475,6 +1475,17 @@ export class CallController {
             typeof callMetadata?.detailedSummaryReady === 'boolean'
               ? callMetadata.detailedSummaryReady
               : null,
+          // Explicit tri-state that layers on top of detailedSummaryReady:
+          // 'pending' during a live generation attempt, 'failed' when the
+          // final Bull retry gave up, 'ready' on success, null on older
+          // recordings that predate this field. The frontend prefers this
+          // over detailedSummaryReady when present.
+          detailedSummaryStatus:
+            callMetadata?.detailedSummaryStatus === 'pending' ||
+            callMetadata?.detailedSummaryStatus === 'ready' ||
+            callMetadata?.detailedSummaryStatus === 'failed'
+              ? (callMetadata.detailedSummaryStatus as 'pending' | 'ready' | 'failed')
+              : null,
           linkedTicketId:
             typeof callMetadata?.linkedTicketId === 'string'
               ? callMetadata.linkedTicketId
@@ -1648,7 +1659,12 @@ export class CallController {
 
   /**
    * POST /api/calls/recordings/:callId/generate-summary
-   * Replace a headless recording's visible summary using a built-in template.
+   * Kick off detailed-summary generation for a headless recording and return
+   * 202 immediately. Progress is observable through
+   * Call.metadata.detailedSummaryStatus ('pending' → 'ready' | 'failed'),
+   * which Zero replicates to the open screen; completion also notifies the
+   * owner (RECORDING_SUMMARY_READY). The underlying LLM call retries
+   * transient failures internally via callLlmRetry.
    */
   regenerateRecordingSummary = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
@@ -1677,27 +1693,24 @@ export class CallController {
         return;
       }
 
-      const result = await noteTakerTranscriptService.regenerateSummary(
-        call,
-        input.summaryTemplateId,
-        input.modelType,
-      );
-      if (!result) {
-        res.status(404).json({
-          success: false,
-          error: 'Transcript is not available or summary generation failed',
+      // Fire-and-forget: the service owns every status transition ('pending'
+      // at start, 'ready'/'failed' at the end) plus the completion
+      // notification, so holding this HTTP request open for a minutes-long
+      // LLM run adds nothing except timeout risk.
+      void noteTakerTranscriptService
+        .regenerateSummary(call, input.summaryTemplateId, input.modelType)
+        .catch(error => {
+          logger.error(`[${callId}] Background summary regeneration threw`, error);
         });
-        return;
-      }
 
-      res.json({ success: true, ...result });
+      res.status(202).json({ success: true, status: 'pending' });
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ success: false, error: error.errors[0]?.message });
         return;
       }
-      logger.error(`[${callId}] Failed to regenerate recording summary`, error);
-      res.status(500).json({ success: false, error: 'Failed to regenerate recording summary' });
+      logger.error(`[${callId}] Failed to start recording summary regeneration`, error);
+      res.status(500).json({ success: false, error: 'Failed to start summary regeneration' });
     }
   };
 

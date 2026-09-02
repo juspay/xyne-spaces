@@ -14,6 +14,7 @@ import {
   VespaOperationType as VespaOpType,
 } from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
+import { indexableTagNames, parseAppliedTags } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
 import {
@@ -458,36 +459,14 @@ export const mapMessage = async (
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
-  // Message acts, denormalized onto the doc so search can filter on them. Stored as a
-  // stringified JSON array; parsed defensively because it is plain TEXT with no DB-level
-  // guarantee of shape.
-  let messageActs: string[] = [];
-  if (args.messageActs) {
-    try {
-      const parsed: unknown = JSON.parse(args.messageActs);
-      if (Array.isArray(parsed)) {
-        messageActs = parsed.filter((v): v is string => typeof v === 'string');
-      }
-    } catch {
-      logger.warn('[VESPA] Ignoring malformed messageActs', { messageId: args.messageId });
-    }
-  }
-
-  // Thread types, same stringified-array shape as messageActs.
-  let threadType: string[] = [];
-  if (conversation.threadType) {
-    try {
-      const parsed: unknown = JSON.parse(conversation.threadType);
-      threadType = Array.isArray(parsed)
-        ? parsed.filter((v): v is string => typeof v === 'string')
-        : typeof parsed === 'string'
-          ? [parsed]
-          : [];
-    } catch {
-      // Rows written before the column held an array stored a bare name.
-      threadType = [conversation.threadType];
-    }
-  }
+  // Tag names, denormalized onto the doc so search can filter on them. Everything on the
+  // thread is indexed as soon as it lands — classifier or person, vocabulary or free-form —
+  // minus anything removed.
+  //
+  // messageActs holds the thread types this message is the EVIDENCE for: the classifier
+  // cites a message per type, and that citation is stored on both sides.
+  const messageActs = indexableTagNames(parseAppliedTags(args.messageActs));
+  const threadType = indexableTagNames(parseAppliedTags(conversation.threadType));
 
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
@@ -1465,7 +1444,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
 
   const ticket = await db.ticket.findFirst({
     where: { conversationId: email.conversationId },
-    select: { id: true, xyneId: true },
+    select: { id: true, xyneId: true, project: { select: { code: true } } },
   });
   const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
@@ -1526,6 +1505,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     parentThreadId: email.externalThreadId || undefined,
     mailId: email.externalMessageId || undefined,
     xyneId: ticket?.xyneId ?? undefined,
+    projectCode: ticket?.project?.code ?? undefined,
     ticketFormFields,
     ticketFormFieldValues: Array.from(new Set(ticketFormFields.map(field => field.fieldValue))),
     subject: email.subject,

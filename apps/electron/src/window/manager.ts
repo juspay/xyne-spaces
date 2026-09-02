@@ -12,6 +12,7 @@ import {
 import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
+import { callInvitePath } from '../utils/validation';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -94,6 +95,14 @@ function applyWindowPolicy(win: BrowserWindow): void {
       
       // Only allow http(s) protocols
       if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+        return { action: 'deny' };
+      }
+
+      // A call the app hosts itself — the router opens it, not a window or a
+      // browser panel showing the guest lobby.
+      const inviteWindowPath = callInvitePath(url);
+      if (inviteWindowPath) {
+        win.webContents.send('navigate-to', inviteWindowPath);
         return { action: 'deny' };
       }
 
@@ -182,6 +191,16 @@ function applyWindowPolicy(win: BrowserWindow): void {
     try {
       const navUrlObj = new URL(navUrl);
       if (navUrlObj.protocol !== 'http:' && navUrlObj.protocol !== 'https:') {
+        return;
+      }
+
+      // Checked before the same-origin allow below: an invite URL normally lives
+      // on the Spaces origin, so following it would replace the running app with
+      // the guest lobby.
+      const invitePath = callInvitePath(navUrl);
+      if (invitePath) {
+        event.preventDefault();
+        win.webContents.send('navigate-to', invitePath);
         return;
       }
 

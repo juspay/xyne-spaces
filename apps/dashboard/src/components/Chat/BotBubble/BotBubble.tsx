@@ -106,7 +106,11 @@ const TicketDisplayModeV2: React.FC<{
   };
 
   return (
-    <div className='w-full mt-2'>
+    <div
+      className='w-full mt-2'
+      data-track-category='CHAT_BUBBLE'
+      data-track-name='OPEN_TICKET_FROM_BOT_BUBBLE'
+    >
       <TicketCardV2 ticket={ticket} onClick={handleClick} isConversation={true} />
     </div>
   );

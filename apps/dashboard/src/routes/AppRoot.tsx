@@ -208,6 +208,7 @@ import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationMo
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
+import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
@@ -1088,7 +1089,17 @@ export const router = createBrowserRouter(
                   ),
                   children: [
                     { index: true, element: <Navigate to='chat/new' replace /> },
-                    { path: 'chat/new', element: <AIScreen /> },
+                    // ONE route, with `new` as an ordinary value of :sessionId.
+                    //
+                    // Declaring `chat/new` separately looks harmless but makes two
+                    // DISTINCT routes out of the same component, so moving between
+                    // them unmounts and remounts AIScreen — wiping activeSessionId,
+                    // chatKey and showChatView. The remount re-seeds from
+                    // sessionStorage, which can still hold the previous thread, so
+                    // the URL effect navigates back to it and remounts again: the
+                    // screen visibly bounces between routes on every thread switch.
+                    // With a single route, changing the param re-renders in place.
+                    { path: 'chat/:sessionId', element: <AIScreen /> },
                     { path: 'daily-brief', element: <AIDailyBriefScreen /> },
                     { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                     { path: 'library', element: <AILibraryScreen /> },
@@ -1831,6 +1842,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='ROLES'>
                       <RoleManagementScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'tag-review',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKSPACE'>
+                      <TagReviewView />
                     </ResourceProtectedRoute>
                   ),
                 },

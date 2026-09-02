@@ -34,6 +34,13 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
   async canUpdate(args: UpdateValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
     if (this.ctx.role === 'GUEST') {
       await this.verifyGuestScope(args.id, tx);
+      // verifyGuestScope only covers the CURRENT mapping - re-pointing needs the new target.
+      if (args.mappedTicketId) {
+        const target = await tx.run(zql.tickets.where('id', args.mappedTicketId as string).one());
+        if (!target || !(await hasGuestTicketAccess(this.ctx, tx, target))) {
+          throw new MutationACLError('Sub-ticket not accessible for guest users', 'sub_tickets');
+        }
+      }
       return;
     }
 

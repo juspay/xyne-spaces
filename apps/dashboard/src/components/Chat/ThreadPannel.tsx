@@ -61,6 +61,7 @@ import { FileBubble } from '../ui/FileBubble/FileBubble';
 import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
+import { ShortcutTooltip } from '../ui/ShortcutTooltip';
 import { mixpanelService } from '../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
@@ -696,6 +697,10 @@ export const ThreadMessages = ({
   const initialMessageSender = useUser(initialMessage?.senderId || '');
   const setThreadTypes = useSetThreadTypes(derivedConversationId);
   const { showThreadTags } = useShowThreadTags();
+  // Which tag's evidence is on screen. Owned here because this component renders both the
+  // chips and the message list; cleared on thread change so it never leaks across threads.
+  const [inspectedTag, setInspectedTag] = useState<string | null>(null);
+  useEffect(() => setInspectedTag(null), [derivedConversationId]);
 
   const threadInfo: ThreadInfo | null = useMemo(() => {
     if (!derivedConversationId || !initialMessage) return null;
@@ -1093,6 +1098,7 @@ export const ThreadMessages = ({
             className='flex-1 flex flex-col overflow-hidden data-[state=inactive]:hidden'
           >
             <ThreadList
+              inspectedTag={inspectedTag}
               channelId={derivedChannelId || ''}
               conversationId={derivedConversationId || ''}
               threadMessages={messages}
@@ -1470,6 +1476,7 @@ export const ThreadMessages = ({
               ) : (
                 <>
                   <ThreadList
+                    inspectedTag={inspectedTag}
                     channelId={derivedChannelId || ''}
                     conversationId={derivedConversationId || ''}
                     threadMessages={messages}
@@ -1602,6 +1609,8 @@ export const ThreadMessages = ({
                       conversationId={derivedConversationId}
                       threadType={conversation?.threadType}
                       canEdit
+                      inspectedTag={inspectedTag}
+                      onInspect={setInspectedTag}
                     />
                   )}
                   {!simpleView && focusedChannelBreadcrumb}
@@ -1766,7 +1775,7 @@ export const ThreadMessages = ({
 
                   {/* Close Button */}
                   {(!simpleView || resolvedOnClose) && (
-                    <Tooltip content='Close'>
+                    <ShortcutTooltip label='Close' shortcut='global.toggleRightSidebar'>
                       <Button
                         variant='ghost'
                         size='sm'
@@ -1779,7 +1788,7 @@ export const ThreadMessages = ({
                       >
                         <MultipleCrossCancelDefault size={16} />
                       </Button>
-                    </Tooltip>
+                    </ShortcutTooltip>
                   )}
                 </div>
               </div>
@@ -1792,6 +1801,7 @@ export const ThreadMessages = ({
             ) : (
               <>
                 <ThreadList
+                  inspectedTag={inspectedTag}
                   channelId={derivedChannelId || ''}
                   conversationId={derivedConversationId || ''}
                   threadMessages={messages}

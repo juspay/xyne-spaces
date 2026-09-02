@@ -5,7 +5,7 @@
  * credential, or the platform allowed list); `defaultModel` labels the
  * Recommended row.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Brain, Check, ChevronDown, ChevronRight, Search, Sparkles } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { cn } from '../../utils/classNames';
@@ -48,6 +48,9 @@ export function ModelThinkingSelector({
   thinkingLevel,
   onSelectThinking,
   disabled,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
 }: {
   models: ClawAgentModel[];
   defaultModel: string | null;
@@ -56,8 +59,23 @@ export function ModelThinkingSelector({
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
   onSelectThinking: (v: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null) => void;
   disabled?: boolean;
+  /** Controlled open state. Paired with `hideTrigger` so a narrow composer can
+   *  drive the menu from the "+" menu instead of showing its own pill. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Render only the popover, anchored to a zero-size element in the toolbar. */
+  hideTrigger?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (isControlled) onOpenChange?.(next);
+      else setUncontrolledOpen(next);
+    },
+    [isControlled, onOpenChange],
+  );
   const [query, setQuery] = useState('');
   const [thinkingOpen, setThinkingOpen] = useState(false);
   // Which side the Thinking flyout opens on. Measured when it opens: in the
@@ -96,35 +114,45 @@ export function ModelThinkingSelector({
       align='end'
       sideOffset={4}
       trigger={
-        <button
-          type='button'
-          disabled={disabled}
-          title={
-            selected
-              ? selected.id
-              : defaultModel
-                ? `Recommended (${defaultModel})`
-                : 'Recommended model'
-          }
-          aria-label='Model and thinking'
-          data-track-category='XyneAI'
-          data-track-name='OPEN_MODEL_SELECTOR'
-          className={cn(
-            'flex h-7 items-center gap-1.5 rounded-lg border border-border px-2 text-sm transition-colors',
-            disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
-          )}
-        >
-          <Sparkles className='h-3.5 w-3.5 shrink-0 text-primary' aria-hidden strokeWidth={1.75} />
-          <span className='font-medium text-foreground truncate max-w-[160px]'>
-            {selected
-              ? formatModelLabel(selected.name)
-              : defaultModel
-                ? formatModelLabel(defaultModel)
-                : 'Recommended'}
-          </span>
-          {thinkingLevel && <span className='text-muted-foreground'>{thinkingLabel}</span>}
-          <ChevronDown className='h-3 w-3 shrink-0 text-muted-foreground' aria-hidden />
-        </button>
+        // Zero-size anchor when the pill is hidden — Radix positions the
+        // popover against the trigger, so it still needs an element in the row.
+        hideTrigger ? (
+          <span aria-hidden className='block h-0 w-0' />
+        ) : (
+          <button
+            type='button'
+            disabled={disabled}
+            title={
+              selected
+                ? selected.id
+                : defaultModel
+                  ? `Recommended (${defaultModel})`
+                  : 'Recommended model'
+            }
+            aria-label='Model and thinking'
+            data-track-category='XyneAI'
+            data-track-name='OPEN_MODEL_SELECTOR'
+            className={cn(
+              'flex h-7 items-center gap-1.5 rounded-lg border border-border px-2 text-sm transition-colors',
+              disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
+            )}
+          >
+            <Sparkles
+              className='h-3.5 w-3.5 shrink-0 text-primary'
+              aria-hidden
+              strokeWidth={1.75}
+            />
+            <span className='font-medium text-foreground truncate max-w-[160px]'>
+              {selected
+                ? formatModelLabel(selected.name)
+                : defaultModel
+                  ? formatModelLabel(defaultModel)
+                  : 'Recommended'}
+            </span>
+            {thinkingLevel && <span className='text-muted-foreground'>{thinkingLabel}</span>}
+            <ChevronDown className='h-3 w-3 shrink-0 text-muted-foreground' aria-hidden />
+          </button>
+        )
       }
       className='w-80 p-0 bg-popover border border-border rounded-lg shadow-lg overflow-visible'
     >

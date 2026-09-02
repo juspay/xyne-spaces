@@ -3624,7 +3624,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             <button
               data-testid='kanban-create-ticket-button'
               data-track-event='BUTTON_CLICK'
-              data-track-category='TICKETS'
+              data-track-category='Tickets'
               data-track-name='CREATE_TICKET_KANBAN'
               data-track-metadata={JSON.stringify({ boardId, channelId })}
               onClick={() => {
@@ -3953,7 +3953,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             transition hover:bg-muted focus:outline-none
             ${isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
-                          data-track-category='TICKETS'
+                          data-track-category='Tickets'
                           data-track-name='KANBAN_VIEW_COMFORTABLE'
                           data-track-metadata={JSON.stringify({ boardId, viewMode: 'comfortable' })}
                         >
@@ -3969,7 +3969,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             transition hover:bg-background hover:text-foreground
             ${!isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                           data-track-event='BUTTON_CLICK'
-                          data-track-category='TICKETS'
+                          data-track-category='Tickets'
                           data-track-name='KANBAN_VIEW_COMPACT'
                           data-track-metadata={JSON.stringify({ boardId, viewMode: 'compact' })}
                         >
@@ -4941,7 +4941,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     {showGroupHeader && (
                       <button
                         onClick={() => toggleGroupExpansion(group.key)}
-                        data-track-category='KanbanBoard'
+                        data-track-category='KANBAN'
                         data-track-name='ToggleGroupExpansion'
                         data-track-metadata={JSON.stringify({ groupKey: group.key, groupBy })}
                         className={`flex items-center gap-3 p-4 bg-muted hover:bg-border transition-colors sticky left-0 z-10 w-full text-left border-b border-border ${isExpanded ? 'rounded-t-lg ' : 'rounded-lg'}`}

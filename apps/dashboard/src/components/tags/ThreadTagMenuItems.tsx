@@ -1,9 +1,10 @@
 import { JSX, useMemo, useState } from 'react';
 import { Check, Plus } from 'lucide-react';
-import { THREAD_TYPES } from '@xyne/shared';
 import { DropdownMenuItem, DropdownMenuSeparator } from '../ui/dropdown-menu';
+import { normalizeThreadTypeName } from '@xyne/shared';
+import { useThreadTypeVocabulary } from '../../hooks/useThreadTypeVocabulary';
 
-/** Matches the mutator's cap, so the UI cannot offer something the server will reject. */
+/** Matches the server's cap, so the UI cannot offer something the API will reject. */
 const MAX_TAG_LENGTH = 40;
 
 interface ThreadTagMenuItemsProps {
@@ -14,35 +15,46 @@ interface ThreadTagMenuItemsProps {
 const normalize = (value: string): string => value.trim().toLowerCase();
 
 /**
- * The body of the "Thread tags" submenu, shared by the message hover toolbar and the
- * thread panel header so the two stay identical.
+ * The body of the "Thread tags" submenu, used by the thread panel header.
  *
- * The listed choices are deliberately just the built-in vocabulary plus whatever this
- * thread already carries — a menu that grows with every tag anyone ever invented stops
- * being scannable. Anything else is reached by typing it.
+ * The listed choices are the workspace's vocabulary plus whatever this thread already
+ * carries — a menu that grows with every tag anyone ever invented stops being scannable.
+ * Anything else is reached by typing it.
  */
 export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProps): JSX.Element => {
   const [search, setSearch] = useState('');
   const query = normalize(search);
+  const { entries } = useThreadTypeVocabulary();
 
-  const builtIn = useMemo(
-    () => THREAD_TYPES.filter(entry => !query || normalize(entry.label).includes(query)),
-    [query],
+  const vocabulary = useMemo(
+    () => entries.filter(entry => !query || normalize(entry.label).includes(query)),
+    [entries, query],
   );
 
-  // Custom tags already on this thread, so they can be unticked from the same list.
+  // Tags on this thread that the vocabulary doesn't cover — free-form ones, and entries an
+  // admin has since removed — so they can be unticked from the same list.
   const custom = useMemo(() => {
-    const builtInNames = new Set(THREAD_TYPES.map(entry => normalize(entry.name)));
+    const known = new Set(entries.map(entry => normalize(entry.name)));
     return applied
-      .filter(name => !builtInNames.has(normalize(name)))
+      .filter(name => !known.has(normalize(name)))
       .filter(name => !query || normalize(name).includes(query));
-  }, [applied, query]);
+  }, [applied, entries, query]);
 
-  const trimmed = search.trim().slice(0, MAX_TAG_LENGTH);
-  const alreadyExists = [...THREAD_TYPES.map(e => e.name), ...applied].some(
-    name => normalize(name) === query,
+  // What typing this would actually create. Shown rather than applied to the input itself,
+  // because the same box is the SEARCH box — forcing the field to uppercase would fight
+  // someone typing "feature" to find "Feature request".
+  const proposed = normalizeThreadTypeName(search).slice(0, MAX_TAG_LENGTH);
+  // Compared in normalised form, so "vespa latency" does not offer to create a second tag
+  // when VESPA_LATENCY already exists.
+  const alreadyExists = [...entries.map(e => e.name), ...applied].some(
+    name => normalizeThreadTypeName(name) === proposed,
   );
-  const canCreate = trimmed.length > 0 && !alreadyExists;
+  const canCreate = proposed.length > 0 && !alreadyExists;
+
+  const create = (): void => {
+    onToggle(proposed);
+    setSearch('');
+  };
 
   const row = (name: string, label: string, color: string | undefined): JSX.Element => (
     <DropdownMenuItem
@@ -78,8 +90,7 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
           event.stopPropagation();
           if (event.key === 'Enter' && canCreate) {
             event.preventDefault();
-            onToggle(trimmed);
-            setSearch('');
+            create();
           }
         }}
         maxLength={MAX_TAG_LENGTH}
@@ -90,25 +101,29 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
         className='w-full px-2 py-1.5 mb-1 text-sm bg-transparent border-b border-border outline-none placeholder:text-muted-foreground'
       />
 
-      {builtIn.map(entry => row(entry.name, entry.label, entry.color))}
-      {custom.length > 0 && builtIn.length > 0 && <DropdownMenuSeparator />}
+      {vocabulary.map(entry => row(entry.name, entry.label, entry.color))}
+      {custom.length > 0 && vocabulary.length > 0 && <DropdownMenuSeparator />}
       {custom.map(name => row(name, name, undefined))}
 
       {canCreate && (
         <>
-          {(builtIn.length > 0 || custom.length > 0) && <DropdownMenuSeparator />}
+          {(vocabulary.length > 0 || custom.length > 0) && <DropdownMenuSeparator />}
           <DropdownMenuItem
             className='gap-2'
             onSelect={event => {
               event.preventDefault();
-              onToggle(trimmed);
-              setSearch('');
+              create();
             }}
             data-track-category='Tags'
             data-track-name='CreateThreadTag'
           >
             <Plus size={14} className='shrink-0 text-muted-foreground' />
-            <span className='flex-1 truncate'>Add “{trimmed}”</span>
+            {/* The NORMALISED name, not what was typed: this is the string that lands on the
+                thread, gets indexed, and goes into the review queue, so it is the string to
+                show before anyone commits to it. */}
+            <span className='flex-1 truncate'>
+              Add <span className='font-mono'>{proposed}</span>
+            </span>
           </DropdownMenuItem>
         </>
       )}

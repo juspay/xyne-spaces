@@ -603,7 +603,14 @@ export function ParticipantsSidebar({
     [onRejectLobbyRequest, rejectingId],
   );
 
-  const canActOnLobbyRequests = isHost && !!onApproveLobbyRequest && !!onRejectLobbyRequest;
+  // Anyone already in the call can admit/decline join requests — not just the host.
+  // (Only the host gets the toast)
+  const isAttendee = useMemo(
+    () => contributors.some(participant => participant.userId === resolvedCurrentUserId),
+    [contributors, resolvedCurrentUserId],
+  );
+  const canActOnLobbyRequests =
+    (isHost || isAttendee) && !!onApproveLobbyRequest && !!onRejectLobbyRequest;
 
   return (
     <>
@@ -658,8 +665,8 @@ export function ParticipantsSidebar({
 
         {/* Participants List */}
         <div className='flex-1 overflow-y-auto p-3 space-y-3'>
-          {/* Requested Section — participants waiting for approval (host only) */}
-          {isHost && requested.length > 0 && (
+          {/* Requested Section — participants waiting for approval (host or any attendee) */}
+          {canActOnLobbyRequests && requested.length > 0 && (
             <div
               className='border border-orange-200 rounded-lg overflow-hidden bg-orange-50/30'
               data-testid='requested-section'

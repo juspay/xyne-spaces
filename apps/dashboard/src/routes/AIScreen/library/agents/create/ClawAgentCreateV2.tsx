@@ -50,7 +50,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
 
   const { user } = useAuth();
-  const builtBy = user?.name ?? user?.email ?? 'you';
+  const builtBy = agent?.owner?.name ?? agent?.owner?.email ?? user?.name ?? user?.email ?? 'you';
 
   const [aiOpen, setAiOpen] = useState(false);
   const aiIntentRef = useRef<HTMLInputElement>(null);

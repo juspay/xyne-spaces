@@ -14,8 +14,9 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess, NotificationType } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
+import { notificationService } from '@/services/notificationService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
@@ -160,11 +161,15 @@ class NoteTakerTranscriptService {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
           detailedSummaryReady: detailedSummary ? true : undefined,
+          detailedSummaryStatus: detailedSummary ? 'ready' : 'failed',
           summaryModelUsed: summaryModelType,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
+      if (detailedSummary) {
+        await this.notifySummaryReady(call);
+      }
       await this.queueVespaIndexing(call);
 
       // Thread-linked recording: already auto-shared to the thread's channel
@@ -195,19 +200,37 @@ class NoteTakerTranscriptService {
     summaryModelUsed: SummaryModelType;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
-    if (!formattedTranscript) return null;
+    if (!formattedTranscript) {
+      // No transcript at all is a terminal 'failed' state — the button offer
+      // should still surface so the user isn't left staring at a stale 'ready'.
+      await this.markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
+
+    // Publish 'pending' up front so the UI can shimmer while the LLM runs
+    // (the underlying call already retries transient failures internally).
+    await this.markDetailedSummaryStatus(call, 'pending');
 
     // An explicit modelType (e.g. the "Try the thinking model" button) wins;
     // otherwise fall back to the creator's saved preference.
     const resolvedModelType = modelType ?? (await this.getSummaryModelPreference(call));
 
-    const detailedSummary = await this.generateDetailedSummaryCanvas(
-      call,
-      formattedTranscript,
-      templateId,
-      resolvedModelType,
-    );
-    if (!detailedSummary) return null;
+    let detailedSummary: DetailedSummaryCanvasResult | null;
+    try {
+      detailedSummary = await this.generateDetailedSummaryCanvas(
+        call,
+        formattedTranscript,
+        templateId,
+        resolvedModelType,
+      );
+    } catch (error) {
+      await this.markDetailedSummaryStatus(call, 'failed');
+      throw error;
+    }
+    if (!detailedSummary) {
+      await this.markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
 
     const current = await repositories.calls.findByExternalId(call.externalId);
     const currentMetadata =
@@ -225,11 +248,14 @@ class NoteTakerTranscriptService {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
         detailedSummaryReady: true,
+        detailedSummaryStatus: 'ready',
         summaryModelUsed: resolvedModelType,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
       markedItems,
     });
+
+    await this.notifySummaryReady(call);
 
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
@@ -237,6 +263,37 @@ class NoteTakerTranscriptService {
       detailedSummaryReady: true,
       summaryModelUsed: resolvedModelType,
     };
+  }
+
+  /**
+   * Notify the recording owner that the detailed summary finished generating.
+   * Best-effort: a notification failure must never fail the generation flow,
+   * so errors are logged and swallowed.
+   */
+  private async notifySummaryReady(call: Call): Promise<void> {
+    try {
+      if (!call.workspaceId) return;
+      // The AI title may have landed after our `call` snapshot was taken —
+      // re-read so the notification names the recording the way the UI does.
+      const currentTitle =
+        (await repositories.calls.findByExternalId(call.externalId))?.title ?? call.title;
+      const recordingName = currentTitle || 'your recording';
+      await notificationService.createNotification(call.createdByUserId, {
+        type: NotificationType.RECORDING_SUMMARY_READY,
+        title: 'Summary ready',
+        message: `The summary for "${recordingName}" is ready to view`,
+        relatedEntityType: 'call',
+        relatedEntityId: call.externalId,
+        actionUrl: `/recordings/${call.externalId}`,
+        workspaceId: call.workspaceId,
+        metadata: { callExternalId: call.externalId },
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] summary_ready_notification_failed`, {
+        path: 'note_taker',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -437,6 +494,34 @@ class NoteTakerTranscriptService {
       });
     } catch (error) {
       logger.error(`[${call.externalId}] metadata_update_failed`, { error, path: 'note_taker' });
+    }
+  }
+
+  /**
+   * Merge just the detailed-summary status onto Call.metadata. Used by the
+   * queue worker to publish 'pending'/'failed' transitions without touching
+   * detailedSummaryCanvasId or detailedSummaryReady — those are owned by the
+   * success paths in processFinalTranscript and regenerateSummary and must
+   * remain the source of truth for readers on older recordings.
+   */
+  async markDetailedSummaryStatus(
+    call: Pick<Call, 'id' | 'externalId'>,
+    status: 'pending' | 'ready' | 'failed',
+  ): Promise<void> {
+    try {
+      const current = await repositories.calls.findByExternalId(call.externalId);
+      const currentMetadata =
+        current?.metadata && typeof current.metadata === 'object' && !Array.isArray(current.metadata)
+          ? (current.metadata as Record<string, unknown>)
+          : {};
+      await repositories.calls.update(call.id, {
+        metadata: { ...currentMetadata, detailedSummaryStatus: status },
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] detailed_summary_status_update_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+        status,
+      });
     }
   }
 
