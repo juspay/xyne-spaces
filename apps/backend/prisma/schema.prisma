@@ -2445,6 +2445,7 @@ model Activity {
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
+  trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
   classification  String                 @default("PENDING")

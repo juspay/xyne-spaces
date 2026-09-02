@@ -128,7 +128,6 @@ export const ActivityItemCard = ({
     const path = resolveSdlcActivityTarget({
       activity,
       channelType: channel?.type,
-      channelId,
       fallbackPath: defaultPath,
     });
 
