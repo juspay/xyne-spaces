@@ -1,3 +1,15 @@
+## [1.251.0-release-20260901.6](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.5...v1.251.0-release-20260901.6) (2026-09-02)
+
+
+### Features
+
+* posthog ([#1320](https://github.com/juspay/xyne-spaces/issues/1320)) ([2d8db58](https://github.com/juspay/xyne-spaces/commit/2d8db58131572ba07e03fc06923ce362557b8f9b))
+
+
+### Reverts
+
+* Revert "feat: add ordered encryption key rotation (#764)" (#1411) ([a53436a](https://github.com/juspay/xyne-spaces/commit/a53436a09e93545be5825dcb17708a21ea06cd82)), closes [#764](https://github.com/juspay/xyne-spaces/issues/764) [#1411](https://github.com/juspay/xyne-spaces/issues/1411)
+
 ## [1.251.0-release-20260901.5](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.4...v1.251.0-release-20260901.5) (2026-09-02)
 
 
