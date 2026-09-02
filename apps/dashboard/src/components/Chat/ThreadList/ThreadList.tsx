@@ -11,7 +11,7 @@ import { DatePill } from '../DatePill';
 import { MessageType, ChannelScopeType } from '@xyne/shared';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
@@ -76,7 +76,7 @@ const ThreadList = ({
   spawnedTicketMessageIds,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
-  const { editingMessageId, requestEdit } = useEditContext();
+  const { isEditingMessage, isEditingHere, requestEdit } = useMessageEdit();
   const location = useLocation();
   const activityNavigationNonce =
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
@@ -133,13 +133,13 @@ const ThreadList = ({
       }
     };
 
-    if (editingMessageId === message.messageId) {
+    if (isEditingMessage(message.messageId)) {
       scrollToMessage();
       return;
     }
 
     requestEdit(message.messageId, scrollToMessage);
-  }, [conversationId, threadMessages, user?.id, editingMessageId, requestEdit]);
+  }, [conversationId, threadMessages, user?.id, isEditingMessage, requestEdit]);
 
   useShortcutById('composer.editLastMessage', handleEditLastMessage, {
     enabled: threadMessages.length > 0,
@@ -157,8 +157,8 @@ const ThreadList = ({
 
   const isEditingRef = useRef(false);
   useEffect(() => {
-    isEditingRef.current = editingMessageId !== null;
-  }, [editingMessageId]);
+    isEditingRef.current = isEditingHere;
+  }, [isEditingHere]);
 
   const lastAutoScrolledMessageIdRef = useRef<string | null>(null);
 
@@ -713,4 +713,4 @@ const ThreadList = ({
   );
 };
 
-export default ThreadList;
+export default withEditSurface(ThreadList);

@@ -13,6 +13,7 @@ import { cn } from '../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import { PreviewSplitDialog, PreviewThreadPanel } from '../ui/PreviewSplitDialog';
 import { ChatBubble } from '../Chat/ChatBubble/ChatBubble';
+import { EditSurfaceScope } from '../../providers/EditProvider';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
@@ -1528,17 +1529,19 @@ const AttachmentGalleryModalInner: React.FC = () => {
     };
 
     return (
-      <div className='flex-1 overflow-auto py-4'>
-        <ChatBubble
-          message={message as unknown as Parameters<typeof ChatBubble>[0]['message']}
-          channelId={currentAttachment?.channelId || ''}
-          showAvatar={true}
-          context='thread'
-          isFirstInThread={true}
-          isTicketThread={false}
-          disableAskAI={true}
-        />
-      </div>
+      <EditSurfaceScope>
+        <div className='flex-1 overflow-auto py-4'>
+          <ChatBubble
+            message={message as unknown as Parameters<typeof ChatBubble>[0]['message']}
+            channelId={currentAttachment?.channelId || ''}
+            showAvatar={true}
+            context='thread'
+            isFirstInThread={true}
+            isTicketThread={false}
+            disableAskAI={true}
+          />
+        </div>
+      </EditSurfaceScope>
     );
   };
 
