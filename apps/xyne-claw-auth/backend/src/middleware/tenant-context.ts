@@ -8,10 +8,10 @@ import type { Request } from "express";
  * looks up the user's org + role. Reading them here keeps handlers decoupled
  * from how auth resolved the request.
  *
- * NOTE (phase 1): only `requireAuth` attaches org context. Routes mounted under
- * `requireS2S` / `requireUserAuth` will see empty `orgId` / `role` — that's an
- * accepted limitation this phase (see completeplan §7 decision). Do not rely on
- * org context from those paths yet.
+ * NOTE: `requireAuth`, `requireS2S`, and `requireUserAuth` all attach org
+ * context now (via the `attachOrgContext` call sites in require-auth.ts).
+ * `requireStrictS2S` / `requireInternalS2S` still attach none — they carry no
+ * user identity, so there is no org to resolve.
  */
 export interface TenantContext {
   userId: string;

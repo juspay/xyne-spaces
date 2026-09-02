@@ -2,27 +2,17 @@ import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { OrgRole } from "@prisma/client";
 import { prisma, type AppPrismaClient, type AppTransactionClient } from "../db.js";
-import { createLogger } from "../logger.js";
+import { asyncHandler, badRequest, conflict, ok } from "../lib/http.js";
+import { resolveSurfacePerson } from "../lib/identity-resolution.js";
 
-const log = createLogger("spaces-sync");
 const router = Router();
-
-class SyncError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 
 type DbClient = AppPrismaClient | AppTransactionClient;
 
-function stringField(body: Record<string, unknown>, key: string, required = true): string {
+function stringField(body: Record<string, unknown>, key: string): string {
   const value = body[key];
   if (typeof value !== "string" || !value.trim()) {
-    if (required) throw new SyncError(400, `${key} is required`);
-    return "";
+    throw badRequest(`${key} is required`);
   }
   return value.trim();
 }
@@ -36,10 +26,10 @@ function optionalString(body: Record<string, unknown>, key: string): string | un
  * Platform roles are privileged, so this intentionally accepts only a literal
  * boolean from the already-authenticated internal provisioning contract.
  */
-export function optionalBoolean(body: Record<string, unknown>, key: string): boolean {
+function optionalBoolean(body: Record<string, unknown>, key: string): boolean {
   const value = body[key];
   if (value === undefined) return false;
-  if (typeof value !== "boolean") throw new SyncError(400, `${key} must be a boolean`);
+  if (typeof value !== "boolean") throw badRequest(`${key} must be a boolean`);
   return value;
 }
 
@@ -47,11 +37,17 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+// The producer (Spaces) owns the status vocabulary. Unknown/missing values
+// deliberately coerce to ACTIVE rather than 400 — the external provisioning
+// contract must not break when Spaces ships a newer status value.
 function mapOrgStatus(status: string | undefined): "ACTIVE" | "ARCHIVED" | "DELETED" {
   if (status === "ARCHIVED" || status === "DELETED") return status;
   return "ACTIVE";
 }
 
+// Same lenient producer contract as mapOrgStatus: any value other than an
+// explicit "ACTIVE" (including unknown future statuses) coerces to INACTIVE
+// so an unrecognized status fails safe (surface disabled, not hidden-active).
 function mapSurfaceStatus(status: string | undefined): "ACTIVE" | "INACTIVE" {
   return status === "ACTIVE" || !status ? "ACTIVE" : "INACTIVE";
 }
@@ -81,7 +77,7 @@ async function ensureSpacesSurface(client: DbClient): Promise<void> {
 
   const byKey = await client.surface.findUnique({ where: { key: "spaces" }, select: { id: true } });
   if (byKey && byKey.id !== "spaces") {
-    throw new SyncError(409, `surface key "spaces" already exists with id ${byKey.id}; expected id "spaces"`);
+    throw conflict(`surface key "spaces" already exists with id ${byKey.id}; expected id "spaces"`);
   }
 
   await client.surface.create({
@@ -121,7 +117,7 @@ async function ensureOrgMapping(
 
   const orgIds = [...new Set(rows.map((row) => row.orgId))];
   if (orgIds.length > 1) {
-    throw new SyncError(409, `Spaces org ${input.spacesOrgId} maps to multiple Claw orgs: ${orgIds.join(",")}`);
+    throw conflict(`Spaces org ${input.spacesOrgId} maps to multiple Claw orgs: ${orgIds.join(",")}`);
   }
 
   if (rows[0]) {
@@ -139,7 +135,7 @@ async function ensureOrgMapping(
   }
 
   if (!input.name) {
-    throw new SyncError(409, `No Claw org mapping exists for Spaces org ${input.spacesOrgId}`);
+    throw conflict(`No Claw org mapping exists for Spaces org ${input.spacesOrgId}`);
   }
 
   const nameCollision = await client.organization.findUnique({
@@ -147,7 +143,7 @@ async function ensureOrgMapping(
     select: { id: true },
   });
   if (nameCollision) {
-    throw new SyncError(409, `Claw organization name "${input.name}" already exists without a Spaces mapping`);
+    throw conflict(`Claw organization name "${input.name}" already exists without a Spaces mapping`);
   }
 
   const org = await client.organization.create({
@@ -209,15 +205,11 @@ async function ensureWorkspaceMapping(
   });
   const conflicting = existingRows.find((row) => row.orgId !== org.orgId);
   if (conflicting) {
-    throw new SyncError(
-      409,
-      `Spaces workspace ${input.spacesWorkspaceId} is already mapped to Claw org ${conflicting.orgId}`,
-    );
+    throw conflict(`Spaces workspace ${input.spacesWorkspaceId} is already mapped to Claw org ${conflicting.orgId}`);
   }
   const mismatched = existingRows.find((row) => row.surfaceOrgId && row.surfaceOrgId !== input.spacesOrgId);
   if (mismatched) {
-    throw new SyncError(
-      409,
+    throw conflict(
       `Spaces workspace ${input.spacesWorkspaceId} mapping has surfaceOrgId ${mismatched.surfaceOrgId}; Spaces says ${input.spacesOrgId}`,
     );
   }
@@ -294,14 +286,12 @@ async function linkSpacesUserIdentity(
   });
 
   if (existing?.userId && existing.userId !== input.userId) {
-    throw new SyncError(
-      409,
+    throw conflict(
       `Spaces user ${input.spacesUserId} in workspace ${input.spacesWorkspaceId} is already linked to Claw user ${existing.userId}`,
     );
   }
   if (existing?.orgId && existing.orgId !== input.orgId) {
-    throw new SyncError(
-      409,
+    throw conflict(
       `Spaces user ${input.spacesUserId} in workspace ${input.spacesWorkspaceId} is already linked to Claw org ${existing.orgId}`,
     );
   }
@@ -336,227 +326,144 @@ async function linkSpacesUserIdentity(
   });
 }
 
-router.post("/org", async (req: Request, res: Response) => {
-  try {
-    const body = req.body as Record<string, unknown>;
-    const spacesOrgId = stringField(body, "spacesOrgId");
-    const name = stringField(body, "name");
-    const result = await prisma.$transaction(async (tx) => {
-      return ensureOrgMapping(tx, {
-        spacesOrgId,
-        name,
-        description: optionalString(body, "description"),
-        createdBySpacesUserId: optionalString(body, "createdBySpacesUserId"),
-        status: optionalString(body, "status"),
-        metadata: body["metadata"],
-      });
+router.post("/org", asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body as Record<string, unknown>;
+  const spacesOrgId = stringField(body, "spacesOrgId");
+  const name = stringField(body, "name");
+  const result = await prisma.$transaction(async (tx) => {
+    return ensureOrgMapping(tx, {
+      spacesOrgId,
+      name,
+      description: optionalString(body, "description"),
+      createdBySpacesUserId: optionalString(body, "createdBySpacesUserId"),
+      status: optionalString(body, "status"),
+      metadata: body["metadata"],
     });
-    res.json({ success: true, data: result });
-  } catch (err) {
-    handleSyncError(res, "org", err);
-  }
-});
+  });
+  ok(res, result);
+}));
 
-router.post("/workspace", async (req: Request, res: Response) => {
-  try {
-    const body = req.body as Record<string, unknown>;
-    const spacesWorkspaceId = stringField(body, "spacesWorkspaceId");
-    const spacesOrgId = stringField(body, "spacesOrgId");
-    const result = await prisma.$transaction(async (tx) => {
-      return ensureWorkspaceMapping(tx, {
-        spacesWorkspaceId,
-        spacesOrgId,
-        name: optionalString(body, "name"),
-        orgName: optionalString(body, "orgName"),
-        description: optionalString(body, "description"),
-        createdBySpacesUserId: optionalString(body, "createdBySpacesUserId"),
-        status: optionalString(body, "status"),
-        metadata: body["metadata"],
-      });
+router.post("/workspace", asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body as Record<string, unknown>;
+  const spacesWorkspaceId = stringField(body, "spacesWorkspaceId");
+  const spacesOrgId = stringField(body, "spacesOrgId");
+  const result = await prisma.$transaction(async (tx) => {
+    return ensureWorkspaceMapping(tx, {
+      spacesWorkspaceId,
+      spacesOrgId,
+      name: optionalString(body, "name"),
+      orgName: optionalString(body, "orgName"),
+      description: optionalString(body, "description"),
+      createdBySpacesUserId: optionalString(body, "createdBySpacesUserId"),
+      status: optionalString(body, "status"),
+      metadata: body["metadata"],
     });
-    res.json({ success: true, data: result });
-  } catch (err) {
-    handleSyncError(res, "workspace", err);
-  }
-});
+  });
+  ok(res, result);
+}));
 
-router.post("/user", async (req: Request, res: Response) => {
-  try {
-    const body = req.body as Record<string, unknown>;
-    const spacesUserId = stringField(body, "spacesUserId");
-    const spacesWorkspaceId = stringField(body, "spacesWorkspaceId");
-    const spacesOrgId = stringField(body, "spacesOrgId");
-    // Person resolution is EMAIL-PRIMARY (product decision): (email, orgId) is
-    // the per-person identity invariant for this deployment. The payload MAY
-    // carry spacesOrgMemberId; we store it only on surface identity rows
-    // (generic surfaceMemberId) as the hard-refuse signal against
-    // email-collision merges — the users table stays free of the key.
-    const spacesOrgMemberId = optionalString(body, "spacesOrgMemberId")
-      ?? optionalString(body, "orgMemberId");
-    const email = normalizeEmail(stringField(body, "email"));
-    const name = stringField(body, "name");
-    const grantClawAdmin = optionalBoolean(body, "grantClawAdmin");
-    const result = await prisma.$transaction(async (tx) => {
-      const workspace = await ensureWorkspaceMapping(tx, {
-        spacesWorkspaceId,
-        spacesOrgId,
-        name: optionalString(body, "workspaceName"),
-        orgName: optionalString(body, "orgName"),
-        createdBySpacesUserId: optionalString(body, "createdBySpacesUserId") ?? spacesUserId,
-        status: "ACTIVE",
-      });
+router.post("/user", asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body as Record<string, unknown>;
+  const spacesUserId = stringField(body, "spacesUserId");
+  const spacesWorkspaceId = stringField(body, "spacesWorkspaceId");
+  const spacesOrgId = stringField(body, "spacesOrgId");
+  // Person resolution is EMAIL-PRIMARY (product decision) and shared with the
+  // request-time JIT mirror — see src/lib/identity-resolution.ts for the full
+  // fail-closed refusal policy (its refusals become HTTP 409 here via the
+  // shared HttpError plumbing).
+  const spacesOrgMemberId = optionalString(body, "spacesOrgMemberId")
+    ?? optionalString(body, "orgMemberId");
+  const email = normalizeEmail(stringField(body, "email"));
+  const name = stringField(body, "name");
+  const grantClawAdmin = optionalBoolean(body, "grantClawAdmin");
+  const result = await prisma.$transaction(async (tx) => {
+    const workspace = await ensureWorkspaceMapping(tx, {
+      spacesWorkspaceId,
+      spacesOrgId,
+      name: optionalString(body, "workspaceName"),
+      orgName: optionalString(body, "orgName"),
+      createdBySpacesUserId: optionalString(body, "createdBySpacesUserId") ?? spacesUserId,
+      status: "ACTIVE",
+    });
 
-      const exactUser = await tx.user.findUnique({
-        where: { id: spacesUserId },
-        select: { id: true, email: true, orgId: true },
-      });
-      const emailUser = await tx.user.findFirst({
-        where: { orgId: workspace.orgId, email: { equals: email, mode: "insensitive" } },
-        select: { id: true, email: true, orgId: true },
-      });
+    const resolution = await resolveSurfacePerson(tx, {
+      orgId: workspace.orgId,
+      email,
+      exactUserId: spacesUserId,
+      ...(spacesOrgMemberId ? { memberId: spacesOrgMemberId } : {}),
+    });
+    if (resolution.kind === "refused") {
+      throw conflict(resolution.reason);
+    }
 
-      const memberIdentityUserIds = spacesOrgMemberId
-        ? [...new Set(
-            (await tx.userSurfaceIdentity.findMany({
-              where: {
-                surfaceId: "spaces",
-                orgId: workspace.orgId,
-                surfaceMemberId: spacesOrgMemberId,
-                userId: { not: null },
-              },
-              select: { userId: true },
-            })).map((row) => row.userId as string),
-          )]
-        : [];
-      if (memberIdentityUserIds.length > 1) {
-        throw new SyncError(
-          409,
-          `Spaces org member ${spacesOrgMemberId} is linked to multiple Claw users: ${memberIdentityUserIds.join(", ")}`,
-        );
-      }
-      const memberUserId = memberIdentityUserIds[0];
-      if (memberUserId && exactUser && memberUserId !== exactUser.id) {
-        throw new SyncError(
-          409,
-          `Spaces org member ${spacesOrgMemberId} resolves to Claw user ${memberUserId}, ` +
-            `but workspace user ${spacesUserId} resolves to ${exactUser.id}`,
-        );
-      }
-      if (memberUserId && emailUser && memberUserId !== emailUser.id) {
-        throw new SyncError(
-          409,
-          `Spaces org member ${spacesOrgMemberId} resolves to Claw user ${memberUserId}, ` +
-            `but email ${email} resolves to ${emailUser.id} in org ${workspace.orgId}`,
-        );
-      }
-      if (spacesOrgMemberId && emailUser && !memberUserId) {
-        const knownMembers = await tx.userSurfaceIdentity.findMany({
-          where: {
-            surfaceId: "spaces", orgId: workspace.orgId, userId: emailUser.id, surfaceMemberId: { not: null },
+    const canonicalUser = resolution.kind === "reuse"
+      ? { id: resolution.userId }
+      : await tx.user.create({
+          // Claw owns its primary key; Spaces' workspace membership id lives
+          // only in the UserSurfaceIdentity row linked below.
+          data: {
+            id: `claw-user-${randomUUID()}`,
+            email,
+            name,
+            orgId: workspace.orgId,
+            ...(grantClawAdmin
+              ? { roles: { create: { role: "CLAW_ADMIN", grantedBy: "spaces-sync" } } }
+              : {}),
           },
-          select: { surfaceMemberId: true },
-          distinct: ["surfaceMemberId"],
+          select: { id: true },
         });
-        if (knownMembers.length > 0) {
-          throw new SyncError(
-            409,
-            `Email ${email} in org ${workspace.orgId} already belongs to distinct member(s) ` +
-              `${knownMembers.map((row) => row.surfaceMemberId).join(", ")}; received ${spacesOrgMemberId} — refusing merge`,
-          );
-        }
-      }
 
-      if (exactUser && exactUser.orgId !== workspace.orgId) {
-        throw new SyncError(
-          409,
-          `Claw user id ${spacesUserId} already belongs to org ${exactUser.orgId}; Spaces says ${workspace.orgId}`,
-        );
-      }
-      if (exactUser && emailUser && exactUser.id !== emailUser.id) {
-        throw new SyncError(
-          409,
-          `Spaces user ${spacesUserId} conflicts with existing Claw user ${emailUser.id} for ${email} in org ${workspace.orgId}`,
-        );
-      }
-
-      const role = mapOrgRole(optionalString(body, "role"));
-      const existingCanonicalUser = memberUserId
-        ? { id: memberUserId, email: emailUser?.email ?? email, orgId: workspace.orgId }
-        : exactUser ?? emailUser;
-      const canonicalUser = existingCanonicalUser ?? await tx.user.create({
-        // Claw owns its primary key; Spaces' workspace membership id lives
-        // only in the UserSurfaceIdentity row linked below.
-        data: {
-          id: `claw-user-${randomUUID()}`,
-          email,
-          name,
-          orgId: workspace.orgId,
-          ...(grantClawAdmin
-            ? { roles: { create: { role: "CLAW_ADMIN", grantedBy: "spaces-sync" } } }
-            : {}),
-        },
-        select: { id: true, email: true, orgId: true },
+    if (resolution.kind === "reuse") {
+      await tx.user.update({
+        where: { id: canonicalUser.id },
+        data: { email, name },
       });
+    }
 
-      if (existingCanonicalUser) {
-        await tx.user.update({
-          where: { id: canonicalUser.id },
-          data: { email, name },
-        });
-      }
-
-      // Provisioning is idempotent: a person may already exist in Claw before
-      // Spaces identifies them as an org admin. Preserve existing roles, and
-      // add CLAW_ADMIN when this trusted provisioning request explicitly asks.
-      if (grantClawAdmin) {
-        await tx.userRole.upsert({
-          where: { userId_role: { userId: canonicalUser.id, role: "CLAW_ADMIN" } },
-          create: { userId: canonicalUser.id, role: "CLAW_ADMIN", grantedBy: "spaces-sync" },
-          update: {},
-        });
-      }
-
-      await tx.orgMember.upsert({
-        where: { userId_orgId: { userId: canonicalUser.id, orgId: workspace.orgId } },
-        create: {
-          userId: canonicalUser.id,
-          orgId: workspace.orgId,
-          role,
-          invitedBy: optionalString(body, "createdBySpacesUserId") ?? "spaces-sync",
-        },
-        update: { role, leftAt: null },
+    // Provisioning is idempotent: a person may already exist in Claw before
+    // Spaces identifies them as an org admin. Preserve existing roles, and
+    // add CLAW_ADMIN when this trusted provisioning request explicitly asks.
+    if (grantClawAdmin) {
+      await tx.userRole.upsert({
+        where: { userId_role: { userId: canonicalUser.id, role: "CLAW_ADMIN" } },
+        create: { userId: canonicalUser.id, role: "CLAW_ADMIN", grantedBy: "spaces-sync" },
+        update: {},
       });
+    }
 
-      await linkSpacesUserIdentity(tx, {
-        orgId: workspace.orgId,
+    // Only write `role` when the payload carries one: re-provisioning an
+    // existing member must not silently demote an OWNER/ADMIN to the MEMBER
+    // default the create branch needs.
+    const suppliedRole = optionalString(body, "role");
+    const role = suppliedRole ? mapOrgRole(suppliedRole) : undefined;
+    await tx.orgMember.upsert({
+      where: { userId_orgId: { userId: canonicalUser.id, orgId: workspace.orgId } },
+      create: {
         userId: canonicalUser.id,
-        spacesUserId,
-        spacesWorkspaceId,
-        status: optionalString(body, "status"),
-        ...(spacesOrgMemberId ? { memberId: spacesOrgMemberId } : {}),
-      });
-
-      return {
         orgId: workspace.orgId,
-        userId: canonicalUser.id,
-        spacesUserId,
-        reusedExistingUser: Boolean(existingCanonicalUser),
-      };
+        role: role ?? OrgRole.MEMBER,
+        invitedBy: optionalString(body, "createdBySpacesUserId") ?? "spaces-sync",
+      },
+      update: { ...(role ? { role } : {}), leftAt: null },
     });
-    res.json({ success: true, data: result });
-  } catch (err) {
-    handleSyncError(res, "user", err);
-  }
-});
 
-function handleSyncError(res: Response, scope: string, err: unknown): void {
-  if (err instanceof SyncError) {
-    log.warn(`[spaces-sync] ${scope} rejected: ${err.message}`);
-    res.status(err.status).json({ success: false, error: err.message });
-    return;
-  }
-  log.error(`[spaces-sync] ${scope} failed:`, err);
-  res.status(500).json({ success: false, error: "Internal server error" });
-}
+    await linkSpacesUserIdentity(tx, {
+      orgId: workspace.orgId,
+      userId: canonicalUser.id,
+      spacesUserId,
+      spacesWorkspaceId,
+      status: optionalString(body, "status"),
+      ...(spacesOrgMemberId ? { memberId: spacesOrgMemberId } : {}),
+    });
+
+    return {
+      orgId: workspace.orgId,
+      userId: canonicalUser.id,
+      spacesUserId,
+      reusedExistingUser: resolution.kind === "reuse",
+    };
+  });
+  ok(res, result);
+}));
 
 export const spacesSyncRouter = router;
