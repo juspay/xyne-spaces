@@ -138,11 +138,16 @@ export class GroupDmParticipantService {
         workspaceId,
       } satisfies CreateChannelInput));
 
-    if (!existingGroupDM) {
+    try {
       for (const participantId of allParticipantIds) {
         const role = participantId === currentUserId ? ChannelRole.ADMIN : ChannelRole.MEMBER;
         await this.channelParticipantRepository.addParticipant(destination.id, participantId, role);
       }
+    } catch (error) {
+      if (!existingGroupDM) {
+        await this.discardCreatedChannel(destination.id, allParticipantIds);
+      }
+      throw error;
     }
 
     const { moved, remaining } = carriesHistory
@@ -213,6 +218,23 @@ export class GroupDmParticipantService {
     });
 
     return { conversations, total };
+  }
+
+  private async discardCreatedChannel(
+    channelId: string,
+    participantIds: string[]
+  ): Promise<void> {
+    try {
+      for (const userId of participantIds) {
+        await this.channelParticipantRepository.removeParticipant(channelId, userId);
+      }
+      await this.channelRepository.delete(channelId);
+    } catch (cleanupError) {
+      logger.error(
+        '[GroupDmParticipantService] Failed to discard partially created group DM',
+        { channelId, error: cleanupError },
+      );
+    }
   }
 
   private async loadActiveUsers(userIds: string[]): Promise<User[]> {
