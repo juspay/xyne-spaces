@@ -210,6 +210,8 @@ export class QueryACLFactory {
         return new ProjectsACL(ctx) as BaseQueryACL<TTable>;
       case 'pull_requests':
         return new PullRequestsACL(ctx) as BaseQueryACL<TTable>;
+      case 'commits':
+        return new BaseQueryACL(ctx, 'commits') as BaseQueryACL<TTable>;
       case 'reaction_counts':
         return new ReactionCountsACL(ctx) as BaseQueryACL<TTable>;
       case 'reactions':
