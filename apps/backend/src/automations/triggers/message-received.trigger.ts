@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
+import { getFlowJsonContentForNotification } from '@/utils/flowJson';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
 
 export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
@@ -294,7 +295,15 @@ async function hydrateMessageReceivedPayload(
     ...payload,
     message: {
       id: messageId,
-      content: messageRow?.content ?? null,
+      // FlowJSON alerts store the real text inside the data-flow-json attribute;
+      // the only visible node is the literal "Flow JSON". Decode to plaintext so
+      // downstream agents receive the actual message instead of the raw blob and
+      // don't have to call other tools just to read what triggered them.
+      // getFlowJsonContentForNotification returns null for normal messages, so
+      // plain content is passed through unchanged.
+      content: messageRow?.content
+        ? getFlowJsonContentForNotification(messageRow.content) ?? messageRow.content
+        : null,
       conversationId,
       channelId,
       createdAt: messageRow?.createdAt ?? new Date(),
