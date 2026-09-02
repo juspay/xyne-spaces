@@ -1,5 +1,9 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { PluginKey } from '@tiptap/pm/state';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import type { EditorView } from '@tiptap/pm/view';
+import type { BaseSelectorPluginState } from '../Selectors';
+import { createSelectorPlugin } from '../Selectors';
 
 /**
  * FileReferenceExtension
@@ -35,6 +39,19 @@ declare module '@tiptap/core' {
     };
   }
 }
+
+/** One selectable file in the thread-file reference picker. */
+export interface FileReferenceItem {
+  id: string;
+  name: string;
+  mimeType?: string;
+}
+
+export type FileReferencePluginState = BaseSelectorPluginState<FileReferenceItem>;
+
+export const fileReferencePluginKey = new PluginKey<FileReferencePluginState>(
+  'fileReferenceSelector',
+);
 
 const ZWSP = '\u200B'; // Zero-width space guard, matching other mention nodes
 
@@ -135,6 +152,36 @@ export const FileReferenceExtension = Node.create<FileReferenceOptions>({
     const attrs = node.attrs as Record<string, unknown>;
     const fileName = (attrs['fileName'] as string) ?? 'file';
     return `📎${fileName}`;
+  },
+
+  addProseMirrorPlugins() {
+    const extensionName = this.name;
+
+    return [
+      createSelectorPlugin<FileReferenceItem>({
+        pluginKey: fileReferencePluginKey,
+        customKeyHandler: (view: EditorView, event: KeyboardEvent): boolean => {
+          const { state, dispatch } = view;
+          const { selection } = state;
+          const { $from } = selection;
+          const nodeBefore = $from.nodeBefore;
+
+          // Backspace at the right ZWSP guard deletes the whole chip, matching
+          // channel/user mentions, so a reference never leaves a half-deleted node.
+          if (event.key === 'Backspace' && nodeBefore && nodeBefore.text === ZWSP) {
+            const posBeforeZwsp = $from.pos - 1;
+            const maybeChip = state.doc.nodeAt(posBeforeZwsp - 1);
+            if (maybeChip && maybeChip.type.name === extensionName) {
+              event.preventDefault();
+              const tr = state.tr.delete(posBeforeZwsp - 1, $from.pos);
+              dispatch(tr);
+              return true;
+            }
+          }
+          return false;
+        },
+      }),
+    ];
   },
 
   addCommands() {

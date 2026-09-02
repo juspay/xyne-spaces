@@ -43,6 +43,7 @@ import { toast } from 'sonner';
 import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
+import { FileReferenceSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
 import { AttachmentPreview } from '../files';
@@ -222,6 +223,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       channelItems = [],
       onChannelSearch,
       onChannelSelect,
+      fileReferenceItems = [],
       commandItems = [],
       onCommandSelect,
       isLoadingCommands = false,
@@ -1552,6 +1554,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           {...(onChannelSearch && { onMentionSearch: onChannelSearch })}
           {...(onChannelSelect && { onMentionSelect: handleChannelSelect })}
         />
+
+        {features.mentions && (
+          <FileReferenceSelector editor={editor} fileItems={fileReferenceItems} />
+        )}
 
         {features.emojiPicker && (
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
