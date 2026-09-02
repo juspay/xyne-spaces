@@ -3,6 +3,7 @@ import { searchService } from '../services/searchService';
 import type { VespaSearchFilters, DisplaySearchResult } from '../types/search';
 import type { Ticket } from '@xyne/shared';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 
 const MAX_VESPA_TICKET_SEARCH_LIMIT = 200;
 const FILTER_ONLY_DYNAMIC_FIELD_CACHE_TTL_MS = 30_000;
@@ -197,6 +198,8 @@ export const useVespaTicketSearch = ({
   const [isSearching, setIsSearching] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const defaultRankProfileFor = useCmdkDefaultRankProfiles();
+  const rankProfile = defaultRankProfileFor('tickets');
 
   const dynamicFieldValuesKey = dynamicFieldValues.join('\u001f');
   const normalizedDynamicFieldValues = useMemo(
@@ -245,6 +248,7 @@ export const useVespaTicketSearch = ({
       };
 
       vespaFilters.limit = pageLimit;
+      vespaFilters.rankProfile = rankProfile;
 
       if (projectId) vespaFilters.projectId = projectId;
       if (boardId) vespaFilters.board = boardId;
@@ -310,6 +314,7 @@ export const useVespaTicketSearch = ({
       safeLimit,
       fetchAllDynamicFieldMatches,
       maxFetchedResults,
+      rankProfile,
     ],
   );
 
@@ -329,12 +334,9 @@ export const useVespaTicketSearch = ({
     }
 
     setIsSearching(true);
-    debounceTimerRef.current = setTimeout(
-      () => {
-        void performSearch(trimmed || '*');
-      },
-      hasDynamicFieldFilters ? 0 : SEARCH_DEBOUNCE_MS,
-    );
+    debounceTimerRef.current = setTimeout(() => {
+      void performSearch(trimmed || '*');
+    }, SEARCH_DEBOUNCE_MS);
 
     return (): void => {
       if (debounceTimerRef.current) {

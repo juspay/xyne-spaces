@@ -177,8 +177,9 @@ const canRepresentGroupInVespa = (
   }
   if (typeof groupBy !== 'object' || groupBy.type !== 'formField') return false;
   if (!groupKey) return false;
-  if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey)) return true;
-  return groupBy.fieldType !== FormFieldType.DATE;
+  // All form field groups can be represented (MISSING_FORM_FIELD_GROUP_KEYS handled via
+  // __VESPA_MISSING__ token). DATE groupBy is not supported in the UI, so no special case.
+  return true;
 };
 
 const getDynamicFieldScalarFilters = (
@@ -387,15 +388,12 @@ export const useKanbanTicketsPage = (
   const pageVespaTokensSet = new Set(options.dynamicFieldVespaTokens ?? []);
   const pageVespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
   if (typeof options.groupBy === 'object' && options.groupBy?.type === 'formField') {
-    // Always add a token for form field groupBy to ensure Vespa search triggers
+    // Add a token for form field groupBy to ensure Vespa search filters by this field.
+    // DATE groupBy is not supported in the UI, so no special handling needed.
     const fieldId = options.groupBy.fieldId;
     const groupKey = options.groupKey ?? '';
 
-    if (options.groupBy.fieldType === FormFieldType.DATE) {
-      // For DATE grouping, always add a placeholder token to trigger Vespa
-      // The actual filtering is done via dynamicFieldDateRanges
-      pageVespaTokensSet.add(`${fieldId}::${VESPA_MISSING_DYNAMIC_FIELD_VALUE}`);
-    } else if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey) || !groupKey) {
+    if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey) || !groupKey) {
       pageVespaTokensSet.add(`${fieldId}::${VESPA_MISSING_DYNAMIC_FIELD_VALUE}`);
     } else {
       pageVespaTokensSet.add(`${fieldId}::${groupKey}`);
@@ -423,10 +421,22 @@ export const useKanbanTicketsPage = (
     options.filters?.priority && options.filters.priority.length > 0
       ? options.filters.priority.join(',')
       : undefined;
+
+  // Parse assignee filter to extract real user IDs, excluding sentinels.
+  // Vespa can't handle 'unassigned' or inverted selections, so skip those cases.
+  const parsedAssignee = options.filters?.assignee?.length
+    ? parseAssigneeFilter(options.filters.assignee)
+    : null;
+  // Only send to Vespa when we have real IDs and not inverted/includeUnassigned
+  // (those semantics require the Zero/local filter path).
   const vespaAssignee =
-    options.filters?.assignee && options.filters.assignee.length > 0
-      ? options.filters.assignee.join(',')
+    parsedAssignee &&
+    parsedAssignee.ids.length > 0 &&
+    !parsedAssignee.inverted &&
+    !parsedAssignee.includeUnassigned
+      ? parsedAssignee.ids.flatMap(id => [id, `user:${id}`]).join(',')
       : undefined;
+
   const vespaTags =
     options.filters?.tags && options.filters.tags.length > 0
       ? options.filters.tags.join(',')
