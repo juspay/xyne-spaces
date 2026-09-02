@@ -177,6 +177,7 @@ async function createAdminUser() {
             userId: user.id,
             resourceId: resource.id,
             accessType: AccessType.ADMIN,
+            workspaceId: defaultWorkspace.id,
           },
         });
         grantedCount++;

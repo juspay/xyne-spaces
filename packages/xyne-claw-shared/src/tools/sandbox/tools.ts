@@ -1353,6 +1353,7 @@ async function configureGitIdentity(
   workDirs: string[],
   userEmail: string | undefined,
   userName: string | undefined,
+  botId: string | undefined,
   log: string[],
 ): Promise<void> {
   if (!userEmail) {
@@ -1361,6 +1362,10 @@ async function configureGitIdentity(
   }
   const safeName = (userName ?? userEmail.split("@")[0] ?? "Xyne User").replace(/['"\\$`]/g, "");
   const safeEmail = userEmail.replace(/['"\\$`]/g, "");
+
+  if (botId) {
+    log.push(`Git identity: ${safeName} (author) + Xyne Spaces (committer) + bot attribution (${botId})`);
+  }
 
   // Xyne Spaces is the committer of every agent commit; the human stays
   // the author. These come from the same identity previously used for the
@@ -1399,6 +1404,9 @@ async function configureGitIdentity(
   //
   // Result: commit lands with the baked bad identity → post-commit amends
   // → final commit has the human user as author and Xyne Spaces as committer.
+  //
+  // Bot attribution: if botId is present (e.g. "claw", "sdlc-agent"), append
+  // "xyne-bot-author: <botId>" trailer to the commit message for PR analytics.
   const postCommitHook = [
     "#!/bin/sh",
     "# Xyne session-local post-commit identity rewrite.",
@@ -1418,15 +1426,25 @@ async function configureGitIdentity(
     `export GIT_COMMITTER_EMAIL="${COMMITTER_EMAIL}"`,
     "export XYNE_POST_COMMIT_AMEND_GUARD=1",
     "",
-    "# --author forces the human user as author (NOT --reset-author, which",
-    "# would copy the committer identity onto the author too). The committer",
-    "# comes from GIT_COMMITTER_* above. --no-edit keeps the message intact.",
-    // --allow-empty: if the original commit had no file changes (e.g. the
-    // doctor's smoke-test empty commit), the amend would otherwise refuse
-    // with "would make it empty" and exit 1, silenced by 2>/dev/null. The
-    // flag lets the amend rewrite identity on those commits too. stderr is
-    // silenced because an amend can fail harmlessly mid-rebase / cherry-pick.
-    `git commit --amend --no-edit --no-verify --allow-empty --author="${safeName} <${safeEmail}>" 2>/dev/null || true`,
+    botId ? [
+      "# Bot attribution: append xyne-bot-author trailer for PR analytics",
+      `BOT_ID="${botId.replace(/["\\$`]/g, "")}"`,
+      'COMMIT_MSG=$(git log -1 --format=%B)',
+      'NEW_MSG="${COMMIT_MSG}',
+      '',
+      'xyne-bot-author: ${BOT_ID}"',
+      `git commit --amend --no-verify --allow-empty --author="${safeName} <${safeEmail}>" -m "$NEW_MSG" 2>/dev/null || true`,
+    ].join("\n") : [
+      "# --author forces the human user as author (NOT --reset-author, which",
+      "# would copy the committer identity onto the author too). The committer",
+      "# comes from GIT_COMMITTER_* above. --no-edit keeps the message intact.",
+      // --allow-empty: if the original commit had no file changes (e.g. the
+      // doctor's smoke-test empty commit), the amend would otherwise refuse
+      // with "would make it empty" and exit 1, silenced by 2>/dev/null. The
+      // flag lets the amend rewrite identity on those commits too. stderr is
+      // silenced because an amend can fail harmlessly mid-rebase / cherry-pick.
+      `git commit --amend --no-edit --no-verify --allow-empty --author="${safeName} <${safeEmail}>" 2>/dev/null || true`,
+    ].join("\n"),
   ].join("\n");
   const postCommitB64 = Buffer.from(postCommitHook, "utf8").toString("base64");
 
@@ -1538,8 +1556,10 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       // Pull the originating user's email/name from the run meta. routes/run.ts
       // populates these from the /run request body. configureGitIdentity below
       // will set git config + install the post-commit identity hook in every workdir.
+      // agentSlug (e.g., "claw", "sdlc-agent") is used for bot commit attribution.
       const userEmail = context.meta?.["userEmail"];
       const userName = context.meta?.["userName"];
+      const botId = context.meta?.["agentSlug"];
       const allWorkDirs = [config.workDir, ...(config.auxRepos?.map((r) => r.workDir) ?? [])];
 
       const log: string[] = [];
@@ -1654,7 +1674,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             if (config.runtimeCredentialBinding) {
               log.push("SDLC Git access binding refreshed for this run.");
             } else {
-              await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
+              await configureGitIdentity(cached, allWorkDirs, userEmail, userName, botId, log);
             }
             return JSON.stringify({
               sessionId: cached.id,
@@ -1893,10 +1913,11 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
 
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
+      // If this is a bot (agentSlug present), append xyne-bot-author trailer.
       if (config.runtimeCredentialBinding) {
         log.push("SDLC Git access binding configured for this run.");
       } else {
-        await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
+        await configureGitIdentity(session, allWorkDirs, userEmail, userName, botId, log);
       }
 
       const jobIds: Record<string, string> = {};
