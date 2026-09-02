@@ -1615,34 +1615,43 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [boards],
   );
 
-  // Get status options and memomize them
-  const statusOptions = [
-    {
-      label: 'Todo',
-      value: 'TODO',
-      icon: <CircleDashed strokeWidth={2.5} className='size-3.5 text-orange-500' />,
-    },
-    {
-      label: 'Started',
-      value: 'STARTED',
-      icon: <CircleDot strokeWidth={2.5} className='size-3.5 text-blue-500' />,
-    },
-    {
-      label: 'Paused',
-      value: 'PAUSED',
-      icon: <PauseCircle strokeWidth={2.5} className='size-3.5 text-teal-500' />,
-    },
-    {
-      label: 'Cancelled',
-      value: 'CANCELLED',
-      icon: <CircleX strokeWidth={2.5} className='size-3.5 text-red-500' />,
-    },
-    {
-      label: 'Completed',
-      value: 'COMPLETED',
-      icon: <CircleCheck strokeWidth={2.5} className='size-3.5 text-green-500' />,
-    },
-  ];
+  // Memoised for real: a new array identity on every render retriggers
+  // EntitySelector's `[filteredOptions]` reset effect, which clears the
+  // keyboard highlight mid-navigation.
+  const statusOptions = useMemo(
+    () => [
+      {
+        label: 'Todo',
+        value: 'TODO',
+        icon: <CircleDashed strokeWidth={2.5} className='size-3.5 text-orange-500' />,
+      },
+      {
+        label: 'Started',
+        value: 'STARTED',
+        icon: <CircleDot strokeWidth={2.5} className='size-3.5 text-blue-500' />,
+      },
+      {
+        label: 'Paused',
+        value: 'PAUSED',
+        icon: <PauseCircle strokeWidth={2.5} className='size-3.5 text-teal-500' />,
+      },
+      {
+        label: 'Cancelled',
+        value: 'CANCELLED',
+        icon: <CircleX strokeWidth={2.5} className='size-3.5 text-red-500' />,
+      },
+      {
+        label: 'Completed',
+        value: 'COMPLETED',
+        icon: <CircleCheck strokeWidth={2.5} className='size-3.5 text-green-500' />,
+      },
+    ],
+    [],
+  );
+
+  // Same reason as statusOptions: getPriorityOptions() returns a fresh array,
+  // and calling it inline in JSX reset the keyboard highlight on every render.
+  const priorityOptions = useMemo(() => getPriorityOptions(), []);
 
   // Channel options for subticket creation
   const channelOptions = useMemo(
@@ -1896,6 +1905,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       cancelGeneration();
                     }
                     field.handleChange(e.target.value);
+                  }}
+                  onKeyDown={e => {
+                    // Vim-style form navigation: Enter advances to the next
+                    // field instead of submitting. Shift+Enter does the same —
+                    // a single-line input cannot hold a newline, so advancing
+                    // keeps the key useful rather than inert. preventDefault
+                    // also suppresses the browser's implicit form submission,
+                    // which is what used to create a ticket from the title.
+                    // Only bare Enter is claimed; modifier combos fall through
+                    // so browser and global shortcuts keep working here.
+                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                    if (e.metaKey || e.ctrlKey || e.altKey) return;
+                    e.preventDefault();
+                    const description = descriptionTextareaRef.current;
+                    if (!description) return;
+                    description.focus();
+                    // Caret after existing text — the description can arrive
+                    // pre-filled from AI or a chat message.
+                    const end = description.value.length;
+                    description.setSelectionRange(end, end);
                   }}
                   aria-label='Ticket Title'
                   placeholder='Enter Ticket Title...'
@@ -2705,7 +2734,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               return (
                 <EntitySelector
                   showSearch={false}
-                  options={getPriorityOptions()}
+                  options={priorityOptions}
                   selectedValue={field.state.value}
                   onSelect={(value: string | null) =>
                     field.handleChange(value as CreateTicketFormData['priority'])

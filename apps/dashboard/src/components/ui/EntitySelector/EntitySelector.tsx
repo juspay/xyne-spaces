@@ -254,6 +254,36 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           inputClassName,
         )}
         style={{ width }}
+        onKeyDown={e => {
+          // Keyboard navigation for the button trigger. When `showSearch` is on,
+          // the search input inside the popover owns these keys and focus moves
+          // there, so this handler never sees them — it is not a second path for
+          // those selectors. With `showSearch={false}` (status, priority, …) no
+          // search input is rendered and `onOpenAutoFocus` leaves focus on the
+          // trigger, which previously meant the open dropdown had no keyboard
+          // support at all. Mirrors the search input's logic exactly so both
+          // paths behave identically.
+          if (!open) return;
+          // Only bare keys are claimed. alt+up / alt+down are global sidebar
+          // shortcuts (allowInInputs: true, so they fire even from here) and
+          // mod+up is the composer's edit-last-message; without this, an open
+          // dropdown would move its highlight AND run the global shortcut off
+          // the same press. Same guard the sidebar's own j/k handlers use.
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setHighlightedIndex(i => Math.min(i + 1, filteredOptions.length - 1));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setHighlightedIndex(i => Math.max(i - 1, 0));
+          } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+            // Only claim Enter once an option is highlighted; otherwise the
+            // button's native click still toggles the popover as before.
+            e.preventDefault();
+            const opt = filteredOptions[highlightedIndex];
+            if (opt && !opt.disabled) handleSelect(opt.value);
+          }
+        }}
       >
         {/* Icon: Show selected option's icon or nothing */}
         {selectedOption?.icon ? (

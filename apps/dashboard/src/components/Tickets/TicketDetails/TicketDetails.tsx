@@ -452,9 +452,6 @@ const StageFormSubmissions: React.FC<StageFormSubmissionsProps> = ({ stageVisitF
 };
 const TICKET_ATTACHMENT_PREVIEW_LIMIT = 5;
 
-// Debounce window for title/description auto-save while the user is typing.
-const FIELD_AUTOSAVE_DEBOUNCE_MS = 600;
-
 interface TicketDetailsProps {
   ticketId: string;
   onNavigateToTicket?: (ticketId: string) => void;
@@ -1752,8 +1749,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, [filteredTags, tagSearchQuery]);
 
   // Initialize edit values when ticket changes. Skip the field currently being
-  // edited: a debounced auto-save mutates `ticket`, and re-syncing here mid-edit
-  // would clobber the user's in-progress text (and jump the caret).
+  // edited: a concurrent update to `ticket` (another user, or our own save
+  // landing) would otherwise clobber the in-progress text and jump the caret.
   useEffect(() => {
     if (ticket && !editingTitle) {
       setTitleValue(ticket.title);
@@ -1797,8 +1794,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // rejections instead of silently rolling back the optimistic update. Server-side
   // rules (e.g. Euler board constraints) reject some updates; previously the error was
   // dropped via `void zero.mutate(...)`, so the user got no feedback (e.g. an unassign
-  // appeared to do nothing). Declared before the loading guard so the debounced
-  // auto-save effects below can reuse it.
+  // appeared to do nothing). Declared before the loading guard so the edit-flush
+  // effect below can reuse it.
   const applyTicketUpdate = useCallback(
     async (
       update: Parameters<typeof mutators.ticket.update>[0],
@@ -1820,41 +1817,55 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     [zero],
   );
 
-  // Debounced auto-save while editing — persist the title as the user types
-  // rather than only on blur/exit. The blur/Enter handler still flushes an
-  // immediate save; leaving edit mode flips `editingTitle`, whose cleanup clears
-  // any pending debounce, so there's no duplicate write. Email-desk tickets are
-  // excluded: a title change there rewrites the email subject via a confirmation
-  // dialog, which must not fire on every keystroke.
-  useEffect(() => {
-    if (!ticket || !editingTitle || isEmailDeskTicket) return;
-    const trimmed = titleValue.trim();
-    if (!trimmed || trimmed === ticket.title) return;
-    const ticketId = ticket.id;
-    const timeoutId = setTimeout(() => {
-      void applyTicketUpdate(
-        { id: ticketId, title: trimmed, updatedAt: Date.now() },
-        'Failed to update title',
-      );
-    }, FIELD_AUTOSAVE_DEBOUNCE_MS);
-    return (): void => clearTimeout(timeoutId);
-  }, [titleValue, editingTitle, isEmailDeskTicket, ticket, applyTicketUpdate]);
+  // Title and description are committed only when the edit is finished — Enter or
+  // blur (see handleSaveTitle / handleSaveDescription). There is deliberately no
+  // debounced save-as-you-type: every ticket.update that changes these fields
+  // appends a "<user> updated the title/description" system message to the ticket
+  // conversation, so typing used to spray one activity message per typing pause.
+  // The refs below let the unmount cleanup flush an edit that never got a blur
+  // (e.g. the details panel is closed while the input still has focus).
+  const pendingTitleEditRef = useRef<{ ticketId: string; value: string } | null>(null);
+  const pendingDescriptionEditRef = useRef<{ ticketId: string; value: string } | null>(null);
+  const applyTicketUpdateRef = useRef(applyTicketUpdate);
+  applyTicketUpdateRef.current = applyTicketUpdate;
 
-  // Debounced auto-save while editing the description (no subject side effect, so
-  // it applies to all ticket types).
+  // Email-desk tickets are excluded: a title change there rewrites the email
+  // subject via a confirmation dialog, which must not fire without the user.
+  pendingTitleEditRef.current =
+    ticket &&
+    editingTitle &&
+    !isEmailDeskTicket &&
+    titleValue.trim() &&
+    titleValue.trim() !== ticket.title
+      ? { ticketId: ticket.id, value: titleValue.trim() }
+      : null;
+  pendingDescriptionEditRef.current =
+    ticket && editingDescription && descriptionValue.trim() !== ticket.description
+      ? { ticketId: ticket.id, value: descriptionValue.trim() }
+      : null;
+
   useEffect(() => {
-    if (!ticket || !editingDescription) return;
-    const next = descriptionValue.trim();
-    if (next === ticket.description) return;
-    const ticketId = ticket.id;
-    const timeoutId = setTimeout(() => {
-      void applyTicketUpdate(
-        { id: ticketId, description: next, updatedAt: Date.now() },
-        'Failed to update description',
-      );
-    }, FIELD_AUTOSAVE_DEBOUNCE_MS);
-    return (): void => clearTimeout(timeoutId);
-  }, [descriptionValue, editingDescription, ticket, applyTicketUpdate]);
+    return (): void => {
+      const pendingTitle = pendingTitleEditRef.current;
+      if (pendingTitle) {
+        void applyTicketUpdateRef.current(
+          { id: pendingTitle.ticketId, title: pendingTitle.value, updatedAt: Date.now() },
+          'Failed to update title',
+        );
+      }
+      const pendingDescription = pendingDescriptionEditRef.current;
+      if (pendingDescription) {
+        void applyTicketUpdateRef.current(
+          {
+            id: pendingDescription.ticketId,
+            description: pendingDescription.value,
+            updatedAt: Date.now(),
+          },
+          'Failed to update description',
+        );
+      }
+    };
+  }, []);
 
   // Auto-focus tag input when dropdown opens
   useEffect(() => {
