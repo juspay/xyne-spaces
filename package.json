@@ -138,6 +138,10 @@
             {
               "type": "chore",
               "release": false
+            },
+            {
+              "type": null,
+              "release": "patch"
             }
           ]
         }
@@ -170,6 +174,13 @@
       [
         "@semantic-release/npm",
         {
+          "npmPublish": false,
+          "pkgRoot": "apps/backend"
+        }
+      ],
+      [
+        "@semantic-release/npm",
+        {
           "npmPublish": false
         }
       ],
@@ -180,6 +191,7 @@
           "assets": [
             "package.json",
             "apps/dashboard/package.json",
+            "apps/backend/package.json",
             "CHANGELOG.md"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]",
