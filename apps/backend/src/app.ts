@@ -102,6 +102,7 @@ import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
+import unreadDigestRoutes from '@/routes/unreadDigest';
 import xyneAIRoutes from '@/routes/xyneAI';
 import cacConfigRoutes from '@/routes/cacConfig';
 import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
@@ -666,6 +667,9 @@ export class App {
 
     // Summarization routes (auth required, uses JAF agent)
     this.app.use('/api/summarize', authMiddleware.authenticate, summarizeRoutes);
+
+    // Unread Digest routes (auth required) — on-demand summary of all unread channels
+    this.app.use('/api/unread-digest', authMiddleware.authenticate, unreadDigestRoutes);
 
     // Xyne AI routes (unified AI assistant with context awareness)
     this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
