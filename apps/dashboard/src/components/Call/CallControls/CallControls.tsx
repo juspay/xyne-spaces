@@ -53,6 +53,7 @@ import {
 } from '../../ui/dropdown-menu';
 import Tooltip from '../../ui/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
+import { Button } from '../../ui/Button/Button';
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
 interface ActiveCallForControls {
@@ -925,20 +926,22 @@ export function CallControls({
                 )}
               >
                 {REACTION_EMOJIS.map(emoji => (
-                  <button
+                  <Button
                     key={emoji}
+                    variant='ghost'
                     onClick={() => {
                       onSendReaction(emoji);
                       setShowReactionPicker(false);
                     }}
                     className='text-2xl p-2 rounded-xl hover:bg-[#202224] transition-colors duration-150 hover:scale-125 transform'
                     title={emoji}
+                    trackId='send_reaction'
                     data-track-category='CALLS'
                     data-track-name='SEND_REACTION'
                     data-track-metadata={JSON.stringify({ emoji, callId })}
                   >
                     {emoji}
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}
@@ -1126,12 +1129,14 @@ export function CallControls({
         )}
 
         {/* Disconnect Button */}
-        <button
+        <Button
+          variant='ghost'
           onClick={onDisconnect}
           className={cn(buttonClasses, 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40')}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Leave call'
           data-testid='end-call-button'
+          trackId='end_call'
           data-track-category='CALLS'
           data-track-name='END_CALL'
           data-track-metadata={JSON.stringify({ callId })}
@@ -1142,7 +1147,7 @@ export function CallControls({
               hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
             }
           />
-        </button>
+        </Button>
       </div>
     </>
   );

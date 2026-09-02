@@ -223,15 +223,17 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                   <CheckCircle2 className='size-4 text-green-500 flex-shrink-0' />
                   <p className='text-xs font-medium text-foreground'>Voice signature stored</p>
                 </div>
-                <button
-                  onClick={() => void handleDelete()}
+                <Button
+                  variant='ghost'
+                  trackId='delete_voice_signature'
+                  trackAction={handleDelete}
                   data-track-category='voice-signature'
                   data-track-name='delete-signature'
                   className='flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 transition-colors'
                 >
                   <Trash2 className='size-3' />
                   Remove
-                </button>
+                </Button>
               </div>
             )}
 

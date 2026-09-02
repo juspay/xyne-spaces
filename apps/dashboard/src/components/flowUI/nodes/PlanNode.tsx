@@ -12,6 +12,7 @@ import { useAgentProgress } from '../../../hooks/useAgentProgress';
 import { cn } from '../../../utils/classNames';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
+import { Button } from '../../ui/Button/Button';
 
 /**
  * Plan artifact — an agent-authored, interactive plan card.
@@ -169,8 +170,9 @@ const ProposedPlan: React.FC<{
   // preview footer (submit() closes the preview on a decision).
   const actionControls = (
     <div className='flex flex-wrap items-center gap-2'>
-      <button
+      <Button
         type='button'
+        variant='ghost'
         onClick={() => void submit('plan-approve')}
         disabled={includedIds.size === 0 || locked || agentRunning}
         className={cn(
@@ -180,12 +182,14 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_APPROVE'
+        trackId='plan_approve'
       >
         {(pending === 'approve' || agentRunning) && <Spinner size={14} className='animate-spin' />}
         {approveLabel}
-      </button>
-      <button
+      </Button>
+      <Button
         type='button'
+        variant='ghost'
         onClick={() => void submit('plan-reject')}
         disabled={locked || agentRunning}
         className={cn(
@@ -196,10 +200,11 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_REJECT'
+        trackId='plan_reject'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {rejectLabel}
-      </button>
+      </Button>
       {agentRunning && (
         <span className='text-xs text-muted-foreground'>Approve once it finishes.</span>
       )}

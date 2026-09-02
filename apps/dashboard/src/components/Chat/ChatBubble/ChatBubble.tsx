@@ -54,11 +54,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
-import {
   extractOriginFromHash,
   extractMessageIdFromHash,
   createMessagePreview,
@@ -461,9 +456,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         channelId,
         conversationId: message['conversationId'],
       });
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,
-      });
       toast.success('Message deleted', {
         description: 'Your message has been deleted successfully',
         duration: 3000,
@@ -538,10 +530,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           );
         })
         .catch(() => undefined);
-
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: 'addBookmark',
-      });
     } catch {
       toast.error('Action failed', {
         description: 'Could not add bookmark',
@@ -561,9 +549,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             markAsDone: false,
           }),
         );
-        mixpanelService.track(EVENTS.INITIATE_ACTION, {
-          type: 'removeBookmark',
-        });
       } catch {
         toast.error('Action failed', {
           description: 'Could not remove bookmark',
