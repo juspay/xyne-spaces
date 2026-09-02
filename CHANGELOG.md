@@ -1,3 +1,10 @@
+## [1.264.2](https://github.com/juspay/xyne-spaces/compare/v1.264.1...v1.264.2) (2026-09-02)
+
+
+### Performance Improvements
+
+* cut recording start latency and remove pill flicker ([#1394](https://github.com/juspay/xyne-spaces/issues/1394)) ([dba4721](https://github.com/juspay/xyne-spaces/commit/dba4721e8d06b1e4515b0c76b4687ac9510550bd))
+
 ## [1.264.1](https://github.com/juspay/xyne-spaces/compare/v1.264.0...v1.264.1) (2026-09-02)
 
 
