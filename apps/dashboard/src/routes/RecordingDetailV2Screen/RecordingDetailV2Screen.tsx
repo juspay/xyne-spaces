@@ -104,8 +104,16 @@ import { SummaryTemplatesModal, getTemplateIcon } from './components/SummaryTemp
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
+const EMPTY_LABEL_SUGGESTIONS: string[] = [];
+
 interface RecordingNavState {
   recordingIds?: string[];
+  /**
+   * Labels the recordings list had loaded when this recording was opened. Only
+   * the picker's suggestion list — a deep link arrives without them and just
+   * offers whatever is already on the recording.
+   */
+  labelSuggestions?: string[];
   from?: string;
   justStopped?: boolean;
   durationMs?: number;
@@ -379,6 +387,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
   // j/k keyboard navigation between recordings
   const recordingIds = navState?.recordingIds;
+  const labelSuggestions = navState?.labelSuggestions ?? EMPTY_LABEL_SUGGESTIONS;
   const backTo = navState?.from ?? '/recordings';
   const currentIndex = useMemo(
     () => (recordingId ? (recordingIds?.indexOf(recordingId) ?? -1) : -1),
@@ -393,10 +402,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const nextIdx = currentIndex + delta;
       const nextId = recordingIds[nextIdx];
       if (nextId) {
-        void navigate(`/recordings/${nextId}`, { state: { recordingIds } });
+        void navigate(`/recordings/${nextId}`, { state: { recordingIds, labelSuggestions } });
       }
     },
-    [recordingIds, currentIndex, navigate],
+    [recordingIds, labelSuggestions, currentIndex, navigate],
   );
 
   useShortcut('j', () => navigateRecording(1), {
@@ -1136,6 +1145,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
             titleState={titleState}
             onTitleUpdated={handleTitleUpdated}
             onLabelsUpdated={handleLabelsUpdated}
+            labelSuggestions={labelSuggestions}
             onTicketLinkUpdated={handleTicketLinkUpdated}
             onOpenShare={() => setShowShareModal(true)}
             {...(ownsLiveSession ? { onMinimize: handleMinimize } : {})}

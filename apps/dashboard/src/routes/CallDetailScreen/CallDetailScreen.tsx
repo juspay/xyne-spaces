@@ -32,10 +32,17 @@ const getCanvasIdFromUrl = (url: unknown): string | null => {
   return url.split('/').filter(Boolean).pop() ?? null;
 };
 
+const EMPTY_LABEL_SUGGESTIONS: string[] = [];
+
 export default function CallDetailScreen(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
-  const call = (location.state as { call: Call } | null)?.call;
+  const navState = location.state as { call: Call; labelSuggestions?: string[] } | null;
+  const call = navState?.call;
+  // The labels the history screen had loaded when this call was opened. Only the
+  // picker's suggestion list — a deep link arrives without them and just offers
+  // whatever is already on the call.
+  const labelSuggestions = navState?.labelSuggestions ?? EMPTY_LABEL_SUGGESTIONS;
   const { isMobile } = usePlatform();
 
   // Hoist derived values so they're available to all hooks below
@@ -374,6 +381,7 @@ export default function CallDetailScreen(): ReactElement {
                 <CallLabelPicker
                   labels={labels}
                   canEdit={canEditLabels}
+                  suggestions={labelSuggestions}
                   onChange={next => void handleLabelsChange(next)}
                 />
               )}

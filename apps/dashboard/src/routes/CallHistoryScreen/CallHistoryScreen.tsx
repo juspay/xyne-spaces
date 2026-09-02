@@ -1357,7 +1357,11 @@ const CallHistoryScreen = (): ReactElement => {
                           labels={call.labels.filter(isManualCallLabel)}
                           resolveLabel={resolveCallLabel}
                           onDetailClick={() => {
-                            void navigate(`${call.id}/detail`, { state: { call } });
+                            // The labels on screen right now double as the detail picker's
+                            // suggestions — same rows this screen's label filter is built from.
+                            void navigate(`${call.id}/detail`, {
+                              state: { call, labelSuggestions: availableCallLabels },
+                            });
                           }}
                         />
                       </div>
