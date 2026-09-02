@@ -1343,10 +1343,9 @@ export default function SdlcScreen(): ReactElement {
     resetArtifactDialog();
     const newCanvasId = response.data.artifact.canvasId;
     setRelatedSourceId(null);
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/artifacts`,
-      `?type=${encodeURIComponent(folder.id)}&canvas=${encodeURIComponent(newCanvasId)}`,
-    );
+    const search = canvasSearch(newCanvasId, true);
+    search.set('type', folder.id);
+    navigateWithinSdlc(`/sdlc/${channelId}/artifacts`, `?${search.toString()}`);
   };
 
   const createArtifactType = async (): Promise<void> => {
