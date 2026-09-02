@@ -4,7 +4,7 @@ import { listRuns, pollChatMessages, rateRun, exportSessionUrl, type AgentRun, t
 
 // In dev, VITE_XYNE_BACKEND_URL may be empty; in prod the dashboard is served off the same origin as this app.
 // Fall back to the current origin so the "Open thread" button always has a target.
-const SPACES_APP_URL = import.meta.env.VITE_XYNE_BACKEND_URL || (typeof window !== "undefined" ? window.location.origin : "");
+import { spacesThreadUrl } from "../lib/spacesLink";
 import { MessageBubble } from "./MessageBubble";
 import { ToolInvocationList } from "./ToolInvocationList";
 
@@ -856,7 +856,7 @@ function OpenSessionButton({ session }: { session: Session }) {
 
   if (source === "spaces" && session.latest.channelId && conversationId) {
     // Spaces dashboard route — from xyne-spaces/dashboard/src/routes/AppRoot.tsx: /chat/dir/:channelId/:conversationId
-    const threadUrl = `${SPACES_APP_URL}/chat/dir/${encodeURIComponent(session.latest.channelId)}/${encodeURIComponent(conversationId)}`;
+    const threadUrl = spacesThreadUrl(session.latest.channelId, conversationId);
     return (
       <a
         href={threadUrl}
@@ -1098,9 +1098,9 @@ function RunDetailDrawer({ run, onClose }: { run: AgentRun; onClose: () => void 
   // For runs that originated from a Spaces thread we link back to the source
   // conversation. Same URL shape used by the session-level OpenSessionButton
   // above — see Spaces dashboard route `/chat/dir/:channelId/:conversationId`.
-  const spacesThreadUrl =
+  const spacesThreadHref =
     run.triggerSource === "spaces" && run.channelId && run.conversationId
-      ? `${SPACES_APP_URL}/chat/dir/${encodeURIComponent(run.channelId)}/${encodeURIComponent(run.conversationId)}`
+      ? spacesThreadUrl(run.channelId, run.conversationId)
       : null;
 
   return (
@@ -1119,9 +1119,9 @@ function RunDetailDrawer({ run, onClose }: { run: AgentRun; onClose: () => void 
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {spacesThreadUrl && (
+            {spacesThreadHref && (
               <a
-                href={spacesThreadUrl}
+                href={spacesThreadHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-300 shadow-sm transition hover:border-zinc-600 hover:bg-zinc-800"
