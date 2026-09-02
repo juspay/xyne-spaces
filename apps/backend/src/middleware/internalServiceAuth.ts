@@ -1,10 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 /**
  * Middleware to authenticate internal service-to-service requests.
- * Validates X-Internal-Service-Secret header against INTERNAL_SERVICE_SECRET env var.
+ * Validates X-Internal-Service-Secret header against config.mtlsServiceSecret.
  * Uses crypto.timingSafeEqual for constant-time comparison to prevent timing attacks.
  */
 export const internalServiceAuth = (
@@ -12,7 +13,7 @@ export const internalServiceAuth = (
   res: Response,
   next: NextFunction
 ): void => {
-  const expectedSecret = process.env.INTERNAL_SERVICE_SECRET;
+  const expectedSecret = config.mtlsServiceSecret;
   const providedSecret = req.headers['x-internal-service-secret'] as string | undefined;
 
   if (!expectedSecret) {

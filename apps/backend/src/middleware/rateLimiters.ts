@@ -1,4 +1,5 @@
 import rateLimit, { ipKeyGenerator, RateLimitRequestHandler } from 'express-rate-limit';
+import { config } from '@/config/env';
 
 /**
  * General rate limiter for all API endpoints
@@ -69,6 +70,22 @@ export const webhookLimiter: RateLimitRequestHandler = rateLimit({
     success: false,
     error: 'Webhook rate limit exceeded. Please try again later.',
     timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const certificateRotationLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: config.mtlsAuth.rateLimitWindowMs,
+  max: config.mtlsAuth.rateLimitMax,
+  keyGenerator: req => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: {
+        code: 'ROTATION_RATE_LIMITED',
+        message: 'Too many certificate rotation requests',
+      },
+    });
   },
   standardHeaders: true,
   legacyHeaders: false,
