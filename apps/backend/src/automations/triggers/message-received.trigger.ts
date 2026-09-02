@@ -295,12 +295,7 @@ async function hydrateMessageReceivedPayload(
     ...payload,
     message: {
       id: messageId,
-      // FlowJSON alerts store the real text inside the data-flow-json attribute;
-      // the only visible node is the literal "Flow JSON". Decode to plaintext so
-      // downstream agents receive the actual message instead of the raw blob and
-      // don't have to call other tools just to read what triggered them.
-      // getFlowJsonContentForNotification returns null for normal messages, so
-      // plain content is passed through unchanged.
+      // Decode FlowJSON alerts to plaintext; returns null for normal messages.
       content: messageRow?.content
         ? getFlowJsonContentForNotification(messageRow.content) ?? messageRow.content
         : null,
