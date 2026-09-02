@@ -43,10 +43,17 @@ class EntityExtractionWorker {
       });
     });
 
+    // A job fails when the thread could not be extracted at all — most often
+    // every LLM call exhausted its retries. Bull retries with backoff; the last
+    // failure is called out separately because that thread stays unextracted
+    // until someone replays it from the failed set (kept: removeOnFail 500).
     queue.on('failed', (job, err) => {
+      const attempts = job.opts?.attempts ?? 1;
+      const exhausted = job.attemptsMade >= attempts;
       logger.error(
-        `[ENTITY-EXTRACTION-WORKER] job ${job.id} failed (attempt ${job.attemptsMade}) ` +
-          `thread=${job.data?.threadId}:`,
+        `[ENTITY-EXTRACTION-WORKER] job ${job.id} failed ` +
+          `(attempt ${job.attemptsMade}/${attempts}) thread=${job.data?.threadId} ` +
+          `${exhausted ? 'GIVING UP — thread left unextracted' : 'will retry'}:`,
         err,
       );
     });

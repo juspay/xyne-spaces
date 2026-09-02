@@ -61,7 +61,17 @@ async function callLiteLLM(messages: Array<{ role: string; content: string }>): 
     }
 
     if (!response.ok) {
-      throw new Error(`LiteLLM error: ${response.status} ${(await response.text()).slice(0, 500)}`);
+      const body = (await response.text()).slice(0, 500);
+      // Includes the 429 that outlived RATE_LIMIT_MAX_RETRIES — worth its own
+      // line, since a persistent 429 means the shared key is saturated, not
+      // that this batch is malformed.
+      logger.error('[ENTITY_LLM] LiteLLM call failed', {
+        status: response.status,
+        rateLimitRetries: attempt,
+        model: config.entityExtraction.model,
+        body,
+      });
+      throw new Error(`LiteLLM error: ${response.status} ${body}`);
     }
     const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return data.choices?.[0]?.message?.content ?? '';
@@ -107,6 +117,12 @@ export const entityLlm: LlmClient = {
       });
     }
 
+    logger.error('[ENTITY_LLM] repair attempts exhausted', {
+      purpose: req.purpose,
+      schemaName: req.schemaName,
+      attempts: MAX_REPAIR_ATTEMPTS + 1,
+      error: lastError.slice(0, 300),
+    });
     throw new Error(
       `LLM failed to produce schema-valid output for "${req.schemaName}" ` +
         `after ${MAX_REPAIR_ATTEMPTS + 1} attempts. Last error: ${lastError}`,

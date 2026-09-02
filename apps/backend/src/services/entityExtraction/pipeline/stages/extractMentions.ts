@@ -40,10 +40,12 @@ export async function extractMentions(
     config.extract.batchSize,
   )
 
+  let failedBatches = 0
+
   const responses = await mapWithConcurrency(
     batches,
     config.extract.concurrency,
-    async (batch) => {
+    async (batch, batchIndex) => {
       try {
         return await llm.completeJson<MentionResponse>({
           system,
@@ -53,7 +55,16 @@ export async function extractMentions(
           purpose: 'entity:extract-mentions',
         })
       } catch (err) {
-        logger.warn('mention batch failed', { error: String(err) })
+        failedBatches++
+        // A failed batch yields zero mentions, which reads exactly like a batch
+        // with nothing to find — so log the docIds, which carry the thread
+        // (`thread:<threadId>[#part]`) and say which content was never looked at.
+        logger.error('[ENTITY_EXTRACT] mention batch failed', {
+          batch: `${batchIndex + 1}/${batches.length}`,
+          docIds: batch.map((d) => d.id),
+          chars: batch.reduce((n, d) => n + d.text.length, 0),
+          error: err instanceof Error ? err.message : String(err),
+        })
         return { mentions: [] } satisfies MentionResponse
       }
     },
@@ -71,6 +82,19 @@ export async function extractMentions(
     }
   })
 
-  logger.info('mentions extracted', { batches: batches.length, mentions: mentions.length })
+  const summary = {
+    docIds: docs.map((d) => d.id),
+    batches: batches.length,
+    failedBatches,
+    mentions: mentions.length,
+  }
+  if (failedBatches === batches.length) {
+    logger.error('[ENTITY_EXTRACT] extraction produced nothing, every batch failed', summary)
+  } else if (failedBatches > 0) {
+    logger.error('[ENTITY_EXTRACT] extraction incomplete, some batches failed', summary)
+  } else {
+    logger.info('[ENTITY_EXTRACT] mentions extracted', summary)
+  }
+
   return mentions
 }
