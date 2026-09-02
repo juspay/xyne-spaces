@@ -1,3 +1,10 @@
+## [1.260.0-release-20260902.1](https://github.com/juspay/xyne-spaces/compare/v1.259.2-release-20260902.2...v1.260.0-release-20260902.1) (2026-09-02)
+
+
+### Features
+
+* remove mixpanel, add posthog ([#1213](https://github.com/juspay/xyne-spaces/issues/1213)) ([#1426](https://github.com/juspay/xyne-spaces/issues/1426)) ([2290d7b](https://github.com/juspay/xyne-spaces/commit/2290d7bd0009f038752f1e4c681dee7f0744d1a9))
+
 ## [1.259.2-release-20260902.2](https://github.com/juspay/xyne-spaces/compare/v1.259.2-release-20260902.1...v1.259.2-release-20260902.2) (2026-09-02)
 
 
