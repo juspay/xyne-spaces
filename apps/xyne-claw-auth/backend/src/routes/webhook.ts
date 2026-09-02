@@ -5664,6 +5664,40 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (payload.emptyReason === "provider_capacity" && !forwardText.trim()) {
       await scheduleCapacityRetryIfNeeded(ctx, payload, false).catch(() => false);
     }
+    // ── HITL write approvals for automation / workflow runs ──
+    // A write tool called during an automation run signs a pendingAction just
+    // like the interactive mention path. But this forward branch returns before
+    // the mention-path approval block (~"Send approval DMs for pending write
+    // actions"), so the card was silently dropped and the write (e.g.
+    // spaces-upload-to-kb saving an RCA to the KB) never surfaced an
+    // Approve/Decline dialog. Post the SAME card here when the automation ran in
+    // a real channel/thread so a human still approves before the write executes.
+    // This does NOT auto-approve — the trust boundary is unchanged; we only make
+    // the dialog appear on the automation path.
+    //
+    // Gated on a deliverable target (channelId or conversationId) and the agent's
+    // app token. A truly headless automation with neither keeps the prior
+    // behavior (skip + log) instead of 400ing on an empty channelId.
+    const automationPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
+    if (automationPendingActions?.length && ctx.appToken && (ctx.channelId || ctx.conversationId)) {
+      let posted = 0;
+      for (const action of automationPendingActions) {
+        try {
+          const targetValidation = await pendingActionTargetValidation(action, ctx, ctx.appToken);
+          if (targetValidation.error) {
+            log.info(`[webhook/result] automation write approval skipped tool=${String(action["tool"] ?? "")}: ${targetValidation.error}`);
+            continue;
+          }
+          await postWriteApprovalAction({ action, ctx, token: ctx.appToken, targetValidation });
+          posted += 1;
+        } catch (err) {
+          log.warn(`[webhook/result] automation write approval card failed tool=${String(action["tool"] ?? "")}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      log.info(`[webhook/result] automation posted ${posted}/${automationPendingActions.length} write approval card(s) session=${sessionId}`);
+    } else if (automationPendingActions?.length) {
+      log.info(`[webhook/result] automation run has ${automationPendingActions.length} pending write action(s) but no deliverable target (channelId/conversationId) — not posting approval card(s) session=${sessionId}`);
+    }
     await forwardResult(ctx.resultForwardUrl, payload, forwardText);
     return;
   }
