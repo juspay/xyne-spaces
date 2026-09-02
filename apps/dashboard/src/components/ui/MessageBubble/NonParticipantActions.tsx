@@ -8,6 +8,7 @@ import { useChannel } from '../../../hooks/useChannels';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useMutation } from '@tanstack/react-query';
 import { channelService } from '../../../services/Chat/channelService';
+import { buildHistoryScope } from '../../Chat/AddPeopleForm/AddPeopleForm.utils';
 import { toast } from 'sonner';
 
 interface MentionedUser {
@@ -115,7 +116,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
       addGroupDmParticipantsMutation.mutate({
         channelId: activeChannelId,
         userIds,
-        historyScope: { mode: 'beginning' },
+        historyScope: buildHistoryScope('today', ''),
       });
     } else {
       // Use existing Zero mutation for regular channels
