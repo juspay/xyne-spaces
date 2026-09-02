@@ -4819,21 +4819,19 @@ img.inline-emoji,
   background: hsl(var(--muted-foreground) / 0.8);
   background-clip: content-box;
 }
-
-.streams-hover,
 .streams-press,
 .streams-press-row {
   transition-property: transform, color, background-color, border-color, opacity, box-shadow;
   transition-duration: 140ms;
   transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
 }
+
 .streams-press:active:not(:disabled) {
   transform: scale(0.97);
 }
 .streams-press-row:active:not(:disabled) {
   transform: scale(0.99);
 }
-
 @keyframes streams-column-flash {
   0%,
   100% {
@@ -4844,56 +4842,16 @@ img.inline-emoji,
     box-shadow: 0 0 0 3px hsl(var(--primary) / 0.55);
   }
 }
+
 .streams-column-flash {
   animation: streams-column-flash 300ms cubic-bezier(0.23, 1, 0.32, 1);
 }
-
-.streams-hover:focus-visible,
 .streams-press:focus-visible,
 .streams-press-row:focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 1px;
 }
-
-@property --streams-fade-top {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
-}
-@property --streams-fade-bot {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
-}
-
-.streams-fade-y {
-  --fade: 16px;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 var(--streams-fade-top),
-    #000 calc(100% - var(--streams-fade-bot)),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 var(--streams-fade-top),
-    #000 calc(100% - var(--streams-fade-bot)),
-    transparent 100%
-  );
-}
-
 @supports (animation-timeline: scroll()) {
-  .streams-fade-y {
-    animation:
-      streams-fade-top linear both,
-      streams-fade-bot linear both;
-    animation-timeline: scroll(self), scroll(self);
-    animation-range:
-      0 var(--fade),
-      calc(100% - var(--fade)) 100%;
-  }
   @keyframes streams-fade-top {
     from {
       --streams-fade-top: 0px;
@@ -4917,13 +4875,11 @@ img.inline-emoji,
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-head));
   mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-head));
 }
-
 @property --tab-on {
   syntax: "<number>";
   inherits: false;
   initial-value: 1;
 }
-
 @property --tab-hover {
   syntax: "<number>";
   inherits: true;
@@ -4944,7 +4900,6 @@ img.inline-emoji,
   --tab-hover: 1;
   transition: --tab-hover var(--tab-hover-dur) var(--jump-ease);
 }
-
 @media (prefers-reduced-motion: reduce) {
   .streams-nav {
     transition: none;
@@ -4964,21 +4919,10 @@ img.inline-emoji,
 .streams-nav-badge {
   filter: grayscale(calc(1 - var(--tab-hover)));
 }
-
 @media (prefers-reduced-motion: reduce) {
   .streams-nav-badge {
     transition: none;
   }
-}
-
-.streams-nav-squeeze {
-  max-width: calc(var(--tab-on) * 9rem);
-}
-
-@property --tick-hover {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
 }
 
 :root {
@@ -4994,88 +4938,6 @@ img.inline-emoji,
   --tick-alert-floor: 0.85;
 }
 
-.streams-nav-tick {
-  --tick-hover: 0;
-  --tick-scale: calc(
-    (
-        var(--tick-h-off) + (var(--tick-h-on) - var(--tick-h-off)) * var(--tab-on) +
-          (var(--tick-h-hover) - var(--tick-h-on)) * var(--tick-hover)
-      ) /
-      var(--tick-h-hover)
-  );
-  --tick-lit: calc(var(--tab-off) + (1 - var(--tab-off)) * max(var(--tab-on), var(--tab-hover)));
-  --tick-ink: var(--tick-lit);
-  width: var(--tick-pitch);
-  align-items: var(--tick-align);
-  color: hsl(var(--foreground));
-  transition: --tick-hover var(--tick-out-dur) var(--jump-ease);
-}
-
-.streams-nav-tick::before {
-  content: "";
-  width: var(--tick-w);
-  height: calc(var(--tick-h-hover) * 1px);
-  border-radius: 999px;
-  background: currentcolor;
-  transform: scaleY(var(--tick-scale));
-  transform-origin: var(--tick-origin);
-  opacity: var(--tick-ink);
-  will-change: transform, opacity;
-}
-
-.streams-nav-tick[data-alert] {
-  color: hsl(var(--primary));
-  --tick-ink: max(var(--tick-lit), var(--tick-alert-floor));
-}
-
-.streams-nav-tick:hover,
-.streams-nav-tick:focus-visible {
-  --tick-hover: 1;
-  --tick-ink: 1;
-  transition-duration: var(--tick-in-dur);
-}
-
-.streams-nav-tick-label {
-  position: absolute;
-  z-index: 30;
-  top: 100%;
-  left: 50%;
-  translate: -50% 0;
-  margin-top: 8px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--tick-out-dur) var(--jump-ease);
-}
-.streams-nav-tick:hover .streams-nav-tick-label,
-.streams-nav-tick:focus-visible .streams-nav-tick-label {
-  opacity: 1;
-  transition-duration: var(--tick-in-dur);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .streams-nav-tick,
-  .streams-nav-tick-label {
-    transition: none !important;
-  }
-}
-
-@property --streams-window-fade {
-  syntax: "<length-percentage>";
-  inherits: false;
-  initial-value: 0%;
-}
-
-@property --window-edge-start {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 1;
-}
-@property --window-edge-end {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 1;
-}
-
 :root {
   --window-w: min(64rem, 70vw);
   --window-fade-rest: 30%;
@@ -5084,39 +4946,6 @@ img.inline-emoji,
   --window-collapse-dur: 200ms;
   --window-ease: var(--jump-ease);
 }
-
-.streams-window {
-  width: var(--window-w);
-  --streams-window-fade: var(--window-fade-rest);
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 calc(var(--streams-window-fade) * var(--window-edge-start)),
-    #000 calc(100% - var(--streams-window-fade) * var(--window-edge-end)),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 calc(var(--streams-window-fade) * var(--window-edge-start)),
-    #000 calc(100% - var(--streams-window-fade) * var(--window-edge-end)),
-    transparent 100%
-  );
-  transition: --streams-window-fade var(--window-collapse-dur) var(--window-ease);
-}
-
-.streams-window:hover,
-.streams-window:focus-within {
-  --streams-window-fade: var(--window-fade-open);
-  transition: --streams-window-fade var(--window-reveal-dur) var(--window-ease);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .streams-window {
-    transition: none !important;
-  }
-}
-
 @property --fade-x-start {
   syntax: "<length>";
   inherits: true;
@@ -5127,7 +4956,6 @@ img.inline-emoji,
   inherits: true;
   initial-value: 32px;
 }
-
 @property --streams-fade-start {
   syntax: "<length>";
   inherits: false;
@@ -5158,7 +4986,6 @@ img.inline-emoji,
     transparent 100%
   );
 }
-
 @supports (animation-timeline: scroll()) {
   .streams-fade-x {
     animation:
@@ -5186,7 +5013,6 @@ img.inline-emoji,
     }
   }
 }
-
 @media (prefers-reduced-motion: reduce) {
   .streams-press:active:not(:disabled),
   .streams-press-row:active:not(:disabled) {

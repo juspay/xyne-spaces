@@ -19,29 +19,7 @@ import type { StreamActivity } from '../../hooks/useStreamActivity';
 import { STREAM_ACTION, STREAM_ACTION_IDLE, STREAMS_EASE } from '../Streams/Streams.types';
 import type { Column } from '../Streams/Streams.types';
 
-/**
- * Five rows, one question.
- *
- * - `list` — every tab at its label's width, in the header's flex slot, scrolled
- *   by hand.
- * - `scroll` — the same row, following the strip so the lit run stays in view.
- * - `window` — an aperture centred on the screen, masked heavily at rest and
- *   opening on hover.
- * - `squeeze` — the whole stream at once, labels appearing only on the run you can
- *   see and collapsing to icons elsewhere.
- * - `index` — no names at all: one tick per column, the name arriving only under
- *   the pointer. The only row that cannot overflow, so it is the only one whose
- *   behaviour does not change with the length of the stream.
- */
-export type StreamNavVariant = 'list' | 'scroll' | 'window' | 'squeeze' | 'index';
-
-/** Rows whose scroll position follows the strip rather than the pointer. */
-const FOLLOWS_STRIP = new Set<StreamNavVariant>(['scroll', 'window']);
-/** Rows that fit the whole stream into the width they have and never scroll. */
-const FITS_STREAM = new Set<StreamNavVariant>(['squeeze', 'index']);
-
 export interface StreamTopNavProps {
-  variant: StreamNavVariant;
   /** Pinned columns, in the order the strip lays them out — outside the scroller. */
   pinned: readonly Column[];
   /** The columns inside the scroller, in strip order. */
@@ -68,14 +46,6 @@ export interface StreamTopNavProps {
    * out. There the stream's own header keeps it.
    */
   onAdd?: (() => void) | undefined;
-  /**
-   * Mark columns with activity in the accent, rather than only in the label.
-   *
-   * `index` only. The other rows carry an `ActivityDot` per tab, which this
-   * would duplicate; a tick has nowhere to put a dot, so the mark itself is the
-   * only channel it has.
-   */
-  alerts?: boolean | undefined;
 }
 
 /**
@@ -90,16 +60,6 @@ export interface StreamTopNavProps {
  * is fully lit. Raise this to 1 and the behaviour is the hard binary.
  */
 const LIT_FROM = 0.7;
-
-/**
- * Over how many pixels of the row's own scroll an end's fade comes in.
- *
- * Short on purpose. The question it answers is binary — is anything hidden this
- * way — and the ramp exists only so the answer changes over two or three frames
- * instead of one, which is the difference between a fade appearing and a fade
- * flicking on.
- */
-const EDGE_RAMP = 24;
 
 /**
  * How far behind the stream the row is allowed to run, as a time constant in ms.
@@ -195,7 +155,6 @@ const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 const NavPill = ({
   column,
   activity,
-  squeeze,
   badges,
   sidebarStyle,
   current,
@@ -204,8 +163,6 @@ const NavPill = ({
   current: boolean;
   column: Column;
   activity: StreamActivity;
-  /** Let the label's width follow the light, rather than sitting at its own. */
-  squeeze: boolean;
   /** Render the workspace's two-tier marking instead of the single dot. */
   badges: boolean;
   /** Wear the app sidebar's colours, weight and hover instead of this row's own. */
@@ -267,7 +224,7 @@ const NavPill = ({
       <span
         className={cn(
           'truncate',
-          squeeze ? 'streams-nav-squeeze' : 'max-w-[9rem]',
+          'max-w-[9rem]',
           badges && isUnread(state) && 'font-semibold text-foreground',
         )}
       >
@@ -290,79 +247,6 @@ const NavPill = ({
 };
 
 NavPill.displayName = 'NavPill';
-
-/**
- * One column, as a tick.
- *
- * The mark is a background on the button, not a child element, and that is
- * forced rather than tidy — see `.streams-nav-tick` in global.css. What matters
- * here is that the button carries `data-nav-column`, so the same per-frame
- * lighting pass that drives the tabs drives these with no special case.
- *
- * A count in the label, where every other surface in Streams shows a dot. That
- * is not a break with `ActivityDot`'s rule but the exception the rule itself
- * names: what it argues against is a badge in *every* header, card and jump row,
- * turning a wall of columns into a table of figures. This is one label, on
- * demand, under the pointer — the tooltip case, where a finer distinction
- * belongs.
- */
-const IndexTick = ({
-  column,
-  activity,
-  alerts,
-  onJump,
-}: {
-  column: Column;
-  activity: StreamActivity;
-  alerts: boolean;
-  onJump: () => void;
-}): ReactElement => {
-  const { icon: Icon, Title } = surfaceFor(column.source);
-  const state = activity[column.id] ?? IDLE;
-  const alerting = alerts && isUnread(state);
-  return (
-    <button
-      type='button'
-      data-nav-column={column.id}
-      // Presence, not a value — the styling is binary and CSS reads it as
-      // `[data-alert]`. `undefined` removes the attribute entirely, which is
-      // what makes the selector a clean on/off.
-      data-alert={alerting ? '' : undefined}
-      onClick={onJump}
-      className={cn(
-        // The tick is thin because the row has to stay readable as a run; the
-        // target is not, because you are aiming at it — so the width is the
-        // pitch, and comes from `--tick-pitch` rather than a class. Nothing
-        // between them: a gap here would be a dead lane the pointer crosses on
-        // the way to the next column, and the label would flicker off in it.
-        // No `items-*` here: which edge the mark sits on is the anchor dial's,
-        // and it has to agree with `transform-origin`, so both live in CSS.
-        'streams-nav-tick pointer-events-auto relative flex h-8 shrink-0 justify-center',
-        'outline-none',
-      )}
-      data-track-category='Streams'
-      data-track-name='JumpFromTopNav'
-    >
-      {/* Deliberately bigger than a tab. This is the only place the index says
-          anything in words, it appears one at a time and only on demand, and it
-          has to be legible against a live column behind it — none of which is
-          true of a row of tabs, where the same size would be a wall. */}
-      <span className='streams-nav-tick-label flex items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-lg'>
-        <Icon className='size-4 shrink-0' aria-hidden />
-        <span className='max-w-[16rem] truncate'>
-          {column.title ?? <Title source={column.source} />}
-        </span>
-        {state.count > 0 ? (
-          <span className='font-medium tabular-nums text-primary'>{state.count}</span>
-        ) : (
-          <ActivityDot activity={state} className='size-2' />
-        )}
-      </span>
-    </button>
-  );
-};
-
-IndexTick.displayName = 'IndexTick';
 
 /**
  * The stream as a row of tabs, on the header's own line.
@@ -509,7 +393,6 @@ const OverflowMark = ({
 };
 
 const StreamTopNav = ({
-  variant,
   pinned,
   scrolling,
   activity,
@@ -517,7 +400,6 @@ const StreamTopNav = ({
   onJump,
   onAdd,
   currentId,
-  alerts,
 }: StreamTopNavProps): ReactElement => {
   // Straight from the dev context rather than through a prop: it is a dial, the
   // provider sits above this whole screen, and threading it would mean editing
@@ -534,12 +416,6 @@ const StreamTopNav = ({
   const followRef = useRef<number | null>(null);
   /** Timestamp of the previous frame, 0 when the loop is starting fresh. */
   const lastRef = useRef(0);
-  const follows = FOLLOWS_STRIP.has(variant);
-  const fits = FITS_STREAM.has(variant);
-  const windowed = variant === 'window';
-  const indexed = variant === 'index';
-  /** Rows the caller has taken out of the header's flow and centred itself. */
-  const centred = windowed || indexed;
 
   /**
    * Rebuild the two-space geometry.
@@ -640,33 +516,19 @@ const StreamTopNav = ({
         }
       }
 
-      if (follows) {
-        const middle = toNav(spansRef.current, from + strip.clientWidth / 2);
-        if (middle !== null) {
-          const target = middle - track.clientWidth / 2;
-          const previous = followRef.current ?? target;
-          const next = previous + (target - previous) * k;
-          if (Math.abs(target - next) > SCROLL_EPSILON) settled = false;
-          followRef.current = next;
-          track.scrollLeft = next;
-        }
-
-        // Read back rather than reusing the value just written: the row clamps,
-        // so at either end of the stream the position it took is not the one it
-        // was asked for, and the point here is knowing when it has stopped.
-        const room = track.scrollWidth - track.clientWidth;
-        const at = track.scrollLeft;
-        // Nothing hidden either way — the stream fits the row, so neither end has
-        // earned a fade and both would be dimming a tab for no reason.
-        const start = room <= 0 ? 0 : clamp01(at / EDGE_RAMP);
-        const end = room <= 0 ? 0 : clamp01((room - at) / EDGE_RAMP);
-        track.style.setProperty('--window-edge-start', start.toFixed(3));
-        track.style.setProperty('--window-edge-end', end.toFixed(3));
+      const middle = toNav(spansRef.current, from + strip.clientWidth / 2);
+      if (middle !== null) {
+        const target = middle - track.clientWidth / 2;
+        const previous = followRef.current ?? target;
+        const next = previous + (target - previous) * k;
+        if (Math.abs(target - next) > SCROLL_EPSILON) settled = false;
+        followRef.current = next;
+        track.scrollLeft = next;
       }
 
       if (!settled) frameRef.current = requestAnimationFrame(tick);
     },
-    [stripRef, follows, navFlat],
+    [stripRef, navFlat],
   );
 
   // Scroll fires far more often than a frame. The loop runs itself once
@@ -726,7 +588,7 @@ const StreamTopNav = ({
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     };
-  }, [stripRef, measure, schedule, variant, pinned, scrolling]);
+  }, [stripRef, measure, schedule, pinned, scrolling]);
 
   // Which mention-bearing tabs are outside the row's own scroll window.
   //
@@ -740,7 +602,7 @@ const StreamTopNav = ({
   });
   useEffect(() => {
     const track = trackRef.current;
-    if (!track || indexed || windowed) {
+    if (!track) {
       setBuried(previous =>
         previous.start.length === 0 && previous.end.length === 0
           ? previous
@@ -788,42 +650,30 @@ const StreamTopNav = ({
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [trackRef, pinned, scrolling, activity, indexed, windowed]);
+  }, [trackRef, pinned, scrolling, activity]);
 
-  const tab = (column: Column): ReactElement =>
-    indexed ? (
-      <IndexTick
-        key={column.id}
-        column={column}
-        activity={activity}
-        alerts={alerts ?? false}
-        onJump={() => onJump(column.id)}
-      />
-    ) : (
-      <NavPill
-        key={column.id}
-        column={column}
-        current={column.id === currentId}
-        activity={activity}
-        squeeze={variant === 'squeeze'}
-        badges={navBadges}
-        sidebarStyle={navSidebar}
-        onJump={() => onJump(column.id)}
-      />
-    );
+  const tab = (column: Column): ReactElement => (
+    <NavPill
+      key={column.id}
+      column={column}
+      current={column.id === currentId}
+      activity={activity}
+      badges={navBadges}
+      sidebarStyle={navSidebar}
+      onJump={() => onJump(column.id)}
+    />
+  );
 
   return (
     <nav
       aria-label='Stream columns'
       className={cn(
         'streams-nav flex items-center gap-1',
-        centred
-          ? 'pointer-events-none shrink-0'
-          : // `ml-1` on top of the row's own `gap-2` — 12px between the stream's
-            // name and its first tab. It was 20px, which pushed the tabs far
-            // enough from the title to read as a separate bar that happened to
-            // start there, rather than as the stream the title names.
-            'ml-1 min-w-0 flex-1',
+        // `ml-1` on top of the row's own `gap-2` — 12px between the stream's
+        // name and its first tab. It was 20px, which pushed the tabs far
+        // enough from the title to read as a separate bar that happened to
+        // start there, rather than as the stream the title names.
+        'ml-1 min-w-0 flex-1',
       )}
     >
       {/* The marks float over this box rather than sitting beside the scroller
@@ -857,43 +707,16 @@ const StreamTopNav = ({
           }
           className={cn(
             'relative flex min-w-0 items-center',
-            // The index has to let its label out: the label hangs below the row,
-            // and any clipping on this box would cut it off at the header's edge.
-            // It can afford to — it is the one row that never scrolls, so there is
-            // nothing here to clip in the first place.
-            indexed ? 'gap-0 overflow-visible' : 'gap-0 overflow-y-hidden',
+            'gap-0 overflow-y-hidden',
             // No scrollbar in any variant: this is a strip of eight chips, and a
             // horizontal bar under it would be taller than the thing it scrolls.
             '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
-            windowed &&
-              // `overflow-x: hidden` still scrolls when `scrollLeft` is assigned;
-              // what it stops is the user scrolling the row by hand, which in this
-              // variant would be fighting the strip for control of the same value.
-              'streams-window pointer-events-none overflow-x-hidden',
-            !windowed &&
-              cn(
-                // A row that fits the stream has nothing to scroll and nothing to
-                // fade; the others scroll and take the strip's own edge mask.
-                fits && !indexed && 'overflow-x-hidden',
-                // `list` is the only row a hand may scroll. `scroll` is driven off
-                // the strip, so `hidden` — which still moves when `scrollLeft` is
-                // assigned — is what stops a drag fighting the stream for one value.
-                //
-                // `hidden` rather than the `pointer-events-none` this used, and the
-                // difference matters now that hovering the row lights it: with the
-                // pointer disabled, only the tabs themselves registered hover, so
-                // crossing a gap between two of them dropped it and the row
-                // flickered dark for a frame.
-                // `auto`, not `hidden`. Hidden was deliberate — the row's
-                // `scrollLeft` is written from the strip, so a hand scroll is two
-                // inputs on one value — but a row you cannot reach is worse than a
-                // row that occasionally snaps: with the stream wider than the header
-                // the tabs past the edge were simply unreachable. Scrolling the
-                // strip still wins, which is the right precedence: the nav
-                // describes the strip, so the strip gets the last word.
-                variant === 'scroll' && 'streams-fade-x overflow-x-auto',
-                variant === 'list' && 'streams-fade-x overflow-x-auto',
-              ),
+            // `auto`, not `hidden`. The row's `scrollLeft` is written from the
+            // strip, so a hand scroll is two inputs on one value — but a row you
+            // cannot reach is worse than one that occasionally snaps. Scrolling
+            // the strip still wins: the nav describes the strip, so the strip
+            // gets the last word.
+            'streams-fade-x overflow-x-auto',
           )}
         >
           {pinned.map(tab)}
@@ -901,10 +724,7 @@ const StreamTopNav = ({
             doing, so the rule says the same thing here that the strip's own
             boundary says: everything to its left is always on screen. */}
           {pinned.length > 0 && scrolling.length > 0 && (
-            <div
-              className={cn('h-3.5 w-px shrink-0 bg-border', indexed ? 'mx-1.5' : 'mx-1')}
-              aria-hidden
-            />
+            <div className={cn('h-3.5 w-px shrink-0 bg-border', 'mx-1')} aria-hidden />
           )}
           {scrolling.map(tab)}
         </div>

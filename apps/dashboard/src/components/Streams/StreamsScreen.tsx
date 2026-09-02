@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,7 +17,6 @@ import { v4 as uuidv4 } from 'uuid';
 // channel header — different stroke weight, different corner treatment, at the
 // same size.
 import { PlusDefault } from '@xyne/icons';
-import { Button } from '../ui/Button/Button';
 import { useZero } from '../../hooks/useZero';
 import { getDraft } from '../../hooks/useDraft';
 import { mutators } from '../../zero/mutators';
@@ -66,8 +64,6 @@ import {
 } from './components/Streams/Streams.utils';
 import {
   ADD_COMMIT_AT,
-  STREAM_ACTION,
-  STREAM_ACTION_IDLE,
   COLUMN_CLOSE_MS,
   COLUMN_FLASH_MS,
   COLUMN_OPEN_MS,
@@ -1362,7 +1358,6 @@ const StreamsScreen = (): ReactElement => {
    * Both consequently give the add button back to the verbs: neither is a run of
    * tabs with an end for it to ride.
    */
-  const centredNav = dev.topNav === 'window' || dev.topNav === 'index';
 
   /**
    * Go to a column, from anywhere.
@@ -2301,24 +2296,7 @@ const StreamsScreen = (): ReactElement => {
       // levels down and so has to be set above both of the row's two
       // possible homes. Cast because CSSProperties has no index signature
       // for custom properties.
-      style={
-        {
-          '--stream-veil-dim': dev.veilDim / 100,
-          '--stream-veil-blur': `${dev.veilBlur}px`,
-          '--tick-pitch': `${dev.tickPitch}px`,
-          '--tick-w': `${dev.tickW}px`,
-          // Unitless — the tick's scale is a ratio of these three, and CSS
-          // cannot divide by a length. See `--tick-scale` in global.css.
-          '--tick-h-off': String(dev.tickOff),
-          '--tick-h-on': String(dev.tickOn),
-          '--tick-h-hover': String(dev.tickHover),
-          // One dial, two properties: where the mark sits in its target and
-          // which edge it grows from. They have to move together, or a
-          // top-anchored tick would hang from the middle of the row.
-          '--tick-align': dev.tickAnchor === 'top' ? 'flex-start' : 'center',
-          '--tick-origin': dev.tickAnchor === 'top' ? 'top' : 'center',
-        } as CSSProperties
-      }
+      style={{} as CSSProperties}
     >
       {/* One marker for both layouts, outside either of them. It is measured
               in viewport coordinates, so it must not sit inside the scroller —
@@ -2408,58 +2386,30 @@ const StreamsScreen = (): ReactElement => {
 
                     Kept in focus mode — the strip there is a real snap
                     carousel, which is the shape this was drawn for. */}
-          {dev.navPlacement === 'top' &&
-            dev.topNav !== 'off' &&
-            !centredNav &&
-            columns.length > 0 && (
-              <StreamTopNav
-                variant={dev.topNav}
-                pinned={navPinned}
-                scrolling={navScrolling}
-                activity={navActivity}
-                stripRef={stripRef}
-                onJump={jumpTo}
-                onAdd={openAdd}
-                alerts={dev.tickAlerts}
-                // Only in focus mode. The wide stream shows five columns at
-                // once, so marking one is answering a question the screen
-                // does not pose.
-                currentId={
-                  // Through `hostFor`, because a pane has no tab of its own —
-                  // the row folds a pair into its parent. Naming the pane
-                  // named a column that was not in the row, so opening one
-                  // simply cleared the highlight until you closed it again.
-                  focusMode ? hostFor(columns, columns[stream.focus]?.id ?? '')?.id : undefined
-                }
-              />
-            )}
+          {columns.length > 0 && (
+            <StreamTopNav
+              pinned={navPinned}
+              scrolling={navScrolling}
+              activity={navActivity}
+              stripRef={stripRef}
+              onJump={jumpTo}
+              onAdd={openAdd}
+              // Only in focus mode. The wide stream shows five columns at
+              // once, so marking one is answering a question the screen
+              // does not pose.
+              currentId={
+                // Through `hostFor`, because a pane has no tab of its own —
+                // the row folds a pair into its parent. Naming the pane
+                // named a column that was not in the row, so opening one
+                // simply cleared the highlight until you closed it again.
+                focusMode ? hostFor(columns, columns[stream.focus]?.id ?? '')?.id : undefined
+              }
+            />
+          )}
         </div>
         {/* The stream's verbs, as one group, at the same `gap-1` a channel
                   header puts between its own icon buttons. */}
         <div className='flex shrink-0 items-center gap-1'>
-          {/* Only when the tab row is not carrying it.
-                    A row of tabs owns its own add button, the way a browser's
-                    tab bar does: it rides the end of the run while the tabs fit
-                    and comes to rest at the end of the bar once they do not.
-                    With no tab row — or with the window variant, whose row is
-                    masked to an aperture and would spend most of its life fading
-                    the button out — it belongs here, at the head of the verbs. */}
-          {(dev.navPlacement !== 'top' || dev.topNav === 'off' || centredNav) && (
-            <Tooltip content='Add a column'>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={openAdd}
-                aria-label='Add a column'
-                className={cn(STREAM_ACTION, STREAM_ACTION_IDLE)}
-                data-track-category='Streams'
-                data-track-name='OpenAddPalette'
-              >
-                <PlusDefault size={16} />
-              </Button>
-            </Tooltip>
-          )}
-
           {/* No overflow menu. It held exactly two rows — reset every width,
                     and a Share that was never wired — and a ⋯ that opens two
                     items, one of them dead, costs more attention than it saves.
@@ -2467,49 +2417,6 @@ const StreamsScreen = (): ReactElement => {
                     column`; Share comes back as its own verb when there is
                     something behind it. */}
         </div>
-        {/* Centred on the viewport, not on the space left over between the
-                  title and the verbs — that space starts wherever the stream's
-                  name happens to end, so laying this out in the row would centre
-                  it on the header rather than on the strip it describes. Taken
-                  out of flow instead and pinned to the middle.
-
-                  `pointer-events-none` here and `auto` on the tabs: the box is
-                  wide and lies across header the user still has to be able to
-                  click, so only the tabs themselves may catch anything.
-
-                  `window` is gone in focus mode and `index` is not, which is
-                  the difference between the two: an aperture whose whole job is
-                  to hold the run of columns you can see has nothing to say about
-                  a run of one, while a map of the whole stream is *most* useful
-                  when you can only see one of it. */}
-        {centredNav &&
-          columns.length > 0 &&
-          dev.navPlacement === 'top' &&
-          (dev.topNav === 'index' || !focusMode) && (
-            <div
-              className='pointer-events-none absolute inset-y-0 left-1/2 z-10 flex -translate-x-1/2 items-center'
-              // The header's own padding, repeated. `inset-y-0` spans the
-              // header's *padding box*, so centring in here centres on its
-              // outer box — while everything laid out inside the header
-              // centres on its content box. Those are not the same place:
-              // the header pays `HEADER_PAD` above and
-              // `HEADER_PAD - STRIP_LEAD` below, deliberately, because the
-              // space beneath it is shared with the strip. So an absolutely
-              // positioned row sat 3px high, which reads exactly as less
-              // room above the ticks than below.
-              style={{ paddingTop: dev.headerPad, paddingBottom: dev.headerPad - STRIP_LEAD }}
-            >
-              <StreamTopNav
-                variant={dev.topNav === 'index' ? 'index' : 'window'}
-                pinned={navPinned}
-                scrolling={navScrolling}
-                activity={navActivity}
-                stripRef={stripRef}
-                onJump={jumpTo}
-                alerts={dev.tickAlerts}
-              />
-            </div>
-          )}
       </header>
 
       <div
