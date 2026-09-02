@@ -360,6 +360,72 @@ router.get('/desk-label-rules', async (req: Request, res: Response) => {
   }
 });
 
+// POST /desk-label-rules/:id/backfill — replay an existing rule over older mail
+router.post('/desk-label-rules/:id/backfill', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const result = await deskLabelRulesService.startBackfill(req.params.id, auth);
+    if (!result) {
+      res.status(503).json({ success: false, error: 'Backfill queue is unavailable' });
+      return;
+    }
+    res.status(result === 'enqueued' ? 202 : 200).json({
+      success: true,
+      data: { backfill: result },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'invalid') {
+      res.status(400).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    logger.error('[automations] desk-label-rules backfill failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to start backfill' });
+  }
+});
+
+// GET /desk-label-rules/:id/backfill — progress of the latest run, null once aged out
+router.get('/desk-label-rules/:id/backfill', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const run = await deskLabelRulesService.getBackfillStatus(req.params.id, auth);
+    res.json({
+      success: true,
+      data: { backfill: run },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === 'not-found') {
+      res.status(404).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    if (code === 'forbidden') {
+      res.status(403).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    logger.error('[automations] desk-label-rules backfill status failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to read backfill status' });
+  }
+});
+
 const DeskLabelRuleStatusSchema = z.object({
   status: z.enum([AutomationStatus.ACTIVE, AutomationStatus.DISABLED]),
 });
