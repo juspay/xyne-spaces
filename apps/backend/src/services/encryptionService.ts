@@ -171,6 +171,17 @@ export function _resetKeyRingCache(): void {
 }
 
 /**
+ * Return the ID of the current write key.
+ *
+ * ENCRYPTION_KEYS is ordered, so the final entry is the active writer.
+ * Returns null when the ordered ring is absent or empty and writes remain
+ * on the legacy ENCRYPTION_KEY format.
+ */
+export function getActiveEncryptionKeyId(): string | null {
+  return loadKeyRing().activeKeyId;
+}
+
+/**
  * Encrypt plaintext using AES-256-CBC.
  * Returns "v2:<keyId>:<iv>:<ciphertext>" when a write key is activated,
  * otherwise the legacy "<iv>:<ciphertext>" format (both hex).
