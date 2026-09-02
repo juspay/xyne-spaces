@@ -1,4 +1,5 @@
 import { type FilePanelProps, useBlockNoteEditor } from '@blocknote/react';
+import { classifyMediaKind } from '@xyne/shared';
 import { type FC, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
@@ -41,7 +42,7 @@ interface CanvasBlock {
 interface UploadingEditor {
   uploadFile?: (file: File, blockId?: string) => Promise<string | Record<string, unknown>>;
   getBlock: (blockId: string) => CanvasBlock | undefined;
-  updateBlock: (blockId: string, update: { props: Record<string, unknown> }) => void;
+  updateBlock: (blockId: string, update: { type?: string; props: Record<string, unknown> }) => void;
   removeBlocks: (blockIds: string[]) => void;
 }
 
@@ -62,6 +63,9 @@ const discardIfEmpty = (api: UploadingEditor, blockId: string): void => {
  * block, so with embed gone the dialog was a panel whose only content was a button
  * that opened the picker. Being the panel rather than a separate watcher covers
  * every way BlockNote asks for a file: inserting the block, and its add-file button.
+ *
+ * With one Upload item rather than four, the block becomes whatever the chosen
+ * file turns out to be; a block that already knows its type keeps it.
  */
 export const CanvasFilePanel: FC<FilePanelProps> = ({ blockId }): null => {
   const editor = useBlockNoteEditor();
@@ -74,16 +78,27 @@ export const CanvasFilePanel: FC<FilePanelProps> = ({ blockId }): null => {
     promptedFor.current = blockId;
 
     void (async (): Promise<void> => {
-      const file = await promptForFile(ACCEPT_BY_BLOCK[api.getBlock(blockId)?.type ?? ''] ?? '*/*');
+      const blockType = api.getBlock(blockId)?.type ?? '';
+      const file = await promptForFile(ACCEPT_BY_BLOCK[blockType] ?? '*/*');
       if (!file) {
         discardIfEmpty(api, blockId);
         return;
       }
+      // Named before the upload starts so the uploading card can show which file.
+      api.updateBlock(blockId, { props: { name: file.name } });
+
       try {
         const uploaded = await upload(file, blockId);
         const url = typeof uploaded === 'string' ? uploaded : uploaded['url'];
         if (typeof url !== 'string' || !url) throw new Error('upload returned no url');
-        api.updateBlock(blockId, { props: { url, name: file.name } });
+
+        // Only the generic block is undecided.
+        const kind = blockType === 'file' ? classifyMediaKind(file.type, file.name) : blockType;
+
+        api.updateBlock(blockId, {
+          ...(kind === blockType ? {} : { type: kind }),
+          props: { url, name: file.name },
+        });
       } catch {
         toast.error('Upload failed', { description: file.name });
         discardIfEmpty(api, blockId);
