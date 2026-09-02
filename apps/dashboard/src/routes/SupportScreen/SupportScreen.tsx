@@ -3333,9 +3333,11 @@ const SupportScreen = (): ReactElement => {
                           >
                             {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
                               const Icon =
-                                column.key === 'assignee'
+                                column.key === 'assignee' || column.key === 'createdBy'
                                   ? User
-                                  : column.key === 'dueDate' || column.key === 'createdAt'
+                                  : column.key === 'dueDate' ||
+                                      column.key === 'createdAt' ||
+                                      column.key === 'updatedAt'
                                     ? CalendarDays
                                     : column.key === 'priority'
                                       ? BarChart4Icon

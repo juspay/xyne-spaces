@@ -438,6 +438,43 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       },
 
       {
+        key: 'updatedAt',
+        headerName: 'Last updated',
+        field: 'updatedAt',
+        minWidth: 175,
+        cellRenderer: (params: ICellRendererParams<Ticket>) => {
+          if (!params.value) return <span className='text-muted-foreground'>—</span>;
+          const updatedAt = new Date(params.value as string | number | Date);
+          if (Number.isNaN(updatedAt.getTime())) {
+            return <span className='text-muted-foreground'>—</span>;
+          }
+          const fullTimestamp = updatedAt.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+          return (
+            <Tooltip content={fullTimestamp}>
+              <span className='text-sm text-muted-foreground whitespace-nowrap'>
+                {fullTimestamp}
+              </span>
+            </Tooltip>
+          );
+        },
+      },
+
+      {
+        key: 'createdBy',
+        headerName: 'Created by',
+        field: 'createdBy',
+        minWidth: 213,
+        cellRenderer: CreatedByCellRenderer,
+      },
+
+      {
         key: 'assignee',
         headerName: 'Assignee',
         field: 'assignedTo',
@@ -809,6 +846,42 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         </div>
       </div>
     </>
+  );
+};
+
+const CreatedByCellRenderer = (params: ICellRendererParams<Ticket>) => {
+  const ticket = params.data;
+  const createdByUser = useUser(ticket?.createdBy ?? '');
+
+  if (!ticket) return null;
+
+  if (!ticket.createdBy) {
+    return (
+      <div className='flex items-center h-full'>
+        <span className='text-muted-foreground'>—</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className='flex items-center h-full'>
+      {createdByUser ? (
+        <div className='flex items-center gap-3'>
+          <Tooltip content={getUserDisplayName(createdByUser)}>
+            <Avatar
+              userId={createdByUser.id}
+              className='rounded-full size-6 flex items-center justify-center'
+              showActiveStatus={false}
+            />
+          </Tooltip>
+          <span className='text-muted-foreground truncate font-medium'>
+            {getUserDisplayName(createdByUser)}
+          </span>
+        </div>
+      ) : (
+        <span className='text-muted-foreground'>—</span>
+      )}
+    </div>
   );
 };
 
