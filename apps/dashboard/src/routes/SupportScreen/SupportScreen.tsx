@@ -4232,7 +4232,6 @@ export const SupportTicketDetail = ({
             replace: true,
             state: {
               ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
-              ...(routerState?.fromSearch ? { fromSearch: true } : {}),
               ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
             },
           });
@@ -4410,7 +4409,6 @@ export const SupportTicketDetail = ({
         conversationId: t.conversationId,
         ticketId: t.id,
         ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
-        ...(routerState?.fromSearch ? { fromSearch: true } : {}),
         ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
@@ -5717,7 +5715,6 @@ const EmailThreadItem = ({
   const navigate = useNavigate();
   const emailRouterState = useLocation().state as {
     fromDeskList?: boolean;
-    fromSearch?: boolean;
     returnToUrl?: string | null;
   } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
@@ -5766,7 +5763,6 @@ const EmailThreadItem = ({
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
               ...(emailRouterState?.fromDeskList ? { fromDeskList: true } : {}),
-              ...(emailRouterState?.fromSearch ? { fromSearch: true } : {}),
               ...(emailRouterState?.returnToUrl
                 ? { returnToUrl: emailRouterState.returnToUrl }
                 : {}),
