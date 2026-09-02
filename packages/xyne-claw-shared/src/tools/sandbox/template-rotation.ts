@@ -21,24 +21,41 @@
 
 /** base template name → its rotation variants (identical goldens, N snapshots). */
 const ROTATION_SETS: Record<string, readonly string[]> = {
-  // 4-way (a-d). e/f were added 2026-08-31 as extra headroom during a storm and
-  // removed the same day — they were never the problem. The real cause: `cursors`
-  // defaulted to 0, so every claw pod began its round-robin at `a` and the tail of
-  // the list was never reached. Measured with the 6-way set in place:
+  // 6-way (a-f), widened from 4 on 2026-09-02. e/f were tried on 2026-08-31 and
+  // pulled the same day, but for a reason that no longer applies: `cursors`
+  // defaulted to 0, so every claw pod began its round-robin at `a` and never
+  // reached the tail. Measured with the 6-way set in place:
   //   rot-a 4 PVCs, rot-b 4, rot-c 3, rot-d 1, rot-e 0, rot-f 0
-  // The two newest variants took ZERO traffic while a/b/c throttled on snapshots
-  // minutes old. Adding variants could not help because clones never got that far.
-  // Fixed by seeding the cursor at a random offset (see `cursors` below).
+  // The two newest variants took ZERO traffic while a/b/c throttled. That is
+  // fixed — the cursor now seeds at a random offset (see `cursors` below) — so
+  // added variants actually receive clones.
   //
-  // Still unfixed, and the bigger lever: a failed clone retries every 12-30s with
-  // no backoff, so once a source is throttled the retries keep it throttled. More
-  // variants divide the per-snapshot rate; they do not stop a retry loop from
-  // re-saturating whatever it is given. Fix backoff before adding e/f back.
+  // CORRECTION (2026-09-02): an earlier version of this comment claimed failed
+  // clones retry "every 12-30s with no backoff". That is wrong. The CSI
+  // external-provisioner DOES back off exponentially; gaps of 5m+ were observed
+  // between retries on a stuck PVC. Do not go hunting for a missing backoff.
+  //
+  // What actually sustains a storm: a failed clone retries FOREVER, and every
+  // attempt counts against the source snapshot's GCP operation limit. One PVC
+  // that has been retrying for ~40 min will re-throttle a brand-new snapshot
+  // within minutes of it becoming ready. Two consequences, both learned the
+  // hard way on 2026-09-02:
+  //   1. Rotating snapshots UNDER THE SAME NAME hands the fresh resource
+  //      straight back to the stuck clients. Rotate to NEW names, or drain
+  //      first. A snapshot with a new name that nothing was waiting on bound in
+  //      ~25s while same-name rotations kept failing.
+  //   2. Stuck PVCs must be DELETED. They never recover on their own, and while
+  //      they exist no amount of added capacity helps.
+  // More variants divide the per-snapshot rate; they do not cap retries. The
+  // real fix is for a clone that has failed N times to be recreated rather than
+  // retried indefinitely — until that exists, a big enough burst still wins.
   "agent-workspace-gvisor-template": [
     "agent-workspace-gvisor-template-a",
     "agent-workspace-gvisor-template-b",
     "agent-workspace-gvisor-template-c",
     "agent-workspace-gvisor-template-d",
+    "agent-workspace-gvisor-template-e",
+    "agent-workspace-gvisor-template-f",
   ],
   // euler: 2-way (not 4). It storms the most of any pool — 5 times between
   // 2026-08-11 and 2026-08-18, every one a RESOURCE_OPERATION_RATE_EXCEEDED on
