@@ -239,6 +239,33 @@ export interface DeskLabelRulesPayload {
   name?: string;
   emailFilters?: Record<string, unknown>;
   keepInInbox?: boolean;
+  /** Also apply the new rule to emails already in the desk. */
+  applyToExisting?: boolean;
+}
+
+export type DeskLabelBackfillEnqueue = 'enqueued' | 'already-running';
+
+export interface DeskLabelBackfillProgress {
+  scanned: number;
+  matched: number;
+  labeled: number;
+  alreadyLabeled: number;
+  archived: number;
+  skipped: number;
+  /** The rule was disabled or archived mid-run, so the scan stopped short. */
+  stoppedEarly: boolean;
+}
+
+export interface DeskLabelBackfillRun {
+  state: 'queued' | 'running' | 'completed' | 'failed';
+  progress: DeskLabelBackfillProgress | null;
+  failedReason: string | null;
+}
+
+export interface DeskLabelRulesCreateResult {
+  automations: Automation[];
+  created: boolean;
+  backfill: DeskLabelBackfillEnqueue | null;
 }
 
 export interface DeskLabelRulesPage {
@@ -256,11 +283,32 @@ export interface DeskLabelRulesPage {
 
 export function createDeskLabelRules(
   payload: DeskLabelRulesPayload,
-): Promise<{ automations: Automation[]; created: boolean }> {
+): Promise<DeskLabelRulesCreateResult> {
   return unwrap(
-    apiInstance.post<SuccessEnvelope<{ automations: Automation[]; created: boolean }>>(
+    apiInstance.post<SuccessEnvelope<DeskLabelRulesCreateResult>>(
       '/automations/desk-label-rules',
       payload,
+    ),
+  );
+}
+
+/** Replay an existing rule over the mail already in its desk. */
+export function startDeskLabelRuleBackfill(
+  id: string,
+): Promise<{ backfill: DeskLabelBackfillEnqueue }> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<{ backfill: DeskLabelBackfillEnqueue }>>(
+      `/automations/desk-label-rules/${id}/backfill`,
+    ),
+  );
+}
+
+export function fetchDeskLabelRuleBackfill(
+  id: string,
+): Promise<{ backfill: DeskLabelBackfillRun | null }> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ backfill: DeskLabelBackfillRun | null }>>(
+      `/automations/desk-label-rules/${id}/backfill`,
     ),
   );
 }

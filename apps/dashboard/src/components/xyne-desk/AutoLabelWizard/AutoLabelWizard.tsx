@@ -80,6 +80,7 @@ export function AutoLabelWizard({
   const [labelColor, setLabelColor] = useState<string | undefined>();
   const [labelSearch, setLabelSearch] = useState('');
   const [keepInInbox, setKeepInInbox] = useState(true);
+  const [applyToExisting, setApplyToExisting] = useState(false);
 
   const triggerSchemaQuery = useQuery({
     queryKey: ['automations', 'schema', 'triggers', 'EMAIL_RECEIVED'],
@@ -112,6 +113,7 @@ export function AutoLabelWizard({
     setLabelColor(undefined);
     setLabelSearch('');
     setKeepInInbox(true);
+    setApplyToExisting(false);
   }, [open, channelId]);
 
   const emailSchema = useMemo(() => {
@@ -156,6 +158,7 @@ export function AutoLabelWizard({
         ...(labelColor ? { color: labelColor } : {}),
         ...(labelId ? { labelId } : {}),
         keepInInbox: showKeepInInbox ? keepInInbox : true,
+        applyToExisting,
         emailFilters,
       }),
     onSuccess: data => {
@@ -168,6 +171,13 @@ export function AutoLabelWizard({
             ? 'Auto-label rule created and active'
             : `${count} auto-label rules created and active`,
         );
+      }
+      if (applyToExisting) {
+        if (data.backfill) {
+          toast.info('Applying the label to older emails — this runs in the background.');
+        } else {
+          toast.error('Rule saved, but older emails could not be queued. Try again from Rules.');
+        }
       }
       void queryClient.invalidateQueries({
         queryKey: deskLabelRulesQueryKey(channelId),
@@ -419,6 +429,23 @@ export function AutoLabelWizard({
                 </p>
               </div>
             )}
+            <div className='rounded-md border border-border bg-muted/30 px-3 py-2.5'>
+              <Checkbox
+                checked={applyToExisting}
+                onChange={setApplyToExisting}
+                label='Also apply to existing emails that match'
+                size='sm'
+              />
+              <p className='mt-1 pl-5 text-[11px] text-muted-foreground'>
+                Labels matching threads already in this desk. Runs in the background.
+              </p>
+              {applyToExisting && showKeepInInbox && !keepInInbox && (
+                <p className='mt-1.5 pl-5 text-[11px] text-amber-600'>
+                  This will also archive every older thread that matches, removing them from your
+                  Inbox.
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>
