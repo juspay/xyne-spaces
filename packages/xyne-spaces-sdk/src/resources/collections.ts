@@ -30,6 +30,11 @@ export class CollectionsResource extends Resource {
     return this.call(collectionsOperations.listSubfolders, { rootCollectionId });
   }
 
+  /** Who a collection is shared with: its user, group and channel grants. */
+  listPermissions(collectionId: string): Promise<unknown[]> {
+    return this.call(collectionsOperations.listPermissions, { collectionId });
+  }
+
   /** List the files in a collection, latest versions only. */
   listItems(collectionId: string): Promise<CollectionItem[]> {
     return this.call(collectionsOperations.listItems, { collectionId });

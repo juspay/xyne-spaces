@@ -128,6 +128,12 @@
       "note": "Older version of a covered operation."
     },
     {
+      "name": "getSdlcChannels",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Lists the SDLC hub channels the caller participates in. getSdlcChannelById is exposed because a caller with a channel id has a concrete thing to ask about; enumerating the subsystem is the product decision that stays deferred."
+    },
+    {
       "name": "getSdlcLinks",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
@@ -136,14 +142,16 @@
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
-      "name": "getSdlcRepos",
-      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
-    },
-    {
       "name": "kanbanTicketsPage",
       "kind": "query",
       "reason": "superseded-by:kanbanTicketsPageV2",
       "note": "Older version of a covered operation."
+    },
+    {
+      "name": "kanbanTicketsPageV2",
+      "kind": "query",
+      "reason": "superseded-by:kanbanTicketsPageV3",
+      "note": "Identical argument schema; V3 reads the isStageOverdue column instead of joining stageEtaEntries."
     },
     {
       "name": "myChannelParticipations",
@@ -176,6 +184,12 @@
     {
       "name": "sdlcRelatedConversations",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
+      "name": "sdlcTicketsByChannel",
+      "kind": "query",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
+      "note": "Tickets on an SDLC hub channel. tickets.listByChannel covers the same rows for any channel without entering the SDLC surface."
     },
     {
       "name": "sdlcTicketsByIds",

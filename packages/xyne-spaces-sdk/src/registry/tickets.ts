@@ -126,7 +126,13 @@ export const ticketsOperations = {
 
   /**
    * A page of tickets for the kanban board, with the board's filter set.
-   * Maps to: Zero query 'kanbanTicketsPageV2'
+   * Maps to: Zero query 'kanbanTicketsPageV3'
+   *
+   * V3 takes exactly the same arguments as V2 — the schema is literally
+   * `kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageV2ArgsSchema`. What changed
+   * is the body: it reads the precomputed `isStageOverdue` column instead of
+   * joining `stageEtaEntries`, so kanban rows no longer carry that relation.
+   * Nothing read it off a kanban row; `list` (ticketsQueryV2) still relates it.
    *
    * `viewMode` and `stageName` are required by the query, not conveniences: the
    * query is written per board column, so it wants to know which scope and which
@@ -157,7 +163,7 @@ export const ticketsOperations = {
       excludeFlowSteps?: boolean;
     },
     Ticket[]
-  >('kanbanTicketsPageV2', {
+  >('kanbanTicketsPageV3', {
     mapArgs: (args) => ({
       viewMode: args.viewMode,
       stageName: args.stageName ?? '',
@@ -182,6 +188,33 @@ export const ticketsOperations = {
       ...(args.excludeFlowSteps !== undefined
         ? { excludeFlowSteps: args.excludeFlowSteps }
         : {}),
+    }),
+  }),
+
+  /**
+   * Tickets created in a channel inside a time window, newest first.
+   * Maps to: Zero query 'topicsExplorerTickets'
+   *
+   * Drives the desk support screen's topic explorer. The window is inclusive at
+   * both ends and the server rejects `createdAtStart > createdAtEnd`.
+   *
+   * `isMember` is required by the schema but unread by the query body — it is an
+   * ACL hint, and is supplied here so a caller does not have to know that.
+   */
+  listByChannelInWindow: query<
+    {
+      channelId: string;
+      createdAtStart: number;
+      createdAtEnd: number;
+      isMember?: boolean;
+    },
+    Ticket[]
+  >('topicsExplorerTickets', {
+    mapArgs: (args) => ({
+      channelId: args.channelId,
+      createdAtStart: args.createdAtStart,
+      createdAtEnd: args.createdAtEnd,
+      isMember: args.isMember ?? true,
     }),
   }),
 

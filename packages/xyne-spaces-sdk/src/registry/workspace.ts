@@ -113,21 +113,25 @@ export const workspaceOperations = {
   // ----- SDLC -----
 
   /**
-   * The SDLC repository wired to a channel, if there is one.
-   * Maps to: Zero query 'getSdlcRepoByChannelId'
+   * One SDLC channel by id, with its participants, stats and canvas folders.
+   * Maps to: Zero query 'getSdlcChannelById'
    *
-   * Ends in `.one()`, so at most one row. A channel with no repository
-   * connected resolves to null rather than an empty list.
+   * Ends in `.one()`, so at most one row; a channel that is not an SDLC hub
+   * resolves to null rather than an empty list.
+   *
+   * Replaces `getSdlcRepoByChannel`. The subsystem was re-keyed from
+   * repositories to channels, and `getSdlcRepoByChannelId` no longer exists —
+   * the SDLC hub *is* a channel now, so there is no separate repo row to fetch.
    */
-  getSdlcRepoByChannel: query<{ channelId: string }, unknown | null>(
-    'getSdlcRepoByChannelId'
-  ),
+  getSdlcChannel: query<{ channelId: string }, unknown | null>('getSdlcChannelById'),
 
   /**
-   * Tracks belonging to an SDLC repository, oldest first.
+   * Tracks belonging to an SDLC channel, oldest first.
    * Maps to: Zero query 'getSdlcTracks'
+   *
+   * Keyed by `channelId` since the same re-keying; it took `repoId` before.
    */
-  listSdlcTracks: query<{ repoId: string }, unknown[]>('getSdlcTracks'),
+  listSdlcTracks: query<{ channelId: string }, unknown[]>('getSdlcTracks'),
 
   /**
    * Start a track on an SDLC repository.

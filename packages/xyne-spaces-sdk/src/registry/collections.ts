@@ -37,6 +37,12 @@ export const collectionsOperations = {
   ),
 
   /**
+   * Who a collection is shared with — the user, group and channel grants on it.
+   * Maps to: Zero query 'collectionPermissions'
+   */
+  listPermissions: query<{ collectionId: string }, unknown[]>('collectionPermissions'),
+
+  /**
    * Files in a collection — latest versions only.
    * Maps to: Zero query 'collectionItems'
    */

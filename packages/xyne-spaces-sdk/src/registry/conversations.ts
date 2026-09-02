@@ -349,9 +349,17 @@ export const conversationsOperations = {
    * the built-in vocabulary.
    * Maps to: Zero mutator 'threadTag.setTypes'
    */
-  setTagTypes: mutator<{ conversationId: string; types: string[] }, void>(
-    'threadTag.setTypes'
-  ),
+  setTagTypes: mutator<
+    { conversationId: string; types: string[]; note?: string },
+    void
+  >('threadTag.setTypes', {
+    mapArgs: (args) => ({
+      conversationId: args.conversationId,
+      types: args.types,
+      ...(args.note !== undefined ? { note: args.note } : {}),
+      timestamp: now(),
+    }),
+  }),
 } as const;
 
 export type { Message };

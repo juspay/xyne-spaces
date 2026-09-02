@@ -117,14 +117,14 @@ export class WorkspaceResource extends Resource {
 
   // ----- SDLC -----
 
-  /** The SDLC repository connected to a channel, or null if there is none. */
-  getSdlcRepoByChannel(channelId: string): Promise<unknown | null> {
-    return this.call(workspaceOperations.getSdlcRepoByChannel, { channelId });
+  /** One SDLC channel by id, or null if that channel is not an SDLC hub. */
+  getSdlcChannel(channelId: string): Promise<unknown | null> {
+    return this.call(workspaceOperations.getSdlcChannel, { channelId });
   }
 
-  /** Tracks on an SDLC repository, oldest first. */
-  listSdlcTracks(repoId: string): Promise<unknown[]> {
-    return this.call(workspaceOperations.listSdlcTracks, { repoId });
+  /** Tracks on an SDLC channel, oldest first. */
+  listSdlcTracks(channelId: string): Promise<unknown[]> {
+    return this.call(workspaceOperations.listSdlcTracks, { channelId });
   }
 
   /**

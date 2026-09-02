@@ -97,6 +97,28 @@ export class TicketsResource extends Resource {
     return this.call(ticketsOperations.listKanban, options);
   }
 
+  /**
+   * Tickets created in a channel between two epoch-ms timestamps, newest first.
+   *
+   * Both ends are inclusive, and `createdAtStart` must not be after
+   * `createdAtEnd` — the server rejects the pair rather than returning nothing.
+   *
+   * @example
+   * const week = await sdk.tickets.listByChannelInWindow({
+   *   channelId: 'channel-123',
+   *   createdAtStart: Date.now() - 7 * 86_400_000,
+   *   createdAtEnd: Date.now(),
+   * });
+   */
+  listByChannelInWindow(options: {
+    channelId: string;
+    createdAtStart: number;
+    createdAtEnd: number;
+    isMember?: boolean;
+  }): Promise<Ticket[]> {
+    return this.call(ticketsOperations.listByChannelInWindow, options);
+  }
+
   /** Get one ticket. */
   get(ticketId: string): Promise<Ticket | null> {
     return this.call(ticketsOperations.get, { ticketId });

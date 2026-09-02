@@ -97,23 +97,35 @@ export const callsOperations = {
    * Standalone recordings the user created.
    * Maps to: Zero query 'createdOatsRecordings'
    */
-  listCreatedRecordings: query<{ limit?: number; start?: CallCursor }, Call[]>(
-    'createdOatsRecordings',
-    {
-      mapArgs: (args) => ({ limit: args.limit ?? 50, start: args.start ?? null }),
-    }
-  ),
+  listCreatedRecordings: query<
+    { limit?: number; start?: CallCursor; participantId?: string },
+    Call[]
+  >('createdOatsRecordings', {
+    mapArgs: (args) => ({
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+      // Required key, nullable value: the schema says `.nullable()`, not
+      // `.optional()`, so it must be sent even when filtering by nobody.
+      participantId: args.participantId ?? null,
+    }),
+  }),
 
   /**
    * Standalone recordings shared with the user.
    * Maps to: Zero query 'sharedOatsRecordings'
    */
-  listSharedRecordings: query<{ limit?: number; start?: CallCursor }, Call[]>(
-    'sharedOatsRecordings',
-    {
-      mapArgs: (args) => ({ limit: args.limit ?? 50, start: args.start ?? null }),
-    }
-  ),
+  listSharedRecordings: query<
+    { limit?: number; start?: CallCursor; participantId?: string },
+    Call[]
+  >('sharedOatsRecordings', {
+    mapArgs: (args) => ({
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+      // Required key, nullable value: the schema says `.nullable()`, not
+      // `.optional()`, so it must be sent even when filtering by nobody.
+      participantId: args.participantId ?? null,
+    }),
+  }),
 
   /**
    * One recording by its room id.
