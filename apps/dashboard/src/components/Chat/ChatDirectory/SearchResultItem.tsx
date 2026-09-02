@@ -458,11 +458,16 @@ const SearchResultItem = ({
                     <RenderMessageWithHTML message={deskTicketSubtitle} />
                   </div>
                 )}
-                {/* Line 3: sender on the left, timestamp on the right */}
+                {/* Line 3: sender + recipients, then the channel as a trailing
+                    "in <name>" phrase — same construct the ticket and file rows
+                    use — with the timestamp on the right. */}
                 <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-                  <span className='min-w-0 truncate'>
-                    {senderName}
-                    {recipientCount > 0 && ` +${recipientCount} more`}
+                  <span className='flex min-w-0 items-center gap-1.5'>
+                    <span className='min-w-0 max-w-[30ch] truncate'>
+                      {senderName}
+                      {recipientCount > 0 && ` +${recipientCount} more`}
+                    </span>
+                    {channelTag && <ChannelSegment channelTag={channelTag} />}
                   </span>
                   <span className='whitespace-nowrap shrink-0'>
                     {utcToIst(result.metadata.timestamp)}
