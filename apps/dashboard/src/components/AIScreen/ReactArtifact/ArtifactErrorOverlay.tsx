@@ -127,10 +127,7 @@ export const ArtifactErrorOverlay = ({
     return (): void => window.clearTimeout(timer);
   }, [copied]);
 
-  const error = useMemo(
-    () => appError ?? fromSandpack(sandpack.error),
-    [appError, sandpack.error],
-  );
+  const error = useMemo(() => appError ?? fromSandpack(sandpack.error), [appError, sandpack.error]);
   if (!error || dismissed) return null;
 
   const text = describeArtifactError(error);
