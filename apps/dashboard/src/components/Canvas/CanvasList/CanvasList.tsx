@@ -1905,6 +1905,45 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     </div>
   );
 
+  const renderStarredSection = (): React.ReactNode => {
+    if (!shouldShowStarredSection) return null;
+
+    return (
+      <div className='px-2.5 pb-1 pt-1'>
+        <div className='px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50'>
+          Starred
+        </div>
+        {visibleStarredCanvases.map(canvas => (
+          <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
+        ))}
+        {hiddenStarredCount > 0 && (
+          <button
+            type='button'
+            onClick={() => setIsStarredSectionExpanded(true)}
+            className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+            data-track-category='CANVAS'
+            data-track-name='SHOW_MORE_STARRED_CANVASES'
+          >
+            <ChevronDown className='size-3.5 shrink-0' strokeWidth={2.2} />
+            See {hiddenStarredCount} more
+          </button>
+        )}
+        {isStarredSectionExpanded && starredCanvases.length > STARRED_SECTION_PAGE_SIZE && (
+          <button
+            type='button'
+            onClick={() => setIsStarredSectionExpanded(false)}
+            className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+            data-track-category='CANVAS'
+            data-track-name='SHOW_LESS_STARRED_CANVASES'
+          >
+            <ChevronRight className='size-3.5 shrink-0 -rotate-90' strokeWidth={2.2} />
+            Show less
+          </button>
+        )}
+      </div>
+    );
+  };
+
   const renderChannelFolderGroupedList = (): React.ReactNode => (
     <div className='h-full overflow-auto pb-2'>
       {hasChannelFolderGroupedResults ? (
@@ -2398,41 +2437,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         </div>
       </div>
 
-      {shouldShowStarredSection && (
-        <div className='shrink-0 px-2.5 pt-1'>
-          <div className='px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50'>
-            Starred
-          </div>
-          {visibleStarredCanvases.map(canvas => (
-            <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
-          ))}
-          {hiddenStarredCount > 0 && (
-            <button
-              type='button'
-              onClick={() => setIsStarredSectionExpanded(true)}
-              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              data-track-category='CANVAS'
-              data-track-name='SHOW_MORE_STARRED_CANVASES'
-            >
-              <ChevronDown className='size-3.5 shrink-0' strokeWidth={2.2} />
-              See {hiddenStarredCount} more
-            </button>
-          )}
-          {isStarredSectionExpanded && starredCanvases.length > STARRED_SECTION_PAGE_SIZE && (
-            <button
-              type='button'
-              onClick={() => setIsStarredSectionExpanded(false)}
-              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              data-track-category='CANVAS'
-              data-track-name='SHOW_LESS_STARRED_CANVASES'
-            >
-              <ChevronRight className='size-3.5 shrink-0 -rotate-90' strokeWidth={2.2} />
-              Show less
-            </button>
-          )}
-        </div>
-      )}
-
       <div className='flex-1 min-h-0'>
         {isInitialLoading || isChannelFolderViewInitialLoading ? (
           <div className='flex items-center justify-center h-64'>
@@ -2441,11 +2445,18 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ) : shouldRenderChannelFolderGroups ? (
           renderChannelFolderGroupedList()
         ) : filteredCanvases.length === 0 && isFilteredScanIncomplete ? (
-          <div className='flex items-center justify-center h-64'>
-            <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
+          <div className='h-full overflow-auto pb-2'>
+            {renderStarredSection()}
+            <div className='flex items-center justify-center h-64'>
+              <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
+            </div>
           </div>
         ) : filteredCanvases.length === 0 ? (
-          renderCanvasEmptyState()
+          shouldShowStarredSection ? (
+            <div className='h-full overflow-auto pb-2'>{renderStarredSection()}</div>
+          ) : (
+            renderCanvasEmptyState()
+          )
         ) : (
           <Virtuoso
             ref={canvasVirtuosoRef}
@@ -2459,6 +2470,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             rangeChanged={handleVisibleRangeChanged}
             itemContent={(index, canvas) => renderListItem(index, canvas)}
             components={{
+              Header: () => renderStarredSection(),
               Footer: () =>
                 (isLoadingNext && shouldLoadMoreOnListEnd) || isFilteredScanIncomplete ? (
                   <div className='flex items-center justify-center py-4'>
