@@ -1,3 +1,17 @@
+## [1.251.0-release-20260901.5](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.4...v1.251.0-release-20260901.5) (2026-09-02)
+
+
+### Features
+
+* fix selection of tickets ([#1316](https://github.com/juspay/xyne-spaces/issues/1316)) ([da9fc12](https://github.com/juspay/xyne-spaces/commit/da9fc125d3333fcb1cf4f7ca6351eb69f95a3add))
+
+## [1.251.0-release-20260901.4](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.3...v1.251.0-release-20260901.4) (2026-09-02)
+
+
+### Features
+
+* add Topics Explorer to the desk support screen ([#974](https://github.com/juspay/xyne-spaces/issues/974)) ([#1375](https://github.com/juspay/xyne-spaces/issues/1375)) ([8d6a7a7](https://github.com/juspay/xyne-spaces/commit/8d6a7a7e166e3f1616fac0c210b64d42c65accaf))
+
 ## [1.251.0-release-20260901.3](https://github.com/juspay/xyne-spaces/compare/v1.251.0-release-20260901.2...v1.251.0-release-20260901.3) (2026-09-01)
 
 

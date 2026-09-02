@@ -358,15 +358,17 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
             {getNudgeKindLabel(nudge.nudgeKind)}
           </span>
           {isScheduleCall && canDismiss && (
-            <button
+            <Button
+              variant='ghost'
               onClick={handleDismiss}
               disabled={isActing}
+              trackId='dismiss_schedule_call_nudge'
               data-track-category='NUDGES'
               data-track-name='dismiss_schedule_call_nudge'
               className='p-0.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/50 disabled:opacity-50'
             >
               <X className='h-3.5 w-3.5' />
-            </button>
+            </Button>
           )}
         </div>
       )}

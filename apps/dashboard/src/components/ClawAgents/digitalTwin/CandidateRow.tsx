@@ -1,6 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { Check, Loader2, Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/Button/Button';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { cn } from '@/utils/classNames';
 import { usePatchDigitalTwinCandidate } from '@/hooks/useClawDigitalTwin';
@@ -107,9 +108,11 @@ export const CandidateRow = ({
         {editing ? (
           <>
             <Tooltip side='top' content='Save edit'>
-              <button
+              <Button
+                variant='ghost'
                 type='button'
                 onClick={() => void handleSave()}
+                trackId='digital_twin_save_candidate_edit'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin save candidate edit'
                 disabled={isBusy}
@@ -120,7 +123,7 @@ export const CandidateRow = ({
                 ) : (
                   <Check className='size-3.5' />
                 )}
-              </button>
+              </Button>
             </Tooltip>
             <Tooltip side='top' content='Cancel'>
               <button
@@ -159,9 +162,11 @@ export const CandidateRow = ({
               </button>
             </Tooltip>
             <Tooltip side='top' content={isDirty ? 'Save & approve' : 'Approve'}>
-              <button
+              <Button
+                variant='ghost'
                 type='button'
                 onClick={() => void handleApprove()}
+                trackId='digital_twin_approve_candidate'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin approve candidate'
                 disabled={isBusy}
@@ -172,12 +177,14 @@ export const CandidateRow = ({
                 ) : (
                   <Check className='size-3.5' />
                 )}
-              </button>
+              </Button>
             </Tooltip>
             <Tooltip side='top' content='Reject'>
-              <button
+              <Button
+                variant='ghost'
                 type='button'
                 onClick={() => void handleReject()}
+                trackId='digital_twin_reject_candidate'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin reject candidate'
                 disabled={isBusy}
@@ -191,7 +198,7 @@ export const CandidateRow = ({
                 ) : (
                   <X className='size-3.5' />
                 )}
-              </button>
+              </Button>
             </Tooltip>
           </>
         )}

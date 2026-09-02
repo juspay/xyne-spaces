@@ -909,6 +909,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             data-track-category='FORWARD_MESSAGE_MODAL'
             data-track-name='FORWARD_MESSAGE'
             data-track-metadata={JSON.stringify({ targetCount: selectedTargets })}
+            trackId='forward_message'
           >
             {form.state.isSubmitting ? 'Forwarding...' : 'Forward'}
           </Button>
