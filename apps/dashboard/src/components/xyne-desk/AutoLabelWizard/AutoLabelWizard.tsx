@@ -476,6 +476,7 @@ export function AutoLabelWizard({
             size='sm'
             disabled={!canSave || saveMutation.isPending}
             onClick={() => saveMutation.mutate()}
+            trackId='create_auto_label_rule'
             data-track-category='xyne-desk'
             data-track-name='auto-label-wizard-save'
           >

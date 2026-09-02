@@ -18,7 +18,7 @@ import {
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit } from '../../../providers/EditProvider';
 import { toast } from 'sonner';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
@@ -53,11 +53,6 @@ import { isMessageEditable } from '../../../utils/chatUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import {
   extractOriginFromHash,
   extractMessageIdFromHash,
@@ -193,7 +188,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
-  const { editingMessageId, requestEdit, stopEditing } = useEditContext();
+  const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
   const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
@@ -257,7 +252,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   ]);
   const [showLinkPreview, setShowLinkPreview] = useState(true);
   const [showCanvasPreview, setShowCanvasPreview] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
@@ -266,10 +260,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const isScrollingRef = useRef(false);
   const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchEndedInsideRef = useRef(false);
-
-  useEffect(() => {
-    setIsEditing(editingMessageId === message.messageId);
-  }, [editingMessageId, message.messageId]);
 
   const { isEntityBookmarked, getBookmarkByEntity } = useUserBookmarks();
 
@@ -434,7 +424,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleEditMessage = (): void => {
     requestEdit(message.messageId, () => {
-      setIsEditing(true);
       // Scroll the message into view when editing starts
       setTimeout(() => {
         if (containerRef.current) {
@@ -460,9 +449,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         messageId: message.messageId,
         channelId,
         conversationId: message['conversationId'],
-      });
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,
       });
       toast.success('Message deleted', {
         description: 'Your message has been deleted successfully',
@@ -538,10 +524,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           );
         })
         .catch(() => undefined);
-
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: 'addBookmark',
-      });
     } catch {
       toast.error('Action failed', {
         description: 'Could not add bookmark',
@@ -561,9 +543,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             markAsDone: false,
           }),
         );
-        mixpanelService.track(EVENTS.INITIATE_ACTION, {
-          type: 'removeBookmark',
-        });
       } catch {
         toast.error('Action failed', {
           description: 'Could not remove bookmark',
@@ -823,7 +802,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   };
 
   const finishEditing = (): void => {
-    setIsEditing(false);
     stopEditing(); // release global lock
   };
 
@@ -870,7 +848,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Only show copy button if there's text content to copy
   const shouldShowCopyButton = hasTextContent;
 
-  const isCurrentEditing = editingMessageId === message.messageId;
+  const isCurrentEditing = isEditingMessage(message.messageId);
 
   // Check for canvas link
   const msgContent = message?.content as string | undefined;
@@ -1001,7 +979,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     variant !== 'pinned' &&
     !isMentionUserAddition &&
     !isTicketActivity &&
-    !(isEditing && isCurrentEditing);
+    !isCurrentEditing;
 
   // No dependency array on purpose: re-registering is a cheap Map.set and this
   // keeps the registered handlers/capabilities in sync with the latest render.
@@ -1274,7 +1252,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }
       }}
     >
-      {isEditing && isCurrentEditing ? (
+      {isCurrentEditing ? (
         <ChatInput
           autoFocus='end' // eslint-disable-line jsx-a11y/no-autofocus
           channelId={channelId}

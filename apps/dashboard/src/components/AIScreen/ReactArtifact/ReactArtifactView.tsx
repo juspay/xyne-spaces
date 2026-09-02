@@ -20,6 +20,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import { Button } from '../../ui/Button/Button';
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
   loadArtifactPayload,
@@ -36,6 +37,7 @@ import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
 import { ArtifactBootOverlay } from './ArtifactBootOverlay';
+import { ArtifactErrorOverlay } from './ArtifactErrorOverlay';
 import { AppLoaderMark } from '../../AppLoader/AppLoaderMark';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { TOP_BAR_HEIGHT_CLASS } from '../../AppNavigator/topBarHeight';
@@ -156,9 +158,16 @@ const ArtifactSandpack = memo(
     return (
       <SandpackProvider template='react-ts' theme={theme} files={files} customSetup={customSetup}>
         <SandpackLayout>
-          <SandpackPreview ref={previewRef} showOpenInCodeSandbox={false} />
+          {/* Sandpack's error overlay is replaced by ArtifactErrorOverlay below,
+              which shows the same failure with a way to act on it. */}
+          <SandpackPreview
+            ref={previewRef}
+            showOpenInCodeSandbox={false}
+            showSandpackErrorOverlay={false}
+          />
         </SandpackLayout>
         <ArtifactBootOverlay fill={fill} />
+        <ArtifactErrorOverlay fill={fill} previewRef={previewRef} />
       </SandpackProvider>
     );
   },
@@ -179,6 +188,7 @@ export const ReactArtifactView = ({
   artifact,
   fill = false,
   onExpand,
+  expandLabel = 'Open full screen',
   onClose,
   titleSlot,
   onSave,
@@ -336,7 +346,9 @@ export const ReactArtifactView = ({
             <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -353,10 +365,12 @@ export const ReactArtifactView = ({
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
                 aria-hidden='true'
               />
-            </button>
+            </Button>
           )}
           {onSave && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
@@ -373,14 +387,15 @@ export const ReactArtifactView = ({
               ) : (
                 <Save className='h-3.5 w-3.5' aria-hidden='true' />
               )}
-            </button>
+            </Button>
           )}
           {onExpand && (
             <button
               type='button'
               onClick={() => onExpand(artifact)}
               className='shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              aria-label='Open full screen'
+              aria-label={expandLabel}
+              title={expandLabel}
               data-track-category='AskAI'
               data-track-name='ReactArtifactExpand'
             >

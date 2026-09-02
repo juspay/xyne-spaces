@@ -41,8 +41,9 @@
    turn it off — and ArtifactBootOverlay draws the Xyne mark over the same
    frame. Without this, theirs fades out over 400ms starting at `done` while
    ours unmounts instantly, flashing the CodeSandbox loader on every boot.
-   Scoped to `.sp-loading`: the timeout and runtime-error overlays use
-   `.sp-error` and must stay visible. */
+   Scoped to `.sp-loading`: the bundler-timeout overlay uses `.sp-error` and
+   must stay visible. (The runtime-error overlay is turned off by prop and
+   replaced by ArtifactErrorOverlay.) */
 .xyne-artifact-sandpack .sp-overlay.sp-loading {
   display: none;
 }

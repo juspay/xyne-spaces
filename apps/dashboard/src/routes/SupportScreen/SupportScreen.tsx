@@ -1905,7 +1905,11 @@ const SupportScreen = (): ReactElement => {
         setShowMergeDialog(false);
         if (parentTicket) {
           void navigate(`${supportBase}/${parentTicket.channelId}/${parentTicket.xyneId}`, {
-            state: { conversationId: parentTicket.conversationId, ticketId: parentTicket.id },
+            state: {
+              conversationId: parentTicket.conversationId,
+              ticketId: parentTicket.id,
+              fromDeskList: true,
+            },
           });
         }
       } catch (error: unknown) {
@@ -2212,6 +2216,7 @@ const SupportScreen = (): ReactElement => {
         state: {
           conversationId: ticketData.conversationId,
           ticketId: ticketData.id,
+          fromDeskList: true,
         },
       });
     },
@@ -3609,7 +3614,7 @@ const SupportScreen = (): ReactElement => {
                   availableStages={availableStages}
                   onTicketClick={ticket => {
                     void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId },
+                      state: { ticketId: ticket.ticketId, fromDeskList: true },
                     });
                   }}
                 />
@@ -3735,6 +3740,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -3756,6 +3762,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -3786,6 +3793,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -4151,6 +4159,7 @@ export const SupportTicketDetail = ({
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
+    fromDeskList?: boolean;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -4223,7 +4232,14 @@ export const SupportTicketDetail = ({
             : undefined,
         });
         if (sourceTicketXyneId && channelIdParam) {
-          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
+          // Same in-place swap as prev/next — the opener stays directly behind us.
+          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`, {
+            replace: true,
+            state: {
+              ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
+            },
+          });
         }
       } catch (err) {
         toast.error('Unmerge Failed', {
@@ -4232,7 +4248,14 @@ export const SupportTicketDetail = ({
         });
       }
     },
-    [channelIdParam, navigate, navBasePath, supportBase],
+    [
+      channelIdParam,
+      navigate,
+      navBasePath,
+      routerState?.fromDeskList,
+      routerState?.returnToUrl,
+      supportBase,
+    ],
   );
 
   const [allEmails] = useCachedQuery(
@@ -4383,10 +4406,15 @@ export const SupportTicketDetail = ({
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
+    // Swap the ticket in place: pushing would bury the opener under the ticket chain
+    // and leave the back arrow one entry short of it.
     void navigate(`${navBasePath ?? supportBase}/${nextChannelId}/${t.xyneId}`, {
+      replace: true,
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
+        ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+        ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
   };
@@ -4442,20 +4470,25 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
-    // Ticket boards (Kanban, My Tickets) hand us the URL they came from, so
-    // "back" returns to that board instead of dumping the user in the channel
-    // inbox they never visited. Only same-origin paths are honoured — reject
-    // absolute URLs and the "//host" / "/\host" protocol-relative forms so
-    // router state can't drive an off-site redirect.
-    const returnToUrl = routerState?.returnToUrl;
-    if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
-      void navigate(returnToUrl);
+    // Both markers are stamped by the opener (desk list, Kanban, My Tickets) as it pushes
+    // this entry, so its page is one Back away — pop it rather than stacking a second copy.
+    // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
+    if (routerState?.fromDeskList || routerState?.returnToUrl) {
+      void navigate(-1);
       return;
     }
     const base = navBasePath ?? supportBase;
     const back = channelIdParam ? `${base}/${channelIdParam}` : base;
-    void navigate(back);
-  }, [channelIdParam, navBasePath, navigate, onBack, routerState?.returnToUrl, supportBase]);
+    void navigate(back, { replace: true });
+  }, [
+    channelIdParam,
+    navBasePath,
+    navigate,
+    onBack,
+    routerState?.fromDeskList,
+    routerState?.returnToUrl,
+    supportBase,
+  ]);
 
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
     const windowTarget = dir === 'forward' ? windowNext : windowPrev;
@@ -5674,6 +5707,10 @@ const EmailThreadItem = ({
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
+  const emailRouterState = useLocation().state as {
+    fromDeskList?: boolean;
+    returnToUrl?: string | null;
+  } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
   const ccList = email.cc || [];
@@ -5712,11 +5749,17 @@ const EmailThreadItem = ({
         });
 
         if (channelIdParam) {
+          // In-place swap like the ticket-level unmerge — the opener stays directly behind.
           void navigate(`/support/${channelIdParam}/${response.data.newTicket.xyneId}`, {
+            replace: true,
             state: {
               conversationId: response.data.newTicket.conversationId,
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
+              ...(emailRouterState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(emailRouterState?.returnToUrl
+                ? { returnToUrl: emailRouterState.returnToUrl }
+                : {}),
             },
           });
         }

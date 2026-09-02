@@ -6,12 +6,6 @@ dotenv.config();
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
 const envSchema = Joi.object({
-  // Legacy AES-256-CBC key used for unversioned ciphertext.
-  ENCRYPTION_KEY: Joi.string().allow('').optional(),
-  // Ordered JSON key ring. The final entry is the active writer;
-  // all entries remain available for decryption.
-  ENCRYPTION_KEYS: Joi.string().allow('').optional(),
-
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
@@ -226,6 +220,7 @@ const envSchema = Joi.object({
   APNS_P8_BASE64: Joi.string().allow('').default(''),
   // Y-Sweet Configuration
   Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
+  Y_SWEET_SERVER_TOKEN: Joi.string().allow('').default(''),
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -416,7 +411,9 @@ const envSchema = Joi.object({
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
+    .allow('')
+    .default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
@@ -841,6 +838,7 @@ export const config = {
   },
   ysweet: {
     url: envVars.Y_SWEET_URL,
+    serverToken: envVars.Y_SWEET_SERVER_TOKEN,
   },
   entityExtraction: {
     enabled: envVars.ENABLE_ENTITY_EXTRACTION,

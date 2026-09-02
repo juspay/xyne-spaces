@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Input from '../../ui/Input';
+import { Button } from '../../ui/Button/Button';
 import { CanvasRow, HighlightedText } from '../CanvasRow';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -269,16 +270,18 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
               </span>
             </button>
           )}
-          <button
+          <Button
+            variant='ghost'
             className={HOVER_ACTION_CLASS}
             onClick={() => void onCreateCanvasInFolder(folderGroup.folder)}
             disabled={isCreatingCanvas}
             title='Create canvas in folder'
+            trackId='create_canvas_in_folder'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_FOLDER'
           >
             <PlusDefault size={14} />
-          </button>
+          </Button>
           {canRenameFolder && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
