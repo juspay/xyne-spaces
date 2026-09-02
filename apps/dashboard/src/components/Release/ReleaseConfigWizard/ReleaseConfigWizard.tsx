@@ -488,6 +488,7 @@ const Step3Applications = ({
                   data-track-name='TEST_REPO_CONNECTION'
                   disabled={isTestingConnection || !sharedRepoUrl.trim()}
                   title='Verify the repo URL and token before configuring applications'
+                  trackId='test_release_repo_connection'
                 >
                   <PlugZap size={14} />
                   {isTestingConnection ? 'Testing…' : 'Test'}
@@ -826,6 +827,7 @@ const ReleaseConfigWizardForm = ({
               onClick={() => void form.handleSave()}
               data-track-category='Release'
               data-track-name='SAVE_RELEASE_CONFIG'
+              trackId='save_release_config'
               disabled={!canSave || form.isSaving}
             >
               {form.isSaving

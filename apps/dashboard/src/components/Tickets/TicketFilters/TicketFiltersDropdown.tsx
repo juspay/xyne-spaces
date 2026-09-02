@@ -989,15 +989,17 @@ export const TicketFiltersDropdown = ({
                       >
                         Cancel
                       </button>
-                      <button
+                      <Button
+                        variant='ghost'
                         data-track-category='saved-views'
                         data-track-name='confirm-save-view'
+                        trackId='save_ticket_view'
                         onClick={handleSaveView}
                         disabled={!viewName.trim() || isSaving}
                         className='text-sm font-semibold px-4 h-8 rounded-[8px] bg-primary text-white disabled:opacity-50 disabled:cursor-not-allowed'
                       >
                         Save
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </Popover.Content>

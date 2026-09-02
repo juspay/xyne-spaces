@@ -5,6 +5,7 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
+import { Button } from '../../ui/Button/Button';
 
 export interface DeskReportPanelProps {
   open: boolean;
@@ -191,20 +192,22 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                 </button>
               )}
               {canGenerate && (
-                <button
+                <Button
+                  variant='ghost'
                   type='button'
                   onClick={() => void handleGenerateNow()}
                   disabled={submitting || report?.generating}
                   className='flex items-center gap-1.5 rounded-[8px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60'
                   data-track-category='DeskReport'
                   data-track-name='GenerateNow'
+                  trackId='desk_report_generate'
                 >
                   <RefreshCw
                     size={14}
                     className={submitting || report?.generating ? 'animate-spin' : ''}
                   />
                   {submitting || report?.generating ? 'Generating…' : 'Generate now'}
-                </button>
+                </Button>
               )}
             </div>
           </div>

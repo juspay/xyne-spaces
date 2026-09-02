@@ -17,6 +17,7 @@ import { MessageCard } from '../MessageCard';
 import { RecipientAvatar, useRecipientName } from '../MessageCard/avatarHelpers';
 import { ScheduleMessageDialog } from '../../ui/ScheduleMessageDialog/ScheduleMessageDialog';
 import { useUserDelayedMessages } from '../../../hooks/useUserDelayedMessages';
+import { Button } from '../../ui/Button';
 
 type DelayedMessageWithAttachments = DelayedMessage & {
   attachments?: readonly MessageAttachment[] | undefined;
@@ -235,9 +236,11 @@ const DelayedMessageRow = ({
               >
                 Cancel
               </button>
-              <button
+              <Button
+                variant='default'
                 type='button'
                 onClick={() => void performSendNow()}
+                trackId='send_now_scheduled_message'
                 disabled={isSendNowLoading}
                 className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2'
                 data-track-category='delayed-messages'
@@ -245,7 +248,7 @@ const DelayedMessageRow = ({
               >
                 {isSendNowLoading ? <Loader2 size={14} className='animate-spin' /> : null}
                 Send now
-              </button>
+              </Button>
             </div>
           </div>
         </Dialog>
@@ -292,15 +295,17 @@ const DelayedMessageRow = ({
               >
                 Cancel
               </button>
-              <button
+              <Button
+                variant='ghost'
                 type='button'
                 onClick={() => void handleConfirmDelete()}
+                trackId='delete_scheduled_message'
                 className='text-sm font-bold px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
                 data-track-category='delayed-messages'
                 data-track-name='confirm-delete-scheduled'
               >
                 Delete message
-              </button>
+              </Button>
             </div>
           </div>
         </Dialog>

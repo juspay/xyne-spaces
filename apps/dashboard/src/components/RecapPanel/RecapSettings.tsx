@@ -463,6 +463,7 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
             onClick={() => void handleSave()}
             data-track-category='RECAP_SETTINGS'
             data-track-name='SAVE_SUBSCRIPTIONS'
+            trackId='save_recap_subscriptions'
           >
             {hasExistingChannels
               ? 'Save Changes'
