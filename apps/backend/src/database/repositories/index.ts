@@ -25,7 +25,8 @@ export { UserRepository } from './users';
 export { ResourceRepository } from './resources';
 export { ResourceAccessRepository } from './resourceAccess';
 export { ACLAuditLogRepository } from './aclAuditLogs';
-export { 
+export { TranscriptionAgentRepository } from './transcriptionAgent';
+export {
   NotificationRepository, 
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
@@ -93,7 +94,8 @@ import { UserRepository } from './users';
 import { ResourceRepository } from './resources';
 import { ResourceAccessRepository } from './resourceAccess';
 import { ACLAuditLogRepository } from './aclAuditLogs';
-import { 
+import { TranscriptionAgentRepository } from './transcriptionAgent';
+import {
   NotificationRepository, 
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
@@ -158,6 +160,7 @@ export class RepositoryContainer {
   public resources: ResourceRepository;
   public resourceAccess: ResourceAccessRepository;
   public aclAuditLogs: ACLAuditLogRepository;
+  public transcriptionAgents: TranscriptionAgentRepository;
   public notifications: NotificationRepository;
   public notificationPreferences: NotificationPreferenceRepository;
   public browserNotificationSubscriptions: BrowserNotificationSubscriptionRepository;
@@ -217,6 +220,7 @@ export class RepositoryContainer {
     this.resources = new ResourceRepository();
     this.resourceAccess = new ResourceAccessRepository();
     this.aclAuditLogs = new ACLAuditLogRepository();
+    this.transcriptionAgents = new TranscriptionAgentRepository();
     this.notifications = new NotificationRepository();
     this.notificationPreferences = new NotificationPreferenceRepository();
     this.browserNotificationSubscriptions = new BrowserNotificationSubscriptionRepository();
@@ -270,4 +274,11 @@ export class RepositoryContainer {
   }
 }
 
-export const repositories = RepositoryContainer.getInstance();
+// Delay construction until a repository is first used. Constructing the
+// entire container during module evaluation makes any repository that imports
+// this barrel vulnerable to circular-import temporal dead zones.
+export const repositories: RepositoryContainer = new Proxy({} as RepositoryContainer, {
+  get(_target, property: keyof RepositoryContainer) {
+    return RepositoryContainer.getInstance()[property];
+  },
+});

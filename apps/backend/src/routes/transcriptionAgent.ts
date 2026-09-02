@@ -21,4 +21,7 @@ router.get('/voiceprints', transcriptionAgentController.getVoiceprints);
 // Fetch all workspace user display names for STT keyword hints
 router.get('/user-names', transcriptionAgentController.getUserNames);
 
+// Self-registration: a pod calls this once on startup with its own {agentName, role}
+router.post('/register-agent', transcriptionAgentController.registerAgent);
+
 export default router;

@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "TranscriptionAgent"]
 }
 
 datasource db {
@@ -3335,6 +3335,26 @@ model LookupValue {
   @@unique([type, value])
   @@index([type])
   @@map("lookup_values")
+  @@schema("public")
+}
+
+// Explicit-dispatch transcription agent registry. `agentName` is deliberately NOT the
+// primary key — the same build can independently hold both 'stable' and 'test' as two
+// separate rows, so a synthetic id is required. `role` is kept on a row even after it
+// goes 'inactive', as a historical record of what it once served. At most one row can
+// be the active holder of a given role — enforced by a partial unique index added by
+// hand in the migration (Prisma's schema DSL has no partial-index syntax), see
+// migration.sql: CREATE UNIQUE INDEX ... ON (role) WHERE status = 'active'.
+model TranscriptionAgent {
+  id         String   @id @default(cuid())
+  agentName  String                       // e.g. "agent_<commit-sha>" — NOT unique; same build can hold multiple roles as separate rows
+  role       String?                      // open-ended slot name, e.g. 'default' | 'test' | ... — not a fixed enum, or null if never assigned a role
+  status     String   @default("active")  // 'active' | 'inactive' — inactive rows are frozen history, never touched again
+  createdAt  DateTime @default(now())
+  modifiedAt DateTime @updatedAt
+
+  @@index([agentName])
+  @@map("transcription_agent")
   @@schema("public")
 }
 

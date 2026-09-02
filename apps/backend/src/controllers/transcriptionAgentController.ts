@@ -8,6 +8,7 @@ import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
+import { livekitService } from '@/services/liveKitService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { TicketController } from './ticketController';
 // import { CallController } from './callController';
@@ -411,6 +412,43 @@ class TranscriptionAgentController {
     } catch (error) {
       logger.error('[Voiceprints] Failed to fetch voiceprints:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch voiceprints' });
+    }
+  };
+
+  /**
+   * POST /api/transcriptionAgent/register-agent
+   * A pod calls this once on startup with its own env-var-supplied {agentName, role}.
+   * Automates the rollout trigger so a human never has to type an agentName by hand —
+   * removes an entire error class (correctly-formatted-but-wrong-build) that live
+   * verification alone can't catch. Goes through the exact same verify-then-commit path
+   * as the human-facing rollout endpoint (transcriptionAgentRolloutController); this is
+   * just a different trigger into it, not a separate write path.
+   */
+  registerAgent = async (req: Request, res: Response): Promise<void> => {
+    const { agentName, role } = (req.body ?? {}) as { agentName?: unknown; role?: unknown };
+
+    if (typeof agentName !== 'string' || !agentName.trim()) {
+      res.status(400).json({ success: false, error: 'agentName is required' });
+      return;
+    }
+    if (typeof role !== 'string' || !role.trim()) {
+      res.status(400).json({ success: false, error: 'role is required' });
+      return;
+    }
+
+    try {
+      const result = await livekitService.attemptTranscriptionAgentRollout(agentName.trim(), role.trim());
+      if (!result.success) {
+        // Not a server error — the pod will retry itself on its own backoff. 200 with
+        // success:false so the pod's retry logic can distinguish "try again" from a
+        // real failure (missing/invalid body), same contract as a validation 400.
+        res.status(200).json({ success: false, reason: result.reason });
+        return;
+      }
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[TranscriptionAgent] register_agent_failed', { agentName, role, error });
+      res.status(503).json({ success: false, error: 'Service Unavailable' });
     }
   };
 }
