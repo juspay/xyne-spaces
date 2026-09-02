@@ -14,7 +14,12 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
+import { initializeYSweetDoc } from '../utils/ysweetUtils.js';
+import { labelBlocks, buildHandleMap, parseLabelledMarkdown, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
+import { createBlockRenderer } from '@/services/canvas/blockRender.js';
+import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
+import { readFromYSweet as readFromYSweetBlocks } from '../utils/ysweetUtils.js';
+import { createSuggestionBatch } from '@/services/canvas/suggestions.js';
 import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
 
 export class CanvasController {
@@ -439,6 +444,26 @@ export class CanvasController {
       // Read content from Y-Sweet
       const { readFromYSweet } = await import('../utils/ysweetUtils.js');
       const blocks = await readFromYSweet(canvas.id);
+
+      // Suggestion mode: return a labelled document and record which blocks the agent saw.
+      if (blocks.length > 0) {
+        const renderer = await createBlockRenderer(blocks);
+        const { markdown: labelled } = labelBlocks(blocks, renderer.render);
+        await saveReadReceipt(canvas.id, userId, {
+          blockIds: blocks
+            .map(b => (b as { id?: string }).id)
+            .filter((id): id is string => Boolean(id)),
+        });
+        res.status(200).json({
+          id: canvas.id,
+          title: canvas.title,
+          markdown: labelled,
+          labelInstruction: LABEL_INSTRUCTION,
+          url: getCanvasUrl(canvas.id, req.user?.workspaceId),
+        });
+        return;
+      }
+
       const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
 
       res.status(200).json({
@@ -489,28 +514,48 @@ export class CanvasController {
         return;
       }
 
-      const blocks = await convertMarkdownToBlockNote(markdown);
+      const current = await readFromYSweetBlocks(canvas.id);
 
-      // Sync content to Y-Sweet for collaborative editing
-      const ysweetSynced = await syncToYSweet(canvas.id, blocks);
-      if (!ysweetSynced) {
-        logger.warn(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
-      }
+      // Suggestion mode, no exceptions: this route only receives agent writes
+      // (S2S, spaces-edit-canvas) and NEVER touches the document itself — every
+      // change parks for human review.
+      const renderer = await createBlockRenderer(current);
+      const entries = parseLabelledMarkdown(markdown);
+      const handleMap = buildHandleMap(current);
 
-      // Update DB timestamp
-      const prisma = DatabaseClient.getInstance();
-      await prisma.canvas.update({
-        where: { id: canvas.id },
-        data: {
-          lastEditedBy: userId,
-          lastEditedAt: new Date(),
-          updatedAt: new Date(),
-        },
+      const receipt = await getReadReceipt(canvas.id, userId);
+      const ops = deriveOps({
+        current,
+        entries,
+        handleMap,
+        render: renderer.render,
+        ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
       });
 
-      res.status(200).json({
+      if (ops.length === 0) {
+        res.status(200).json({
+          id: canvas.id,
+          title: canvas.title,
+          status: 'no-changes',
+          message: 'The proposed content matches the canvas; nothing to review.',
+          url: getCanvasUrl(canvas.id, req.user?.workspaceId),
+        });
+        return;
+      }
+
+      const batch = await createSuggestionBatch({
+        workspaceId: canvas.workspaceId,
+        canvasId: canvas.id,
+        ops,
+      });
+
+      res.status(202).json({
         id: canvas.id,
         title: canvas.title,
+        status: 'pending-review',
+        batchId: batch.batchId,
+        changeCount: batch.created,
+        message: `${batch.created} change(s) proposed and awaiting approval.`,
         url: getCanvasUrl(canvas.id, req.user?.workspaceId),
       });
     } catch (error) {

@@ -4888,7 +4888,11 @@ const spacesReadCanvas: ToolDef = {
   description:
     "Read the full markdown content of an existing canvas. " +
     "Pass the viewAccessId (the ID from the canvas URL: /chat/canvas/<viewAccessId>). " +
-    "Returns the canvas title and markdown body.",
+    "Returns the canvas title and markdown body. " +
+    "The body MAY arrive with a short label like [b1a2b3c] on each paragraph. " +
+    "Those labels identify paragraphs and must be preserved exactly when you " +
+    "write the document back with spaces-edit-canvas — follow the rules included " +
+    "in the response.",
   inputSchema: {
     type: "object",
     properties: {
@@ -4910,8 +4914,14 @@ const spacesReadCanvas: ToolDef = {
           method: "GET",
           headers: { "x-user-id": ctx.userId },
         },
-        { s2sKey },
-      )) as { title?: string; markdown?: string; url?: string; error?: string };
+        { s2sKey }
+      )) as {
+        title?: string;
+        markdown?: string;
+        url?: string;
+        labelInstruction?: string;
+        error?: string;
+      };
 
       if (result.error) return err(result.error);
       const title = result.title ?? "Untitled";
@@ -4920,6 +4930,20 @@ const spacesReadCanvas: ToolDef = {
 
       const citations: Citation[] = [];
       pushCanvasCitation(citations, viewAccessId, 1, title);
+      // Suggestion mode: each paragraph carries a [bXXXXXX] label and
+      // labelInstruction explains how to preserve them. It must be included in
+      // the output — without it the model strips the labels and the edit is
+      // rejected. The title is emitted as metadata ("Canvas title:") instead of
+      // a "# Title" heading, which models echo back as unlabelled body text,
+      // producing a phantom "added paragraph" in every review.
+      if (result.labelInstruction) {
+        return okCited(
+          prefixChunk(1, `Canvas title: ${title}`, [
+            ``, `URL: ${url}`, ``, result.labelInstruction, ``, markdown,
+          ]),
+          citations,
+        );
+      }
       return okCited(prefixChunk(1, `# ${title}`, [``, `URL: ${url}`, ``, markdown]), citations);
     }),
 };
@@ -4929,9 +4953,13 @@ const spacesReadCanvas: ToolDef = {
 const spacesEditCanvas: ToolDef = {
   name: "spaces-edit-canvas",
   description:
-    "Replace the contents of an existing canvas. Requires edit access (owner, editor, or an edit link). " +
+    "Propose new contents for an existing canvas. Requires edit access (owner, editor, or an edit link). " +
     "Pass the viewAccessId (the ID from the canvas URL: /chat/canvas/<viewAccessId>) and the new markdown. " +
-    "Returns the canvas URL on success.",
+    "IMPORTANT: if spaces-read-canvas returned paragraphs prefixed with labels like [b1a2b3c], " +
+    "keep every label exactly as given, prefix paragraphs you ADD with [new], and omit a " +
+    "paragraph only if you intend to delete it. Dropping a label turns that paragraph into a " +
+    "delete-plus-add (its comments are lost), so keep labels exactly. Edits to existing canvases " +
+    "are queued for human approval rather than applied immediately.",
   inputSchema: {
     type: "object",
     properties: {
@@ -5469,7 +5497,19 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
         method: "POST",
         headers: { "x-xyne-acting-user-id": ctx.userId },
         body: JSON.stringify(args),
-      }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
+      }, sdlcSpacesAuth())) as {
+        artifact: { canvasId: string; viewAccessId?: string; url?: string; parked?: boolean; pendingChanges?: number };
+      };
+      // Parked = queued as suggestions a human must accept in the canvas; the
+      // document is NOT updated yet. Say so, or the model reports it as done.
+      if (data.artifact.parked) {
+        const n = data.artifact.pendingChanges ?? 0;
+        return ok(
+          n === 0
+            ? `No changes detected — the artifact already matches. ${JSON.stringify(data.artifact)}`
+            : `Queued ${n} change(s) for human review in the canvas — not applied until accepted. ${JSON.stringify(data.artifact)}`,
+        );
+      }
       return ok(JSON.stringify(data.artifact));
     } catch (e) {
       return err(`Update SDLC artifact error: ${errMsg(e)}`);
