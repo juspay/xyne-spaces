@@ -49,6 +49,15 @@ export const ActivityItem = memo(function ActivityItem({
       return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'group_mention':
+      if (activity.canvasId) {
+        return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;
+      }
+      return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'channel_mention':
+      if (activity.canvasId) {
+        return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;
+      }
       return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'keyword_match':

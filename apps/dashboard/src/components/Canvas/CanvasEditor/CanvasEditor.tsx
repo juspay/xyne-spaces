@@ -31,10 +31,14 @@ import { filterSuggestionItems } from '@blocknote/core/extensions';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import { en } from '@blocknote/core/locales';
-import { PresentationModal, usePresentation } from 'blocknote-layout-extensions';
+import {
+  PresentationModal,
+  usePresentation,
+  getMentionSuggestionMenuItems as getMentionSuggestionMenuItemsUntyped,
+  insertGroupMention as insertGroupMentionUntyped,
+  asBlockNoteEditorForView,
+} from 'blocknote-layout-extensions';
 import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
-import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-layout-extensions';
-import { asBlockNoteEditorForView } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
 import { withHeadingsTogether } from '../canvasSlashMenu';
@@ -94,6 +98,34 @@ const canvasDictionary = {
     emptyDocument: "Write something, or press '/' for commands",
   },
 };
+
+type CanvasEditorForView = ReturnType<typeof asBlockNoteEditorForView>;
+type MentionSuggestionUser = {
+  id: string;
+  username: string;
+  email: string;
+  picture?: string | null;
+};
+type MentionSuggestionOptions = {
+  onUserSearch: (query: string) => Promise<MentionSuggestionUser[]>;
+  currentUserId?: string;
+};
+type GroupMentionTarget = {
+  id: string;
+  name: string;
+  alias?: string | null;
+};
+
+const getMentionSuggestionMenuItems = getMentionSuggestionMenuItemsUntyped as unknown as (
+  editor: CanvasEditorForView,
+  query: string,
+  options: MentionSuggestionOptions,
+) => Promise<DefaultReactSuggestionItem[]>;
+
+const insertGroupMention = insertGroupMentionUntyped as unknown as (
+  editor: CanvasEditorForView,
+  group: GroupMentionTarget,
+) => void;
 
 // Content size limit in bytes
 const CONTENT_SIZE_MAX_THRESHOLD = 100 * 1024; // 100KB - block save

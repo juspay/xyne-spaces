@@ -10,12 +10,23 @@ import { notificationService } from '../services/notificationService.js';
 import { slackService } from '../services/slackService.js';
 import { activityService } from '../services/activity/activityService.js';
 import { DatabaseClient } from '@/database/client';
-import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
+import {
+  getChannelParticipantsForMention,
+  getGroupMembersForNotification,
+} from '../utils/mentionUtils.js';
+import { enqueueCanvasPermissionRefresh } from '../services/canvasPermissionSync.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
-import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
+import { initializeYSweetDoc, syncToYSweet } from '../utils/ysweetUtils.js';
+import {
+  convertMarkdownToBlockNote,
+  convertBlockNoteToMarkdown,
+  getCanvasUrl,
+  getCanvasById,
+} from '../services/canvasService.js';
+
+const sanitizeLogValue = (value: string): string => value.replace(/[\r\n]/g, '');
 
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -24,7 +35,106 @@ export class CanvasController {
     this.messageAttachmentRepository = messageAttachmentRepository;
   }
 
-    createCanvas = async (req: Request, res: Response): Promise<void> => {
+  private async ensureCommentMentionTargetAccess({
+    canvasId,
+    mentionType,
+    mentionId,
+    userId,
+    workspaceId,
+  }: {
+    canvasId: string;
+    mentionType: 'group' | 'channel';
+    mentionId: string;
+    userId: string;
+    workspaceId: string;
+  }): Promise<boolean> {
+    const db = DatabaseClient.getInstance();
+    const now = new Date();
+
+    if (mentionType === 'group') {
+      const group = await db.userGroup.findFirst({
+        where: {
+          id: mentionId,
+          workspaceId,
+          isActive: true,
+        },
+        select: { id: true },
+      });
+      if (!group) return false;
+
+      await db.canvasParticipant.upsert({
+        where: {
+          canvasId_userGroupId: {
+            canvasId,
+            userGroupId: mentionId,
+          },
+        },
+        create: {
+          id: uuidv4(),
+          workspaceId,
+          canvasId,
+          userGroupId: mentionId,
+          role: CanvasRole.VIEWER,
+          joinedAt: now,
+          updatedAt: now,
+        },
+        update: {},
+      });
+      await enqueueCanvasPermissionRefresh(canvasId).catch((error) =>
+        logger.warn(
+          `[CANVAS-MENTIONS] Failed to enqueue permission refresh for canvas ${sanitizeLogValue(canvasId)}: ${error instanceof Error ? sanitizeLogValue(error.message) : 'Unknown error'}`
+        )
+      );
+      return true;
+    }
+
+    const channel = await db.channel.findFirst({
+      where: {
+        id: mentionId,
+        workspaceId,
+        scopeType: 'DEFAULT',
+        isArchived: false,
+      },
+      select: { id: true },
+    });
+    if (!channel) return false;
+
+    const actorInChannel = await db.channelParticipant.findFirst({
+      where: {
+        channelId: mentionId,
+        userId,
+      },
+      select: { id: true },
+    });
+    if (!actorInChannel) return false;
+
+    await db.canvasParticipant.upsert({
+      where: {
+        canvasId_channelId: {
+          canvasId,
+          channelId: mentionId,
+        },
+      },
+      create: {
+        id: uuidv4(),
+        workspaceId,
+        canvasId,
+        channelId: mentionId,
+        role: CanvasRole.VIEWER,
+        joinedAt: now,
+        updatedAt: now,
+      },
+      update: {},
+    });
+    await enqueueCanvasPermissionRefresh(canvasId).catch((error) =>
+      logger.warn(
+        `[CANVAS-MENTIONS] Failed to enqueue permission refresh for canvas ${sanitizeLogValue(canvasId)}: ${error instanceof Error ? sanitizeLogValue(error.message) : 'Unknown error'}`
+      )
+    );
+    return true;
+  }
+
+  createCanvas = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
       if (!userId) {
@@ -55,8 +165,8 @@ export class CanvasController {
             title,
             content: [],
             workspaceId: req.user!.workspaceId!,
-            createdBy: creatorId,  // <-- AUTHENTICATED USER
-            channelId: channelId || null,  // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
+            createdBy: creatorId, // <-- AUTHENTICATED USER
+            channelId: channelId || null, // <-- ASSOCIATE WITH CHANNEL IF PROVIDED
             visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
             isTemplate: false,
             isCollaborative: true,
@@ -71,7 +181,7 @@ export class CanvasController {
             id: participantId,
             canvasId,
             workspaceId: req.user!.workspaceId!,
-            userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
+            userId: creatorId, // <-- AUTHENTICATED USER IS OWNER
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
@@ -123,7 +233,7 @@ export class CanvasController {
         await canvasAuthService.requireEditAccess(canvasId, userId);
       } catch (error) {
         logger.warn(`[CANVAS-UPLOAD] Permission denied for user ${userId} on canvas ${canvasId}`, {
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: error instanceof Error ? error.message : 'Unknown error',
         });
         await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(403).json({ error: 'Permission denied' });
@@ -151,7 +261,10 @@ export class CanvasController {
       const uploadResults = await uploadFiles([file]);
 
       if (!uploadResults || uploadResults.length === 0) {
-        logger.error('[CANVAS-UPLOAD] The file upload service did not return a valid result for file:', { fileName: file.originalname });
+        logger.error(
+          '[CANVAS-UPLOAD] The file upload service did not return a valid result for file:',
+          { fileName: file.originalname }
+        );
         await cleanupProxiedFile(file, { logPrefix: 'CANVAS-UPLOAD' });
         res.status(500).json({ error: 'Failed to process the uploaded file.' });
         return;
@@ -213,14 +326,14 @@ export class CanvasController {
 
   /**
    * POST /api/canvas/:canvasId/mentions
-   * Event-based: notify users when a user/group is selected from the @ mention menu.
-   * Body: { mentionType: 'user' | 'group', mentionId: string, blockId: string, canvasTitle: string }
+   * Event-based: notify users when a user/group/channel is selected from the mention menu.
+   * Body: { mentionType: 'user' | 'group' | 'channel', mentionId: string, blockId: string, canvasTitle: string }
    *
    * One API call per mention selection. No counting/deduplication - react to events.
    */
   handleMentions = async (req: Request, res: Response): Promise<void> => {
     const CanvasMentionSchema = z.object({
-      mentionType: z.enum(['user', 'group']),
+      mentionType: z.enum(['user', 'group', 'channel']),
       mentionId: z.string().min(1),
       blockId: z.string().min(1),
       commentThreadId: z.string().optional(),
@@ -242,8 +355,15 @@ export class CanvasController {
         return;
       }
 
-      const { mentionType, mentionId, blockId, commentThreadId, canvasTitle, mentionContext, slackUrl } =
-        validatedBody.data;
+      const {
+        mentionType,
+        mentionId,
+        blockId,
+        commentThreadId,
+        canvasTitle,
+        mentionContext,
+        slackUrl,
+      } = validatedBody.data;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -268,9 +388,34 @@ export class CanvasController {
       // Fetch canvas to get channelId
       const canvasRecord = await db.canvas.findUnique({
         where: { id: canvasId },
-        select: { channelId: true },
+        select: { channelId: true, createdBy: true, workspaceId: true },
       });
+      if (!canvasRecord) {
+        res.status(404).json({ error: 'Canvas not found' });
+        return;
+      }
       const canvasChannelId = canvasRecord?.channelId;
+      let commentMentionTargetAccessEnsured = false;
+
+      if (mentionContext === 'comment' && (mentionType === 'group' || mentionType === 'channel')) {
+        const hasMentionTargetAccess = await this.ensureCommentMentionTargetAccess({
+          canvasId,
+          mentionType,
+          mentionId,
+          userId,
+          workspaceId: canvasRecord.workspaceId,
+        });
+
+        if (!hasMentionTargetAccess) {
+          res.status(200).json({
+            success: true,
+            notified: 0,
+            skipped: [{ mentionType, mentionId, reason: 'MENTION_TARGET_NOT_ACCESSIBLE' }],
+          });
+          return;
+        }
+        commentMentionTargetAccessEnsured = true;
+      }
 
       // Fetch channel name if canvas is linked to a channel
       const channel = canvasChannelId
@@ -282,8 +427,9 @@ export class CanvasController {
       const channelName = channel?.name;
 
       // Resolve mentioned users
-      const mentionedUsers: { userId: string; mentionSource: 'direct' | 'group' }[] = [];
-      
+      const mentionedUsers: { userId: string; mentionSource: 'direct' | 'group' | 'channel' }[] =
+        [];
+
       if (mentionType === 'user' && mentionId !== userId) {
         mentionedUsers.push({ userId: mentionId, mentionSource: 'direct' });
       } else if (mentionType === 'group') {
@@ -293,6 +439,13 @@ export class CanvasController {
             mentionedUsers.push({ userId: m.userId, mentionSource: 'group' });
           }
         }
+      } else if (mentionType === 'channel') {
+        const members = await getChannelParticipantsForMention(mentionId).catch(() => []);
+        for (const m of members) {
+          if (m.userId !== userId) {
+            mentionedUsers.push({ userId: m.userId, mentionSource: 'channel' });
+          }
+        }
       }
 
       if (mentionedUsers.length === 0) {
@@ -300,51 +453,66 @@ export class CanvasController {
         return;
       }
 
-      // Batch check canvas access for all mentioned users in a single query
-      const uniqueUserIds = [...new Set(mentionedUsers.map(u => u.userId))];
-      
-      // Fetch canvas details, canvas participants, sender name, and mentioned users' emails in one batch
-      const [canvas, canvasParticipants, sender, mentionedUserRecords] = await Promise.all([
-        db.canvas.findUnique({
-          where: { id: canvasId },
-          select: { createdBy: true },
-        }),
-        db.canvasParticipant.findMany({
-          where: {
-            canvasId,
-            userId: { in: uniqueUserIds },
-          },
-          select: { userId: true },
-        }),
+      const uniqueUserIds = [...new Set(mentionedUsers.map((u) => u.userId))];
+
+      // Fetch canvas details, sender name, and mentioned users' emails in one batch.
+      // Canvas access itself must use canvasAuthService because access can be direct,
+      // group-shared, channel-shared, public visibility, or guest container access.
+      const [sender, mentionedUserRecords] = await Promise.all([
         db.user.findUnique({ where: { id: userId }, select: { name: true } }),
         db.user.findMany({
           where: { id: { in: uniqueUserIds } },
           select: { id: true, email: true },
         }),
       ]);
-      
-      // Determine which users have access (canvas creator or canvas participant)
-      const canvasParticipantIds = new Set(canvasParticipants.map(p => p.userId));
-      const usersWithAccessIds = uniqueUserIds.filter(uid => 
-        uid === canvas?.createdBy || 
-        canvasParticipantIds.has(uid)
-      );
+
+      const usersWithAccessIds = commentMentionTargetAccessEnsured
+        ? uniqueUserIds
+        : (
+            await Promise.all(
+              uniqueUserIds.map(async (uid) => ({
+                uid,
+                hasAccess:
+                  uid === canvasRecord.createdBy ||
+                  (await canvasAuthService.checkCanvasAccess(canvasId, uid)).hasAccess,
+              }))
+            )
+          )
+            .filter((result) => result.hasAccess)
+            .map((result) => result.uid);
+      const skippedMentionTargets =
+        mentionType === 'user' && !usersWithAccessIds.includes(mentionId)
+          ? [{ mentionType, mentionId, reason: 'NO_CANVAS_ACCESS' }]
+          : [];
 
       if (usersWithAccessIds.length === 0) {
-        res.status(200).json({ success: true, notified: 0 });
+        res.status(200).json({
+          success: true,
+          notified: 0,
+          skipped: skippedMentionTargets,
+        });
         return;
       }
 
       // Filter to users with access and create activities
-      const mentionedUsersWithAccess = mentionedUsers.filter(u => usersWithAccessIds.includes(u.userId));
-      const activities = mentionedUsersWithAccess.map(u => ({
+      const mentionedUsersWithAccess = mentionedUsers.filter((u) =>
+        usersWithAccessIds.includes(u.userId)
+      );
+      const activities = mentionedUsersWithAccess.map((u) => ({
         id: uuidv4(),
         userId: u.userId,
         actorId: userId,
-        actorAction: u.mentionSource === 'direct' ? 'mentioned_user' : 'group_mention',
+        actorAction:
+          u.mentionSource === 'direct'
+            ? 'mentioned_user'
+            : u.mentionSource === 'group'
+              ? 'group_mention'
+              : 'channel_mention',
         actionSource: mentionContext === 'comment' ? 'canvas_comment' : 'canvas',
-        actionSourceId: mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
+        actionSourceId:
+          mentionContext === 'comment' && commentThreadId ? commentThreadId : canvasId,
         channelId: canvasChannelId ?? undefined,
+        workspaceId: canvasRecord.workspaceId ?? req.user?.workspaceId,
         canvasId: canvasId,
         blockId: blockId ?? undefined,
         classification: ActivityClassification.PENDING,
@@ -355,8 +523,8 @@ export class CanvasController {
       const usersWithAccessSet = new Set(usersWithAccessIds);
       const userEmailMap = new Map(
         mentionedUserRecords
-          .filter(u => u.email && usersWithAccessSet.has(u.id))
-          .map(u => [u.id, u.email!])
+          .filter((u) => u.email && usersWithAccessSet.has(u.id))
+          .map((u) => [u.id, u.email!])
       );
       const mentionedEmails = Array.from(userEmailMap.values());
 
@@ -378,12 +546,19 @@ export class CanvasController {
           blockId,
           commentThreadId,
           canvasChannelId ?? undefined,
-          mentionContext,
+          mentionContext
         );
 
-        slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
+        slackRecipientEmails = getSlackRecipientEmails(
+          mentionedEmails,
+          deliveredUserIds,
+          userEmailMap
+        );
       } catch (error) {
-        logger.error('[CANVAS-MENTIONS] Spaces notification failed — sending Slack to all recipients', { error });
+        logger.error(
+          '[CANVAS-MENTIONS] Spaces notification failed — sending Slack to all recipients',
+          { error }
+        );
       }
 
       // Step 3: Send Slack notifications only to users who didn't receive app notification
@@ -391,12 +566,13 @@ export class CanvasController {
         slackRecipientEmails,
         senderName,
         canvasTitle ?? 'Canvas',
-        slackUrl!,
+        slackUrl!
       );
 
       res.status(200).json({
         success: true,
         notified: usersWithAccessIds.length,
+        skipped: skippedMentionTargets,
       });
     } catch (error) {
       logger.error('[CANVAS-MENTIONS] Error sending mention notifications:', error);
