@@ -25,12 +25,14 @@ import {
   CircleCheck,
   CircleDashed,
   CircleDot,
-  MultipleCrossCancelCircle as CircleX,
-  ThreeDotsMenuHorizontal as Ellipsis,
-  Hashtag as Hash,
-  LinkChainHorizontal as LinkIcon,
-  PaperclipSlant as Paperclip,
-  ExternalLink as SquareArrowOutUpRight,
+  CircleX,
+  Ellipsis,
+  Hash,
+  Link as LinkIcon,
+  Paperclip,
+  Signature,
+  SquareArrowOutUpRight,
+  SquareKanban,
   Tag,
   Ticket,
   Trash2,
@@ -826,17 +828,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       );
     }, 250);
     return () => clearTimeout(handle);
-  }, [
-    enableUrlSync,
-    isOpen,
-    formValues.priority,
-    formValues.status,
-    formValues.boardId,
-    formValues.assignee,
-    formValues.eta,
-    formValues.tags,
-    formValues.workflowType,
-  ]);
+  }, [enableUrlSync, isOpen, formValues]);
 
   // If a board is currently set but no longer exists in the list, clear it so AI can re-suggest
   useEffect(() => {
