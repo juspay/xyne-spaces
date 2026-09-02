@@ -16,8 +16,10 @@
  * and surface a normal 4xx).
  */
 
-import { prisma } from "../db.js";
 import { randomUUID } from "node:crypto";
+import { Prisma, type User } from "@prisma/client";
+import { prisma } from "../db.js";
+import { resolveSurfacePerson } from "./identity-resolution.js";
 import { getSpacesUserById, type SpacesAuthCaller, type SpacesUserProfile } from "./spaces-db.js";
 
 import { createLogger } from "../logger.js";
@@ -63,7 +65,9 @@ export async function resolveClawUserIdForSpacesIdentity(
   workspaceId?: string | null,
 ): Promise<string | undefined> {
   const id = spacesUserId.trim();
-  if (!id) return undefined;
+  if (!id) {
+    return undefined;
+  }
 
   // Check the workspace identity first. During the org-member migration a
   // legacy Claw row can have the same id as this workspace-scoped Spaces user,
@@ -81,10 +85,25 @@ export async function resolveClawUserIdForSpacesIdentity(
     select: { userId: true },
     orderBy: { updatedAt: "desc" },
   });
-  if (identity?.userId) return identity.userId;
+  if (identity?.userId) {
+    return identity.userId;
+  }
 
   const exact = await prisma.user.findUnique({ where: { id }, select: { id: true } });
   return exact?.id;
+}
+
+/**
+ * "Id-or-alias → canonical Claw user id, else the input unchanged": the shared
+ * one-liner for admin routes that accept either Claw ids or Spaces workspace
+ * aliases. Resolution failures degrade to the input id (fail-open) so a
+ * transient DB hiccup is a not-found, never a 500.
+ */
+export async function resolveCanonicalUserIdOrSelf(
+  spacesUserId: string,
+  workspaceId?: string | null,
+): Promise<string> {
+  return (await resolveClawUserIdForSpacesIdentity(spacesUserId, workspaceId).catch(() => undefined)) ?? spacesUserId;
 }
 
 /**
@@ -93,26 +112,28 @@ export async function resolveClawUserIdForSpacesIdentity(
  * plausibly copy from either system). Resolves through the identity/
  * exact-id ladder and returns the canonical Claw users row (or null).
  */
-export async function findUserByAnyId(rawId: string) {
-  const canonicalId = await resolveClawUserIdForSpacesIdentity(rawId).catch(() => undefined);
+export async function findUserByAnyId(rawId: string): Promise<User | null> {
+  const canonicalId = await resolveClawUserIdForSpacesIdentity(rawId).catch((err) => {
+    log.warn(`[users-jit] findUserByAnyId: identity resolution failed for "${rawId}":`, err instanceof Error ? err.message : err);
+    return undefined;
+  });
   return canonicalId ? prisma.user.findUnique({ where: { id: canonicalId } }) : null;
 }
 
 async function linkSpacesIdentity(spacesUser: SpacesUserProfile, orgId: string, userId: string): Promise<void> {
   if (!spacesUser.workspaceId) return;
 
-  const surfaceById = await prisma.surface.findUnique({ where: { id: "spaces" }, select: { id: true, key: true } });
-  const surfaceByKey = await prisma.surface.findUnique({ where: { key: "spaces" }, select: { id: true } });
-  if (surfaceByKey && surfaceByKey.id !== "spaces") {
-    log.warn(`[users-jit] cannot link Spaces identity: surface key "spaces" belongs to ${surfaceByKey.id}, not id "spaces"`);
+  // The `surfaces` registry row for "spaces" is seeded by migration
+  // 20260706205659_slice0_surface_foundation. Read-only here: a missing or
+  // mismatched row means migrations have not run — a hard deployment failure
+  // this request path must not self-heal over.
+  const surface = await prisma.surface.findUnique({ where: { id: "spaces" }, select: { id: true, key: true } });
+  if (!surface || surface.key !== "spaces") {
+    log.error(
+      `[users-jit] cannot link Spaces identity: surface row id="spaces" ${surface ? `has key "${surface.key}"` : "is missing"} — ` +
+        `expected migration 20260706205659_slice0_surface_foundation to seed it`,
+    );
     return;
-  }
-  if (!surfaceById) {
-    await prisma.surface.create({
-      data: { id: "spaces", key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
-    });
-  } else if (surfaceById.key !== "spaces") {
-    await prisma.surface.update({ where: { id: "spaces" }, data: { key: "spaces" } });
   }
 
   const existing = await prisma.userSurfaceIdentity.findUnique({
@@ -342,68 +363,28 @@ export async function ensureUserExists(
     return false;
   }
 
-  if (existing && existing.orgId !== orgId) {
-    log.error(
-      `[users-jit] user ${spacesUser.id} already belongs to Claw org ${existing.orgId}, ` +
-        `but workspace=${spacesUser.workspaceId ?? "none"} resolves to ${orgId}; refusing to relink`,
-    );
-    return false;
-  }
-
-  // Email-primary person resolution (deliberate product choice): within an
-  // org, (email, orgId) is the per-person uniqueness invariant Spaces data
-  // satisfies in this deployment. The person key Spaces derives (org_members
-  // id) is stored only on the SURFACE identity rows (users stays surface-
-  // agnostic) — used here as two protective rails around email matching:
-  // (a) a same-member hit upgrades a weak email match to a confident reuse,
-  // (b) contradicting member claims = hard refuse (never a silent merge).
+  // Person resolution is shared with the spaces-sync provisioning route —
+  // see src/lib/identity-resolution.ts for the email-primary rule and the
+  // fail-closed refusal rails. A refusal here is a hard miss (no throw): the
+  // webhook/S2S entrypoints treat it as "user not mirrorable right now".
   const email = normalizeEmail(spacesUser.email);
-  const existingInOrg = await prisma.user.findFirst({
-    where: { orgId, email: { equals: email, mode: "insensitive" } },
-    select: { id: true },
+  const resolution = await resolveSurfacePerson(prisma, {
+    orgId,
+    email,
+    ...(existing ? { exactUserId: existing.id } : {}),
+    ...(spacesUser.spacesOrgMemberId?.trim()
+      ? { memberId: spacesUser.spacesOrgMemberId.trim() }
+      : {}),
   });
-  const memberId = spacesUser.spacesOrgMemberId?.trim() || undefined;
-  const memberIdentity = memberId
-    ? await prisma.userSurfaceIdentity.findMany({
-        where: { surfaceId: "spaces", orgId, surfaceMemberId: memberId, userId: { not: null } },
-        select: { userId: true },
-      })
-    : [];
-  const memberUserIds = [...new Set(memberIdentity.map((row) => row.userId as string))];
-  if (memberUserIds.length > 1) {
+  if (resolution.kind === "refused") {
     log.error(
-      `[users-jit] identity conflict: Spaces member ${memberId} is linked to multiple Claw users ` +
-        `${memberUserIds.join(", ")} in org=${orgId}; refusing to pick one`,
+      `[users-jit] identity conflict for Spaces user ${spacesUser.id} ` +
+        `(workspace=${spacesUser.workspaceId ?? "none"}) org=${orgId} caller=${caller}: ${resolution.reason}`,
     );
     return false;
-  }
-  const memberUserId = memberUserIds[0];
-  if (memberUserId && existingInOrg && memberUserId !== existingInOrg.id) {
-    log.error(
-      `[users-jit] identity conflict: Spaces member ${memberId} is linked to Claw user ${memberUserId}, ` +
-        `but email=${email} resolves to ${existingInOrg.id} in org=${orgId}; refusing merge`,
-    );
-    return false;
-  }
-  if (memberId && existingInOrg && memberUserIds.length === 0) {
-    // The email-matched person has identities claiming OTHER members in this
-    // org: a same-email/different-person collision. Refuse rather than merge.
-    const knownMembersOfEmailUser = await prisma.userSurfaceIdentity.findMany({
-      where: { surfaceId: "spaces", orgId, userId: existingInOrg.id, surfaceMemberId: { not: null } },
-      select: { surfaceMemberId: true },
-      distinct: ["surfaceMemberId"],
-    });
-    if (knownMembersOfEmailUser.length > 0) {
-      log.error(
-        `[users-jit] identity conflict: email=${email} in org=${orgId} already belongs to ` +
-          `member(s) ${knownMembersOfEmailUser.map((row) => row.surfaceMemberId).join(", ")}, ` +
-          `received ${memberId}; refusing email-collision merge`,
-      );
-      return false;
-    }
   }
 
-  let canonicalUserId = memberUserId ?? existingInOrg?.id;
+  let canonicalUserId = resolution.kind === "reuse" ? resolution.userId : undefined;
 
   if (canonicalUserId) {
     await prisma.user.update({
@@ -415,17 +396,39 @@ export async function ensureUserExists(
         `(${email}) org=${orgId} caller=${caller}`,
     );
   } else {
-    const created = await prisma.user.create({
-      data: {
-        id: `claw-user-${randomUUID()}`,
-        email,
-        name: spacesUser.name,
-        orgId,
-      },
-      select: { id: true },
-    });
-    canonicalUserId = created.id;
-    log.info(`[users-jit] created local user ${email} (id=${canonicalUserId}) org=${orgId} caller=${caller}`);
+    try {
+      const created = await prisma.user.create({
+        data: {
+          id: `claw-user-${randomUUID()}`,
+          email,
+          name: spacesUser.name,
+          orgId,
+        },
+        select: { id: true },
+      });
+      canonicalUserId = created.id;
+      log.info(`[users-jit] created local user ${email} (id=${canonicalUserId}) org=${orgId} caller=${caller}`);
+    } catch (err) {
+      // Two concurrent first-contact JITs race on User's @@unique([email,
+      // orgId]): the loser hits P2002. Re-resolve to the winner's row and
+      // continue linking instead of propagating — orgIdForSpacesUser only
+      // wants a clean miss-or-result, never a race exception.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) {
+        throw err;
+      }
+      const winner = await prisma.user.findFirst({
+        where: { orgId, email: { equals: email, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!winner) {
+        throw err;
+      }
+      canonicalUserId = winner.id;
+      log.info(
+        `[users-jit] concurrent JIT create for ${email} raced another request; ` +
+          `linking to winner ${canonicalUserId} org=${orgId} caller=${caller}`,
+      );
+    }
   }
 
   await ensureOrgMembership(canonicalUserId, orgId);
