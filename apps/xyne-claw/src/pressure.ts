@@ -6,6 +6,7 @@ const MEM_HIGH_PCT = numEnv("RUN_PRESSURE_MEM_HIGH_PCT", 85);
 const MEM_LOW_PCT = numEnv("RUN_PRESSURE_MEM_LOW_PCT", 70);
 const LOOP_HIGH_MS = numEnv("RUN_PRESSURE_LOOP_HIGH_MS", 100);
 const LOOP_LOW_MS = numEnv("RUN_PRESSURE_LOOP_LOW_MS", 50);
+const LOOP_SUSTAIN_SAMPLES = numEnv("RUN_PRESSURE_LOOP_SUSTAIN_SAMPLES", 3);
 export const PRESSURE_CHECK_INTERVAL_MS = numEnv("RUN_PRESSURE_CHECK_INTERVAL_MS", 2000);
 
 const MEM_CACHE_MS = 1_000;
@@ -61,6 +62,7 @@ loopHistogram.enable();
 
 let loopCachedAt = 0;
 let loopCachedMs = 0;
+let loopHighStreak = 0;
 
 export function eventLoopDelayMs(): number {
   const now = Date.now();
@@ -69,11 +71,17 @@ export function eventLoopDelayMs(): number {
   loopHistogram.reset();
   loopCachedMs = Number.isFinite(p95) ? p95 : 0;
   loopCachedAt = now;
+  loopHighStreak = loopCachedMs >= LOOP_HIGH_MS ? loopHighStreak + 1 : 0;
   return loopCachedMs;
 }
 
+function loopSustainedHigh(): boolean {
+  eventLoopDelayMs();
+  return loopHighStreak >= LOOP_SUSTAIN_SAMPLES;
+}
+
 export function isUnderPressure(): boolean {
-  return memoryPressurePct() >= MEM_HIGH_PCT || eventLoopDelayMs() >= LOOP_HIGH_MS;
+  return memoryPressurePct() >= MEM_HIGH_PCT || loopSustainedHigh();
 }
 
 export function overHighWater(): boolean {
@@ -85,7 +93,7 @@ export function underLowWater(): boolean {
 }
 
 export function describePressure(): string {
-  return `mem=${memoryPressurePct().toFixed(1)}% high=${MEM_HIGH_PCT} low=${MEM_LOW_PCT} loopHighMs=${LOOP_HIGH_MS} loopLowMs=${LOOP_LOW_MS}`;
+  return `mem=${memoryPressurePct().toFixed(1)}% (high=${MEM_HIGH_PCT} low=${MEM_LOW_PCT}) loop=${eventLoopDelayMs().toFixed(0)}ms streak=${loopHighStreak}/${LOOP_SUSTAIN_SAMPLES} (high=${LOOP_HIGH_MS} low=${LOOP_LOW_MS})`;
 }
 
 export function __resetPressureCacheForTests(): void {
@@ -93,4 +101,5 @@ export function __resetPressureCacheForTests(): void {
   memCachedPct = 0;
   loopCachedAt = 0;
   loopCachedMs = 0;
+  loopHighStreak = 0;
 }
