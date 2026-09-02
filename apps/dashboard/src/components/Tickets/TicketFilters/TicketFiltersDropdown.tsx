@@ -109,7 +109,9 @@ export const TicketFiltersDropdown = ({
   projectId,
   className = '',
   availablePriorities,
-  availableUsers,
+  availableCreators,
+  availableAssignees,
+  availableRoleAssignmentUsers,
   availableBoardDetails,
   availableBoards,
   sourceChannelProjectIds,
@@ -567,7 +569,7 @@ export const TicketFiltersDropdown = ({
             includeUnassigned
             allowInvert
             channelId={channelId}
-            priorityUserIds={availableUsers}
+            availableUsers={availableAssignees || []}
             demoteDeactivated
           />
         );
@@ -585,7 +587,7 @@ export const TicketFiltersDropdown = ({
             key='role-assignments-submenu'
             selectedRoles={filters.roleAssignments || []}
             onChange={value => handleFilterChange('roleAssignments', value)}
-            availableUsers={availableUsers || []}
+            availableUsers={availableRoleAssignmentUsers || []}
           />
         );
       case 'createdBy':
@@ -594,6 +596,7 @@ export const TicketFiltersDropdown = ({
             key='created-by-submenu'
             selectedUsers={filters.createdBy || []}
             onChange={(users: string[]) => handleFilterChange('createdBy', users)}
+            availableUsers={availableCreators || []}
             label='Created by'
           />
         );
@@ -800,7 +803,7 @@ export const TicketFiltersDropdown = ({
                   includeUnassigned
                   allowInvert
                   channelId={channelId}
-                  priorityUserIds={availableUsers}
+                  availableUsers={availableAssignees || []}
                   demoteDeactivated
                 />
               </Popover.Content>

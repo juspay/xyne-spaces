@@ -1646,16 +1646,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return Object.values(TicketPriority);
   }, []);
 
-  const { availableUsers, hasPrReviewers, hasQaAssigned } = useMemo(() => {
-    const userIds = new Set<string>();
+  const {
+    availableCreators,
+    availableAssignees,
+    availableRoleAssignmentUsers,
+    hasPrReviewers,
+    hasQaAssigned,
+  } = useMemo(() => {
+    const creatorIds = new Set<string>();
+    const assigneeIds = new Set<string>();
+    const roleAssignmentUserIds = new Set<string>();
     let hasPrReviewers = false;
     let hasQaAssigned = false;
     (kanbanSourceTickets as KanbanLocalTicket[] | undefined)?.forEach(ticket => {
-      if (ticket.assignedTo) userIds.add(ticket.assignedTo);
-      userIds.add(ticket.createdBy);
+      creatorIds.add(ticket.createdBy);
+      if (ticket.assignedTo) assigneeIds.add(ticket.assignedTo);
       if (Array.isArray(ticket.assignments)) {
         ticket.assignments.forEach(assignment => {
-          if (assignment.userId) userIds.add(assignment.userId);
+          if (assignment.userId) roleAssignmentUserIds.add(assignment.userId);
           const responsibility = assignment.userResponsibility as UserResponsibility;
           if (!hasPrReviewers && responsibility === UserResponsibility.PR_REVIEWER) {
             hasPrReviewers = true;
@@ -1665,7 +1673,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         });
       }
     });
-    return { availableUsers: Array.from(userIds), hasPrReviewers, hasQaAssigned };
+    return {
+      availableCreators: Array.from(creatorIds),
+      availableAssignees: Array.from(assigneeIds),
+      availableRoleAssignmentUsers: Array.from(roleAssignmentUserIds),
+      hasPrReviewers,
+      hasQaAssigned,
+    };
   }, [kanbanSourceTickets]);
 
   // Get available board IDs based on view mode (only needed for my-tickets views)
@@ -3468,7 +3482,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : effectiveProjectId || ''
               }
               availablePriorities={availablePriorities}
-              availableUsers={availableUsers}
+              availableCreators={availableCreators}
+              availableAssignees={availableAssignees}
+              availableRoleAssignmentUsers={availableRoleAssignmentUsers}
               availableBoards={availableBoards}
               availableBoardDetails={availableBoardDetails}
               sourceChannelProjectIds={sourceChannelProjectIds}

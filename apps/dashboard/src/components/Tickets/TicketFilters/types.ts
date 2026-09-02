@@ -46,7 +46,9 @@ export interface TicketFiltersProps {
   projectId?: string;
   className?: string;
   availablePriorities?: TicketPriority[] | undefined;
-  availableUsers?: string[] | undefined;
+  availableCreators?: string[] | undefined;
+  availableAssignees?: string[] | undefined;
+  availableRoleAssignmentUsers?: string[] | undefined;
   availableBoards?: string[] | undefined;
   availableBoardDetails?: BoardOption[] | undefined;
   sourceChannelProjectIds?: string[] | undefined;
