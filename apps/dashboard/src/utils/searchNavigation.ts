@@ -212,7 +212,12 @@ export const navigateToMail = (result: DisplaySearchResult, navigate: NavigateFu
   params.set('conversationId', conversationId);
   if (ticketId) params.set('ticketId', ticketId);
   if (mailId) params.set('mail', mailId);
-  void navigate(`/support/${channelId}/${xyneId}?${params.toString()}`);
+  // `fromSearch` tells the ticket's Back control it was opened from cmd+K or the
+  // search results screen, so Back returns there instead of routing to the
+  // channel inbox the user never visited. See goBackToTicketList in SupportScreen.
+  void navigate(`/support/${channelId}/${xyneId}?${params.toString()}`, {
+    state: { fromSearch: true },
+  });
 };
 
 /**
@@ -241,7 +246,7 @@ export const navigateToTicket = (
   // If EMAIL channel (Support/Desk ticket) AND has xyneId → Support view
   if (isDeskChannelType(channel?.type) && xyneId) {
     void navigate(`/support/${channelId}/${xyneId}`, {
-      state: { conversationId, ticketId },
+      state: { conversationId, ticketId, fromSearch: true },
     });
     return;
   }

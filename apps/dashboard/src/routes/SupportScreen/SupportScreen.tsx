@@ -1395,8 +1395,16 @@ const SupportScreen = (): ReactElement => {
     const mailId = searchParams.get('mail');
     if (mailId) params.set('mail', mailId);
     const qs = params.toString();
+    // This is a URL normalisation, not a real navigation, so it must not discard
+    // the router state the caller arrived with — `fromSearch` (set by cmd+K and
+    // the search results screen) decides where Back goes, and this effect always
+    // runs for a mail deeplink, which is exactly how search opens a ticket.
+    // Read from `window.history` rather than `location.state`: this effect
+    // rewrites that state, so depending on it would re-trigger the effect.
+    const carriedState = (window.history.state as { usr?: Record<string, unknown> } | null)?.usr;
     void navigate(`${supportBase}/${selectedChannelId}/${xyneId}${qs ? `?${qs}` : ''}`, {
       replace: true,
+      state: carriedState,
     });
   }, [
     deeplinkConversationId,
@@ -4145,6 +4153,8 @@ export const SupportTicketDetail = ({
     ticketId?: string | null;
     returnToUrl?: string | null;
     fromDeskList?: boolean;
+    /** Set by cmd+K / the search results screen; see goBackToTicketList. */
+    fromSearch?: boolean;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -4222,6 +4232,7 @@ export const SupportTicketDetail = ({
             replace: true,
             state: {
               ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(routerState?.fromSearch ? { fromSearch: true } : {}),
               ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
             },
           });
@@ -4399,6 +4410,7 @@ export const SupportTicketDetail = ({
         conversationId: t.conversationId,
         ticketId: t.id,
         ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+        ...(routerState?.fromSearch ? { fromSearch: true } : {}),
         ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
@@ -4455,10 +4467,20 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
-    // Both markers are stamped by the opener (desk list, Kanban, My Tickets) as it pushes
-    // this entry, so its page is one Back away — pop it rather than stacking a second copy.
+    // Every marker is stamped by the opener (desk list, Kanban, My Tickets, cmd+K,
+    // the search results screen) as it pushes this entry, so its page is one Back
+    // away — pop it rather than stacking a second copy.
     // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
-    if (routerState?.fromDeskList || routerState?.returnToUrl) {
+    //
+    // `idx` is react-router's position in the history stack; 0 means this entry is the
+    // first of the session, so there is nothing behind us to pop and going back would
+    // eject the user from the app. Markers only survive an in-app push, so this should
+    // not happen — it is a guard, not a code path.
+    const historyIdx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (
+      (routerState?.fromDeskList || routerState?.returnToUrl || routerState?.fromSearch) &&
+      historyIdx > 0
+    ) {
       void navigate(-1);
       return;
     }
@@ -4472,6 +4494,7 @@ export const SupportTicketDetail = ({
     onBack,
     routerState?.fromDeskList,
     routerState?.returnToUrl,
+    routerState?.fromSearch,
     supportBase,
   ]);
 
@@ -5694,6 +5717,7 @@ const EmailThreadItem = ({
   const navigate = useNavigate();
   const emailRouterState = useLocation().state as {
     fromDeskList?: boolean;
+    fromSearch?: boolean;
     returnToUrl?: string | null;
   } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
@@ -5742,6 +5766,7 @@ const EmailThreadItem = ({
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
               ...(emailRouterState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(emailRouterState?.fromSearch ? { fromSearch: true } : {}),
               ...(emailRouterState?.returnToUrl
                 ? { returnToUrl: emailRouterState.returnToUrl }
                 : {}),
