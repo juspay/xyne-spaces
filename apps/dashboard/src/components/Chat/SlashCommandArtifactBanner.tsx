@@ -17,6 +17,7 @@ import {
 } from './SlashCommandArtifactSideEffects';
 import { buildSlashCommandArtifactRoute } from './SlashCommandArtifacts';
 import { isDMChannel } from './ChatDirectory/ChatDirectory.utils';
+import { Button } from '../ui/Button/Button';
 
 export const getVisibleSlashCommandArtifactBanners = (
   items: readonly SlashCommandArtifactBannerItem[],
@@ -182,8 +183,9 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
               </button>
 
               {item.activeCallExternalId && (
-                <button
+                <Button
                   type='button'
+                  variant='ghost'
                   onClick={() => {
                     if (!isInThisCall) {
                       setIsOpen(false);
@@ -196,6 +198,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                     }
                   }}
                   disabled={isInThisCall}
+                  trackId='join_call_from_banner'
                   className='flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg bg-orange-500 px-2.5 text-xs font-semibold text-white hover:bg-orange-600 disabled:cursor-default disabled:opacity-70'
                   data-track-category='SLASH_COMMAND_ARTIFACT'
                   data-track-name='JOIN_CALL_FROM_BANNER'
@@ -207,7 +210,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                 >
                   <Phone className='size-3' />
                   {isInThisCall ? 'In call' : 'Join call'}
-                </button>
+                </Button>
               )}
             </div>
 
