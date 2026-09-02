@@ -1,14 +1,15 @@
 /**
- * Direct Vespa access for the `spaces-vespa-query` MCP tool — the raw-YQL
- * escape hatch, gated by DIRECT_VESPA_SEARCH. The agent writes its own YQL;
- * queryDirect() injects the per-schema ACL guard, picks a rank profile, runs
- * the query against VESPA_QUERY_ENDPOINT, and shapes the response.
+ * Direct Vespa access for the `spaces-vespa-search` MCP tool and the other
+ * direct-Vespa callers (corpus scan, evidence pack, context assembler), gated
+ * by DIRECT_VESPA_SEARCH. Callers hand queryDirect() a YQL string built in
+ * code; it injects the per-schema ACL guard, picks a rank profile, runs the
+ * query against VESPA_QUERY_ENDPOINT, and shapes the response.
  *
  * NOTE: this is NOT used by `spaces-search`. That tool always goes through the
  * Spaces backend /api/vespaSearch (the canonical YqlBuilder). An earlier
  * structured-params builder (searchDirect/buildYql) lived here too, but it was
  * a drift-prone second copy of YqlBuilder and was removed once spaces-search
- * was decoupled — only the raw-YQL path remains.
+ * was decoupled.
  *
  * ACL semantics below mirror backend/src/vespa/src/utils/YqlBuilder.ts — keep
  * aclConditionForSchema() in sync with any backend ACL/schema change.
