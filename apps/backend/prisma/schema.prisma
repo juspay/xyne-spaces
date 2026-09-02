@@ -941,6 +941,70 @@ model QuestionnaireResponse {
   @@schema("non_zero")
 }
 
+/// Admin-authored in-app feature announcements. Product content, not tenant data.
+///
+/// Intentionally non-Zero: eligibility is decided server-side (publish window, CAC flag,
+/// per-user state), and the client snapshots the batch when the card opens so pages cannot
+/// shift mid-session.
+///
+/// A null workspaceId means "every workspace". That requires FeatureAnnouncementsACL to be
+/// registered — the tenant extension force-scopes any model carrying a scalar workspaceId
+/// that has no ACL, which would silently drop every product-wide row.
+model FeatureAnnouncement {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  title       String
+  description String
+  /// FeatureAnnouncementPage[] — validated at the controller, never trusted from the row.
+  pages       Json
+  /// Object storage key. Never a signed URL: these rows outlive any expiry.
+  mediaKey    String?
+  mediaAlt    String?
+  ctaLabel    String?
+  ctaType     String?
+  ctaTarget   String?
+  status      String    @default("DRAFT")
+  publishedAt DateTime?
+  expiresAt   DateTime?
+  cacKey      String?
+  workspaceId String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, publishedAt])
+  @@index([workspaceId])
+  @@map("feature_announcements")
+  @@schema("non_zero")
+}
+
+/// Per-user delivery state for one-time surfaces. Authoritative — the UserActivityEvent
+/// mirror written alongside it is best-effort telemetry only.
+///
+/// Keyed by (surfaceKind, surfaceKey) rather than an announcement id so the device-scoped
+/// localStorage gates this supersedes can migrate onto the same table.
+model UserSurfaceState {
+  workspaceId String
+  id          String    @id @default(cuid())
+  userId      String
+  surfaceKind String
+  surfaceKey  String
+  /// Null until the surface actually rendered. Distinguishes delivered from viewed.
+  seenAt      DateTime?
+  seenCount   Int       @default(0)
+  progress    Int?
+  actedAt     DateTime?
+  dismissedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, surfaceKind, surfaceKey])
+  @@index([workspaceId, userId])
+  @@index([surfaceKind, surfaceKey])
+  @@map("user_surface_states")
+  @@schema("non_zero")
+}
+
 // Scheduled Messages – recurring messages posted to channels via Bull cron jobs
 model ScheduledMessage {
   workspaceId String // denormalized tenant key (stamped on insert)

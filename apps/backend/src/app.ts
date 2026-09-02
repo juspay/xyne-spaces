@@ -133,6 +133,7 @@ import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
 import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
+import featureAnnouncementRoutes from '@/routes/featureAnnouncements';
 import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
@@ -686,6 +687,9 @@ export class App {
 
     // Scheduled messages routes (auth required)
     this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);
+
+    // Feature announcement routes (auth applied per-route; admin writes gated within)
+    this.app.use('/api/feature-announcements', featureAnnouncementRoutes);
 
     // Generic tag routes (auth applied per-route within tagRoutes)
     this.app.use('/api/tags', tagRoutes);

@@ -4,6 +4,7 @@ import { queries } from '../zero/queries';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { stateMachineActor } from '../machines/stateMachine';
 import { apiInstance } from '../services/clients/apiClient';
+import { FeatureAnnouncementHost } from './FeatureAnnouncement/FeatureAnnouncementHost';
 
 interface CurrentUserRolesApiResponse {
   success: boolean;
@@ -42,5 +43,5 @@ export const DeferredLoader: React.FC = () => {
     }
   }, [currentUserRolesQuery.isSuccess, currentUserRolesQuery.data]);
 
-  return null;
+  return <FeatureAnnouncementHost />;
 };

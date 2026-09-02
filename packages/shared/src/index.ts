@@ -15,6 +15,7 @@ export * from './tags';
 export * from './board-types';
 export * from './types/workflowApproval';
 export * from './types/userActivity';
+export * from './types/featureAnnouncement';
 export * from './types/call';
 export * from './types/callChat';
 export * from './utils/etaCalculation';

@@ -74,6 +74,38 @@ export function setSafeInlineImageHeaders(
   res.setHeader('Content-Type', normalized);
 }
 
+const INLINE_VIDEO_MIME_TYPES = new Set<string>(['video/mp4', 'video/webm']);
+
+/**
+ * Sets response headers for a media endpoint rendered via <img> or <video>. Identical to
+ * setSafeInlineImageHeaders for images; additionally keeps the two video container types
+ * playable instead of downgrading them to an opaque download. SVG is excluded — a video
+ * surface has no reason to serve markup.
+ *
+ * Returns whether the type was served inline, so callers can 415 rather than silently
+ * handing back an attachment.
+ */
+export function setSafeInlineMediaHeaders(
+  res: Response,
+  contentType?: string | null,
+): boolean {
+  const normalized = (contentType || '').split(';')[0].trim().toLowerCase();
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  const inlinable =
+    INLINE_VIDEO_MIME_TYPES.has(normalized) ||
+    (INLINE_IMAGE_MIME_TYPES.has(normalized) && normalized !== 'image/svg+xml');
+
+  if (!inlinable) {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment');
+    return false;
+  }
+
+  res.setHeader('Content-Type', normalized);
+  return true;
+}
+
 /**
  * Sets Content-Type / Content-Disposition on an attachment download response.
  *

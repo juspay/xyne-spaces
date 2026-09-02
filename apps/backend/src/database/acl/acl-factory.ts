@@ -37,6 +37,7 @@ import {
   EmailReadsACL,
   EmailsACL,
   ExternalStepResponsesACL,
+  FeatureAnnouncementsACL,
   FormContextMappingsACL,
   FormEntityValuesACL,
   FormFieldsACL,
@@ -60,6 +61,7 @@ import {
   ProactiveNudgesACL,
   ProjectsACL,
   QuestionnaireResponsesACL,
+  UserSurfaceStatesACL,
   PullRequestsACL,
   QueriesACL,
   RcasACL,
@@ -219,6 +221,8 @@ export class ACLFactory {
       return new EmailReadsACL(ctx, prisma)
     case 'externalStepResponse':
       return new ExternalStepResponsesACL(ctx, prisma)
+    case 'featureAnnouncement':
+      return new FeatureAnnouncementsACL(ctx, prisma)
     case 'form':
       return new FormsACL(ctx, prisma)
     case 'formContextMapping':
@@ -267,6 +271,8 @@ export class ACLFactory {
       return new QueriesACL(ctx, prisma)
     case 'questionnaireResponse':
       return new QuestionnaireResponsesACL(ctx, prisma)
+    case 'userSurfaceState':
+      return new UserSurfaceStatesACL(ctx, prisma)
     case 'rCA':
       return new RcasACL(ctx, prisma)
     case 'reaction':

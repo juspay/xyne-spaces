@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
-import { Settings, Mail, ChevronLeft, UserCheck, GitBranch, LayoutGrid } from 'lucide-react';
+import { Settings, Mail, ChevronLeft, UserCheck, GitBranch, LayoutGrid, Megaphone } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,6 +10,7 @@ import { InvitationsTab } from './InvitationsTab';
 import { GuestUsersTab } from './GuestUsersTab';
 import { RepositoryCredentialsTab } from './RepositoryCredentialsTab';
 import { ToolbarTab } from './ToolbarTab';
+import { AnnouncementsTab } from './AnnouncementsTab';
 import * as Tabs from '@radix-ui/react-tabs';
 
 export const WorkspaceManagementScreen = (): ReactElement => {
@@ -87,6 +88,7 @@ export const WorkspaceManagementScreen = (): ReactElement => {
               <TabTrigger value='invitations' icon={Mail} label='Invitations' />
               <TabTrigger value='guests' icon={UserCheck} label='Guest Users' />
               <TabTrigger value='toolbar' icon={LayoutGrid} label='Toolbar' />
+              <TabTrigger value='announcements' icon={Megaphone} label='Announcements' />
             </Tabs.List>
           </Tabs.Root>
         </div>
@@ -111,6 +113,9 @@ export const WorkspaceManagementScreen = (): ReactElement => {
               </Tabs.Content>
               <Tabs.Content value='toolbar' className='outline-none h-full'>
                 <ToolbarTab isActive={activeTab === 'toolbar'} />
+              </Tabs.Content>
+              <Tabs.Content value='announcements' className='outline-none h-full'>
+                <AnnouncementsTab isActive={activeTab === 'announcements'} />
               </Tabs.Content>
             </div>
           </Tabs.Root>
