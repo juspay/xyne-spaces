@@ -196,7 +196,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   );
 
   // Fetch message with attachments when editing a message
-  const [messageData] = useCachedQuery(
+  const [messageData, messageDetails] = useCachedQuery(
     queries.getMessageForActivityV2({ messageId: state?.messageId || '' }),
     { enabled: !!state?.messageId },
   );
@@ -467,6 +467,14 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   useEffect(() => {
     if (canvasId === 'new') {
       setIsCreating(true);
+
+      // Editing a message starts with content from navigation state, but attachments
+      // arrive through Zero. Wait for that query before creating the canvas; otherwise
+      // the first render wins the race and permanently creates it without attachments.
+      if (isEditingMessage && state?.messageId && messageDetails.type !== 'complete') {
+        return;
+      }
+
       const createNewCanvas = async (): Promise<void> => {
         const newCanvasId = uuidv4();
         const now = Date.now();
@@ -570,6 +578,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     isCreatingMessage,
     state?.initialContent,
     messageData,
+    messageDetails.type,
     navigate,
     state,
     user?.id,

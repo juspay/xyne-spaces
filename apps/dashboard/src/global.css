@@ -2729,6 +2729,19 @@ html .bn-code-block-source-popup-ok-button:hover {
   color: hsl(var(--foreground));
 }
 
+/* Make ordinary canvas links visibly interactive in both light and midnight themes.
+   Repository source citations below intentionally override this base treatment. */
+.canvas-surface .bn-editor a[href] {
+  color: var(--link-color);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.canvas-surface .bn-editor a[href]:hover {
+  color: var(--link-hover-color);
+  text-decoration-thickness: 2px;
+}
+
 .canvas-surface .bn-side-menu .mantine-UnstyledButton-root:not(.mantine-Menu-item) {
   background-color: transparent;
 }
