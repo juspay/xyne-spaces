@@ -3053,7 +3053,7 @@ model CanvasVersion {
 
 model CanvasCommentThread {
   id              String                    @id @default(cuid())
-  workspaceId     String                    // denormalized tenant key (stamped on insert)
+  workspaceId     String?                   // denormalized tenant key (stamped on insert; nullable during backfill release)
   canvasId        String
   blockId         String
   anchorText      String?
@@ -3078,7 +3078,7 @@ model CanvasCommentThread {
 
 model CanvasComment {
   id               String   @id @default(cuid())
-  workspaceId      String   // denormalized tenant key (stamped on insert)
+  workspaceId      String?  // denormalized tenant key (stamped on insert; nullable during backfill release)
   threadId         String
   canvasId         String
   body             String

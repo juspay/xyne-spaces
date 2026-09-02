@@ -9748,7 +9748,9 @@ export function createMutators(
           const thread = await tx.run(
             zql.canvas_comment_threads
               .where('id', threadId)
-              .where('workspaceId', authData.workspaceId)
+              .where(({ or, cmp }) =>
+                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
+              )
               .one(),
           );
           if (!thread || thread.canvasId !== canvasId) {
@@ -9800,7 +9802,9 @@ export function createMutators(
           const comment = await tx.run(
             zql.canvas_comments
               .where('id', commentId)
-              .where('workspaceId', authData.workspaceId)
+              .where(({ or, cmp }) =>
+                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
+              )
               .one(),
           );
           if (!comment) {
@@ -9830,7 +9834,9 @@ export function createMutators(
           const comment = await tx.run(
             zql.canvas_comments
               .where('id', commentId)
-              .where('workspaceId', authData.workspaceId)
+              .where(({ or, cmp }) =>
+                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
+              )
               .one(),
           );
           if (!comment) {
@@ -9853,7 +9859,9 @@ export function createMutators(
           const thread = await tx.run(
             zql.canvas_comment_threads
               .where('id', comment.threadId)
-              .where('workspaceId', authData.workspaceId)
+              .where(({ or, cmp }) =>
+                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
+              )
               .one(),
           );
           if (thread) {
@@ -9875,7 +9883,9 @@ export function createMutators(
           const thread = await tx.run(
             zql.canvas_comment_threads
               .where('id', threadId)
-              .where('workspaceId', authData.workspaceId)
+              .where(({ or, cmp }) =>
+                or(cmp('workspaceId', authData.workspaceId), cmp('workspaceId', 'IS', null)),
+              )
               .one(),
           );
           if (!thread) {

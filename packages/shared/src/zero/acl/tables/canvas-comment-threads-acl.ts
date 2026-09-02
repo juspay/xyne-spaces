@@ -12,7 +12,9 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<'canvas_comment_thread
     query: Query<'canvas_comment_threads', Schema, TReturn>,
   ): Query<'canvas_comment_threads', Schema, TReturn> {
     return query
-      .where('workspaceId', '=', this.ctx.workspaceId)
+      .where(({ or, cmp }) =>
+        or(cmp('workspaceId', '=', this.ctx.workspaceId), cmp('workspaceId', 'IS', null)),
+      )
       .whereExists('canvas', canvas =>
         canvas.where(({ or, cmp, exists }) =>
           or(

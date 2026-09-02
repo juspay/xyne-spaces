@@ -3306,7 +3306,9 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({ canvasId: z.string() }),
     ({ ctx, args: { canvasId } }) => {
       return zql.canvas_comment_threads
-        .where('workspaceId', ctx.workspaceId)
+        .where(({ or, cmp }) =>
+          or(cmp('workspaceId', ctx.workspaceId), cmp('workspaceId', 'IS', null)),
+        )
         .where('canvasId', canvasId)
         .orderBy('createdAt', 'asc')
         .related('initialComment');
@@ -3317,7 +3319,9 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({ threadId: z.string() }),
     ({ ctx, args: { threadId } }) => {
       return zql.canvas_comments
-        .where('workspaceId', ctx.workspaceId)
+        .where(({ or, cmp }) =>
+          or(cmp('workspaceId', ctx.workspaceId), cmp('workspaceId', 'IS', null)),
+        )
         .where('threadId', threadId)
         .orderBy('createdAt', 'asc');
     },

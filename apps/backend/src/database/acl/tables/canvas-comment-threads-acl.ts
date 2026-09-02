@@ -10,15 +10,25 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasCommentThreadWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    return {
+      OR: [
+        { workspaceId: this.ctx.workspaceId },
+        { workspaceId: null, canvas: { workspaceId: this.ctx.workspaceId } },
+      ],
+    }
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasCommentThreadWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    return {
+      OR: [
+        { workspaceId: this.ctx.workspaceId },
+        { workspaceId: null, canvas: { workspaceId: this.ctx.workspaceId } },
+      ],
+    }
   }
 
   async canCreate(data: Prisma.CanvasCommentThreadUncheckedCreateInput): Promise<boolean> {
-    if (data.workspaceId !== this.ctx.workspaceId) return false
+    if (data.workspaceId != null && data.workspaceId !== this.ctx.workspaceId) return false
 
     const canvas = await this.prisma.canvas.findFirst({
       where: { id: data.canvasId, workspaceId: this.ctx.workspaceId },

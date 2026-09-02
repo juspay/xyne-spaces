@@ -7,9 +7,6 @@ FROM "public"."canvases" AS canvas
 WHERE thread."canvasId" = canvas."id"
   AND thread."workspaceId" IS NULL;
 
-ALTER TABLE "public"."canvas_comment_threads"
-ALTER COLUMN "workspaceId" SET NOT NULL;
-
 ALTER TABLE "public"."canvas_comments"
 ADD COLUMN "workspaceId" TEXT;
 
@@ -18,9 +15,6 @@ SET "workspaceId" = thread."workspaceId"
 FROM "public"."canvas_comment_threads" AS thread
 WHERE comment."threadId" = thread."id"
   AND comment."workspaceId" IS NULL;
-
-ALTER TABLE "public"."canvas_comments"
-ALTER COLUMN "workspaceId" SET NOT NULL;
 
 DROP INDEX IF EXISTS "public"."canvas_comment_threads_canvasId_createdAt_idx";
 DROP INDEX IF EXISTS "public"."canvas_comments_threadId_isInitial_createdAt_idx";
