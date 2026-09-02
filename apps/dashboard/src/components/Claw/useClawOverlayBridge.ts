@@ -6,9 +6,16 @@ function getClawOverlayAPI(): ClawOverlayAPI {
   return window.electronAPI?.clawOverlay;
 }
 
+export type ClawMode = 'pill' | 'spotlight';
+
 export interface ClawOverlayBridge {
   setIgnoreMouse: (ignore: boolean) => void;
   setExpanded: (expanded: boolean) => void;
+  dismissSpotlight: () => void;
+  setSpotlightHeight: (height: number) => void;
+  dragStart: () => void;
+  dragEnd: () => void;
+  onMode: (cb: (mode: ClawMode) => void) => () => void;
   focus: () => void;
   blur: () => void;
   openInMain: (pathname: string) => void;
@@ -34,6 +41,28 @@ export function useClawOverlayBridge(): ClawOverlayBridge {
 
   const setExpanded = useCallback((expanded: boolean) => {
     getClawOverlayAPI()?.setExpanded(expanded);
+  }, []);
+
+  const dismissSpotlight = useCallback(() => {
+    getClawOverlayAPI()?.dismissSpotlight();
+  }, []);
+
+  const setSpotlightHeight = useCallback((height: number) => {
+    getClawOverlayAPI()?.setSpotlightHeight(height);
+  }, []);
+
+  const dragStart = useCallback(() => {
+    getClawOverlayAPI()?.dragStart();
+  }, []);
+
+  const dragEnd = useCallback(() => {
+    getClawOverlayAPI()?.dragEnd();
+  }, []);
+
+  const onMode = useCallback((cb: (mode: ClawMode) => void) => {
+    const overlay = getClawOverlayAPI();
+    if (!overlay) return () => {};
+    return overlay.onMode(cb);
   }, []);
 
   const focus = useCallback(() => {
@@ -77,6 +106,11 @@ export function useClawOverlayBridge(): ClawOverlayBridge {
     () => ({
       setIgnoreMouse,
       setExpanded,
+      dismissSpotlight,
+      setSpotlightHeight,
+      dragStart,
+      dragEnd,
+      onMode,
       focus,
       blur,
       openInMain,
@@ -88,6 +122,11 @@ export function useClawOverlayBridge(): ClawOverlayBridge {
     [
       setIgnoreMouse,
       setExpanded,
+      dismissSpotlight,
+      setSpotlightHeight,
+      dragStart,
+      dragEnd,
+      onMode,
       focus,
       blur,
       openInMain,

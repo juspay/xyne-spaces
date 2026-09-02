@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { ReactElement, ReactNode, AnchorHTMLAttributes, HTMLAttributes } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -6,6 +6,10 @@ import remarkBreaks from 'remark-breaks';
 import type { Components } from 'react-markdown';
 import type { Element } from 'hast';
 import { cn } from '../../../utils/classNames';
+import {
+  StreamingMarkdownBlocks,
+  type MarkdownBlockRenderer,
+} from '../../utils/StreamingMarkdownBlocks';
 import {
   buildClawCitationToolNumbers,
   linkifyAndGroupClawCitations,
@@ -147,13 +151,18 @@ interface ClawMarkdownProps {
   content: string;
   className?: string;
   toolInvocations?: ToolInvocation[] | undefined;
+  isStreaming?: boolean | undefined;
 }
 
 export function ClawMarkdown({
   content,
   className,
   toolInvocations,
+  isStreaming,
 }: ClawMarkdownProps): ReactElement {
+  const everStreamedRef = useRef(isStreaming === true);
+  if (isStreaming) everStreamedRef.current = true;
+
   const renderedContent = useMemo(() => {
     const toolNumbers = buildClawCitationToolNumbers(content);
     return linkifyAndGroupClawCitations(content, toolNumbers);
@@ -166,15 +175,26 @@ export function ClawMarkdown({
     [toolInvocations],
   );
 
-  return (
-    <div className={cn('claw-markdown', className)}>
+  const renderBlock = useCallback<MarkdownBlockRenderer>(
+    markdown => (
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         urlTransform={url => url}
         components={markdownComponents}
       >
-        {renderedContent}
+        {markdown}
       </ReactMarkdown>
+    ),
+    [markdownComponents],
+  );
+
+  return (
+    <div className={cn('claw-markdown', className)}>
+      {everStreamedRef.current ? (
+        <StreamingMarkdownBlocks content={renderedContent} render={renderBlock} />
+      ) : (
+        renderBlock(renderedContent)
+      )}
     </div>
   );
 }

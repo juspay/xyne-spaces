@@ -172,9 +172,31 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
+  clawCompletion?: {
+    onShow: (
+      callback: (payload: {
+        outcome: 'idle' | 'needs-input' | 'error';
+        preview: string | null;
+        dark: boolean;
+      }) => void,
+    ) => () => void;
+    onHide: (callback: () => void) => () => void;
+    open: () => void;
+    dismiss: () => void;
+  };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;
     setExpanded: (expanded: boolean) => void;
+    dismissSpotlight: () => void;
+    setSpotlightHeight: (height: number) => void;
+    dragStart: () => void;
+    dragEnd: () => void;
+    setSessionState: (state: {
+      status: 'idle' | 'running' | 'needs-input' | 'error';
+      conversationId: string | null;
+      preview: string | null;
+    }) => void;
+    onMode: (callback: (mode: 'pill' | 'spotlight') => void) => () => void;
     focus: () => void;
     blur: () => void;
     openInMain: (pathname: string) => void;
@@ -188,6 +210,7 @@ export interface ElectronAPI {
       height: number;
     }) => Promise<boolean | null>;
     getEnabled: () => Promise<boolean>;
+    getShortcut: () => Promise<string | null>;
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };

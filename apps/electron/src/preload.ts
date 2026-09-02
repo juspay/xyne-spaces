@@ -411,9 +411,45 @@ const electronAPI = {
     },
   },
 
+  clawCompletion: {
+    onShow: (
+      callback: (payload: {
+        outcome: 'idle' | 'needs-input' | 'error';
+        preview: string | null;
+        dark: boolean;
+      }) => void,
+    ) => {
+      const listener = (_event: unknown, payload: never) => callback(payload);
+      ipcRenderer.on('claw-completion:show', listener);
+      return () => ipcRenderer.removeListener('claw-completion:show', listener);
+    },
+    onHide: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('claw-completion:hide', listener);
+      return () => ipcRenderer.removeListener('claw-completion:hide', listener);
+    },
+    open: () => ipcRenderer.send('claw-completion:open'),
+    dismiss: () => ipcRenderer.send('claw-completion:dismiss'),
+  },
+
   clawOverlay: {
     setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('claw:set-ignore-mouse', ignore),
     setExpanded: (expanded: boolean) => ipcRenderer.send('claw:set-expanded', expanded),
+    dismissSpotlight: () => ipcRenderer.send('claw:dismiss-spotlight'),
+    setSpotlightHeight: (height: number) =>
+      ipcRenderer.send('claw:set-spotlight-height', height),
+    dragStart: () => ipcRenderer.send('claw:drag-start'),
+    dragEnd: () => ipcRenderer.send('claw:drag-end'),
+    setSessionState: (state: {
+      status: 'idle' | 'running' | 'needs-input' | 'error';
+      conversationId: string | null;
+      preview: string | null;
+    }) => ipcRenderer.send('claw:session-state-changed', state),
+    onMode: (callback: (mode: 'pill' | 'spotlight') => void) => {
+      const listener = (_event: unknown, mode: 'pill' | 'spotlight') => callback(mode);
+      ipcRenderer.on('claw:mode', listener);
+      return () => ipcRenderer.removeListener('claw:mode', listener);
+    },
     focus: () => ipcRenderer.send('claw:focus'),
     blur: () => ipcRenderer.send('claw:blur'),
     onVisibility: (callback: (visible: boolean) => void) => {
@@ -436,6 +472,7 @@ const electronAPI = {
     },
 
     getEnabled: (): Promise<boolean> => ipcRenderer.invoke('claw:get-enabled'),
+    getShortcut: (): Promise<string | null> => ipcRenderer.invoke('claw:get-shortcut'),
     setEnabled: (enabled: boolean) => ipcRenderer.send('claw:set-enabled', enabled),
     onEnabledChanged: (callback: (enabled: boolean) => void) => {
       const listener = (_event: unknown, enabled: boolean) => callback(enabled);

@@ -30,3 +30,6 @@ packages:
   - tools/xyne-automation-old
   - tools/deadcode-analyzer
   - tools/fcm-ota-trigger
+
+onlyBuiltDependencies:
+  - electron

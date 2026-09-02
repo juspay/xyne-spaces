@@ -21,6 +21,8 @@ import {
   isRecordingPillEnabled,
   setRecordingPillTheme,
 } from '../services/recording-pill-window';
+import { setClawOverlayThemeName } from '../services/claw-overlay-window';
+import { getClawSpotlightShortcut } from '../services/global-shortcuts';
 import { isTrayVisible, setTrayVisible } from '../services/tray';
 import {
   focusMainWindow,
@@ -641,8 +643,13 @@ export function setupIpcHandlers(): void {
     },
   );
 
-  ipcMain.on('app:theme-changed', (event, theme: unknown) => {
+  ipcMain.handle('claw:get-shortcut', (event) =>
+    isMainWindowSender(event) ? getClawSpotlightShortcut() : null,
+  );
+
+  ipcMain.on('app:theme-changed', (event, theme: unknown, themeName: unknown) => {
     if (!isMainWindowSender(event)) return;
+    if (typeof themeName === 'string') setClawOverlayThemeName(themeName);
     if (theme !== 'light' && theme !== 'dark') return;
     setRecordingPillTheme(theme);
   });

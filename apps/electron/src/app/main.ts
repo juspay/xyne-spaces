@@ -19,10 +19,20 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { startVersionChecker, stopVersionChecker } from '../services/version-checker';
 import ElectronEvent from '../services/logger/electron-events';
 import { meetingDetectorService } from '../services/meeting-detector';
-import { initTray } from '../services/tray';
+import { getTrayBounds, initTray } from '../services/tray';
 import { registerGlobalShortcuts } from '../services/global-shortcuts';
 import { initRecordingPillVisibility } from '../services/recording-controller';
-import { initClawOverlayAuthGate } from '../services/claw-overlay-window';
+import {
+  initClawOverlayAuthGate,
+  isClawSpotlightVisible,
+  openClawSpotlight,
+} from '../services/claw-overlay-window';
+import { onClawSessionCompleted } from '../services/claw-session-controller';
+import {
+  setClawCompletionAnchorProvider,
+  setClawCompletionOpenHandler,
+  showClawCompletionPanel,
+} from '../services/claw-completion-panel';
 import { registerProtocolScheme, setupCustomProtocol } from '../services/custom-protocol';
 import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
@@ -199,6 +209,13 @@ async function initializeApp(): Promise<void> {
   initRecordingPillVisibility();
 
   initClawOverlayAuthGate();
+
+  setClawCompletionAnchorProvider(getTrayBounds);
+  setClawCompletionOpenHandler(() => void openClawSpotlight());
+  onClawSessionCompleted((event) => {
+    if (isClawSpotlightVisible()) return;
+    showClawCompletionPanel(event);
+  });
 
   setupAppStateListeners();
 

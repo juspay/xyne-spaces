@@ -108,7 +108,11 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
               />
             )}
             <div className={cn(showActivity && 'pl-[22px]')}>
-              <ClawMarkdown content={displayText} toolInvocations={message.toolInvocations} />
+              <ClawMarkdown
+                content={displayText}
+                toolInvocations={message.toolInvocations}
+                isStreaming={message.isStreaming}
+              />
             </div>
             {message.isStreaming && rawText.trim().length > 0 && (
               <span className='inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle' />

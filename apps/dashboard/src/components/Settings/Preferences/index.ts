@@ -9,6 +9,7 @@ export type PreferenceSection =
   | 'recordings'
   | 'messaging'
   | 'launch'
+  | 'claw'
   | 'toolbar'
   | 'calendar'
   | 'password'

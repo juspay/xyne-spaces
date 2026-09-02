@@ -47,7 +47,11 @@ export const useTheme = (): { theme: Theme; changeTheme: (newTheme: Theme) => vo
     document.documentElement.setAttribute('data-theme', theme);
     // Persist to localStorage
     localStorage.setItem(THEME_STORAGE_KEY, theme);
-    window.electronAPI?.ipcSend?.('app:theme-changed', theme === 'midnight' ? 'dark' : 'light');
+    window.electronAPI?.ipcSend?.(
+      'app:theme-changed',
+      theme === 'midnight' ? 'dark' : 'light',
+      theme,
+    );
   }, [theme]);
 
   const changeTheme = (newTheme: Theme): void => {
