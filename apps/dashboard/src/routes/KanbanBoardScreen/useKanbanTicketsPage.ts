@@ -429,21 +429,34 @@ export const useKanbanTicketsPage = (
     : null;
   // Only send to Vespa when we have real IDs and not inverted/includeUnassigned
   // (those semantics require the Zero/local filter path).
+  // Send all 4 identity forms to match prefixedKanbanIdentityValues storage variants.
   const vespaAssignee =
     parsedAssignee &&
     parsedAssignee.ids.length > 0 &&
     !parsedAssignee.inverted &&
     !parsedAssignee.includeUnassigned
-      ? parsedAssignee.ids.flatMap(id => [id, `user:${id}`]).join(',')
+      ? parsedAssignee.ids
+          .flatMap(id => {
+            const bareId = id.replace(/^(user:|group:|userGroup:)/, '');
+            return [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`];
+          })
+          .join(',')
       : undefined;
 
   const vespaTags =
     options.filters?.tags && options.filters.tags.length > 0
       ? options.filters.tags.join(',')
       : undefined;
+
+  // Send all 4 identity forms to match prefixedKanbanIdentityValues storage variants.
   const vespaCreatedBy =
     options.filters?.createdBy && options.filters.createdBy.length > 0
-      ? options.filters.createdBy.join(',')
+      ? options.filters.createdBy
+          .flatMap(id => {
+            const bareId = id.replace(/^(user:|group:|userGroup:)/, '');
+            return [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`];
+          })
+          .join(',')
       : undefined;
 
   // Compute group-specific filter for Vespa based on groupBy/groupKey
@@ -460,9 +473,12 @@ export const useKanbanTicketsPage = (
     if (options.groupBy === 'assignee') {
       // Don't filter if groupKey is "Unassigned" - Vespa can't filter for null assignee easily
       if (options.groupKey === 'Unassigned') return {};
-      // Remove prefixes like "user:" or "group:" if present
-      const normalizedKey = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
-      return { assignee: normalizedKey };
+      // Vespa may store assignedTo in any of these forms (see prefixedKanbanIdentityValues).
+      // Send all variants so we match regardless of storage format.
+      const bareId = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
+      return {
+        assignee: [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`].join(','),
+      };
     }
     if (options.groupBy === 'status') {
       // Filter by the group's status value
