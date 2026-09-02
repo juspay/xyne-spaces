@@ -522,6 +522,7 @@ interface WebhookEvent {
     projectId?: string;
     projectName?: string;
     mentionedUserIds?: string[];
+    workspaceId?: string;
     attachments?: WebhookAttachment[];
   };
   timestamp: string;
@@ -1564,7 +1565,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     payload: {
       conversationId: payload.conversationId,
       channelId: payload.channelId,
-      userId: payload.userId,
+      // Commands act on Claw-owned rows (experiment runs, /clear-session's
+      // pod sandbox key): those are keyed by the canonical Claw id. The raw
+      // Spaces id would silently miss all of them.
+      userId: clawSenderId,
     },
     log,
     userText,
@@ -1598,7 +1602,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   const targetUserId = eventType === "USER_MENTIONED" && allMentionedIds.length > 0
     ? (await resolveClawUserIdForSpacesIdentity(
         allMentionedIds[0]!,
-        (payload as { workspaceId?: string }).workspaceId,
+        payload.workspaceId,
       ).catch(() => undefined) ?? allMentionedIds[0]!)
     : clawSenderId;
 
@@ -2306,8 +2310,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // mentioned user, not an agent call, so they are intentionally not gated.
     {
       const invocRow = await agentRepository.findBySlug(agent.slug, agent.orgId ?? undefined).catch(() => null);
-      if (invocRow && !isAgentInvocableBy(invocRow.config as Record<string, unknown> | null, payload.userId)) {
-        log.warn(`Invocation denied (not whitelisted) agent=${agent.slug} userId=${payload.userId} conv=${payload.conversationId}`);
+      // The whitelist stores Claw user ids — compare against the canonical
+      // sender, not the raw workspace membership id.
+      if (invocRow && !isAgentInvocableBy(invocRow.config as Record<string, unknown> | null, clawSenderId)) {
+        log.warn(`Invocation denied (not whitelisted) agent=${agent.slug} userId=${clawSenderId} conv=${payload.conversationId}`);
         if (payload.conversationId) {
           await postAgentMessage(
             { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
@@ -2327,7 +2333,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         return;
       }
     }
-    await dispatchRunForTarget(clawSenderId, (payload as { workspaceId?: string }).workspaceId);
+    await dispatchRunForTarget(clawSenderId, payload.workspaceId);
   } catch (err) {
     log.error("Error forwarding:", { error: errMsg(err) });
     if (eventType !== "USER_MENTIONED" && payload.conversationId) {
@@ -2735,10 +2741,12 @@ export async function handleAutomationWebhook(
     return;
   }
   // Invocation whitelist — automations run under `userId` (the run owner); gate
-  // them exactly like a human caller so "all surfaces" holds. Refused like
-  // disabled (403), which the automation callback surfaces to the trigger.
-  if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
-    clog.warn(`[webhook/automation-run] invocation denied (not whitelisted) agent=${agentSlug} userId=${userId} sessionId=${sessionId}`);
+  // them exactly like a human caller so "all surfaces" holds. The whitelist
+  // stores Claw user ids — compare against the canonical `clawUserId`, not the
+  // raw workspace membership id. Refused like disabled (403), which the
+  // automation callback surfaces to the trigger.
+  if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, clawUserId)) {
+    clog.warn(`[webhook/automation-run] invocation denied (not whitelisted) agent=${agentSlug} userId=${clawUserId} sessionId=${sessionId}`);
     res.status(403).json({ success: false, error: `agent "${agentSlug}" is restricted — you don't have access to it` });
     return;
   }

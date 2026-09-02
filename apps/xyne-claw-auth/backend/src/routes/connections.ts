@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
+import { asyncHandler, ok, badRequest, notFound, unauthorized } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -9,7 +9,7 @@ import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { getCanonicalRequesterId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
-import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("connections");
@@ -23,7 +23,7 @@ router.use("/:userId", pinUserIdParam);
 // canonical identity that requireAuth placed in x-user-id.
 function canonicalUserId(req: Request): string {
   const userId = getCanonicalRequesterId(req);
-  if (!userId) throw new Error("authenticated user required after pinUserIdParam");
+  if (!userId) throw unauthorized("authenticated user required after pinUserIdParam");
   return userId;
 }
 
@@ -308,7 +308,8 @@ router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req:
   // looks at `req.cookies.xyne_session` *after* confirming `workspaceId` is
   // present (header or `xyne_last_workspace` cookie). Without it the
   // session-refresh path is skipped entirely → 401 once the JWT expires.
-  const resolvedWorkspaceId = lastWorkspace ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+  const resolvedWorkspaceId = lastWorkspace
+    ?? await getWorkspaceIdForUser(userId, "require-auth", requestWorkspaceHint(req)).catch(() => null);
   if (resolvedWorkspaceId) credentials["workspaceId"] = resolvedWorkspaceId;
   // TEMP [sid-debug] — remove after verifying
   log.info(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);

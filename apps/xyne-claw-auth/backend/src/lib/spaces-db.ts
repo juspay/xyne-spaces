@@ -21,6 +21,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import type { Request } from "express";
 import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -47,6 +48,18 @@ interface UserSessionRow {
   status: string;
   lastActivity: Date;
   workspaceId: string | null;
+}
+
+/**
+ * Read the workspace requireAuth stamped on this request
+ * (`x-spaces-workspace-id`), string-only. Pass it to getSpacesAuthForUser /
+ * getWorkspaceIdForUser so a user holding memberships in two Spaces
+ * workspaces resolves the identity for the workspace THIS request selected
+ * instead of tripping the ambiguity guard.
+ */
+export function requestWorkspaceHint(req: Request): string | undefined {
+  const raw = req.headers["x-spaces-workspace-id"];
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
 }
 
 /**
@@ -188,10 +201,15 @@ export type SpacesAuthCaller =
  * identities in multiple workspaces: callers must provide the workspace that
  * selected the request.
  */
-async function resolveSpacesUserId(
+interface SpacesIdentityRow {
+  surfaceUserId: string;
+  surfaceWorkspaceId: string | null;
+}
+
+async function resolveSpacesIdentity(
   clawUserId: string,
   workspaceId?: string | null,
-): Promise<string | null> {
+): Promise<SpacesIdentityRow | null> {
   const user = await prisma.user.findUnique({
     where: { id: clawUserId },
     select: { id: true },
@@ -205,11 +223,11 @@ async function resolveSpacesUserId(
       status: "ACTIVE",
       ...(workspaceId ? { surfaceWorkspaceId: workspaceId } : {}),
     },
-    select: { surfaceUserId: true },
+    select: { surfaceUserId: true, surfaceWorkspaceId: true },
     orderBy: { updatedAt: "desc" },
     take: 2,
   });
-  if (identities.length === 1) return identities[0]!.surfaceUserId;
+  if (identities.length === 1) return identities[0]!;
   if (identities.length > 1) {
     log.warn(
       `[spaces-db] identity resolution clawUserId=${clawUserId} result=ambiguous ` +
@@ -217,6 +235,50 @@ async function resolveSpacesUserId(
     );
   }
   return null;
+}
+
+/**
+ * Most recently active, non-expired session row (joined to its user's
+ * workspace) for a RAW, workspace-scoped Spaces user id. `workspaceId` lives
+ * on `public.users.workspaceId`, NOT on the session row — sessions inherit
+ * the user's workspace, so we join on `userId` to pull both in one query.
+ */
+async function findActiveUserSessionRow(
+  client: SpacesDbClient,
+  spacesUserId: string,
+): Promise<UserSessionRow | undefined> {
+  const rows = await client.$queryRaw<Array<UserSessionRow>>`
+    SELECT
+      s.id,
+      s."accessToken",
+      s."accessTokenExpiry",
+      s."refreshTokenExpiry",
+      s.status::text AS status,
+      s."lastActivity",
+      u."workspaceId"
+    FROM workflow.user_sessions s
+    JOIN public.users u ON u.id = s."userId"
+    WHERE s."userId" = ${spacesUserId}
+      AND s.status = 'ACTIVE'
+      AND s."refreshTokenExpiry" > NOW()
+    ORDER BY s."lastActivity" DESC
+    LIMIT 1
+  `;
+  return rows[0];
+}
+
+/** The user row's `public.users.workspaceId` for a RAW Spaces user id. */
+async function findUserWorkspaceRow(
+  client: SpacesDbClient,
+  spacesUserId: string,
+): Promise<{ workspaceId: string | null } | undefined> {
+  const rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
+    SELECT "workspaceId"
+    FROM public.users
+    WHERE id = ${spacesUserId}
+    LIMIT 1
+  `;
+  return rows[0];
 }
 
 export async function getSpacesAuthForUser(
@@ -230,56 +292,24 @@ export async function getSpacesAuthForUser(
 
   const started = Date.now();
   try {
-    // First preserve legacy/raw callers. If that raw id has no Spaces session,
-    // resolve it as a canonical Claw id through UserSurfaceIdentity.
+    // Resolve a canonical Claw id through UserSurfaceIdentity BEFORE the
+    // session query: a raw id still queries directly (no identity, no extra
+    // round-trip), while a canonical id is a guaranteed miss in Spaces'
+    // users table. When the resolution did remap, fall back to the raw id's
+    // session once so legacy callers that never got an identity still work.
     let spacesUserId = userId;
-    // Most recently active non-expired session for this user.
-    // `workspaceId` lives on `public.users.workspaceId`, NOT on the session
-    // row — sessions inherit the user's workspace. We join on `userId` to
-    // pull both in one query.
-    let rows = await client.$queryRaw<Array<UserSessionRow>>`
-      SELECT
-        s.id,
-        s."accessToken",
-        s."accessTokenExpiry",
-        s."refreshTokenExpiry",
-        s.status::text AS status,
-        s."lastActivity",
-        u."workspaceId"
-      FROM workflow.user_sessions s
-      JOIN public.users u ON u.id = s."userId"
-      WHERE s."userId" = ${spacesUserId}
-        AND s.status = 'ACTIVE'
-        AND s."refreshTokenExpiry" > NOW()
-      ORDER BY s."lastActivity" DESC
-      LIMIT 1
-    `;
-
-    if (!rows[0]) {
-      const resolved = await resolveSpacesUserId(userId, workspaceId);
-      if (resolved && resolved !== spacesUserId) {
-        spacesUserId = resolved;
-        rows = await client.$queryRaw<Array<UserSessionRow>>`
-          SELECT
-            s.id,
-            s."accessToken",
-            s."accessTokenExpiry",
-            s."refreshTokenExpiry",
-            s.status::text AS status,
-            s."lastActivity",
-            u."workspaceId"
-          FROM workflow.user_sessions s
-          JOIN public.users u ON u.id = s."userId"
-          WHERE s."userId" = ${spacesUserId}
-            AND s.status = 'ACTIVE'
-            AND s."refreshTokenExpiry" > NOW()
-          ORDER BY s."lastActivity" DESC
-          LIMIT 1
-        `;
+    const identity = await resolveSpacesIdentity(userId, workspaceId);
+    if (identity) {
+      spacesUserId = identity.surfaceUserId;
+    }
+    let row = await findActiveUserSessionRow(client, spacesUserId);
+    if (!row && identity && spacesUserId !== userId) {
+      row = await findActiveUserSessionRow(client, userId);
+      if (row) {
+        spacesUserId = userId;
       }
     }
 
-    const row = rows[0];
     const elapsed = Date.now() - started;
 
     if (!row) {
@@ -425,25 +455,15 @@ export async function getWorkspaceIdForUser(
   const client = getClient();
   if (client) try {
     let spacesUserId = userId;
-    let rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
-      SELECT "workspaceId"
-      FROM public.users
-      WHERE id = ${spacesUserId}
-      LIMIT 1
-    `;
-    if (!rows[0]) {
-      const resolved = await resolveSpacesUserId(userId, requestedWorkspaceId);
-      if (resolved && resolved !== spacesUserId) {
-        spacesUserId = resolved;
-        rows = await client.$queryRaw<Array<{ workspaceId: string | null }>>`
-          SELECT "workspaceId"
-          FROM public.users
-          WHERE id = ${spacesUserId}
-          LIMIT 1
-        `;
+    let row = await findUserWorkspaceRow(client, spacesUserId);
+    if (!row) {
+      const identity = await resolveSpacesIdentity(userId, requestedWorkspaceId);
+      if (identity && identity.surfaceUserId !== spacesUserId) {
+        spacesUserId = identity.surfaceUserId;
+        row = await findUserWorkspaceRow(client, spacesUserId);
       }
     }
-    const workspaceId = rows[0]?.workspaceId ?? null;
+    const workspaceId = row?.workspaceId ?? null;
     const elapsed = Date.now() - started;
     log.info(
       `[spaces-db] workspace-lookup userId=${userId} spacesUserId=${spacesUserId} caller=${caller} result=${workspaceId ? "hit" : "miss"}${workspaceId ? ` workspaceId=${workspaceId}` : ""} ms=${elapsed}`,
@@ -457,22 +477,13 @@ export async function getWorkspaceIdForUser(
   }
 
   try {
-    const workspaceId = await resolveSpacesUserId(userId, requestedWorkspaceId)
-      .then(async (spacesUserId) => {
-        if (!spacesUserId) return null;
-        const identity = await prisma.userSurfaceIdentity.findFirst({
-          where: {
-            surfaceId: "spaces",
-            userId,
-            surfaceUserId: spacesUserId,
-            status: "ACTIVE",
-            ...(requestedWorkspaceId ? { surfaceWorkspaceId: requestedWorkspaceId } : {}),
-          },
-          select: { surfaceWorkspaceId: true },
-        });
-        return identity?.surfaceWorkspaceId ?? null;
-      });
-    if (workspaceId) return workspaceId;
+    // resolveSpacesIdentity already read the single matching identity row —
+    // reuse its surfaceWorkspaceId directly instead of re-querying
+    // UserSurfaceIdentity for the same row it just selected.
+    const identity = await resolveSpacesIdentity(userId, requestedWorkspaceId);
+    if (identity?.surfaceWorkspaceId) {
+      return identity.surfaceWorkspaceId;
+    }
 
     // Backward compatibility for legacy Claw users that predate
     // UserSurfaceIdentity. This is deliberately allowed only when the org has
@@ -541,7 +552,8 @@ export async function getDmChannelForUserAndApp(
 
   const workspaceId = await getWorkspaceIdForUser(trimmedUserId, "mcp-runner");
   if (!workspaceId) return null;
-  const spacesUserId = await resolveSpacesUserId(trimmedUserId, workspaceId) ?? trimmedUserId;
+  const spacesUserId =
+    (await resolveSpacesIdentity(trimmedUserId, workspaceId))?.surfaceUserId ?? trimmedUserId;
 
   const appProviderUserId = `xyne-app-${trimmedAppId}`;
   const started = Date.now();

@@ -1246,7 +1246,10 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
     }
 
     const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId) {
+    // run.userId may be keyed by EITHER verified representation of the caller
+    // (canonical Claw id or the raw Spaces id the session was started under),
+    // so a strict equality check would 404 the legitimate owner.
+    if (!run || (run.userId !== userId && !matchesAuthenticatedUserId(req, run.userId))) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
@@ -1259,12 +1262,14 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
       return;
     }
 
+    // Forward the run's stored owner id (not the requester): the pod compares
+    // x-user-id against the id the run was dispatched with.
     const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
+        "x-user-id": run.userId,
       },
     });
 

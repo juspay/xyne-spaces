@@ -18,7 +18,7 @@ import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import {
@@ -180,6 +180,8 @@ async function postScheduledFailureNotice(row: {
 
   let effectiveWorkspaceId = row.workspaceId;
   if (!effectiveWorkspaceId) {
+    // No request here (job-owner row lookup at fire time): the unscoped
+    // resolution relies on the user having a single active Spaces identity.
     effectiveWorkspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job").catch(() => null);
   }
   if (!effectiveWorkspaceId) {
@@ -306,7 +308,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // Without this fallback the row gets workspaceId=NULL and Spaces rejects
   // the result-delivery call when the job fires.
   if (!workspaceId) {
-    const live = await getSpacesAuthForUser(userId, "scheduled-job");
+    const live = await getSpacesAuthForUser(userId, "scheduled-job", requestWorkspaceHint(req));
     if (live?.workspaceId) {
       workspaceId = live.workspaceId;
       log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${userId}`);
@@ -320,7 +322,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // silently rejected result delivery when the job fired ("missing
   // workspaceId on row"). The user row always carries the workspaceId.
   if (!workspaceId) {
-    const wsId = await getWorkspaceIdForUser(userId, "scheduled-job");
+    const wsId = await getWorkspaceIdForUser(userId, "scheduled-job", requestWorkspaceHint(req));
     if (wsId) {
       workspaceId = wsId;
       log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from users row for userId=${userId}`);
@@ -1160,6 +1162,8 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   let effectiveWorkspaceId = row.workspaceId;
 
   if (!effectiveWorkspaceId) {
+    // No request here (job-owner row lookup at fire time): the unscoped
+    // resolution relies on the user having a single active Spaces identity.
     const resolvedWorkspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job");
     if (resolvedWorkspaceId) {
       await prisma.scheduledJob.update({
@@ -1182,6 +1186,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   // lookup misses → text left as-is.
   let resultText = payload.result ?? "";
   try {
+    // No request here (job-owner session at fire time): see the note above.
     const senderAuth = row.userId
       ? await getSpacesAuthForUser(row.userId, "scheduled-job").catch(() => null)
       : null;

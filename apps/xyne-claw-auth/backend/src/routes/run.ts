@@ -120,13 +120,21 @@ async function resolveSpacesAuthFromRequest(
       }
     }
 
-    // Workspace id: x-workspace-id header → xyne_last_workspace cookie
+    // Workspace id: VERIFIED x-spaces-workspace-id (requireAuth derived it
+    // from the session's active workspace) → x-workspace-id header →
+    // xyne_last_workspace cookie. The verified header must win: the others
+    // are client-supplied conveniences.
     const verifiedWorkspaceHeader = req.headers["x-spaces-workspace-id"];
+    const verifiedWorkspaceId =
+      typeof verifiedWorkspaceHeader === "string" && verifiedWorkspaceHeader.trim()
+        ? verifiedWorkspaceHeader.trim()
+        : undefined;
     const workspaceHeader = req.headers["x-workspace-id"];
     const workspaceId =
-      typeof workspaceHeader === "string" && workspaceHeader.trim()
+      verifiedWorkspaceId ??
+      (typeof workspaceHeader === "string" && workspaceHeader.trim()
         ? workspaceHeader.trim()
-        : cookieMap.get("xyne_last_workspace");
+        : cookieMap.get("xyne_last_workspace"));
 
     // Token: workspace-scoped JWT → legacy google_access_token JWT → Authorization Bearer
     let token: string | undefined;
@@ -166,9 +174,6 @@ async function resolveSpacesAuthFromRequest(
       : userId;
     const effectiveWorkspaceId =
       workspaceId ??
-      (typeof verifiedWorkspaceHeader === "string" && verifiedWorkspaceHeader.trim()
-        ? verifiedWorkspaceHeader.trim()
-        : null) ??
       (spacesUserId ? await getWorkspaceIdForUser(spacesUserId, "require-auth").catch(() => null) : null) ??
       undefined;
     if (!workspaceId && effectiveWorkspaceId) {
