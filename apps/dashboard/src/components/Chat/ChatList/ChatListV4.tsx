@@ -1081,10 +1081,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // re-runs on combinedMessages and scrolls once the conversation lands.
     if (idx === -1) return;
 
-    // Consume only after the target is actually found.
-    prevActiveThreadRef.current = activeThreadConversationId;
-
     const timer = setTimeout(() => {
+      // Consume only once the scroll actually runs. Consuming before the timer
+      // fires loses it: a `conversations` change inside the 100ms window clears
+      // the timer through this effect's cleanup, and the re-run then early-returns
+      // on the already-consumed ref. Leaving it unconsumed lets the re-run
+      // recompute `idx` against the new list and reschedule.
+      prevActiveThreadRef.current = activeThreadConversationId;
       requestAnimationFrame(() => {
         if (isConversationFullyVisible(activeThreadConversationId, idx)) return;
         virtualizer.scrollToIndex(idx, { align: 'center' });
