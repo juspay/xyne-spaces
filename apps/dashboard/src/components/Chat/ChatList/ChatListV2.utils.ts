@@ -1,6 +1,7 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { useMemo } from 'react';
+import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { CombinedMessageItem, shouldShowAvatar } from './ChatListUtils';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { MessageType, parseReactionsMd } from '@xyne/shared';
@@ -144,12 +145,16 @@ function estimateImageDisplayHeight(
  * @param prevItem      - The item immediately before this one (or null)
  * @param isMobile      - Whether the viewport is in mobile mode
  * @param isNewMsgBoundary - Whether the red "New Messages" divider is shown above this item
+ * @param showThreadTags - Whether the reader has thread tag chips enabled; must match what
+ *                         ChatListItem passes to `shouldShowAvatar`, or the estimated height
+ *                         disagrees with the rendered one.
  */
 export function estimateMessageHeight(
   item: CombinedMessageItem,
   prevItem: CombinedMessageItem | null,
   isMobile: boolean,
   isNewMsgBoundary = false,
+  showThreadTags = false,
 ): number {
   // Only 'conversation' type items exist in this list (no date-separator via
   // useCombinedMesseges – those come from GroupedVirtuoso group headers).
@@ -164,7 +169,7 @@ export function estimateMessageHeight(
   const msgType = message.msgType;
 
   // ── Determine avatar visibility ──
-  const showAvatar = prevItem === null || shouldShowAvatar(item, prevItem);
+  const showAvatar = prevItem === null || shouldShowAvatar(item, prevItem, showThreadTags);
   let height = showAvatar ? WITH_AVATAR_PADDING : WITHOUT_AVATAR_PADDING;
 
   // ── New-message boundary divider ──
@@ -488,6 +493,8 @@ export const useCombinedMesseges = (
   isMobile: boolean,
   isNewMsgBoundaryIndex = -1,
 ): CombinedMesseges => {
+  const { showThreadTags } = useShowThreadTags();
+
   const combinedMessages: CombinedMessageItem[] = useMemo(() => {
     return conversations.map(conversation => ({
       type: 'conversation' as const,
@@ -525,9 +532,9 @@ export const useCombinedMesseges = (
     return combinedMessages.map((item, index) => {
       const prevItem = index > 0 ? (combinedMessages[index - 1] ?? null) : null;
       const isNewMsgBoundary = index === isNewMsgBoundaryIndex;
-      return estimateMessageHeight(item, prevItem, isMobile, isNewMsgBoundary);
+      return estimateMessageHeight(item, prevItem, isMobile, isNewMsgBoundary, showThreadTags);
     });
-  }, [combinedMessages, isMobile, isNewMsgBoundaryIndex]);
+  }, [combinedMessages, isMobile, isNewMsgBoundaryIndex, showThreadTags]);
 
   return {
     groupCounts,
