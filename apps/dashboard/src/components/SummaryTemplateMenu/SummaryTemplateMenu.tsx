@@ -11,6 +11,7 @@ import type { ReactElement } from 'react';
 import { Refresh, CheckTickSingle, GridDashboardBento, Hashtag, PlusDefault } from '@xyne/icons';
 import { XyneAIStar } from '@/components/icons/xyne-ai';
 import { cn } from '../../utils/classNames';
+import { Button } from '../ui/Button/Button';
 import type { SummaryTemplateMenuProps, SummaryTemplateOption } from './SummaryTemplateMenu.types';
 import {
   getSummaryTemplateLabel,
@@ -71,20 +72,23 @@ export function SummaryTemplateMenu({
             {label}
           </span>
         </span>
-        <button
+        <Button
           type='button'
+          variant='ghost'
           disabled={isRegenerating || !canRegenerate}
           onClick={() => {
             onRequestClose();
             onRegenerate();
           }}
+          trackId='regenerate_selected_summary_template'
+          trackProps={{ 'track-category': trackCategory }}
           aria-label={`Regenerate with ${fullLabel}`}
           className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category={trackCategory}
           data-track-name='regenerate_selected_summary_template'
         >
           <Refresh strokeWidth={2.5} className={cn('size-4', isRegenerating && 'animate-spin')} />
-        </button>
+        </Button>
         <span className='flex w-5 shrink-0 items-center justify-center'>
           <CheckTickSingle
             strokeWidth={2.5}
@@ -105,13 +109,16 @@ export function SummaryTemplateMenu({
           templates
             .filter(template => template.id !== selectedTemplate?.id)
             .map(template => (
-              <button
+              <Button
                 key={template.id}
                 type='button'
+                variant='ghost'
                 onClick={() => {
                   onRequestClose();
                   onSelectTemplate(template.id);
                 }}
+                trackId='select_summary_template'
+                trackProps={{ trackCategory }}
                 title={template.name}
                 className='flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
                 data-track-category={trackCategory}
@@ -123,7 +130,7 @@ export function SummaryTemplateMenu({
                 <span className='min-w-0 flex-1 truncate'>
                   {truncateTemplateName(template.name)}
                 </span>
-              </button>
+              </Button>
             ))
         )}
       </div>
