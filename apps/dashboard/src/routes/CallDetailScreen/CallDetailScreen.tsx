@@ -1,8 +1,12 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Loader2, FileText } from 'lucide-react';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE } from '@xyne/shared';
+import { SidebarRightClose, SidebarRightOpen } from '@xyne/icons';
 import { recordingService } from '../../services/Recording/recordingService';
+import { Button } from '../../components/ui/Button/Button';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { useCallPRD } from '../../hooks/useCallPRD';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
@@ -13,6 +17,12 @@ import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import { type Call } from '../CallHistoryScreen/callHistoryItem.utils';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
+import {
+  TranscriptSidePanel,
+  type TranscriptPanelTarget,
+} from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
+import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 import { DetailedSummaryCanvasTab } from './DetailedSummaryCanvasTab';
 import { PrdCanvasTab } from './PrdCanvasTab';
 import { CallParticipantsPopover } from './CallParticipantsPopover';
@@ -124,6 +134,38 @@ export default function CallDetailScreen(): ReactElement {
     call?.startedAt && call?.endedAt
       ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
       : null;
+
+  // Transcript side panel
+  const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
+  const [selectedTranscriptLanguage, setSelectedTranscriptLanguage] = useState(
+    ORIGINAL_TRANSCRIPT_LANGUAGE,
+  );
+  const [citationNonce, setCitationNonce] = useState(0);
+  const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
+  const hasTranscript = Boolean(call?.transcript);
+  const transcript = useTranscriptTranslation({
+    externalId: call?.externalId,
+    language: selectedTranscriptLanguage,
+    enabled: showTranscriptPanel,
+  });
+
+  // Route canvas citations (detailed-summary pills carry callId = externalId) into this
+  // screen's own panel instead of the global TranscriptCitationModal.
+  const callExternalId = call?.externalId;
+  useEffect(() => {
+    if (!callExternalId) return;
+    return transcriptCitationStore.setHandler(ref => {
+      if (ref.callId !== callExternalId) return false;
+      setCitationRef({
+        ...(ref.timestamp ? { timestamp: ref.timestamp } : {}),
+        ...(ref.speaker ? { speaker: ref.speaker } : {}),
+        ...(ref.segment ? { segment: ref.segment } : {}),
+      });
+      setCitationNonce(value => value + 1);
+      setShowTranscriptPanel(true);
+      return true;
+    });
+  }, [callExternalId]);
 
   const { prdEntries } = useCallPRD({
     externalId: call?.externalId ?? '',
@@ -252,7 +294,12 @@ export default function CallDetailScreen(): ReactElement {
     // sidebar. Mirrors the recording detail screen's root.
     <div className='relative flex h-full overflow-hidden bg-background rounded-2xl'>
       <div className='flex-1 flex flex-col overflow-hidden min-w-0'>
-        <div className='flex-1 overflow-y-auto'>
+        <div
+          className={cn(
+            'flex-1 overflow-y-auto transition-[padding] duration-300',
+            showTranscriptPanel && 'md:pr-[560px]',
+          )}
+        >
           <div className='mx-auto w-full max-w-[820px] px-6 pt-6 pb-24 sm:px-8'>
             {/* Breadcrumb + Ask AI */}
             <div className='flex items-center gap-[7px] mb-[18px]'>
@@ -400,6 +447,33 @@ export default function CallDetailScreen(): ReactElement {
                   <ChevronRight className='size-3.5' />
                 </button>
               )}
+              {hasTranscript && (
+                <Tooltip
+                  content={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
+                  side='left'
+                >
+                  <Button
+                    onClick={(): void => {
+                      setShowTranscriptPanel(open => !open);
+                      setCitationRef(null);
+                    }}
+                    variant='ghost'
+                    className={cn(
+                      'inline-flex size-8 items-center justify-center rounded-xl border border-border/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      showTranscriptPanel ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                    aria-label={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
+                    data-track-category='CallDetail'
+                    data-track-name='open_transcript_panel'
+                  >
+                    {showTranscriptPanel ? (
+                      <SidebarRightClose className='size-4' aria-hidden='true' variant='Solid' />
+                    ) : (
+                      <SidebarRightOpen className='size-4' aria-hidden='true' variant='Solid' />
+                    )}
+                  </Button>
+                </Tooltip>
+              )}
             </div>
 
             {/* Tab content */}
@@ -438,6 +512,30 @@ export default function CallDetailScreen(): ReactElement {
           </div>
         </div>
       </div>
+
+      {/* Transcript side panel */}
+      <AnimatePresence>
+        {showTranscriptPanel && (
+          <TranscriptSidePanel
+            transcript={transcript.text ?? ''}
+            isLoading={transcript.isLoading}
+            error={transcript.error ?? null}
+            onRetry={transcript.retry}
+            target={citationRef}
+            openNonce={citationNonce}
+            title={title}
+            selectedLanguage={selectedTranscriptLanguage}
+            onLanguageChange={setSelectedTranscriptLanguage}
+            isTranslating={transcript.isTranslating}
+            translatePartial={transcript.partial}
+            onClose={(): void => {
+              setShowTranscriptPanel(false);
+              setCitationRef(null);
+            }}
+            className='absolute inset-y-0 right-0 z-30 w-full md:w-[560px]'
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

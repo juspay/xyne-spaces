@@ -5,7 +5,12 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
+import type {
+  DefaultOutlet,
+  GrantableEntityUserAccess,
+  RecordingType,
+  TranscriptTranslation,
+} from '@xyne/shared';
 import { CallType, CallVisibility } from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
@@ -331,16 +336,30 @@ class RecordingService {
     return response.data;
   }
 
-  /**
-   * Get recording detail with transcript and summary
-   */
-  async getRecordingDetail(callId: string): Promise<RecordingDetail> {
+  // `scope: 'metadata'` skips the transcript-body GCS reads server-side; fetch text lazily
+  // via translateTranscript(callId, ORIGINAL_TRANSCRIPT_LANGUAGE) instead.
+  async getRecordingDetail(
+    callId: string,
+    opts?: { scope?: 'metadata' },
+  ): Promise<RecordingDetail> {
+    const query = opts?.scope ? `?scope=${opts.scope}` : '';
     const response: AxiosResponse<RecordingDetailResponse> = await apiInstance.get(
-      `/calls/recordings/${callId}`,
+      `/calls/recordings/${callId}${query}`,
     );
 
     const data: RecordingDetailResponse = response.data;
     return data.recording;
+  }
+
+  /** Lightweight poll target — only what's needed to detect post-call audio landing. */
+  async getRecordingStatus(
+    callId: string,
+  ): Promise<{ hasRecording: boolean; durationMs: number | null }> {
+    const response: AxiosResponse<{
+      success: true;
+      recording: { hasRecording: boolean; durationMs: number | null };
+    }> = await apiInstance.get(`/calls/recordings/${callId}?scope=status`);
+    return response.data.recording;
   }
 
   /**
@@ -363,6 +382,20 @@ class RecordingService {
       await apiInstance.post(`/calls/recordings/${callId}/generate-summary`, {
         summaryTemplateId,
         ...(modelType ? { modelType } : {}),
+      });
+    return response.data;
+  }
+
+  // `language: ORIGINAL_TRANSCRIPT_LANGUAGE` returns the transcript as recorded, no LLM call.
+  async translateTranscript(
+    callId: string,
+    language: string,
+    variant?: 'identified',
+  ): Promise<TranscriptTranslation> {
+    const response: AxiosResponse<{ success: true } & TranscriptTranslation> =
+      await apiInstance.post(`/calls/${callId}/translate-transcript`, {
+        language,
+        ...(variant ? { variant } : {}),
       });
     return response.data;
   }

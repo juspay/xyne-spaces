@@ -7,7 +7,7 @@ import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtil
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
-import type { CallParticipantMetadata } from '@xyne/shared';
+import type { CallParticipantMetadata, TranscriptTranslation } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
@@ -37,6 +37,7 @@ export interface CallMetadata {
   systemMessageId?: string;
   conversationId?: string;
   artifactMessageId?: string;
+  translations?: Record<string, TranscriptTranslation>;
 }
 
 const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
@@ -251,6 +252,26 @@ export class CallRepository {
     return result;
   }
 
+  // Writes one language's translation status into calls.metadata.translations. `id` is the internal Call.id, not externalId.
+  // Read-modify-write, not transactional — a concurrent write for another language could be lost.
+  async setTranslationStatus(
+    id: string,
+    language: string,
+    translation: TranscriptTranslation,
+  ): Promise<void> {
+    const client = DatabaseClient.getInstance();
+    const current = await client.call.findUnique({ where: { id }, select: { metadata: true } });
+    const currentMetadata = (current?.metadata as CallMetadata | null) ?? {};
+    const nextMetadata: CallMetadata = {
+      ...currentMetadata,
+      translations: { ...currentMetadata.translations, [language]: translation },
+    };
+    await client.call.update({
+      where: { id },
+      data: { metadata: nextMetadata as Prisma.InputJsonValue },
+    });
+  }
+
   /**
    * Adopt an already-running call as a slash-command artifact's call.
    *
@@ -279,9 +300,9 @@ export class CallRepository {
         where: { id: callId },
         data: {
           metadata: {
-            ...((metadata as CallMetadata | null) ?? {}),
+            ...((metadata as Record<string, Prisma.InputJsonValue> | null) ?? {}),
             artifactMessageId,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
