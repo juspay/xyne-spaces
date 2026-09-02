@@ -58,6 +58,8 @@ export interface AutoLabelWizardProps {
   onOpenChange: (open: boolean) => void;
   channelId: string;
   isMember: boolean;
+  /** Hidden on desks with no mailbox folders — there is no Inbox to keep mail in. */
+  showKeepInInbox?: boolean;
   onCreated?: (automations: Automation[]) => void;
 }
 
@@ -66,6 +68,7 @@ export function AutoLabelWizard({
   onOpenChange,
   channelId,
   isMember,
+  showKeepInInbox = true,
   onCreated,
 }: AutoLabelWizardProps): React.ReactElement {
   const queryClient = useQueryClient();
@@ -152,7 +155,7 @@ export function AutoLabelWizard({
         labelName: labelName.trim(),
         ...(labelColor ? { color: labelColor } : {}),
         ...(labelId ? { labelId } : {}),
-        keepInInbox,
+        keepInInbox: showKeepInInbox ? keepInInbox : true,
         emailFilters,
       }),
     onSuccess: data => {
@@ -403,17 +406,19 @@ export function AutoLabelWizard({
                 </span>
               </div>
             )}
-            <div className='rounded-md border border-border bg-muted/30 px-3 py-2.5'>
-              <Checkbox
-                checked={keepInInbox}
-                onChange={setKeepInInbox}
-                label='Keep matching emails in Inbox'
-                size='sm'
-              />
-              <p className='mt-1 pl-5 text-[11px] text-muted-foreground'>
-                When disabled, inbox label will be removed from matching emails.
-              </p>
-            </div>
+            {showKeepInInbox && (
+              <div className='rounded-md border border-border bg-muted/30 px-3 py-2.5'>
+                <Checkbox
+                  checked={keepInInbox}
+                  onChange={setKeepInInbox}
+                  label='Keep matching emails in Inbox'
+                  size='sm'
+                />
+                <p className='mt-1 pl-5 text-[11px] text-muted-foreground'>
+                  When disabled, inbox label will be removed from matching emails.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
