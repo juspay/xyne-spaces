@@ -95,9 +95,14 @@ const envSchema = Joi.object({
   MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(250),       // pause between paged Slack calls during collection (SDK still honors Retry-After on 429)
   MIGRATION_SLACK_LIST_DELAY_MS: Joi.number().default(3000),      // pause between Tier-2 list pages (conversations.list/users.list ≈ 20/min) to stay under the limit
   MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(600000),  // per-attachment download timeout (~10 min: enough for Slack's 1GB max at ~3MB/s)
+  MIGRATION_SLACK_FILE_CONCURRENCY: Joi.number().default(5),      // attachments streamed Slack→GCS in parallel per message during collection
   MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
   MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
-  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
+  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(0),     // pause between messages at ingest (0 = unpaced; parallelism now caps rate, not this)
+  MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker process ingests in parallel (juggles DB waits); total in-flight = processes × this
+  MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES to fork inside the pod (Node cluster). This is the real CPU-parallelism knob; 1 = single process (no fork)
+  MIGRATION_INGEST_BULK: Joi.boolean().default(false),            // migration-only bulk-insert path (createMany, bypasses conversationService) — off by default until validated
+  MIGRATION_INGEST_BULK_BATCH_SIZE: Joi.number().default(500),    // rows per createMany in the bulk path (bounds memory + statement size)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -682,6 +687,11 @@ export const config = {
     requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
     stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
     ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
+    ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY,
+    workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,
+    fileConcurrency: envVars.MIGRATION_SLACK_FILE_CONCURRENCY,
+    ingestBulk: envVars.MIGRATION_INGEST_BULK,
+    ingestBulkBatchSize: envVars.MIGRATION_INGEST_BULK_BATCH_SIZE,
   },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
