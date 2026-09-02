@@ -76,7 +76,7 @@ const ThreadList = ({
   spawnedTicketMessageIds,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
-  const { isEditingMessage, requestEdit } = useMessageEdit();
+  const { isEditingMessage, isEditingHere, requestEdit } = useMessageEdit();
   const location = useLocation();
   const activityNavigationNonce =
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
@@ -157,8 +157,8 @@ const ThreadList = ({
 
   const isEditingRef = useRef(false);
   useEffect(() => {
-    isEditingRef.current = editingMessageId !== null;
-  }, [editingMessageId]);
+    isEditingRef.current = isEditingHere;
+  }, [isEditingHere]);
 
   const lastAutoScrolledMessageIdRef = useRef<string | null>(null);
 

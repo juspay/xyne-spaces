@@ -115,6 +115,7 @@ export const useEditContext = (): EditContextType => {
 
 export const useMessageEdit = (): {
   isEditingMessage: (messageId: string) => boolean;
+  isEditingHere: boolean;
   requestEdit: (messageId: string, onConfirm: () => void) => void;
   stopEditing: () => void;
 } => {
@@ -131,5 +132,7 @@ export const useMessageEdit = (): {
     [requestEdit, surface],
   );
 
-  return { isEditingMessage, requestEdit: requestEditHere, stopEditing };
+  const isEditingHere = editingMessageId !== null && editingSurface === surface;
+
+  return { isEditingMessage, isEditingHere, requestEdit: requestEditHere, stopEditing };
 };
