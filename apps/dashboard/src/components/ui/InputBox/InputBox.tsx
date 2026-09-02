@@ -1115,10 +1115,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
-          // Convert oversized pasted text to a file attachment, but only when there's
-          // a channel to attach it to. Without a channelId (e.g. the DM-compose panel,
-          // before the conversation exists) fall through to normal inline paste.
-          if (pastedText && pastedText.length > 11500 && channelId) {
+          // Convert oversized pasted text to a file attachment. This needs a place to
+          // stash the file: either a channelId to upload against, OR disableDraftUpload
+          // mode (QuickDmComposer / DM-compose), where the file is held locally and sent
+          // with the message once the conversation exists. Without either, fall through
+          // to normal inline paste. (Skipping this for disableDraftUpload left the whole
+          // blob inline in the multipart `content` field, tripping busboy's field-size
+          // cap -> "Field value too long".)
+          if (pastedText && pastedText.length > 11500 && (channelId || disableDraftUpload)) {
             event.preventDefault();
 
             // Check if attachment limit has been reached before adding text file
