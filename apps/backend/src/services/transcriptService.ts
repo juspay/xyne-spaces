@@ -228,13 +228,18 @@ TRANSCRIPT:
 
 // Short topical labels for browsing/search. Kept intentionally simple (no
 // categories/config) — persisted as generic Tag rows by noteTakerTranscriptService.
+// Each label is a single word; multi-word labels would be slugified into
+// hyphenated tags downstream.
+const MAX_CALL_LABELS = 3;
+
 const CALL_LABELS_PROMPT = `
 You are analyzing a call transcript to generate a small set of short topical labels/tags for browsing and search.
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Generate 1-4 short labels that best describe the topics/themes discussed
-- Each label must be 1-3 words, lowercase, describing a topic (e.g. "pricing", "bug report", "onboarding")
+- Generate 1-3 short labels that best describe the topics/themes discussed
+- Each label must be EXACTLY ONE word, lowercase (e.g. "pricing", "onboarding", "billing", "latency")
+- NEVER use multi-word labels, spaces, hyphens or underscores (write "pricing", not "pricing-discussion" or "bug report")
 - Do NOT include people's names, company names, or dates as labels
 - Do NOT duplicate labels
 
@@ -244,7 +249,7 @@ BRAND NAME CORRECTION:
 
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
-  "labels": ["[short topic label]", "[short topic label]"]
+  "labels": ["[one-word topic label]", "[one-word topic label]"]
 }
 
 Only output valid JSON.
@@ -1300,7 +1305,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       const labels = parsed.labels
         .filter((l: unknown): l is string => typeof l === 'string' && l.trim().length > 0)
-        .slice(0, 4);
+        .slice(0, MAX_CALL_LABELS);
 
       logger.info(`Generated ${labels.length} call labels`);
       return labels;
