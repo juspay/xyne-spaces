@@ -24,6 +24,7 @@ import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { loadTestTranscript } from '@/testTranscripts/testTranscripts';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -800,6 +801,19 @@ export class TranscriptService {
     try {
       // Try to fetch formatted transcript first
       const formattedPath = `attachments/${callId}_formatted.txt`;
+
+      // Local test override: if a fixture transcript is present, persist it as
+      // the formatted transcript in (fake) GCS and use it for both artifact
+      // generation and the UI. Absent/empty fixture => normal behavior.
+      const fixture = await loadTestTranscript('default');
+      if (fixture) {
+        await this.transcriptStorage.uploadFileV2(Buffer.from(fixture, 'utf-8'), {
+          path: formattedPath,
+          contentType: 'text/plain',
+          metadata: { callId, type: 'test_transcript' },
+        });
+        return fixture;
+      }
 
       const formattedExists = await this.transcriptStorage.fileExists(formattedPath);
 
