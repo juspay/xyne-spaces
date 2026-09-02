@@ -1,4 +1,5 @@
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
+import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { isAgentInvocableBy } from "xyne-claw-shared";
@@ -642,6 +643,18 @@ router.post(
       const thumbnails = filesMap?.["thumbnails"];
       if (files.length === 0) {
         res.status(400).json({ success: false, error: "No files uploaded" });
+        return;
+      }
+
+      // Deny-by-default content screening: reject native executables / the EICAR
+      // test file (by magic bytes, regardless of filename) and executable
+      // extensions / MIME types, so an attachment can't be a malware carrier.
+      const rejected = screenUploadFiles([...files, ...(thumbnails ?? [])]);
+      if (rejected) {
+        res.status(400).json({
+          success: false,
+          error: `File "${rejected.filename}" was rejected: ${rejected.reason}`,
+        });
         return;
       }
 
