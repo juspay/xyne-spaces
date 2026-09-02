@@ -65,6 +65,10 @@ export interface AIComposerHandle {
   clearContent: () => void;
   focus: () => void;
   setPrompt: (value: string) => void;
+  /** Submit `text` as its own turn, carrying the composer's current context
+   *  (agent, model, toggles) but not its draft or attachments — those stay
+   *  put. False when refused because a reply is still streaming. */
+  submitPrompt: (text: string) => boolean;
   /** REPLACE the composer's editable context with these items (empty clears it).
    *  Used on chat switch to carry the opened conversation's last-turn context
    *  into the composer. */
@@ -490,6 +494,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setValue(nextValue);
         window.setTimeout(() => textareaRef.current?.focus(), 0);
       },
+      submitPrompt: (text: string): boolean => {
+        if (pending) return false;
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        onSubmit?.(trimmed, undefined, buildContext());
+        return true;
+      },
       setContext: (items: AttachedContextItem[]): void => {
         const next = attachedContextToSelections(items);
         setSelections({
@@ -504,7 +515,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setFolderScopes(next.folderScopes);
       },
     }),
-    [handleFilesAdded],
+    [handleFilesAdded, pending, onSubmit, buildContext],
   );
 
   const submit = (): void => {

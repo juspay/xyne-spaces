@@ -12,7 +12,15 @@
  * as the current viewer and posts snapshots in over postMessage.
  */
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 
 const PROTOCOL_VERSION = 1;
 
@@ -51,6 +59,56 @@ const refreshFns: Record<string, () => void> = {};
 function post(message: Record<string, unknown>): void {
   if (window.parent === window) return;
   window.parent.postMessage({ source: 'xyne-artifact', v: PROTOCOL_VERSION, ...message }, '*');
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  // A rejection with a plain `{ message }` — common from fetch wrappers.
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return '';
+}
+
+/**
+ * Tells the host the app broke. The bundler reports some of this on its own,
+ * but its report has no component stack and misses anything a boundary
+ * swallows — so the app reports its own failures too, and the host shows
+ * whichever it holds (see ArtifactErrorOverlay).
+ */
+function reportError(error: unknown, componentStack?: string): void {
+  post({
+    type: 'error',
+    message: errorText(error) || 'Unknown error',
+    ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+    ...(componentStack ? { componentStack } : {}),
+  });
+}
+
+window.addEventListener('error', event => reportError(event.error ?? event.message));
+window.addEventListener('unhandledrejection', event => reportError(event.reason));
+
+/**
+ * Wraps the app's root. Placed by the synthesized entry, not by agent code, so
+ * every app has one whether or not the agent thought to add its own. Renders
+ * nothing once it has caught: the host's overlay is the failure UI, and a
+ * second message inside the frame would only compete with it.
+ */
+export class XyneErrorBoundary extends Component<{ children?: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
+    reportError(error, info.componentStack ?? undefined);
+  }
+
+  override render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
 }
 
 window.addEventListener('message', (event: MessageEvent) => {

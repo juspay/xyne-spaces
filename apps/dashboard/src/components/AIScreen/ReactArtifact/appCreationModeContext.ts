@@ -36,6 +36,23 @@ export interface AppCreationModeSignal {
   restoreVersion: (versionId: string) => void;
   /** True while a restore is in flight, so cards can disable themselves. */
   restoring: boolean;
+  /**
+   * Enter App Creation mode for a specific app, from the card that knows it.
+   *
+   * The card is the one component that holds the app id, the version id, and
+   * the fact that a build is on screen — all at once, with no intermediate
+   * state. Routing entry through it, rather than through a scan of the message
+   * list that reports upward into screen state and then into a URL effect,
+   * removes every link in the chain that used to make entry order-dependent.
+   */
+  enterForApp: (appId: string, versionId: string | null) => void;
+  /**
+   * Send a message into the thread this app belongs to, as if typed into its
+   * composer. Returns false when the thread refused it (a reply is still
+   * streaming). Null where there is no thread — the Library's app screen —
+   * which is what hides "Fix with AI" there.
+   */
+  submitPrompt: ((text: string) => boolean) | null;
 }
 
 const AppCreationModeContext = createContext<AppCreationModeSignal>({
@@ -47,6 +64,8 @@ const AppCreationModeContext = createContext<AppCreationModeSignal>({
   viewVersion: () => undefined,
   restoreVersion: () => undefined,
   restoring: false,
+  enterForApp: () => undefined,
+  submitPrompt: null,
 });
 
 export const AppCreationModeProvider = AppCreationModeContext.Provider;
