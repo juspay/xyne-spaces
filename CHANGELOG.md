@@ -1,3 +1,15 @@
+## [1.263.0](https://github.com/juspay/xyne-spaces/compare/v1.262.0...v1.263.0) (2026-09-02)
+
+
+### Features
+
+* made notifications title message nullable ([#1279](https://github.com/juspay/xyne-spaces/issues/1279)) ([2be9d83](https://github.com/juspay/xyne-spaces/commit/2be9d83feeefb6803729f81b6563a5bff8f56b92))
+
+
+### Bug Fixes
+
+* notify dev ticket owners and thread on release status changes ([#1421](https://github.com/juspay/xyne-spaces/issues/1421)) ([972889d](https://github.com/juspay/xyne-spaces/commit/972889dc7fcbbcf795163c4042ecfc4c33bdbf36))
+
 ## [1.262.0](https://github.com/juspay/xyne-spaces/compare/v1.261.0...v1.262.0) (2026-09-02)
 
 
