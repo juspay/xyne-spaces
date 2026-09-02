@@ -334,7 +334,7 @@ const ViewsSidebarSection = (): ReactElement => {
         )}
       </div>
 
-      {/* SHARED WITH ME — views shared with the current user via kanban_board_view_access. */}
+      {/* SHARED WITH ME — views shared with the current user via view_access. */}
       <AnimatePresence initial={false}>
         {allSharedViews.length > 0 && (
           <motion.div

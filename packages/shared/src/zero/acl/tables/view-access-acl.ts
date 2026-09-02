@@ -1,23 +1,27 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
+import { ViewAccessEntityType } from '../../types';
 import { BaseQueryACL } from '../core/base-acl';
 import { denyGuestSelect, isGuestContext } from '../core/guest-acl-utils';
 
-export class KanbanBoardViewAccessACL extends BaseQueryACL<'kanban_board_view_access'> {
+export class ViewAccessACL extends BaseQueryACL<'view_access'> {
   constructor(ctx: Context) {
-    super(ctx, 'kanban_board_view_access');
+    super(ctx, 'view_access');
   }
 
   canSelect<TReturn>(
-    query: Query<'kanban_board_view_access', Schema, TReturn>,
-  ): Query<'kanban_board_view_access', Schema, TReturn> {
+    query: Query<'view_access', Schema, TReturn>,
+  ): Query<'view_access', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return denyGuestSelect(query, 'id');
     }
 
-    return query.where(({ or, cmp }) =>
+    return query.where(({ or, and, cmp }) =>
       or(
-        cmp('userId', '=', this.ctx.userID),
+        and(
+          cmp('entityType', '=', ViewAccessEntityType.USER),
+          cmp('entityId', '=', this.ctx.userID),
+        ),
         cmp('sharedBy', '=', this.ctx.userID),
       ),
     );

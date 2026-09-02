@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import Input from '../../ui/Input';
+import { ViewAccessEntityType } from '@xyne/shared';
 import { useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
@@ -69,10 +70,11 @@ export const ShareViewDialog = ({
       const timestamp = Date.now();
       for (const userId of selectedUserIds) {
         const res = await zero.mutate(
-          mutators.kanbanBoardViewAccess.grant({
+          mutators.viewAccess.grant({
             id: uuidv4(),
             viewId,
-            userId,
+            entityType: ViewAccessEntityType.USER,
+            entityId: userId,
             timestamp,
           }),
         ).server;

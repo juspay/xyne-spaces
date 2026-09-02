@@ -318,6 +318,8 @@ interface BoardKanbanScreenProps {
   initialFilters?: TicketFilters;
   initialGroupBy?: string;
   initialColumns?: string[];
+  /** Version of the saved view (config updatedAt) — bumps when the owner updates it. */
+  initialViewVersion?: number;
 }
 
 type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
@@ -419,6 +421,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   initialFilters,
   initialGroupBy,
   initialColumns,
+  initialViewVersion,
   hasSharedSeed,
 }) => {
   const { projectId: projectIdParam, boardId } = useParams<{
@@ -995,13 +998,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // What this mount actually seeded, so the completion effect below compares against
   // the draft when one was restored rather than against the saved definition.
   const seededBoardsRef = useRef<string[] | null>(null);
+  // View version last seeded — a bump means the owner updated the view.
+  const seededViewVersionRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!isWorkspaceView || hasSeededViewRef.current) return;
-    if (state.value !== 'initialized') return;
+    if (!isWorkspaceView || state.value !== 'initialized') return;
+    const viewVersion = initialViewVersion ?? 0;
+    const versionAdvanced =
+      seededViewVersionRef.current !== null && viewVersion > seededViewVersionRef.current;
+    if (hasSeededViewRef.current && !versionAdvanced) return;
     hasSeededViewRef.current = true;
+    seededViewVersionRef.current = viewVersion;
+    // URL params win only when snapshotted against the current view version (`v`).
+    const urlVersion = Number(searchParams.get('v') ?? 0);
     const urlHasFilters = Object.keys(state.context.urlFilters ?? {}).length > 0;
-    urlHasFiltersRef.current = urlHasFilters;
-    if (urlHasFilters) {
+    const urlIsCurrent = urlHasFilters && urlVersion >= viewVersion;
+    urlHasFiltersRef.current = urlIsCurrent;
+    if (urlIsCurrent) {
       // URL already has filters, mark seeding complete immediately
       setHasSeededWorkspaceView(true);
       return;
@@ -1009,7 +1021,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // Precedence: URL > unsaved draft > saved definition. Falling straight through to
     // the saved definition is what used to discard an in-progress edit whenever the
     // view was re-entered without its query string (sidebar click, refresh, deep link).
-    if (initialDraft) {
+    // A version advance (owner updated the view) supersedes both of the former.
+    if (initialDraft && !versionAdvanced) {
       seededBoardsRef.current = initialDraft.filters.boards ?? [];
       setFilters({ ...initialDraft.filters });
       setGroupBy(parseGroupBy(initialDraft.groupBy));
@@ -1018,8 +1031,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // Dispatch to machine - seeding will be marked complete by the effect below
     // when filters are actually applied
     seededBoardsRef.current = initialFilters?.boards ?? [];
+    if (versionAdvanced) setHasSeededWorkspaceView(false);
     setFilters(initialFilters ? { ...initialFilters } : {});
     setGroupBy(initialGroupBy ? parseGroupBy(initialGroupBy) : 'none');
+    // Stamp the version so later loads treat this URL snapshot as current.
+    if (viewVersion > 0) {
+      setSearchParams(
+        prev => {
+          prev.set('v', String(viewVersion));
+          return prev;
+        },
+        { replace: true },
+      );
+    }
   }, [
     isWorkspaceView,
     state.value,
@@ -1027,8 +1051,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     initialDraft,
     initialFilters,
     initialGroupBy,
+    initialViewVersion,
     setFilters,
     setGroupBy,
+    searchParams,
+    setSearchParams,
   ]);
 
   // Mark workspace view seeding complete when filters are actually applied by the machine.

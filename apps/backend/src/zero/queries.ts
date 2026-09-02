@@ -47,6 +47,7 @@ import {
   DelayedMessageStatus,
   RecapEntityType,
   UserType,
+  ViewAccessEntityType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -5257,8 +5258,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   savedConfigsSharedWithUser: defineQuery(
     z.object({ userId: z.string() }),
     ({ args: { userId } }) => {
-      return zql.kanban_board_view_access
-        .where('userId', userId)
+      return zql.view_access
+        .where('entityType', ViewAccessEntityType.USER)
+        .where('entityId', userId)
         .related('view', view => view.related('values'))
         .orderBy('createdAt', 'desc');
     },

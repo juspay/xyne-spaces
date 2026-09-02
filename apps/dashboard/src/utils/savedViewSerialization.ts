@@ -98,7 +98,7 @@ interface ShareableView {
 
 // DB-backed share link: /projects/views/{viewId}.
 // The link itself grants no access — users must be shared with via the
-// Share dialog (kanban_board_view_access) to open the view.
+// Share dialog (view_access) to open the view.
 export function buildShareLink(view: ShareableView): string {
   const base = window.location.pathname.split('/projects')[0];
   return `${window.location.origin}${base}/projects/views/${view.id}`;

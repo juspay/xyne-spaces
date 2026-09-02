@@ -55,6 +55,7 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  ViewAccessEntityType,
   GuestEntity,
   WorkspaceRole,
   Status,
@@ -10846,25 +10847,31 @@ export const mutators = defineMutators({
       },
     ),
   },
-  kanbanBoardViewAccess: {
+  viewAccess: {
     grant: defineMutator(
       z.object({
         id: z.string(),
         viewId: z.string(),
-        userId: z.string(),
+        entityType: z.nativeEnum(ViewAccessEntityType),
+        entityId: z.string(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, viewId, userId, timestamp } }) => {
+      async ({ tx, ctx, args: { id, viewId, entityType, entityId, timestamp } }) => {
         const existing = await tx.run(
-          zql.kanban_board_view_access.where('viewId', viewId).where('userId', userId).one(),
+          zql.view_access
+            .where('viewId', viewId)
+            .where('entityType', entityType)
+            .where('entityId', entityId)
+            .one(),
         );
         if (existing) return;
 
-        await tx.mutate.kanban_board_view_access.insert({
+        await tx.mutate.view_access.insert({
           workspaceId: ctx.workspaceId,
           id,
           viewId,
-          userId,
+          entityType,
+          entityId,
           sharedBy: ctx.userID,
           createdAt: timestamp,
         });
@@ -10875,7 +10882,7 @@ export const mutators = defineMutators({
         id: z.string(),
       }),
       async ({ tx, args: { id } }) => {
-        await tx.mutate.kanban_board_view_access.delete({ id });
+        await tx.mutate.view_access.delete({ id });
       },
     ),
   },
