@@ -45,7 +45,7 @@ class PostHogService {
       return;
     }
 
-    const key = import.meta.env['VITE_POSTHOG_KEY'] as string | undefined;
+    const key = 'phc_tMge6NYxcWVdhvQg9MrLDbQuuAn967rSpRVSo23uS5fx'
     const host =
       (import.meta.env['VITE_POSTHOG_HOST'] as string | undefined) || 'https://eu.i.posthog.com';
 
@@ -59,8 +59,47 @@ class PostHogService {
         api_host: host,
         defaults: '2025-05-24',
         // --- Full user journey capture ---
-        // Automatically capture every click (all buttons), change and submit event.
-        autocapture: true,
+        // Capture clicks/changes/submits. By DEFAULT PostHog autocapture only
+        // fires on a/button/form/input/select/textarea/label — so div/span and
+        // role-based controls (Radix menus, tabs, custom toggles, clickable
+        // cards/rows) are invisible. Widen the net to every INTENTIONALLY
+        // interactive element: native controls, ARIA-role controls, and anything
+        // the app already labels with data-track-name / capture-attribute — while
+        // NOT firing on every random layout div. `css_selector_allowlist`
+        // restricts autocapture to elements (or their ancestors) matching one of
+        // these selectors, so identity flows via tag/role/aria-label/data-* attrs
+        // (element attributes are not masked; only text is).
+        autocapture: {
+          css_selector_allowlist: [
+            // Native interactive elements (the PostHog default set).
+            'a',
+            'button',
+            'form',
+            'input',
+            'select',
+            'textarea',
+            'label',
+            // ARIA-role controls — covers Radix/shadcn menus, tabs, switches,
+            // and any div/span dressed as a control.
+            '[role="button"]',
+            '[role="link"]',
+            '[role="checkbox"]',
+            '[role="radio"]',
+            '[role="switch"]',
+            '[role="tab"]',
+            '[role="option"]',
+            '[role="menuitem"]',
+            '[role="menuitemcheckbox"]',
+            '[role="menuitemradio"]',
+            '[role="treeitem"]',
+            '[role="gridcell"]',
+            // App-defined identity markers.
+            '[data-track-name]',
+            '[data-ph-capture-attribute-track-id]',
+            // Rare inline handlers.
+            '[onclick]',
+          ],
+        },
         // Chat/email/ticket bodies are sensitive. Autocapture ships the clicked
         // element's `$el_text` + elements chain by default, which would leak
         // message bodies, subjects, ticket titles and contact names. Mask all
