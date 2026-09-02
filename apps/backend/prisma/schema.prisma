@@ -4237,7 +4237,7 @@ model KanbanBoardViewAccess {
   viewId      String
   userId      String
   sharedBy    String
-  createdAt   DateTime              @default(now())
+  createdAt   DateTime
 
   view        SavedUserConfiguration @relation(fields: [viewId], references: [id], onDelete: Cascade)
   user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
