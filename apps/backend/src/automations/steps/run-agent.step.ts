@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BaseActionStep } from './base-step';
+import { BaseActionStep, type ActionExecutionContext } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
@@ -55,6 +55,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
   async execute(
     cfg: z.infer<typeof RunAgentConfigSchema>,
     context: AutomationContext,
+    execution: ActionExecutionContext,
   ): Promise<RunAgentOutput> {
     const store = automationContextStorage.getStore();
     if (!store) {
@@ -63,11 +64,9 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       );
     }
 
-    const stepCount = Object.keys(context.steps).length;
-    const currentIndex = Math.max(0, stepCount - 1);
-
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const { runId, stepName } = execution;
+    const sessionId = `${runId}:${stepName}`;
+    const callbackUrl = buildCallbackUrl(runId, stepName);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
@@ -77,7 +76,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
+      `[RUN_AGENT] firing — executionId=${runId} step=${stepName} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
     );
 
     try {
@@ -93,7 +92,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       });
     } catch (err) {
       logger.error(
-        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepIndex=${currentIndex}:`,
+        `[RUN_AGENT] claw rejected the run — executionId=${runId} step=${stepName}:`,
         err,
       );
       throw err;
@@ -105,6 +104,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     rowData: Record<string, unknown>,
     cfg: z.infer<typeof RunAgentConfigSchema>,
     context: AutomationContext,
+    execution: ActionExecutionContext,
   ): Promise<RunAgentOutput> {
     const agentRawResult = rowData['agentRawResult'] as Record<string, unknown> | undefined;
     if (!agentRawResult) {
@@ -141,7 +141,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn(`[RUN_AGENT] validation failed: ${message}`);
-      return this.handleValidationFailure(message, rowData, cfg, context);
+      return this.handleValidationFailure(message, rowData, cfg, context, execution);
     }
   }
 
@@ -150,6 +150,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     rowData: Record<string, unknown>,
     cfg: z.infer<typeof RunAgentConfigSchema>,
     context: AutomationContext,
+    execution: ActionExecutionContext,
   ): Promise<RunAgentOutput> {
     const previousRetries = Number(rowData['agentRetryCount'] ?? 0);
     const maxRetries = cfg.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -163,16 +164,10 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     if (!store) {
       throw new Error('[RUN_AGENT] retry attempted outside an automation context');
     }
-    const stepName =
-      typeof rowData['stepName'] === 'string'
-        ? (rowData['stepName'] as string)
-        : deriveStepNameFromCtx(context);
-    if (!stepName) {
-      throw new Error('[RUN_AGENT] cannot derive stepName for retry');
-    }
+    const { runId, stepName } = execution;
 
     const nextRetry = previousRetries + 1;
-    const retrySessionId = `${store.runId}:${stepName}:retry-${nextRetry}`;
+    const retrySessionId = `${runId}:${stepName}:retry-${nextRetry}`;
     const agentSlug = cfg.agentSlug as string;
     const originalPrompt = cfg.prompt as string;
     const retryPrompt = buildRetryPrompt(
@@ -183,11 +178,11 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
-    const callbackUrl = buildCallbackUrl(store.runId, stepName);
+    const callbackUrl = buildCallbackUrl(runId, stepName);
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] retry ${nextRetry}/${maxRetries} firing — executionId=${store.runId} step=${stepName} sessionId=${retrySessionId}`,
+      `[RUN_AGENT] retry ${nextRetry}/${maxRetries} firing — executionId=${runId} step=${stepName} sessionId=${retrySessionId}`,
     );
 
     try {
@@ -352,12 +347,6 @@ async function resolveHeadlessIdentityContext(
     spacesOrgId: workspace.orgId,
     spacesOrgMemberId: user.orgMemberId,
   };
-}
-
-function deriveStepNameFromCtx(context: AutomationContext): string | null {
-  const stepCount = Object.keys(context.steps).length;
-  if (stepCount === 0) return null;
-  return `step_${stepCount - 1}`;
 }
 
 function buildRetryPrompt(
