@@ -49,6 +49,13 @@ import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
 import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import {
+  cleanNotificationText,
+  getFlowJsonContentForNotification,
+  getFlowJsonRawTextForMentions,
+} from '@/utils/flowJson';
+// Re-exported so existing importers (e.g. vespa-injection mapper) keep working.
+export { getFlowJsonContentForNotification };
 import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -59,93 +66,6 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
 const installedAppsRepository = new InstalledAppsRepository();
-
-/**
- * Extract plaintext content strings from a FlowJSON payload for notification
- * preview and mention scanning.
- *
- * FlowJSON is stored as `<div data-flow-json="...escaped JSON...">Flow JSON</div>`.
- * The visible text node ("Flow JSON") is meaningless — we need to walk the
- * component tree and collect every text `content` prop, then join them.
- */
-function extractTextFromFlowJson(content: string): string {
-  const attrMatch = content.match(/data-flow-json="([^"]+)"/);
-  if (!attrMatch) return '';
-  try {
-    const json = attrMatch[1]
-      .replace(/&quot;/g, '"')
-      .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&');
-    const flow = JSON.parse(json) as { components?: unknown[] };
-
-    const texts: string[] = [];
-
-    function walk(components: unknown[]): void {
-      for (const comp of components) {
-        if (!comp || typeof comp !== 'object') continue;
-        const c = comp as Record<string, unknown>;
-        if (c['props'] && typeof c['props'] === 'object') {
-          const p = c['props'] as Record<string, unknown>;
-          if (typeof p['content'] === 'string' && p['content'].trim()) {
-            texts.push(p['content'].trim());
-          }
-        }
-        if (Array.isArray(c['children'])) {
-          walk(c['children'] as unknown[]);
-        }
-      }
-    }
-
-    if (Array.isArray(flow.components)) {
-      walk(flow.components);
-    }
-    return texts.join(' ').replace(/\s+/g, ' ').trim();
-  } catch {
-    return '';
-  }
-}
-
-/**
- * Like extractTextFromFlowJson but strips mrkdwn tokens for display in
- * notification previews (user mentions removed, broadcast → @channel, etc.).
- */
-function extractCleanTextFromFlowJson(content: string): string {
-  const raw = extractTextFromFlowJson(content);
-  return cleanNotificationText(raw);
-}
-
-/** Strip Flow mrkdwn tokens without exposing internal entity identifiers. */
-function cleanNotificationText(raw: string): string {
-  if (!raw) return '';
-  return raw
-    .replace(/<userid:[^>]+>/g, '')
-    .replace(/<channelid:[^>]+>/g, '#channel')
-    .replace(/<broadcast:channel>/gi, '@channel ')
-    .replace(/<broadcast:here>/gi, '@here ')
-    .replace(/<broadcast:([^>]+)>/gi, '@$1')
-    .replace(/<([^|>]+)\|([^>]+)>/g, '$2')
-    .replace(/<(https?:[^>]+)>/g, '$1')
-    .replace(/\s+/g, ' ').trim();
-}
-
-/**
- * For flow JSON messages, returns the extracted plaintext from the FlowJSON
- * component tree (suitable for mention scanning and notification preview).
- * Returns null for non-flow-json content.
- */
-export function getFlowJsonContentForNotification(content: string): string | null {
-  if (!content.includes('data-flow-json')) return null;
-  return extractCleanTextFromFlowJson(content) || null;
-}
-
-/** Returns raw FlowJSON text with tokens intact (for mention scanning). */
-function getFlowJsonRawTextForMentions(content: string): string | null {
-  if (!content.includes('data-flow-json')) return null;
-  return extractTextFromFlowJson(content) || null;
-}
 
 /**
  * Friendly notification label for a flow CARD whose title/content doesn't live
