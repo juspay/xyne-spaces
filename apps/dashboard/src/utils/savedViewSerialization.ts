@@ -90,23 +90,16 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
 }
 
 interface ShareableView {
+  id: string;
   name: string;
   contextId: string;
   values?: readonly SavedConfigValueRow[];
 }
 
-// Self-contained share link: /projects/views/new#cfg=<base64(JSON{name,filters,groupBy})>.
-// Recipient opens it → builder prefilled → "Save view" creates their own private copy.
+// DB-backed share link: /projects/views/{viewId}.
+// The link itself grants no access — users must be shared with via the
+// Share dialog (kanban_board_view_access) to open the view.
 export function buildShareLink(view: ShareableView): string {
-  const values = view.values ?? [];
-  const filters = valuesToFilters(values);
-  // Legacy per-board views store their board in contextId, not as 'boards' value rows.
-  if (!filters.boards?.length && view.contextId) {
-    filters.boards = [view.contextId];
-  }
-  const groupBy = values.find(v => v.fieldName === '__groupBy')?.fieldValue;
-  const cfg = { name: view.name, filters, ...(groupBy ? { groupBy } : {}) };
-  const encoded = btoa(encodeURIComponent(JSON.stringify(cfg)));
   const base = window.location.pathname.split('/projects')[0];
-  return `${window.location.origin}${base}/projects/views/new#cfg=${encoded}`;
+  return `${window.location.origin}${base}/projects/views/${view.id}`;
 }
