@@ -26,6 +26,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
+import { isRecording } from '@/utils/callTypeUtils';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -1672,12 +1673,7 @@ export class CallController {
       const input = UpdateCallLabelsSchema.parse(req.body);
       const call = await repositories.calls.findByExternalId(callId);
 
-      if (
-        !call ||
-        call.callType === CallType.HEADLESS ||
-        !workspaceId ||
-        call.workspaceId !== workspaceId
-      ) {
+      if (!call || isRecording(call) || !workspaceId || call.workspaceId !== workspaceId) {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
