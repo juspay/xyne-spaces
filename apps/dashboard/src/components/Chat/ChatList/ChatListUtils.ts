@@ -43,6 +43,53 @@ export const extractMessageIdFromHash = (hash: string): string | null => {
 };
 
 /**
+ * Extract the temporal anchor (epoch ms) from a message deep-link hash.
+ * Example: #origin=abc&createdAt=1712345678901 -> 1712345678901
+ * Mirrors the receiver parsing in ConversationPanelV2 so the copy-link
+ * producer and the link consumer stay in sync.
+ */
+export const extractCreatedAtFromHash = (hash: string): number | null => {
+  if (!hash) return null;
+
+  const match = hash.match(/createdAt=([^&#]+)/);
+  if (!match?.[1]) return null;
+  const parsed = parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+export type MessageLinkContext = 'thread' | 'channel';
+
+/**
+ * Build a shareable deep link to a message.
+ *
+ * The `createdAt` temporal anchor is what lets the receiver load the message
+ * window directly (getChannelConversationsSnapshot) instead of resolving the
+ * target time through a Zero-cache ID lookup (getConversationByIdWithChannel),
+ * which is slow or misses for OLDER messages that are not in the local cache —
+ * the cause of links landing at the bottom of the channel instead of on the
+ * linked message.
+ */
+export const buildMessageLink = (params: {
+  shareableOrigin: string;
+  channelId: string;
+  conversationId: string;
+  messageId: string;
+  createdAt?: number | null;
+  context: MessageLinkContext;
+}): string => {
+  const { shareableOrigin, channelId, conversationId, messageId, createdAt, context } = params;
+  const createdAtParam =
+    typeof createdAt === 'number' && Number.isFinite(createdAt) ? `&createdAt=${createdAt}` : '';
+
+  if (context === 'thread') {
+    // Thread message: full path with conversation + messageId + createdAt in hash.
+    return `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}${createdAtParam}`;
+  }
+  // Channel message: channel in path, conversation + createdAt in hash.
+  return `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}${createdAtParam}`;
+};
+
+/**
  * Helper function to determine if avatar should be shown
  * Shows avatar when:
  * - It's the first message
