@@ -61,7 +61,6 @@ import {
 import {
   extractOriginFromHash,
   extractMessageIdFromHash,
-  buildMessageLink,
   createMessagePreview,
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
@@ -681,19 +680,24 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const onCopyLink = (): void => {
     // Get conversation ID from conversation object or fallback to message
     const conversationId = conversation?.conversationId || message.conversationId;
+    // Include the message's createdAt (epoch ms) as a temporal anchor. Without it
+    // the receiver resolves the target via a Zero-cache ID lookup that is slow or
+    // misses for older, uncached messages, so the link lands at the bottom of the
+    // channel instead of on the linked message.
+    const linkCreatedAt = conversation?.createdAt ?? message.createdAt;
+    const createdAtParam =
+      typeof linkCreatedAt === 'number' && Number.isFinite(linkCreatedAt)
+        ? `&createdAt=${linkCreatedAt}`
+        : '';
     let messageLink = '';
     if (conversationId) {
-      // Include the createdAt temporal anchor so the receiver loads the message
-      // window directly instead of relying on a Zero-cache ID lookup that is slow
-      // or misses for older messages (which made links land at the channel bottom).
-      messageLink = buildMessageLink({
-        shareableOrigin,
-        channelId,
-        conversationId,
-        messageId: message.messageId,
-        createdAt: conversation?.createdAt ?? message.createdAt,
-        context: context === 'thread' ? 'thread' : 'channel',
-      });
+      if (context === 'thread') {
+        // Thread message: include full path with conversation + messageId in hash
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}${createdAtParam}`;
+      } else {
+        // Channel message: only channel in path, conversation in hash
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}${createdAtParam}`;
+      }
     }
 
     navigator.clipboard

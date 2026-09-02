@@ -20,16 +20,27 @@ export type CombinedMessageItem =
       data: ThreadMessage;
       createdAt: Date;
     };
-// Message deep-link helpers live in a dependency-free module so the copy-link
-// contract can be unit-tested in isolation. Re-exported here to preserve the
-// existing import paths used across the Chat components.
-export {
-  extractOriginFromHash,
-  extractMessageIdFromHash,
-  extractCreatedAtFromHash,
-  buildMessageLink,
-} from './messageLink';
-export type { MessageLinkContext } from './messageLink';
+/**
+ * Extract origin conversation ID from URL hash
+ * Example: #origin=9d305bdb-2a05-4833-8bd2-1d4e911db695 → 9d305bdb-2a05-4833-8bd2-1d4e911db695
+ */
+export const extractOriginFromHash = (hash: string): string | null => {
+  if (!hash) return null;
+
+  const match = hash.match(/origin=([^&]+)/);
+  return match?.[1] ?? null;
+};
+
+/**
+ * Extract message ID from URL hash
+ * Example: #origin=abc123&messageId=xyz789 → xyz789
+ */
+export const extractMessageIdFromHash = (hash: string): string | null => {
+  if (!hash) return null;
+
+  const match = hash.match(/messageId=([^&]+)/);
+  return match?.[1] ?? null;
+};
 
 /**
  * Helper function to determine if avatar should be shown
