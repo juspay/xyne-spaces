@@ -42,6 +42,9 @@ export const fetchFile = async (
       });
 
       const blob: Blob = response.data;
+      if (!blob || blob.size === 0) {
+        throw new Error('The file is empty or unavailable');
+      }
       return new File([blob], fileName, { type: mimeType });
     },
     staleTime: 10 * 60 * 1000,
@@ -122,7 +125,11 @@ export const createPreviewUrl = async (
         responseType: 'blob',
         signal,
       });
-      return response.data as Blob;
+      const blob = response.data as Blob;
+      if (!blob || blob.size === 0) {
+        throw new Error('The file is empty or unavailable');
+      }
+      return blob;
     },
     staleTime: 10 * 60 * 1000,
   });
