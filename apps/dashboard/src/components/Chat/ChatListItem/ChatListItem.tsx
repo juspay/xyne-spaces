@@ -10,6 +10,7 @@ import { ChannelScopeType, MessageAttachment } from '@xyne/shared';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { useAuth } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
+import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { Button } from '../../ui/Button/Button';
 import {
   usePendingStatusByMessageId,
@@ -60,6 +61,7 @@ const ChatListItemComponent = ({
   const pendingMessageId = conversation?.initialMessageId ?? '';
   const pendingStatus = usePendingStatusByMessageId(pendingMessageId);
   const pendingEntry = usePendingByMessageId(pendingMessageId);
+  const { showThreadTags } = useShowThreadTags();
 
   // Render date separator
   if (item.type === 'date-separator') {
@@ -94,7 +96,7 @@ const ChatListItemComponent = ({
   let showAvatar = true;
 
   if (prevItem && prevItem.type !== 'date-separator') {
-    showAvatar = shouldShowAvatar(item, prevItem);
+    showAvatar = shouldShowAvatar(item, prevItem, showThreadTags);
   }
 
   return (
