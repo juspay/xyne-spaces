@@ -1,21 +1,34 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronUp,
   CopyDefault,
   DownloadDown,
+  FileText,
   MultipleCrossCancelDefault,
   SearchBig,
   Spinner,
+  Translate,
 } from '@xyne/icons';
 import { toast } from 'sonner';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
 import { Button } from '../../ui/Button/Button';
 import { Tooltip } from '../../ui/Tooltip';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../ui/Select/Select';
 import { MarkedMomentDivider } from '../../Notetaker/MarkedMomentDivider';
 import { useTextSearch } from '../../../hooks/useTextSearch';
 import { HighlightedText } from '../../../routes/RecordingsScreen/components/HighlightedText';
 import { cn } from '../../../utils/classNames';
+import { sanitizeFilename } from '../../../utils/canvasExport';
+import { Skeleton } from '../../ui/Skeleton';
 import {
   CITATION_HIGHLIGHT,
   findTargetIndex,
@@ -27,6 +40,18 @@ import {
 
 /** Stable identity so the memos below don't recompute for callers passing no moments. */
 const NO_MARKED_MOMENTS: readonly number[] = [];
+
+/** Fixed varying widths so the loading shimmer reads as transcript lines, not uniform bars. */
+const TRANSCRIPT_SKELETON_ROWS: ReadonlyArray<readonly string[]> = [
+  ['w-11/12'],
+  ['w-4/5', 'w-2/3'],
+  ['w-full'],
+  ['w-3/4'],
+  ['w-5/6', 'w-1/2'],
+  ['w-2/3'],
+  ['w-11/12', 'w-3/5'],
+  ['w-4/5'],
+];
 
 /**
  * Which treatment the resolved line gets. `marker` is the amber one, for a line
@@ -49,6 +74,7 @@ export interface TranscriptSidePanelProps {
   openNonce?: number;
   isLoading?: boolean;
   error?: string | null;
+  onRetry?: () => void;
   /**
    * Offsets, in seconds from the recording start, the user flagged while recording —
    * the `moment` entries of Call.markedItems. Each is resolved to the line being
@@ -57,6 +83,13 @@ export interface TranscriptSidePanelProps {
   markedTimestampsSeconds?: readonly number[];
   onClose: () => void;
   className?: string;
+  title?: string;
+  // Translation dropdown
+  selectedLanguage?: string;
+  onLanguageChange?: (language: string) => void;
+  isTranslating?: boolean;
+  /** Some lines fell back to their original language — surfaced as a notice, not silently mixed in. */
+  translatePartial?: boolean;
 }
 
 export function TranscriptSidePanel({
@@ -65,9 +98,15 @@ export function TranscriptSidePanel({
   openNonce = 0,
   isLoading = false,
   error = null,
+  onRetry,
   markedTimestampsSeconds = NO_MARKED_MOMENTS,
   onClose,
   className = '',
+  title,
+  selectedLanguage = ORIGINAL_TRANSCRIPT_LANGUAGE,
+  onLanguageChange,
+  isTranslating = false,
+  translatePartial = false,
 }: TranscriptSidePanelProps): ReactElement {
   const lineRefs = useRef(new Map<number, HTMLDivElement>());
   const lines = useMemo(() => parseTranscript(transcript), [transcript]);
@@ -109,16 +148,23 @@ export function TranscriptSidePanel({
   }, [transcript]);
 
   const handleDownload = useCallback((): void => {
+    const languageLabel =
+      selectedLanguage === ORIGINAL_TRANSCRIPT_LANGUAGE
+        ? 'original'
+        : (SUPPORTED_TRANSCRIPT_LANGUAGES.find(language => language.code === selectedLanguage)
+            ?.label ?? selectedLanguage);
+    const filename = `${sanitizeFilename(title ?? 'transcript')}-scribe-${sanitizeFilename(languageLabel)}.txt`;
+
     const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = href;
-    anchor.download = 'transcript.txt';
+    anchor.download = filename;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(href), 0);
-  }, [transcript]);
+  }, [transcript, title, selectedLanguage]);
 
   const shouldReduceMotion = useReducedMotion();
 
@@ -185,85 +231,154 @@ export function TranscriptSidePanel({
       </header>
 
       <div className='shrink-0 border-b border-border px-4 py-3'>
-        <div className='flex h-10 items-center gap-1.5 rounded-xl border border-border bg-muted/45 px-3 text-muted-foreground focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20'>
-          <SearchBig size={16} strokeWidth={2.2} className='shrink-0' aria-hidden='true' />
-          <input
-            type='text'
-            value={search.query}
-            onFocus={search.open}
-            onChange={event => search.setQuery(event.target.value)}
-            onKeyDown={search.handleKeyDown}
-            placeholder='Search transcript...'
-            aria-label='Search transcript'
-            className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
-            data-track-category='TranscriptPanel'
-            data-track-name='search_transcript'
-          />
-          {search.query ? (
-            <>
-              <span className='shrink-0 text-xs tabular-nums'>
-                {search.matchCount > 0
-                  ? `${search.currentIndex + 1} of ${search.matchCount}`
-                  : 'No matches'}
-              </span>
-              <Button
-                type='button'
-                variant='ghost'
-                size='iconSm'
-                onClick={search.goToPrevious}
-                disabled={search.matchCount === 0}
-                className='size-6 rounded-full hover:bg-muted disabled:opacity-35'
-                aria-label='Previous match'
+        <div className='flex items-center gap-2'>
+          <div className='flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-border bg-muted/45 px-3 text-muted-foreground focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20'>
+            <SearchBig size={16} strokeWidth={2.2} className='shrink-0' aria-hidden='true' />
+            <input
+              type='text'
+              value={search.query}
+              onFocus={search.open}
+              onChange={event => search.setQuery(event.target.value)}
+              onKeyDown={search.handleKeyDown}
+              placeholder='Search transcript...'
+              aria-label='Search transcript'
+              className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+              data-track-category='TranscriptPanel'
+              data-track-name='search_transcript'
+            />
+            {search.query ? (
+              <>
+                <span className='shrink-0 text-xs tabular-nums'>
+                  {search.matchCount > 0
+                    ? `${search.currentIndex + 1} of ${search.matchCount}`
+                    : 'No matches'}
+                </span>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='iconSm'
+                  onClick={search.goToPrevious}
+                  disabled={search.matchCount === 0}
+                  className='size-6 rounded-full hover:bg-muted disabled:opacity-35'
+                  aria-label='Previous match'
+                  data-track-category='TranscriptPanel'
+                  data-track-name='transcript_search_previous'
+                >
+                  <ChevronUp className='size-3.5' aria-hidden='true' />
+                </Button>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='iconSm'
+                  onClick={search.goToNext}
+                  disabled={search.matchCount === 0}
+                  className='size-6 rounded-full hover:bg-muted disabled:opacity-35'
+                  aria-label='Next match'
+                  data-track-category='TranscriptPanel'
+                  data-track-name='transcript_search_next'
+                >
+                  <ChevronDown className='size-3.5' aria-hidden='true' />
+                </Button>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='iconSm'
+                  onClick={search.close}
+                  className='size-6 rounded-full hover:bg-muted'
+                  aria-label='Clear transcript search'
+                  data-track-category='TranscriptPanel'
+                  data-track-name='clear_transcript_search'
+                >
+                  <MultipleCrossCancelDefault className='size-3.5' aria-hidden='true' />
+                </Button>
+              </>
+            ) : null}
+          </div>
+          {onLanguageChange ? (
+            <Select
+              value={selectedLanguage}
+              onValueChange={onLanguageChange}
+              disabled={isTranslating}
+            >
+              <SelectTrigger
+                aria-label='Translate transcript'
+                className='h-9 shrink-0 gap-1.5 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground shadow-none hover:bg-muted'
                 data-track-category='TranscriptPanel'
-                data-track-name='transcript_search_previous'
+                data-track-name='translate_transcript'
               >
-                <ChevronUp className='size-3.5' aria-hidden='true' />
-              </Button>
-              <Button
-                type='button'
-                variant='ghost'
-                size='iconSm'
-                onClick={search.goToNext}
-                disabled={search.matchCount === 0}
-                className='size-6 rounded-full hover:bg-muted disabled:opacity-35'
-                aria-label='Next match'
-                data-track-category='TranscriptPanel'
-                data-track-name='transcript_search_next'
-              >
-                <ChevronDown className='size-3.5' aria-hidden='true' />
-              </Button>
-              <Button
-                type='button'
-                variant='ghost'
-                size='iconSm'
-                onClick={search.close}
-                className='size-6 rounded-full hover:bg-muted'
-                aria-label='Clear transcript search'
-                data-track-category='TranscriptPanel'
-                data-track-name='clear_transcript_search'
-              >
-                <MultipleCrossCancelDefault className='size-3.5' aria-hidden='true' />
-              </Button>
-            </>
+                {isTranslating ? (
+                  <Spinner
+                    size={16}
+                    className='shrink-0 text-muted-foreground !animate-spin'
+                    aria-hidden='true'
+                  />
+                ) : (
+                  <Translate size={16} aria-hidden='true' />
+                )}
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align='end'>
+                <SelectItem value={ORIGINAL_TRANSCRIPT_LANGUAGE}>Original</SelectItem>
+                {SUPPORTED_TRANSCRIPT_LANGUAGES.map(language => (
+                  <SelectItem key={language.code} value={language.code}>
+                    {language.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : null}
         </div>
       </div>
 
       <div className='thin-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-3'>
         {isLoading ? (
-          <div
-            className='flex items-center gap-2 py-6 text-sm text-muted-foreground'
-            aria-live='polite'
-          >
-            <Spinner size={16} className='animate-spin' aria-hidden='true' />
-            Loading transcript
+          <div className='space-y-2.5' aria-busy='true' aria-label='Loading transcript'>
+            {TRANSCRIPT_SKELETON_ROWS.map((lineWidths, rowIndex) => (
+              <div key={rowIndex} className='-mx-3 rounded-lg px-3 py-2.5'>
+                <Skeleton className='mb-1.5 h-3 w-12' />
+                <div className='space-y-1.5'>
+                  {lineWidths.map((width, lineIndex) => (
+                    <Skeleton key={lineIndex} className={`h-3.5 ${width}`} />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         ) : null}
-        {!isLoading && error ? <p className='py-6 text-sm text-destructive'>{error}</p> : null}
+        {!isLoading && error ? (
+          <div className='flex flex-col items-center gap-3 py-6 text-center'>
+            <p className='text-sm text-destructive'>{error}</p>
+            {onRetry ? (
+              <Button type='button' variant='outline' size='sm' onClick={onRetry}>
+                Try again
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {!isLoading && !error && lines.length === 0 ? (
-          <p className='py-6 text-sm text-muted-foreground'>
-            No transcript is available for this call.
-          </p>
+          <div className='flex h-full min-h-[240px] flex-col items-center justify-center gap-3 text-center'>
+            <div className='flex size-11 items-center justify-center rounded-xl bg-muted'>
+              <FileText size={20} className='text-muted-foreground' aria-hidden='true' />
+            </div>
+            <div className='space-y-1'>
+              <p className='text-sm font-medium text-foreground'>No transcript available</p>
+              <p className='text-xs text-muted-foreground'>
+                This call doesn&apos;t have a transcript to show yet.
+              </p>
+            </div>
+          </div>
+        ) : null}
+        {!isLoading && !error && translatePartial ? (
+          <div className='mb-3 flex items-center justify-center gap-2 rounded-xl border border-border bg-muted p-2'>
+            <AlertTriangle
+              size={14}
+              className='shrink-0 text-muted-foreground'
+              aria-hidden='true'
+            />
+            <p className='text-xs text-muted-foreground'>
+              Some lines couldn&apos;t be translated and are shown in their original language
+            </p>
+          </div>
         ) : null}
         {!isLoading && !error && lines.length > 0 ? (
           <div className='space-y-2.5'>
