@@ -1,3 +1,10 @@
+## [1.265.0](https://github.com/juspay/xyne-spaces/compare/v1.264.2...v1.265.0) (2026-09-02)
+
+
+### Features
+
+* Add labels for calls ([#1188](https://github.com/juspay/xyne-spaces/issues/1188)) ([f684e38](https://github.com/juspay/xyne-spaces/commit/f684e3852cba43a3bbb8c74ceb0d71ab527fb54e))
+
 ## [1.264.2](https://github.com/juspay/xyne-spaces/compare/v1.264.1...v1.264.2) (2026-09-02)
 
 
