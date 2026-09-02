@@ -5298,10 +5298,10 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     variant='app'
-                    recordOnly={
-                      channel?.type === ChannelType.APP &&
-                      channelPreference?.appWebhookDeliveryEnabled === false
-                    }
+                    // The ticket is app-sourced whatever the desk type, so the
+                    // channel preference alone decides whether the reply reaches
+                    // the app — matching appDeskService's outbound gate.
+                    recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
                   />
                 ) : null
               ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (

@@ -8,15 +8,13 @@ import {
   connectChannelApp,
   disconnectChannelApp,
   listAppDeskEligibleApps,
-  listChannelApps,
 } from '../../../services/clients/appDeskApi';
+import { channelAppsQueryKey, useChannelApps } from '../../../hooks/useChannelApps';
 
 interface ConnectedAppsSectionProps {
   channelId: string;
   canManage: boolean;
 }
-
-const channelAppsQueryKey = (channelId: string) => ['app-desk-channel-apps', channelId] as const;
 
 export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
   channelId,
@@ -31,15 +29,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
     appName: string | null;
   } | null>(null);
 
-  const {
-    data: connectedApps,
-    isLoading,
-    isError,
-  } = useQuery({
-    queryKey: channelAppsQueryKey(channelId),
-    queryFn: () => listChannelApps(channelId),
-    enabled: !!channelId,
-  });
+  const { data: connectedApps, isLoading, isError } = useChannelApps(channelId);
 
   const { data: eligibleApps, isLoading: isLoadingEligibleApps } = useQuery({
     queryKey: ['app-desk-eligible-apps'],

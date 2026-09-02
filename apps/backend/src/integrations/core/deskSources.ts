@@ -10,17 +10,22 @@ export const buildChannelAppSourceName = (installedAppId: string, channelId: str
   `${DESK_SOURCE_PREFIXES.APP}${installedAppId}-${channelId}`;
 
 /**
- * Namespace an app-supplied message id by its source before it becomes an
- * `Email.externalMessageId`.
+ * Namespace an app-supplied message id by its source.
  *
- * That column's uniqueness is `(externalMessageId, channelId)` — channel-scoped,
- * not source-scoped — while the id itself is chosen by the app. Two apps sharing
- * a channel routinely mint the same ids ("1", "evt-1"), and unprefixed the second
- * app's upsert silently adopts the first app's Email row (inbound) or hits P2002
- * mid-reply (outbound). Prefixing makes the existing constraint behave as if it
- * were scoped by source. `ExternalMessage.externalId` keeps the raw id — that
- * table is already keyed by (externalSourceId, externalId) and is the app-facing
- * dedup contract.
+ * `Email.externalMessageId` is unique per `(externalMessageId, channelId)` —
+ * channel-scoped, not source-scoped — while the id itself is chosen by the app.
+ * Two apps sharing a channel routinely mint the same ids ("1", "evt-1"), and
+ * unprefixed the second app's upsert silently adopts the first app's Email row
+ * (inbound) or hits P2002 mid-reply (outbound). Prefixing makes the existing
+ * constraint behave as if it were scoped by source.
+ *
+ * The scoped id is written to BOTH `Email.externalMessageId` and the paired
+ * `ExternalMessage.externalId`. Those two columns hold the same value everywhere
+ * in this repo (`core.ts` writes `normalizedData.externalId` to both;
+ * `emailService.ts` copies one into the other), and lookups join on that
+ * equality — so the namespace applies to both sides or to neither. Callers
+ * looking up by an app-supplied id must scope it first; the raw id is only ever
+ * a legacy-read fallback for rows written before this prefix existed.
  */
 export const scopeExternalMessageIdToSource = (
   externalSourceId: string,

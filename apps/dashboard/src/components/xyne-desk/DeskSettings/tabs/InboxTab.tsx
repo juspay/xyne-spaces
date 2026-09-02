@@ -12,6 +12,7 @@ import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
 import { Button } from '../../../ui/Button/Button';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
+import { useChannelApps } from '../../../../hooks/useChannelApps';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
@@ -73,6 +74,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     () => localStorage.getItem(SIGNATURE_AUTO_APPEND_STORAGE_KEY) !== 'false',
   );
   const signatureModalRef = useRef<HTMLDivElement>(null);
+
+  // Webhook delivery is a per-channel preference that now applies to any desk
+  // carrying app bindings, not just ChannelType.APP. Keep it visible on APP desks
+  // even before the first connect so the pre-existing control never disappears.
+  const { data: connectedApps } = useChannelApps(channelId, isDeskChannel);
+  const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
   useEffect(() => {
     if (signatureModalOpen) {
@@ -293,7 +300,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         </div>
       )}
 
-      {isApp && (
+      {showAppWebhookDelivery && (
         <div className='flex items-start justify-between gap-4'>
           <div className='flex flex-col gap-[4px]'>
             <div className='text-desk-label'>Send replies to app webhook</div>
