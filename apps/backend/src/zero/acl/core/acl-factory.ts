@@ -414,6 +414,9 @@ export class ACLFactory {
         return new ReposACL(ctx);
       case 'sdlc_entity_links':
         return new SdlcEntityLinksACL(ctx);
+      case 'commits':
+        // Server-written table: no client mutations (BaseACL denies all).
+        return new BaseACL<any>(ctx);
       case 'sdlc_artifacts':
         // Server-written provenance table: no client mutations (BaseACL denies all).
         return new BaseACL<any>(ctx);

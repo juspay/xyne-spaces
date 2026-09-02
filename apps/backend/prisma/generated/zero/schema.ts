@@ -567,6 +567,8 @@ export const scheduledMessageTable = table("scheduled_messages")
     messageContent: string(),
     channelId: string(),
     daysOfWeek: string(),
+    monthlyMode: string().optional(),
+    monthlyValue: number().optional(),
     scheduledTime: string(),
     isActive: boolean(),
     createdBy: string(),
@@ -2345,6 +2347,20 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     testedAt: number().optional(),
     failureReason: string().optional(),
     isHotfix: boolean().optional(),
+    createdAt: number(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const releaseRepositoryTable = table("release_repositories")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    releaseId: string(),
+    mainReleaseBoardId: string(),
+    branch: string(),
+    deployedCommit: string(),
+    newCommit: string(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -5203,6 +5219,7 @@ export const schema = createSchema(
       stageApproversTable,
       applicationTable,
       applicationReleaseTicketTable,
+      releaseRepositoryTable,
       releaseEventTable,
       releaseChangeTable,
       releaseChangeTypeTable,
@@ -5508,6 +5525,7 @@ export type CollectionPermission = Row<typeof schema.tables.collection_permissio
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type Application = Row<typeof schema.tables.applications>;
 export type ApplicationReleaseTicket = Row<typeof schema.tables.application_release_tickets>;
+export type ReleaseRepository = Row<typeof schema.tables.release_repositories>;
 export type ReleaseEvent = Row<typeof schema.tables.release_events>;
 export type ReleaseChange = Row<typeof schema.tables.release_changes>;
 export type ReleaseChangeType = Row<typeof schema.tables.release_change_types>;
