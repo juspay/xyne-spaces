@@ -11,12 +11,11 @@ import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
-import { useAllChannels } from '../../hooks/useChannels';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
 import { useSelector } from '@xstate/react';
-import { CallType, ChannelType } from '@xyne/shared';
-import { buildSdlcPath } from '@xyne/shared/sdlc';
+import { CallType } from '@xyne/shared';
+import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
@@ -77,6 +76,7 @@ interface NotificationData {
       conversation?: Conversation;
       notificationType?: string;
       ticketId?: string;
+      sdlcTarget?: unknown;
     };
     metadata?: {
       notificationType?: string;
@@ -132,14 +132,6 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
-  // Read inside the socket callback, which is registered once.
-  const allChannels = useAllChannels();
-  const sdlcChannelIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    sdlcChannelIdsRef.current = new Set(
-      allChannels.filter(channel => channel.type === ChannelType.SDLC).map(channel => channel.id),
-    );
-  }, [allChannels]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
@@ -241,20 +233,10 @@ export const NotificationHandler: React.FC = () => {
         }
         // Socket delivery spreads metadata into `data`; the REST row keeps `metadata`.
         const ids = { ...data.notification.metadata, ...data.notification.data };
-        // No builder knows the SDLC routes, so the hub's own paths are built here
-        // from the ids they all send, against channels the client already holds.
-        const sdlcActionUrl =
-          ids.channelId && sdlcChannelIdsRef.current.has(ids.channelId)
-            ? buildSdlcPath({
-                channelId: ids.channelId,
-                canvasId: ids.canvasId,
-                ticketId: ids.ticketId,
-                conversationId: ids.conversationId,
-                messageId: ids.messageId,
-                blockId: ids.blockId,
-                commentThreadId: ids.commentThreadId,
-              })
-            : undefined;
+        // The server leaves actionUrl chat-shaped for push, which has no SDLC routes,
+        // so a hub path is rebuilt here from the target it resolved at send time.
+        const sdlcTarget = parseSdlcNavTarget(ids.sdlcTarget);
+        const sdlcActionUrl = sdlcTarget ? buildSdlcPath(sdlcTarget) : undefined;
         const resolvedRawActionUrl =
           sdlcActionUrl ||
           data.notification.actionUrl ||

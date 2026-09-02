@@ -3110,6 +3110,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
 
+      // The hub channel is absent from the visible-channel list, so use the board's own.
+      if (channel?.type === ChannelType.SDLC) {
+        const sdlcUrl = `/sdlc/${channel.id}/tickets/${ticket.id}`;
+        if (!isMobile && isCmdClick) {
+          window.open(`${ws ? `/${ws}` : ''}${sdlcUrl}`, '_blank');
+          return;
+        }
+        void navigate(sdlcUrl);
+        return;
+      }
+
       // Desk tickets open in the Support screen, not the chat ticket panel.
       const ticketChannel = allChannels.find(c => c.id === ticket.channelId);
       if (isDeskChannelType(ticketChannel?.type) && ticket.xyneId) {
@@ -3172,7 +3183,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         );
       }
     },
-    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels],
+    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels, channelsById],
   );
 
   const openCreateForColumn = useCallback(
