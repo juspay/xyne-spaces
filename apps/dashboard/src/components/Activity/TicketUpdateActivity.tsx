@@ -171,6 +171,41 @@ const getActivityConfig = (actorAction: string): ActivityConfig => {
         description: 'assigned you as QA for ticket',
         label: 'QA Assigned',
       };
+    case 'ticket_release_started':
+      return {
+        icon: <TicketToken className='size-3 text-blue-600' />,
+        badgeColor: 'bg-blue-100',
+        description: 'added ticket to an active release in',
+        label: 'Release Started',
+      };
+    case 'ticket_release_completed':
+      return {
+        icon: <TicketToken className='size-3 text-green-600' />,
+        badgeColor: 'bg-green-100',
+        description: 'released ticket to production in',
+        label: 'Released',
+      };
+    case 'ticket_release_cancelled':
+      return {
+        icon: <TicketToken className='size-3 text-red-600' />,
+        badgeColor: 'bg-red-100',
+        description: 'cancelled the release carrying ticket in',
+        label: 'Release Cancelled',
+      };
+    case 'ticket_release_paused':
+      return {
+        icon: <TicketToken className='size-3 text-amber-600' />,
+        badgeColor: 'bg-amber-100',
+        description: 'paused the release carrying ticket in',
+        label: 'Release Paused',
+      };
+    case 'ticket_release_planning':
+      return {
+        icon: <TicketToken className='size-3 text-slate-600' />,
+        badgeColor: 'bg-slate-100',
+        description: 'moved the release carrying ticket to planning in',
+        label: 'Release Replanned',
+      };
     default:
       return {
         icon: <TicketToken className='size-3 text-muted-foreground' />,
@@ -197,6 +232,7 @@ export const TicketUpdateActivity = ({
   const ticketXyneId = ticket.xyneId || activity.ticketId || activity.actionSourceId;
   const ticketIdValue = activity.ticketId || activity.actionSourceId;
   const config = getActivityConfig(activity.actorAction);
+  const isReleaseAction = activity.actorAction.startsWith('ticket_release_');
 
   // On mobile: will navigate to minimized view with details tab
   // On desktop: will navigate to tab-based route in ConversationPannel
@@ -211,7 +247,7 @@ export const TicketUpdateActivity = ({
     <div className='flex flex-col gap-1 mt-2'>
       <div className='text-sm font-medium break-words whitespace-normal'>
         {' '}
-        {isPRAction ? config.label.toLowerCase() : `${config.label} updated`} for ticket &ldquo;
+        {isPRAction || isReleaseAction ? config.label.toLowerCase() : `${config.label} updated`} for ticket &ldquo;
         {ticket.title}&rdquo;
       </div>
       <div className='text-xs text-muted-foreground break-words whitespace-normal'>
@@ -227,7 +263,7 @@ export const TicketUpdateActivity = ({
       </span>
       <span className='text-muted-foreground'>
         {' '}
-        {isPRAction ? config.label.toLowerCase() : `${config.label.toLowerCase()} updated`}
+        {isPRAction || isReleaseAction ? config.label.toLowerCase() : `${config.label.toLowerCase()} updated`}
       </span>
     </span>
   );
