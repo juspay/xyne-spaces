@@ -8,6 +8,7 @@ import { getCredentialFieldsByServerType } from "../mcp/connector-definitions.js
 import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { isOAuthConnector } from "./oauth-token.js";
+import { evictSession } from "../mcp/runner.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("servers");
@@ -701,7 +702,33 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(403).json({ success: false, error: "Only the connector owner or a CLAW_ADMIN can delete it" });
       return;
     }
+    // Evict cached MCP child processes for every user who has a connection to
+    // this server. Without this the runner keeps stale sessions alive until the
+    // 20-min idle eviction, and tools from the deleted server remain callable.
+    const connections = await prisma.userMcpConnection.findMany({
+      where: { mcpServerId: id },
+      select: { userId: true },
+    });
+    for (const c of connections) {
+      await evictSession(c.userId, existing.type).catch((err) => {
+        log.error(`[servers] evictSession failed for ${existing.type}:`, err);
+      });
+    }
+
     await prisma.mcpServer.delete({ where: { id } });
+
+    // Clean up orphaned tool catalog entries. The Tool model stores
+    // `source: "mcp:${serverType}"` as a plain string — NOT a foreign key —
+    // so Prisma's cascade delete does not reach the tools table. Without this
+    // the deleted server's tools persist in the agent config picker forever.
+    // AgentTool links cascade-delete automatically (onDelete: Cascade on Tool).
+    const deletedTools = await prisma.tool.deleteMany({
+      where: { source: `mcp:${existing.type}` },
+    });
+    if (deletedTools.count > 0) {
+      log.info(`[servers] Deleted ${deletedTools.count} orphaned tools for ${existing.type}`);
+    }
+
     await writeAuditLog({
       actorUserId: requesterId,
       eventType: "MCP_CONNECTOR_DELETED",
@@ -714,6 +741,7 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
         launchConfigTemplate: existing.launchConfigTemplate,
         httpConfigTemplate: existing.httpConfigTemplate,
         credentialForm: existing.credentialForm,
+        deletedToolsCount: deletedTools.count,
       },
     });
     res.json({ success: true });
