@@ -1,3 +1,10 @@
+## [1.262.0](https://github.com/juspay/xyne-spaces/compare/v1.261.0...v1.262.0) (2026-09-02)
+
+
+### Features
+
+* Implement release manager v4 multi-repo support ([#749](https://github.com/juspay/xyne-spaces/issues/749)) ([3810449](https://github.com/juspay/xyne-spaces/commit/38104493c9f889429b914edf10ab97ed503f6f35))
+
 ## [1.261.0](https://github.com/juspay/xyne-spaces/compare/v1.260.0...v1.261.0) (2026-09-02)
 
 
