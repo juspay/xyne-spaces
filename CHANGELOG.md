@@ -1,3 +1,10 @@
+## [1.239.0-release-20260827.19](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.18...v1.239.0-release-20260827.19) (2026-09-02)
+
+
+### Bug Fixes
+
+* club messages when thread tags are disabled ([#1413](https://github.com/juspay/xyne-spaces/issues/1413)) ([660a1d8](https://github.com/juspay/xyne-spaces/commit/660a1d8393413bc4a3e7ec17f3d8e4b7a9737209))
+
 ## [1.239.0-release-20260827.18](https://github.com/juspay/xyne-spaces/compare/v1.239.0-release-20260827.17...v1.239.0-release-20260827.18) (2026-09-02)
 
 
