@@ -282,6 +282,16 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
+  async countHistoryPreview(channelId: string, createdAfter: Date | null): Promise<number> {
+    return await this.db.conversation.count({
+      where: {
+        channelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
+      }
+    });
+  }
+
   async getHistoryPreview(
     channelId: string,
     createdAfter: Date | null,
@@ -358,7 +368,8 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     const conversations = await this.db.conversation.findMany({
       where: {
         channelId: sourceChannelId,
-        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {})
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
       },
       select: { conversationId: true }
     });

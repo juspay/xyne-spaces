@@ -44,6 +44,7 @@ export interface AddPeopleHistoryStepProps {
   onCustomDateChange: (value: string) => void;
   cutoffChosen: boolean;
   previewGroups: PreviewGroup[];
+  previewOverflowCount: number;
   hasPreviewItems: boolean;
   embedded: boolean;
   dimmed: boolean;

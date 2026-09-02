@@ -2505,14 +2505,14 @@ export class ChannelController {
       const since = Number.isFinite(sinceParam) ? new Date(sinceParam) : null;
       const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 20;
 
-      const conversations = await groupDmParticipantService.getHistoryPreview({
+      const { conversations, total } = await groupDmParticipantService.getHistoryPreview({
         channelId,
         currentUserId,
         since,
         limit,
       });
 
-      res.status(200).json({ conversations });
+      res.status(200).json({ conversations, total });
     } catch (error) {
       if (error instanceof AppError) {
         res.status(error.statusCode).json({ error: error.message });

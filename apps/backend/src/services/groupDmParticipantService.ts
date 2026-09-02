@@ -175,7 +175,7 @@ export class GroupDmParticipantService {
     currentUserId: string;
     since: Date | null;
     limit: number;
-  }): Promise<HistoryPreviewEntry[]> {
+  }): Promise<{ conversations: HistoryPreviewEntry[]; total: number }> {
     const { channelId, currentUserId, since, limit } = params;
 
     const participants =
@@ -184,7 +184,10 @@ export class GroupDmParticipantService {
       throw new AppError('You must be a participant to preview this conversation', 403);
     }
 
-    const rows = await this.conversationRepository.getHistoryPreview(channelId, since, limit);
+    const [rows, total] = await Promise.all([
+      this.conversationRepository.getHistoryPreview(channelId, since, limit),
+      this.conversationRepository.countHistoryPreview(channelId, since),
+    ]);
     const senderIds = [
       ...new Set(rows.map(r => r.initialMessage?.senderId).filter((id): id is string => !!id)),
     ];
@@ -193,7 +196,7 @@ export class GroupDmParticipantService {
       : [];
     const senderById = new Map(senders.map(user => [user.id, user]));
 
-    return rows.map(row => {
+    const conversations = rows.map(row => {
       const sender = row.initialMessage ? senderById.get(row.initialMessage.senderId) : undefined;
       return {
         conversationId: row.conversationId,
@@ -208,6 +211,8 @@ export class GroupDmParticipantService {
         attachments: row.attachments,
       };
     });
+
+    return { conversations, total };
   }
 
   private async loadActiveUsers(userIds: string[]): Promise<User[]> {

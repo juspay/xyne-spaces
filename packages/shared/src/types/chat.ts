@@ -39,6 +39,7 @@ export interface HistoryPreviewEntry {
 
 export interface HistoryPreviewResponse {
   conversations: HistoryPreviewEntry[];
+  total: number;
 }
 
 export const MAX_DM_PARTICIPANTS = 10;

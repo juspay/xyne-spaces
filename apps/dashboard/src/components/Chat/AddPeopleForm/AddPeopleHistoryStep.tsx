@@ -19,6 +19,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
   onCustomDateChange,
   cutoffChosen,
   previewGroups,
+  previewOverflowCount,
   hasPreviewItems,
   embedded,
   dimmed,
@@ -136,6 +137,13 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                     ))}
                   </div>
                 ))}
+
+                {previewOverflowCount > 0 && (
+                  <p className='pt-1 text-center text-xs text-muted-foreground'>
+                    +{previewOverflowCount} more conversation
+                    {previewOverflowCount === 1 ? '' : 's'} will also be shared
+                  </p>
+                )}
               </div>
             )}
           </div>

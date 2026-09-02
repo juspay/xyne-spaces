@@ -83,6 +83,10 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
     [previewEnabled, previewData],
   );
 
+  const previewOverflowCount = previewEnabled
+    ? Math.max((previewData?.total ?? 0) - (previewData?.conversations.length ?? 0), 0)
+    : 0;
+
   useEffect(() => {
     onContextChange?.({ step, isDirectConversation });
   }, [step, isDirectConversation, onContextChange]);
@@ -262,6 +266,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
         cutoffChosen={cutoffChosen}
         dimmed={confirmingFullHistory}
         previewGroups={previewGroups}
+        previewOverflowCount={previewOverflowCount}
         hasPreviewItems={previewGroups.length > 0}
         embedded={embedded}
         footer={confirmingFullHistory ? confirmFooter : historyFooter}
