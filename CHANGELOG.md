@@ -1,3 +1,10 @@
+## [1.264.0](https://github.com/juspay/xyne-spaces/compare/v1.263.1...v1.264.0) (2026-09-02)
+
+
+### Features
+
+* incremental app updates ([#1434](https://github.com/juspay/xyne-spaces/issues/1434)) ([e0e92ea](https://github.com/juspay/xyne-spaces/commit/e0e92ead4bf60a8f9aaea10aa96a2bdad045cb1e))
+
 ## [1.263.1](https://github.com/juspay/xyne-spaces/compare/v1.263.0...v1.263.1) (2026-09-02)
 
 
