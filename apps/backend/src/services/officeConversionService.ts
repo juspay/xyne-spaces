@@ -1,6 +1,6 @@
 import { spawn } from "child_process"
-import { createHash, randomBytes } from "crypto"
-import { mkdtemp, readFile, rm } from "fs/promises"
+import { createHash } from "crypto"
+import { mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import path from "path"
 import pLimit from "p-limit"
@@ -40,12 +40,6 @@ const conversionLimit = pLimit(SOFFICE_MAX_CONCURRENCY)
 // file/collection id, just bytes), so content is the only key available.
 // Content-addressed and immutable, so entries never need to expire.
 const GCS_CACHE_PREFIX = "office-conversion-cache"
-
-// Uploaded bytes are staged here (randomly-keyed, short-lived) so soffice
-// can fetch them via a signed URL instead of us writing them to local disk
-// ourselves. Deleted right after each conversion in the finally block below.
-const INPUT_GCS_PREFIX = "office-conversion-tmp-input"
-const SIGNED_URL_EXPIRY_HOURS = 10 / 60 // 10 min — comfortably longer than CONVERSION_TIMEOUT_MS below
 
 export class OfficeConversionError extends Error {
     constructor(
@@ -112,24 +106,15 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
     const profileDir = path.join(workDir, "profile")
     // originalFilename is attacker-controlled (the client-supplied upload
     // name); only accept a plain alphanumeric extension so nothing in it
-    // (path separators, "..", null bytes, ...) can influence the temp GCS
-    // key or the local output path.
+    // (path separators, "..", null bytes, ...) can influence where
+    // inputPath actually lands on disk.
     const rawExt = path.extname(originalFilename)
     const ext = /^\.[a-zA-Z0-9]{1,10}$/.test(rawExt) ? rawExt : ".bin"
+    const inputPath = path.join(workDir, `input${ext}`)
     const outputPath = path.join(workDir, "input.pdf")
 
-    // Random subdirectory (not just filename) so the object's full key is
-    // unguessable; the basename stays fixed as "input<ext>" so soffice's
-    // derived output filename stays predictable ("input.pdf") regardless of
-    // the signed URL's query-string suffix.
-    const inputGcsKey = `${INPUT_GCS_PREFIX}/${contentHash}-${randomBytes(8).toString("hex")}/input${ext}`
-
     try {
-        await storageService.uploadFileV2(buffer, {
-            path: inputGcsKey,
-            contentType: "application/octet-stream",
-        })
-        const inputUrl = await storageService.generateSignedUrl(inputGcsKey, SIGNED_URL_EXPIRY_HOURS)
+        await writeFile(inputPath, buffer)
 
         await conversionLimit(() => new Promise<void>((resolve, reject) => {
             const args = [
@@ -140,7 +125,7 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
                 "pdf",
                 "--outdir",
                 workDir,
-                inputUrl,
+                inputPath,
             ]
             const proc = spawn(SOFFICE_BINARY, args)
 
@@ -199,12 +184,6 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
         await rm(workDir, { recursive: true, force: true }).catch(err => {
             logger.warn("[OfficeConversion] Failed to clean up temp dir", {
                 workDir,
-                error: err instanceof Error ? err.message : String(err),
-            })
-        })
-        await storageService.deleteFile(inputGcsKey).catch(err => {
-            logger.warn("[OfficeConversion] Failed to clean up temp GCS input object", {
-                inputGcsKey,
                 error: err instanceof Error ? err.message : String(err),
             })
         })
