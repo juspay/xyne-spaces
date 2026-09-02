@@ -5,6 +5,8 @@ import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { BoardRepository } from '../database/repositories/boardRepository';
+import { ResourceRepository } from '../database/repositories/resources';
+import { ResourceAccessRepository } from '../database/repositories/resourceAccess';
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { MessageRepository } from '../database/repositories/messageRepository';
@@ -70,6 +72,9 @@ import { BaseTicketType,
   MessageType,
   ConversationParticipation,
   BoardType,
+  WorkspaceRole,
+  OrgRole,
+  AccessType,
 } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
@@ -607,6 +612,25 @@ export class TicketController {
       // persisting releaseRepos, quietly covering fewer repos than configured.
       const rawReleaseRepos = dynamicFields?.['releaseRepos'];
       if (rawReleaseRepos !== undefined) {
+        if (!req.user) {
+          res.status(401).json({ error: 'Authentication required' });
+          return;
+        }
+        const privileged =
+          req.user.role === WorkspaceRole.ADMIN ||
+          req.user.role === WorkspaceRole.OWNER ||
+          req.user.orgRole === OrgRole.ADMIN ||
+          req.user.orgRole === OrgRole.OWNER;
+        if (!privileged) {
+          const releaseResource = await new ResourceRepository().findByName('RELEASE-MANAGER');
+          const allowed = releaseResource
+            ? await new ResourceAccessRepository().hasAccess(req.user.id, releaseResource.id, AccessType.WRITE)
+            : false;
+          if (!allowed) {
+            res.status(403).json({ error: 'Release Manager write access is required to create a release.' });
+            return;
+          }
+        }
         let parsedReleaseRepos: unknown;
         try {
           parsedReleaseRepos =
@@ -623,6 +647,40 @@ export class TicketController {
           if (incomplete.length > 0) {
             res.status(400).json({
               error: `Each release repo needs mainReleaseBoardId, branch, deployedCommit and newCommit; ${incomplete.length} repo(s) are incomplete.`,
+            });
+            return;
+          }
+          const isSha = (s: string): boolean => /^[0-9a-f]{7,40}$/i.test(s);
+          const invalid = parsedReleaseRepos.filter((r: any) => {
+            const deployed = String(r?.deployedCommit ?? '').trim();
+            const newCommit = String(r?.newCommit ?? '').trim();
+            return !isSha(deployed) || !isSha(newCommit) || deployed === newCommit;
+          });
+          if (invalid.length > 0) {
+            res.status(400).json({
+              error: `Each release repo needs a distinct valid deployed and new commit hash; ${invalid.length} repo(s) are invalid.`,
+            });
+            return;
+          }
+          const actorWorkspaceId = req.user.workspaceId;
+          const boardIds = [
+            ...new Set(
+              parsedReleaseRepos.map((r: any) => String(r?.mainReleaseBoardId ?? '').trim()).filter(Boolean),
+            ),
+          ];
+          const repoBoards = await db.board.findMany({
+            where: { id: { in: boardIds } },
+            select: { id: true, workspaceId: true, projectId: true, boardType: true },
+          });
+          const owned =
+            repoBoards.length === boardIds.length &&
+            repoBoards.every(
+              b => b.workspaceId === actorWorkspaceId && b.boardType === BoardType.RELEASE,
+            ) &&
+            new Set(repoBoards.map(b => b.projectId)).size <= 1;
+          if (!owned) {
+            res.status(403).json({
+              error: 'Release repositories must be release boards in your workspace and belong to one project.',
             });
             return;
           }

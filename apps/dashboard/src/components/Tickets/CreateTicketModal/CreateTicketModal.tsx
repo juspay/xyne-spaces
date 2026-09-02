@@ -1235,18 +1235,29 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     if (ticketKind !== 'release') return null;
     if (!formValues?.boardId) return 'Select at least one repository';
     const df = formValues?.dynamicFields ?? {};
-    const filled = (v: string | string[] | undefined): boolean =>
-      Array.isArray(v) ? Boolean(v[0]?.trim()) : Boolean(v?.trim());
-    const primaryComplete =
-      filled(df['branch']) && filled(df['deployedCommitId']) && filled(df['newCommitId']);
-    const additionalsComplete = selectedRepoBoardIds.every(
-      id =>
-        Boolean(repoRanges[id]?.branch?.trim()) &&
-        Boolean(repoRanges[id]?.deployedCommit?.trim()) &&
-        Boolean(repoRanges[id]?.newCommit?.trim()),
-    );
-    if (!primaryComplete || !additionalsComplete) {
+    const one = (v: string | string[] | undefined): string =>
+      (Array.isArray(v) ? (v[0] ?? '') : (v ?? '')).trim();
+    const isSha = (v: string): boolean => /^[0-9a-f]{7,40}$/i.test(v);
+    const ranges = [
+      {
+        branch: one(df['branch']),
+        deployed: one(df['deployedCommitId']),
+        next: one(df['newCommitId']),
+      },
+      ...selectedRepoBoardIds.map(id => ({
+        branch: (repoRanges[id]?.branch ?? '').trim(),
+        deployed: (repoRanges[id]?.deployedCommit ?? '').trim(),
+        next: (repoRanges[id]?.newCommit ?? '').trim(),
+      })),
+    ];
+    if (ranges.some(r => !r.branch || !r.deployed || !r.next)) {
       return 'Enter the branch and deployed → new commit range for every selected repository';
+    }
+    if (ranges.some(r => !isSha(r.deployed) || !isSha(r.next))) {
+      return 'Commit values must be valid hashes (7–40 hex characters)';
+    }
+    if (ranges.some(r => r.deployed === r.next)) {
+      return 'Deployed and new commit must be different';
     }
     return null;
   }, [
