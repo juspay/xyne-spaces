@@ -2677,9 +2677,13 @@ html .bn-code-block-source-popup-ok-button:hover {
   display: inline-flex;
   width: 490px;
   max-width: 100%;
+  height: 30px;
   min-height: 30px;
+  max-height: 30px;
   box-sizing: border-box;
   align-items: center;
+  flex-wrap: nowrap;
+  overflow: hidden;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   border: 1px solid hsl(var(--border));
@@ -2722,13 +2726,22 @@ html .bn-code-block-source-popup-ok-button:hover {
   user-select: none;
 }
 
+.canvas-ticket-anchor__source {
+  display: none;
+}
+
 .canvas-ticket-anchor__text {
+  display: block;
   overflow: hidden;
   min-width: 0;
+  max-width: 100%;
   flex: 1 1 auto;
   font-weight: 600;
+  line-height: 24px;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: normal !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
 }
 
 .canvas-ticket-anchor__status,

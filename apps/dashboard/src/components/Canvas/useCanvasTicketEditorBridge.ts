@@ -42,6 +42,8 @@ interface UseCanvasTicketEditorBridgeResult {
 interface ResolvedSelectionPositionLike {
   parent: { textContent: string };
   sameParent: (other: ResolvedSelectionPositionLike) => boolean;
+  start: () => number;
+  end: () => number;
 }
 
 interface TiptapEditorLike {
@@ -332,7 +334,9 @@ export function useCanvasTicketEditorBridge({
       }
 
       const { from, to } = tiptapEditor.state.selection;
-      if (rangeHasLink(tiptapEditor, from, to)) {
+      const blockFrom = $from.start();
+      const blockTo = $from.end();
+      if (rangeHasLink(tiptapEditor, blockFrom, blockTo)) {
         toast.error('Tickets cannot be created from linked text');
         return;
       }
@@ -350,7 +354,11 @@ export function useCanvasTicketEditorBridge({
         toast.error('Selected text is already linked to a ticket');
         return;
       }
-      const blockText = tiptapEditor.state.selection.$from.parent.textContent.trim();
+      if (rangeHasTicketStyle(tiptapEditor, blockFrom, blockTo)) {
+        toast.error('This block is already linked to a ticket');
+        return;
+      }
+      const blockText = $from.parent.textContent.trim();
 
       setActiveTicketAnchor({
         blockId,
@@ -377,17 +385,23 @@ export function useCanvasTicketEditorBridge({
 
       if (anchor && editor && tiptapEditor && !tiptapEditor.state.selection.empty) {
         try {
-          const { from, to } = tiptapEditor.state.selection;
+          const { from, to, $from, $to } = tiptapEditor.state.selection;
           const currentBlockId = editor.getTextCursorPosition().block?.id;
           const currentText = tiptapEditor.state.doc.textBetween(from, to, ' ').trim();
+          const currentBlockText = $from.parent.textContent.trim();
+          const blockFrom = $from.start();
+          const blockTo = $from.end();
 
           if (
             currentBlockId === anchor.blockId &&
+            $from.sameParent($to) &&
             currentText === anchor.anchorText &&
-            !rangeHasTicketStyle(tiptapEditor, from, to)
+            currentBlockText === anchor.blockText &&
+            !rangeHasTicketStyle(tiptapEditor, blockFrom, blockTo)
           ) {
+            tiptapEditor.commands.setTextSelection({ from: blockFrom, to: blockTo });
             editor.addStyles({ canvasTicket: ticket.id } as never);
-            tiptapEditor.commands.setTextSelection({ from: to, to });
+            tiptapEditor.commands.setTextSelection({ from: blockTo, to: blockTo });
             styleApplied = true;
           }
         } catch {

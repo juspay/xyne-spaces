@@ -33,7 +33,7 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
   const assignedUser = useUser(ticket?.assignedTo ?? '');
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const contentElementRef = useRef<HTMLElement | null>(null);
-  const [previewText, setPreviewText] = useState('');
+  const [sourceText, setSourceText] = useState('');
   const statusLabel = ticket?.stageName?.trim() || formatTicketStatus(ticket?.statusV2);
   const isUnavailable = ticketDetails.type === 'complete' && !ticket;
   const accessState = ticket ? 'available' : isUnavailable ? 'unavailable' : 'loading';
@@ -53,13 +53,12 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
     [contentRef],
   );
 
-  const handlePreviewOpenChange = useCallback(
-    (open: boolean): void => {
-      if (!open) return;
-      setPreviewText(contentElementRef.current?.textContent?.trim() || ticket?.title || 'Ticket');
-    },
-    [ticket?.title],
-  );
+  const handlePreviewOpenChange = useCallback((open: boolean): void => {
+    if (!open) return;
+    setSourceText(contentElementRef.current?.textContent?.trim() || '');
+  }, []);
+
+  const ticketDescription = ticket?.description?.trim() || sourceText;
 
   const trigger = (
     <span
@@ -86,7 +85,10 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
           {ticket.xyneId}
         </span>
       )}
-      <span ref={setContentElement} className='canvas-ticket-anchor__text' />
+      <span ref={setContentElement} className='canvas-ticket-anchor__source' aria-hidden='true' />
+      <span className='canvas-ticket-anchor__text' contentEditable={false}>
+        {ticket?.title || 'Ticket'}
+      </span>
       {ticket && (
         <span className='canvas-ticket-anchor__status' contentEditable={false}>
           <Clock3 aria-hidden='true' />
@@ -141,9 +143,16 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
           </span>
         </div>
 
-        <p className='m-0 whitespace-normal text-sm font-semibold leading-5 text-foreground'>
-          {previewText || ticket.title}
-        </p>
+        <div className='min-w-0 space-y-1.5'>
+          <p className='m-0 whitespace-normal text-sm font-semibold leading-5 text-foreground'>
+            {ticket.title}
+          </p>
+          {ticketDescription && (
+            <p className='m-0 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-muted-foreground'>
+              {ticketDescription}
+            </p>
+          )}
+        </div>
 
         <div className='flex min-w-0 items-center gap-4 text-xs text-muted-foreground'>
           <span className='flex min-w-0 items-center gap-1.5'>
