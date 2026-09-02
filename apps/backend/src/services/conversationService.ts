@@ -34,7 +34,10 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { emitTicketCommented } from '@/automations/triggers/ticket-commented.trigger';
-import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
+import {
+  emitMessageReceived,
+  MessageLocation,
+} from '@/automations/triggers/message-received.trigger';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 
 interface UserInfo {
@@ -540,6 +543,7 @@ export class ConversationService {
       channelId,
       msgType: message.msgType as MessageType,
       userId,
+      messageLocation: MessageLocation.NEW_CONVERSATION,
     });
 
     return {
@@ -800,6 +804,18 @@ export class ConversationService {
 
     // Also broadcast via Redis for horizontal scaling (using session method for now)
     // await redisService.broadcastMessageToSession(conversationId, chatMessage);
+
+    // Fan out the automation `MESSAGE_RECEIVED` event for replies. Matching by
+    // location, conversation, sender, message kind, and text happens in the
+    // automation worker. Failures must not fail the message write.
+    void emitMessageReceived({
+      messageId: message.messageId,
+      conversationId,
+      channelId: conversation.channelId,
+      msgType: message.msgType as MessageType,
+      userId,
+      messageLocation: MessageLocation.THREAD_REPLY,
+    });
 
     // Fan out the automation `TICKET_COMMENTED` event. Fire-and-forget; the
     // helper itself filters out bot/system messages and conversations not

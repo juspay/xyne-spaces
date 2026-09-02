@@ -6,6 +6,7 @@ import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   DESK_AUTOMATION_WORKFLOW_TYPE,
+  parseAutomationConfig,
   parseAutomationMetadata,
   triggerTypeToEventType,
 } from '../types/workflow-adapter';
@@ -13,6 +14,11 @@ import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
+import {
+  MESSAGE_RECEIVED_EVENT,
+  MessageLocation,
+  messageLocationMatches,
+} from '../types/message-received-event';
 
 class EventRouter {
   async emit(event: AutomationEvent, workspaceId: string): Promise<void> {
@@ -94,12 +100,30 @@ class EventRouter {
     };
 
     if (event.type !== EMAIL_RECEIVED_EVENT || typeof event.payload.channelId !== 'string') {
-      return db.workflow.findMany({
+      const workflows = await db.workflow.findMany({
         where: {
           workflowType: AUTOMATION_WORKFLOW_TYPE,
           ...baseWhere,
         },
       });
+
+      // Thread replies are much more frequent than new channel conversations.
+      // Drop automations that cannot match before creating execution rows and
+      // queue jobs; legacy configurations remain new-conversation-only.
+      if (
+        event.type === MESSAGE_RECEIVED_EVENT &&
+        event.payload.messageLocation === MessageLocation.THREAD_REPLY
+      ) {
+        return workflows.filter(workflow => {
+          const config = parseAutomationConfig(workflow.context);
+          return messageLocationMatches(
+            config.trigger.config.messageLocation,
+            event.payload.messageLocation,
+          );
+        });
+      }
+
+      return workflows;
     }
 
     const [generalAutomations, deskRules] = await Promise.all([
