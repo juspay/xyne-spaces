@@ -8,7 +8,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { DelayedSpinner } from '../ui/DelayedSpinner';
 import { useGetChannelUserStatus } from '@xyne/shared/hooks';
 import { DatePill } from './DatePill';
-import { EditSurfaceScope } from '../../providers/EditProvider';
+import { withEditSurface } from '../../providers/EditProvider';
 import { formatDatePill } from '../../utils/dateUtils';
 
 interface PinListProps {
@@ -100,10 +100,4 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
   );
 };
 
-const PinListV2WithEditSurface: React.FC<PinListProps> = props => (
-  <EditSurfaceScope>
-    <PinListV2 {...props} />
-  </EditSurfaceScope>
-);
-
-export default PinListV2WithEditSurface;
+export default withEditSurface(PinListV2);

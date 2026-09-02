@@ -20,7 +20,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
-import { EditSurfaceScope, useMessageEdit } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
@@ -1507,10 +1507,4 @@ const ChatListV4: React.FC<ChatListProps> = ({
   );
 };
 
-const ChatListV4WithEditSurface: React.FC<ChatListProps> = props => (
-  <EditSurfaceScope>
-    <ChatListV4 {...props} />
-  </EditSurfaceScope>
-);
-
-export default withProfiler(ChatListV4WithEditSurface, 'ChatListV4');
+export default withProfiler(withEditSurface(ChatListV4), 'ChatListV4');

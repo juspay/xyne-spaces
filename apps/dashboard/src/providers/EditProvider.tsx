@@ -5,6 +5,8 @@ import {
   useEffect,
   useId,
   useState,
+  ComponentType,
+  FC,
   ReactNode,
   ReactElement,
 } from 'react';
@@ -17,6 +19,7 @@ interface EditContextType {
   editingSurface: EditSurface | null;
   requestEdit: (id: string, surface: EditSurface, onConfirm: () => void) => void;
   stopEditing: () => void;
+  releaseSurface: (surface: EditSurface) => void;
   pendingAction: (() => void) | undefined;
   clearPendingAction: () => void;
 }
@@ -48,6 +51,10 @@ export const EditProvider = ({ children }: { children: ReactNode }): ReactElemen
     setEditing(null);
   };
 
+  const releaseSurface = useCallback((surface: EditSurface): void => {
+    setEditing(current => (current?.surface === surface ? null : current));
+  }, []);
+
   useEffect(() => {
     stopEditing();
     setPendingAction(undefined);
@@ -60,6 +67,7 @@ export const EditProvider = ({ children }: { children: ReactNode }): ReactElemen
         editingSurface: editing?.surface ?? null,
         requestEdit,
         stopEditing,
+        releaseSurface,
         pendingAction,
         clearPendingAction: () => setPendingAction(undefined),
       }}
@@ -71,7 +79,30 @@ export const EditProvider = ({ children }: { children: ReactNode }): ReactElemen
 
 export const EditSurfaceScope = ({ children }: { children: ReactNode }): ReactElement => {
   const surface = useId();
+  const { releaseSurface } = useEditContext();
+
+  useEffect(
+    () => (): void => {
+      releaseSurface(surface);
+    },
+    [releaseSurface, surface],
+  );
+
   return <EditSurfaceContext.Provider value={surface}>{children}</EditSurfaceContext.Provider>;
+};
+
+export const withEditSurface = <P extends object>(component: ComponentType<P>): FC<P> => {
+  const Component = component;
+
+  const WithEditSurface: FC<P> = (props): ReactElement => (
+    <EditSurfaceScope>
+      <Component {...props} />
+    </EditSurfaceScope>
+  );
+
+  WithEditSurface.displayName = `withEditSurface(${component.displayName ?? component.name})`;
+
+  return WithEditSurface;
 };
 
 export const useEditContext = (): EditContextType => {

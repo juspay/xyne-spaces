@@ -16,7 +16,7 @@ import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import { ArrowDown } from 'lucide-react';
 import { useGetChannelConversations, useGetChannelUserStatus } from '../../../hooks/useChannels';
-import { EditSurfaceScope, useMessageEdit } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
@@ -604,10 +604,4 @@ const ChatListV2: React.FC<ChatListProps> = ({
   );
 };
 
-const ChatListV2WithEditSurface: React.FC<ChatListProps> = props => (
-  <EditSurfaceScope>
-    <ChatListV2 {...props} />
-  </EditSurfaceScope>
-);
-
-export default ChatListV2WithEditSurface;
+export default withEditSurface(ChatListV2);

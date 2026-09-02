@@ -11,7 +11,7 @@ import { DatePill } from '../DatePill';
 import { MessageType, ChannelScopeType } from '@xyne/shared';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
-import { EditSurfaceScope, useMessageEdit } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
@@ -713,10 +713,4 @@ const ThreadList = ({
   );
 };
 
-const ThreadListWithEditSurface = (props: ThreadListProps): ReactElement => (
-  <EditSurfaceScope>
-    <ThreadList {...props} />
-  </EditSurfaceScope>
-);
-
-export default ThreadListWithEditSurface;
+export default withEditSurface(ThreadList);

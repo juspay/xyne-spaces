@@ -15,7 +15,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
-import { EditSurfaceScope, useMessageEdit } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
@@ -1434,10 +1434,4 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 };
 
-const ChatListV3WithEditSurface: React.FC<ChatListProps> = props => (
-  <EditSurfaceScope>
-    <ChatListV3 {...props} />
-  </EditSurfaceScope>
-);
-
-export default withProfiler(ChatListV3WithEditSurface, 'ChatListV3');
+export default withProfiler(withEditSurface(ChatListV3), 'ChatListV3');
