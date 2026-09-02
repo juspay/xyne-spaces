@@ -28,6 +28,7 @@ import remarkBreaks from 'remark-breaks';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { RefineInput } from '../RefineInput/RefineInput';
+import { Button } from '../../ui/Button/Button';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
@@ -499,8 +500,10 @@ export const DraftCard = ({
             </button>
           )}
           <div className={cn('relative flex items-center', !onSeeSources && 'ml-auto')}>
-            <button
+            <Button
               type='button'
+              variant='default'
+              trackId='accept_ai_draft'
               onClick={onAccept}
               disabled={!draftContent || isStreaming}
               className='inline-flex items-center justify-center h-8 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
@@ -510,7 +513,7 @@ export const DraftCard = ({
               data-track-name='AcceptDraft'
             >
               Insert
-            </button>
+            </Button>
           </div>
         </div>
       </div>

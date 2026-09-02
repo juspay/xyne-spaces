@@ -8,6 +8,7 @@ import { mutators } from '../../../zero/mutators';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { Dialog } from '../../ui/Dialog/Dialog';
+import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import {
   deleteConversationLabel,
@@ -262,16 +263,18 @@ export const DeskLabelsSidebar = ({
             >
               Cancel
             </button>
-            <button
+            <Button
               type='button'
+              variant='default'
               onClick={() => void handleCreate()}
               disabled={!newName.trim()}
+              trackId='create_desk_label'
               className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50 disabled:pointer-events-none transition-colors'
               data-track-category='Support'
               data-track-name='ConfirmCreateLabel'
             >
               Create
-            </button>
+            </Button>
           </div>
         </div>
       </Dialog>
@@ -309,17 +312,19 @@ export const DeskLabelsSidebar = ({
               >
                 Cancel
               </button>
-              <button
+              <Button
                 type='button'
+                variant='destructive'
                 onClick={() => void confirmDelete()}
                 disabled={deleteSubmitting}
+                trackId='delete_desk_label'
                 className='inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 disabled:pointer-events-none transition-colors'
                 data-track-category='Support'
                 data-track-name='ConfirmDeleteLabel'
               >
                 {deleteSubmitting && <Loader2 className='size-4 animate-spin' />}
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         )}

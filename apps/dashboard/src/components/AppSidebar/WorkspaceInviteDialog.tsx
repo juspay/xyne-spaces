@@ -4,6 +4,7 @@ import { CheckTickSingle, CopyDefault } from '@xyne/icons';
 import { WorkspaceRole } from '@xyne/shared';
 import { toast } from 'sonner';
 import Dialog from '../ui/Dialog';
+import { Button } from '../ui/Button/Button';
 import { apiInstance } from '../../services/clients/apiClient';
 import { cn } from '../../utils/classNames';
 
@@ -205,15 +206,17 @@ export const WorkspaceInviteDialog = ({
               data-track-category='WorkspaceInviteDialog'
               data-track-name='EmailsInput'
             />
-            <button
+            <Button
               type='submit'
+              variant='ghost'
+              trackId='invite_workspace_member'
               disabled={isInviting || !emailsInput.trim()}
               className='h-10 shrink-0 rounded-[12px] bg-[#ff6368] px-6 text-[15px] font-semibold text-white transition-colors hover:bg-[#f2555b] disabled:cursor-not-allowed disabled:opacity-70'
               data-track-category='WorkspaceInviteDialog'
               data-track-name='InviteByEmail'
             >
               {isInviting ? 'Inviting...' : 'Invite'}
-            </button>
+            </Button>
           </div>
         </div>
 
