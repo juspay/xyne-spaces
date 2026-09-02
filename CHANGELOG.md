@@ -1,3 +1,10 @@
+## [1.257.0](https://github.com/juspay/xyne-spaces/compare/v1.256.0...v1.257.0) (2026-09-02)
+
+
+### Features
+
+* calendar sync events to worker for processing ([#1362](https://github.com/juspay/xyne-spaces/issues/1362)) ([436004d](https://github.com/juspay/xyne-spaces/commit/436004d236621399703d4a54332a2cc7a51bf272))
+
 ## [1.256.0](https://github.com/juspay/xyne-spaces/compare/v1.255.0...v1.256.0) (2026-09-02)
 
 
