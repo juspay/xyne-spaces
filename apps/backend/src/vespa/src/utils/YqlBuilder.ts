@@ -628,14 +628,19 @@ export class YqlBuilder {
       );
     }
 
-    // Chat/Ticket/Transcript attachments: require owner/channelPermissions/isPrivate check
-    if (
-      subApps.some(
-        (s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT'
-      )
-    ) {
+    // Chat/Ticket attachments: require owner/channelPermissions/isPrivate check
+    if (subApps.some((s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT')) {
       subAppConditions.push(
-        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
+        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
+      );
+    }
+
+    // Transcripts also check `permissions` (the call's attendee list). Without it
+    // a channel-less call has only ownerId to match on, so nobody but the creator
+    // can find it.
+    if (subApps.some((s) => s === 'TRANSCRIPT')) {
+      subAppConditions.push(
+        `((subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or permissions contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
       );
     }
 
@@ -690,22 +695,21 @@ export class YqlBuilder {
       conditions.push(`(${creators})`);
     }
 
-    // Date filters
+    // Date filters. The file schema's field is `createdAt` (file.sd:92) — there is
+    // no `createdAtTimestamp` here, and naming it makes Vespa reject the query.
     if (filters.createdBefore) {
       const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
-      if (timestamp) conditions.push(`createdAtTimestamp < ${timestamp}`);
+      if (timestamp) conditions.push(`createdAt < ${timestamp}`);
     }
     if (filters.createdAfter) {
       const timestamp = parseDateToTimestamp(filters.createdAfter, 'end');
-      if (timestamp) conditions.push(`createdAtTimestamp > ${timestamp}`);
+      if (timestamp) conditions.push(`createdAt > ${timestamp}`);
     }
     if (filters.createdOn) {
       const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
       const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
       if (rangeStart && rangeEnd) {
-        conditions.push(
-          `(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`
-        );
+        conditions.push(`(createdAt >= ${rangeStart} and createdAt <= ${rangeEnd})`);
       }
     }
 
@@ -713,9 +717,7 @@ export class YqlBuilder {
     if (filters.createdRange) {
       const timeRange = parseTimeKeyword(filters.createdRange);
       if (timeRange) {
-        conditions.push(
-          `(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`
-        );
+        conditions.push(`(createdAt >= ${timeRange.from} and createdAt <= ${timeRange.to})`);
       }
     }
     return conditions.join(' and ');
@@ -1291,15 +1293,28 @@ export class YqlBuilder {
       conditions.push(`!(status contains ${params.bind('callStatusExcluded', 'CANCELLED')})`);
     }
 
+    // Time window. `startsAt`/`endsAt` are the SCHEDULED times and are 0 on ad-hoc
+    // calls and recordings, so match the actual start/end too. Additive — anything
+    // that matched before still matches.
     if (Number.isFinite(filters.timeFrom) || Number.isFinite(filters.timeTo)) {
-      const timeConditions: string[] = [];
-      if (Number.isFinite(filters.timeTo)) {
-        timeConditions.push(`startsAtTimestamp < ${Math.trunc(filters.timeTo!)}`);
+      const to = Number.isFinite(filters.timeTo) ? Math.trunc(filters.timeTo!) : null;
+      const from = Number.isFinite(filters.timeFrom) ? Math.trunc(filters.timeFrom!) : null;
+
+      const scheduled: string[] = [];
+      if (to !== null) scheduled.push(`startsAtTimestamp < ${to}`);
+      if (from !== null) scheduled.push(`endsAtTimestamp > ${from}`);
+
+      // No end time = still in progress. Treat it as a point event at its start so
+      // it matches "today" but not every past window.
+      const actual: string[] = [`startedAtTimestamp > 0`];
+      if (to !== null) actual.push(`startedAtTimestamp < ${to}`);
+      if (from !== null) {
+        actual.push(
+          `(endedAtTimestamp > ${from} or (endedAtTimestamp <= 0 and startedAtTimestamp > ${from}))`
+        );
       }
-      if (Number.isFinite(filters.timeFrom)) {
-        timeConditions.push(`endsAtTimestamp > ${Math.trunc(filters.timeFrom!)}`);
-      }
-      conditions.push(`(${timeConditions.join(' and ')})`);
+
+      conditions.push(`((${scheduled.join(' and ')}) or (${actual.join(' and ')}))`);
     }
 
     return conditions.join(' and ');
