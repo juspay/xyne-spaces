@@ -22,6 +22,7 @@ import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import {
+  GridDashboard01,
   LayoutGridTwoVertical as Columns3,
   TicketToken as TicketIcon,
   Hashtag,
@@ -192,6 +193,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
+import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
@@ -609,6 +611,7 @@ const SupportScreen = (): ReactElement => {
       const params = new URLSearchParams(searchParams);
       clearTicketFilterParams(params);
       params.delete('metrics');
+      params.delete('topics');
       params.delete('settings');
       const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
@@ -1240,6 +1243,7 @@ const SupportScreen = (): ReactElement => {
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
+  const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1507,6 +1511,7 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     setIsMetricsOpen(searchParams.get('metrics') === 'open');
+    setIsTopicsOpen(searchParams.get('topics') === 'open');
   }, [searchParams]);
 
   useEffect(() => {
@@ -1564,6 +1569,11 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+  // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
+  const canExploreTopics =
+    isSelectedChannelJoined &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.metricsEnabled;
 
   const metricsSelectableDesks = useMemo(
     () =>
@@ -2869,6 +2879,29 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         )}
+                      {canExploreTopics && (
+                        <Tooltip content='Topics explorer' side='bottom'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              const base = `${supportBase}/${selectedChannelId}`;
+                              if (isTopicsOpen) void navigate(base, { replace: true });
+                              else void navigate(`${base}?topics=open`);
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isTopicsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenTopicsExplorer'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <GridDashboard01 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -3582,6 +3615,19 @@ const SupportScreen = (): ReactElement => {
                   }}
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
+                />
+              )}
+              {isTopicsOpen && selectedChannelId && canExploreTopics && (
+                <TopicsExplorer
+                  open
+                  onClose={() =>
+                    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
+                  }
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
+                  supportBase={supportBase}
+                  availableAiCategories={availableAiCategories}
+                  availableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
