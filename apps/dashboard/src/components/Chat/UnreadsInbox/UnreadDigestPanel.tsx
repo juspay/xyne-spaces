@@ -30,6 +30,22 @@ interface DigestMeta {
   omittedChannelCount: number;
 }
 
+/** Shape of a single parsed SSE `data:` frame from the digest stream. */
+interface DigestEvent {
+  type?: string;
+  totalChannels?: number;
+  omittedChannelCount?: number;
+  index?: number;
+  total?: number;
+  channelId?: string;
+  channelName?: string;
+  includedCount?: number;
+  omittedCount?: number;
+  failed?: boolean;
+  error?: string;
+  output?: { summary?: string; keyPoints?: { point: string }[] } | null;
+}
+
 const UnreadDigestPanel = (): ReactElement => {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -82,9 +98,9 @@ const UnreadDigestPanel = (): ReactElement => {
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          let data: Record<string, unknown>;
+          let data: DigestEvent;
           try {
-            data = JSON.parse(line.slice(6));
+            data = JSON.parse(line.slice(6)) as DigestEvent;
           } catch {
             continue;
           }
@@ -100,18 +116,14 @@ const UnreadDigestPanel = (): ReactElement => {
               setProgress({ index: Number(data.index ?? 0), total: Number(data.total ?? 0) });
               break;
             case 'channel': {
-              const output = (data.output ?? null) as
-                | { summary?: string; keyPoints?: { point: string }[] }
-                | null;
-              setSummaries((prev) => [
+              const output = data.output ?? null;
+              setSummaries(prev => [
                 ...prev,
                 {
                   channelId: String(data.channelId ?? ''),
                   channelName: String(data.channelName ?? 'Channel'),
                   summary: output?.summary ?? '',
-                  keyPoints: Array.isArray(output?.keyPoints)
-                    ? output!.keyPoints.map((k) => ({ point: k.point }))
-                    : [],
+                  keyPoints: (output?.keyPoints ?? []).map(k => ({ point: k.point })),
                   includedCount: Number(data.includedCount ?? 0),
                   omittedCount: Number(data.omittedCount ?? 0),
                   failed: Boolean(data.failed),
@@ -153,7 +165,11 @@ const UnreadDigestPanel = (): ReactElement => {
         data-track-category='UNREADS_INBOX'
         data-track-name='SUMMARISE_UNREADS'
       >
-        {isLoading ? <Loader2 className='w-4 h-4 animate-spin' /> : <Sparkles className='w-4 h-4' />}
+        {isLoading ? (
+          <Loader2 className='w-4 h-4 animate-spin' />
+        ) : (
+          <Sparkles className='w-4 h-4' />
+        )}
         <span className='text-sm font-medium'>Summarise unreads</span>
       </Button>
 
@@ -203,11 +219,16 @@ const UnreadDigestPanel = (): ReactElement => {
             )}
 
             {!isLoading && !error && summaries.length === 0 && (
-              <p className='text-sm text-muted-foreground'>You&apos;re all caught up — nothing to summarise.</p>
+              <p className='text-sm text-muted-foreground'>
+                You&apos;re all caught up — nothing to summarise.
+              </p>
             )}
 
-            {summaries.map((s) => (
-              <div key={s.channelId} className='rounded-md border border-border/40 bg-background p-3'>
+            {summaries.map(s => (
+              <div
+                key={s.channelId}
+                className='rounded-md border border-border/40 bg-background p-3'
+              >
                 <div className='flex items-center justify-between mb-1.5'>
                   <span className='text-sm font-semibold text-foreground'>#{s.channelName}</span>
                   <span className='text-[11px] text-muted-foreground'>
