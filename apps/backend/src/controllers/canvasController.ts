@@ -14,11 +14,10 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import { initializeYSweetDoc, readFromYSweetStrict, syncToYSweet } from '../utils/ysweetUtils.js';
+import { initializeYSweetDoc, readFromYSweetStrict } from '../utils/ysweetUtils.js';
 import { labelBlocks, buildHandleMap, parseLabelledMarkdown, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
 import { createBlockRenderer } from '@/services/canvas/blockRender.js';
 import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
-import { isCanvasContentEmpty } from '@xyne/shared';
 import { createSuggestionBatch } from '@/services/canvas/suggestions.js';
 import {
   convertMarkdownToBlockNote,
@@ -523,9 +522,9 @@ export class CanvasController {
       // current document is what the write restores it from. A read that fails
       // must stop the write: taken as an empty canvas it would restore nothing,
       // and the drawing would be gone for good behind a warning in a log.
-      let existingBlocks;
+      let current;
       try {
-        existingBlocks = await readFromYSweetStrict(canvas.id, userId);
+        current = await readFromYSweetStrict(canvas.id, userId);
       } catch (error) {
         logger.error(
           `[CANVAS-UPDATE] Could not read canvas ${canvas.id} before writing to it`,
@@ -535,79 +534,46 @@ export class CanvasController {
         return;
       }
 
-      // Suggestion mode: this route only receives agent writes (S2S, spaces-edit-canvas);
-      // park block-level changes for review unless the canvas is empty. Nothing reaches Y-Sweet here.
-      if (!isCanvasContentEmpty(existingBlocks)) {
-        const renderer = await createBlockRenderer(existingBlocks);
-        const entries = parseLabelledMarkdown(markdown);
-        const handleMap = buildHandleMap(existingBlocks);
+      // Suggestion mode, no exceptions: this route only receives agent writes
+      // (S2S, spaces-edit-canvas) and NEVER touches the document itself — every
+      // change parks for human review.
+      const renderer = await createBlockRenderer(current);
+      const entries = parseLabelledMarkdown(markdown);
+      const handleMap = buildHandleMap(current);
 
-        const receipt = await getReadReceipt(canvas.id, userId);
-        const ops = deriveOps({
-          current: existingBlocks,
-          entries,
-          handleMap,
-          render: renderer.render,
-          ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
-        });
+      const receipt = await getReadReceipt(canvas.id, userId);
+      const ops = deriveOps({
+        current,
+        entries,
+        handleMap,
+        render: renderer.render,
+        ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
+      });
 
-        if (ops.length === 0) {
-          res.status(200).json({
-            id: canvas.id,
-            title: canvas.title,
-            status: 'no-changes',
-            message: 'The proposed content matches the canvas; nothing to review.',
-            url: getCanvasUrl(canvas.id, req.user?.workspaceId),
-          });
-          return;
-        }
-
-        const batch = await createSuggestionBatch({
-          workspaceId: canvas.workspaceId,
-          canvasId: canvas.id,
-          ops,
-        });
-
-        res.status(202).json({
+      if (ops.length === 0) {
+        res.status(200).json({
           id: canvas.id,
           title: canvas.title,
-          status: 'pending-review',
-          batchId: batch.batchId,
-          changeCount: batch.created,
-          message: `${batch.created} change(s) proposed and awaiting approval.`,
+          status: 'no-changes',
+          message: 'The proposed content matches the canvas; nothing to review.',
           url: getCanvasUrl(canvas.id, req.user?.workspaceId),
         });
         return;
       }
 
-      // ── direct write (unchanged behaviour) ─────────────────
-      const blocks = await convertMarkdownToBlockNote(markdown, existingBlocks);
-
-      // Sync content to Y-Sweet for collaborative editing
-      const ysweetSynced = await syncToYSweet(canvas.id, blocks, userId);
-      if (!ysweetSynced) {
-        logger.error(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
-        res.status(502).json({
-          error: 'Canvas update failed',
-          message: 'The collaborative document could not be updated. Try again.',
-        });
-        return;
-      }
-
-      // Update DB timestamp
-      const prisma = DatabaseClient.getInstance();
-      await prisma.canvas.update({
-        where: { id: canvas.id },
-        data: {
-          lastEditedBy: userId,
-          lastEditedAt: new Date(),
-          updatedAt: new Date(),
-        },
+      const batch = await createSuggestionBatch({
+        workspaceId: canvas.workspaceId,
+        canvasId: canvas.id,
+        ops,
       });
 
-      res.status(200).json({
+      res.status(202).json({
         id: canvas.id,
         title: canvas.title,
+        status: 'pending-review',
+        batchId: batch.batchId,
+        changeCount: batch.created,
+        message: `${batch.created} change(s) proposed and awaiting approval.`,
         url: getCanvasUrl(canvas.id, req.user?.workspaceId),
       });
     } catch (error) {
