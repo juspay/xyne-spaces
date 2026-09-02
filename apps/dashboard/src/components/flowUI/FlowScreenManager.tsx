@@ -5,6 +5,9 @@ import { FlowRenderer } from './FlowRenderer';
 import type { FlowDefinition, AppActionResponse, FlowState } from '@xyne/shared';
 import { toast } from 'sonner';
 import type { FlowMessageContext } from './FlowContext';
+import { useAuthContextValues } from '../../hooks/useAuth';
+import { isApprovalHiddenFromViewer } from './approvalVisibility';
+import { RestrictedApprovalPlaceholder } from './RestrictedApprovalPlaceholder';
 
 interface FlowScreenManagerProps {
   /** Initial screen — rendered inline inside the message bubble */
@@ -36,6 +39,15 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
   messageContext,
 }) => {
   const [screenStack, setScreenStack] = useState<FlowDefinition[]>([flow]);
+
+  // Visibility gate: some approval cards (HITL write, skill-update, clone,
+  // mcp-configure) are addressed to a SINGLE user — the server rejects any
+  // other clicker with a 403. Hide the actionable card from everyone except
+  // that intended approver so the rest of the thread isn't shown buttons they
+  // cannot use. Fails open: if the intended user can't be determined, or this
+  // isn't an approval card, the flow renders unchanged.
+  const { userID } = useAuthContextValues();
+  const hiddenFromViewer = isApprovalHiddenFromViewer(flow, userID);
 
   // Live re-sync of the inline (base) screen when the agent UPDATES this
   // message's flow in place — e.g. a plan/todo card advancing
@@ -141,6 +153,10 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
       return [...prev.slice(0, -1), { ...last, state: cleanState }];
     });
   }, []);
+
+  if (hiddenFromViewer) {
+    return <RestrictedApprovalPlaceholder />;
+  }
 
   return (
     <>
