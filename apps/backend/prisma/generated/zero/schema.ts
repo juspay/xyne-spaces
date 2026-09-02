@@ -755,6 +755,29 @@ export const pullRequestsTable = table("pull_requests")
     updatedAt: number(),
     status: string(),
     ticketId: string().optional(),
+    botCommitCount: number().optional(),
+    humanCommitCount: number().optional(),
+    unknownCommitCount: number().optional(),
+    commitAnalysisStatus: string().optional(),
+    commitAnalysisError: string().optional(),
+    commitAnalyzedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const commitTable = table("commits")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    commitSha: string(),
+    pullRequestId: string(),
+    repositoryUrl: string(),
+    agentSlug: string().optional(),
+    authorName: string(),
+    authorEmail: string(),
+    messageHeadline: string(),
+    messageBody: string().optional(),
+    committedAt: number(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -3804,11 +3827,24 @@ export const aclAuditLogTableRelationships = relationships(aclAuditLogTable, ({ 
   })
 }));
 
-export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
+export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one, many }) => ({
   workflowExecution: one({
     sourceField: ["workflowExecutionId"],
     destField: ["id"],
     destSchema: workflowExecutionTable,
+  }),
+  commits: many({
+    sourceField: ["id"],
+    destField: ["pullRequestId"],
+    destSchema: commitTable,
+  })
+}));
+
+export const commitTableRelationships = relationships(commitTable, ({ one }) => ({
+  pullRequest: one({
+    sourceField: ["pullRequestId"],
+    destField: ["id"],
+    destSchema: pullRequestsTable,
   })
 }));
 
@@ -5075,6 +5111,7 @@ export const schema = createSchema(
       resourceAccessTable,
       aclAuditLogTable,
       pullRequestsTable,
+      commitTable,
       prThreadLinkTable,
       teamIntelligenceIngestionBatchV2Table,
       teamIntelligenceUserIngestionV2Table,
@@ -5249,6 +5286,7 @@ export const schema = createSchema(
       resourceAccessTableRelationships,
       aclAuditLogTableRelationships,
       pullRequestsTableRelationships,
+      commitTableRelationships,
       teamIntelligenceIngestionBatchV2TableRelationships,
       teamIntelligenceUserIngestionV2TableRelationships,
       teamIntelligenceTeamSummaryV2TableRelationships,
@@ -5378,6 +5416,7 @@ export type Resource = Row<typeof schema.tables.resources>;
 export type ResourceAccess = Row<typeof schema.tables.resource_access>;
 export type ACLAuditLog = Row<typeof schema.tables.acl_audit_logs>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
+export type Commit = Row<typeof schema.tables.commits>;
 export type PrThreadLink = Row<typeof schema.tables.pr_thread_links>;
 export type TeamIntelligenceIngestionBatchV2 = Row<typeof schema.tables.team_intelligence_ingestion_batches_v2>;
 export type TeamIntelligenceUserIngestionV2 = Row<typeof schema.tables.team_intelligence_user_ingestions_v2>;

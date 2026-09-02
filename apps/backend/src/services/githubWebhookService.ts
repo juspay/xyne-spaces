@@ -8,6 +8,7 @@ import { pullRequestValidationService } from '@/services/pullRequestValidationSe
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { PRStatusEvent } from '@xyne/shared';
+import { commitAnalysisQueue } from '@/queues/commitAnalysisQueue';
 import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
@@ -476,7 +477,33 @@ export class GitHubWebhookService {
       sourceBranchName: context.sourceBranch,
       destinationBranchName: context.destinationBranch,
       numberOfComments: context.numberOfComments,
+      commitAnalysisStatus: 'PENDING', // Mark for async analysis
     });
+
+    // Enqueue commit analysis job (async, non-blocking)
+    if (result?.pr) {
+      try {
+        // Extract owner/repo from repository URL or name
+        const [owner, repo] = context.repoName.includes('/')
+          ? context.repoName.split('/')
+          : [context.projectName || '', context.repoName];
+
+        await commitAnalysisQueue.enqueueAnalysis({
+          workspaceId: result.pr.workspaceId,
+          prId: context.prId,
+          prInternalId: result.pr.id,
+          repositoryUrl: context.repoUrl,
+          projectKey: owner,
+          repositorySlug: repo,
+          vcsProvider: 'github',
+        });
+
+        logger.info(`[GitHub-Webhook] Enqueued commit analysis for PR #${context.prId}`);
+      } catch (error) {
+        // Log but don't fail webhook - analysis can be retried
+        logger.error(`[GitHub-Webhook] Failed to enqueue commit analysis for PR #${context.prId}:`, error);
+      }
+    }
 
     if (result) {
       if (result.statusChanged) {

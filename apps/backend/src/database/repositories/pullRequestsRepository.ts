@@ -158,8 +158,20 @@ export class PRMetricsRepository {
     prId,
     repoUrl,
     prUrl,
-    numberOfComments
-  }: PRStatusUpdateProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
+    numberOfComments,
+    // Commit authorship tracking fields
+    botCommitCount,
+    humanCommitCount,
+    unknownCommitCount,
+    commitAnalysisStatus,
+    commitAnalysisError,
+  }: PRStatusUpdateProps & {
+    botCommitCount?: number;
+    humanCommitCount?: number;
+    unknownCommitCount?: number;
+    commitAnalysisStatus?: string;
+    commitAnalysisError?: string | null;
+  }): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
       const currentPr = await this.prisma.pullRequests.findFirst({
@@ -179,7 +191,14 @@ export class PRMetricsRepository {
         data: {
           status: PRStatus.MERGED,
           numberOfComments,
-          repositoryUrl: repoUrl
+          repositoryUrl: repoUrl,
+          // Conditionally include authorship fields
+          ...(botCommitCount !== undefined && { botCommitCount }),
+          ...(humanCommitCount !== undefined && { humanCommitCount }),
+          ...(unknownCommitCount !== undefined && { unknownCommitCount }),
+          ...(commitAnalysisStatus && { commitAnalysisStatus }),
+          ...(commitAnalysisError !== undefined && { commitAnalysisError }),
+          ...(commitAnalysisStatus && { commitAnalyzedAt: new Date() }),
         }
       });
 

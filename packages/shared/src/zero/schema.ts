@@ -680,6 +680,23 @@ export const pullRequestsTable = table('pull_requests')
   })
   .primaryKey('id');
 
+export const commitTable = table('commits')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    commitSha: string(),
+    pullRequestId: string(),
+    repositoryUrl: string(),
+    agentSlug: string().optional(),
+    authorName: string(),
+    authorEmail: string(),
+    messageHeadline: string(),
+    messageBody: string().optional(),
+    committedAt: number(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 export const organizationTable = table('organizations')
   .columns({
     orgId: string(),
@@ -4082,6 +4099,14 @@ export const pullRequestsTableRelationships = relationships(pullRequestsTable, (
   }),
 }));
 
+export const commitTableRelationships = relationships(commitTable, ({ one }) => ({
+  pullRequest: one({
+    sourceField: ['pullRequestId'],
+    destField: ['id'],
+    destSchema: pullRequestsTable,
+  }),
+}));
+
 export const organizationTableRelationships = relationships(organizationTable, ({ one, many }) => ({
   members: many({
     sourceField: ['orgId'],
@@ -4779,6 +4804,7 @@ export const schema = createSchema({
     resourceTable,
     resourceAccessTable,
     pullRequestsTable,
+    commitTable,
     organizationTable,
     orgMemberTable,
     workspaceTable,
@@ -4950,6 +4976,7 @@ export const schema = createSchema({
     canvasParticipantTableRelationships,
     canvasUserStatusTableRelationships,
     pullRequestsTableRelationships,
+    commitTableRelationships,
     organizationTableRelationships,
     orgMemberTableRelationships,
     workspaceTableRelationships,
