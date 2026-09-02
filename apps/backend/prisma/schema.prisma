@@ -945,13 +945,9 @@ model ScheduledMessage {
   title          String
   messageContent String   @db.Text
   channelId      String
-  frequency      String   @default("WEEKLY") // "WEEKLY" | "MONTHLY"
-  daysOfWeek     String   // WEEKLY only: "0,1,2,3,4,5,6" for all days, "1,2,3,4,5" for weekdays (0=Sun...6=Sat); "" for MONTHLY
-  // MONTHLY fields — which one is used depends on monthlyMode; all null for WEEKLY
-  monthlyMode    String?  // "DAY_OF_MONTH" | "NTH_WEEKDAY" | "LAST_DAY"
-  dayOfMonth     Int?     // DAY_OF_MONTH: 1..28
-  weekOrdinal    String?  // NTH_WEEKDAY: "1".."4" | "LAST"
-  weekday        Int?     // NTH_WEEKDAY: 0=Sun...6=Sat
+  daysOfWeek     String   // "0,1,2,3,4,5,6" for all days, "1,2,3,4,5" for weekdays (0=Sun...6=Sat); "-" = monthly
+  monthlyMode    String?  // "DAY_OF_MONTH" | "NTH_WEEKDAY"
+  monthlyValue   Int?     // encoded monthly schedule (see cronUtils)
   scheduledTime  String   // "HH:mm" in UTC
   isActive       Boolean  @default(true)
   createdBy      String

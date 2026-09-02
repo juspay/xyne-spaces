@@ -7,81 +7,69 @@ import { scheduledMessageService } from '@/services/scheduledMessageService';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 // ── Schedule validation / normalization ──────────────────────────────────────
-// Normalizes the raw schedule fields into exactly what we persist. For WEEKLY,
-// the monthly columns are nulled; for MONTHLY, daysOfWeek is "" and only the
-// columns relevant to the chosen monthlyMode are set.
+// Normalizes the raw schedule fields into exactly what we persist. Weekly stores a
+// day list in daysOfWeek (monthly columns null); monthly sets daysOfWeek = "-" plus
+// a mode and a packed integer value (see cronUtils for the encoding).
+const MONTHLY_DOW = '-';
+
 interface NormalizedSchedule {
-  frequency: 'WEEKLY' | 'MONTHLY';
   daysOfWeek: string;
   monthlyMode: MonthlyMode | null;
-  dayOfMonth: number | null;
-  weekOrdinal: string | null;
-  weekday: number | null;
+  monthlyValue: number | null;
 }
 
 interface ScheduleInput {
-  frequency?: string;
   daysOfWeek?: string;
   monthlyMode?: string;
-  dayOfMonth?: number;
-  weekOrdinal?: string;
-  weekday?: number;
+  monthlyValue?: number;
 }
 
 function normalizeSchedule(input: ScheduleInput): { error: string } | { data: NormalizedSchedule } {
-  const frequency = input.frequency ?? 'WEEKLY';
-  if (frequency !== 'WEEKLY' && frequency !== 'MONTHLY') {
-    return { error: 'frequency must be WEEKLY or MONTHLY' };
-  }
+  const { daysOfWeek } = input;
 
-  if (frequency === 'WEEKLY') {
-    if (!input.daysOfWeek || !/^[0-6](,[0-6])*$/.test(input.daysOfWeek)) {
-      return { error: 'daysOfWeek must be a comma-separated list of 0-6' };
+  // Weekly — daysOfWeek is a comma-separated list of 0-6.
+  if (daysOfWeek !== MONTHLY_DOW) {
+    if (!daysOfWeek || !/^[0-6](,[0-6])*$/.test(daysOfWeek)) {
+      return { error: 'daysOfWeek must be a comma-separated list of 0-6, or "-" for monthly' };
     }
-    return {
-      data: { frequency, daysOfWeek: input.daysOfWeek, monthlyMode: null, dayOfMonth: null, weekOrdinal: null, weekday: null },
-    };
+    return { data: { daysOfWeek, monthlyMode: null, monthlyValue: null } };
   }
 
-  // MONTHLY
+  // Monthly — mode + a single packed integer.
   const mode = input.monthlyMode;
-  if (mode !== 'DAY_OF_MONTH' && mode !== 'NTH_WEEKDAY' && mode !== 'LAST_DAY') {
-    return { error: 'monthlyMode must be DAY_OF_MONTH, NTH_WEEKDAY or LAST_DAY' };
+  const value = Number(input.monthlyValue);
+  if (!Number.isInteger(value)) {
+    return { error: 'monthlyValue must be an integer' };
   }
 
   if (mode === 'DAY_OF_MONTH') {
-    const d = Number(input.dayOfMonth);
-    if (!Number.isInteger(d) || d < 1 || d > 28) {
-      return { error: 'dayOfMonth must be an integer between 1 and 28' };
+    if (value !== -1 && (value < 1 || value > 28)) {
+      return { error: 'monthlyValue for DAY_OF_MONTH must be 1..28, or -1 for the last day' };
     }
-    return { data: { frequency, daysOfWeek: '', monthlyMode: mode, dayOfMonth: d, weekOrdinal: null, weekday: null } };
+    return { data: { daysOfWeek: MONTHLY_DOW, monthlyMode: mode, monthlyValue: value } };
   }
 
   if (mode === 'NTH_WEEKDAY') {
-    const ord = input.weekOrdinal;
-    if (!ord || !['1', '2', '3', '4', 'LAST'].includes(ord)) {
-      return { error: 'weekOrdinal must be 1, 2, 3, 4 or LAST' };
+    const ordinal = Math.floor(value / 10);
+    const weekday = value % 10;
+    if (![1, 2, 3, 4, 5].includes(ordinal) || weekday < 0 || weekday > 6) {
+      return {
+        error:
+          'monthlyValue for NTH_WEEKDAY must be ordinal*10+weekday (ordinal 1..4 or 5=last, weekday 0..6)',
+      };
     }
-    const w = Number(input.weekday);
-    if (!Number.isInteger(w) || w < 0 || w > 6) {
-      return { error: 'weekday must be an integer between 0 and 6' };
-    }
-    return { data: { frequency, daysOfWeek: '', monthlyMode: mode, dayOfMonth: null, weekOrdinal: ord, weekday: w } };
+    return { data: { daysOfWeek: MONTHLY_DOW, monthlyMode: mode, monthlyValue: value } };
   }
 
-  // LAST_DAY — no extra fields
-  return { data: { frequency, daysOfWeek: '', monthlyMode: mode, dayOfMonth: null, weekOrdinal: null, weekday: null } };
+  return { error: 'monthlyMode must be DAY_OF_MONTH or NTH_WEEKDAY' };
 }
 
 function cronFromSchedule(scheduledTime: string, s: NormalizedSchedule): string {
   return buildCronPattern({
     scheduledTime,
-    frequency: s.frequency,
     daysOfWeek: s.daysOfWeek,
     monthlyMode: s.monthlyMode ?? undefined,
-    dayOfMonth: s.dayOfMonth ?? undefined,
-    weekOrdinal: s.weekOrdinal ?? undefined,
-    weekday: s.weekday ?? undefined,
+    monthlyValue: s.monthlyValue ?? undefined,
   });
 }
 
@@ -247,12 +235,9 @@ export async function updateScheduledMessage(req: Request, res: Response) {
     // the persisted columns stay internally consistent (also handles switching
     // frequency, e.g. WEEKLY → MONTHLY).
     const normalized = normalizeSchedule({
-      frequency: req.body.frequency ?? existing.frequency,
       daysOfWeek: req.body.daysOfWeek ?? existing.daysOfWeek,
       monthlyMode: req.body.monthlyMode ?? existing.monthlyMode ?? undefined,
-      dayOfMonth: req.body.dayOfMonth ?? existing.dayOfMonth ?? undefined,
-      weekOrdinal: req.body.weekOrdinal ?? existing.weekOrdinal ?? undefined,
-      weekday: req.body.weekday ?? existing.weekday ?? undefined,
+      monthlyValue: req.body.monthlyValue ?? existing.monthlyValue ?? undefined,
     });
     if ('error' in normalized) {
       return res.status(400).json({ error: normalized.error });

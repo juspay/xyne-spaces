@@ -63,12 +63,12 @@ const ScheduledMessageCard = ({
     return `${istHours}:${istMinutes}`;
   };
 
-  const ordinalLabel: Record<string, string> = {
-    '1': '1st',
-    '2': '2nd',
-    '3': '3rd',
-    '4': '4th',
-    LAST: 'last',
+  const ordinalLabel: Record<number, string> = {
+    1: '1st',
+    2: '2nd',
+    3: '3rd',
+    4: '4th',
+    5: 'last',
   };
   const weekdayNames = [
     'Sunday',
@@ -81,19 +81,18 @@ const ScheduledMessageCard = ({
   ];
 
   const formatSchedule = (): string => {
-    if (scheduledMessage.frequency === 'MONTHLY') {
-      switch (scheduledMessage.monthlyMode) {
-        case 'DAY_OF_MONTH':
-          return `Monthly on day ${scheduledMessage.dayOfMonth}`;
-        case 'LAST_DAY':
-          return 'Monthly on the last day';
-        case 'NTH_WEEKDAY':
-          return `Monthly on the ${ordinalLabel[scheduledMessage.weekOrdinal ?? '1']} ${
-            weekdayNames[scheduledMessage.weekday ?? 0]
-          }`;
-        default:
-          return 'Monthly';
+    // Monthly is signalled by daysOfWeek === "-"; monthlyValue is the packed schedule.
+    if (scheduledMessage.daysOfWeek === '-') {
+      const value = scheduledMessage.monthlyValue ?? 0;
+      if (scheduledMessage.monthlyMode === 'DAY_OF_MONTH') {
+        return value === -1 ? 'Monthly on the last day' : `Monthly on day ${value}`;
       }
+      if (scheduledMessage.monthlyMode === 'NTH_WEEKDAY') {
+        const ordinal = Math.floor(value / 10);
+        const weekday = value % 10;
+        return `Monthly on the ${ordinalLabel[ordinal] ?? ''} ${weekdayNames[weekday] ?? ''}`;
+      }
+      return 'Monthly';
     }
     return formatDays(scheduledMessage.daysOfWeek);
   };

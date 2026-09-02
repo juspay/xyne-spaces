@@ -46,21 +46,23 @@ interface FormValues {
   isActive: boolean;
 }
 
-// Assemble the MONTHLY recurrence payload from the form, keeping only the fields
-// relevant to the chosen monthlyMode.
+// Encode the form's monthly selection into the persisted shape: daysOfWeek "-" plus
+// a mode and a packed integer (DAY_OF_MONTH: 1..28 or -1=last day; NTH_WEEKDAY:
+// ordinal*10 + weekday, ordinal 1..4 or 5=last). The UI's "Last day" maps to
+// DAY_OF_MONTH = -1.
 function buildMonthlyFields(v: FormValues): SchedulePayloadFields {
-  if (v.monthlyMode === 'DAY_OF_MONTH') {
-    return { frequency: 'MONTHLY', monthlyMode: 'DAY_OF_MONTH', dayOfMonth: Number(v.dayOfMonth) };
+  if (v.monthlyMode === 'LAST_DAY') {
+    return { daysOfWeek: '-', monthlyMode: 'DAY_OF_MONTH', monthlyValue: -1 };
   }
   if (v.monthlyMode === 'NTH_WEEKDAY') {
+    const ordinal = v.weekOrdinal === 'LAST' ? 5 : Number(v.weekOrdinal);
     return {
-      frequency: 'MONTHLY',
+      daysOfWeek: '-',
       monthlyMode: 'NTH_WEEKDAY',
-      weekOrdinal: v.weekOrdinal,
-      weekday: Number(v.weekday),
+      monthlyValue: ordinal * 10 + Number(v.weekday),
     };
   }
-  return { frequency: 'MONTHLY', monthlyMode: 'LAST_DAY' };
+  return { daysOfWeek: '-', monthlyMode: 'DAY_OF_MONTH', monthlyValue: Number(v.dayOfMonth) };
 }
 
 const ScheduledMessageModal = ({
@@ -157,26 +159,45 @@ const ScheduledMessageModal = ({
         String(utcDate.getMinutes()).padStart(2, '0'),
       ].join(':');
 
+      // Monthly rows store daysOfWeek as "-"; weekly rows hold the day list.
+      const isMonthly = scheduledMessage.daysOfWeek === '-';
       const isWeekday = scheduledMessage.daysOfWeek === '1,2,3,4,5';
-      // MONTHLY rows store daysOfWeek as "" — fall back to a sane weekly default
-      // so the weekly picker is valid if the user switches frequency.
       const daysArray =
-        scheduledMessage.daysOfWeek && scheduledMessage.daysOfWeek.length > 0
+        !isMonthly && scheduledMessage.daysOfWeek.length > 0
           ? scheduledMessage.daysOfWeek.split(',')
           : ['1', '2', '3', '4', '5'];
+
+      // Decode the packed monthlyValue back into the UI's mode + fields.
+      const mv = scheduledMessage.monthlyValue ?? 1;
+      let uiMonthlyMode: FormValues['monthlyMode'] = 'DAY_OF_MONTH';
+      let uiDayOfMonth = '1';
+      let uiWeekOrdinal = '1';
+      let uiWeekday = '1';
+      if (isMonthly && scheduledMessage.monthlyMode === 'DAY_OF_MONTH') {
+        if (mv === -1) {
+          uiMonthlyMode = 'LAST_DAY';
+        } else {
+          uiDayOfMonth = String(mv);
+        }
+      } else if (isMonthly && scheduledMessage.monthlyMode === 'NTH_WEEKDAY') {
+        uiMonthlyMode = 'NTH_WEEKDAY';
+        const ordinal = Math.floor(mv / 10);
+        uiWeekOrdinal = ordinal === 5 ? 'LAST' : String(ordinal);
+        uiWeekday = String(mv % 10);
+      }
 
       reset({
         channelId: scheduledMessage.channelId,
         title: scheduledMessage.title,
         messageContent: scheduledMessage.messageContent,
         messageContentHtml: scheduledMessage.messageContent,
-        frequency: scheduledMessage.frequency ?? 'WEEKLY',
+        frequency: isMonthly ? 'MONTHLY' : 'WEEKLY',
         dayMode: isWeekday ? 'weekday' : 'custom',
         daysOfWeek: daysArray,
-        monthlyMode: scheduledMessage.monthlyMode ?? 'DAY_OF_MONTH',
-        dayOfMonth: String(scheduledMessage.dayOfMonth ?? 1),
-        weekOrdinal: scheduledMessage.weekOrdinal ?? '1',
-        weekday: String(scheduledMessage.weekday ?? 1),
+        monthlyMode: uiMonthlyMode,
+        dayOfMonth: uiDayOfMonth,
+        weekOrdinal: uiWeekOrdinal,
+        weekday: uiWeekday,
         scheduledTime: localTime,
         isActive: scheduledMessage.isActive,
       });
@@ -226,10 +247,7 @@ const ScheduledMessageModal = ({
       const scheduleFields: SchedulePayloadFields =
         formValues.frequency === 'MONTHLY'
           ? buildMonthlyFields(formValues)
-          : {
-              frequency: 'WEEKLY',
-              daysOfWeek: formValues.daysOfWeek.sort((a, b) => Number(a) - Number(b)).join(','),
-            };
+          : { daysOfWeek: formValues.daysOfWeek.sort((a, b) => Number(a) - Number(b)).join(',') };
 
       if (isEditMode && scheduledMessage) {
         const payload: UpdateScheduledMessagePayload = {
