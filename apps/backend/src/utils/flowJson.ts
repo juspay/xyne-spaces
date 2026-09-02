@@ -1,26 +1,13 @@
 /**
  * Shared FlowJSON text extraction helpers.
  *
- * FlowJSON messages are stored as
- * `<div data-flow-json="...escaped JSON...">Flow JSON</div>`. The visible text
- * node ("Flow JSON") is meaningless — the real content lives inside the escaped
- * JSON `data-flow-json` attribute. These helpers walk the component tree and
- * return readable plaintext.
- *
- * This lives in `utils` (not inside a zero side-effect handler) so it can be
- * shared by notification building, Vespa indexing, mention scanning AND the
- * automation trigger layer without creating an import cycle
- * (messages-handler imports the trigger, so the trigger must not import back
- * into messages-handler).
+ * FlowJSON is stored as `<div data-flow-json="...escaped JSON...">Flow JSON</div>`
+ * — the real text lives in the escaped attribute. Kept in `utils` (not in the
+ * zero messages handler) so the automation trigger can use it without an import
+ * cycle (messages-handler imports the trigger).
  */
 
-/**
- * Extract plaintext content strings from a FlowJSON payload for notification
- * preview and mention scanning.
- *
- * Walks the component tree and collects every text `content` prop, then joins
- * them. Returns '' for non-flow / unparseable content.
- */
+/** Collect text `content` props from a FlowJSON tree. '' for non-flow content. */
 export function extractTextFromFlowJson(content: string): string {
   const attrMatch = content.match(/data-flow-json="([^"]+)"/);
   if (!attrMatch) return '';
@@ -75,20 +62,13 @@ export function cleanNotificationText(raw: string): string {
     .replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Like extractTextFromFlowJson but strips mrkdwn tokens for display in
- * notification previews (user mentions removed, broadcast → @channel, etc.).
- */
+/** Like extractTextFromFlowJson but strips mrkdwn tokens for display. */
 export function extractCleanTextFromFlowJson(content: string): string {
   const raw = extractTextFromFlowJson(content);
   return cleanNotificationText(raw);
 }
 
-/**
- * For flow JSON messages, returns the extracted plaintext from the FlowJSON
- * component tree (suitable for mention scanning and notification preview).
- * Returns null for non-flow-json content.
- */
+/** Extracted plaintext for a FlowJSON message; null for non-flow content. */
 export function getFlowJsonContentForNotification(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
   return extractCleanTextFromFlowJson(content) || null;
