@@ -1,3 +1,15 @@
+## [1.258.0](https://github.com/juspay/xyne-spaces/compare/v1.257.0...v1.258.0) (2026-09-02)
+
+
+### Features
+
+* add Spec Validation check on pull requests ([#1253](https://github.com/juspay/xyne-spaces/issues/1253)) ([59759d1](https://github.com/juspay/xyne-spaces/commit/59759d19bc1d423fa8f5996216bd503d15862f6a)), closes [#1362](https://github.com/juspay/xyne-spaces/issues/1362) [#1363](https://github.com/juspay/xyne-spaces/issues/1363)
+
+
+### Bug Fixes
+
+* add all recordings tab and summary template regen states ([#1390](https://github.com/juspay/xyne-spaces/issues/1390)) ([19ff608](https://github.com/juspay/xyne-spaces/commit/19ff6087b312273891a0453283aec2adc7cd76ae))
+
 ## [1.257.0](https://github.com/juspay/xyne-spaces/compare/v1.256.0...v1.257.0) (2026-09-02)
 
 
