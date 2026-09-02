@@ -1,3 +1,16 @@
+## [1.260.0](https://github.com/juspay/xyne-spaces/compare/v1.259.3...v1.260.0) (2026-09-02)
+
+
+### Features
+
+* Add specific reviewers for ACL files ([#1286](https://github.com/juspay/xyne-spaces/issues/1286)) ([774d9ef](https://github.com/juspay/xyne-spaces/commit/774d9ef653822e3786740061cf8e186308f7d580))
+
+
+### Bug Fixes
+
+* club messages when thread tags are disabled ([#1402](https://github.com/juspay/xyne-spaces/issues/1402)) ([a176141](https://github.com/juspay/xyne-spaces/commit/a17614157c0bc02b2d9f7923f5ba5524d2884217))
+* scope message edit lock to the requesting list ([#1398](https://github.com/juspay/xyne-spaces/issues/1398)) ([79d4fcb](https://github.com/juspay/xyne-spaces/commit/79d4fcb9e8367fb0d9380798212135a55282895c)), closes [#1406](https://github.com/juspay/xyne-spaces/issues/1406) [#1406](https://github.com/juspay/xyne-spaces/issues/1406) [#1406](https://github.com/juspay/xyne-spaces/issues/1406)
+
 ## [1.259.3](https://github.com/juspay/xyne-spaces/compare/v1.259.2...v1.259.3) (2026-09-02)
 
 
