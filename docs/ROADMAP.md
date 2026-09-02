@@ -1,0 +1,78 @@
+# Xyne Spaces 2-Week Roadmap
+
+**Sprint:** 25 Aug 2026 – 5 Sep 2026  
+**Source:** [Xyne OSS Roadmap canvas](https://app.spaces.xyne.juspay.net/6642623f-cca7-43ad-9a6b-5e49c33226b4/chat/canvas/337e856e-2f34-43e1-91b2-a19be1f9ab16)
+
+This roadmap is a focused two-week slice of the broader Xyne Spaces OSS plan. The goal is to ship the foundations that make the project runnable, understandable, and contributor-ready for an external audience.
+
+---
+
+## Themes
+
+### 🏗️ Adoption & Onboarding
+Making Xyne Spaces installable and navigable for a new contributor or team.
+
+### 🤖 Agent Platform
+Stabilizing the Claw agent layer so agents can be created, reviewed, and run safely from the chat interface.
+
+### ✨ Product Polish
+Tightening the Spaces UI and call experience so the product feels coherent end to end.
+
+### 📝 Content & Community
+Publishing the architecture, feature writeups, and seed content that explain what Xyne Spaces is and why it exists.
+
+---
+
+## Roadmap
+
+### 🏗️ Adoption & Onboarding
+
+| Item | Description | Status |
+|------|-------------|--------|
+| **Local setup of spaces** | Finish the local harness and desk setup paths. Validate `pnpm run up` on macOS, Linux, and Windows/WSL2. Port pre-flight checks and the mprocs-based TUI should land this sprint. | 🚧 In Progress |
+| **Onboarding flow** | Ship a first-run flow that creates Xyne as the anchor agent, connects the local harness, and lets the admin pick the connectors they want to use. | 📅 Planned |
+| **Open community to Juspay** | Open the community workspace to Juspay users first and seed the main channels with getting-started content. | 📅 Planned |
+
+### 🤖 Agent Platform
+
+| Item | Description | Status |
+|------|-------------|--------|
+| **Agent creation from chat** | Allow users to create agents and connect tools entirely from the Spaces chat interface, with agent widgets rendered inline. | 📅 Planned |
+| **Reviewer agent before publishing** | Require a reviewer agent pass before an agent is published, with a common formatting contract for all agent outputs. | 🚧 In Progress |
+| **Skill ↔ tool mapping** | Finalize the skill-to-tool mapping layer and migrate OAuth tools from code into the database so connectors can be configured without a deploy. | 📅 Planned |
+| **MCP changes validation** | Complete end-to-end testing of MCP credential scoping and recent gateway/runtime changes. | 🚧 In Progress |
+| **Automation NLP processing** | Land natural-language triggers for automations so non-technical users can describe rules in plain text. | 📅 Planned |
+| **Benchmarking** | Instrument PR throughput: PRs raised and merged via agents, tracked daily. | 📅 Planned |
+
+### ✨ Product Polish
+
+| Item | Description | Status |
+|------|-------------|--------|
+| **Consistent left-bar navigation** | Unify the left bar across all tabs and collapse related sections so navigation stops feeling app-by-app. | 📅 Planned |
+| **Call interface refresh** | Bring the call UI closer to Scribe: summary panel, transcript highlights, and post-call actions surfaced in one place. | 📅 Planned |
+| **Reliability hardening** | Close known ACL regressions around guests and call participants, and add coverage for cross-app permission checks. | 🚧 In Progress |
+
+### 📝 Content & Community
+
+| Item | Description | Status |
+|------|-------------|--------|
+| **Architecture diagrams** | Publish the system and agent-sandbox diagrams in the docs site with explanatory captions. | 🚧 In Progress |
+| **Feature writeups** | Ship overview pages for Chat, Call, Canvas, Tickets, Claw, Agentic Search, Automations, and Connectors. | 📅 Planned |
+| **Demo videos** | Record short walkthroughs of setup, agent creation, and a day-in-the-life collaboration flow. | 📅 Planned |
+| **Product Hunt content** | Draft launch copy, screenshots, and the tagline deck for the public release. | 📅 Planned |
+
+---
+
+## Definition of done for this sprint
+
+- [ ] A new engineer can clone the repo and reach a running Spaces environment in under 30 minutes on any supported OS.
+- [ ] The docs site explains the architecture and each org app in its own page.
+- [ ] Published Claw agents go through a reviewer check and produce output in the common format.
+- [ ] OAuth-style connectors are configurable from the database, not hard-coded.
+- [ ] The community workspace has seeded channels and a first cohort of internal users.
+
+---
+
+## Feedback
+
+If you want to propose a change or add something to the roadmap, open a discussion in [GitHub Discussions](https://github.com/juspay/xyne-spaces/discussions) with a short explanation of **what** you want and **why** it matters.
