@@ -1,158 +1,157 @@
 import { Request, Response } from 'express';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { getStorageService } from '@/services/storage';
-import path from 'path';
+import { BundleOverrideService, BundleType } from '@/services/bundleOverrideService';
 
-// MIME type mapping for common frontend assets
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'application/javascript',
-  '.mjs': 'application/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.eot': 'application/vnd.ms-fontobject',
-  '.webp': 'image/webp',
-  '.webm': 'video/webm',
-  '.mp4': 'video/mp4',
-  '.txt': 'text/plain',
-  '.xml': 'application/xml',
-  '.map': 'application/json',
-};
+const VALID_TYPES: BundleType[] = ['version', 'bundle'];
 
 /**
- * Controller for serving frontend bundles from GCS
+ * Bundle version resolution + per-user override administration.
+ *
+ * The backend NO LONGER streams bundle files — nginx streams them directly from
+ * GCS. The backend only answers "which bundle does this user get?": nginx calls
+ * getVersion() (forwarding the user's auth cookie) to decide what to serve, and
+ * admins manage the per-user override table via the admin* handlers.
  */
 export class BundleController {
-  private static storage() {
-    return getStorageService(config.gcs.bundleBucketName);
+  /**
+   * Resolve the bundle (version or folder) for the authenticated user.
+   * Route: GET /api/bundles/version  (optionalAuthenticate)
+   *
+   * userId comes from the VERIFIED JWT (req.user.id, cookie or bearer). If the
+   * user has an enabled override it is returned; otherwise the baked default
+   * version. Anonymous / invalid token -> default. Always 200 with { type, value }
+   * so nginx has a deterministic answer.
+   */
+  public static async getVersion(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const resolved = await BundleOverrideService.resolveBundle(userId);
+
+    logger.info('[BundleVersion] Resolved', {
+      userId: userId ?? 'anonymous',
+      authenticated: !!userId,
+      type: resolved.type,
+      value: resolved.value,
+    });
+
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({ success: true, ...resolved, timestamp: new Date().toISOString() });
   }
 
-  /**
-   * Get content type based on file extension
-   */
-  private static getContentType(filePath: string): string {
-    const ext = path.extname(filePath).toLowerCase();
-    return MIME_TYPES[ext] || 'application/octet-stream';
-  }
+  // ---------------------------------------------------------------------------
+  // Admin CRUD for per-user bundle overrides.
+  // Workspace/org ADMIN or OWNER only (see routes); scoped to the caller's
+  // workspace by the tenant ACL layer, with explicit workspace checks below.
+  // ---------------------------------------------------------------------------
 
-  /**
-   * Serve a file from GCS bundle bucket
-   * Route: GET /api/bundles/:branchName/*
-   */
-  public static async serveBundle(req: Request, res: Response): Promise<void> {
+  /** GET /api/bundles/admin/overrides */
+  public static async listOverrides(_req: Request, res: Response): Promise<void> {
     try {
-      const { branchName } = req.params;
-      // Capture the rest of the path after /api/bundles/:branchName/
-      const filePath = req.params[0] || 'index.html';
-
-      // Validate branch name to prevent directory traversal
-      if (!branchName || branchName.includes('..') || branchName.includes('/')) {
-        res.status(400).json({
-          success: false,
-          error: 'Invalid branch name',
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      }
-
-      // Validate file path to prevent directory traversal
-      if (filePath.includes('..')) {
-        res.status(400).json({
-          success: false,
-          error: 'Invalid file path',
-          timestamp: new Date().toISOString(),
-        });
-        return;
-      }
-
-      // Construct GCS path: {branchName}/{filePath}
-      const gcsPath = `${branchName}/${filePath}`;
-
-      logger.info(`Serving bundle file from GCS: ${gcsPath}`, {
-        branchName,
-        filePath,
-        userAgent: req.get('user-agent'),
+      const overrides = await BundleOverrideService.list();
+      res.json({
+        success: true,
+        data: { overrides, default: BundleOverrideService.getDefault() },
+        timestamp: new Date().toISOString(),
       });
+    } catch (error) {
+      logger.error('[BundleOverride] listOverrides error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to list bundle overrides',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
 
-      const storage = this.storage();
+  /** POST /api/bundles/admin/overrides  body: { userId, type, value, enabled?, note? } */
+  public static async upsertOverride(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId, type, value, enabled, note } = req.body ?? {};
 
-      // Check if file exists
-      const exists = await storage.fileExists(gcsPath);
+      if (
+        !userId ||
+        typeof userId !== 'string' ||
+        !value ||
+        typeof value !== 'string' ||
+        typeof type !== 'string' ||
+        !VALID_TYPES.includes(type as BundleType)
+      ) {
+        res.status(400).json({
+          success: false,
+          error: `userId and value are required strings, and type must be one of: ${VALID_TYPES.join(', ')}`,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
 
-      if (!exists) {
-        // If specific file doesn't exist and path doesn't have extension, try serving index.html (for SPA routing)
-        if (!path.extname(filePath)) {
-          const indexPath = `${branchName}/index.html`;
-          const indexExists = await storage.fileExists(indexPath);
+      // Reject values that would escape a GCS prefix (folder / path traversal).
+      if (value.includes('..') || value.includes('/')) {
+        res.status(400).json({
+          success: false,
+          error: 'Invalid value',
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
 
-          if (indexExists) {
-            logger.info(`Serving index.html for SPA route: ${filePath}`);
-            const contentType = this.getContentType('index.html');
-            res.setHeader('Content-Type', contentType);
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-
-            (await storage.createReadStream(indexPath)).pipe(res);
-            return;
-          }
-        }
-
-        logger.warn(`Bundle file not found in GCS: ${gcsPath}`);
+      // Workspace isolation: the target user must belong to the caller's
+      // workspace. Resolved via the userService so an arbitrary userId cannot be
+      // attached to another workspace's override.
+      const { UserService } = await import('@/services/userService');
+      const targetUser = await new UserService().getUserById(userId);
+      if (!targetUser || targetUser.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({
           success: false,
-          error: 'Bundle file not found',
+          error: 'User not found in your workspace',
           timestamp: new Date().toISOString(),
         });
         return;
       }
 
-      // Get file metadata for content type
-      const contentType = this.getContentType(filePath);
+      const override = await BundleOverrideService.upsert({
+        userId,
+        workspaceId: targetUser.workspaceId,
+        type: type as BundleType,
+        value,
+        enabled: typeof enabled === 'boolean' ? enabled : undefined,
+        note: typeof note === 'string' ? note : null,
+      });
 
-      // Set appropriate headers
-      res.setHeader('Content-Type', contentType);
-
-      // Cache static assets aggressively, but not HTML files
-      if (path.extname(filePath) === '.html') {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      } else {
-        // Cache assets for 1 year (they should be versioned/hashed)
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      }
-
-      // Stream file from storage to response
-      const stream = await storage.createReadStream(gcsPath);
-      stream
-        .on('error', (error: Error) => {
-          logger.error(`Error streaming bundle file from storage: ${gcsPath}`, error);
-          if (!res.headersSent) {
-            res.status(500).json({
-              success: false,
-              error: 'Failed to stream bundle file',
-              timestamp: new Date().toISOString(),
-            });
-          }
-        })
-        .pipe(res);
+      res.json({ success: true, data: override, timestamp: new Date().toISOString() });
     } catch (error) {
-      logger.error('Bundle controller error:', error);
+      logger.error('[BundleOverride] upsertOverride error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to save bundle override',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
 
-      if (!res.headersSent) {
-        res.status(500).json({
+  /** DELETE /api/bundles/admin/overrides/:userId */
+  public static async deleteOverride(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.params;
+      const existing = await BundleOverrideService.getByUserId(userId);
+
+      // 404 when absent OR in another workspace (defense-in-depth over the ACL layer).
+      if (!existing || existing.workspaceId !== req.user!.workspaceId) {
+        res.status(404).json({
           success: false,
-          error: 'Internal server error',
+          error: 'Override not found',
           timestamp: new Date().toISOString(),
         });
+        return;
       }
+
+      await BundleOverrideService.remove(userId);
+      res.json({ success: true, timestamp: new Date().toISOString() });
+    } catch (error) {
+      logger.error('[BundleOverride] deleteOverride error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete bundle override',
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 }

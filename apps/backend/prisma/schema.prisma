@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "UserBundleOverride"]
 }
 
 datasource db {
@@ -878,6 +878,35 @@ model User {
   @@index([workspaceId, id])
   @@map("users")
   @@schema("public")
+}
+
+// Per-user frontend bundle override.
+// The backend resolves this from the VERIFIED JWT (userId = sub) at
+// GET /api/bundles/version. nginx calls that endpoint to decide which bundle to
+// stream from GCS. Absence of a row (or enabled=false) => the baked default
+// version. Each override carries a `type` (what the value means) and a `value`:
+//   - type "version" -> value is a semantic version (e.g. "1.216.0")
+//   - type "bundle"  -> value is a named bundle folder (e.g. "beta-v2")
+//
+// workspaceId scopes the row to a workspace: the tenant ACL/stamp layer
+// auto-stamps it on insert and auto-filters reads/writes to the caller's
+// workspace, so a workspace admin can only manage overrides for their own
+// workspace.
+model UserBundleOverride {
+  id          String   @id @default(cuid())
+  userId      String   @unique                 // users.id (relationMode=prisma, no hard FK)
+  workspaceId String                           // tenant scope (stamped from context)
+  type        String   @default("version")     // "version" | "bundle"
+  value       String                           // the version string or bundle folder name
+  enabled     Boolean  @default(true)
+  note        String?                          // optional human note about why this override exists
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("user_bundle_overrides")
+  @@schema("non_zero")
 }
 
 // User Preferences

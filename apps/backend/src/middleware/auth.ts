@@ -9,6 +9,7 @@ import { UserSessionService } from '../services/userSessionService';
 import { apiKeyService } from '../services/apiKeyService';
 import { jwtService } from '../services/jwtService';
 import '../types/express'; // Import the Express type extensions
+import type { AuthenticatedUser } from '../types/express';
 import { config } from '@/config/env';
 
 export class AuthMiddleware {
@@ -674,19 +675,88 @@ export class AuthMiddleware {
       }
 
       const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        // No token provided, continue without authentication
-        return next();
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        // Bearer token present — validate via the full flow.
+        await this.authenticate(req, res, next);
+        return;
       }
 
-      // If token is provided, validate it
-      await this.authenticate(req, res, next);
+      // No Bearer header. A top-level browser navigation (e.g. the bundle
+      // entry index.html) cannot send an Authorization header — it only sends
+      // cookies. So also honor the workspace JWT cookie here, but NEVER reject:
+      // on any failure we fall through as anonymous (unlike authenticate(),
+      // which would send a 401 and break the page load).
+      const cookieUser = await this.tryResolveUserFromCookie(req);
+      if (cookieUser) {
+        req.user = cookieUser;
+      }
+      return next();
     } catch (error) {
-      // If optional auth fails, log but continue
+      // If optional auth fails, log but continue (stay anonymous).
       logger.warn('[AUTH] Optional authentication failed:', error);
       next();
     }
   };
+
+  /**
+   * Best-effort: resolve the authenticated user from the workspace JWT cookie
+   * WITHOUT ever writing an error response. Used by optionalAuthenticate so
+   * cookie-only requests (browser navigations, e.g. the bundle entry HTML) can
+   * be attributed to a user. Returns null on any missing/invalid/expired token
+   * or lookup failure — the caller then proceeds as anonymous.
+   */
+  private async tryResolveUserFromCookie(req: Request): Promise<AuthenticatedUser | null> {
+    try {
+      if (!this.googleAuthEnabled || !this.userService) {
+        return null;
+      }
+      const workspaceId =
+        (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
+      const token = workspaceId ? req.cookies?.[`xyne_ws_${workspaceId}_token`] : undefined;
+      if (!token) {
+        return null;
+      }
+
+      let payload: any;
+      try {
+        payload = jwtService.verifyToken(token);
+      } catch {
+        // Expired/invalid — stay anonymous (no refresh in the optional path).
+        return null;
+      }
+      if (!payload?.sub) {
+        return null;
+      }
+
+      const user = await this.userService.getUserById(payload.sub);
+      if (!user) {
+        return null;
+      }
+
+      const effectiveWorkspaceId = payload.workspaceId ?? user.workspaceId ?? undefined;
+      const effectiveMemberId = payload.memberId ?? user.orgMemberId ?? undefined;
+      if (!effectiveWorkspaceId || !effectiveMemberId) {
+        return null;
+      }
+
+      return {
+        id: user.id,
+        googleId: user.providerUserId,
+        email: user.email,
+        name: user.name,
+        displayName: user.displayName,
+        workspaceId: effectiveWorkspaceId,
+        isApiKeyUser: false,
+        scopes: [],
+        role: user.role,
+        orgRole: payload.orgRole ?? user.orgMember?.role ?? 'MEMBER',
+        memberId: effectiveMemberId,
+      };
+    } catch (error) {
+      logger.warn('[AUTH] tryResolveUserFromCookie failed (staying anonymous):', error);
+      return null;
+    }
+  }
 
   /**
    * Middleware to check if user has required scope (for API key users)
