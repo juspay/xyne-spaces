@@ -1,8 +1,13 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
+import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
-import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
+import {
+  BrowseDialog,
+  handleBrowseDialogOpenChange,
+  type FilterOption,
+} from '../../primitives/BrowseDialog';
 import { Pill } from '../../primitives/Pill';
 import { SubagentChip } from './SubagentChip';
 import { SubagentDetailPanel } from './SubagentDetailPanel';
@@ -31,11 +36,6 @@ const RISK_TONE = {
   write: 'warning',
   destructive: 'danger',
 } as const;
-
-function matchesSearch(entry: SubagentCatalogEntry, query: string): boolean {
-  if (!query) return true;
-  return `${entry.name} ${entry.description}`.toLowerCase().includes(query);
-}
 
 const SubagentCard = ({
   entry,
@@ -127,12 +127,13 @@ export function BrowseSubagentsDialog({
 
   const openEntry = catalog.find(entry => entry.name === openName) ?? null;
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const visible = useMemo(
     () =>
-      catalog.filter(
-        entry => matchesSearch(entry, q) && (source === null || entry.source === source),
-      ),
+      searchByNameThenDescription(catalog, q, entry => ({
+        name: entry.name,
+        description: entry.description,
+      })).filter(entry => source === null || entry.source === source),
     [catalog, q, source],
   );
 
@@ -150,10 +151,13 @@ export function BrowseSubagentsDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setOpenName(null);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setSource(null);
+          setOpenName(null);
+        })
+      }
       title='Browse Subagent'
       description='Search and select the subagents this agent can delegate to.'
       testId='browse-subagents-dialog'

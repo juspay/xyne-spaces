@@ -1,6 +1,7 @@
 import type { DelegationStatus } from '@/services/claw/clawDelegationTypes';
 import type { PillTone } from '../../primitives/Pill';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import { matchesLibrarySearch } from '../../librarySearch';
 
 export interface CallableAgentEntry {
   slug: string;
@@ -16,8 +17,14 @@ export interface CallableAgentEntry {
 }
 
 export function matchesSearch(entry: CallableAgentEntry, query: string): boolean {
-  if (!query) return true;
-  return `${entry.name} ${entry.slug} ${entry.description}`.toLowerCase().includes(query);
+  return matchesLibrarySearch(
+    {
+      name: entry.name,
+      description: entry.description,
+      ...(entry.slug && entry.slug !== entry.name ? { aliases: [entry.slug] as const } : {}),
+    },
+    query,
+  );
 }
 
 export function statusPill(

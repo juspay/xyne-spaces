@@ -7,6 +7,7 @@ import {
   PhotoImageDefault,
 } from '@xyne/icons';
 import type { KbCollectionNode, KbFile, KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
+import { matchesLibrarySearch } from '../../librarySearch';
 
 export type KbIconComponent = typeof FileDefault;
 
@@ -175,15 +176,5 @@ export function revokeFile(grants: readonly KbSelection[], fileId: string): KbSe
 }
 
 export function matchesQuery(root: KbCollectionNode, query: string): boolean {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-  const haystack = [
-    root.name,
-    root.channelName ?? '',
-    root.projectName ?? '',
-    root.description ?? '',
-  ]
-    .join(' ')
-    .toLowerCase();
-  return haystack.includes(needle);
+  return matchesLibrarySearch({ name: root.name }, query);
 }

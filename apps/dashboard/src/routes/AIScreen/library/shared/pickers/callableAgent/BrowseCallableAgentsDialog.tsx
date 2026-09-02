@@ -1,12 +1,17 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
+import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
-import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
+import {
+  BrowseDialog,
+  handleBrowseDialogOpenChange,
+  type FilterOption,
+} from '../../primitives/BrowseDialog';
 import { Pill } from '../../primitives/Pill';
 import { SubagentChip } from '../subagent/SubagentChip';
 import { CallableAgentDetailPanel } from './CallableAgentDetailPanel';
-import { matchesSearch, statusPill, type CallableAgentEntry } from './callableAgentCatalog';
+import { statusPill, type CallableAgentEntry } from './callableAgentCatalog';
 
 const FILTER_OPTIONS: readonly FilterOption[] = [
   { id: null, label: 'All' },
@@ -110,12 +115,15 @@ export function BrowseCallableAgentsDialog({
   const [openSlug, setOpenSlug] = useState<string | null>(null);
 
   const openEntry = catalog.find(entry => entry.slug === openSlug) ?? null;
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
 
   const visible = useMemo(
     () =>
-      catalog.filter(entry => {
-        if (!matchesSearch(entry, q)) return false;
+      searchByNameThenDescription(catalog, q, entry => ({
+        name: entry.name,
+        description: entry.description,
+        ...(entry.slug && entry.slug !== entry.name ? { aliases: [entry.slug] as const } : {}),
+      })).filter(entry => {
         if (filter === 'added') return entry.status !== null;
         if (filter === 'available') return entry.status === null;
         return true;
@@ -128,10 +136,13 @@ export function BrowseCallableAgentsDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setOpenSlug(null);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setFilter(null);
+          setOpenSlug(null);
+        })
+      }
       title='Browse Agents'
       description='Search and select the agents this agent can hand a task to.'
       testId='browse-callable-agents-dialog'
