@@ -135,6 +135,7 @@ import dailyBriefRoutes from '@/routes/dailyBrief';
 import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import { tagRoutes, registerDeskEmailTags } from '@/tags';
+import entityRoutes from '@/routes/entities';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
@@ -690,6 +691,9 @@ export class App {
 
     // Generic tag routes (auth applied per-route within tagRoutes)
     this.app.use('/api/tags', tagRoutes);
+
+    // Entity registry reads for the Entities page (messages come from /api/vespaSearch)
+    this.app.use('/api/entities', entityRoutes);
 
     // Automations routes (auth required, no ACL — matches /api/calls)
     this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);

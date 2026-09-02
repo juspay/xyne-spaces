@@ -30,9 +30,10 @@ export function buildThreadDocument(
   const ticketId = messages.find((m) => m.id.startsWith('ticket:'))?.id.slice('ticket:'.length)
 
   const cleaned = messages
-    .map((m) => ({ id: m.id, text: cleanMessageText(m.text, cfg.minTextLength), ts: m.ts }))
-    .filter((m) => !m.text.drop)
-    .map((m) => ({ id: m.id, text: m.text.text, ts: m.ts }))
+    .map((m) => {
+      const clean = cleanMessageText(m.text, cfg.minTextLength)
+      return { id: m.id, text: clean.drop ? '' : clean.text, ts: m.ts }
+    })
     .sort((a, b) => a.ts - b.ts)
 
   if (cleaned.length === 0) return []
@@ -65,12 +66,14 @@ export function buildThreadDocument(
   }
 
   for (const m of cleaned) {
-    if (chars > 0 && chars + m.text.length > cfg.maxThreadChars) {
+    if (m.text && chars > 0 && chars + m.text.length > cfg.maxThreadChars) {
       flush()
     }
-    part.push(m.text)
+    if (m.text) {
+      part.push(m.text)
+      chars += m.text.length + 1
+    }
     partIds.push(m.id)
-    chars += m.text.length + 1
   }
   flush()
   return docs

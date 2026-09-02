@@ -205,6 +205,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       mentions,        // User ID(s) mentioned in the message (scoped mention search)
       channelMentions, // Channel ID(s) referenced in the message (scoped mention search)
+      entityId,        // Extracted-entity ID(s) the message was tagged with
       mentionHighlights, // Display name(s) of bare mention chips — highlighted in results, not in YQL
       // Unified filters (work for both slack and ticket)
       projectId,   // Project ID(s) - comma-separated
@@ -787,6 +788,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
     if (messageActs) {
       options.slack.messageActs = toFilterValues(messageActs, 'messageActs');
+    }
+    // Extracted-entity filter — the entity review screen sends this with
+    // filterOnly=true and an empty q to list every message carrying an entity.
+    // The builder narrows this to thread roots — one hit per thread. See YqlBuilder.
+    if (entityId) {
+      options.slack.entityIds = toFilterValues(entityId, 'entityId');
     }
     // Highlight-only: exact display names to bold in result snippets (kept out of the YQL filter).
     if (mentionHighlights) {

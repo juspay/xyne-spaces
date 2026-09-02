@@ -44,6 +44,7 @@ import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBa
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
 import { MemoryScreen } from './MemoryScreen';
+import { EntitiesScreen } from './EntitiesScreen';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
@@ -1510,6 +1511,10 @@ export const router = createBrowserRouter(
                       <MemoryScreen />
                     </ToolbarProtectedRoute>
                   ),
+                },
+                {
+                path: 'entities',
+                element: <EntitiesScreen />,
                 },
                 {
                   path: 'analytics',

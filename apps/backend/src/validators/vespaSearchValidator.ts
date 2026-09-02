@@ -112,6 +112,20 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'In must be a string or array of channel IDs'
     }),
 
+  // Extracted-entity filter: messages tagged with these entity IDs (Vespa `entityIds` field).
+  // Powers the entity review screen — pair with filterOnly=true and an empty q.
+  entityId: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'entityId must be a string or array of entity IDs'
+    }),
+
   // Mention filter (scoped search): messages that mention these user IDs (Vespa `mentions` field)
   mentions: Joi.alternatives()
     .try(

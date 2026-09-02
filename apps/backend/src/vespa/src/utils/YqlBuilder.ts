@@ -57,6 +57,9 @@ export interface SlackFilters {
   // messages that justified a tag. Different questions; both exact attribute filters.
   threadType?: string[];
   messageActs?: string[];
+  // Extracted-entity filter: messages the entity pipeline tagged with these entity ids.
+  // `entityIds` is a fast-search attribute, so this is set membership, not a scan.
+  entityIds?: string[];
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -816,6 +819,15 @@ export class YqlBuilder {
         .map((act) => `messageActs contains ${params.bind('messageActs', act.trim())}`)
         .join(' or ');
       conditions.push(`(${acts})`);
+    }
+
+    // Extracted-entity filter - messages the entity pipeline tagged with these entities
+    if (filters.entityIds && filters.entityIds.length > 0) {
+      const entities = filters.entityIds
+        .map((id) => `entityIds contains ${params.bind('entityId', id.trim())}`)
+        .join(' or ');
+      conditions.push(`(${entities})`);
+      conditions.push('isRootMessage = true');
     }
 
     if (filters.createdBefore) {
