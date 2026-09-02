@@ -6,15 +6,15 @@ import {
   SURFACE_MIN_WIDTHS,
   type ColumnSource,
   type Stream,
-} from '../utils/Streams.types';
-import { allowsDuplicates, sourceKey } from '../utils/Streams.utils';
+} from '../components/Streams/Streams.types';
+import { allowsDuplicates, sourceKey } from '../components/Streams/Streams.utils';
 import {
   createStream,
   liveStreams,
   loadLayout,
   makeColumn,
   saveLayout,
-} from '../utils/streamsLayout';
+} from '../components/StreamsLayout/StreamsLayout';
 
 /** A stream as the picker needs it: something to name and something to add to. */
 export interface StreamTarget {

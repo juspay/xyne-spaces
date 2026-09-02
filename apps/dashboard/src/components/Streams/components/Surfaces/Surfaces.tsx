@@ -1,5 +1,5 @@
 import { ReactElement, type ComponentType } from 'react';
-import { SparkleAi } from '../../icons/SparkleAi';
+import { SparkleAi } from '../../../icons/SparkleAi';
 import {
   ChatChatting,
   FileText,
@@ -8,22 +8,22 @@ import {
   PaperclipSlant,
   TicketToken,
 } from '@xyne/icons';
-import ConversationPanelV2 from '../../Chat/ConversationPannel/ConversationPanelV2';
-import { ThreadMessages } from '../../Chat/ThreadPannel';
-import XyneAISidebar from '../../Chat/XyneAISidebar/XyneAISidebar';
-import CanvasScreen from '../../Canvas/CanvasScreen/CanvasScreen';
-import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
-import FileColumn from './FileColumn';
-import type { StreamsActions } from './StreamsActions';
-import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
-import { useChannel } from '../../../hooks/useChannels';
-import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
-import { useAuthContextValues } from '../../../hooks/useAuth';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
-import type { StreamItem } from '../utils/streamsDnd';
-import { SURFACE_MIN_WIDTHS } from '../utils/Streams.types';
-import type { ColumnSeed, ColumnSource, SurfaceKind } from '../utils/Streams.types';
+import ConversationPanelV2 from '../../../Chat/ConversationPannel/ConversationPanelV2';
+import { ThreadMessages } from '../../../Chat/ThreadPannel';
+import XyneAISidebar from '../../../Chat/XyneAISidebar/XyneAISidebar';
+import CanvasScreen from '../../../Canvas/CanvasScreen/CanvasScreen';
+import { TicketDetails } from '../../../Tickets/TicketDetails/TicketDetails';
+import FileColumn from '../FileColumn/FileColumn';
+import type { StreamsActions } from '../StreamsActions/StreamsActions';
+import KanbanBoardScreen from '../../../../routes/KanbanBoardScreen';
+import { useChannel } from '../../../../hooks/useChannels';
+import { useChannelDisplayName } from '../../../../hooks/useChannelDisplayName';
+import { useAuthContextValues } from '../../../../hooks/useAuth';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { queries } from '../../../../zero/queries';
+import type { StreamItem } from '../StreamsDnd/StreamsDnd';
+import { SURFACE_MIN_WIDTHS } from '../Streams/Streams.types';
+import type { ColumnSeed, ColumnSource, SurfaceKind } from '../Streams/Streams.types';
 
 /**
  * The surface registry — the single extension point.

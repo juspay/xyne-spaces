@@ -1,5 +1,5 @@
 import { ReactElement, useRef, useState } from 'react';
-import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { Tooltip } from '../../../ui/Tooltip/Tooltip';
 // The app's own set, at the app's own `size={14}` — the same call every other
 // menu in the product makes. This shipped on lucide at `size-3.5`, which is
 // a different stroke weight and a different corner treatment at a nominally
@@ -22,13 +22,13 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from '../../ui/dropdown-menu';
-import { ActivityDot } from './ActivityDot';
-import { archivedStreams, liveStreams } from '../utils/streamsLayout';
-import { IDLE, type ColumnActivity } from '../hooks/useColumnActivity';
-import { cn } from '../../../utils/classNames';
-import type { StreamActivity } from '../hooks/useStreamActivity';
-import type { Stream, StreamsLayout } from '../utils/Streams.types';
+} from '../../../ui/dropdown-menu';
+import { ActivityDot } from '../ActivityDot/ActivityDot';
+import { archivedStreams, liveStreams } from '../StreamsLayout/StreamsLayout';
+import { IDLE, type ColumnActivity } from '../../hooks/useColumnActivity';
+import { cn } from '../../../../utils/classNames';
+import type { StreamActivity } from '../../hooks/useStreamActivity';
+import type { Stream, StreamsLayout } from '../Streams/Streams.types';
 
 export interface StreamSwitcherProps {
   layout: StreamsLayout;

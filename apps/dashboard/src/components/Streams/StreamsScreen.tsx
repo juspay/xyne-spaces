@@ -24,18 +24,18 @@ import { getDraft } from '../../hooks/useDraft';
 import { mutators } from '../../zero/mutators';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useScope, useShortcut } from '../../shortcuts';
-import StreamColumn from './components/StreamColumn';
-import AddColumnPalette from './components/AddColumnPalette';
-import StreamTopNav from './components/StreamTopNav';
-import StreamSwitcher from './components/StreamSwitcher';
+import StreamColumn from './components/StreamColumn/StreamColumn';
+import AddColumnPalette from './components/AddColumnPalette/AddColumnPalette';
+import StreamTopNav from './components/StreamTopNav/StreamTopNav';
+import StreamSwitcher from './components/StreamSwitcher/StreamSwitcher';
 import { useColumnDrag, type MarkerRect } from './hooks/useColumnDrag';
 import { useStreamActivity } from './hooks/useStreamActivity';
 import { useAttachmentColumns } from './hooks/useAttachmentColumns';
 import { IDLE, type ColumnActivity } from './hooks/useColumnActivity';
-import { DEV_DEFAULTS } from './components/StreamsDev';
-import { surfaceFor } from './components/surfaces';
+import { DEV_DEFAULTS } from './components/StreamsDev/StreamsDev';
+import { surfaceFor } from './components/Surfaces/Surfaces';
 import { toast } from 'sonner';
-import ColumnResizeHandle from './components/ColumnResizeHandle';
+import ColumnResizeHandle from './components/ColumnResizeHandle/ColumnResizeHandle';
 import {
   activeStream,
   archiveStream,
@@ -52,8 +52,8 @@ import {
   saveFocusMode,
   saveLayout,
   switchStream,
-} from './utils/streamsLayout';
-import FocusAddPage from './components/FocusAddPage';
+} from './components/StreamsLayout/StreamsLayout';
+import FocusAddPage from './components/FocusAddPage/FocusAddPage';
 import {
   acceptsAttachment,
   allowsDuplicates,
@@ -63,7 +63,7 @@ import {
   isAttachingSource,
   scrollBehavior,
   sourceKey,
-} from './utils/Streams.utils';
+} from './components/Streams/Streams.utils';
 import {
   ADD_COMMIT_AT,
   STREAM_ACTION,
@@ -81,10 +81,15 @@ import {
   RING_GUTTER,
   STRIP_LEAD,
   STRIP_PAD,
-} from './utils/Streams.types';
+} from './components/Streams/Streams.types';
 import { streamsActor } from '../../machines/streamsMachine';
-import { questionFor, type StreamItem } from './utils/streamsDnd';
-import type { Column, ColumnSeed, ColumnSource, StreamsLayout } from './utils/Streams.types';
+import { questionFor, type StreamItem } from './components/StreamsDnd/StreamsDnd';
+import type {
+  Column,
+  ColumnSeed,
+  ColumnSource,
+  StreamsLayout,
+} from './components/Streams/Streams.types';
 import { cn } from '../../utils/classNames';
 
 const SCOPE = 'streams';

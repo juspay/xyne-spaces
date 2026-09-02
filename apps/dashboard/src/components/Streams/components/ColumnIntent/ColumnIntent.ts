@@ -1,4 +1,4 @@
-import type { ColumnSource } from './Streams.types';
+import type { ColumnSource } from '../Streams/Streams.types';
 
 /**
  * Reading a column's navigation as "open this beside me".

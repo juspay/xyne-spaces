@@ -22,7 +22,7 @@ import {
   Video,
 } from 'lucide-react';
 import { Menu } from '@base-ui/react/menu';
-import { AddToStreamBaseUiMenuItem } from '../../Streams/components/AddToStreamMenu';
+import { AddToStreamBaseUiMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import {
   formatFileSize,
   getFileExtension,

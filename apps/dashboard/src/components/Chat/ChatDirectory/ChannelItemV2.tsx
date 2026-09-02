@@ -38,7 +38,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '../../ui/dropdown-menu';
-import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { stripHtml } from '../../xyne-desk/EmailComposer/helpers';
 import { cn } from '../../../utils/classNames';
 import { renderEmoji } from '../../../utils/customEmojiUtils';

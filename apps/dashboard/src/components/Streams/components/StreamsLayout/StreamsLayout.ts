@@ -1,6 +1,6 @@
-import { allowsDuplicates, sourceKey } from './Streams.utils';
-import { DEFAULT_WIDTH, LEGACY_VIEWPORT, MAX_WIDTH, MIN_WIDTH } from './Streams.types';
-import type { Column, ColumnSource, Stream, StreamsLayout } from './Streams.types';
+import { allowsDuplicates, sourceKey } from '../Streams/Streams.utils';
+import { DEFAULT_WIDTH, LEGACY_VIEWPORT, MAX_WIDTH, MIN_WIDTH } from '../Streams/Streams.types';
+import type { Column, ColumnSource, Stream, StreamsLayout } from '../Streams/Streams.types';
 
 export const clampWidth = (value: number): number =>
   Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value)));

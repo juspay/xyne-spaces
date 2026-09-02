@@ -128,7 +128,7 @@ import {
   type ResolvedBoardAdditionalField,
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
-import { AddToStreamButton } from '../../Streams/components/AddToStreamMenu';
+import { AddToStreamButton } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;

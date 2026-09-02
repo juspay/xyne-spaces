@@ -7,17 +7,17 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
-import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { Tooltip } from '../../../ui/Tooltip/Tooltip';
 import { ChevronLeft, ChevronRight, PlusDefault } from '@xyne/icons';
-import { Button } from '../../ui/Button/Button';
-import { surfaceFor } from './surfaces';
-import { ActivityDot } from './ActivityDot';
-import { type ColumnActivity, IDLE, isUnread } from '../hooks/useColumnActivity';
-import { cn } from '../../../utils/classNames';
-import { DEV_DEFAULTS } from './StreamsDev';
-import type { StreamActivity } from '../hooks/useStreamActivity';
-import { STREAM_ACTION, STREAM_ACTION_IDLE, STREAMS_EASE } from '../utils/Streams.types';
-import type { Column } from '../utils/Streams.types';
+import { Button } from '../../../ui/Button/Button';
+import { surfaceFor } from '../Surfaces/Surfaces';
+import { ActivityDot } from '../ActivityDot/ActivityDot';
+import { type ColumnActivity, IDLE, isUnread } from '../../hooks/useColumnActivity';
+import { cn } from '../../../../utils/classNames';
+import { DEV_DEFAULTS } from '../StreamsDev/StreamsDev';
+import type { StreamActivity } from '../../hooks/useStreamActivity';
+import { STREAM_ACTION, STREAM_ACTION_IDLE, STREAMS_EASE } from '../Streams/Streams.types';
+import type { Column } from '../Streams/Streams.types';
 
 /**
  * Five rows, one question.

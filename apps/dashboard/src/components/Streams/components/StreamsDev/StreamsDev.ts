@@ -1,7 +1,7 @@
 // Shipped as a separate entry point, and the panel is unusable without it — the
 // controls render as raw block elements at page width and shove the app down.
-import { DEFAULT_WIDTH } from '../utils/Streams.types';
-import type { StreamNavVariant } from './StreamTopNav';
+import { DEFAULT_WIDTH } from '../Streams/Streams.types';
+import type { StreamNavVariant } from '../StreamTopNav/StreamTopNav';
 
 /**
  * Streams' dev dials.

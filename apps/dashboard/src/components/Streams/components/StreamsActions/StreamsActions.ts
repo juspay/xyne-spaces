@@ -1,5 +1,5 @@
-import type { ColumnActivity } from '../hooks/useColumnActivity';
-import type { ColumnSource } from '../utils/Streams.types';
+import type { ColumnActivity } from '../../hooks/useColumnActivity';
+import type { ColumnSource } from '../Streams/Streams.types';
 
 export interface StreamsActions {
   /**

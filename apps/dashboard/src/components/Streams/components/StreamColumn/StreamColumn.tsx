@@ -10,26 +10,26 @@ import {
 // even though the rest of this header's controls come from lucide — matching the
 // *verb* across the two places it lives beats matching the icon family within one
 // row, because the two buttons do the identical thing to the identical state.
-import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import StreamRouterScope from './StreamRouterScope';
-import { ActivityDot } from './ActivityDot';
-import { columnIntentFor } from '../utils/columnIntent';
-import { isUnread } from '../hooks/useColumnActivity';
-import type { StreamsActions } from './StreamsActions';
-import { DEV_DEFAULTS } from './StreamsDev';
-import { surfaceFor } from './surfaces';
-import { hasDragItem, readDragItem, type StreamItem } from '../utils/streamsDnd';
-import { cn } from '../../../utils/classNames';
-import { prefersReducedMotion } from '../utils/Streams.utils';
-import type { ColumnActivity } from '../hooks/useColumnActivity';
+import { Tooltip } from '../../../ui/Tooltip/Tooltip';
+import StreamRouterScope from '../StreamRouterScope/StreamRouterScope';
+import { ActivityDot } from '../ActivityDot/ActivityDot';
+import { columnIntentFor } from '../ColumnIntent/ColumnIntent';
+import { isUnread } from '../../hooks/useColumnActivity';
+import type { StreamsActions } from '../StreamsActions/StreamsActions';
+import { DEV_DEFAULTS } from '../StreamsDev/StreamsDev';
+import { surfaceFor } from '../Surfaces/Surfaces';
+import { hasDragItem, readDragItem, type StreamItem } from '../StreamsDnd/StreamsDnd';
+import { cn } from '../../../../utils/classNames';
+import { prefersReducedMotion } from '../Streams/Streams.utils';
+import type { ColumnActivity } from '../../hooks/useColumnActivity';
 import {
   COLUMN_CLOSE_MS,
   COLUMN_OPEN_MS,
   FOCUS_EASE,
   FOCUS_PEEK,
   STREAMS_EASE,
-} from '../utils/Streams.types';
-import type { Column, ColumnSeed } from '../utils/Streams.types';
+} from '../Streams/Streams.types';
+import type { Column, ColumnSeed } from '../Streams/Streams.types';
 
 /**
  * The focus ring, as a box-shadow that changes *spread* rather than opacity.

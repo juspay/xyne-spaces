@@ -4,7 +4,7 @@ import {
   attachmentViewerActor,
   type AttachmentRef,
 } from '../../../machines/attachmentViewerMachine';
-import type { ColumnSource } from '../utils/Streams.types';
+import type { ColumnSource } from '../components/Streams/Streams.types';
 
 /**
  * Files, redirected from the app's viewer into a column.
