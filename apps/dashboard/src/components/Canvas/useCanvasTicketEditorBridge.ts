@@ -57,42 +57,16 @@ interface TiptapEditorLike {
     };
     doc: {
       textBetween: (from: number, to: number, blockSeparator?: string) => string;
-      descendants: (
-        callback: (
-          node: {
-            isText?: boolean;
-            text?: string | null;
-            nodeSize: number;
-            marks?: Array<{ type: { name: string }; attrs?: { stringValue?: string } }>;
-          },
-          position: number,
-        ) => void,
-      ) => void;
       nodesBetween: (
         from: number,
         to: number,
         callback: (node: { marks?: Array<{ type: { name: string } }> }) => void,
       ) => void;
     };
-    schema: { marks: { canvasTicket?: unknown } };
-    tr: {
-      removeMark: (from: number, to: number, markType: unknown) => TiptapEditorLike['state']['tr'];
-      setMeta: (key: string, value: unknown) => TiptapEditorLike['state']['tr'];
-    };
   };
-  view: { dispatch: (transaction: TiptapEditorLike['state']['tr']) => void };
   commands: {
     setTextSelection: (range: { from: number; to: number }) => boolean;
   };
-  on: (event: 'update', callback: TiptapUpdateHandler) => void;
-  off: (event: 'update', callback: TiptapUpdateHandler) => void;
-}
-
-type TiptapUpdateHandler = (event: { transaction: unknown }) => void;
-
-interface TicketMarkedTextSnapshot {
-  text: string;
-  ranges: Array<{ from: number; to: number }>;
 }
 
 const getTiptapEditor = (editor: CanvasEditorLike): TiptapEditorLike | null =>
@@ -130,62 +104,6 @@ const rangeHasLink = (editor: TiptapEditorLike, from: number, to: number): boole
   return hasLink;
 };
 
-const getTicketMarkedTextSnapshots = (
-  editor: TiptapEditorLike,
-): Map<string, TicketMarkedTextSnapshot> => {
-  const snapshots = new Map<string, TicketMarkedTextSnapshot>();
-
-  editor.state.doc.descendants((node, position) => {
-    if (!node.isText || !node.text) return;
-    const ticketMark = node.marks?.find(mark => mark.type.name === 'canvasTicket');
-    const ticketId = ticketMark?.attrs?.stringValue;
-    if (!ticketId) return;
-
-    const existing = snapshots.get(ticketId) ?? { text: '', ranges: [] };
-    existing.text += node.text;
-    const from = position;
-    const to = position + node.nodeSize;
-    const previousRange = existing.ranges.at(-1);
-    if (previousRange?.to === from) {
-      previousRange.to = to;
-    } else {
-      existing.ranges.push({ from, to });
-    }
-    snapshots.set(ticketId, existing);
-  });
-
-  return snapshots;
-};
-
-const removeChangedTicketStyles = (
-  editor: TiptapEditorLike,
-  previousSnapshots: Map<string, TicketMarkedTextSnapshot>,
-  currentSnapshots: Map<string, TicketMarkedTextSnapshot>,
-  sourceTransaction: unknown,
-): boolean => {
-  const ticketMarkType = editor.state.schema.marks.canvasTicket;
-  if (!ticketMarkType) return false;
-
-  const rangesToUnlink: Array<{ from: number; to: number }> = [];
-  for (const [ticketId, currentSnapshot] of currentSnapshots) {
-    const previousSnapshot = previousSnapshots.get(ticketId);
-    if (previousSnapshot && previousSnapshot.text !== currentSnapshot.text) {
-      rangesToUnlink.push(...currentSnapshot.ranges);
-    }
-  }
-  if (rangesToUnlink.length === 0) return false;
-
-  let transaction = editor.state.tr;
-  for (const range of rangesToUnlink) {
-    transaction = transaction.removeMark(range.from, range.to, ticketMarkType);
-  }
-  // Keep the automatic unlink in the same history event as the text edit that
-  // triggered it. One undo then restores both the edited text and its ticket mark.
-  transaction.setMeta('appendedTransaction', sourceTransaction);
-  editor.view.dispatch(transaction);
-  return true;
-};
-
 const getClosestCanvasBlock = (node: Node | null): HTMLElement | null => {
   const element = node instanceof Element ? node : node?.parentElement;
   return element?.closest<HTMLElement>('.bn-block-content[data-content-type]') ?? null;
@@ -217,30 +135,6 @@ export function useCanvasTicketEditorBridge({
   useEffect(() => {
     setActiveTicketAnchor(null);
   }, [channelId]);
-
-  useEffect(() => {
-    if (!ready) return;
-    const editor = getEditor();
-    const tiptapEditor = editor ? getTiptapEditor(editor) : null;
-    if (!editor || !tiptapEditor) return;
-
-    let previousSnapshots = getTicketMarkedTextSnapshots(tiptapEditor);
-    const handleUpdate: TiptapUpdateHandler = ({ transaction }) => {
-      const currentSnapshots = getTicketMarkedTextSnapshots(tiptapEditor);
-      const removedStyle = removeChangedTicketStyles(
-        tiptapEditor,
-        previousSnapshots,
-        currentSnapshots,
-        transaction,
-      );
-      previousSnapshots = removedStyle
-        ? getTicketMarkedTextSnapshots(tiptapEditor)
-        : currentSnapshots;
-    };
-    tiptapEditor.on('update', handleUpdate);
-
-    return (): void => tiptapEditor.off('update', handleUpdate);
-  }, [getEditor, ready]);
 
   useEffect(() => {
     const container = containerRef.current;

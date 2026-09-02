@@ -70,13 +70,13 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
       data-canvas-ticket-access={accessState}
       className='canvas-ticket-anchor'
       role={isInteractive ? 'link' : undefined}
-      tabIndex={isInteractive ? 0 : -1}
+      tabIndex={0}
       aria-disabled={!isInteractive || undefined}
       aria-label={
-        isUnavailable
-          ? 'Ticket unavailable or you do not have access'
-          : ticket
-            ? `Open ${ticket.xyneId}: ${ticket.title}`
+        ticket
+          ? `Open ${ticket.xyneId}: ${ticket.title}`
+          : isUnavailable
+            ? 'Ticket unavailable or you do not have access'
             : 'Ticket details are loading'
       }
     >
@@ -87,7 +87,7 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
       )}
       <span ref={setContentElement} className='canvas-ticket-anchor__source' aria-hidden='true' />
       <span className='canvas-ticket-anchor__text' contentEditable={false}>
-        {ticket?.title || 'Ticket'}
+        {ticket?.title || (isUnavailable ? 'Ticket unavailable or no access' : 'Loading ticket…')}
       </span>
       {ticket && (
         <span className='canvas-ticket-anchor__status' contentEditable={false}>
@@ -113,15 +113,8 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
           )}
         </span>
       )}
-      {isUnavailable && (
-        <span className='canvas-ticket-anchor__unavailable' contentEditable={false}>
-          Ticket unavailable or no access
-        </span>
-      )}
     </span>
   );
-
-  if (!ticket) return trigger;
 
   return (
     <HoverCard
@@ -135,61 +128,71 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
       collisionPadding={12}
       className='w-80 rounded-xl p-3'
     >
-      <div className='flex min-w-0 flex-col gap-3' data-canvas-ticket-preview={ticketId}>
-        <div className='flex min-w-0 items-center gap-2 text-xs'>
-          <span className='font-medium text-primary'>{ticket.xyneId}</span>
-          <span className='max-w-32 truncate rounded-full bg-muted px-2 py-0.5 text-muted-foreground'>
-            {statusLabel}
-          </span>
-        </div>
+      {ticket ? (
+        <div className='flex min-w-0 flex-col gap-3' data-canvas-ticket-preview={ticketId}>
+          <div className='flex min-w-0 items-center gap-2 text-xs'>
+            <span className='font-medium text-primary'>{ticket.xyneId}</span>
+            <span className='max-w-32 truncate rounded-full bg-muted px-2 py-0.5 text-muted-foreground'>
+              {statusLabel}
+            </span>
+          </div>
 
-        <div className='min-w-0 space-y-1.5'>
-          <p className='m-0 whitespace-normal text-sm font-semibold leading-5 text-foreground'>
-            {ticket.title}
-          </p>
-          {ticketDescription && (
-            <p className='m-0 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-muted-foreground'>
-              {ticketDescription}
+          <div className='min-w-0 space-y-1.5'>
+            <p className='m-0 whitespace-normal text-sm font-semibold leading-5 text-foreground'>
+              {ticket.title}
+            </p>
+            {ticketDescription && (
+              <p className='m-0 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-muted-foreground'>
+                {ticketDescription}
+              </p>
+            )}
+          </div>
+
+          <div className='flex min-w-0 items-center gap-4 text-xs text-muted-foreground'>
+            <span className='flex min-w-0 items-center gap-1.5'>
+              {ticket.assignedTo ? (
+                <Avatar
+                  userId={ticket.assignedTo}
+                  size='xs'
+                  rounded={true}
+                  showActiveStatus={false}
+                  className='canvas-ticket-avatar'
+                />
+              ) : (
+                <CircleHelp className='size-4' aria-hidden='true' />
+              )}
+              <span className='max-w-24 truncate'>{assigneeLabel}</span>
+            </span>
+
+            <span className='flex min-w-0 items-center gap-1.5'>
+              <Flag className='size-3.5' aria-hidden='true' />
+              <span className='max-w-24 truncate'>{priorityLabel}</span>
+            </span>
+
+            <button
+              type='button'
+              className='ml-auto shrink-0 rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent'
+              data-track-category='CANVAS'
+              data-track-name='OPEN_CANVAS_TICKET_PREVIEW'
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                anchorRef.current?.click();
+              }}
+            >
+              Open
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className='flex min-w-0 flex-col gap-2' data-canvas-ticket-preview={ticketId}>
+          {sourceText && (
+            <p className='m-0 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-5 text-foreground'>
+              {sourceText}
             </p>
           )}
         </div>
-
-        <div className='flex min-w-0 items-center gap-4 text-xs text-muted-foreground'>
-          <span className='flex min-w-0 items-center gap-1.5'>
-            {ticket.assignedTo ? (
-              <Avatar
-                userId={ticket.assignedTo}
-                size='xs'
-                rounded={true}
-                showActiveStatus={false}
-                className='canvas-ticket-avatar'
-              />
-            ) : (
-              <CircleHelp className='size-4' aria-hidden='true' />
-            )}
-            <span className='max-w-24 truncate'>{assigneeLabel}</span>
-          </span>
-
-          <span className='flex min-w-0 items-center gap-1.5'>
-            <Flag className='size-3.5' aria-hidden='true' />
-            <span className='max-w-24 truncate'>{priorityLabel}</span>
-          </span>
-
-          <button
-            type='button'
-            className='ml-auto shrink-0 rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent'
-            data-track-category='CANVAS'
-            data-track-name='OPEN_CANVAS_TICKET_PREVIEW'
-            onClick={event => {
-              event.preventDefault();
-              event.stopPropagation();
-              anchorRef.current?.click();
-            }}
-          >
-            Open
-          </button>
-        </div>
-      </div>
+      )}
     </HoverCard>
   );
 }

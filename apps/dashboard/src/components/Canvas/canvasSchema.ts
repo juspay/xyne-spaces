@@ -25,6 +25,7 @@ import { canvasLinkShortcutsExtension } from './canvasLinkShortcuts';
 import { canvasPastedLinkExtension } from './canvasPastedLink';
 import { canvasSourceBlockShortcutsExtension } from './canvasSourceBlockShortcuts';
 import { canvasTableShortcutsExtension } from './canvasTableShortcuts';
+import { canvasTicketUnlinkExtension } from './canvasTicketUnlink';
 
 // Default blocks + whiteboard, then extended with mention and citation inline content.
 // Shared by the canvas editors and the read-only previews: a preview built on a
@@ -288,6 +289,7 @@ const handleCanvasTableKeyDown = (view: EditorView, event: KeyboardEvent): boole
 
 export const canvasTiptapOptions = {
   extensions: [
+    canvasTicketUnlinkExtension,
     canvasTablePendingExitRowExtension,
     canvasPastedLinkExtension,
     canvasLinkShortcutsExtension,
