@@ -1,6 +1,8 @@
 import { useState, type ReactElement } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
+import { CheckTickCircle, MultipleCrossCancelCircle } from '@xyne/icons';
+import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
@@ -50,7 +52,9 @@ function GrantRow({
           {reason}
         </p>
       )}
-      {actions && <div className='flex items-center justify-end gap-2'>{actions}</div>}
+      {actions && (
+        <div className='-my-1 flex shrink-0 items-center justify-end gap-1'>{actions}</div>
+      )}
     </div>
   );
 }
@@ -145,26 +149,37 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
                 badge={<DelegationStatusBadge status={grant.status} />}
                 actions={
                   <>
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      disabled={busyId !== null}
-                      onClick={() => void decide(grant, false)}
-                      data-track-category='Claw Agents'
-                      data-track-name='DeclineDelegation'
-                    >
-                      Decline
-                    </Button>
-                    <Button
-                      size='sm'
-                      loading={busyId === grant.id}
-                      disabled={busyId !== null}
-                      onClick={() => void decide(grant, true)}
-                      data-track-category='Claw Agents'
-                      data-track-name='ApproveDelegation'
-                    >
-                      Approve
-                    </Button>
+                    <Tooltip content='Approve request' side='top'>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        aria-label='Approve request'
+                        disabled={busyId !== null}
+                        onClick={() => void decide(grant, true)}
+                        className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
+                        data-track-category='Claw Agents'
+                        data-track-name='ApproveDelegation'
+                      >
+                        <CheckTickCircle className='size-4' />
+                      </Button>
+                    </Tooltip>
+
+                    <Tooltip content='Decline request' side='top'>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        aria-label='Decline request'
+                        disabled={busyId !== null}
+                        onClick={() => void decide(grant, false)}
+                        className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
+                        data-track-category='Claw Agents'
+                        data-track-name='DeclineDelegation'
+                      >
+                        <MultipleCrossCancelCircle className='size-4' />
+                      </Button>
+                    </Tooltip>
                   </>
                 }
               />
@@ -194,17 +209,21 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
                 }
                 badge={<DelegationStatusBadge status={grant.status} />}
                 actions={
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    loading={busyId === grant.id}
-                    disabled={busyId !== null}
-                    onClick={() => void revoke(grant)}
-                    data-track-category='Claw Agents'
-                    data-track-name='RevokeDelegation'
-                  >
-                    Revoke
-                  </Button>
+                  <Tooltip content='Revoke access' side='top'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      aria-label='Revoke access'
+                      disabled={busyId !== null}
+                      onClick={() => void revoke(grant)}
+                      className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
+                      data-track-category='Claw Agents'
+                      data-track-name='RevokeDelegation'
+                    >
+                      <MultipleCrossCancelCircle className='size-4' />
+                    </Button>
+                  </Tooltip>
                 }
               />
             ))
