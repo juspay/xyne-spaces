@@ -2253,6 +2253,19 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         previousValue.isThreadReply,
         currentMessage.content,
       );
+
+      // An edit can ADD an @agent / @bot mention the original message never had.
+      // Re-run the mention triggers for ONLY the newly-added mentions, so editing
+      // an already-tagged message (e.g. fixing a typo) never re-runs an agent that
+      // was already notified on insert. previousValue.content is the pre-edit
+      // snapshot captured by the side-effect collector.
+      if (typeof previousValue.content === 'string') {
+        await this.handleEditedMessageMentions(
+          previousValue.messageId,
+          previousValue.content,
+          currentMessage.content,
+        );
+      }
     }
   }
 
@@ -2389,6 +2402,189 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   }
 
   /**
+   * Re-fire mention triggers when a message is EDITED to add mentions it did not
+   * have before. Computes the delta (new mentions minus old mentions) for both
+   * installed apps (APP_MENTION) and built-in chat bots, and fires ONLY the
+   * additions. This closes the gap where onInsert is the sole place agents are
+   * triggered, so adding an @agent via edit previously did nothing.
+   *
+   * Scope: regular (non-DM) channels only, mirroring handleBotMentions. DM /
+   * GROUP_DM mention delivery is owned by other paths and is intentionally not
+   * re-triggered on edit here.
+   */
+  private async handleEditedMessageMentions(
+    messageId: string,
+    oldContent: string,
+    newContent: string,
+  ): Promise<void> {
+    try {
+      if (oldContent === newContent) return;
+
+      const message = await db.message.findUnique({
+        where: { messageId },
+        select: {
+          messageId: true,
+          senderId: true,
+          content: true,
+          conversationId: true,
+          msgType: true,
+          hasAttachment: true,
+          createdAt: true,
+          isDeleted: true,
+        },
+      });
+      if (!message || message.isDeleted || message.msgType !== MessageType.USER) return;
+
+      const conversation = await db.conversation.findUnique({
+        where: { conversationId: message.conversationId },
+        select: { channelId: true, initialMessageId: true },
+      });
+      if (!conversation?.channelId) return;
+
+      const { senderId, conversationId } = message;
+      const { channelId } = conversation;
+
+      const [channel, sender, channelParticipantsRaw] = await Promise.all([
+        db.channel.findUnique({
+          where: { id: channelId },
+          select: { name: true, scopeType: true, projectId: true },
+        }),
+        db.user.findUnique({
+          where: { id: senderId },
+          select: { name: true, displayName: true, userType: true },
+        }),
+        db.channelParticipant.findMany({
+          where: { channelId },
+          select: { userId: true },
+        }),
+      ]);
+
+      // Edit re-trigger only applies to regular channels; DM/GROUP_DM are handled elsewhere.
+      if (
+        !channel ||
+        channel.scopeType === ChannelScopeType.DM ||
+        channel.scopeType === ChannelScopeType.GROUP_DM
+      ) {
+        return;
+      }
+      // A bot/app editing its own message must never re-trigger anything (loop guard).
+      if (sender?.userType === UserType.BOT || sender?.userType === UserType.APP) return;
+
+      const participantUserIds = channelParticipantsRaw.map(p => p.userId);
+      const users = await db.user.findMany({
+        where: { id: { in: participantUserIds } },
+        select: { id: true, email: true, name: true, displayName: true, userType: true },
+      });
+      const appUserIds = new Set(users.filter(u => u.userType === UserType.APP).map(u => u.id));
+      const userMap = new Map(users.map(u => [u.id, u]));
+      const channelParticipants = channelParticipantsRaw.map(p => ({
+        userId: p.userId,
+        user: {
+          email: userMap.get(p.userId)?.email || '',
+          name: userMap.get(p.userId)?.displayName || userMap.get(p.userId)?.name || '',
+        },
+      }));
+
+      // ACL: sender must still be a channel participant (mirror handleBotMentions).
+      if (!channelParticipants.some(p => p.userId === senderId)) return;
+
+      const workspaceId = await channelRepository.getWorkspaceId(channelId);
+      const channelParticipantIds = new Set(participantUserIds);
+
+      // Resolve the set of APP users directly @mentioned in a given content string.
+      const mentionedAppUserIdsIn = async (content: string): Promise<Set<string>> => {
+        const flowRawText = getFlowJsonRawTextForMentions(content);
+        const mentioned = await extractAllUsersForNotification(
+          flowRawText ?? content,
+          workspaceId,
+          undefined,
+          false,
+        );
+        return new Set(
+          mentioned
+            .filter(u => u.mentionSource === 'direct' || u.mentionSource === 'group')
+            .filter(u => channelParticipantIds.has(u.userId) && u.userId !== senderId && appUserIds.has(u.userId))
+            .map(u => u.userId),
+        );
+      };
+
+      const [oldApps, newApps] = await Promise.all([
+        mentionedAppUserIdsIn(oldContent),
+        mentionedAppUserIdsIn(newContent),
+      ]);
+      const addedAppUserIds = [...newApps].filter(id => !oldApps.has(id));
+
+      const oldBotUserIds = new Set((await extractBotMentions(oldContent)).map(b => b.botUserId));
+      const addedBotUserIds = new Set(
+        (await extractBotMentions(newContent))
+          .filter(b => !oldBotUserIds.has(b.botUserId))
+          .map(b => b.botUserId),
+      );
+
+      if (addedAppUserIds.length === 0 && addedBotUserIds.size === 0) return;
+
+      logger.info('[SIDE-EFFECT] Edited message added new mentions — re-triggering', {
+        messageId,
+        addedAppUserIds,
+        addedBotUserIds: [...addedBotUserIds],
+      });
+
+      // Fire APP_MENTION for newly-added installed-app mentions.
+      if (addedAppUserIds.length > 0) {
+        const channelProject = channel.projectId
+          ? await db.project.findUnique({ where: { id: channel.projectId }, select: { name: true } })
+          : null;
+        const attachments = message.hasAttachment
+          ? await messageAttachmentRepository.findByMessageId(messageId)
+          : [];
+        const cleanContent = getNotificationPreviewContent(message.content, message.msgType, message.hasAttachment);
+
+        void this.handlleMessageAppEvents(AppEventType.APP_MENTION, {
+          conversationId,
+          messageId,
+          content: message.content,
+          cleanContent,
+          createdAt: message.createdAt,
+          userId: senderId,
+          senderName: sender?.displayName || sender?.name || 'Someone',
+          channelId,
+          channelName: channel.name ?? channelId,
+          ...(channel.projectId ? { projectId: channel.projectId } : {}),
+          ...(channelProject?.name ? { projectName: channelProject.name } : {}),
+          ...(attachments.length > 0 && {
+            attachments: attachments.map(att => ({
+              attachmentId: att.id,
+              fileName: att.originalFilename,
+              fileSize: att.size,
+              mimeType: att.mimetype,
+              fileUrl: att.url,
+            })),
+          }),
+        }, addedAppUserIds);
+      }
+
+      // Fire built-in chat bots for newly-added @bot mentions only.
+      if (addedBotUserIds.size > 0) {
+        await this.handleBotMentions(
+          { messageId, senderId, content: message.content, conversationId },
+          { channelId, initialMessageId: conversation.initialMessageId },
+          { id: channelId, name: channel.name, scopeType: channel.scopeType },
+          sender
+            ? { name: sender.displayName || sender.name || 'Someone', userType: sender.userType }
+            : null,
+          channelParticipants,
+          { restrictToBotUserIds: addedBotUserIds },
+        );
+      }
+    } catch (error) {
+      logger.error('[SIDE-EFFECT] Failed to handle edited message mentions', {
+        messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Handle bot mentions - trigger bot execution when @mentioned in channels/threads
    */
   private async handleBotMentions(
@@ -2396,7 +2592,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     conversation: { channelId: string; initialMessageId: string | null },
     channel: { id?: string; name: string | null; scopeType: string | null } | null,
     sender: { name: string; userType?: string } | null,
-    channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>
+    channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>,
+    // When set, only fire for bots whose userId is in this set (edit re-trigger delta).
+    options?: { restrictToBotUserIds?: Set<string> }
   ): Promise<void> {
     try {
       // ACL CHECK: Verify sender is a channel participant before proceeding
@@ -2435,7 +2633,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       // (with no explicit @mention), auto-route to that same bot. This allows natural
       // back-and-forth conversation without requiring explicit @mentions on every reply.
       let threadBotInfo: { botUserId: string; botId: string; botDefinition: BotDefinition } | null = null;
-      if (isThreadReply && botMentions.length === 0 && conversation.initialMessageId) {
+      if (isThreadReply && botMentions.length === 0 && conversation.initialMessageId && !options?.restrictToBotUserIds) {
         // Get initial message with sender details
         const initialMessage = await db.message.findUnique({
           where: { messageId: conversation.initialMessageId },
@@ -2474,9 +2672,15 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }
 
       // Process explicit mentions or thread bot
-      const botsToProcess = botMentions.length > 0
+      const allBotsToProcess = botMentions.length > 0
         ? botMentions
         : (threadBotInfo ? [threadBotInfo] : []);
+
+      // On an edit re-trigger, restrict to the bots the edit newly added so an
+      // already-mentioned bot is never re-run when an edit changes other text.
+      const botsToProcess = options?.restrictToBotUserIds
+        ? allBotsToProcess.filter(b => options.restrictToBotUserIds!.has(b.botUserId))
+        : allBotsToProcess;
 
       // Process each bot (explicit mentions or thread bot)
       for (const { botUserId, botId, botDefinition } of botsToProcess) {
