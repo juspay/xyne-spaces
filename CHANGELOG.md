@@ -1,3 +1,15 @@
+## [1.256.0](https://github.com/juspay/xyne-spaces/compare/v1.255.0...v1.256.0) (2026-09-02)
+
+
+### Features
+
+* summary generation alerting ([#1361](https://github.com/juspay/xyne-spaces/issues/1361)) ([4ab5d20](https://github.com/juspay/xyne-spaces/commit/4ab5d2097521eb2364731165b639ee1273d8de44))
+
+
+### Bug Fixes
+
+* activity for summary + label fix ([#1363](https://github.com/juspay/xyne-spaces/issues/1363)) ([cc1f12c](https://github.com/juspay/xyne-spaces/commit/cc1f12c9d7a0ed6d7031a919cda4991880d64e01))
+
 ## [1.255.0](https://github.com/juspay/xyne-spaces/compare/v1.254.0...v1.255.0) (2026-09-01)
 
 
