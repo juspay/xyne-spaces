@@ -82,7 +82,11 @@ interface TiptapEditorLike {
   commands: {
     setTextSelection: (range: { from: number; to: number }) => boolean;
   };
+  on: (event: 'update', callback: TiptapUpdateHandler) => void;
+  off: (event: 'update', callback: TiptapUpdateHandler) => void;
 }
+
+type TiptapUpdateHandler = (event: { transaction: unknown }) => void;
 
 interface TicketMarkedTextSnapshot {
   text: string;
@@ -112,6 +116,16 @@ const rangeHasCodeStyle = (editor: TiptapEditorLike, from: number, to: number): 
     }
   });
   return hasCodeStyle;
+};
+
+const rangeHasLink = (editor: TiptapEditorLike, from: number, to: number): boolean => {
+  let hasLink = false;
+  editor.state.doc.nodesBetween(from, to, node => {
+    if (node.marks?.some(mark => mark.type.name === 'link')) {
+      hasLink = true;
+    }
+  });
+  return hasLink;
 };
 
 const getTicketMarkedTextSnapshots = (
@@ -145,6 +159,7 @@ const removeChangedTicketStyles = (
   editor: TiptapEditorLike,
   previousSnapshots: Map<string, TicketMarkedTextSnapshot>,
   currentSnapshots: Map<string, TicketMarkedTextSnapshot>,
+  sourceTransaction: unknown,
 ): boolean => {
   const ticketMarkType = editor.state.schema.marks.canvasTicket;
   if (!ticketMarkType) return false;
@@ -162,7 +177,9 @@ const removeChangedTicketStyles = (
   for (const range of rangesToUnlink) {
     transaction = transaction.removeMark(range.from, range.to, ticketMarkType);
   }
-  transaction.setMeta('addToHistory', false);
+  // Keep the automatic unlink in the same history event as the text edit that
+  // triggered it. One undo then restores both the edited text and its ticket mark.
+  transaction.setMeta('appendedTransaction', sourceTransaction);
   editor.view.dispatch(transaction);
   return true;
 };
@@ -206,19 +223,21 @@ export function useCanvasTicketEditorBridge({
     if (!editor || !tiptapEditor) return;
 
     let previousSnapshots = getTicketMarkedTextSnapshots(tiptapEditor);
-    const unsubscribe = editor.onChange(() => {
+    const handleUpdate: TiptapUpdateHandler = ({ transaction }) => {
       const currentSnapshots = getTicketMarkedTextSnapshots(tiptapEditor);
       const removedStyle = removeChangedTicketStyles(
         tiptapEditor,
         previousSnapshots,
         currentSnapshots,
+        transaction,
       );
       previousSnapshots = removedStyle
         ? getTicketMarkedTextSnapshots(tiptapEditor)
         : currentSnapshots;
-    });
+    };
+    tiptapEditor.on('update', handleUpdate);
 
-    return unsubscribe;
+    return (): void => tiptapEditor.off('update', handleUpdate);
   }, [getEditor, ready]);
 
   useEffect(() => {
@@ -313,6 +332,10 @@ export function useCanvasTicketEditorBridge({
       }
 
       const { from, to } = tiptapEditor.state.selection;
+      if (rangeHasLink(tiptapEditor, from, to)) {
+        toast.error('Tickets cannot be created from linked text');
+        return;
+      }
       if (rangeHasCodeStyle(tiptapEditor, from, to)) {
         toast.error('Tickets cannot be created from code-formatted text');
         return;
