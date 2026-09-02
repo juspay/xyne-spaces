@@ -1,10 +1,6 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { db, readReplicaDb } from '@/database/client';
-import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
-import { OPEN_STATUSES } from '@/utils/etaNotificationUtils';
-import { Prisma } from '@prisma/client';
-import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import {
