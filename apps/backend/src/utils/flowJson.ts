@@ -79,3 +79,15 @@ export function getFlowJsonRawTextForMentions(content: string): string | null {
   if (!content.includes('data-flow-json')) return null;
   return extractTextFromFlowJson(content) || null;
 }
+
+/**
+ * Message content rendered as readable plaintext: a FlowJSON payload is decoded
+ * to its underlying text, and a plain message is returned unchanged. Null/empty
+ * in → null out.
+ */
+export function toReadableMessageContent(
+  content: string | null | undefined,
+): string | null {
+  if (!content) return null;
+  return getFlowJsonContentForNotification(content) ?? content;
+}

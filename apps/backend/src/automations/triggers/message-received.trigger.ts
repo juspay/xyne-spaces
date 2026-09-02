@@ -7,7 +7,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
-import { getFlowJsonContentForNotification } from '@/utils/flowJson';
+import { toReadableMessageContent } from '@/utils/flowJson';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
 
 export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
@@ -295,10 +295,7 @@ async function hydrateMessageReceivedPayload(
     ...payload,
     message: {
       id: messageId,
-      // Decode FlowJSON alerts to plaintext; returns null for normal messages.
-      content: messageRow?.content
-        ? getFlowJsonContentForNotification(messageRow.content) ?? messageRow.content
-        : null,
+      content: toReadableMessageContent(messageRow?.content),
       conversationId,
       channelId,
       createdAt: messageRow?.createdAt ?? new Date(),
