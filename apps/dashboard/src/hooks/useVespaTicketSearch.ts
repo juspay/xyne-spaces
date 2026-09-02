@@ -14,12 +14,17 @@ interface UseVespaTicketSearchParams {
   boardId?: string;
   status?: string;
   stage?: string;
+  priority?: string;
+  assignee?: string;
+  tags?: string;
+  createdBy?: string;
   dynamicFieldValues?: string[];
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   enabled?: boolean;
   limit?: number;
   fetchAllDynamicFieldMatches?: boolean;
   maxFetchedResults?: number;
+  searchKey?: string;
 }
 
 interface UseVespaTicketSearchResult {
@@ -46,6 +51,10 @@ const getFilterOnlyDynamicFieldCacheKey = (filters: VespaSearchFilters): string 
     board: filters.board ?? null,
     status: filters.status ?? null,
     stage: filters.stage ?? null,
+    priority: filters.priority ?? null,
+    assignee: filters.assignee ?? null,
+    tags: filters.tags ?? null,
+    from: filters.from ?? null,
     dynamicFieldValues: filters.dynamicFieldValues ?? null,
     dynamicFieldDateRanges: filters.dynamicFieldDateRanges
       ? Object.entries(filters.dynamicFieldDateRanges).sort(([left], [right]) =>
@@ -172,12 +181,17 @@ export const useVespaTicketSearch = ({
   boardId,
   status,
   stage,
+  priority,
+  assignee,
+  tags,
+  createdBy,
   dynamicFieldValues = EMPTY_DYNAMIC_FIELD_VALUES,
   dynamicFieldDateRanges = {},
   enabled = true,
   limit = MAX_VESPA_TICKET_SEARCH_LIMIT,
   fetchAllDynamicFieldMatches = false,
   maxFetchedResults = 400,
+  searchKey,
 }: UseVespaTicketSearchParams): UseVespaTicketSearchResult => {
   const [searchResults, setSearchResults] = useState<Ticket[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -236,13 +250,23 @@ export const useVespaTicketSearch = ({
       if (boardId) vespaFilters.board = boardId;
       if (status) vespaFilters.status = status;
       if (stage) vespaFilters.stage = stage;
+      if (priority) vespaFilters.priority = priority;
+      if (assignee) vespaFilters.assignee = assignee;
+      if (tags) vespaFilters.tags = tags;
+      if (createdBy) vespaFilters.from = createdBy;
       if (normalizedDynamicFieldValues.length > 0) {
         vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
-        vespaFilters.filterOnly = isFilterOnlyDynamicSearch;
+        // Only set filterOnly when true - when false, omit it so backend uses default behavior
+        // This ensures dynamic field values are always used as filters, even with search terms
+        if (isFilterOnlyDynamicSearch) {
+          vespaFilters.filterOnly = true;
+        }
       }
       if (Object.keys(normalizedDynamicFieldDateRanges).length > 0) {
         vespaFilters.dynamicFieldDateRanges = normalizedDynamicFieldDateRanges;
-        vespaFilters.filterOnly = isFilterOnlyDynamicSearch;
+        if (isFilterOnlyDynamicSearch) {
+          vespaFilters.filterOnly = true;
+        }
       }
 
       try {
@@ -277,6 +301,10 @@ export const useVespaTicketSearch = ({
       boardId,
       status,
       stage,
+      priority,
+      assignee,
+      tags,
+      createdBy,
       normalizedDynamicFieldValues,
       normalizedDynamicFieldDateRanges,
       safeLimit,
@@ -319,6 +347,7 @@ export const useVespaTicketSearch = ({
     normalizedDynamicFieldDateRanges,
     enabled,
     performSearch,
+    searchKey,
   ]);
 
   useEffect(() => {
