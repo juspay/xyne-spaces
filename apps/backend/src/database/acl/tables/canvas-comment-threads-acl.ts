@@ -1,12 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 
-/**
- * Canvas comment threads carry NO workspaceId column of their own — the tenant
- * boundary lives on the canvas they hang off. Scoping therefore has to traverse
- * the relation; a bare {} here would read as unrestricted and skip filtering
- * entirely.
- */
 export class CanvasCommentThreadsACL extends BaseQueryACL<
   Prisma.CanvasCommentThreadWhereInput,
   Prisma.CanvasCommentThreadUncheckedCreateInput
@@ -16,14 +10,16 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasCommentThreadWhereInput> {
-    return { canvas: { workspaceId: this.ctx.workspaceId } }
+    return { workspaceId: this.ctx.workspaceId }
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasCommentThreadWhereInput> {
-    return { canvas: { workspaceId: this.ctx.workspaceId } }
+    return { workspaceId: this.ctx.workspaceId }
   }
 
   async canCreate(data: Prisma.CanvasCommentThreadUncheckedCreateInput): Promise<boolean> {
+    if (data.workspaceId !== this.ctx.workspaceId) return false
+
     const canvas = await this.prisma.canvas.findFirst({
       where: { id: data.canvasId, workspaceId: this.ctx.workspaceId },
       select: { id: true },

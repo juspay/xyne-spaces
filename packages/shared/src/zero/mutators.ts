@@ -439,8 +439,11 @@ async function assertCanvasCommentEditAccess(
   tx: Transaction<Schema>,
   canvasId: string,
   userId: string,
+  workspaceId: string,
 ): Promise<{ id: string; createdBy: string }> {
-  const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+  const canvas = await tx.run(
+    zql.canvases.where('id', canvasId).where('workspaceId', workspaceId).one(),
+  );
   if (!canvas) {
     throw new Error('Canvas not found');
   }
@@ -457,12 +460,13 @@ async function assertCanvasThreadManageAccess(
   tx: Transaction<Schema>,
   thread: { canvasId: string; createdBy: string },
   userId: string,
+  workspaceId: string,
 ): Promise<void> {
   if (thread.createdBy === userId) {
     return;
   }
 
-  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId);
+  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId, workspaceId);
 }
 
 async function deleteConversationWithParticipants(
@@ -6500,10 +6504,11 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
-        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID);
+        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID, ctx.workspaceId);
 
         await tx.mutate.canvas_comment_threads.insert({
           id: threadId,
+          workspaceId: ctx.workspaceId,
           canvasId,
           blockId,
           anchorText: anchorText || null,
@@ -6518,6 +6523,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: ctx.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6540,15 +6546,21 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, threadId, canvasId, body, mentionedUserIds, timestamp } }) => {
-        const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+        const thread = await tx.run(
+          zql.canvas_comment_threads
+            .where('id', threadId)
+            .where('workspaceId', ctx.workspaceId)
+            .one(),
+        );
         if (!thread || thread.canvasId !== canvasId) {
           throw new Error('Comment thread not found');
         }
 
-        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID);
+        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID, ctx.workspaceId);
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
+          workspaceId: thread.workspaceId,
           threadId,
           canvasId,
           body,
@@ -6586,7 +6598,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).where('workspaceId', ctx.workspaceId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }
@@ -6611,7 +6625,9 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, timestamp } }) => {
-        const comment = await tx.run(zql.canvas_comments.where('id', commentId).one());
+        const comment = await tx.run(
+          zql.canvas_comments.where('id', commentId).where('workspaceId', ctx.workspaceId).one(),
+        );
         if (!comment) {
           throw new Error('Comment not found');
         }
@@ -6629,7 +6645,12 @@ export const mutators = defineMutators({
           deletedAt: timestamp,
         });
 
-        const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+        const thread = await tx.run(
+          zql.canvas_comment_threads
+            .where('id', comment.threadId)
+            .where('workspaceId', ctx.workspaceId)
+            .one(),
+        );
         if (thread) {
           const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
           await tx.mutate.canvas_comment_threads.update({
@@ -6646,12 +6667,17 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { threadId, status, timestamp } }) => {
-        const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+        const thread = await tx.run(
+          zql.canvas_comment_threads
+            .where('id', threadId)
+            .where('workspaceId', ctx.workspaceId)
+            .one(),
+        );
         if (!thread) {
           throw new Error('Comment thread not found');
         }
 
-        await assertCanvasThreadManageAccess(tx, thread, ctx.userID);
+        await assertCanvasThreadManageAccess(tx, thread, ctx.userID, ctx.workspaceId);
 
         await tx.mutate.canvas_comment_threads.update({
           id: threadId,

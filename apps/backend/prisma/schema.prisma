@@ -3053,6 +3053,7 @@ model CanvasVersion {
 
 model CanvasCommentThread {
   id              String                    @id @default(cuid())
+  workspaceId     String                    // denormalized tenant key (stamped on insert)
   canvasId        String
   blockId         String
   anchorText      String?
@@ -3070,13 +3071,14 @@ model CanvasCommentThread {
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
-  @@index([canvasId, createdAt])
+  @@index([workspaceId, canvasId, createdAt])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
 
 model CanvasComment {
   id               String   @id @default(cuid())
+  workspaceId      String   // denormalized tenant key (stamped on insert)
   threadId         String
   canvasId         String
   body             String
@@ -3091,7 +3093,7 @@ model CanvasComment {
   initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
   createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
 
-  @@index([threadId, isInitial, createdAt])
+  @@index([workspaceId, threadId, isInitial, createdAt])
   @@map("canvas_comments")
   @@schema("public")
 }
