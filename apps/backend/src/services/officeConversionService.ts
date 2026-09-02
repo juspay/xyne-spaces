@@ -82,9 +82,19 @@ async function writeGcsCache(gcsPath: string, buffer: Buffer, contentHash: strin
     }
 }
 
+// Pure function of the content — callers that need to know where a
+// buffer's converted PDF lives in GCS (e.g. to point the async OCR
+// scheduler's page-splitter at it directly) can compute this without
+// re-running the conversion, since it's the exact path convertToPdf
+// itself reads from/writes to below.
+export function getConvertedPdfGcsPath(buffer: Buffer): string {
+    const contentHash = createHash("sha256").update(buffer).digest("hex")
+    return `${GCS_CACHE_PREFIX}/${contentHash}.pdf`
+}
+
 export async function convertToPdf(buffer: Buffer, originalFilename: string): Promise<Buffer> {
     const contentHash = createHash("sha256").update(buffer).digest("hex")
-    const gcsPath = `${GCS_CACHE_PREFIX}/${contentHash}.pdf`
+    const gcsPath = getConvertedPdfGcsPath(buffer)
 
     const gcsHit = await readGcsCache(gcsPath)
     if (gcsHit) {
