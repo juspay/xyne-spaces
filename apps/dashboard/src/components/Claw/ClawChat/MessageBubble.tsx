@@ -6,6 +6,7 @@ import { cn } from '../../../utils/classNames';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ActivityBlock } from '../../Chat/XyneAISidebar/components/ActivityBlock';
 import { PendingActionBlock } from '../../Chat/XyneAISidebar/components/PendingActionBlock';
+import { AttachmentPreview } from '../../Chat/XyneAISidebar/components/MessageItem';
 import { respondToPendingAction } from '../../../services/XyneAI/XyneAIPendingActionService';
 import { useClawConversation } from '../ClawConversationContext';
 import { ClawMarkdown } from './ClawMarkdown';
@@ -110,6 +111,13 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
             <div className={cn(showActivity && 'pl-[22px]')}>
               <ClawMarkdown content={displayText} toolInvocations={message.toolInvocations} />
             </div>
+            {message.attachments && message.attachments.length > 0 && (
+              <div className={cn('mt-2 space-y-2', showActivity && 'pl-[22px]')}>
+                {message.attachments.map((attachment, index) => (
+                  <AttachmentPreview key={index} attachment={attachment} />
+                ))}
+              </div>
+            )}
             {message.isStreaming && rawText.trim().length > 0 && (
               <span className='inline-block h-3.5 w-1.5 animate-pulse bg-current align-middle' />
             )}
