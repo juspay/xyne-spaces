@@ -2607,6 +2607,17 @@ export const queries = defineQueries({
     return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
   }),
 
+  canvasPendingAccessRequests: defineQuery(
+    z.object({ canvasId: z.string() }),
+    ({ args: { canvasId } }) => {
+      return zql.activities
+        .where('canvasId', canvasId)
+        .where('actorAction', 'canvas_access_requested')
+        .where('classification', ActivityClassification.ACTIONABLE)
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+
   canvasCommentThreads: defineQuery(
     z.object({ canvasId: z.string() }),
     ({ args: { canvasId } }) => {

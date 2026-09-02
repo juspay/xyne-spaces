@@ -15,6 +15,7 @@ import { TicketUpdateActivity } from './TicketUpdateActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
+import { CanvasAccessRequestActivity } from './CanvasAccessRequestActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
 import { RecordingSummaryActivity } from './RecordingSummaryActivity';
 import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
@@ -123,6 +124,9 @@ export const ActivityItem = memo(function ActivityItem({
     case 'canvas_role_changed':
     case 'canvas_access_revoked':
       return <CanvasSharedActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'canvas_access_requested':
+      return <CanvasAccessRequestActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'recording_shared':
     case 'recording_access_revoked':
