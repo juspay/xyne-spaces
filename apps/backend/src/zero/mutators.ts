@@ -4896,8 +4896,14 @@ export function createMutators(
           type: z.literal('moment'),
           timestampSeconds: z.number().nonnegative(),
           text: z.string(),
+          /**
+           * Wall-clock epoch seconds of the flag press. A live call has no
+           * client-side transcript to measure an offset against, so
+           * `timestampSeconds` is provisional until transcriptService rebases it.
+           */
+          markedAtEpochSeconds: z.number().nonnegative().optional(),
         }),
-        async ({ tx, args: { callId, type, timestampSeconds, text } }) => {
+        async ({ tx, args: { callId, type, timestampSeconds, text, markedAtEpochSeconds } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call) {
             throw new Error('Call not found');
@@ -4916,6 +4922,7 @@ export function createMutators(
                 type,
                 text,
                 timestampSeconds,
+                ...(markedAtEpochSeconds !== undefined ? { markedAtEpochSeconds } : {}),
               });
               if (!appended) {
                 logger.warn('mark_moment_not_persisted', { callId, reason: 'call_not_found' });

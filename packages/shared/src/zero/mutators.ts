@@ -3433,8 +3433,14 @@ export const mutators = defineMutators({
         type: z.literal('moment'),
         timestampSeconds: z.number().nonnegative(),
         text: z.string(),
+        /**
+         * Wall-clock epoch seconds of the flag press. A live call has no
+         * client-side transcript to measure an offset against, so
+         * `timestampSeconds` is provisional until transcriptService rebases it.
+         */
+        markedAtEpochSeconds: z.number().nonnegative().optional(),
       }),
-      async ({ tx, ctx, args: { callId, type, timestampSeconds, text } }) => {
+      async ({ tx, ctx, args: { callId, type, timestampSeconds, text, markedAtEpochSeconds } }) => {
         const call = await tx.run(zql.calls.where('externalId', callId).one());
         // Headless recording calls are fetched via the oats* named queries and may not
         // be synced into the client's optimistic cache. Skip and let the authoritative
@@ -3449,7 +3455,15 @@ export const mutators = defineMutators({
         const markedItems = Array.isArray(call.markedItems) ? call.markedItems : [];
         await tx.mutate.calls.update({
           id: call.id,
-          markedItems: [...markedItems, { type, text, timestampSeconds }],
+          markedItems: [
+            ...markedItems,
+            {
+              type,
+              text,
+              timestampSeconds,
+              ...(markedAtEpochSeconds !== undefined ? { markedAtEpochSeconds } : {}),
+            },
+          ],
         });
       },
     ),

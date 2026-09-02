@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchTranscriptCached } from './transcriptCache';
-import { TranscriptSidePanel } from './TranscriptSidePanel';
+import { TranscriptSidePanel, type TranscriptTargetHighlight } from './TranscriptSidePanel';
 
 export interface TranscriptCitationRef {
   callId: string;
   timestamp?: string;
   speaker?: string;
   segment?: string;
+  /**
+   * Offset from the first transcript line. Canvas citations resolve by `segment`,
+   * but a timeline marker only knows its offset, so the panel falls back to the
+   * nearest line at or before this.
+   */
+  timestampSeconds?: number;
+  /** Line treatment. Defaults to the neutral citation block. */
+  highlight?: TranscriptTargetHighlight;
+  /** Moment offsets drawn as dividers, so the panel matches the timeline it came from. */
+  markedTimestampsSeconds?: readonly number[];
 }
 
 type Listener = () => void;
@@ -134,7 +144,12 @@ export function TranscriptCitationModal(): ReactElement | null {
           ...(ref.timestamp ? { timestamp: ref.timestamp } : {}),
           ...(ref.speaker ? { speaker: ref.speaker } : {}),
           ...(ref.segment ? { segment: ref.segment } : {}),
+          ...(ref.timestampSeconds !== undefined ? { timestampSeconds: ref.timestampSeconds } : {}),
+          ...(ref.highlight ? { highlight: ref.highlight } : {}),
         }}
+        {...(ref.markedTimestampsSeconds
+          ? { markedTimestampsSeconds: ref.markedTimestampsSeconds }
+          : {})}
         openNonce={nonce}
         isLoading={loading}
         error={error}

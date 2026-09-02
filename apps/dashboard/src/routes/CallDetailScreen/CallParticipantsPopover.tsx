@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import AvatarGroup from '../../components/ui/Avatar/AvatarGroup';
 import { Popover } from '../../components/ui/Popover';
-import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
+import { type CallParticipantRow } from '../../hooks/useCallParticipantRoster';
 import { usePlatform } from '../../hooks/usePlatform';
 import { cn } from '../../utils/classNames';
 import { getCallParticipantCount, type Call } from '../CallHistoryScreen/callHistoryItem.utils';
@@ -13,7 +13,9 @@ const MAX_PARTICIPANT_FACES = 4;
 
 interface CallParticipantsPopoverProps {
   call: Call;
-  currentUserId: string | undefined;
+  /** Resolved roster, owned by the screen — the timeline needs the same rows. */
+  participants: CallParticipantRow[];
+  isLoading: boolean;
   className?: string;
 }
 
@@ -25,12 +27,12 @@ interface CallParticipantsPopoverProps {
  */
 export function CallParticipantsPopover({
   call,
-  currentUserId,
+  participants,
+  isLoading,
   className,
 }: CallParticipantsPopoverProps): ReactElement | null {
   const [isOpen, setIsOpen] = useState(false);
   const { isMobile } = usePlatform();
-  const { participants, isLoading } = useCallParticipantRoster(call, isOpen, currentUserId);
 
   // Attendees first, invitees after. `sort` is stable, so each group keeps the
   // roster order the hook produced.

@@ -26,6 +26,7 @@ import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { rebaseMarkedMoments } from '@/services/recordingSummaryMarkedItems';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -443,6 +444,10 @@ export class TranscriptService {
       const uniqueSpeakers = new Set(entries.map((e) => e.user)).size;
       logger.info(`[${callId}] transcript_parsed`, { entries_count: entries.length, speakers_count: uniqueSpeakers });
 
+      // The transcript's clock is now known, so moments flagged live can be
+      // moved onto it before anything reads them.
+      await this.rebasePendingMarkedMoments(callId, entries[0].timestamp);
+
       // 5. Format as plain text (usernames are already included in transcript entries)
       logger.info(`[${callId}] transcript_formatting_started`, { format: 'plain_text' });
       const formattedTranscript = this.formatTranscript(entries, callId);
@@ -628,6 +633,37 @@ export class TranscriptService {
 
     logger.info(`[${callId}] transcript_consolidated`, { original_entries: entries.length, consolidated_entries: consolidated.length });
     return consolidated;
+  }
+
+  /**
+   * Move moments flagged mid-call onto the transcript's clock.
+   *
+   * A live call has no client-side transcript, so the flag records wall-clock
+   * epoch seconds; the transcript counts from its first spoken line.
+   *
+   * Idempotent (the field is dropped once applied) and best-effort — a failure
+   * here must not cost the caller its transcript.
+   */
+  private async rebasePendingMarkedMoments(
+    callId: string,
+    firstEntryEpochSeconds: number
+  ): Promise<void> {
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) return;
+
+      const { items, rebasedCount } = rebaseMarkedMoments(call.markedItems, firstEntryEpochSeconds);
+      if (rebasedCount === 0) return;
+
+      await repositories.calls.update(call.id, {
+        markedItems: items as Prisma.InputJsonValue[],
+      });
+      logger.info(`[${callId}] marked_moments_rebased`, { rebased_count: rebasedCount });
+    } catch (error) {
+      logger.warn(`[${callId}] marked_moments_rebase_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -1893,6 +1929,12 @@ Output ONLY the processed transcript, nothing else.`;
         logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
         return;
       }
+
+      // postCallTranscript normally does this first, but it can fail (see above)
+      // while this path still succeeds off raw GCS content. Idempotent, so the
+      // common case where it already ran is a no-op.
+      await this.rebasePendingMarkedMoments(callId, entries[0].timestamp);
+
       const formattedTranscript = this.formatTranscript(entries, callId);
 
       // For CONVERSATION origin calls, combine conversation messages with transcript for title

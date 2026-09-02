@@ -24,6 +24,14 @@ import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
 import { CallLabelPicker } from './CallLabelPicker';
 import { callService } from '../../services/Call/callService';
+import {
+  buildParticipantEvents,
+  CallTimelineBar,
+  participantEventOriginMs,
+} from '../../components/CallTimeline';
+import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
+import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
+import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -134,6 +142,54 @@ export default function CallDetailScreen(): ReactElement {
     call?.startedAt && call?.endedAt
       ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
       : null;
+
+  // Moment offsets are drawn as dividers in the transcript panel, matching the
+  // flags on the timeline. Memoised for a stable identity: the panel keys its
+  // own memos off this array.
+  const markedMomentSeconds = useMemo(
+    () =>
+      parseMarkedItems(call?.markedItems)
+        .filter(item => item.type === 'moment')
+        .map(item => item.timestampSeconds),
+    [call?.markedItems],
+  );
+
+  // Owned here, not in the popover: the timeline needs the same rows and draws
+  // them unprompted, so the roster resolves with the screen rather than on open.
+  const { participants: rosterParticipants, isLoading: isRosterLoading } = useCallParticipantRoster(
+    call,
+    true,
+    user?.id,
+  );
+
+  const participantEvents = useMemo(() => {
+    if (!call) return [];
+    const originMs = participantEventOriginMs(call.startedAt, call.metadata);
+    return buildParticipantEvents(
+      rosterParticipants.map(participant => ({
+        name: participant.name,
+        joinedAt: participant.joinedAtMs,
+        leftAt: participant.leftAtMs,
+      })),
+      originMs,
+    );
+  }, [call, rosterParticipants]);
+
+  // Markers open the same side panel a summary citation does. A moment already
+  // announces itself there with a divider, so only decisions and actions need the
+  // amber line highlight to be findable.
+  const handleMarkerSelect = useCallback(
+    (item: MarkedItem): void => {
+      if (!call?.externalId) return;
+      transcriptCitationStore.open({
+        callId: call.externalId,
+        timestampSeconds: item.timestampSeconds,
+        markedTimestampsSeconds: markedMomentSeconds,
+        ...(item.type === 'moment' ? {} : { highlight: 'marker' as const }),
+      });
+    },
+    [call?.externalId, markedMomentSeconds],
+  );
 
   const { prdEntries } = useCallPRD({
     externalId: call?.externalId ?? '',
@@ -376,7 +432,11 @@ export default function CallDetailScreen(): ReactElement {
 
             {/* Participants + labels — one row, as on the recording detail header */}
             <div className='mt-3.5 flex flex-wrap items-center gap-2'>
-              <CallParticipantsPopover call={call} currentUserId={user?.id} />
+              <CallParticipantsPopover
+                call={call}
+                participants={rosterParticipants}
+                isLoading={isRosterLoading}
+              />
               {(canEditLabels || labels.length > 0) && (
                 <CallLabelPicker
                   labels={labels}
@@ -386,6 +446,16 @@ export default function CallDetailScreen(): ReactElement {
                 />
               )}
             </div>
+
+            {/* Decisions, actions and marked moments across the call */}
+            <CallTimelineBar
+              callId={call.externalId}
+              markedItems={call.markedItems}
+              fallbackDurationMs={durationMs}
+              participantEvents={participantEvents}
+              onMarkerSelect={handleMarkerSelect}
+              className='mt-3.5'
+            />
 
             {/* Recording */}
             {hasRecording && (
