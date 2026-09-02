@@ -14,11 +14,10 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import {initializeYSweetDoc, syncToYSweet} from '../utils/ysweetUtils.js';
+import { initializeYSweetDoc } from '../utils/ysweetUtils.js';
 import { labelBlocks, buildHandleMap, parseLabelledMarkdown, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
 import { createBlockRenderer } from '@/services/canvas/blockRender.js';
 import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
-import { isCanvasContentEmpty } from '@xyne/shared';
 import { readFromYSweet as readFromYSweetBlocks } from '../utils/ysweetUtils.js';
 import { createSuggestionBatch } from '@/services/canvas/suggestions.js';
 import { convertMarkdownToBlockNote, convertBlockNoteToMarkdown, getCanvasUrl, getCanvasById } from '../services/canvasService.js';
@@ -515,80 +514,48 @@ export class CanvasController {
         return;
       }
 
-      // Only read the document when suggestion mode can actually gate this write.
       const current = await readFromYSweetBlocks(canvas.id);
 
-      // Suggestion mode: this route only receives agent writes (S2S, spaces-edit-canvas);
-      // park block-level changes for review unless the canvas is empty. Nothing reaches Y-Sweet here.
-      if (!isCanvasContentEmpty(current)) {
-        const renderer = await createBlockRenderer(current);
-        const entries = parseLabelledMarkdown(markdown);
-        const handleMap = buildHandleMap(current);
+      // Suggestion mode, no exceptions: this route only receives agent writes
+      // (S2S, spaces-edit-canvas) and NEVER touches the document itself — every
+      // change parks for human review.
+      const renderer = await createBlockRenderer(current);
+      const entries = parseLabelledMarkdown(markdown);
+      const handleMap = buildHandleMap(current);
 
-        const receipt = await getReadReceipt(canvas.id, userId);
-        const ops = deriveOps({
-          current,
-          entries,
-          handleMap,
-          render: renderer.render,
-          ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
-        });
+      const receipt = await getReadReceipt(canvas.id, userId);
+      const ops = deriveOps({
+        current,
+        entries,
+        handleMap,
+        render: renderer.render,
+        ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
+      });
 
-        if (ops.length === 0) {
-          res.status(200).json({
-            id: canvas.id,
-            title: canvas.title,
-            status: 'no-changes',
-            message: 'The proposed content matches the canvas; nothing to review.',
-            url: getCanvasUrl(canvas.id, req.user?.workspaceId),
-          });
-          return;
-        }
-
-        const batch = await createSuggestionBatch({
-          workspaceId: canvas.workspaceId,
-          canvasId: canvas.id,
-          ops,
-        });
-
-        res.status(202).json({
+      if (ops.length === 0) {
+        res.status(200).json({
           id: canvas.id,
           title: canvas.title,
-          status: 'pending-review',
-          batchId: batch.batchId,
-          changeCount: batch.created,
-          message: `${batch.created} change(s) proposed and awaiting approval.`,
+          status: 'no-changes',
+          message: 'The proposed content matches the canvas; nothing to review.',
           url: getCanvasUrl(canvas.id, req.user?.workspaceId),
         });
         return;
       }
 
-      // ── direct write (unchanged behaviour) ─────────────────────────────
-      const blocks = await convertMarkdownToBlockNote(markdown);
-      const ysweetSynced = await syncToYSweet(canvas.id, blocks);
-      if (!ysweetSynced) {
-        logger.error(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
-        res.status(502).json({
-          error: 'Canvas update failed',
-          message: 'The collaborative document could not be updated. Try again.',
-        });
-        return;
-      }
-
-      // Update DB timestamp
-      const prisma = DatabaseClient.getInstance();
-      await prisma.canvas.update({
-        where: { id: canvas.id },
-        data: {
-          lastEditedBy: userId,
-          lastEditedAt: new Date(),
-          updatedAt: new Date(),
-        },
+      const batch = await createSuggestionBatch({
+        workspaceId: canvas.workspaceId,
+        canvasId: canvas.id,
+        ops,
       });
 
-      res.status(200).json({
+      res.status(202).json({
         id: canvas.id,
         title: canvas.title,
+        status: 'pending-review',
+        batchId: batch.batchId,
+        changeCount: batch.created,
+        message: `${batch.created} change(s) proposed and awaiting approval.`,
         url: getCanvasUrl(canvas.id, req.user?.workspaceId),
       });
     } catch (error) {
