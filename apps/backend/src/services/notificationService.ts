@@ -207,8 +207,6 @@ class NotificationService {
       workspaceId,
       userId,
       type: data.type,
-      title: data.title,
-      message: data.message,
       relatedEntityType: data.relatedEntityType,
       relatedEntityId: data.relatedEntityId,
       actionUrl: data.actionUrl,

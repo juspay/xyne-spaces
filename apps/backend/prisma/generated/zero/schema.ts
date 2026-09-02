@@ -1604,8 +1604,6 @@ export const notificationTable = table("notifications")
     id: string(),
     userId: string(),
     type: string(),
-    title: string(),
-    message: string(),
     status: string(),
     deliveryMethods: json<string[]>(),
     metadata: json().optional(),
