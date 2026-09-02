@@ -606,8 +606,6 @@ const SearchResults = (): ReactElement => {
     });
   }, [baseResults, filters.sortBy, isChannelsMode]);
 
-  const autoOpenedResultKeyRef = useRef<string | null>(null);
-  const hasManualPanelSelectionRef = useRef(false);
   const filterKey = JSON.stringify([
     filters.docType,
     filters.fromUserIds,
@@ -629,18 +627,14 @@ const SearchResults = (): ReactElement => {
 
   // Reset auto-open and close stale panel whenever the search or any filter changes
   useEffect(() => {
-    autoOpenedResultKeyRef.current = null;
-    hasManualPanelSelectionRef.current = false;
     setSelectedPanel(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
 
   const handleSelectThread = useCallback((thread: SearchResultsThread) => {
-    hasManualPanelSelectionRef.current = true;
     setSelectedPanel({ kind: 'thread', thread });
   }, []);
   const handleSelectUser = useCallback((userId: string) => {
-    hasManualPanelSelectionRef.current = true;
     setSelectedPanel({ kind: 'profile', userId });
   }, []);
   const handleSelectChannelContext = useCallback(
@@ -650,7 +644,6 @@ const SearchResults = (): ReactElement => {
       conversationCreatedAt?: number,
       matchedMessageId?: string | null,
     ) => {
-      hasManualPanelSelectionRef.current = true;
       setSelectedPanel({
         kind: 'channel',
         channelId,
@@ -662,80 +655,8 @@ const SearchResults = (): ReactElement => {
     [],
   );
   const handleClosePanel = (): void => {
-    hasManualPanelSelectionRef.current = true;
     setSelectedPanel(null);
   };
-
-  // Auto-open the first result once results arrive for a new search (desktop only)
-  useEffect(() => {
-    if (isMobile || isLoading) return;
-    if (hasManualPanelSelectionRef.current) return;
-
-    const autoOpenableTypes =
-      filters.docType === 'messages'
-        ? new Set<DisplaySearchResult['type']>(['conversation'])
-        : filters.docType === 'tickets'
-          ? new Set<DisplaySearchResult['type']>(['ticket'])
-          : filters.docType === 'all'
-            ? new Set<DisplaySearchResult['type']>(['conversation', 'ticket'])
-            : null;
-
-    // Files and other non-message tabs do not have a meaningful thread to preview.
-    if (!autoOpenableTypes) return;
-
-    const first = results.find(result => {
-      if (!autoOpenableTypes.has(result.type)) return false;
-      const resultContext = result.searchContext;
-      if (!resultContext?.channelId || !resultContext.conversationId) return false;
-      return !(
-        resultContext.subApp === 'DESK' ||
-        (result.type === 'ticket' &&
-          isDeskChannelType(allChannelsForNav.find(c => c.id === resultContext.channelId)?.type))
-      );
-    });
-
-    if (!first) {
-      // A completed search with no previewable result must not retain a stale panel.
-      if (autoOpenedResultKeyRef.current !== null) {
-        autoOpenedResultKeyRef.current = null;
-        setSelectedPanel(null);
-      }
-      return;
-    }
-
-    const ctx = first.searchContext;
-    if (!ctx?.channelId || !ctx?.conversationId) return;
-    const resultKey = JSON.stringify([
-      fullSearchKey,
-      first.type,
-      first.id,
-      ctx.channelId,
-      ctx.conversationId,
-      ctx.messageId,
-    ]);
-    if (autoOpenedResultKeyRef.current === resultKey) return;
-    autoOpenedResultKeyRef.current = resultKey;
-
-    // Mirror the click-handler routing: open thread panel for any conversation with
-    // replies (replyCount > 0), channel context for standalone messages.
-    if (ctx.replyCount && ctx.replyCount > 0) {
-      setSelectedPanel({
-        kind: 'thread',
-        thread: {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          matchedMessageId: ctx.messageId ?? null,
-        },
-      });
-    } else {
-      setSelectedPanel({
-        kind: 'channel',
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        matchedMessageId: ctx.messageId ?? null,
-      });
-    }
-  }, [results, isMobile, isLoading, filters.docType, fullSearchKey, allChannelsForNav]);
 
   const contextValue = useMemo(
     () => ({
