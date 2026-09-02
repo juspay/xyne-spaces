@@ -77,6 +77,7 @@ import {
   RING_GUTTER,
   STRIP_LEAD,
   STRIP_PAD,
+  STREAM_PRESS_ROW,
 } from './components/Streams/Streams.types';
 import { streamsActor } from '../../machines/streamsMachine';
 import { questionFor, type StreamItem } from './components/StreamsDnd/StreamsDnd';
@@ -2460,6 +2461,7 @@ const StreamsScreen = (): ReactElement => {
               ref={stripRef}
               className={cn(
                 'streams-strip flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden',
+                '[scrollbar-width:auto] [scrollbar-color:hsl(var(--muted-foreground)/0.5)_hsl(var(--muted)/0.6)] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-[hsl(var(--muted)/0.6)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-[3px] [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-[hsl(var(--muted-foreground)/0.5)] [&::-webkit-scrollbar-thumb]:bg-clip-content [&::-webkit-scrollbar-thumb:hover]:bg-[hsl(var(--muted-foreground)/0.8)] motion-reduce:scroll-auto',
                 'scroll-smooth',
                 // Fades, not gutters. A column that ends at a hard edge
                 // reads as broken; a fade says "this continues". Each side
@@ -2579,7 +2581,10 @@ const StreamsScreen = (): ReactElement => {
                   // and the dashes are darkened enough to survive on both
                   // wallpapers — still grey, still clearly an empty slot rather
                   // than a column that is already there.
-                  className='streams-press-row flex h-full shrink-0 flex-col items-center justify-center gap-2 border-2 border-dashed border-muted-foreground/30 bg-card/40 text-muted-foreground hover:border-muted-foreground/60 hover:bg-card/70 hover:text-foreground'
+                  className={cn(
+                    STREAM_PRESS_ROW,
+                    'flex h-full shrink-0 flex-col items-center justify-center gap-2 border-2 border-dashed border-muted-foreground/30 bg-card/40 text-muted-foreground hover:border-muted-foreground/60 hover:bg-card/70 hover:text-foreground',
+                  )}
                   data-track-category='Streams'
                   data-track-name='OpenAddPaletteSlot'
                 >

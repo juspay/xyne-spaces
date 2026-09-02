@@ -1,3 +1,5 @@
+import { cn } from '../../../../utils/classNames';
+import { STREAM_PRESS } from '../Streams/Streams.types';
 import { ReactElement, useEffect, useState } from 'react';
 import { DownloadDown } from '@xyne/icons';
 import { detectFileType, formatFileSize } from '../../../FileViewer/utils';
@@ -77,7 +79,10 @@ const FileColumn = ({
     <button
       type='button'
       onClick={download}
-      className='streams-press flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent'
+      className={cn(
+        STREAM_PRESS,
+        'flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent',
+      )}
       data-track-category='Streams'
       data-track-name='DownloadFileColumn'
     >

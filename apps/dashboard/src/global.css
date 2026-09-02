@@ -4798,83 +4798,6 @@ img.inline-emoji,
   z-index: 10;
 }
 
-.streams-strip {
-  scrollbar-width: auto;
-  scrollbar-color: hsl(var(--muted-foreground) / 0.5) hsl(var(--muted) / 0.6);
-}
-.streams-strip::-webkit-scrollbar {
-  height: 12px;
-}
-.streams-strip::-webkit-scrollbar-track {
-  @apply rounded-full;
-  background: hsl(var(--muted) / 0.6);
-}
-.streams-strip::-webkit-scrollbar-thumb {
-  @apply rounded-full;
-  background: hsl(var(--muted-foreground) / 0.5);
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-.streams-strip::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.8);
-  background-clip: content-box;
-}
-.streams-press,
-.streams-press-row {
-  transition-property: transform, color, background-color, border-color, opacity, box-shadow;
-  transition-duration: 140ms;
-  transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-.streams-press:active:not(:disabled) {
-  transform: scale(0.97);
-}
-.streams-press-row:active:not(:disabled) {
-  transform: scale(0.99);
-}
-@keyframes streams-column-flash {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
-  }
-  25%,
-  75% {
-    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.55);
-  }
-}
-
-.streams-column-flash {
-  animation: streams-column-flash 300ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-.streams-press:focus-visible,
-.streams-press-row:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 1px;
-}
-@supports (animation-timeline: scroll()) {
-  @keyframes streams-fade-top {
-    from {
-      --streams-fade-top: 0px;
-    }
-    to {
-      --streams-fade-top: var(--fade);
-    }
-  }
-  @keyframes streams-fade-bot {
-    from {
-      --streams-fade-bot: var(--fade);
-    }
-    to {
-      --streams-fade-bot: 0px;
-    }
-  }
-}
-
-.streams-fade-head {
-  --fade-head: 14px;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-head));
-  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-head));
-}
 @property --tab-on {
   syntax: "<number>";
   inherits: false;
@@ -4925,27 +4848,6 @@ img.inline-emoji,
   }
 }
 
-:root {
-  --tick-pitch: 12px;
-  --tick-w: 1px;
-  --tick-h-off: 7;
-  --tick-h-on: 15;
-  --tick-h-hover: 21;
-  --tick-in-dur: 150ms;
-  --tick-out-dur: 250ms;
-  --tick-align: center;
-  --tick-origin: center;
-  --tick-alert-floor: 0.85;
-}
-
-:root {
-  --window-w: min(64rem, 70vw);
-  --window-fade-rest: 30%;
-  --window-fade-open: 4%;
-  --window-reveal-dur: 260ms;
-  --window-collapse-dur: 200ms;
-  --window-ease: var(--jump-ease);
-}
 @property --fade-x-start {
   syntax: "<length>";
   inherits: true;
@@ -5011,14 +4913,5 @@ img.inline-emoji,
     to {
       --streams-fade-end: 0px;
     }
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .streams-press:active:not(:disabled),
-  .streams-press-row:active:not(:disabled) {
-    transform: none;
-  }
-  .streams-strip {
-    scroll-behavior: auto;
   }
 }

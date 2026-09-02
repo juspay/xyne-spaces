@@ -433,6 +433,30 @@ export const LEGACY_VIEWPORT = 1440;
  * box size and the muted-at-rest colour, which is exactly what
  * `ConversationHeader` adds too.
  */
+
+/**
+ * Press feedback for anything pressable in a stream.
+ *
+ * Three arbitrary properties rather than `transition-[…] duration-[…] ease-[…]`:
+ * Tailwind's `transition-*` utility writes its own 150ms and its own easing into
+ * the same rule, and beats the separate `duration-`/`ease-` utilities. Setting
+ * the three longhands directly is the only form that survives.
+ *
+ * One class string owns the whole `transition` declaration. Two rules cannot
+ * merge one, so pairing this with a `transition-colors` utility would silently
+ * drop one set of properties — which is why the colours are listed here rather
+ * than left to a neighbouring class.
+ *
+ * `[&:active:not(:disabled)]` rather than Tailwind's `enabled:`, which compiles
+ * to `:enabled` and matches only form elements — several of these are divs.
+ */
+export const STREAM_PRESS =
+  '[transition-property:transform,color,background-color,border-color,opacity,box-shadow] [transition-duration:140ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[hsl(var(--ring))] [&:active:not(:disabled)]:scale-[0.97] motion-reduce:[&:active:not(:disabled)]:transform-none';
+
+/** The same, at the gentler scale a full-width row wants. */
+export const STREAM_PRESS_ROW =
+  '[transition-property:transform,color,background-color,border-color,opacity,box-shadow] [transition-duration:140ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[hsl(var(--ring))] [&:active:not(:disabled)]:scale-[0.99] motion-reduce:[&:active:not(:disabled)]:transform-none';
+
 export const STREAM_ACTION = 'h-7 w-7 rounded-lg shrink-0';
 /**
  * Idle-to-hover, in ink rather than in a colour.

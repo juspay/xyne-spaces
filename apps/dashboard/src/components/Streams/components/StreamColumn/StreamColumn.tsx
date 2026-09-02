@@ -28,6 +28,7 @@ import {
   FOCUS_EASE,
   FOCUS_PEEK,
   STREAMS_EASE,
+  STREAM_PRESS,
 } from '../Streams/Streams.types';
 import type { Column, ColumnSeed } from '../Streams/Streams.types';
 
@@ -395,7 +396,8 @@ const StreamColumn = ({
   // none.
   const controlsShown = focused || column.pinned === true;
   const controls = cn(
-    'streams-press shrink-0 rounded-md p-1.5 text-muted-foreground',
+    STREAM_PRESS,
+    'shrink-0 rounded-md p-1.5 text-muted-foreground',
     'hover:bg-accent hover:text-foreground focus-visible:opacity-100',
     controlsShown ? 'opacity-100' : 'opacity-0 group-hover/column:opacity-100',
   );
@@ -429,7 +431,8 @@ const StreamColumn = ({
           aria-label={held ? 'Exit focus mode' : 'Enter focus mode'}
           aria-pressed={held}
           className={cn(
-            'streams-press shrink-0 rounded-md p-1.5',
+            STREAM_PRESS,
+            'shrink-0 rounded-md p-1.5',
             held ? 'text-primary opacity-100 hover:bg-primary/10' : controls,
             // On the left it is one of a pair with the button before it, not a third
             // item in the row: the header's own `gap-2` reads as a separator between
@@ -481,7 +484,7 @@ const StreamColumn = ({
         // "It is already open, and it is right here." Only ever runs in response
         // to a direct request for a column that already exists, so it is an
         // answer rather than an interruption.
-        flash && 'streams-column-flash',
+        flash && 'animate-streams-column-flash',
         // Lifted, not dimmed. The card follows the pointer now, so it is the
         // thing you are holding — it should read as picked up off the surface.
         // No transition on `transform` here: `useColumnDrag` writes it directly
@@ -688,7 +691,7 @@ const StreamColumn = ({
                 : 'New since you last looked. Click to clear'
             }
             aria-label='Mark this column read'
-            className='streams-press flex shrink-0 items-center rounded-full'
+            className={cn(STREAM_PRESS, 'flex shrink-0 items-center rounded-full')}
             data-track-category='Streams'
             data-track-name='ClearColumnActivity'
           >
@@ -788,7 +791,8 @@ const StreamColumn = ({
                 aria-label={column.pinned ? 'Unpin column' : 'Pin column'}
                 aria-pressed={column.pinned ?? false}
                 className={cn(
-                  'streams-press shrink-0 rounded-md p-1.5 hover:bg-accent',
+                  STREAM_PRESS,
+                  'shrink-0 rounded-md p-1.5 hover:bg-accent',
                   // Pinned is a *state*, so its control stays lit even unhovered —
                   // otherwise the only way to tell a column is pinned is to hover it.
                   column.pinned
@@ -837,7 +841,7 @@ const StreamColumn = ({
         // the header. Nothing sat between the two once the per-column
         // "Catch me up" bar became opt-out, so the first message was being cut
         // dead across the middle of its own text.
-        className='streams-fade-head relative min-h-0 flex-1 overflow-hidden'
+        className='[--fade-head:14px] [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,#000_var(--fade-head))] [mask-image:linear-gradient(to_bottom,transparent_0,#000_var(--fade-head))] relative min-h-0 flex-1 overflow-hidden'
         // Same reveal as the header, and here it is the one that matters: the
         // body holds a live chat panel with a virtualised list, and relaying it
         // out on every frame of a 240ms tween is the expensive way to animate a

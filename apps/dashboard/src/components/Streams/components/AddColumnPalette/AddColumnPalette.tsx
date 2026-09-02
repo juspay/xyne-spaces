@@ -1,3 +1,4 @@
+import { STREAM_PRESS_ROW } from '../Streams/Streams.types';
 import { ReactElement, useCallback, useMemo, useState } from 'react';
 import { SparkleAi } from '../../../icons/SparkleAi';
 import { toast } from 'sonner';
@@ -66,7 +67,10 @@ const AskAiFooter = ({ onPick }: { onPick: (source: ColumnSource) => void }): Re
       <button
         type='button'
         onClick={() => onPick({ kind: 'agent' })}
-        className='streams-press-row flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] hover:bg-accent hover:text-accent-foreground'
+        className={cn(
+          STREAM_PRESS_ROW,
+          'flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] hover:bg-accent hover:text-accent-foreground',
+        )}
         data-track-category='Streams'
         data-track-name='AddSurfaceColumn'
       >
