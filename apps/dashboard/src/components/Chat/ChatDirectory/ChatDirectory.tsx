@@ -242,6 +242,7 @@ const ChatDirectory = ({
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
+  const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
   const [sectionToDelete, setSectionToDelete] = useState<ChannelSection | null>(null);
   const [sectionToManage, setSectionToManage] = useState<ChannelSection | null>(null);
@@ -934,7 +935,10 @@ const ChatDirectory = ({
                     onRename={setSectionToRename}
                     onDelete={setSectionToDelete}
                     onManageChannels={setSectionToManage}
-                    onCreateSection={() => setShowAddSectionForm(true)}
+                    onCreateSection={() => {
+                      setAddSectionSource('channels');
+                      setShowAddSectionForm(true);
+                    }}
                     onMoveChannelToSection={moveChannelToSection}
                     onSetSortOrder={(sectionId, order) => {
                       void zero.mutate(
@@ -1079,7 +1083,10 @@ const ChatDirectory = ({
                             label: 'New section',
                             icon: FolderPlus,
                             trackName: 'CREATE_NEW_SECTION',
-                            onSelect: () => setShowAddSectionForm(true),
+                            onSelect: () => {
+                              setAddSectionSource('channels');
+                              setShowAddSectionForm(true);
+                            },
                           },
                         ]}
                       />
@@ -1169,6 +1176,15 @@ const ChatDirectory = ({
                           trackName: 'CREATE_DIRECT_MESSAGE',
                           onSelect: handleAddDirectMessage,
                         },
+                        {
+                          label: 'New section',
+                          icon: FolderPlus,
+                          trackName: 'CREATE_NEW_SECTION',
+                          onSelect: () => {
+                            setAddSectionSource('dms');
+                            setShowAddSectionForm(true);
+                          },
+                        },
                       ]}
                     />
                   </div>
@@ -1244,6 +1260,7 @@ const ChatDirectory = ({
               channels={sectionableChannels}
               existingNames={(channelSections ?? []).map(s => s.name)}
               lastSectionPosition={lastSectionPosition}
+              prioritizeType={addSectionSource === 'dms' ? 'dm' : 'channel'}
               onClose={() => setShowAddSectionForm(false)}
             />
           )}
