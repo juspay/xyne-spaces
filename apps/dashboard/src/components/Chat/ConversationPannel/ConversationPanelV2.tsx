@@ -148,11 +148,16 @@ const ConversationPanelV2 = ({
   const canvasId = searchParams.get('canvasId');
 
   const participationStatus = useGetChannelUserStatus(channelId);
+  // A closed/not-open DM is absent from the status map, so participation is briefly undefined;
+  // treat a DM/group-DM as member here too — otherwise the linked-message lookup returns nothing
+  // and the panel is stuck on "Messages are loading…". The query's ACL re-verifies real membership.
+  const isDmScope =
+    channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
   const [initialMessageById] = useCachedQuery(
     queries.getConversationByIdWithChannel({
       conversationId: urlConversationId || '',
       channelId: channelId || '',
-      isMember: !!participationStatus,
+      isMember: !!participationStatus || isDmScope,
     }),
     { enabled: !!urlConversationId && !urlCreatedAtMatch && stateLinkedItemCreatedAt === null },
   );
