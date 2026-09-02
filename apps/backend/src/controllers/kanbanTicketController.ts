@@ -47,7 +47,7 @@ const kanbanCountsBodySchema = z.object({
     .optional(),
   groupBy: z
     .union([
-      z.enum(['none', 'assignee', 'status', 'priority']),
+      z.enum(['none', 'assignee', 'status', 'priority', 'createdBy']),
       z.object({
         type: z.literal('formField'),
         fieldId: z.string(),

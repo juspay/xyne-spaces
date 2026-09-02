@@ -20,6 +20,7 @@ type KanbanCountTicket = {
   assignedTo: string | null;
   statusV2: string;
   priority: string;
+  createdBy: string | null;
 };
 
 type KanbanCountGroupedRow = {
@@ -28,6 +29,7 @@ type KanbanCountGroupedRow = {
   statusV2?: string;
   assignedTo: string | null;
   priority: string;
+  createdBy: string | null;
   _count: {
     _all: number;
   };
@@ -181,7 +183,7 @@ export const getFormFieldGroupKeys = (
 };
 
 const getBuiltInGroupKey = (
-  ticket: Pick<KanbanCountTicket, 'assignedTo'> & {
+  ticket: Pick<KanbanCountTicket, 'assignedTo' | 'createdBy'> & {
     statusV2?: string;
     priority?: string;
   },
@@ -189,6 +191,12 @@ const getBuiltInGroupKey = (
 ): { groupKey: string; displayName: string } => {
   if (groupBy === 'assignee') {
     const groupKey = ticket.assignedTo ?? UNASSIGNED_GROUP;
+    return { groupKey, displayName: groupKey };
+  }
+
+  if (groupBy === 'createdBy') {
+    const raw = ticket.createdBy ?? '';
+    const groupKey = raw.replace(/^user:/, '') || 'Unknown';
     return { groupKey, displayName: groupKey };
   }
 
@@ -256,8 +264,9 @@ const addAggregateRowToGroup = (
 
 const getBuiltInGroupByFields = (
   groupBy: Exclude<KanbanGroupBy, KanbanFormFieldGroup> | undefined,
-): Array<'assignedTo' | 'statusV2' | 'priority'> => {
+): Array<'assignedTo' | 'statusV2' | 'priority' | 'createdBy'> => {
   if (groupBy === 'assignee') return ['assignedTo'];
+  if (groupBy === 'createdBy') return ['createdBy'];
   if (groupBy === 'status') return ['statusV2'];
   if (groupBy === 'priority') return ['priority'];
   return [];
@@ -297,7 +306,7 @@ export const getKanbanCounts = async (
   if (!isFormFieldGroup(groupBy) && dynamicFieldIds.length === 0) {
     const groupFields = getBuiltInGroupByFields(groupBy);
     const aggregateGroupFields = [...new Set([...groupFields, countField])] as Array<
-      'assignedTo' | 'stageName' | 'statusV2' | 'priority'
+      'assignedTo' | 'stageName' | 'statusV2' | 'priority' | 'createdBy'
     >;
 
     logger.info('[KanbanCountsService] Executing aggregate counts query', {
@@ -318,6 +327,7 @@ export const getKanbanCounts = async (
       const group = getBuiltInGroupKey(
         {
           assignedTo: row.assignedTo,
+          createdBy: row.createdBy,
           statusV2: row.statusV2,
           priority: row.priority,
         },
@@ -342,7 +352,7 @@ export const getKanbanCounts = async (
     ? []
     : getBuiltInGroupByFields(groupBy);
   const fallbackFields = [...new Set(['id', countField, ...fallbackGroupFields])] as Array<
-    'id' | 'assignedTo' | 'stageName' | 'statusV2' | 'priority'
+    'id' | 'assignedTo' | 'stageName' | 'statusV2' | 'priority' | 'createdBy'
   >;
 
   const tickets = (await db.ticket.groupBy({

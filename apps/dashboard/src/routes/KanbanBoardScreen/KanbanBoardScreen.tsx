@@ -299,7 +299,7 @@ interface BoardKanbanScreenProps {
   initialColumns?: string[];
 }
 
-type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
+type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | 'createdBy' | FormFieldGroup;
 
 interface FormFieldGroup {
   type: 'formField';
@@ -558,7 +558,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return groupTicketsByFormField(tickets, criterion, formValuesByTicketId, userNamesById);
     }
 
-    // Original logic for assignee, status, priority
+    // Original logic for assignee, status, priority, createdBy
     return tickets.reduce(
       (acc, ticket) => {
         const key =
@@ -566,7 +566,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             ? (ticket.assignedTo ?? 'Unassigned')
             : criterion === 'status'
               ? ticket.statusV2
-              : (ticket.priority ?? 'No Priority');
+              : criterion === 'createdBy'
+                ? (ticket.createdBy ?? 'Unknown')
+                : (ticket.priority ?? 'No Priority');
 
         (acc[key] ??= []).push(ticket);
         return acc;
@@ -1281,6 +1283,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         value: 'priority' as const,
         label: 'Group by: Priority',
         icon: <Vote className='h-4 w-4' />,
+      },
+      {
+        value: 'createdBy' as const,
+        label: 'Group by: Created By',
+        icon: <User className='h-4 w-4' />,
       },
     ];
 
@@ -3355,6 +3362,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       } else if (groupBy === 'priority' && groupName !== 'No Priority') {
         priority = groupName as TicketPriority;
         displayName = groupName.charAt(0).toUpperCase() + groupName.slice(1).toLowerCase();
+      } else if (groupBy === 'createdBy' && groupName !== 'Unknown') {
+        const normalizedId = groupName.replace(/^(user:|group:|userGroup:)/, '');
+        entityType = 'user';
+        entityId = normalizedId;
+        displayName = userNamesById.get(normalizedId) || displayName;
       } else if (
         isFormFieldGroup(groupBy) &&
         groupBy.fieldType === FormFieldType.USER &&
@@ -3388,11 +3400,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     const isAssigneeGrouping =
       groupBy === 'assignee' ||
+      groupBy === 'createdBy' ||
       (isFormFieldGroup(groupBy) && groupBy.fieldType === FormFieldType.USER);
     if (isAssigneeGrouping) {
-      const isUnassigned = (key: string): boolean => key === 'Unassigned';
+      const isMissingGroup = (key: string): boolean =>
+        key === 'Unassigned' || key === 'Unknown';
       mapped.sort((a, b) => {
-        if (isUnassigned(a.key) !== isUnassigned(b.key)) return isUnassigned(a.key) ? 1 : -1;
+        if (isMissingGroup(a.key) !== isMissingGroup(b.key))
+          return isMissingGroup(a.key) ? 1 : -1;
         return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
       });
     }
@@ -3420,7 +3435,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
       return availableColumns.filter(
-        col => !['stage', 'board', 'createdAt', 'createdBy'].includes(col.key),
+        col => !['stage', 'board', 'createdAt'].includes(col.key),
       );
     }
     if (layoutView === 'calendar') {

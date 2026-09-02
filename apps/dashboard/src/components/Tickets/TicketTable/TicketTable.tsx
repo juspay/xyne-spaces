@@ -438,6 +438,14 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       },
 
       {
+        key: 'createdBy',
+        headerName: 'Created By',
+        field: 'createdBy',
+        minWidth: 160,
+        cellRenderer: CreatedByCellRenderer,
+      },
+
+      {
         key: 'assignee',
         headerName: 'Assignee',
         field: 'assignedTo',
@@ -864,6 +872,38 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
           </div>
           <span>Unassigned</span>
         </div>
+      )}
+    </div>
+  );
+};
+
+const CreatedByCellRenderer = (params: ICellRendererParams<Ticket>) => {
+  const ticket = params.data;
+  const rawCreatedBy = ticket?.createdBy;
+  const createdById = rawCreatedBy ? rawCreatedBy.replace(/^(user:|group:|userGroup:)/, '') : '';
+  const createdUser = useUser(createdById || '');
+
+  if (!ticket || !rawCreatedBy) {
+    return <span className='text-muted-foreground'>—</span>;
+  }
+
+  return (
+    <div className='flex items-center h-full'>
+      {createdUser ? (
+        <div className='flex items-center gap-2'>
+          <Tooltip content={getUserDisplayName(createdUser)}>
+            <Avatar
+              userId={createdUser.id}
+              className='rounded-full size-5 flex items-center justify-center'
+              showActiveStatus={false}
+            />
+          </Tooltip>
+          <span className='text-muted-foreground truncate text-sm'>
+            {getUserDisplayName(createdUser)}
+          </span>
+        </div>
+      ) : (
+        <span className='text-muted-foreground text-sm truncate'>{rawCreatedBy}</span>
       )}
     </div>
   );

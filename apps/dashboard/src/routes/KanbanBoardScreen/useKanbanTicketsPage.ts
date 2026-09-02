@@ -29,6 +29,7 @@ export type KanbanPageGroupBy =
   | 'assignee'
   | 'status'
   | 'priority'
+  | 'createdBy'
   | {
       type: 'formField';
       fieldId: string;
@@ -164,7 +165,7 @@ const canRepresentGroupInVespa = (
   groupKey: string | undefined,
 ): boolean => {
   if (!groupBy || groupBy === 'none') return true;
-  if (groupBy === 'assignee' || groupBy === 'status' || groupBy === 'priority') {
+  if (groupBy === 'assignee' || groupBy === 'status' || groupBy === 'priority' || groupBy === 'createdBy') {
     return true;
   }
   if (typeof groupBy !== 'object' || groupBy.type !== 'formField') return false;

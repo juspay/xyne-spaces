@@ -160,6 +160,7 @@ const getGroupKeys = (
 ): string[] => {
   if (!groupBy || groupBy === 'none') return [ALL_TICKETS_GROUP];
   if (groupBy === 'assignee') return [normalizeIdentity(snapshot.assignedTo) ?? UNASSIGNED_GROUP];
+  if (groupBy === 'createdBy') return [normalizeIdentity(snapshot.createdBy) ?? 'Unknown'];
   if (groupBy === 'status') return [snapshot.statusV2 ?? ''];
   if (groupBy === 'priority') return [snapshot.priority ?? ''];
   if (typeof groupBy === 'object' && groupBy.type === 'formField') {

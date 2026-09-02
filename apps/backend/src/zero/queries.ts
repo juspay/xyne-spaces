@@ -89,7 +89,7 @@ const kanbanTicketsPageArgsSchema = z.object({
     .nullable(),
   groupBy: z
     .union([
-      z.enum(['none', 'assignee', 'status', 'priority']),
+      z.enum(['none', 'assignee', 'status', 'priority', 'createdBy']),
       z.object({
         type: z.literal('formField'),
         fieldId: z.string(),
@@ -461,6 +461,8 @@ const applyKanbanTicketPageConditions = (
     query = query.where('statusV2', groupKey as TicketStatusV2);
   } else if (groupBy === 'priority' && groupKey) {
     query = query.where('priority', groupKey as TicketPriority);
+  } else if (groupBy === 'createdBy' && groupKey && groupKey !== 'Unknown') {
+    query = query.where('createdBy', 'IN', [groupKey, `user:${groupKey}`]);
   } else if (typeof groupBy === 'object' && groupBy.type === 'formField' && formFieldValue !== undefined) {
     query = query.whereExists('formEntityValues', (formEntityValue: any) =>
       formEntityValue
