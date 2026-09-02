@@ -379,6 +379,7 @@ interface Step3Props {
   isTestingConnection: boolean;
   /** null = not tested yet; otherwise the last test result. */
   connectionTest: { ok: boolean; message: string } | null;
+  lockTrackingMode: boolean;
 }
 
 const Step3Applications = ({
@@ -399,6 +400,7 @@ const Step3Applications = ({
   onTestConnection,
   isTestingConnection,
   connectionTest,
+  lockTrackingMode,
 }: Step3Props): ReactElement => {
   return (
     <div className='space-y-3'>
@@ -469,12 +471,19 @@ const Step3Applications = ({
                 <SelectionCard
                   key={mode.value}
                   isSelected={releaseTrackingMode === mode.value}
+                  isDisabled={lockTrackingMode}
                   onClick={() => onReleaseTrackingModeChange(mode.value)}
                   label={mode.label}
                   description={mode.description}
                 />
               ))}
             </div>
+            {lockTrackingMode && (
+              <p className={HELP_CLASS}>
+                Tracking mode is fixed once a repository is configured. Changing it would discard
+                the existing release analysis. Remove and re-add the repository to switch.
+              </p>
+            )}
           </div>
 
           <div className='px-3 py-2 bg-primary/5 rounded-md border border-primary/20 space-y-1.5'>
@@ -708,6 +717,7 @@ const ReleaseConfigWizardForm = ({
             onUpdateApplication={form.updateApplication}
             releaseTrackingMode={form.releaseTrackingMode}
             onReleaseTrackingModeChange={form.setReleaseTrackingMode}
+            lockTrackingMode={form.isEditing}
             sharedRepoUrl={form.sharedRepoUrl}
             onSharedRepoUrlChange={form.setSharedRepoUrl}
             showGroupControls={!isSingleService}

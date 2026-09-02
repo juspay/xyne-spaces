@@ -170,6 +170,19 @@ export function useReleaseConfigForm({
   // ─── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
+    const hasNamelessContent = applications.some(
+      app =>
+        !app.name.trim() &&
+        (app.regex.trim() ||
+          app.ownerTeam.trim() ||
+          app.envPaths.trim() ||
+          app.migrationPaths.trim()),
+    );
+    if (hasNamelessContent) {
+      toast.error('Every service needs a name');
+      return;
+    }
+
     const validApps = applications.filter(app => app.name.trim());
 
     if (validApps.length === 0) {

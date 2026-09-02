@@ -87,6 +87,7 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
       workspaceId: ticket.workspaceId,
       // keep Hotfix-type re-runs flagging ART rows as hotfix (matches create path)
       isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
+      isReRun: true,
     });
 
     res.json({ success: result.success, canvasUrl: result.canvasUrl, error: result.error });

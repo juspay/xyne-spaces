@@ -166,6 +166,8 @@ export interface CommitAnalysisParams {
   hotfixSync?: boolean;
   // Multi-repo hotfix: restrict analysis to the merged repo's board(s) + post-merge head.
   hotfixOverride?: { boardIds: string[]; mergeCommitSha: string };
+  // Re-run keeps the deployed pointer frozen (it was set at create).
+  isReRun?: boolean;
 }
 
 interface ReleaseRepoContext {
@@ -404,6 +406,9 @@ export class CommitAnalysisController {
       // Project's local code drives the dev-ticket-id regex (e.g. 'TSP').
       // Falls through to 'XYNE' in the service if absent.
       ...(projectCode && { ticketPrefix: projectCode }),
+      // Hotfix syncs fire seconds after a merge; retry the eventually-consistent
+      // PR lookup so the just-merged commit's PR isn't missed on the canvas.
+      retryMissingPr: hotfixSync,
     };
 
     // Build a provider-specific VCS client + downstream services per repo
@@ -445,7 +450,7 @@ export class CommitAnalysisController {
       envChanges = releaseResult.envChanges;
       appMatchSummary = releaseResult.appMatchSummary;
 
-      if (newCommitId && affectedApplications.length > 0) {
+      if (newCommitId && affectedApplications.length > 0 && !params.isReRun) {
         const applicationIds = affectedApplications.map((app) => app.id);
         await releaseService.updateDeployedCommits(applicationIds, newCommitId);
       }
