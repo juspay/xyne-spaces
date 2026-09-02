@@ -5930,6 +5930,8 @@ export function createMutators(
             params.statusV2 !== undefined &&
             ticket.statusV2 === TicketStatusV2.PAUSED &&
             params.statusV2 !== TicketStatusV2.PAUSED;
+          const isPureManualEtaChange =
+            isEtaChanging && !isStageChanging && !isResumingFromPause && !isEnteringTerminal && !isLeavingTerminal;
 
           // Board/etaManagement context, fetched once and reused by both the permission gate
           // below and the ETA domain-service evaluation further down - only when one of the
@@ -6249,6 +6251,7 @@ export function createMutators(
               if (field === 'statusV2') activityType = 'STATUS';
               if (field === 'assignedTo') activityType = 'ASSIGNED_TO';
               if (field === 'userGroupId') activityType = 'USER_GROUP_ID';
+              if (field === 'eta' && isPureManualEtaChange) continue;
               if (field === 'eta') activityType = 'ETA';
               if (field === 'boardId') activityType = 'BOARD';
               if (field === 'isArchived') activityType = 'IS_ARCHIVED';
@@ -6470,8 +6473,6 @@ export function createMutators(
           // Pure manual due-date edit: optimistic-concurrency check against the persisted
           // fingerprint, so a stale client refetches rather than committing a change decided
           // against outdated risk state.
-          const isPureManualEtaChange =
-            isEtaChanging && !isStageChanging && !isResumingFromPause && !isEnteringTerminal && !isLeavingTerminal;
           if (isPureManualEtaChange && params.etaExpectedFingerprint !== undefined) {
             const preCheckEtaManagement = parseTicketEtaManagement(ticket.metadata);
             if (preCheckEtaManagement.planningRisk.fingerprint !== params.etaExpectedFingerprint) {

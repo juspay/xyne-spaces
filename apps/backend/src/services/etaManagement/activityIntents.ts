@@ -3,6 +3,7 @@ import {
   parseTicketEtaManagement,
   type EtaActivityOutbox,
   type EtaAutoRecomputedActivityValue,
+  type EtaManuallyUpdatedActivityValue,
   type EtaRiskAcknowledgedActivityValue,
   type EtaChangeTrigger,
   type EtaRiskDetectedActivityValue,
@@ -105,6 +106,16 @@ export function etaSystemMessageContent(
     case ActivityType.ETA_RISK_ACKNOWLEDGED: {
       const reason = (intent.value as EtaRiskAcknowledgedActivityValue | undefined)?.reason ?? '';
       return `${actorName} acknowledged the planning-risk warning: ${reason}`;
+    }
+    // Replaces the thread message the generic ActivityType.ETA row used to post for a
+    // manual due-date edit; that row is now suppressed on this path, and this one carries
+    // the reason the old text had no field for.
+    case ActivityType.ETA_MANUALLY_UPDATED: {
+      const v = intent.value as EtaManuallyUpdatedActivityValue | undefined;
+      const oldDate = v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none';
+      const newDate = v?.newEta ? new Date(v.newEta).toLocaleDateString() : 'none';
+      const reason = v?.reason ? `: ${v.reason}` : '';
+      return `${actorName} updated ETA from ${oldDate} to ${newDate}${reason}`;
     }
     default:
       return null;
