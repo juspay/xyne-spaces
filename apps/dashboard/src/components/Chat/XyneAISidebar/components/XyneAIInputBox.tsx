@@ -55,6 +55,7 @@ import { MentionSelector } from '../../../ui/Selectors';
 import { XyneAIPlusMenu } from './XyneAIPlusMenu';
 import type { MentionResult } from '@xyne/shared';
 import { usePlatform } from '../../../../hooks/usePlatform';
+import { posthogService } from '../../../../services/Analytics/posthogService';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
@@ -1065,6 +1066,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
             // Otherwise, submit the message
             event.preventDefault();
+            // Keyboard submit is invisible to autocapture; emit it explicitly.
+            posthogService.capture('ai_query_submit', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
             onSubmit();
             return true;
           }

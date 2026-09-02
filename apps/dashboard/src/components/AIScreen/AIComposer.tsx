@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { PlusDefault } from '@xyne/icons';
 import { toast } from 'sonner';
+import { posthogService } from '../../services/Analytics/posthogService';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
@@ -527,6 +528,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      // Keyboard submit is invisible to autocapture; emit it explicitly.
+      posthogService.capture('ai_query_submit', {
+        trigger: 'keyboard',
+        keyCombo: 'enter',
+      });
       submit();
     }
   };

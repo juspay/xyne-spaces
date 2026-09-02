@@ -45,7 +45,7 @@ class PostHogService {
       return;
     }
 
-    const key = 'phc_tMge6NYxcWVdhvQg9MrLDbQuuAn967rSpRVSo23uS5fx'
+    const key = import.meta.env['VITE_POSTHOG_KEY'] as string | undefined;
     const host =
       (import.meta.env['VITE_POSTHOG_HOST'] as string | undefined) || 'https://eu.i.posthog.com';
 
