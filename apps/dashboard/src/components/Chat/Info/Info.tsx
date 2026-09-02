@@ -280,7 +280,7 @@ const Info = ({
     handleCallAction(handleCallClick);
   };
 
-  const popoverContainerRef = useRef<HTMLDivElement>(null);
+  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
 
   const headerLinkContainerStyle =
     'flex items-center flex-col gap-y-2 border border-border p-[12px] min-w-[98px] rounded-[10px] cursor-pointer flex-1 text-muted-foreground';
@@ -296,7 +296,7 @@ const Info = ({
 
   return (
     <div
-      ref={popoverContainerRef}
+      ref={setPopoverContainer}
       className='overflow-clip h-[720px] bg-background flex flex-col'
       style={{ position: 'relative' }}
     >
@@ -490,7 +490,7 @@ const Info = ({
               channel={channel}
               participants={participants}
               channelDisplayName={channelDisplayName}
-              popoverContainer={popoverContainerRef.current}
+              popoverContainer={popoverContainer}
             />
           </Tabs.Content>
         )}
@@ -661,7 +661,13 @@ const ParticipantListItem = ({
               side='bottom'
               sideOffset={8}
               align='end'
-              {...(popoverContainer ? { container: popoverContainer } : {})}
+              {...(popoverContainer
+                ? {
+                    container: popoverContainer,
+                    collisionBoundary: popoverContainer,
+                    collisionPadding: 8,
+                  }
+                : {})}
               className='p-1 border border-border rounded-lg shadow-lg overflow-hidden z-[100]'
             >
               <div>
