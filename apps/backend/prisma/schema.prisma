@@ -2756,6 +2756,7 @@ model Call {
   participants CallParticipant[]
   recordings   CallRecording[]   // 1:N — every recording session for this call
   recurringSeries RecurringCallSeries? @relation(fields: [recurringSeriesId], references: [id])
+  sessions     CallSession[]     // 1:N — one immutable row per LiveKit activation
 
   @@index([externalId]) // Fast lookup by public ID
   @@index([createdByUserId]) // Fast lookup of user's calls
@@ -2772,6 +2773,27 @@ model Call {
   @@index([status, startedAt(sort: Desc), externalId])
   @@index([status, startsAt, externalId])
   @@map("calls")
+  @@schema("public")
+}
+
+/// One immutable row per LiveKit activation of a Call. Append-only: `startedAt`
+/// is written once at activation and never mutated; `endedAt` is set exactly once
+/// when that session closes. Call.startedAt/endedAt is a projection of these rows
+/// (MIN start .. MAX end), maintained only on session close, so a status-transition
+/// write (e.g. a rejoin) can no longer corrupt call duration.
+model CallSession {
+  workspaceId String    // denormalized tenant key (stamped on insert)
+  id          String    @id @default(cuid())
+  callId      String    // FK -> Call.id
+  startedAt   DateTime  // IMMUTABLE: when THIS activation began
+  endedAt     DateTime? // NULL = session still open; set once on close
+  createdAt   DateTime  @default(now())
+
+  call Call @relation(fields: [callId], references: [id])
+
+  @@index([callId])
+  @@index([callId, endedAt]) // fast open-session lookup (endedAt IS NULL)
+  @@map("call_sessions")
   @@schema("public")
 }
 

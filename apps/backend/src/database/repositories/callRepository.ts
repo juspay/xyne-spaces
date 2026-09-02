@@ -301,6 +301,46 @@ export class CallRepository {
   }
 
   /**
+   * Close the most recent still-open CallSession for a call (set its endedAt),
+   * then re-project Call.startedAt/endedAt from the immutable session rows
+   * (MIN startedAt .. MAX endedAt). This is the ONLY writer of Call.startedAt
+   * after activation, so the denormalized envelope is always first-join ->
+   * last-leave and can never be corrupted by a status-transition write.
+   * Idempotent: with no open session it just re-projects. Returns the projected
+   * envelope so callers can hand the corrected startedAt to duration consumers
+   * within the same transaction (before the projection is re-read from the DB).
+   */
+  private async closeOpenCallSession(
+    tx: Prisma.TransactionClient,
+    callId: string,
+    endedAt: Date,
+  ): Promise<{ startedAt: Date | null; endedAt: Date | null }> {
+    const open = await tx.callSession.findFirst({
+      where: { callId, endedAt: null },
+      orderBy: { startedAt: 'desc' },
+      select: { id: true },
+    });
+    if (open) {
+      await tx.callSession.update({ where: { id: open.id }, data: { endedAt } });
+    }
+    const agg = await tx.callSession.aggregate({
+      where: { callId },
+      _min: { startedAt: true },
+      _max: { endedAt: true },
+    });
+    if (agg._min.startedAt) {
+      await tx.call.update({
+        where: { id: callId },
+        data: {
+          startedAt: agg._min.startedAt,
+          ...(agg._max.endedAt ? { endedAt: agg._max.endedAt } : {}),
+        },
+      });
+    }
+    return { startedAt: agg._min.startedAt, endedAt: agg._max.endedAt };
+  }
+
+  /**
    * Mirror a call transition onto the slash-command artifact that started it.
    * A no-op for every other call, which is why it can sit directly on the
    * shared end-of-call paths without altering their behavior.
@@ -1057,15 +1097,20 @@ export class CallRepository {
           where: { id: call.id },
           data: { status: finalStatus, endedAt: leftAt },
         });
+        // Close the open session and re-project Call.startedAt/endedAt from the
+        // immutable sessions, so downstream duration (system message, artifact,
+        // analytics) reads the full first-join -> last-leave envelope.
+        const envelope = await this.closeOpenCallSession(tx, call.id, leftAt);
+        const callForEnd = { ...call, startedAt: envelope.startedAt ?? call.startedAt };
         shouldEndCall = finalStatus === CallStatus.ENDED;
         if (shouldEndCall) {
           await refreshCallParticipantPreview(tx, call.id);
-          await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, leftAt);
+          await this.syncArtifactLifecycle(tx, callForEnd, MessageArtifactStatus.COMPLETED, leftAt);
         }
 
         // Update system message whether the call is fully ended or just rescheduled
         messageUpdated = await updateCallSystemMessageIfNeeded({
-          call,
+          call: callForEnd,
           callId: callExternalId,
           endedAt: leftAt,
           tx,
@@ -1102,6 +1147,7 @@ export class CallRepository {
 
       let shouldEndCall = false;
       let messageUpdated = false;
+      let callForEnd = call;
 
       // Check and update call status if not already ended
       if (call.status !== CallStatus.ENDED) {
@@ -1115,6 +1161,10 @@ export class CallRepository {
           where: { id: call.id },
           data: { status: finalStatus, endedAt },
         });
+        // Close the open session and re-project Call.startedAt/endedAt from the
+        // immutable sessions (see closeOpenCallSession).
+        const envelope = await this.closeOpenCallSession(tx, call.id, endedAt);
+        callForEnd = { ...call, startedAt: envelope.startedAt ?? call.startedAt };
         shouldEndCall = finalStatus === CallStatus.ENDED;
         if (shouldEndCall) {
           await refreshCallParticipantPreview(tx, call.id);
@@ -1122,7 +1172,7 @@ export class CallRepository {
 
         // Update system message whether the call is fully ended or just rescheduled
         messageUpdated = await updateCallSystemMessageIfNeeded({
-          call,
+          call: callForEnd,
           callId: callExternalId,
           endedAt,
           tx,
@@ -1130,7 +1180,7 @@ export class CallRepository {
       } else {
         // Call already ended - still try to update system message if needed
         messageUpdated = await updateCallSystemMessageIfNeeded({
-          call,
+          call: callForEnd,
           callId: callExternalId,
           endedAt,
           tx,
@@ -1138,7 +1188,7 @@ export class CallRepository {
       }
 
       if (call.status === CallStatus.ENDED || shouldEndCall) {
-        await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
+        await this.syncArtifactLifecycle(tx, callForEnd, MessageArtifactStatus.COMPLETED, endedAt);
       }
 
       // Clear conversation.callId when call ends (for conversation calls)
@@ -1288,6 +1338,7 @@ export class CallRepository {
           data: {
             status: CallStatus.ACTIVE,
             startedAt: now,
+            endedAt: null,
             lastActivityAt: now,
             updatedAt: now,
             // Merge (not replace) so calendar-derived fields already on the call
@@ -1333,6 +1384,7 @@ export class CallRepository {
           data: {
             status: CallStatus.ACTIVE,
             startedAt: now,
+            endedAt: null,
             lastActivityAt: now,
             updatedAt: now,
             metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
@@ -1343,8 +1395,11 @@ export class CallRepository {
         await tx.call.update({
           where: { id: call.id },
           data: {
+            // NOTE: startedAt is deliberately NOT written here. A rejoin is a new
+            // session, not a new call start; overwriting startedAt collapsed the
+            // reported duration to the last session (the ~49min-shown-as-18s bug).
             status: CallStatus.ACTIVE,
-            startedAt: now,
+            endedAt: null,
             lastActivityAt: now,
             updatedAt: now,
           },
@@ -1376,6 +1431,17 @@ export class CallRepository {
           });
         }
       }
+
+      // Append an immutable session row for THIS activation. Sessions are the
+      // append-only source of truth for call timing; Call.startedAt/endedAt is a
+      // projection maintained on session close (see closeOpenCallSession).
+      await tx.callSession.create({
+        data: {
+          callId: call.id,
+          workspaceId: resolvedWorkspaceId,
+          startedAt: now,
+        },
+      });
     });
 
     // Sync eagerly so initial_message_md is populated before the response returns.
