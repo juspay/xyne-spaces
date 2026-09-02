@@ -527,13 +527,20 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     !!user?.id &&
     initialCall.organizerUserId !== user.id;
 
-  // Restricted editors may only add, so everyone already on the call is pinned.
+  // Restricted editors may drop the people they invited themselves, so only the organizer
+  // and everyone invited by someone else is pinned. Mirrors the backend's pinned set in
+  // scheduleCallController.authorizeScheduledCallEdit.
   const lockedParticipantValues = useMemo(
     () =>
       participantsOnly && initialCall
         ? new Set(
             initialCall.participants
-              .filter(p => !p.isExternal && p.userId !== user?.id)
+              .filter(
+                p =>
+                  !p.isExternal &&
+                  p.userId !== user?.id &&
+                  (p.userId === initialCall.organizerUserId || p.invitedBy !== user?.id),
+              )
               .map(p => `user:${p.userId}`),
           )
         : undefined,
@@ -621,21 +628,29 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // ── Time validation ───────────────────────────────────────────────────
       // react-hook-form clears manual setError calls when handleSubmit re-validates,
       // so we re-check the constraint here to prevent saving invalid data.
-      if (isRecurring) {
-        const recurringTimeError = validateRecurringCallTimes(recurringStartTime, recurringEndTime);
-        if (recurringTimeError) {
-          setError('endsAt', { type: 'manual', message: recurringTimeError });
-          return;
-        }
-      } else {
-        const { startsAtError, endsAtError } = validateCallDateTimes(data.startsAt, data.endsAt);
-        if (startsAtError) {
-          setError('startsAt', { type: 'manual', message: startsAtError });
-          return;
-        }
-        if (endsAtError) {
-          setError('endsAt', { type: 'manual', message: endsAtError });
-          return;
+      // A restricted editor sends no times and their inputs are hidden, so an error here
+      // would be an invisible dead end — a call whose start has already passed, or a series
+      // that crosses midnight, would block them forever.
+      if (!participantsOnly) {
+        if (isRecurring) {
+          const recurringTimeError = validateRecurringCallTimes(
+            recurringStartTime,
+            recurringEndTime,
+          );
+          if (recurringTimeError) {
+            setError('endsAt', { type: 'manual', message: recurringTimeError });
+            return;
+          }
+        } else {
+          const { startsAtError, endsAtError } = validateCallDateTimes(data.startsAt, data.endsAt);
+          if (startsAtError) {
+            setError('startsAt', { type: 'manual', message: startsAtError });
+            return;
+          }
+          if (endsAtError) {
+            setError('endsAt', { type: 'manual', message: endsAtError });
+            return;
+          }
         }
       }
 
@@ -703,8 +718,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       // ── EDIT MODE ──────────────────────────────────────────────────────────
       if (isEditMode && initialCall) {
         if (editEntireSeries && initialCall.recurringSeriesId) {
-          // Validate weekly requires at least one day
-          if (recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
+          // Validate weekly requires at least one day. A participant editor never sends the
+          // recurrence rule, so the check doesn't apply to them.
+          if (!participantsOnly && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
             toast.error('Select at least one day', {
               description: 'Weekly recurrence requires at least one day.',
               duration: 3000,
@@ -712,22 +728,31 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             return;
           }
           const resolvedChannelId = channelId; // selective calls stay on their channel
-          await callService.updateRecurringSeries(initialCall.recurringSeriesId, {
-            title: data.title,
-            // postCallUpdates mode: send callUpdatesChannel (backend checks membership)
-            // Selective call: send channelId (no callUpdatesChannel),
-            ...(postCallUpdates && updateChannelId ? { callUpdatesChannel: updateChannelId } : {}),
-            ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
-            ...(userIds.length > 0 && { targetUserIds: userIds }),
-            recurrenceRule: buildRrule(),
-            timezone,
-            startTime: recurringStartTime,
-            endTime: recurringEndTime,
-            startsOn: data.startsAt.getTime(),
-            externalInvitees: effExternals,
-            ...(seriesEndsType === 'on' &&
-              seriesEndsOn !== null && { endsOn: seriesEndsOn.getTime() }),
-          });
+          // A participant editor may send nothing but the invite list — the backend rejects
+          // the request outright otherwise.
+          await callService.updateRecurringSeries(
+            initialCall.recurringSeriesId,
+            participantsOnly
+              ? { targetUserIds: userIds }
+              : {
+                  title: data.title,
+                  // postCallUpdates mode: send callUpdatesChannel (backend checks membership)
+                  // Selective call: send channelId (no callUpdatesChannel),
+                  ...(postCallUpdates && updateChannelId
+                    ? { callUpdatesChannel: updateChannelId }
+                    : {}),
+                  ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
+                  ...(userIds.length > 0 && { targetUserIds: userIds }),
+                  recurrenceRule: buildRrule(),
+                  timezone,
+                  startTime: recurringStartTime,
+                  endTime: recurringEndTime,
+                  startsOn: data.startsAt.getTime(),
+                  externalInvitees: effExternals,
+                  ...(seriesEndsType === 'on' &&
+                    seriesEndsOn !== null && { endsOn: seriesEndsOn.getTime() }),
+                },
+          );
           toast.success('Recurring Series Updated', {
             description: `Changes applied to all occurrences of ${data.title}`,
             duration: 3000,
@@ -965,16 +990,23 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Single source of truth for the submit button: drives `disabled`, the
   // hover-tooltip contents, and the label.
+  // A restricted editor submits the invite list and nothing else, and every other field is
+  // hidden or disabled for them — so gating Save on those fields would strand them behind a
+  // requirement they cannot see or fix.
   const missingRequirements: string[] = [];
-  if (!title.trim()) missingRequirements.push('Add a title');
   if (participants.length === 0) missingRequirements.push('Add at least one participant');
-  if (!scheduleStartIsValid || errors.startsAt) missingRequirements.push('Pick a valid start time');
-  if (!scheduleEndIsValid || errors.endsAt) missingRequirements.push('Pick a valid end time');
-  if (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
-    missingRequirements.push('Pick at least one weekday');
-  }
-  if (postCallUpdates && !updateChannelId) {
-    missingRequirements.push('Pick a channel for post-call updates');
+  if (!participantsOnly) {
+    if (!title.trim()) missingRequirements.push('Add a title');
+    if (!scheduleStartIsValid || errors.startsAt) {
+      missingRequirements.push('Pick a valid start time');
+    }
+    if (!scheduleEndIsValid || errors.endsAt) missingRequirements.push('Pick a valid end time');
+    if (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
+      missingRequirements.push('Pick at least one weekday');
+    }
+    if (postCallUpdates && !updateChannelId) {
+      missingRequirements.push('Pick a channel for post-call updates');
+    }
   }
   if (allChannelMembersExcluded) {
     missingRequirements.push('Include at least one channel participant');
@@ -1119,14 +1151,20 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       )}
                     />
                   )}
-                  rules={{
-                    required: 'Title is required',
-                    maxLength: {
-                      value: 80,
-                      message: 'Title must be less than 80 characters',
-                    },
-                    validate: value => value.trim().length > 0 || 'Title cannot be empty',
-                  }}
+                  // No rules for a restricted editor: the field is disabled and the title is
+                  // never sent, so an existing empty or over-long title must not block Save.
+                  rules={
+                    participantsOnly
+                      ? {}
+                      : {
+                          required: 'Title is required',
+                          maxLength: {
+                            value: 80,
+                            message: 'Title must be less than 80 characters',
+                          },
+                          validate: value => value.trim().length > 0 || 'Title cannot be empty',
+                        }
+                  }
                 />
                 {errors.title && (
                   <p className='text-red-500 text-xs mt-1'>{errors.title.message}</p>
@@ -1975,14 +2013,20 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 </div>
               )}
 
-              {/* Edit entire series checkbox — only for recurring calls in edit mode */}
-              {isEditMode && initialCall?.recurringSeriesId && !participantsOnly && (
+              {/* Edit entire series checkbox — only for recurring calls in edit mode. Restricted
+                  editors get it too: without it their invite changes would land on this one
+                  occurrence and silently vanish from the rest of the series. */}
+              {isEditMode && initialCall?.recurringSeriesId && (
                 <Checkbox
                   checked={editEntireSeries}
                   onChange={setEditEntireSeries}
                   data-track-category='CALLS'
                   data-track-name='APPLY_TO_SERIES_TOGGLE'
-                  label='Apply to all calls in this series'
+                  label={
+                    participantsOnly
+                      ? 'Apply these people to all calls in this series'
+                      : 'Apply to all calls in this series'
+                  }
                 />
               )}
 

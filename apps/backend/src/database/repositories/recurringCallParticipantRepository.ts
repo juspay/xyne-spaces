@@ -14,17 +14,28 @@ export class RecurringCallParticipantRepository {
     return tx ?? DatabaseClient.getInstance();
   }
 
+  /**
+   * Replace the series' internal participants with `userIds` (the organizer is always kept).
+   * `invitedByUserId` is the editor and is stamped only on rows that did not exist before —
+   * a participant who added someone must stay credited so they can remove them later, and
+   * everyone else's original inviter must survive an edit by someone other than the organizer.
+   */
   async replaceInternalParticipants(params: {
     recurringSeriesId: string;
     organizerId: string;
+    invitedByUserId?: string;
     userIds: string[];
     workspaceId: string;
     tx?: Prisma.TransactionClient;
   }): Promise<void> {
-    const { recurringSeriesId, organizerId, userIds, workspaceId, tx } = params;
+    const { recurringSeriesId, organizerId, invitedByUserId, userIds, workspaceId, tx } = params;
     const client = this.client(tx);
     const participantUserIds = normalizeUserIds(userIds, organizerId);
     const now = new Date();
+
+    const existingInviters = new Map(
+      (await this.findInternalParticipants(recurringSeriesId, tx)).map(p => [p.userId, p.invitedBy]),
+    );
 
     await client.recurringCallParticipant.deleteMany({
       where: {
@@ -40,7 +51,7 @@ export class RecurringCallParticipantRepository {
         recurringSeriesId,
         workspaceId,
         userId,
-        invitedBy: organizerId,
+        invitedBy: existingInviters.get(userId) ?? invitedByUserId ?? organizerId,
         invitedAt: now,
         response: InvitationResponse.INVITED,
         meetingStatus: userId === organizerId ? MeetingStatus.ACCEPTED : MeetingStatus.PENDING,
@@ -139,6 +150,26 @@ export class RecurringCallParticipantRepository {
     return participants
       .map(p => p.email)
       .filter((email): email is string => Boolean(email));
+  }
+
+  /** Internal participants with the user who invited each of them. */
+  async findInternalParticipants(
+    recurringSeriesId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<Array<{ userId: string; invitedBy: string }>> {
+    return this.client(tx).recurringCallParticipant.findMany({
+      where: {
+        recurringSeriesId,
+        isExternal: false,
+      },
+      select: {
+        userId: true,
+        invitedBy: true,
+      },
+      orderBy: {
+        invitedAt: 'asc',
+      },
+    });
   }
 
   async findInternalParticipantUserIds(

@@ -134,6 +134,16 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     return exclusiveSelection && selectedValues.some(v => v.startsWith('channel:'));
   }, [selectedValues, exclusiveSelection]);
 
+  // Only meaningful while `lockedValues` is set: the pinned roster vs. what this editor added.
+  const pinnedOptions = useMemo(
+    () => selectedOptions.filter(opt => lockedValues?.has(opt.value)),
+    [selectedOptions, lockedValues],
+  );
+  const addedByEditorOptions = useMemo(
+    () => selectedOptions.filter(opt => !lockedValues?.has(opt.value)),
+    [selectedOptions, lockedValues],
+  );
+
   const isEmailLikeQuery = useMemo(() => {
     const query = searchQuery.trim();
     return query.includes('@');
@@ -288,6 +298,30 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         break;
     }
   };
+
+  const renderSelectedPill = (option: ParticipantOptions): React.ReactNode => (
+    <div
+      key={option.value}
+      className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'
+    >
+      {option.icon && <span>{option.icon}</span>}
+      <span className='truncate max-w-60 text-foreground'>{option.label}</span>
+      {!lockedValues?.has(option.value) && (
+        <button
+          type='button'
+          onClick={e => {
+            e.stopPropagation();
+            toggleValue(option.value);
+          }}
+          className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
+          data-track-category='CALLS'
+          data-track-name='remove-participant'
+        >
+          <X className='size-3' />
+        </button>
+      )}
+    </div>
+  );
 
   const renderTrigger = () => {
     const selectedGroupOrChannel = exclusiveSelection
@@ -596,37 +630,61 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         </Popover.Root>
       )}
 
+      {/* Restricted editors get the roster split into its own panel: one section for the
+          people already on the call, one for the people they added. Mixing both into a
+          single wrap left the removable pills indistinguishable from the pinned ones. */}
+      {lockedValues && selectedOptions.length > 0 && !hasChannelSelected && (
+        <div className='mt-2 rounded-xl border border-border bg-muted/20 divide-y divide-border overflow-hidden'>
+          {pinnedOptions.length > 0 && (
+            <div className='p-3 space-y-2'>
+              <p className='text-xs text-muted-foreground'>Already in this call</p>
+              <div className='flex flex-wrap gap-1.5 max-h-28 overflow-y-auto no-scrollbar'>
+                {pinnedOptions.map(renderSelectedPill)}
+              </div>
+            </div>
+          )}
+          <div className='p-3 space-y-2'>
+            <div className='flex items-center justify-between gap-2'>
+              <p className='text-xs text-muted-foreground'>
+                Added by you
+                {addedByEditorOptions.length > 0 && ` (${addedByEditorOptions.length})`}
+              </p>
+              {addedByEditorOptions.length > 0 && (
+                <button
+                  type='button'
+                  onClick={() =>
+                    void onMultiSelect(selectedValues.filter(v => lockedValues.has(v)))
+                  }
+                  className='shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors'
+                  data-track-category='CALLS'
+                  data-track-name='clear-all-participants'
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+            {addedByEditorOptions.length > 0 ? (
+              <div className='flex flex-wrap gap-1.5 max-h-28 overflow-y-auto no-scrollbar'>
+                {addedByEditorOptions.map(renderSelectedPill)}
+              </div>
+            ) : (
+              <p className='text-xs text-muted-foreground'>
+                Search above to invite more people to this call.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Selected participants rendered below the search bar */}
-      {selectedOptions.length > 0 && !hasChannelSelected && (
+      {!lockedValues && selectedOptions.length > 0 && !hasChannelSelected && (
         <div className='flex items-start justify-between mt-2'>
           <div className='flex flex-wrap gap-1.5 max-h-32 overflow-y-auto flex-1'>
-            {selectedOptions.map(option => (
-              <div
-                key={option.value}
-                className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'
-              >
-                {option.icon && <span>{option.icon}</span>}
-                <span className='truncate max-w-60 text-foreground'>{option.label}</span>
-                {!lockedValues?.has(option.value) && (
-                  <button
-                    type='button'
-                    onClick={e => {
-                      e.stopPropagation();
-                      toggleValue(option.value);
-                    }}
-                    className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
-                    data-track-category='CALLS'
-                    data-track-name='remove-participant'
-                  >
-                    <X className='size-3' />
-                  </button>
-                )}
-              </div>
-            ))}
+            {selectedOptions.map(renderSelectedPill)}
           </div>
           <button
             type='button'
-            onClick={() => void onMultiSelect(selectedValues.filter(v => lockedValues?.has(v)))}
+            onClick={() => void onMultiSelect([])}
             className='ml-2 shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5'
             data-track-category='CALLS'
             data-track-name='clear-all-participants'

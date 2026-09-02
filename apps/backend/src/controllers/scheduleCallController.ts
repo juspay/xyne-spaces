@@ -99,11 +99,12 @@ export class ScheduleCallController {
   /**
    * Decide what `userId` may change on `call`:
    *   - organizer                                    → every field
-   *   - participant of a direct (DM/GROUP_DM) call   → may only ADD people
+   *   - participant of a direct (DM/GROUP_DM) call   → may only change the invite list:
+   *     add anyone, and remove only the people they themselves invited
    *   - anyone else                                  → nothing
    * On success returns the participants that must survive the edit: empty for the
-   * organizer, the current roster for a participant editor, so a missing id in their
-   * `targetUserIds` can never be read as a removal.
+   * organizer, and for a participant editor everyone they did NOT invite, so a missing id
+   * in their `targetUserIds` can only ever remove their own invitees.
    */
   private async authorizeScheduledCallEdit(params: {
     call: { id: string; channelId: string | null; createdByUserId: string };
@@ -153,13 +154,94 @@ export class ScheduleCallController {
       edits.externalInvitees !== undefined;
 
     if (editsBeyondParticipants || edits.targetUserIds === undefined) {
-      return { allowed: false, status: 403, error: 'Participants can only add people to this call' };
+      return {
+        allowed: false,
+        status: 403,
+        error: 'Participants can only change who is invited to this call',
+      };
     }
 
-    // findParticipants already excludes external invitees.
-    const pinnedParticipantIds = (await repositories.calls.findParticipants(call.id)).map(
-      (p) => p.userId,
+    // Pin everyone this editor did not invite — they may drop their own invitees, but
+    // nobody else's. findParticipants already excludes external invitees.
+    const pinnedParticipantIds = (await repositories.calls.findParticipants(call.id))
+      .filter((p) => p.invitedBy !== userId)
+      .map((p) => p.userId);
+    return { allowed: true, pinnedParticipantIds };
+  }
+
+  /**
+   * Series counterpart of `authorizeScheduledCallEdit` — same rule, one level up:
+   *   - organizer                                       → every field
+   *   - participant of a direct (DM/GROUP_DM) series     → may only change the invite list:
+   *     add anyone, and remove only the people they themselves invited
+   *   - anyone else                                     → nothing
+   * Returns the participants that must survive the edit: empty for the organizer, and for a
+   * participant editor everyone they did NOT invite.
+   */
+  private async authorizeRecurringSeriesEdit(params: {
+    series: { id: string; channelId: string; organizerId: string };
+    userId: string;
+    edits: {
+      title?: unknown;
+      recurrenceRule?: unknown;
+      startTime?: unknown;
+      endTime?: unknown;
+      startsOn?: unknown;
+      endsOn?: unknown;
+      timezone?: unknown;
+      channelId?: unknown;
+      callUpdatesChannel?: unknown;
+      externalInvitees?: unknown;
+      targetUserIds?: string[] | undefined;
+    };
+  }): Promise<
+    { allowed: true; pinnedParticipantIds: string[] } | { allowed: false; status: number; error: string }
+  > {
+    const { series, userId, edits } = params;
+
+    if (series.organizerId === userId) {
+      return { allowed: true, pinnedParticipantIds: [] };
+    }
+
+    // getScopeType, not findById — see authorizeScheduledCallEdit for why the ACL can't be used.
+    const channelScopeType = await repositories.channels.getScopeType(series.channelId);
+    const isDirectCall =
+      channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
+    const seriesParticipants = await repositories.recurringCallParticipants.findInternalParticipants(
+      series.id,
     );
+    const isParticipant = seriesParticipants.some((p) => p.userId === userId);
+
+    if (!isDirectCall || !isParticipant) {
+      logger.warn(
+        `[authorizeRecurringSeriesEdit] forbidden | seriesId=${series.id} userId=${userId} channelScopeType=${channelScopeType} isParticipant=${isParticipant}`,
+      );
+      return { allowed: false, status: 403, error: 'Only the organizer can edit this series' };
+    }
+
+    const editsBeyondParticipants =
+      edits.title !== undefined ||
+      edits.recurrenceRule !== undefined ||
+      edits.startTime !== undefined ||
+      edits.endTime !== undefined ||
+      edits.startsOn !== undefined ||
+      edits.endsOn !== undefined ||
+      edits.timezone !== undefined ||
+      edits.channelId !== undefined ||
+      edits.callUpdatesChannel !== undefined ||
+      edits.externalInvitees !== undefined;
+
+    if (editsBeyondParticipants || edits.targetUserIds === undefined) {
+      return {
+        allowed: false,
+        status: 403,
+        error: 'Participants can only change who is invited to this series',
+      };
+    }
+
+    const pinnedParticipantIds = seriesParticipants
+      .filter((p) => p.invitedBy !== userId)
+      .map((p) => p.userId);
     return { allowed: true, pinnedParticipantIds };
   }
 
@@ -517,7 +599,8 @@ export class ScheduleCallController {
    * PATCH /api/calls/:callId
    * Update a single SCHEDULED call instance (title, time, participants).
    * The organizer can edit every field. A non-organizer participant of a direct
-   * (DM/GROUP_DM-backed) call may only ADD people, and change nothing else.
+   * (DM/GROUP_DM-backed) call may only change the invite list — adding anyone, and
+   * removing only the people they themselves added — and nothing else.
    * Only SCHEDULED calls may be edited.
    */
   updateScheduledCall = async (req: Request, res: Response): Promise<void> => {
@@ -615,8 +698,11 @@ export class ScheduleCallController {
             req.user!.workspaceId!,
           );
         }
-        // callUpdatesChannel is orthogonal: apply the requested value, clearing it when omitted.
-        newCallUpdatesChannel = reqCallUpdatesChannel ?? null;
+        // callUpdatesChannel is orthogonal: apply the organizer's requested value, clearing it
+        // when they omit it. A participant editor may never send the field at all, so their
+        // silence must leave the organizer's choice alone instead of reading as "clear it".
+        newCallUpdatesChannel =
+          call.createdByUserId === userId ? (reqCallUpdatesChannel ?? null) : undefined;
         logger.info(`[updateScheduledCall] resolvedChannelId=${resolvedChannelId} newCallUpdatesChannel=${newCallUpdatesChannel}`);
       } else {
         logger.info(`[updateScheduledCall] no channel/participant change — keeping existing channelId=${call.channelId}`);
@@ -658,6 +744,7 @@ export class ScheduleCallController {
         channelId: resolvedChannelId,
         addUserIds,
         removeUserIds,
+        invitedByUserId: userId,
         callUpdatesChannel: newCallUpdatesChannel,
         externalInvitees: normalizedExternalInvitees,
       });
@@ -751,8 +838,10 @@ export class ScheduleCallController {
   /**
    * PATCH /api/calls/series/:seriesId
    * Update a recurring call series (title, recurrence rule, time, participants).
-   * Only the organizer can edit. Updates the series record and cascades title/time
-   * changes to ALL SCHEDULED instances in the series. If the recurrence rule or call times
+   * The organizer can edit every field. A non-organizer participant of a direct
+   * (DM/GROUP_DM-backed) series may only change the invite list — adding anyone, and
+   * removing only the people they themselves added. Updates the series record and cascades
+   * title/time changes to ALL SCHEDULED instances in the series. If the recurrence rule or call times
    * change, all SCHEDULED instances are deleted and regenerated.
    *
    * Scope: All SCHEDULED instances in the series are affected by series edits.
@@ -790,10 +879,35 @@ export class ScheduleCallController {
 
       logger.info(`[updateRecurringSeries] series found | currentChannelId=${series.channelId} organizerId=${series.organizerId}`);
 
-      if (series.organizerId !== userId) {
-        res.status(403).json({ success: false, error: 'Only the organizer can edit this series' });
+      const auth = await this.authorizeRecurringSeriesEdit({
+        series,
+        userId,
+        edits: {
+          title,
+          recurrenceRule,
+          startTime,
+          endTime,
+          endsOn,
+          timezone,
+          channelId: reqChannelId,
+          callUpdatesChannel: reqCallUpdatesChannel,
+          externalInvitees: normalizedExternalInvitees,
+          targetUserIds,
+        },
+      });
+      if (!auth.allowed) {
+        res.status(auth.status).json({ success: false, error: auth.error });
         return;
       }
+
+      // The frontend omits the viewer from `targetUserIds`, so fold the actor back in, along
+      // with the organizer and whatever the authorization pinned (see above).
+      const desiredParticipantIds =
+        targetUserIds !== undefined
+          ? Array.from(
+              new Set([...targetUserIds, ...auth.pinnedParticipantIds, userId, series.organizerId]),
+            )
+          : undefined;
 
       if (series.status === 'CANCELLED') {
         res.status(400).json({ success: false, error: 'Cannot edit a cancelled series' });
@@ -827,15 +941,20 @@ export class ScheduleCallController {
         } else if (targetUserIds !== undefined && targetUserIds.length > 0) {
           // Direct group call — create a GROUP_DM for the participants.
           logger.info(`[updateRecurringSeries] group call: creating GROUP_DM for targetUserIds=${JSON.stringify(targetUserIds)}`);
+          // Anchored on the organizer, not the actor: a participant editing the list must
+          // not drag the series onto their own DM/self-DM.
           resolvedChannelId = await repositories.channels.findOrCreateDMChannel(
-            userId,
-            targetUserIds,
+            series.organizerId,
+            desiredParticipantIds!.filter((id) => id !== series.organizerId),
             repositories.channelParticipants,
             req.user!.workspaceId!,
           );
         }
-        // callUpdatesChannel is orthogonal: apply the requested value, clearing it when omitted.
-        newCallUpdatesChannel = reqCallUpdatesChannel ?? null;
+        // callUpdatesChannel is orthogonal: apply the organizer's requested value, clearing it
+        // when they omit it. A participant editor may never send the field at all, so their
+        // silence must leave the organizer's choice alone instead of reading as "clear it".
+        newCallUpdatesChannel =
+          series.organizerId === userId ? (reqCallUpdatesChannel ?? null) : undefined;
         logger.info(`[updateRecurringSeries] resolvedChannelId=${resolvedChannelId} newCallUpdatesChannel=${newCallUpdatesChannel}`);
       } else {
         logger.info(`[updateRecurringSeries] no channelId change — keeping existing channelId=${series.channelId}`);
@@ -845,7 +964,7 @@ export class ScheduleCallController {
         targetUserIds !== undefined || resolvedChannelId !== undefined;
       const recurringParticipantUserIds = shouldReplaceRecurringInternalParticipants
         ? await this.resolveRecurringInternalParticipantUserIds({
-          targetUserIds,
+          targetUserIds: desiredParticipantIds,
           channelId: resolvedChannelId ?? series.channelId,
           logPrefix: '[updateRecurringSeries]',
         })
@@ -882,7 +1001,9 @@ export class ScheduleCallController {
         if (recurringParticipantUserIds !== undefined) {
           await repositories.recurringCallParticipants.replaceInternalParticipants({
             recurringSeriesId: seriesId,
-            organizerId: userId,
+            organizerId: series.organizerId,
+            // Credit the editor on rows they add, so they can remove them later.
+            invitedByUserId: userId,
             userIds: recurringParticipantUserIds,
             workspaceId: req.user!.workspaceId!,
             tx,
@@ -892,7 +1013,7 @@ export class ScheduleCallController {
         if (normalizedExternalInvitees !== undefined) {
           await repositories.recurringCallParticipants.replaceExternalInvitees({
             recurringSeriesId: seriesId,
-            organizerId: userId,
+            organizerId: series.organizerId,
             externalInvitees: normalizedExternalInvitees,
             workspaceId: req.user!.workspaceId!,
             tx,
@@ -1033,7 +1154,7 @@ export class ScheduleCallController {
           for (const instance of allScheduledInstances) {
             const { addUserIds, removeUserIds } = await this.resolveParticipantDelta(
               instance.id,
-              userId,
+              series.organizerId,
               recurringParticipantUserIds,
               effectiveChannelIdForDelta,
               `[updateRecurringSeries] instance=${instance.id}`,
@@ -1043,6 +1164,7 @@ export class ScheduleCallController {
                 callId: instance.id,
                 addUserIds: addUserIds.length > 0 ? addUserIds : undefined,
                 removeUserIds: removeUserIds.length > 0 ? removeUserIds : undefined,
+                invitedByUserId: userId,
               });
             }
           }
