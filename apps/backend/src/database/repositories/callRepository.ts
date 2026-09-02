@@ -18,6 +18,9 @@ import {
 
 export type { Call, CallParticipant };
 
+// Shorter channel calls skip post-call AI outputs (see getPostCallAiSkipReason).
+const MIN_CALL_DURATION_FOR_AI_SECONDS = 30;
+
 function parseRecordingParticipantIds(stored: string | null): string[] {
   if (!stored) return [];
   try {
@@ -347,6 +350,35 @@ export class CallRepository {
       WHERE "externalId" = ${externalId}
     `;
     return rowsUpdated > 0;
+  }
+
+  /**
+   * Why a channel call should get no post-call AI outputs, or null to proceed.
+   * Channel calls only: headless calls have no CallParticipant rows. A null
+   * endedAt (webhook race) never triggers the duration skip.
+   */
+  async getPostCallAiSkipReason(
+    call: Pick<Call, 'id' | 'startedAt' | 'endedAt'>,
+  ): Promise<{
+    reason: 'single_joined_participant' | 'call_too_short' | null;
+    joinedCount: number;
+    durationSeconds: number | null;
+  }> {
+    const joinedCount = await DatabaseClient.getInstance().callParticipant.count({
+      where: { callId: call.id, joinedAt: { not: null } },
+    });
+    const durationSeconds = call.endedAt
+      ? Math.max(0, (call.endedAt.getTime() - call.startedAt.getTime()) / 1000)
+      : null;
+
+    const reason =
+      joinedCount <= 1
+        ? 'single_joined_participant'
+        : durationSeconds !== null && durationSeconds < MIN_CALL_DURATION_FOR_AI_SECONDS
+          ? 'call_too_short'
+          : null;
+
+    return { reason, joinedCount, durationSeconds };
   }
 
   async updateRecordingParticipants(
