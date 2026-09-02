@@ -1,3 +1,20 @@
+## [1.261.0](https://github.com/juspay/xyne-spaces/compare/v1.260.0...v1.261.0) (2026-09-02)
+
+
+### Features
+
+* remove mixpanel, add posthog ([#1213](https://github.com/juspay/xyne-spaces/issues/1213)) ([f2fb48c](https://github.com/juspay/xyne-spaces/commit/f2fb48ca057e2bbb636cd1a759b487bf1d844a1d))
+
+
+### Bug Fixes
+
+* Investigate missed call summary display logic ([#1417](https://github.com/juspay/xyne-spaces/issues/1417)) ([6b4b2ca](https://github.com/juspay/xyne-spaces/commit/6b4b2cac1557f42cd5b3b54ea91f9fea0154fcca))
+
+
+### Reverts
+
+* Revert "feat: add ordered encryption key rotation (#764)" (#1265) ([4f113cd](https://github.com/juspay/xyne-spaces/commit/4f113cd16b93bc6fa8ab8bbc70c5e2038cb9c2b9)), closes [#764](https://github.com/juspay/xyne-spaces/issues/764) [#1265](https://github.com/juspay/xyne-spaces/issues/1265)
+
 ## [1.260.0](https://github.com/juspay/xyne-spaces/compare/v1.259.3...v1.260.0) (2026-09-02)
 
 
