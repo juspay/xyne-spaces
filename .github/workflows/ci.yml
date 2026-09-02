@@ -23,7 +23,6 @@ jobs:
   # packages consumed from their built dist/ — so they are compiled first.
   # ---------------------------------------------------------------------------
   backend:
-    if: false # temporarily disabled while isolating self-hosted runner testing
     name: Backend typecheck + build
     runs-on:  github-builds-runners
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
@@ -64,9 +63,8 @@ jobs:
   # Dashboard: depends on @xyne/shared and @xyne/icons, consumed from dist/.
   # ---------------------------------------------------------------------------
   dashboard:
-    if: false # temporarily disabled while isolating self-hosted runner testing
     name: Dashboard ${{ matrix.task }}
-    runs-on: [self-hosted, github-builds-runners]
+    runs-on: github-builds-runners
     strategy:
       fail-fast: false
       matrix:
