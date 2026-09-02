@@ -38,7 +38,6 @@ export class UnreadService {
           isRead: false,
         }, data: {
           isRead: true,
-          updatedAt: new Date().toISOString(),
         }
       });
 
@@ -108,7 +107,6 @@ export class UnreadService {
           isRead: false,
         }, data: {
           isRead: true,
-          updatedAt: new Date().toISOString(),
         }
       });
       const conversationSeenCutoffAt =

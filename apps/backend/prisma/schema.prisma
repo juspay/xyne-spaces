@@ -2455,7 +2455,7 @@ model Activity {
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
+  updatedAt       DateTime @default(now())  // Event timestamp; update only when activity content changes
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
