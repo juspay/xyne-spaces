@@ -1421,6 +1421,12 @@ export class ConfluenceImportService {
       },
     });
 
+    const ownersWorkspaceId = input.workspaceId;
+    if (!ownersWorkspaceId) {
+      throw new Error('workspaceId required: Confluence import config missing workspaceId');
+    }
+    await this.ensureCanvasOwners(canvasId, [lastEditorUserId], ownersWorkspaceId);
+
     await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[], lastEditorUserId);
   }
 

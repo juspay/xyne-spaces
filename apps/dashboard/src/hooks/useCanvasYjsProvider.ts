@@ -94,6 +94,14 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     prefetchedCanvas?.provider.awareness ?? null,
   );
 
+  const prefetchedProviderDestroyedRef = useRef(false);
+
+  useEffect(() => {
+    return (): void => {
+      doc.destroy();
+    };
+  }, [doc]);
+
   const hasConnectedOnceRef = useRef(false);
   const lastNotificationStatusRef = useRef<string>('');
   const localChangesTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -197,22 +205,33 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     }
   }, [authError]);
 
-  // Update read-only state when auth token changes
+  // Update read-only state when auth token changes. Only flip the visible
+  // isReadOnly flag while a provider actually exists — otherwise a token
+  // refresh that lands after the provider was torn down (e.g. by the
+  // authError effect above) would make the editor look editable while
+  // nothing is actually connected. permissionReadOnlyRef still always
+  // updates so a freshly (re)created provider picks up the right value.
   useEffect(() => {
     if (authTokenData) {
       const readOnly = authTokenData.authorization === 'read-only';
       permissionReadOnlyRef.current = readOnly;
-      setIsReadOnly(readOnly);
+      if (providerRef.current) {
+        setIsReadOnly(readOnly);
+      }
     }
   }, [authTokenData]);
 
   latestAuthTokenRef.current = authTokenData;
-  // Derived, not effect-driven state: two useEffects here (set true when the
-  // token arrives, reset false on canvasId change) both fire on mount, and
-  // when the token is already cached the reset can run after the set and
-  // win, permanently gating out provider creation for that mount. Deriving
-  // it during render has no such ordering to race.
-  const hasAuthToken = authTokenData?.docId === canvasId;
+  // Derived, not effect-driven state: gate on token presence, not on
+  // docId === canvasId — a legacy share-link canvas (viewAccessId/
+  // editAccessId in the URL) legitimately gets back a canonical docId that
+  // differs from canvasId, and that canvas must still connect.
+  const hasAuthToken = authTokenData !== undefined;
+  useEffect(() => {
+    if (authTokenData && !providerRef.current && hasConnectedOnceRef.current) {
+      setReconnectNonce(n => n + 1);
+    }
+  }, [authTokenData]);
 
   const getAuthToken = useCallback(async (): Promise<YSweetAuthToken> => {
     if (errorCountRef.current >= 5) {
@@ -226,7 +245,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   }, [refetch]);
 
   useEffect(() => {
-    if (prefetchedCanvas?.provider) {
+    if (prefetchedCanvas?.provider && !prefetchedProviderDestroyedRef.current) {
       const provider = prefetchedCanvas.provider;
       providerRef.current = provider;
       setAwareness(provider.awareness);
@@ -262,6 +281,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
             providerRef.current = null;
             setAwareness(null);
             setConnectionFailed(true);
+            prefetchedProviderDestroyedRef.current = true;
           }
           if (lastNotificationStatusRef.current !== 'error') {
             lastNotificationStatusRef.current = 'error';
@@ -419,7 +439,6 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       }
 
       setAwareness(null);
-      doc.destroy();
     };
   }, [doc, canvasId, hasAuthToken, getAuthToken, reconnectNonce]);
 

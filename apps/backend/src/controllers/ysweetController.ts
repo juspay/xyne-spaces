@@ -14,11 +14,16 @@ import { superpositionClient } from '@/services/superpositionClient';
  * primary as connection count scales, same pattern as analyticsRepository.
  */
 async function getValidateDbInstance() {
-  const useReadReplica = await superpositionClient.getBooleanValue(
-    'YSWEET_USE_READ_REPLICA',
-    false,
-    {}
-  );
+  let useReadReplica = false;
+  try {
+    useReadReplica = await superpositionClient.getBooleanValue(
+      'YSWEET_USE_READ_REPLICA',
+      false,
+      {}
+    );
+  } catch (error) {
+    logger.error('[YSweet] Failed to read YSWEET_USE_READ_REPLICA flag, defaulting to primary DB:', error);
+  }
   if (!useReadReplica) {
     return DatabaseClient.getInstance();
   }

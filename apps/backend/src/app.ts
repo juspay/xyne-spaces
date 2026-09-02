@@ -977,6 +977,18 @@ export class App {
       logger.warn('Continuing startup without Superposition client...');
     }
 
+    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate (requireYSweetServerToken
+    // fails closed with 401 if it's empty). A missing token here is silent at
+    // request time — every canvas connect and every 10s revalidation poll
+    // just 401s — so surface it loudly at boot instead. Warn, don't crash:
+    // an empty value is expected in local dev where nothing calls this route.
+    if (!config.ysweet.serverToken) {
+      logger.warn(
+        'Y_SWEET_SERVER_TOKEN is not set.' +
+          'if y-sweet auth validation is enabled in this environment, canvas collaboration will be down.'
+      );
+    }
+
     try {
       await registerAllExternalSources();
     } catch (error) {

@@ -72,6 +72,7 @@ interface WikiPageRecord {
   folderId: string | null;
   folder: { name: string } | null;
   metadata: Prisma.JsonValue;
+  createdBy: string;
 }
 
 interface WikiEntityRecord {
@@ -175,6 +176,7 @@ export class SdlcWikiPageStore {
         folderId: true,
         folder: { select: { name: true } },
         metadata: true,
+        createdBy: true,
       },
     });
     const entities = await this.entityRows(pages.map((page) => page.id));
@@ -1037,7 +1039,14 @@ export class SdlcWikiPageStore {
     }
 
     if (input.action.action !== 'archive') {
-      const synced = await this.dependencies.syncCanvas(canvas.id, content, input.actorId);
+      // Sync as the canvas's original creator, not the triggering actor —
+      // wiki canvases grant the whole repo channel VIEWER-only access by
+      // design (see sdlcChannelCanvasParticipant), so most actors triggering
+      // a sync legitimately lack canEdit. The creator always has canEdit via
+      // checkCanvasAccess's isCreator check, so this keeps the sync working
+      // once y-sweet revalidates the token's authorization level.
+      const syncActorId = existing?.createdBy ?? input.actorId;
+      const synced = await this.dependencies.syncCanvas(canvas.id, content, syncActorId);
       if (!synced) throw new AppError(`Y-Sweet sync failed for Wiki page: ${path}`, 503);
     }
     await this.dependencies.indexCanvas({
@@ -1101,6 +1110,7 @@ export class SdlcWikiPageStore {
         folderId: true,
         folder: { select: { name: true } },
         metadata: true,
+        createdBy: true,
       },
     });
     return (
