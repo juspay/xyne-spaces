@@ -1,8 +1,10 @@
 import { spawn } from "child_process"
 import { createHash } from "crypto"
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import path from "path"
+import { XMLBuilder, XMLParser } from "fast-xml-parser"
+import JSZip from "jszip"
 import pLimit from "p-limit"
 import { logger } from "@/utils/logger"
 import { storageService } from "@/services/storage"
@@ -40,6 +42,146 @@ const conversionLimit = pLimit(SOFFICE_MAX_CONCURRENCY)
 // file/collection id, just bytes), so content is the only key available.
 // Content-addressed and immutable, so entries never need to expire.
 const GCS_CACHE_PREFIX = "office-conversion-cache"
+
+// Untrusted documents can carry external "links" — linked images/OLE
+// objects, remote template refs — that LibreOffice resolves by default
+// when it opens a file, even in headless --convert-to mode. That resolution
+// is a real, exploited-in-the-wild bug class: Slack's 2019 unoconv incident
+// used exactly this (a linked object pointing at an internal/metadata URL,
+// or a file:// path) to get soffice to fetch/read content server-side and
+// render it back into the output PDF — SSRF and local file disclosure via
+// a perfectly well-formed document, no parser bug or macro needed.
+//
+// There's no --convert-to CLI flag for this (the fix is the UNO API's
+// UpdateDocMode=NO_UPDATE, only settable via scripting) — but each
+// conversion already gets a fresh, throwaway profile dir via
+// -env:UserInstallation, so seeding that profile's registrymodifications.xml
+// before soffice starts achieves the same thing: link/field updates and
+// macro execution are switched off before the document is ever opened.
+const HARDENED_PROFILE_REGISTRY = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+ <item oor:path="/org.openoffice.Office.Common/Load"><prop oor:name="UpdateLinksOnLoad" oor:op="fuse"><value>0</value></prop></item>
+ <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+ <item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
+</oor:items>
+`
+
+async function seedHardenedProfile(profileDir: string): Promise<void> {
+    const userDir = path.join(profileDir, "user")
+    await mkdir(userDir, { recursive: true })
+    await writeFile(path.join(userDir, "registrymodifications.xml"), HARDENED_PROFILE_REGISTRY)
+}
+
+function asArray<T>(value: T | T[] | undefined): T[] {
+    if (value == null) return []
+    return Array.isArray(value) ? value : [value]
+}
+
+const RELS_XML_PARSER = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" })
+const RELS_XML_BUILDER = new XMLBuilder({
+    ignoreAttributes: false,
+    attributeNamePrefix: "@_",
+    suppressEmptyNode: true,
+})
+
+// Modern Office formats (pptx/docx/xlsx) are zips whose *.rels parts declare
+// every external reference a document part can carry — linked images, linked
+// OLE objects, external chart data sources, remote template refs. This is
+// the exact mechanism the registry hardening above defends against (Slack's
+// 2019 unoconv SSRF/LFD incident), but that hardening relies on trusting
+// which of LibreOffice's internal resolution paths a given registry key
+// actually governs — and testing against our own hand-built PoC couldn't
+// confirm that for every link type. Neutralizing every External
+// relationship's Target here is a stronger, more directly verifiable
+// guarantee: there is no URL/file path left anywhere in the package for any
+// LibreOffice code path — known or not yet discovered — to resolve.
+//
+// Complementary to, not a replacement for, the registry hardening: this only
+// covers the OPC-relationship mechanism (modern .pptx/.docx/.xlsx), not
+// legacy binary .ppt/.doc/.xls (a completely different, non-zip container
+// format where "linked object" references live in binary compound-file
+// streams instead). Non-zip input falls through unchanged below — the
+// registry hardening is what still covers that case.
+interface StrippedReference {
+    part: string
+    relationshipId: string
+    type: string
+    target: string
+}
+
+async function stripExternalReferences(
+    buffer: Buffer,
+    contentHash: string,
+    originalFilename: string,
+): Promise<Buffer> {
+    let zip: JSZip
+    try {
+        zip = await JSZip.loadAsync(buffer)
+    } catch {
+        return buffer
+    }
+
+    let changed = false
+    const stripped: StrippedReference[] = []
+    const relsFiles = zip.file(/\.rels$/)
+
+    for (const entry of relsFiles) {
+        const xml = await entry.async("text")
+        let parsed: Record<string, unknown>
+        try {
+            parsed = RELS_XML_PARSER.parse(xml)
+        } catch {
+            continue
+        }
+
+        const relationshipsNode = (parsed?.Relationships as Record<string, unknown>)?.Relationship
+        const relationships = asArray(relationshipsNode as Record<string, string> | Record<string, string>[])
+        if (relationships.length === 0) continue
+
+        let fileChanged = false
+        for (const rel of relationships) {
+            if (rel["@_TargetMode"] === "External") {
+                // Every relationship type (image, oleObject, attachedTemplate,
+                // externalLinkPath, ...) carries its outbound reference the
+                // same way, so this isn't filtered by @_Type — anything
+                // TargetMode="External" is, by definition, a reference that
+                // would take soffice outside the package.
+                stripped.push({
+                    part: entry.name,
+                    relationshipId: rel["@_Id"] ?? "",
+                    type: (rel["@_Type"] ?? "").split("/").pop() ?? rel["@_Type"] ?? "",
+                    target: rel["@_Target"] ?? "",
+                })
+                rel["@_Target"] = ""
+                delete rel["@_TargetMode"]
+                fileChanged = true
+            }
+        }
+        if (!fileChanged) continue
+
+        ;(parsed.Relationships as Record<string, unknown>).Relationship = relationships
+        zip.file(entry.name, RELS_XML_BUILDER.build(parsed) as string)
+        changed = true
+    }
+
+    if (!changed) return buffer
+
+    // Compliance/audit trail — every uploaded document that shipped an
+    // external reference, with enough detail (which part, what kind, what it
+    // pointed at) to answer "did we ever process a file that tried to reach
+    // <url>" after the fact, not just "sanitization ran."
+    logger.warn("[OfficeConversion] Stripped external references before conversion", {
+        contentHash,
+        originalFilename,
+        strippedCount: stripped.length,
+        stripped,
+    })
+
+    // Match the original archive's DEFLATE compression — the default
+    // (STORE, uncompressed) would otherwise silently bloat every sanitized
+    // file by ~3x on its way into the GCS cache.
+    return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
+}
 
 export class OfficeConversionError extends Error {
     constructor(
@@ -114,7 +256,9 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
     const outputPath = path.join(workDir, "input.pdf")
 
     try {
-        await writeFile(inputPath, buffer)
+        const sanitizedBuffer = await stripExternalReferences(buffer, contentHash, originalFilename)
+        await writeFile(inputPath, sanitizedBuffer)
+        await seedHardenedProfile(profileDir)
 
         await conversionLimit(() => new Promise<void>((resolve, reject) => {
             const args = [
