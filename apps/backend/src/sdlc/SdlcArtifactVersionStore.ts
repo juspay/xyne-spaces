@@ -1,5 +1,10 @@
 import { createHash } from 'crypto';
-import { isBaselineCanvasType, parseSdlcSourcePaths, parseSdlcSourceReferences } from '@xyne/shared';
+import {
+  isBaselineCanvasType,
+  parseSdlcSourcePaths,
+  parseSdlcSourceReferences,
+  SDLC_MEMBERSHIP_RELATION,
+} from '@xyne/shared';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -27,7 +32,7 @@ interface ResolvedArtifact {
   canvasId: string;
   title: string;
   path: string | null;
-  artifactKind: 'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC';
+  artifactKind: 'WIKI' | 'BASELINE' | 'ARTIFACT';
   archived: boolean;
   content: Prisma.JsonValue | null;
 }
@@ -53,10 +58,9 @@ function wikiActionFromVersionName(name: string): WikiRevisionEvidence['action']
 function artifactKindForCanvasType(
   artifactType: string | null | undefined
 ): ResolvedArtifact['artifactKind'] | null {
-  if (artifactType === 'WIKI' || artifactType === 'PRD' || artifactType === 'TECH_DOC') {
-    return artifactType;
-  }
-  return isBaselineCanvasType(artifactType) ? 'BASELINE' : null;
+  if (!artifactType) return null;
+  if (artifactType === 'WIKI') return 'WIKI';
+  return isBaselineCanvasType(artifactType) ? 'BASELINE' : 'ARTIFACT';
 }
 
 function shortCommitRef(commitSha: string): string {
@@ -127,7 +131,7 @@ export class SdlcArtifactVersionStore {
     repoId: string;
     workspaceId: string;
     userId: string;
-    kinds?: Array<'WIKI' | 'BASELINE' | 'PRD' | 'TECH_DOC'>;
+    kinds?: Array<'WIKI' | 'BASELINE' | 'ARTIFACT'>;
     includeArchived?: boolean;
   }) {
     const repo = await this.requireRepository(input);
@@ -136,7 +140,9 @@ export class SdlcArtifactVersionStore {
         channelId: repo.channelId,
         workspaceId: input.workspaceId,
         projectId: repo.projectId,
-        sdlcArtifact: { is: { artifactStatus: { not: 'REFRESH_CANDIDATE' } } },
+        // A hub can cover several repositories, so the artifact's repository is part of
+        // what identifies it, not just the channel it renders in.
+        sdlcArtifact: { is: { repoId: repo.id, artifactStatus: { not: 'REFRESH_CANDIDATE' } } },
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       select: {
@@ -309,7 +315,7 @@ export class SdlcArtifactVersionStore {
             channelId: repo.channelId,
             workspaceId: input.workspaceId,
             projectId: repo.projectId,
-            sdlcArtifact: { is: { artifactType: 'WIKI' } },
+            sdlcArtifact: { is: { artifactType: 'WIKI', repoId: repo.id } },
           },
           select: {
             id: true,
@@ -332,7 +338,7 @@ export class SdlcArtifactVersionStore {
             channelId: repo.channelId,
             workspaceId: input.workspaceId,
             projectId: repo.projectId,
-            sdlcArtifact: { is: { artifactType: { not: 'DEFAULT' } } },
+            sdlcArtifact: { is: { repoId: repo.id, artifactType: { not: 'DEFAULT' } } },
           },
           select: {
             id: true,
@@ -383,18 +389,29 @@ export class SdlcArtifactVersionStore {
     workspaceId: string;
     userId: string;
   }) {
-    const repo = await this.prisma.repo.findFirst({
-      where: {
-        id: input.repoId,
-        workspaceId: input.workspaceId,
-        projectId: { not: null },
-        channelId: { not: null },
-        channel: { participants: { some: { userId: input.userId } } },
-      },
-      select: { id: true, channelId: true, projectId: true },
-    });
-    if (!repo?.channelId || !repo.projectId) throw new AppError('SDLC artifact not found', 404);
-    return { ...repo, channelId: repo.channelId, projectId: repo.projectId };
+    const [repo, membership] = await Promise.all([
+      this.prisma.repo.findFirst({
+        where: { id: input.repoId, workspaceId: input.workspaceId, projectId: { not: null } },
+        select: { id: true, projectId: true },
+      }),
+      // Membership is the read check: the actor must participate in a hub this
+      // repository belongs to.
+      this.prisma.sdlcEntityLink.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          targetType: 'REPOSITORY',
+          targetId: input.repoId,
+          relationType: SDLC_MEMBERSHIP_RELATION,
+          channel: { participants: { some: { userId: input.userId } } },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { channelId: true },
+      }),
+    ]);
+    if (!repo?.projectId || !membership?.channelId) {
+      throw new AppError('SDLC artifact not found', 404);
+    }
+    return { id: repo.id, channelId: membership.channelId, projectId: repo.projectId };
   }
 
   private async loadWikiEvidence(
@@ -403,7 +420,6 @@ export class SdlcArtifactVersionStore {
   ): Promise<Map<string, RevisionRecord>> {
     const links = await this.prisma.sdlcEntityLink.findMany({
       where: {
-        repoId,
         sourceType: 'REPOSITORY',
         sourceId: repoId,
         targetType: 'WORKFLOW_EXECUTION',

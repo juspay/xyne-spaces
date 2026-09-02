@@ -1,10 +1,14 @@
 /**
  * CloneAgentDialog — prompts for the new agent's name before cloning.
  *
- * A clone copies only the system prompt, tools, and skills into a new personal
- * agent. Owners/contributors/admins get an instant copy; everyone else raises
- * an approval request (the chosen name is carried through and applied when the
- * owner approves). The parent owns the actual clone call + navigation.
+ * A clone copies the prompt, tools, skills, behaviour settings and
+ * knowledge-base grants into a new personal agent. Saved integration
+ * credentials come across only when you already own the source — cloning
+ * someone else's agent never copies their credentials, so the copy describes
+ * itself differently in those two cases. Owners/contributors/admins get an
+ * instant copy; everyone else raises an approval request (the chosen name is
+ * carried through and applied when the owner approves). The parent owns the
+ * actual clone call + navigation.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -20,6 +24,12 @@ interface CloneAgentDialogProps {
   sourceName: string;
   /** True when the viewer can't edit → cloning raises an approval request. */
   needsApproval: boolean;
+  /** True when the viewer already owns the source, the only case where its
+   *  saved integration credentials travel with the copy. */
+  isOwnAgent: boolean;
+  /** Source's enabled state — mirrored onto the copy, so a paused source makes
+   *  a paused copy and the dialog has to say so or the copy looks broken. */
+  sourceEnabled: boolean;
   /** In-flight flag from the parent (disables inputs + button). */
   submitting: boolean;
   /** Called with the chosen name when the user confirms. */
@@ -33,6 +43,8 @@ export function CloneAgentDialog({
   onOpenChange,
   sourceName,
   needsApproval,
+  isOwnAgent,
+  sourceEnabled,
   submitting,
   onConfirm,
 }: CloneAgentDialogProps) {
@@ -98,7 +110,9 @@ export function CloneAgentDialog({
       description={
         needsApproval
           ? "You'll send a request to this agent's owner. Your chosen name is used when they approve."
-          : "Creates your own copy — the system prompt, tools, and skills. Credentials and knowledge-base grants are not copied."
+          : isOwnAgent
+            ? "Creates your own copy — prompt, tools, skills, knowledge base and your integrations all come across. Its Spaces identity and sharing do not."
+            : "Creates your own copy — prompt, tools, skills and knowledge-base grants come across. You'll connect your own credentials for its integrations."
       }
       maxWidth={520}
       footer={
@@ -161,7 +175,9 @@ export function CloneAgentDialog({
         <div className="mt-1 flex items-start gap-2 rounded-lg border border-xyne-border-subtle px-3 py-2 text-[11px] text-xyne-fg-tertiary">
           <CopyIcon size={12} className="mt-[1px] shrink-0" />
           <span>
-            The copy starts with no model selected — you'll pick one before its first run.
+            {sourceEnabled
+              ? "The copy starts with no model selected — you'll pick one before its first run."
+              : "This agent is paused, so your copy starts paused too — enable it when you're ready."}
           </span>
         </div>
       </div>

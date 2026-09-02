@@ -12,7 +12,7 @@ import SearchResultItem from '../../ChatDirectory/SearchResultItem';
 import { ChannelCategory } from '../../ChatDirectory/ChatDirectory.types';
 import {
   groupChannelsByScope,
-  getDMSearchableNames,
+  getDMNames,
   isDMChannel,
   isGroupDMChannel,
   getDMParticipantIdsToFetch,
@@ -176,12 +176,15 @@ export const ContextPicker = ({
       channel: Channel;
       category: ChannelCategory;
       searchableNames?: string[];
+      searchNames?: string[];
     }> = [];
     sortByActivity(grouped.starred).forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
     sortByActivity([...grouped.channels, ...deskChannels]).forEach(channel => {
@@ -192,10 +195,12 @@ export const ContextPicker = ({
       });
     });
     sortByActivity(grouped.directMessages).forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
     return result;

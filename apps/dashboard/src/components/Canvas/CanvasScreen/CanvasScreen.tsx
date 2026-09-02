@@ -30,6 +30,7 @@ import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import {
+  AudioLines,
   ArrowLeft,
   Archive,
   CheckCircle,
@@ -87,6 +88,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
+import { getRecordingCanvasCallId } from '../canvasFilters';
 import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
@@ -118,6 +120,10 @@ interface CanvasScreenProps {
   onToggleFullscreen?: () => void;
   showAskAiAction?: boolean;
 }
+
+// Latency thresholds (ms) above which a canvas load/save is flagged slow.
+const CANVAS_LOAD_SLOW_MS = 3000;
+const CANVAS_SAVE_SLOW_MS = 4000;
 
 const getCanvasRolePriority = (role: CanvasRole): number => {
   switch (role) {
@@ -246,6 +252,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const initializedCanvasIdRef = useRef<string | null>(null); // Track which canvas has been initialized to avoid overwriting local edits
   const previousAccessLevelRef = useRef<CanvasRole | undefined>(undefined);
   const isFirstAccessLevelComputeRef = useRef(true);
+  // Canvas load timing: track start per canvasId and whether completion was reported.
+  const loadStartRef = useRef<{ id: string; startedAt: number } | null>(null);
+  const loadReportedIdRef = useRef<string | null>(null);
+  const navStateLoggedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     titleRef.current = currentTitle;
@@ -264,14 +274,63 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     setShowVersionHistory(false);
   }, [selectedCanvas?.id]);
 
+  // Canvas load timing — start the clock whenever a real canvasId becomes active.
+  useEffect(() => {
+    if (!canvasId || canvasId === 'new') return;
+    if (loadStartRef.current?.id === canvasId) return;
+
+    loadStartRef.current = { id: canvasId, startedAt: performance.now() };
+    loadReportedIdRef.current = null;
+    logger.info(Event.CANVAS_LOAD_STARTED, {
+      canvasId,
+      hadNavState: (state as LocationState)?.canvas?.id === canvasId,
+    });
+  }, [canvasId, state]);
+
+  // Canvas load timing — report completion once the backing query resolves.
+  useEffect(() => {
+    if (!canvasId || canvasId === 'new') return;
+    if (singleCanvasDetails.type !== 'complete') return;
+    if (loadReportedIdRef.current === canvasId) return;
+    if (loadStartRef.current?.id !== canvasId) return;
+
+    loadReportedIdRef.current = canvasId;
+    const durationMs = Math.round(performance.now() - loadStartRef.current.startedAt);
+    const found = !!singleCanvas;
+
+    logger.info(Event.CANVAS_LOAD_COMPLETE, { canvasId, durationMs, found });
+    if (durationMs > CANVAS_LOAD_SLOW_MS) {
+      logger.warn(Event.CANVAS_LOAD_SLOW, {
+        canvasId,
+        durationMs,
+        thresholdMs: CANVAS_LOAD_SLOW_MS,
+        found,
+      });
+    }
+    if (!found) {
+      logger.warn(Event.CANVAS_LOAD_EMPTY, { canvasId, durationMs });
+    }
+  }, [canvasId, singleCanvas, singleCanvasDetails.type]);
+
   // Handle single canvas data sync
   useEffect(() => {
     // Use canvas from navigation state if available (for newly created canvases)
     const canvasFromState = (state as LocationState)?.canvas;
-    const shouldUseState = canvasFromState && canvasFromState.id === canvasId && !singleCanvas;
+    const shouldUseState =
+      canvasFromState &&
+      canvasFromState.id === canvasId &&
+      (!singleCanvas || singleCanvasDetails.type !== 'complete');
 
     if (shouldUseState) {
       const isNewCanvas = initializedCanvasIdRef.current !== canvasFromState.id;
+      if (navStateLoggedIdRef.current !== canvasFromState.id) {
+        navStateLoggedIdRef.current = canvasFromState.id;
+        logger.info(Event.CANVAS_LOAD_FROM_STATE, {
+          canvasId: canvasFromState.id,
+          isNewCanvas,
+          queryReady: singleCanvasDetails.type === 'complete',
+        });
+      }
       setSelectedCanvas(canvasFromState);
       if (isNewCanvas) {
         setCurrentTitle(canvasFromState.title);
@@ -656,11 +715,24 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       // Prevent concurrent saves, but queue the latest state
       if (isSavingRef.current) {
         hasPendingSaveRef.current = true;
+        logger.info(Event.CANVAS_SAVE_BLOCKED, {
+          canvasId: canvas?.id ?? null,
+          reason: 'in_progress',
+        });
         return;
       }
 
+      // Set ref synchronously so re-entrant calls within the same tick are blocked
+      isSavingRef.current = true;
+
       // Always read the latest title from ref to prevent stale state
       const titleToSave = titleRef.current;
+      const saveStartedAt = performance.now();
+
+      logger.info(Event.CANVAS_SAVE_STARTED, {
+        canvasId: canvas?.id ?? null,
+        blockCount: blocks.length,
+      });
 
       try {
         setIsSaving(true);
@@ -678,18 +750,42 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
           // Update saved state tracker
           lastSavedContentRef.current = JSON.stringify(blocks);
 
+          const durationMs = Math.round(performance.now() - saveStartedAt);
+          logger.info(Event.CANVAS_SAVE_COMPLETE, {
+            canvasId: canvas.id,
+            blockCount: blocks.length,
+            durationMs,
+          });
+          if (durationMs > CANVAS_SAVE_SLOW_MS) {
+            logger.warn(Event.CANVAS_SAVE_SLOW, {
+              canvasId: canvas.id,
+              durationMs,
+              thresholdMs: CANVAS_SAVE_SLOW_MS,
+            });
+          }
+
           // Mention notifications are now event-based (on @ selection), not on save
+        } else {
+          logger.warn(Event.CANVAS_SAVE_SKIPPED_NO_CANVAS, { canvasId: null });
         }
-      } catch {
+      } catch (error) {
+        logger.error(Event.CANVAS_SAVE_FAILED, {
+          canvasId: canvas?.id ?? null,
+          error: error instanceof Error ? error.message : String(error),
+        });
         toast.error('Error', {
           description: 'Failed to save canvas. Please check your connection and try again.',
         });
       } finally {
+        isSavingRef.current = false;
         setIsSaving(false);
 
         // If changes occurred while saving, save again immediately
         if (hasPendingSaveRef.current && latestContentRef.current) {
           hasPendingSaveRef.current = false;
+          logger.info(Event.CANVAS_SAVE_RERUN_QUEUED, {
+            canvasId: selectedCanvasRef.current?.id ?? null,
+          });
           void performSave(latestContentRef.current, selectedCanvasRef.current);
         }
       }
@@ -705,6 +801,17 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const handleSave = useCallback(
     (blocks: PartialBlock[], html?: string): void => {
+      logger.info(Event.CANVAS_SAVE_REQUESTED, {
+        canvasId: selectedCanvas?.id ?? null,
+        blockCount: blocks.length,
+      });
+      // Skip save if content hasn't changed since last save
+      if (JSON.stringify(blocks) === lastSavedContentRef.current) {
+        logger.info(Event.CANVAS_SAVE_SKIPPED_UNCHANGED, {
+          canvasId: selectedCanvas?.id ?? null,
+        });
+        return;
+      }
       void performSave(blocks, selectedCanvas, html);
     },
     [performSave, selectedCanvas],
@@ -713,6 +820,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const handleTitleSave = useCallback((): void => {
     if (!selectedCanvas?.id || !canEdit || currentTitle === selectedCanvas.title) return;
 
+    logger.info(Event.CANVAS_TITLE_SAVED, { canvasId: selectedCanvas.id });
     z.mutate(
       mutators.canvas.update({
         id: selectedCanvas.id,
@@ -756,8 +864,21 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
     const canvasToUpdate = selectedCanvasRef.current;
     hasPendingCollaborativeTimestampRef.current = false;
-    if (!canvasToUpdate?.id || !canEditRef.current) return;
+    if (!canvasToUpdate?.id || !canEditRef.current) {
+      logger.info(Event.CANVAS_AUTOSAVE_TRIGGERED, {
+        canvasId: canvasToUpdate?.id ?? null,
+        mode: 'collaborative',
+        flushed: false,
+        reason: !canvasToUpdate?.id ? 'no_canvas' : 'no_edit_access',
+      });
+      return;
+    }
 
+    logger.info(Event.CANVAS_AUTOSAVE_TRIGGERED, {
+      canvasId: canvasToUpdate.id,
+      mode: 'collaborative',
+      flushed: true,
+    });
     z.mutate(
       mutators.canvas.update({
         id: canvasToUpdate.id,
@@ -840,6 +961,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const isKnowledgeCanvas =
     selectedCanvas?.metadata &&
     (selectedCanvas.metadata as KnowledgeCanvasMetadata).source === 'workflow_knowledge';
+  const isCallDetailedSummaryCanvas =
+    selectedCanvas?.metadata &&
+    typeof selectedCanvas.metadata === 'object' &&
+    !Array.isArray(selectedCanvas.metadata) &&
+    selectedCanvas.metadata.source === 'call_detailed_summary';
 
   // Handle knowledge approval
   const handleApproveKnowledge = async (): Promise<void> => {
@@ -972,6 +1098,15 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       canvasInfo,
     });
   };
+
+  const recordingCallId = selectedCanvas ? getRecordingCanvasCallId(selectedCanvas) : null;
+  const handleOpenRecordingNotes = useCallback((): void => {
+    if (!recordingCallId) return;
+
+    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+      state: { from: `${location.pathname}${location.search}` },
+    });
+  }, [location.pathname, location.search, navigate, recordingCallId]);
 
   const handleExportMarkdown = useCallback((): void => {
     void (async (): Promise<void> => {
@@ -1244,6 +1379,24 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           <Share01 size={16} className='shrink-0 opacity-60' />
                         </button>
 
+                        {recordingCallId && (
+                          <button
+                            type='button'
+                            onClick={handleOpenRecordingNotes}
+                            className={`${headerIconButtonClass} bg-muted text-muted-foreground hover:bg-border hover:text-foreground`}
+                            title='Open recording notes'
+                            aria-label='Open recording notes'
+                            data-track-category='CANVAS'
+                            data-track-name='Open_Recording_Notes_From_Canvas'
+                            data-track-metadata={JSON.stringify({
+                              canvasId: selectedCanvas.id,
+                              recordingId: recordingCallId,
+                            })}
+                          >
+                            <AudioLines size={16} strokeWidth={2.2} className='shrink-0' />
+                          </button>
+                        )}
+
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
                           {showAskAiAction && (
@@ -1315,6 +1468,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                   <DropdownMenuItem
                                     className='gap-2'
                                     onClick={handleExportMarkdown}
+                                    data-track-category='CANVAS'
+                                    data-track-name='EXPORT_MARKDOWN'
                                     data-testid='canvas-export-markdown'
                                   >
                                     <Markdown size={16} className='shrink-0' />
@@ -1323,6 +1478,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                   <DropdownMenuItem
                                     className='gap-2'
                                     onClick={handleExportPdf}
+                                    data-track-category='CANVAS'
+                                    data-track-name='EXPORT_PDF'
                                     data-testid='canvas-export-pdf'
                                   >
                                     <File02PdfFormat size={16} className='shrink-0' />
@@ -1336,6 +1493,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 onClick={() => {
                                   editorRef.current?.handlePresent();
                                 }}
+                                data-track-category='CANVAS'
+                                data-track-name='PRESENT_CANVAS'
                                 data-testid='canvas-present-item'
                               >
                                 <PlaySquare size={16} className='shrink-0' />
@@ -1356,6 +1515,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                         setSelectedTheme(theme.value);
                                         editorRef.current?.handleThemeChange(theme.value);
                                       }}
+                                      data-track-category='CANVAS'
+                                      data-track-name='SELECT_CANVAS_THEME'
                                     >
                                       <span className='flex-1 truncate'>{theme.label}</span>
                                       {selectedTheme === theme.value && (
@@ -1453,7 +1614,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   <span className='font-medium text-foreground'>{previewUpdatedAtText}</span>
                 </div>
                 <div className='flex items-center gap-2'>
-                  <Button variant='secondary' size='sm' onClick={handleBackToCurrentVersion}>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    onClick={handleBackToCurrentVersion}
+                    data-track-category='CANVAS'
+                    data-track-name='BACK_TO_CURRENT_VERSION'
+                  >
                     Back to current
                   </Button>
                   {hasVersionDiff && (
@@ -1461,6 +1628,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       variant={showVersionDiff ? 'default' : 'secondary'}
                       size='sm'
                       onClick={() => setShowVersionDiff(prev => !prev)}
+                      data-track-category='CANVAS'
+                      data-track-name='TOGGLE_VERSION_DIFF'
                       aria-pressed={showVersionDiff}
                     >
                       <GitCompare size={14} />
@@ -1472,6 +1641,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       variant='default'
                       size='sm'
                       onClick={() => void handleRestoreVersion(previewVersion)}
+                      data-track-category='CANVAS'
+                      data-track-name='RESTORE_CANVAS_VERSION'
                       loading={restoringVersionId === previewVersion.id}
                     >
                       <RotateCcw size={14} />
@@ -1524,6 +1695,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   title={currentTitle}
                   editable={canEdit}
                   placeholder='Start writing your canvas...'
+                  className={cn(isCallDetailedSummaryCanvas && 'recording-summary-canvas-editor')}
+                  trackEditedRecordingSummaryBlocks={Boolean(isCallDetailedSummaryCanvas)}
                   onFileUpload={handleFileUpload}
                   onChange={handleCollaborativeContentChange}
                   onCollaboratorsChange={handleCollaboratorsChange}
@@ -1618,6 +1791,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               onFilterChange={setActiveFilter}
               paginated={true}
             />
+          </div>
+        ) : singleCanvasDetails.type !== 'complete' ? (
+          <div className='h-full w-full flex items-center justify-center bg-muted'>
+            <div className='flex flex-col items-center gap-3'>
+              <Loader2 className='w-8 h-8 animate-spin text-muted-foreground' />
+              <span className='text-sm text-muted-foreground'>Loading canvas...</span>
+            </div>
           </div>
         ) : (
           <div

@@ -9,6 +9,7 @@ import {
   type NavigationItem,
 } from '../components/AppSidebar/navigationConfig';
 import { useClawDashboardVisibility } from './useClawDashboardVisibility';
+import { useDisabledToolbarPaths } from './useDisabledToolbarPaths';
 
 // Navigation items the current user is allowed to see, in canonical order.
 export const useVisibleNavigationItems = (): NavigationItem[] => {
@@ -20,6 +21,7 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
   );
   const { showClawDashboard } = useClawDashboardVisibility();
   const isGuest = user?.role === WorkspaceRole.GUEST;
+  const disabledToolbarPaths = useDisabledToolbarPaths();
 
   return useMemo(() => {
     const permittedItems = filterNavItemsByPermission(
@@ -32,7 +34,9 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
     const withoutGuestBlocked = isGuest
       ? permittedItems.filter(item => item.path !== '/claw-agents')
       : permittedItems;
-    if (showClawDashboard) return withoutGuestBlocked;
-    return withoutGuestBlocked.filter(item => item.path !== '/claw-agents');
-  }, [permissions, canManageOwnUserGroups, showClawDashboard, isGuest]);
+    const visibleItems = showClawDashboard
+      ? withoutGuestBlocked
+      : withoutGuestBlocked.filter(item => item.path !== '/claw-agents');
+    return visibleItems.filter(item => !disabledToolbarPaths.has(item.path));
+  }, [permissions, canManageOwnUserGroups, showClawDashboard, isGuest, disabledToolbarPaths]);
 };

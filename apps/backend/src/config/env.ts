@@ -6,6 +6,12 @@ dotenv.config();
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
 const envSchema = Joi.object({
+  // Legacy AES-256-CBC key used for unversioned ciphertext.
+  ENCRYPTION_KEY: Joi.string().allow('').optional(),
+  // Ordered JSON key ring. The final entry is the active writer;
+  // all entries remain available for decryption.
+  ENCRYPTION_KEYS: Joi.string().allow('').optional(),
+
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
@@ -82,6 +88,16 @@ const envSchema = Joi.object({
   // Google Cloud Storage Configuration (Workload Identity)
   GCS_PROJECT_ID: Joi.string().allow('').default(''),
   GCS_BUCKET_NAME: Joi.string().allow('').default(''),
+  MIGRATION_GCS_BUCKET: Joi.string().allow('').default(''),
+  MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
+  MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
+  RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
+  MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(250),       // pause between paged Slack calls during collection (SDK still honors Retry-After on 429)
+  MIGRATION_SLACK_LIST_DELAY_MS: Joi.number().default(3000),      // pause between Tier-2 list pages (conversations.list/users.list ≈ 20/min) to stay under the limit
+  MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(600000),  // per-attachment download timeout (~10 min: enough for Slack's 1GB max at ~3MB/s)
+  MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
+  MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
+  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -100,10 +116,28 @@ const envSchema = Joi.object({
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+  ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
+  // One switch for the whole feature, read by both processes: the API gates
+  // its producer on it, the worker gates its drain loop on it. A separate
+  // worker flag only bought states that are a no-op or actively bad (enqueuing
+  // with nothing draining), and idling the worker alone is a replicas:0
+  // decision, not a config one. Toggling loses nothing — watermarks persist,
+  // so the next enqueue replays everything above them.
+  ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
+  RADAR_PARSER_MODEL: Joi.string().default('open-fast'),
+  RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // Kept as a knob deliberately: this is the hard ceiling on how much text can
+  // enter one parse, so it is the emergency brake on parser spend.
+  RADAR_MAX_WINDOW_MESSAGES: Joi.number().integer().min(1).default(200),
+  RADAR_EXECUTION_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
+  RADAR_RUN_LOG_RETENTION_DAYS: Joi.number().integer().min(1).default(3),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
+  TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
+  TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
+  TEAM_INTELLIGENCE_ORG_JOB_CONCURRENCY: Joi.number().integer().min(1).default(1),
   ENABLE_TAG_GENERATION_PIPELINE: Joi.boolean().default(false),
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
@@ -192,11 +226,12 @@ const envSchema = Joi.object({
   APNS_P8_BASE64: Joi.string().allow('').default(''),
   // Y-Sweet Configuration
   Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
+  Y_SWEET_SERVER_TOKEN: Joi.string().allow('').default(''),
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
   ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
-  ENTITY_EXTRACTION_MODEL: Joi.string().default('glm-private'),
+  ENTITY_EXTRACTION_MODEL: Joi.string().default('open-fast'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
   // How long a thread's job sits delayed before it runs. This is the debounce
   // window: every message on the thread inside it collapses into one job, so a
@@ -222,9 +257,15 @@ const envSchema = Joi.object({
   IMAGE_GENERATION_ENDPOINT: Joi.string().default(''),
   IMAGE_GENERATION_MODEL: Joi.string().default(''),
   ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // Dedicated LiteLLM key for thread-type classification; falls back to the org's when unset.
+  THREAD_TYPE_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // LiteLLM config specifically for call features (transcript summary, PRD, detailed summary)
   CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
   CALL_LITELLM_MODEL: Joi.string().default(''),
+  // Per-user "fast" / "thinking" model tiers for recording summary generation.
+  // Same CALL_LITELLM_API_KEY for both; both fall back to CALL_LITELLM_MODEL.
+  CALL_RECORDING_FAST_LITELLM_MODEL: Joi.string().allow('').default(''),
+  CALL_RECORDING_THINKING_LITELLM_MODEL: Joi.string().allow('').default(''),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default('0 2 * * *'),
   PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
@@ -233,17 +274,30 @@ const envSchema = Joi.object({
   WORKING_HOUR_END: Joi.number().default(19),
   ENABLE_NOTIFICATION_WORKER: Joi.boolean().default(false),
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
+  // What the dedicated classification key serves.
+  MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
+  ENABLE_DESK_REPORT_SCHEDULER: Joi.boolean().default(true),
+  DESK_REPORT_GENERATION_CRON: Joi.string().default('30 22 * * *'), //4:00 IST daily
+  DESK_REPORT_CLEANUP_CRON: Joi.string().default('30 21 * * *'), //3:00 IST daily
+  DESK_REPORT_RETENTION_DAYS: Joi.number().default(3),
   RECENT_VISITED_LOOKBACK_DAYS: Joi.number().integer().min(1).default(7),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
   TICKET_DESC_CLEAN_MAX_RETRIES: Joi.number().default(3),
   LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
+  TEAM_INTELLIGENCE_LLM_MODEL: Joi.string().default('open-fast'),
+  TEAM_INTELLIGENCE_LLM_REQUEST_TIMEOUT_MS: Joi.number().default(120000),
+  TEAM_INTELLIGENCE_LLM_GLOBAL_CONCURRENCY: Joi.number().integer().min(1).default(8),
+  TEAM_INTELLIGENCE_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_USER_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_TEAM_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
+  TEAM_INTELLIGENCE_ORG_SECTION_CONCURRENCY: Joi.string().allow('').default(''),
   // Dynamic Dashboard tunables
   DASHBOARD_AI_SSE_PING_INTERVAL_MS: Joi.number().default(20000),
   DASHBOARD_AI_TOP_VALUES_INLINE_LIMIT: Joi.number().default(30),
@@ -363,9 +417,7 @@ const envSchema = Joi.object({
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
-    .allow('')
-    .default(''),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
@@ -600,9 +652,15 @@ export const config = {
     litellmBaseUrl: envVars.LITELLM_BASE_URL,
     litellmModel: envVars.ACTIVITY_CLASSIFICATION_MODEL,
     requestTimeoutMs: envVars.LLM_REQUEST_TIMEOUT_MS,
+    teamIntelligenceRequestTimeoutMs: envVars.TEAM_INTELLIGENCE_LLM_REQUEST_TIMEOUT_MS,
     // Call-specific LiteLLM config (falls back to main litellm if not set)
     callLitellmApiKey: envVars.CALL_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
     callLitellmModel: envVars.CALL_LITELLM_MODEL,
+    // Fast (default) and thinking model tiers; both fall back to CALL_LITELLM_MODEL.
+    callRecordingFastLitellmModel:
+      envVars.CALL_RECORDING_FAST_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
+    callRecordingThinkingLitellmModel:
+      envVars.CALL_RECORDING_THINKING_LITELLM_MODEL || envVars.CALL_LITELLM_MODEL,
   },
   activityClassification: {
     litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,
@@ -614,9 +672,23 @@ export const config = {
     publicKey: envVars.LANGFUSE_PUBLIC_KEY,
     secretKey: envVars.LANGFUSE_SECRET_KEY,
   },
+  migrationEncryption: {
+    keys: envVars.MIGRATION_ENC_KEYS,
+    activeKeyId: envVars.MIGRATION_ENC_ACTIVE,
+  },
+  runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
+  slackMigration: {
+    pageDelayMs: envVars.MIGRATION_SLACK_PAGE_DELAY_MS,
+    listDelayMs: envVars.MIGRATION_SLACK_LIST_DELAY_MS,
+    fileTimeoutMs: envVars.MIGRATION_SLACK_FILE_TIMEOUT_MS,
+    requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
+    stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
+    ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
+  },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
     bucketName: envVars.GCS_BUCKET_NAME,
+    migrationBucketName: envVars.MIGRATION_GCS_BUCKET,
     bundleBucketName: envVars.GCS_BUNDLE_BUCKET_NAME,
     canvasBucketName: envVars.GCS_CANVAS_BUCKET_NAME,
     docsBucketName: envVars.GCS_DOCS_BUCKET_NAME,
@@ -636,9 +708,37 @@ export const config = {
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
+  // Radar execution engine. Two switches: enqueue on message insert, and run
+  // the drain worker. A gated window always goes to the parser and a valid
+  // transition is always applied — there is no separate dry-run mode.
+  radar: {
+    enabled: envVars.ENABLE_RADAR_EXECUTION as boolean,
+    // Required once radar is enabled — a blank model throws at parse time.
+    parserModel: envVars.RADAR_PARSER_MODEL as string,
+    // Blank falls back to the shared LITELLM_API_KEY. A dedicated key keeps
+    // radar's rate limit and spend off the quota other features draw on.
+    litellmApiKey: envVars.RADAR_EXECUTION_LITELLM_API_KEY as string,
+    maxWindowMessages: envVars.RADAR_MAX_WINDOW_MESSAGES as number,
+    workerConcurrency: envVars.RADAR_EXECUTION_WORKER_CONCURRENCY as number,
+    // execution_run_logs is the fastest-growing table here — one row per
+    // drain pass, carrying full LLM payloads. Swept on a timer by the worker.
+    runLogRetentionDays: envVars.RADAR_RUN_LOG_RETENTION_DAYS as number,
+  },
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
+  teamIntelligence: {
+    model: envVars.TEAM_INTELLIGENCE_LLM_MODEL as string,
+    userJobConcurrency: envVars.TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY as number,
+    teamJobConcurrency: envVars.TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY as number,
+    orgJobConcurrency: envVars.TEAM_INTELLIGENCE_ORG_JOB_CONCURRENCY as number,
+    llmGlobalConcurrency: envVars.TEAM_INTELLIGENCE_LLM_GLOBAL_CONCURRENCY as number,
+    sectionConcurrency: envVars.TEAM_INTELLIGENCE_SECTION_CONCURRENCY as string,
+    userSectionConcurrency: envVars.TEAM_INTELLIGENCE_USER_SECTION_CONCURRENCY as string,
+    teamSectionConcurrency: envVars.TEAM_INTELLIGENCE_TEAM_SECTION_CONCURRENCY as string,
+    orgSectionConcurrency: envVars.TEAM_INTELLIGENCE_ORG_SECTION_CONCURRENCY as string,
+  },
   enableTagGenerationPipeline: envVars.ENABLE_TAG_GENERATION_PIPELINE,
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
@@ -742,6 +842,7 @@ export const config = {
   },
   ysweet: {
     url: envVars.Y_SWEET_URL,
+    serverToken: envVars.Y_SWEET_SERVER_TOKEN,
   },
   entityExtraction: {
     enabled: envVars.ENABLE_ENTITY_EXTRACTION,
@@ -757,6 +858,7 @@ export const config = {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
     askAiApiKey: envVars.ASK_AI_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
+    threadTypeClassificationApiKey: envVars.THREAD_TYPE_CLASSIFICATION_LITELLM_API_KEY,
     imageGenerationEndpoint: envVars.IMAGE_GENERATION_ENDPOINT,
     imageGenerationModel: envVars.IMAGE_GENERATION_MODEL,
     documentOutlineEnabled: envVars.DOCUMENT_OUTLINE_ENABLED,
@@ -860,12 +962,21 @@ export const config = {
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
+  messageClassification: {
+    model: envVars.MESSAGE_CLASSIFIER_MODEL,
+  },
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,
     generationCron: envVars.RECAP_GENERATION_CRON,
     cleanupCron: envVars.RECAP_CLEANUP_CRON,
     retentionDays: envVars.RECAP_RETENTION_DAYS,
+  },
+  deskReportScheduler: {
+    enabled: envVars.ENABLE_DESK_REPORT_SCHEDULER,
+    generationCron: envVars.DESK_REPORT_GENERATION_CRON,
+    cleanupCron: envVars.DESK_REPORT_CLEANUP_CRON,
+    retentionDays: envVars.DESK_REPORT_RETENTION_DAYS,
   },
   otel: {
     metricsEnabled: envVars.ENABLE_OTEL_METRICS,

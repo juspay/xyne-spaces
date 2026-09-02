@@ -28,6 +28,7 @@
  */
 
 import { redisService } from "../redis.js";
+import { errMsg } from "./errors.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("message-queue");
@@ -54,6 +55,7 @@ export const BUSY_TTL_MS = Number(process.env["CLAW_MSG_QUEUE_BUSY_TTL_MS"] ?? S
 const SEEN_TTL_SEC = Number(process.env["CLAW_MSG_QUEUE_SEEN_TTL_SEC"] ?? String(60 * 60));
 
 const BUSY_PREFIX = "claw:busy:";
+const BUSY_META_PREFIX = "claw:busymeta:";
 const QUEUE_PREFIX = "claw:mq:";
 const SEEN_PREFIX = "claw:mq:seen:";
 
@@ -69,6 +71,8 @@ const scoped = (base: string, agentSlug: string, userScopeId?: string): string =
 
 const busyKey = (conversationId: string, agentSlug: string, userScopeId?: string): string =>
   scoped(`${BUSY_PREFIX}${conversationId}:${agentSlug}`, agentSlug, userScopeId);
+const busyMetaKey = (conversationId: string, agentSlug: string, userScopeId?: string): string =>
+  scoped(`${BUSY_META_PREFIX}${conversationId}:${agentSlug}`, agentSlug, userScopeId);
 const queueKey = (conversationId: string, agentSlug: string, userScopeId?: string): string =>
   scoped(`${QUEUE_PREFIX}${conversationId}:${agentSlug}`, agentSlug, userScopeId);
 const seenKey = (conversationId: string, agentSlug: string, userScopeId?: string): string =>
@@ -144,6 +148,14 @@ export interface QueuedMessage {
   sessionContext?: Record<string, unknown>;
   /** Defaults to "conversation" on drain when absent (legacy-safe). */
   responseMode?: "conversation" | "approval";
+  /** Why this message is waiting. Used to distinguish explicit `/queue <msg>`
+   *  from a normal busy-thread enqueue and from a same-user interrupt follow-up. */
+  queueReason?: "busy" | "explicit_queue" | "interrupt_followup";
+  /** Requested handling mode for the active run when this message was queued. */
+  interruptMode?: "queue_only" | "interrupt_with_reply";
+  /** Suppress the normal "queued" notice when another control path already
+   *  posts a better acknowledgement. */
+  suppressQueuedNotice?: boolean;
   /** epoch ms when enqueued */
   ts: number;
 }
@@ -168,20 +180,61 @@ export interface EnqueueResult {
  * the runtime session lock remains the safety net — we never block a first
  * message on a queue-infra outage.
  */
-export async function tryAcquireSlot(conversationId: string, agentSlug: string, userScopeId?: string): Promise<string | null> {
+export async function tryAcquireSlot(conversationId: string, agentSlug: string, userScopeId?: string, ownerUserId?: string): Promise<string | null> {
   if (!conversationId || !agentSlug) return `no-conv-${Date.now()}`;
   const token = `${process.env["POD_ID"] ?? "pod"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     const redis = redisService.getConnection();
     const res = await redis.set(busyKey(conversationId, agentSlug, userScopeId), token, "PX", BUSY_TTL_MS, "NX");
+    if (res === "OK" && ownerUserId) {
+      await redis.set(busyMetaKey(conversationId, agentSlug, userScopeId), JSON.stringify({ userId: ownerUserId }), "PX", BUSY_TTL_MS).catch(() => {});
+    }
     return res === "OK" ? token : null;
   } catch (err) {
     log.warn("tryAcquireSlot failed — failing open (dispatch proceeds, runtime lock guards)", {
       conversationId,
       agentSlug,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
     return `failopen-${Date.now()}`;
+  }
+}
+
+export interface SlotOwner {
+  userId?: string;
+  sessionId?: string;
+}
+
+export async function attachSlotSession(conversationId: string, agentSlug: string, sessionId: string, userScopeId?: string): Promise<void> {
+  if (!conversationId || !agentSlug || !sessionId) return;
+  try {
+    const redis = redisService.getConnection();
+    const key = busyMetaKey(conversationId, agentSlug, userScopeId);
+    let owner: SlotOwner = {};
+    try {
+      const raw = await redis.get(key);
+      if (raw) owner = JSON.parse(raw) as SlotOwner;
+    } catch { owner = {}; }
+    if (owner.sessionId === sessionId) {
+      await redis.pexpire(key, BUSY_TTL_MS).catch(() => {});
+      return;
+    }
+    await redis.set(key, JSON.stringify({ ...owner, sessionId }), "PX", BUSY_TTL_MS);
+  } catch (err) {
+    log.warn("attachSlotSession failed", { conversationId, agentSlug, error: errMsg(err) });
+  }
+}
+
+export async function getSlotOwner(conversationId: string, agentSlug: string, userScopeId?: string): Promise<SlotOwner | null> {
+  if (!conversationId || !agentSlug) return null;
+  try {
+    const redis = redisService.getConnection();
+    const raw = await redis.get(busyMetaKey(conversationId, agentSlug, userScopeId));
+    if (!raw) return null;
+    return JSON.parse(raw) as SlotOwner;
+  } catch (err) {
+    log.warn("getSlotOwner failed — treating as no owner (fail-safe)", { conversationId, agentSlug, error: errMsg(err) });
+    return null;
   }
 }
 
@@ -205,7 +258,7 @@ export async function isSlotBusy(conversationId: string, agentSlug: string, user
     log.warn("isSlotBusy failed — assuming not busy (fail-open)", {
       conversationId,
       agentSlug,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
     return false;
   }
@@ -238,8 +291,9 @@ export async function refreshSlot(conversationId: string, agentSlug: string, tok
     } else {
       await redis.pexpire(busyKey(conversationId, agentSlug, userScopeId), BUSY_TTL_MS);
     }
+    await redis.pexpire(busyMetaKey(conversationId, agentSlug, userScopeId), BUSY_TTL_MS).catch(() => {});
   } catch (err) {
-    log.warn("refreshSlot failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("refreshSlot failed", { conversationId, agentSlug, error: errMsg(err) });
   }
 }
 
@@ -268,8 +322,9 @@ export async function releaseSlot(conversationId: string, agentSlug: string, tok
     } else {
       await redis.del(busyKey(conversationId, agentSlug, userScopeId));
     }
+    await redis.del(busyMetaKey(conversationId, agentSlug, userScopeId)).catch(() => {});
   } catch (err) {
-    log.warn("releaseSlot failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("releaseSlot failed", { conversationId, agentSlug, error: errMsg(err) });
   }
 }
 
@@ -323,7 +378,7 @@ export async function enqueueMessage(msg: QueuedMessage): Promise<EnqueueResult>
     log.warn("enqueueMessage failed", {
       conversationId: msg.conversationId,
       agentSlug: msg.agentSlug,
-      error: err instanceof Error ? err.message : String(err),
+      error: errMsg(err),
     });
     // Fail-closed on enqueue: report not-enqueued so the caller can tell the
     // user we couldn't queue it (better than a false "queued" promise).
@@ -340,7 +395,7 @@ export async function dequeueMessage(conversationId: string, agentSlug: string, 
     if (!raw) return null;
     return JSON.parse(raw) as QueuedMessage;
   } catch (err) {
-    log.warn("dequeueMessage failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("dequeueMessage failed", { conversationId, agentSlug, error: errMsg(err) });
     return null;
   }
 }
@@ -359,7 +414,7 @@ export async function clearQueue(conversationId: string, agentSlug: string, user
     await redis.del(queueKey(conversationId, agentSlug, userScopeId), seenKey(conversationId, agentSlug, userScopeId));
     return discarded;
   } catch (err) {
-    log.warn("clearQueue failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("clearQueue failed", { conversationId, agentSlug, error: errMsg(err) });
     return 0;
   }
 }
@@ -391,7 +446,7 @@ export async function peekQueue(conversationId: string, agentSlug: string, userS
       })
       .filter((m): m is QueuedMessage => m !== null);
   } catch (err) {
-    log.warn("peekQueue failed", { conversationId, agentSlug, error: err instanceof Error ? err.message : String(err) });
+    log.warn("peekQueue failed", { conversationId, agentSlug, error: errMsg(err) });
     return [];
   }
 }

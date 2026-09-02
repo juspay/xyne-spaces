@@ -260,6 +260,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   convId: string;
   userGroupId: string;
   channelRef: string;
+  channelWeightedSet?: Record<string, number>;
   projectRef: string;
   threadId: string;
   status: TicketStatusV2;
@@ -367,6 +368,7 @@ export interface VespaFileDocument extends VespaDocument {
   mimeType: string,
   subApp: string,
   channelRef?: string;
+  channelWeightedSet?: Record<string, number>;
   conversationId?: string;
   clId?: string,
   clFd?: string,
@@ -463,6 +465,8 @@ export interface VespaMailDocument extends VespaDocument {
   parentThreadId?: string;
   mailId?: string;
   xyneId?: string;
+  /** Project.code of the linked ticket — the "<code>" half of xyneId. */
+  projectCode?: string;
   ticketFormFields?: TicketFormFields;
   ticketFormFieldValues?: string[]; // Indexed copy used for Desk/All lexical search.
   subject: string;
@@ -485,6 +489,7 @@ export interface VespaMailDocument extends VespaDocument {
    * without per-email re-feeds.
    */
   channelRef: string;
+  channelWeightedSet?: Record<string, number>;
   from: string;
   to: string[];
   cc?: string[];

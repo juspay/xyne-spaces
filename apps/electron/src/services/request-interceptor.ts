@@ -159,6 +159,20 @@ const RESTRICTED_MEDIA_PERMISSIONS = new Set(['media', 'display-capture', 'media
 const FIRST_PARTY_NONMEDIA_PERMISSIONS = new Set([
   'clipboard-sanitized-write', 'clipboard-read', 'fullscreen', 'pointerLock',
 ]);
+const appOwnedWindows = new Set<BrowserWindow>();
+
+export function registerAppOwnedWindow(window: BrowserWindow): void {
+  appOwnedWindows.add(window);
+  window.once('closed', () => appOwnedWindows.delete(window));
+}
+
+function isAppOwnedWindowContents(webContents: Electron.WebContents | undefined): boolean {
+  if (!webContents) return false;
+  const owner = BrowserWindow.fromWebContents(webContents);
+  if (!owner || owner.isDestroyed()) return false;
+  return owner.webContents === webContents && appOwnedWindows.has(owner);
+}
+
 function isTopLevelMainWindow(webContents: Electron.WebContents | undefined): boolean {
   if (!webContents) return false;
   if (!mainWindow || mainWindow.isDestroyed()) return false;
@@ -179,9 +193,11 @@ function isFirstPartyUrl(rawUrl: string | undefined): boolean {
   }
 }
 function installMediaPermissionGuard(targetSession: Electron.Session, label: string): void {
-  targetSession.setPermissionRequestHandler((webContents, permission, callback) => {
+  targetSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
-      const allowed = isTopLevelMainWindow(webContents);
+      const allowed =
+        isTopLevelMainWindow(webContents) ||
+        (isAppOwnedWindowContents(webContents) && isFirstPartyUrl(details?.requestingUrl));
       if (!allowed) {
         Logger.warn(
           `[permissions:${label}] denied ${permission} for non-main webContents (url=${webContents?.getURL() ?? 'n/a'})`,
@@ -206,9 +222,12 @@ function installMediaPermissionGuard(targetSession: Electron.Session, label: str
     );
     callback(false);
   });
-  targetSession.setPermissionCheckHandler((webContents, permission) => {
+  targetSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
     if (RESTRICTED_MEDIA_PERMISSIONS.has(permission)) {
-      return isTopLevelMainWindow(webContents ?? undefined);
+      return (
+        isTopLevelMainWindow(webContents ?? undefined) ||
+        (isAppOwnedWindowContents(webContents ?? undefined) && isFirstPartyUrl(requestingOrigin))
+      );
     }
     // Non-media permission checks succeed for the first-party main window,
     // and for the narrow clipboard/fullscreen set on first-party content hosted outside
@@ -232,15 +251,23 @@ function installFrontendCsp(): void {
   const googleApis = 'https://apis.google.com https://accounts.google.com';
   const googleFontsCss = 'https://fonts.googleapis.com';
   const googleFontsFiles = 'https://fonts.gstatic.com';
+  // Sandpack (agent-generated React artifacts in Ask AI) does NOT bundle
+  // in-page: its preview is an iframe whose document is served by the
+  // CodeSandbox bundler, and the client talks to that frame. Without both
+  // frame-src and connect-src the preview silently never loads.
+  // Revisit when the artifact data-bridge lands — at that point real workspace
+  // data enters the frame and the bundler should be self-hosted on xyneHosts
+  // (Sandpack's `bundlerURL` option) instead of allowlisting a third party.
+  const sandpackBundler = 'https://*.codesandbox.io';
   const cspDirectives = [
     `default-src 'self' ${xyneHosts}`,
     `script-src 'self' ${xyneHosts} ${googleApis}`,
     `style-src 'self' 'unsafe-inline' ${xyneHosts} ${googleFontsCss}`,
     `img-src 'self' data: blob: https:`,
     `media-src 'self' blob: ${xyneHosts}`,
-    `connect-src 'self' ${xyneHosts} ${xyneWs} https://o4507796893925376.ingest.us.sentry.io https://accounts.google.com https://*.googleapis.com`,
+    `connect-src 'self' ${xyneHosts} ${xyneWs} https://o4507796893925376.ingest.us.sentry.io https://accounts.google.com https://*.googleapis.com ${sandpackBundler}`,
     `font-src 'self' data: ${xyneHosts} ${googleFontsFiles}`,
-    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://accounts.google.com https://docs.google.com`,
+    `frame-src 'self' blob: ${xyneHosts} https://www.youtube.com https://player.vimeo.com https://www.loom.com https://accounts.google.com https://docs.google.com ${sandpackBundler}`,
     `worker-src 'self' blob:`,
     `object-src 'none'`,
     `base-uri 'none'`,

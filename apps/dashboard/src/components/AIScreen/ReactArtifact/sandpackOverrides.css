@@ -1,0 +1,60 @@
+/*
+ * Overrides scoped to the React-artifact frame (`.xyne-artifact-sandpack`).
+ *
+ * Sandpack's own wrappers (`.sp-wrapper` from SandpackProvider, `.sp-layout`,
+ * `.sp-stack`) are all auto-height, and `--sp-layout-height` is applied to
+ * `.sp-stack` as a percentage — so the frame's height has to survive a chain of
+ * CSS percentage resolutions, and any link whose parent the spec treats as
+ * indefinite (auto-height flex rows, wrapped flex lines) silently collapses the
+ * whole preview to content height. That chain broke differently in the thread,
+ * the side panel, and the dialog.
+ *
+ * So the outer chain doesn't use percentages at all: the host is a positioning
+ * context and `.sp-wrapper` is pinned to it with `inset: 0`, which fills the
+ * host's laid-out box unconditionally. Percentages below that resolve against
+ * an absolutely-positioned (hence definite) ancestor, which is always safe.
+ */
+
+.xyne-artifact-sandpack {
+  position: relative;
+}
+
+.xyne-artifact-sandpack .sp-wrapper {
+  position: absolute;
+  inset: 0;
+}
+
+.xyne-artifact-sandpack .sp-layout,
+.xyne-artifact-sandpack .sp-stack,
+.xyne-artifact-sandpack .sp-preview-container {
+  height: 100%;
+  min-height: 0;
+}
+
+/* The artifact frame already draws its own border and rounds its corners. */
+.xyne-artifact-sandpack .sp-layout {
+  border: none;
+  border-radius: 0;
+}
+
+/* SandpackPreview always renders its own boot overlay — there is no prop to
+   turn it off — and ArtifactBootOverlay draws the Xyne mark over the same
+   frame. Without this, theirs fades out over 400ms starting at `done` while
+   ours unmounts instantly, flashing the CodeSandbox loader on every boot.
+   Scoped to `.sp-loading`: the timeout and runtime-error overlays use
+   `.sp-error` and must stay visible. */
+.xyne-artifact-sandpack .sp-overlay.sp-loading {
+  display: none;
+}
+
+/* SandpackPreview listens for the bundler's `resize` message and writes the
+   app's own content height onto the iframe as an INLINE style; `!important` is
+   the only thing that outranks it. `min/max-height` are cleared too — the base
+   rule pins them to 160px/2000px, which would clamp the frame at both ends.
+   A taller app scrolls inside the iframe. */
+.xyne-artifact-sandpack .sp-preview-iframe {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex: 1;
+}

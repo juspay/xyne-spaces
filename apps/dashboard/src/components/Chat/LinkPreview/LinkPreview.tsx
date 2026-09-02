@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, X, Copy } from 'lucide-react';
+import { toast } from 'sonner';
 import { getYoutubeEmbedUrl, getYoutubeVideoId, isYoutubeUrl } from './youtubeUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { YouTubeThumbnail } from './YouTubeThumbnail';
@@ -164,24 +165,47 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
     onClose?.();
   };
 
+  const handleCopy = (event: React.MouseEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    navigator.clipboard
+      .writeText(url)
+      .then(() => toast.success('Link copied to clipboard'))
+      .catch(() => toast.error('Failed to copy link'));
+  };
+
   return (
     <div
-      className='link-preview relative flex flex-col gap-0.5 w-full max-w-[380px] rounded-lg border border-border overflow-hidden bg-card py-1.5 pr-6 pl-2'
+      className='link-preview relative flex flex-col gap-0.5 w-full max-w-[380px] rounded-lg border border-border overflow-hidden bg-card py-1.5 pr-14 pl-2'
       aria-label={`Link preview: ${displayTitle}`}
     >
-      {onClose && (
+      <div className='absolute top-1 right-1 z-10 flex items-center gap-1'>
         <button
           type='button'
-          className='link-preview__close-button absolute top-1 right-1 z-10 p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
-          onClick={handleClose}
-          aria-label='Close link preview'
+          className='link-preview__copy-button p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
+          onClick={handleCopy}
+          aria-label='Copy link'
+          title='Copy link'
           data-track-category='MESSAGE'
-          data-track-name='CLOSE_LINK_PREVIEW'
+          data-track-name='COPY_LINK_PREVIEW'
           data-track-metadata={JSON.stringify({ url })}
         >
-          <X size={12} className='text-muted-foreground' />
+          <Copy size={12} className='text-muted-foreground' />
         </button>
-      )}
+        {onClose && (
+          <button
+            type='button'
+            className='link-preview__close-button p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
+            onClick={handleClose}
+            aria-label='Close link preview'
+            data-track-category='MESSAGE'
+            data-track-name='CLOSE_LINK_PREVIEW'
+            data-track-metadata={JSON.stringify({ url })}
+          >
+            <X size={12} className='text-muted-foreground' />
+          </button>
+        )}
+      </div>
 
       {/* Line 1: Icon + domain (Slack-style, clickable) */}
       <a

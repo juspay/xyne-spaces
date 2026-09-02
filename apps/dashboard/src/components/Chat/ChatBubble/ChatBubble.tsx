@@ -18,7 +18,7 @@ import {
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit } from '../../../providers/EditProvider';
 import { toast } from 'sonner';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
@@ -29,8 +29,11 @@ import {
   parseForwardedMessageXml,
   parsePreviewMd,
   isDeskChannelType,
+  resolveConversationAnchorType,
+  type ConversationAnchorType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
+import { MessageTags } from '../../tags/MessageTags';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
@@ -131,11 +134,14 @@ interface ChatBubbleProps {
   disableAskAI?: boolean;
   searchItemView?: boolean;
   onUserClick?: (userId: string) => void;
+  spawnedTicketMessageIds?: ReadonlySet<string> | undefined;
   isPrevActivity?: boolean;
   isNextActivity?: boolean;
   linkedConversationId?: string | null;
   /** Message ID to highlight when this bubble is rendered in a thread context (e.g. search screen sidebar). */
   highlightMessageId?: string | null;
+  /** Tag being inspected from the thread header; messages carrying it show a chip. */
+  inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
   isThreadTicketSubTicket?: boolean;
 }
@@ -161,10 +167,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   disableAskAI = false,
   searchItemView = false,
   onUserClick,
+  spawnedTicketMessageIds,
   isPrevActivity = false,
   isNextActivity = false,
   linkedConversationId,
   highlightMessageId,
+  inspectedTag = null,
   afterTextContent,
   isThreadTicketSubTicket = false,
 }) => {
@@ -185,7 +193,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
-  const { editingMessageId, requestEdit, stopEditing } = useEditContext();
+  const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
   const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
@@ -249,7 +257,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   ]);
   const [showLinkPreview, setShowLinkPreview] = useState(true);
   const [showCanvasPreview, setShowCanvasPreview] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
@@ -258,10 +265,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const isScrollingRef = useRef(false);
   const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchEndedInsideRef = useRef(false);
-
-  useEffect(() => {
-    setIsEditing(editingMessageId === message.messageId);
-  }, [editingMessageId, message.messageId]);
 
   const { isEntityBookmarked, getBookmarkByEntity } = useUserBookmarks();
 
@@ -276,6 +279,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     : undefined;
 
   const metadata = message?.metadata as Record<string, unknown> | null;
+
+  // Recording anchors use recording-specific actions.
+  const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
 
   // Both internal and external link previews are stored in link_preview_md.
   // Memoized: ChatBubble re-renders on every hover, and parsing per render
@@ -423,7 +429,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleEditMessage = (): void => {
     requestEdit(message.messageId, () => {
-      setIsEditing(true);
       // Scroll the message into view when editing starts
       setTimeout(() => {
         if (containerRef.current) {
@@ -812,7 +817,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   };
 
   const finishEditing = (): void => {
-    setIsEditing(false);
     stopEditing(); // release global lock
   };
 
@@ -835,8 +839,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
   // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
   // but do not open this message in the generic editor, which would discard that wrapper.
-  const canEditMessage = canModifyMessage && !isSlashCommandArtifactMessage(message.content);
-  const canDeleteMessage = canModifyMessage && !hasTicket;
+  const canEditMessage =
+    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isRecordingMessage;
+  const canDeleteMessage = canModifyMessage && !hasTicket && !isRecordingMessage;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -858,7 +863,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Only show copy button if there's text content to copy
   const shouldShowCopyButton = hasTextContent;
 
-  const isCurrentEditing = editingMessageId === message.messageId;
+  const isCurrentEditing = isEditingMessage(message.messageId);
 
   // Check for canvas link
   const msgContent = message?.content as string | undefined;
@@ -914,8 +919,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ?.parentMessage)
     : undefined;
 
-  const threadPreviewText =
-    isShowInChannel && parentMessage?.content ? createMessagePreview(parentMessage.content) : null;
+  const threadPreviewText = parentMessage?.content
+    ? createMessagePreview(parentMessage.content)
+    : null;
 
   // For showInChannel messages, check if there are newer replies in the original thread
   // by checking if replyCount meets the minimum threshold
@@ -960,12 +966,27 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // the overlay can derive them at show time. Hover never sets state here.
 
   const hoverToolbarKey = useId();
+
   const appliedThreadTypes = useMemo(
     () => parseThreadTypes(conversation?.threadType),
     [conversation?.threadType],
   );
   const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
   const { showThreadTags } = useShowThreadTags();
+  // The thread types this message was cited as evidence for. Composed onto afterTextContent
+  // rather than the header slot: the header only renders for the first message in a group,
+  // and the second and third messages of a burst are exactly the ones you need to see marked.
+  const messageTags =
+    showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
+      <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
+    ) : null;
+  const textTrailer =
+    afterTextContent !== undefined || messageTags ? (
+      <>
+        {afterTextContent}
+        {messageTags}
+      </>
+    ) : undefined;
 
   const canShowHoverToolbar =
     !isMobile &&
@@ -973,7 +994,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     variant !== 'pinned' &&
     !isMentionUserAddition &&
     !isTicketActivity &&
-    !(isEditing && isCurrentEditing);
+    !isCurrentEditing;
 
   // No dependency array on purpose: re-registering is a cheap Map.set and this
   // keeps the registered handlers/capabilities in sync with the latest render.
@@ -1033,7 +1054,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isMessageDeleted &&
         isTicketThread &&
         canNestSubTicket &&
-        !isFirstInThread && {
+        !isFirstInThread &&
+        !spawnedTicketMessageIds?.has(message.messageId) && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
       ...((!isSystemMessage || isTicketCreationMessage) &&
@@ -1046,7 +1068,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onRemindMeOption: handleReminderPresetSelect,
         }),
       ...(!isMessageDeleted &&
-        (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage }),
+        (isCallMessage || !isSystemMessage) &&
+        !isRecordingMessage && { onForwardMessage: handleForwardMessage }),
       isPinned: conversation?.pinned || false,
       ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
       ...(canEditMessage && { onEditMessage: handleEditMessage }),
@@ -1244,7 +1267,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }
       }}
     >
-      {isEditing && isCurrentEditing ? (
+      {isCurrentEditing ? (
         <ChatInput
           autoFocus='end' // eslint-disable-line jsx-a11y/no-autofocus
           channelId={channelId}
@@ -1282,7 +1305,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
-            {...(afterTextContent !== undefined && { afterTextContent })}
+            {...(textTrailer !== undefined && { afterTextContent: textTrailer })}
             {...(context === 'channel' &&
               !isSystemMessage &&
               !isMessageDeleted && {
@@ -1298,13 +1321,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,
             })}
-            {...(isShowInChannel &&
+            {...((isShowInChannel || conversation?.initialMessageId === message.messageId) &&
               parentMessage &&
               threadPreviewText &&
               parentMessage.conversationId && {
                 threadInfo: {
                   preview: threadPreviewText,
                   conversationId: parentMessage.conversationId,
+                  ...((parentMessage as { channelId?: string }).channelId && {
+                    channelId: (parentMessage as { channelId?: string }).channelId,
+                  }),
+                  anchorType: resolveConversationAnchorType(
+                    parentMessage as { anchorType?: ConversationAnchorType },
+                  ),
                 },
               })}
           />
@@ -1366,7 +1395,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...((!isSystemMessage || isTicketCreationMessage) &&
                 !isMessageDeleted && { onRemindMe: handleOpenReminderOptions })}
               {...(!isMessageDeleted &&
-                (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
+                (isCallMessage || !isSystemMessage) &&
+                !isRecordingMessage && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && { onEditMessage: handleEditMessage })}
@@ -1493,6 +1523,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             onClose={() => setIsSubTicketModalOpen(false)}
             ticketId={threadTicketId}
             conversationId={conversation.conversationId}
+            sourceMessageId={message.messageId}
           />
         )}
 
@@ -1511,6 +1542,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 variant='ghost'
                 className='w-full justify-start'
                 onClick={e => handleReminderPresetSelect(option.option, e)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SELECT_REMINDER_PRESET'
               >
                 {option.label}
               </Button>
@@ -1584,10 +1617,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             </div>
 
             <div className='flex justify-end gap-2 pt-2'>
-              <Button variant='outline' onClick={() => setIsCustomReminderModalOpen(false)}>
+              <Button
+                variant='outline'
+                onClick={() => setIsCustomReminderModalOpen(false)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='CANCEL_CUSTOM_REMINDER'
+              >
                 Cancel
               </Button>
-              <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+              <Button
+                onClick={handleSaveCustomReminder}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SAVE_CUSTOM_REMINDER'
+                disabled={!customReminderDate}
+              >
                 Save
               </Button>
             </div>

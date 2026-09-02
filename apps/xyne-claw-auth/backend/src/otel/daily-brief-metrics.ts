@@ -1,4 +1,5 @@
 import { metrics } from "@opentelemetry/api";
+import { errMsg } from "../lib/errors.js";
 import type { Counter, Histogram, Meter } from "@opentelemetry/api";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -41,7 +42,11 @@ const switchSourceKey = (source: BriefSwitchSource): string =>
   `daily_brief:switch_users:src:${source}`;
 /** HyperLogLog per day: a windowed distinct count without one Redis member per user per day. */
 const switchDayKey = (dateBucket: string): string => `daily_brief:switch_users:day:${dateBucket}`;
-const SWITCH_DAY_TTL_SECONDS = 35 * 24 * 60 * 60;
+
+const DAY_HLL_TTL_SECONDS = 35 * 24 * 60 * 60;
+
+/** Activity kinds recorded per user per day in Postgres. Bounded set. */
+export type DailyBriefActivityKind = "view" | "regenerate" | "switch";
 
 /** Per user per day, so we know which attempt a request is. Two days is plenty. */
 const dayAttemptKey = (userId: string, dateBucket: string): string =>
@@ -112,9 +117,10 @@ export function recordDailyBriefGenerated(
   trigger: DailyBriefTrigger,
   status: "ready" | "failed",
   durationMs: number,
+  attempt = 1,
 ): void {
   try {
-    const attributes = { trigger, status };
+    const attributes = { trigger, status, attempt: attemptBucket(attempt) };
     getDailyBriefGeneratedTotal().add(1, attributes);
     getGenerationDuration().record(durationMs, attributes);
   } catch {
@@ -150,6 +156,27 @@ export function recordScheduledDeliveryDelay(dateBucket: string, generatedAt: Da
   }
 }
 
+// Daily Brief Opt-In Changes — labels: action (opted_in | opted_out)
+let _optInChanges: Counter | null = null;
+function getOptInChanges(): Counter {
+  if (!_optInChanges) {
+    _optInChanges = getMeter().createCounter("daily_brief_opt_in_changes_total", {
+      description: "Daily Brief master toggle flips, by direction",
+      unit: "1",
+    });
+  }
+  return _optInChanges;
+}
+
+/** Count one master-toggle flip. Only call when the stored value actually changed. */
+export function recordDailyBriefOptInChange(enabled: boolean): void {
+  try {
+    getOptInChanges().add(1, { action: enabled ? "opted_in" : "opted_out" });
+  } catch {
+    // metrics must never break a request
+  }
+}
+
 // Daily Brief Regeneration Attempts — labels: attempt (1 | 2 | 3 | 4+), origin
 let _regenerationAttempts: Counter | null = null;
 function getRegenerationAttempts(): Counter {
@@ -162,6 +189,11 @@ function getRegenerationAttempts(): Counter {
   return _regenerationAttempts;
 }
 
+/** Bounded attempt bucket shared by the attempts counter and the completion counter. */
+function attemptBucket(attempt: number): string {
+  return attempt >= 4 ? "4+" : String(attempt);
+}
+
 /**
  * Count one regeneration request, the user behind it, and — the useful part —
  * which attempt of the day it is and what it is replacing. Best-effort.
@@ -170,13 +202,32 @@ function getRegenerationAttempts(): Counter {
  */
 export async function recordDailyBriefRegeneration(
   userId: string,
+  orgId: string,
   dateBucket: string,
   existing: { status: string; generatedAt: Date | null } | null,
-): Promise<void> {
+): Promise<number> {
   try {
     const redis = redisService.getConnection();
     const dayKey = dayAttemptKey(userId, dateBucket);
     const attempt = await redis.incr(dayKey);
+    void finishRegenerationRecord(userId, orgId, dateBucket, existing, attempt, dayKey);
+    return attempt;
+  } catch {
+    // metrics must never break a brief run
+    return 1;
+  }
+}
+
+async function finishRegenerationRecord(
+  userId: string,
+  orgId: string,
+  dateBucket: string,
+  existing: { status: string; generatedAt: Date | null } | null,
+  attempt: number,
+  dayKey: string,
+): Promise<void> {
+  try {
+    const redis = redisService.getConnection();
     await redis.expire(dayKey, DAY_ATTEMPT_TTL_SECONDS);
 
     const origin: RegenerationOrigin =
@@ -188,10 +239,7 @@ export async function recordDailyBriefRegeneration(
             ? "replacing_scheduled_brief"
             : "first_brief_of_day";
 
-    getRegenerationAttempts().add(1, {
-      attempt: attempt >= 4 ? "4+" : String(attempt),
-      origin,
-    });
+    getRegenerationAttempts().add(1, { attempt: attemptBucket(attempt), origin });
 
     const writes = redis.multi().incr(REGEN_COUNT_KEY).sadd(REGEN_USERS_KEY, userId);
     if (origin === "replacing_scheduled_brief") writes.sadd(DEFAULT_REJECTED_USERS_KEY, userId);
@@ -199,14 +247,60 @@ export async function recordDailyBriefRegeneration(
     // run has attempt >= 2 without being dissatisfied with anything.
     if (origin === "replacing_own_regeneration") writes.sadd(REPEAT_REGEN_USERS_KEY, userId);
     await writes.exec();
+    const isRejection =
+      origin === "replacing_scheduled_brief" || origin === "replacing_own_regeneration";
+    await recordDailyBriefActivity(userId, orgId, "regenerate", dateBucket, isRejection);
   } catch {
     // metrics must never break a brief run
+  }
+}
+
+/**
+ * Upsert one row per user per day per kind. Distinct-user counts over an arbitrary
+ * date range then come from COUNT(DISTINCT "userId") in Postgres, which is exact
+ * and unbounded in lookback — a fixed-window sketch can be neither. Repeat activity
+ * on the same day bumps `count` instead of adding a row, so the table stays bounded
+ * at one row per user per day per kind however heavy the usage.
+ *
+ * @param isRejection increments `rejectionCount` alongside `count`.
+ */
+export async function recordDailyBriefActivity(
+  userId: string,
+  orgId: string,
+  kind: DailyBriefActivityKind,
+  dateBucket: string,
+  isRejection = false,
+): Promise<void> {
+  try {
+    const now = new Date();
+    const rejection = isRejection ? 1 : 0;
+    await prisma.dailyBriefActivity.upsert({
+      where: { userId_kind_dateBucket: { userId, kind, dateBucket } },
+      create: {
+        userId,
+        orgId,
+        kind,
+        dateBucket,
+        count: 1,
+        rejectionCount: rejection,
+        occurredAt: now,
+        lastSeenAt: now,
+      },
+      update: {
+        count: { increment: 1 },
+        rejectionCount: { increment: rejection },
+        lastSeenAt: now,
+      },
+    });
+  } catch {
+    // metrics must never break a request
   }
 }
 
 /** Record that a user switched to a different brief, from a given entry point. */
 export async function recordDailyBriefSwitch(
   userId: string,
+  orgId: string,
   source: BriefSwitchSource,
   dateBucket: string,
 ): Promise<void> {
@@ -220,18 +314,28 @@ export async function recordDailyBriefSwitch(
       .sadd(SWITCH_USERS_KEY, userId)
       .sadd(switchSourceKey(source), userId)
       .pfadd(dayKey, userId)
-      .expire(dayKey, SWITCH_DAY_TTL_SECONDS)
+      .expire(dayKey, DAY_HLL_TTL_SECONDS)
       .exec();
+    await recordDailyBriefActivity(userId, orgId, "switch", dateBucket);
   } catch {
     // metrics must never break a request
   }
 }
 
+/** Record that a user opened a brief. */
+export async function recordDailyBriefViewed(
+  userId: string,
+  orgId: string,
+  dateBucket: string,
+): Promise<void> {
+  await recordDailyBriefActivity(userId, orgId, "view", dateBucket);
+}
+
 /** The last `days` day-bucket keys, newest first — the union PFCOUNT reads. */
-function switchDayKeysBack(days: number): string[] {
+function dayKeysBack(key: (dateBucket: string) => string, days: number): string[] {
   const now = Date.now();
   return Array.from({ length: days }, (_, i) =>
-    switchDayKey(formatDayIST(new Date(now - i * 24 * 60 * 60 * 1000))),
+    key(formatDayIST(new Date(now - i * 24 * 60 * 60 * 1000))),
   );
 }
 
@@ -283,6 +387,15 @@ export function registerDailyBriefGauges(): void {
   const switchesSourceGauge = meter.createObservableGauge("daily_brief_switches_by_source", {
     description: "Brief switches ever served, by the control used (events, not people)",
   });
+  const enabledUsersGauge = meter.createObservableGauge("daily_brief_enabled_users_total", {
+    description: "Users who currently have the Daily Brief switched on",
+  });
+  const eligibleUsersGauge = meter.createObservableGauge("daily_brief_eligible_users_total", {
+    description: "All user accounts — the fixed denominator for the opt-in rate",
+  });
+  const deliveredTodayGauge = meter.createObservableGauge("daily_brief_delivered_today", {
+    description: "Briefs ready for today's bucket — divide by opted-in users for fan-out coverage",
+  });
 
   meter.addBatchObservableCallback(
     async (result) => {
@@ -304,6 +417,9 @@ export function registerDailyBriefGauges(): void {
           switches,
           switchesHistoryMenu,
           switchesDatePicker,
+          enabledUsers,
+          eligibleUsers,
+          deliveredToday,
         ] = await Promise.all([
           prisma.generatedContent.count({ where }),
           prisma.generatedContent.groupBy({ by: ["userId"], where }),
@@ -312,13 +428,18 @@ export function registerDailyBriefGauges(): void {
           redis.scard(DEFAULT_REJECTED_USERS_KEY).catch(() => 0),
           redis.scard(REPEAT_REGEN_USERS_KEY).catch(() => 0),
           redis.scard(SWITCH_USERS_KEY).catch(() => 0),
-          redis.pfcount(...switchDayKeysBack(7)).catch(() => 0),
-          redis.pfcount(...switchDayKeysBack(30)).catch(() => 0),
+          redis.pfcount(...dayKeysBack(switchDayKey, 7)).catch(() => 0),
+          redis.pfcount(...dayKeysBack(switchDayKey, 30)).catch(() => 0),
           redis.scard(switchSourceKey("history_menu")).catch(() => 0),
           redis.scard(switchSourceKey("date_picker")).catch(() => 0),
           redis.get(SWITCH_COUNT_KEY).catch(() => null),
           redis.get(switchSourceCountKey("history_menu")).catch(() => null),
           redis.get(switchSourceCountKey("date_picker")).catch(() => null),
+          prisma.user.count({ where: { dailyBriefEnabled: true } }),
+          prisma.user.count(),
+          prisma.generatedContent.count({
+            where: { ...where, dateBucket: formatDayIST(new Date()) },
+          }),
         ]);
         result.observe(usersGauge, users.length);
         result.observe(briefsGauge, briefs);
@@ -338,9 +459,12 @@ export function registerDailyBriefGauges(): void {
         result.observe(switchesSourceGauge, Number(switchesDatePicker ?? 0), {
           source: "date_picker",
         });
+        result.observe(enabledUsersGauge, enabledUsers);
+        result.observe(eligibleUsersGauge, eligibleUsers);
+        result.observe(deliveredTodayGauge, deliveredToday);
       } catch (err) {
         // OTel swallows a rejected callback silently — log so a broken read is visible.
-        log.warn(`[otel] daily-brief gauges skipped: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[otel] daily-brief gauges skipped: ${errMsg(err)}`);
       }
     },
     [
@@ -355,6 +479,9 @@ export function registerDailyBriefGauges(): void {
       switchUsersSourceGauge,
       switchesGauge,
       switchesSourceGauge,
+      enabledUsersGauge,
+      eligibleUsersGauge,
+      deliveredTodayGauge,
     ],
   );
 }

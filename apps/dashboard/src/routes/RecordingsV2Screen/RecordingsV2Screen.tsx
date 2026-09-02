@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { LayersTo, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import {
+  refreshOatsRecordings,
   usePaginatedOatsRecordings,
   type OatsRecordingEntry,
 } from '../../hooks/usePaginatedOatsRecordings';
+import { recordingService } from '../../services/Recording/recordingService';
+import { logRecordingError } from '../../utils/recordingUtils';
+import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -25,22 +30,27 @@ import { RecordingLabelFilter } from './components/RecordingLabelFilter';
 import { RecordingPeopleFilter } from './components/RecordingPeopleFilter';
 import { RecordingSharedWithMeTab } from './components/RecordingSharedWithMeTab';
 import RecordingAskAIModal from './components/RecordingAskAIModal';
-import RecordingsV2Pill, { RecordingsV2LivePill } from './components/RecordingsV2Pill';
+import RecordingsV2Pill, {
+  RecordingsV2LivePill,
+  type RecordingsV2PillRecording,
+} from './components/RecordingsV2Pill';
 import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
+import { RecordingDeleteDialog } from './components/RecordingDeleteDialog';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
 import {
   buildRecordingRows,
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
   findNearestVisibleRecording,
+  formatRecordingParticipants,
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
   LIST_TAB_CLASS_NAME,
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
-import { normalizeRecordingTags } from '../../utils/recordingUtils';
-import { DEFAULT_RECORDING_TITLE } from '@/utils/recordingUtils';
+import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
+import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { SummaryTemplatesModal } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
@@ -48,18 +58,23 @@ import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 const RecordingsV2Screen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const requestedSummaryTemplateId = searchParams.get('summaryTemplateId');
   const shouldOpenTemplatesFromUrl =
     searchParams.get('templates') === '1' || requestedSummaryTemplateId !== null;
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
-  const [activeListTab, setActiveListTab] = useState<RecordingOwnershipTab>('created');
+  const listTabParam = searchParams.get('tab');
+  const activeListTab: RecordingOwnershipTab =
+    listTabParam === 'created' || listTabParam === 'shared' ? listTabParam : 'all';
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [selectedSharerIds, setSelectedSharerIds] = useState<string[]>([]);
   const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
+  const [shareRecording, setShareRecording] = useState<RecordingsV2PillRecording | null>(null);
+  const [deleteRecording, setDeleteRecording] = useState<RecordingsV2PillRecording | null>(null);
   const showTemplatesModal = shouldOpenTemplatesFromUrl;
   const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } =
     useSummaryTemplates(showTemplatesModal);
@@ -71,7 +86,7 @@ const RecordingsV2Screen = (): ReactElement => {
     isLoading,
     error,
     refreshRecordings,
-  } = usePaginatedOatsRecordings(activeListTab);
+  } = usePaginatedOatsRecordings(activeListTab, selectedCreatorId);
   const currentUser = useSelf();
   const users = useUsers();
   const usersById = useMemo(() => new Map(users.map(user => [user.id, user])), [users]);
@@ -134,26 +149,25 @@ const RecordingsV2Screen = (): ReactElement => {
   // to their actual value once here so both the filter dropdown and the
   // per-row chips show real label names instead of raw ids. Every id is passed
   // in, including generated ones, since resolving is also what reveals the method.
-  const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(availableLabels);
+  const { resolveLabel, resolveMethod, isResolved } = useResolvedRecordingLabels(availableLabels);
 
   const isManualLabel = useCallback(
-    (label: string): boolean => resolveMethod(label) !== TagMethod.LLM,
+    (label: string): boolean => resolveMethod(label) === TagMethod.MANUAL,
     [resolveMethod],
   );
   const manualLabels = useMemo(
-    () => availableLabels.filter(isManualLabel),
-    [availableLabels, isManualLabel],
+    () => availableLabels.filter(isResolved).filter(isManualLabel),
+    [availableLabels, isResolved, isManualLabel],
   );
 
-  /** An explicit pick in the People filter wins over the tab's shared-by picker. */
-  const selectedCreatorIds = useMemo(
-    () => (selectedCreatorId ? [selectedCreatorId] : selectedSharerIds),
-    [selectedCreatorId, selectedSharerIds],
-  );
-
+  /**
+   * The People filter is applied server-side by the recordings query, so only the
+   * tab's shared-by picker still narrows the loaded page — and an explicit pick in
+   * the People filter wins over it.
+   */
   const ownershipFilteredRecordings = useMemo(
-    () => filterRecordingsByOwnership(recordings, selectedCreatorIds),
-    [recordings, selectedCreatorIds],
+    () => filterRecordingsByOwnership(recordings, selectedCreatorId ? [] : selectedSharerIds),
+    [recordings, selectedCreatorId, selectedSharerIds],
   );
 
   const liveRecording = useMemo(() => {
@@ -171,7 +185,7 @@ const RecordingsV2Screen = (): ReactElement => {
     liveRecording?.startedAt ?? (isLocalRecordingActive ? recordingStartTime : null);
   const liveRecordingTitle = liveRecording?.title ?? recordingTitle ?? DEFAULT_RECORDING_TITLE;
   const isOwnRecordingView =
-    activeListTab === 'created' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
+    activeListTab !== 'shared' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
     isOwnRecordingView && liveRecordingStartedAt !== null && isLocalRecordingActive;
   const hiddenLiveRecordingId =
@@ -204,6 +218,21 @@ const RecordingsV2Screen = (): ReactElement => {
     [recordings],
   );
 
+  const setActiveListTab = useCallback(
+    (tab: RecordingOwnershipTab): void => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (tab === 'all') next.delete('tab');
+          else next.set('tab', tab);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
   const handleTabChange = useCallback(
     (tab: RecordingOwnershipTab): void => {
       if (tab === activeListTab) return;
@@ -213,49 +242,104 @@ const RecordingsV2Screen = (): ReactElement => {
       setSelectedLabels([]);
       setSelectedSharerIds([]);
     },
-    [activeListTab],
+    [activeListTab, setActiveListTab],
   );
 
-  const handleCreatorChange = useCallback(
-    (creatorId: string | null): void => {
-      setSelectedCreatorId(creatorId);
-      if (creatorId) {
-        setActiveListTab(creatorId === currentUser?.id ? 'created' : 'shared');
-      }
-    },
-    [currentUser?.id],
-  );
+  const handleCreatorChange = useCallback((creatorId: string | null): void => {
+    setSelectedCreatorId(creatorId);
+  }, []);
 
   const handleOpenRecording = useCallback(
     (recordingId: string): void => {
       void navigate(`/recordings/${recordingId}`, {
-        state: { recordingIds: filteredRecordings.map(recording => recording.externalId) },
+        state: {
+          recordingIds: filteredRecordings.map(recording => recording.externalId),
+          from: `${location.pathname}${location.search}`,
+        },
       });
     },
-    [filteredRecordings, navigate],
+    [filteredRecordings, location.pathname, location.search, navigate],
   );
 
   const handleOpenLiveRecordingWindow = useCallback(
     (recordingId: string): void => {
       void navigate(`/recordings/${recordingId}`, {
-        state: { recordingIds: filteredRecordings.map(recording => recording.externalId) },
+        state: {
+          recordingIds: filteredRecordings.map(recording => recording.externalId),
+          from: `${location.pathname}${location.search}`,
+        },
       });
     },
-    [filteredRecordings, navigate],
+    [filteredRecordings, location.pathname, location.search, navigate],
   );
+
+  const handleShareRecording = useCallback((recording: RecordingsV2PillRecording): void => {
+    setShareRecording(recording);
+  }, []);
+
+  const handleRequestDeleteRecording = useCallback((recording: RecordingsV2PillRecording): void => {
+    setDeleteRecording(recording);
+  }, []);
+
+  const handleConfirmDeleteRecording = useCallback(async (): Promise<void> => {
+    if (!deleteRecording) return;
+
+    const target = deleteRecording;
+    setDeleteRecording(null);
+    try {
+      await recordingService.deleteRecording(target.externalId);
+      refreshOatsRecordings();
+      toast.success('Recording deleted');
+    } catch (err) {
+      logRecordingError('RecordingsV2Screen.deleteRecording', err);
+      toast.error('Failed to delete recording');
+    }
+  }, [deleteRecording]);
 
   const handleOpenAskAI = useCallback((): void => {
     setShowAskAIContextModal(true);
   }, []);
 
   const handleConfirmAskAIContext = useCallback((selected: OatsRecordingEntry[]): void => {
+    // Attach each recording's documents alongside the recording itself, the same
+    // way the detail screen does — otherwise Ask AI opened from the list gets only
+    // the call and has to rediscover the summary and the user's notes. Each canvas
+    // carries its role, because from the row alone the machine-written summary and
+    // the human's notes are indistinguishable.
+    const canvases = selected.flatMap(recording => {
+      const title = recording.title || DEFAULT_RECORDING_TITLE;
+      const { summaryCanvasId, notesCanvasId } = readRecordingCanvasIds(recording.metadata);
+      return [
+        ...(summaryCanvasId
+          ? [
+              {
+                id: summaryCanvasId,
+                canvasId: summaryCanvasId,
+                title: `${title} summary`,
+                canvasRole: 'call-summary' as const,
+              },
+            ]
+          : []),
+        ...(notesCanvasId && notesCanvasId !== summaryCanvasId
+          ? [
+              {
+                id: notesCanvasId,
+                canvasId: notesCanvasId,
+                title: `${title} notes`,
+                canvasRole: 'call-notes' as const,
+              },
+            ]
+          : []),
+      ];
+    });
+
     xyneAIActor.send({
       type: 'OPEN',
       contextType: 'general',
       threadInfo: null,
       startFreshChat: true,
       initialContextSelections: {
-        canvases: [],
+        canvases,
         recordings: selected.map(recording => ({
           id: recording.id,
           title: recording.title || DEFAULT_RECORDING_TITLE,
@@ -319,6 +403,21 @@ const RecordingsV2Screen = (): ReactElement => {
                 >
                   <button
                     type='button'
+                    aria-pressed={activeListTab === 'all'}
+                    onClick={() => handleTabChange('all')}
+                    className={cn(
+                      LIST_TAB_CLASS_NAME,
+                      activeListTab === 'all'
+                        ? 'bg-background text-foreground font-medium'
+                        : 'text-muted-foreground/80 hover:text-foreground',
+                    )}
+                    data-track-category='RecordingsV2'
+                    data-track-name='show_all_recordings'
+                  >
+                    All
+                  </button>
+                  <button
+                    type='button'
                     aria-pressed={activeListTab === 'created'}
                     onClick={() => handleTabChange('created')}
                     className={cn(
@@ -344,7 +443,7 @@ const RecordingsV2Screen = (): ReactElement => {
                 <RecordingDateFilter value={selectedDatePreset} onChange={setSelectedDatePreset} />
 
                 <RecordingPeopleFilter
-                  creators={availableCreators}
+                  creators={users}
                   currentUserId={currentUser?.id}
                   selectedUserId={selectedCreatorId}
                   onUserChange={handleCreatorChange}
@@ -460,7 +559,8 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='flex flex-1 flex-col items-center justify-center px-6 pb-28 text-center'>
                 <RecordingsEmptyStateIllustration />
                 <h2 className='text-base font-semibold text-foreground'>
-                  {selectedCreatorIds.length > 0 ||
+                  {selectedCreatorId !== null ||
+                  selectedSharerIds.length > 0 ||
                   selectedLabels.length > 0 ||
                   ownershipFilteredRecordings.length > 0
                     ? 'No matching recordings'
@@ -514,9 +614,27 @@ const RecordingsV2Screen = (): ReactElement => {
                       <RecordingsV2Pill
                         recording={row.recording}
                         creator={usersById.get(row.recording.createdByUserId) ?? null}
-                        tags={row.recording.labels.filter(isManualLabel)}
+                        participantsLabel={formatRecordingParticipants(
+                          getRecordingParticipantIds(
+                            row.recording.createdByUserId,
+                            row.recording.recordingParticipants,
+                          ),
+                          usersById,
+                          currentUser?.id,
+                        )}
+                        tags={row.recording.labels.filter(isResolved).filter(isManualLabel)}
+                        suggestedTags={row.recording.labels.filter(
+                          label =>
+                            isResolved(label) && resolveMethod(label) === TagMethod.AUTOMATED,
+                        )}
+                        pendingLabelCount={
+                          row.recording.labels.filter(label => !isResolved(label)).length
+                        }
                         resolveLabel={resolveLabel}
+                        currentUserId={currentUser?.id}
                         onOpen={handleOpenRecording}
+                        onShare={handleShareRecording}
+                        onDelete={handleRequestDeleteRecording}
                       />
                     </div>
                   )
@@ -568,6 +686,23 @@ const RecordingsV2Screen = (): ReactElement => {
           onConfirm={handleConfirmAskAIContext}
         />
       )}
+
+      {shareRecording && (
+        <Dialog
+          open
+          onOpenChange={open => !open && setShareRecording(null)}
+          title='Share recording'
+          testId='recordings-v2-share-dialog'
+        >
+          <RecordingShareModal recording={shareRecording} onClose={() => setShareRecording(null)} />
+        </Dialog>
+      )}
+
+      <RecordingDeleteDialog
+        recording={deleteRecording}
+        onOpenChange={open => !open && setDeleteRecording(null)}
+        onConfirm={() => void handleConfirmDeleteRecording()}
+      />
     </div>
   );
 };

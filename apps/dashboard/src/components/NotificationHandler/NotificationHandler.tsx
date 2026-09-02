@@ -11,18 +11,24 @@ import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
+import { useAllChannels } from '../../hooks/useChannels';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
-import { CallType } from '@xyne/shared';
+import { useSelector } from '@xstate/react';
+import { CallType, ChannelType } from '@xyne/shared';
+import { buildSdlcPath } from '@xyne/shared/sdlc';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import {
   sendRecordingEvent,
+  stopRecordingForNavigation,
   stopRecordingForTeardown,
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -70,6 +76,7 @@ interface NotificationData {
       commentThreadId?: string;
       conversation?: Conversation;
       notificationType?: string;
+      ticketId?: string;
     };
     metadata?: {
       notificationType?: string;
@@ -125,6 +132,14 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
+  // Read inside the socket callback, which is registered once.
+  const allChannels = useAllChannels();
+  const sdlcChannelIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    sdlcChannelIdsRef.current = new Set(
+      allChannels.filter(channel => channel.type === ChannelType.SDLC).map(channel => channel.id),
+    );
+  }, [allChannels]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
@@ -139,6 +154,7 @@ export const NotificationHandler: React.FC = () => {
       const currentWorkspaceId = activeWorkspaceIdRef.current;
 
       if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {
+        if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
         try {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,
@@ -223,10 +239,33 @@ export const NotificationHandler: React.FC = () => {
             ),
           });
         }
+        // Socket delivery spreads metadata into `data`; the REST row keeps `metadata`.
+        const ids = { ...data.notification.metadata, ...data.notification.data };
+        // No builder knows the SDLC routes, so the hub's own paths are built here
+        // from the ids they all send, against channels the client already holds.
+        const sdlcActionUrl =
+          ids.channelId && sdlcChannelIdsRef.current.has(ids.channelId)
+            ? buildSdlcPath({
+                channelId: ids.channelId,
+                canvasId: ids.canvasId,
+                ticketId: ids.ticketId,
+                conversationId: ids.conversationId,
+                messageId: ids.messageId,
+                blockId: ids.blockId,
+                commentThreadId: ids.commentThreadId,
+              })
+            : undefined;
         const resolvedRawActionUrl =
-          data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
+          sdlcActionUrl ||
+          data.notification.actionUrl ||
+          canvasRedirectUrl ||
+          fallbackChatActionUrl;
         const resolvedActionUrl = resolvedRawActionUrl
-          ? withWorkspacePrefix(resolvedRawActionUrl, notificationWorkspaceId)
+          ? withWorkspacePrefix(
+              resolvedRawActionUrl,
+              // Unprefixed SDLC paths bind :workspaceId to "sdlc" — never ship one.
+              notificationWorkspaceId ?? activeWorkspaceIdRef.current,
+            )
           : undefined;
 
         // Always show workspace at the top when available, matching Slack.
@@ -318,6 +357,10 @@ export const NotificationHandler: React.FC = () => {
             action: {
               label: 'View',
               onClick: (): void => {
+                globalClickTracker.trackManualEvent(
+                  'NOTIFICATIONS',
+                  'CLICK_NOTIFICATION_TOAST_VIEW',
+                );
                 void handleNotificationClick(resolvedActionUrl, notificationWorkspaceId);
               },
             },
@@ -575,6 +618,12 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (isElectron && window.electronAPI && typeof window.electronAPI.onNavigateTo === 'function') {
       const handleNavigate = (url: string, workspaceId?: string): void => {
+        // The navigate-to IPC fires for notifications, deep links, tray and
+        // overlay navigations alike — the renderer cannot tell them apart, so
+        // this is recorded as a generic externally-triggered navigation.
+        globalClickTracker.trackManualEvent('NAVIGATION', 'ELECTRON_NAVIGATE', undefined, {
+          to: url,
+        });
         void handleNotificationClick(url, workspaceId);
       };
 
@@ -609,6 +658,26 @@ export const NotificationHandler: React.FC = () => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;
     return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
   }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingStopForTeardown) return;
+    return window.electronAPI.onRecordingStopForTeardown(stopRecordingForNavigation);
+  }, [isElectron]);
+
+  // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands
+  // before the mic is enabled, so main knows the upcoming activation is ours.
+  const isInXyneCall = useSelector(
+    roomActor,
+    s =>
+      s.matches('initiating') ||
+      s.matches('joining') ||
+      s.matches('connecting') ||
+      s.matches('connected'),
+  );
+  useEffect(() => {
+    if (!isElectron) return;
+    window.electronAPI?.ipcSend?.('call:state-changed', isInXyneCall);
+  }, [isElectron, isInXyneCall]);
 
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const recordingStartTime = useRecordingStore(ctx => ctx.startTime);

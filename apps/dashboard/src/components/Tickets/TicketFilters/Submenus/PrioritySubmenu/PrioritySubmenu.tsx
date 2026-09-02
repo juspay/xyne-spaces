@@ -1,5 +1,5 @@
 import { ReactElement, useMemo } from 'react';
-import { Check } from 'lucide-react';
+import { CheckTickSingle as Check } from '@xyne/icons';
 import { TicketPriority } from '@xyne/shared';
 import { PRIORITY_CONFIG } from '../../Utils/filterConstants';
 import { getPriorityIcon } from '../../../TicketCard/TicketCard.utils';
@@ -41,7 +41,11 @@ export const PrioritySubmenu = ({
 
   return (
     <div className='w-56 bg-background border border-border rounded-lg shadow-lg overflow-hidden'>
-      <div className='py-1.5 px-1 flex flex-col gap-1 max-h-80 overflow-y-auto'>
+      <div
+        className='py-1.5 px-1 flex flex-col gap-1 max-h-80 overflow-y-auto'
+        onWheel={e => e.stopPropagation()}
+        onTouchMove={e => e.stopPropagation()}
+      >
         {prioritiesToShow.length > 0 ? (
           prioritiesToShow.map(([priority, config]) => {
             const isSelected = selectedPriorities.includes(priority as TicketPriority);

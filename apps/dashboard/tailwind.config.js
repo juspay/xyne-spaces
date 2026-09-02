@@ -125,6 +125,9 @@ export default {
           failure: 'var(--status-failure)',
           paused: 'var(--status-paused)',
         },
+        'claw-ai': {
+          fg: 'var(--claw-ai-fg)',
+        },
         sidebar: {
           DEFAULT: 'var(--sidebar)',
           foreground: 'var(--sidebar-foreground)',
@@ -193,6 +196,18 @@ export default {
         fadeLeft: {
           '0%': { opacity: '0', transform: 'translateX(32px)' },
           '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        railTravel: {
+          '0%': { left: '0%', opacity: '0' },
+          '12%': { opacity: '1' },
+          '88%': { opacity: '1' },
+          '100%': { left: '100%', opacity: '0' },
+        },
+        railTravelVertical: {
+          '0%': { top: '0%', opacity: '0' },
+          '12%': { opacity: '1' },
+          '88%': { opacity: '1' },
+          '100%': { top: '100%', opacity: '0' },
         },
         'slide-in-up': {
           from: {

@@ -4,12 +4,15 @@ import {
   BoardType,
   deserializeFlowPlan,
   inferRepositoryNameFromUrl,
-  normalizeChannelName,
-  validateChannelName,
   type FlowPlan,
 } from '@xyne/shared';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Edit2, GitBranch, LayoutGrid, Rocket } from 'lucide-react';
+import {
+  ArrowLeft,
+  PencilEdit as Edit2,
+  GitBranch,
+  Grid01 as LayoutGrid,
+  RocketShip as Rocket,
+} from '@xyne/icons';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
 import * as Tabs from '@radix-ui/react-tabs';
 
@@ -32,7 +35,6 @@ import { toast } from 'sonner';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
-import { channelService } from '../../services/Chat/channelService';
 import { ProjectRepositoriesSection } from './ProjectRepositoriesSection';
 
 // Type for board data passed from BoardEditScreen to BoardStageConfigScreen
@@ -83,7 +85,6 @@ const ProjectDetailScreen = (): ReactElement => {
   const [repositoryUrl, setRepositoryUrl] = useState('');
   const [repositoryName, setRepositoryName] = useState('');
   const [repositoryNameEdited, setRepositoryNameEdited] = useState(false);
-  const [debouncedRepositoryName, setDebouncedRepositoryName] = useState('');
   const [repositoryBranch, setRepositoryBranch] = useState('main');
   const [addingRepository, setAddingRepository] = useState(false);
   const [repositoryRefreshKey, setRepositoryRefreshKey] = useState(0);
@@ -111,9 +112,12 @@ const ProjectDetailScreen = (): ReactElement => {
   });
 
   // Fetch boards for this project (lightweight list without stages)
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId || '' }), {
-    enabled: !!projectId,
-  });
+  const [boards, boardsDetails] = useCachedQuery(
+    queries.boardsListByProject({ projectId: projectId || '' }),
+    {
+      enabled: !!projectId,
+    },
+  );
 
   // Consume the Ticket view's edit-board intent once.
   const requestedEditBoardId = searchParams.get('editBoard');
@@ -222,21 +226,6 @@ const ProjectDetailScreen = (): ReactElement => {
     fullBoardDetailsStatus.type,
   ]);
 
-  useEffect(() => {
-    const timeoutId = setTimeout(() => setDebouncedRepositoryName(repositoryName), 500);
-    return (): void => clearTimeout(timeoutId);
-  }, [repositoryName]);
-
-  const { data: channelDuplicateCheck } = useQuery({
-    queryKey: ['checkDuplicateChannel', debouncedRepositoryName, 'default'],
-    queryFn: () => channelService.checkDuplicateChannel(debouncedRepositoryName, 'default'),
-    enabled:
-      Boolean(debouncedRepositoryName) && validateChannelName(debouncedRepositoryName) === null,
-    staleTime: 0,
-    retry: 1,
-    refetchOnWindowFocus: false,
-  });
-
   const loading = project === undefined || boards === undefined;
 
   // Early return if no projectId
@@ -291,15 +280,15 @@ const ProjectDetailScreen = (): ReactElement => {
     }
   };
 
-  const repositoryNameError = repositoryName
-    ? (validateChannelName(repositoryName) ??
-      (channelDuplicateCheck?.isDuplicate ? 'Channel name already exists' : null))
-    : null;
+  // A repository label, not a channel name: repositories no longer create a
+  // channel, and a space names itself when it is created.
+  const repositoryNameError =
+    repositoryName && repositoryName.length > 120 ? 'Keep the name under 120 characters' : null;
 
   const handleRepositoryUrlChange = (value: string): void => {
     setRepositoryUrl(value);
     if (repositoryNameEdited) return;
-    setRepositoryName(normalizeChannelName(inferRepositoryNameFromUrl(value) ?? ''));
+    setRepositoryName(inferRepositoryNameFromUrl(value) ?? '');
   };
 
   const closeAddRepositoryModal = (): void => {
@@ -443,6 +432,7 @@ const ProjectDetailScreen = (): ReactElement => {
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
                   boards={boards}
+                  loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
@@ -795,8 +785,9 @@ const ProjectDetailScreen = (): ReactElement => {
         open={showEditProjectModal}
         onOpenChange={setShowEditProjectModal}
         title='Edit Project'
+        className='debug'
       >
-        <div className='p-6'>
+        <div>
           <ProjectForm
             project={project}
             onSubmit={data => handleUpdateProject(project.id, data)}
@@ -838,7 +829,7 @@ const ProjectDetailScreen = (): ReactElement => {
             data-track-name='RepositoryUrlChanged'
           />
           <label htmlFor='sdlc-repository-name' className='mt-4 block text-sm font-medium'>
-            Channel name
+            Repository name
           </label>
           <input
             id='sdlc-repository-name'
@@ -846,7 +837,7 @@ const ProjectDetailScreen = (): ReactElement => {
             value={repositoryName}
             onChange={event => {
               setRepositoryNameEdited(true);
-              setRepositoryName(normalizeChannelName(event.target.value));
+              setRepositoryName(event.target.value);
             }}
             className={cn(
               'mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring',
@@ -861,7 +852,7 @@ const ProjectDetailScreen = (): ReactElement => {
               repositoryNameError ? 'text-destructive' : 'text-muted-foreground',
             )}
           >
-            {repositoryNameError ?? "Names this repository's SDLC channel."}
+            {repositoryNameError ?? 'How this repository is labelled in SDLC spaces.'}
           </p>
           <div className='mt-4'>
             <label htmlFor='sdlc-repository-branch' className='block text-sm font-medium'>
@@ -885,7 +876,7 @@ const ProjectDetailScreen = (): ReactElement => {
               loading={addingRepository}
               disabled={!repositoryUrl.trim() || !repositoryName || Boolean(repositoryNameError)}
             >
-              Attach repository
+              Add repository
             </Button>
           </div>
         </form>

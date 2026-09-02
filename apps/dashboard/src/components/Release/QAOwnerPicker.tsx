@@ -52,6 +52,8 @@ export const QAOwnerPicker = ({
     <button
       type='button'
       onClick={e => e.stopPropagation()}
+      data-track-category='Release'
+      data-track-name='OPEN_QA_OWNER_PICKER'
       onKeyDown={e => e.stopPropagation()}
       className='text-xs px-2 py-1 rounded border border-border hover:bg-muted transition-colors truncate max-w-[120px]'
       title={currentUserName ?? 'Unassigned'}
@@ -87,6 +89,8 @@ export const QAOwnerPicker = ({
             type='button'
             className='w-full rounded-sm px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted'
             onClick={() => handleSelect(null)}
+            data-track-category='Release'
+            data-track-name='CLEAR_QA_OWNER'
           >
             Clear
           </button>
@@ -100,6 +104,8 @@ export const QAOwnerPicker = ({
               u.id === testedBy && 'font-semibold',
             )}
             onClick={() => handleSelect(u.id)}
+            data-track-category='Release'
+            data-track-name='SELECT_QA_OWNER'
           >
             {u.name ?? u.email}
           </button>

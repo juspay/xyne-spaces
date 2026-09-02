@@ -15,12 +15,30 @@
 # Escape hatch: a model that is intentionally global/cross-tenant (e.g. a shared
 # lookup table) can opt out by placing `// workspace-check:ignore` on the line
 # directly above `model X {`.
+#
+# No-Default-ACL Guard
+#
+# The ACL factory switches (see ACL_FACTORY_PATHS below) must enumerate every
+# table with an explicit `case`. A `default:` branch returning BaseQueryACL /
+# BaseACL lets a brand-new table silently inherit generic base-class scoping
+# without the author — or any reviewer — ever making a deliberate access
+# decision for that table. There is no escape hatch for this one: remove the
+# `default:` branch and add an explicit `case` per table (a purpose-built ACL
+# class, or an explicit BaseQueryACL/UnscopedACL choice).
 
 set -e
 
 SCHEMA_PATHS=(
     "apps/backend/prisma/schema.prisma"
     "apps/xyne-claw-auth/backend/prisma/schema.prisma"
+)
+
+# ACL factory switches that must enumerate every table explicitly — a `default:`
+# branch in any of these files is a blocking failure.
+ACL_FACTORY_PATHS=(
+    "apps/backend/src/database/acl/acl-factory.ts"
+    "apps/backend/src/zero/acl/core/acl-factory.ts"
+    "packages/shared/src/zero/acl/core/query-acl-factory.ts"
 )
 
 if [ -t 1 ]; then
@@ -154,13 +172,74 @@ validate_workspace_id() {
     return 0
 }
 
+# Staged (or working-tree fallback) content of an arbitrary file, so the check
+# matches what would actually be committed.
+get_file_content() {
+    local file="$1"
+    git show ":$file" 2>/dev/null || cat "$file" 2>/dev/null || echo ""
+}
+
+# No-Default-ACL guard: the factory switches must list every table with an
+# explicit `case`. A `default:` branch returning a base ACL means a new table
+# gets generic scoping without anyone deliberately choosing its access rules.
+validate_no_default_acl() {
+    local has_errors=false
+
+    for factory_file in "${ACL_FACTORY_PATHS[@]}"; do
+        if [ ! -f "$factory_file" ]; then
+            log_warning "$factory_file not found — skipping its default-branch check."
+            continue
+        fi
+
+        local matches
+        matches=$(get_file_content "$factory_file" | grep -nE '^[[:space:]]*default[[:space:]]*:' || true)
+
+        if [ -n "$matches" ]; then
+            has_errors=true
+            log_error "$factory_file has a 'default:' branch in the ACL factory switch:"
+            while IFS= read -r match; do
+                echo "    ${match}"
+            done <<< "$matches"
+        fi
+    done
+
+    if [ "$has_errors" = true ]; then
+        echo ""
+        echo "ACL factory switches must enumerate every table explicitly:"
+        echo "  Remove the 'default:' branch and add an explicit 'case' for each table"
+        echo "  (a purpose-built ACL class, or an explicit BaseQueryACL/UnscopedACL choice),"
+        echo "  so every table's access rule is a deliberate, reviewable decision."
+        echo ""
+        return 1
+    fi
+
+    log_success "No 'default:' branch found in ACL factory switches."
+    return 0
+}
+
 # Skip validation if HUSKY=0 (for automated commits)
 if [ "${HUSKY:-}" = "0" ]; then
-    log_info "HUSKY=0 detected, skipping workspaceId validation"
+    log_info "HUSKY=0 detected, skipping workspaceId/ACL-factory validation"
     exit 0
 fi
 
-if ! validate_workspace_id; then
+failed_guards=()
+
+log_info "━━━ Guard 1/2: tenant-key (workspaceId/orgId) on new models ━━━"
+validate_workspace_id || failed_guards+=("workspaceId/orgId tenant-key check")
+
+echo ""
+log_info "━━━ Guard 2/2: no 'default:' branch in ACL factory switches ━━━"
+validate_no_default_acl || failed_guards+=("no-default-ACL check")
+
+if [ ${#failed_guards[@]} -gt 0 ]; then
+    echo ""
+    log_error "Guard(s) failed:"
+    for guard in "${failed_guards[@]}"; do
+        echo "  ❌ $guard"
+    done
+    echo ""
+    echo "See the detailed error output above for each failed guard."
     exit 1
 fi
 

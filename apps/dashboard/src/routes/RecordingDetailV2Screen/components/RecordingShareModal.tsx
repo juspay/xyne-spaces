@@ -1,15 +1,24 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Hash, Users, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Globe, Hash, Link2, Lock, Users, X } from 'lucide-react';
+import { LinkChainSlant } from '@xyne/icons';
+import type { MentionResult } from '@xyne/shared';
+import { CallVisibility, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useUserGroupSearch, useChannelSearch } from '@xyne/shared/hooks';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
-import { SearchParticipants } from '../../CallHistoryScreen/SearchParticipants';
-import { useActiveUsers } from '../../../hooks/useUsers';
+import { Switch } from '../../../components/ui/Switch';
+import { InputBox } from '../../../components/ui/InputBox';
+import { UnifiedParticipantSearch } from '../../../components/ui/UnifiedParticipantSearch/UnifiedParticipantSearch';
+import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
+import { useActiveUserSearch } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
+import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { queries } from '../../../zero/queries';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, userToMentionResult } from '../../../utils/userDisplayName';
 import {
   recordingService,
   type RecordingDetail,
@@ -17,39 +26,53 @@ import {
   type RecordingTicketLinkState,
 } from '../../../services/Recording/recordingService';
 import { getApiErrorMessage } from '../../../utils/apiError';
-import { logRecordingError } from '../../../utils/recordingUtils';
+import {
+  getRecordingSharePost,
+  isRecordingTicketLinkShare,
+  logRecordingError,
+} from '../../../utils/recordingUtils';
+
+const MENTION_USER_LIMIT = 20;
+const MENTION_GROUP_LIMIT = 10;
 
 export interface RecordingShareModalProps {
-  recording: RecordingDetail;
+  recording: Pick<RecordingDetail, 'externalId' | 'createdByUserId'>;
   onClose?: () => void;
   onTicketLinkUpdated?: (ticketLink: RecordingTicketLinkState) => void;
 }
 
+/** Unified recording share and post modal. */
 export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   recording,
+  onClose,
   onTicketLinkUpdated,
 }) => {
   const { user: currentUser } = useAuth();
-  const activeUsers = useActiveUsers();
+  const shareableOrigin = useShareableOrigin();
+  const isCreator = currentUser?.id === recording.createdByUserId;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
+  const [messageContent, setMessageContent] = useState('');
   const [sharing, setSharing] = useState(false);
   const [locallyRevokedShareIds, setLocallyRevokedShareIds] = useState<Set<string>>(new Set());
-
-  const userGroups = useUserGroupSearch(searchQuery, 10);
-  const channels = useChannelSearch(searchQuery, 10);
+  const [visibilityOverride, setVisibilityOverride] = useState<CallVisibility | null>(null);
+  const inputBoxRef = useRef<InputBoxHandle>(null);
 
   const [recordingRow] = useCachedQuery(
     queries.oatsRecordingByExternalId({ callId: recording.externalId }),
   );
+  const visibility = visibilityOverride ?? recordingRow?.visibility ?? CallVisibility.PRIVATE;
+  const isPublic = visibility === CallVisibility.PUBLIC;
+
   const shares = useMemo(
-    () => (recordingRow?.shares ?? []).filter(share => !locallyRevokedShareIds.has(share.id)),
+    () =>
+      (recordingRow?.shares ?? []).filter(
+        share =>
+          !locallyRevokedShareIds.has(share.id) && !isRecordingTicketLinkShare(share.metadata),
+      ),
     [locallyRevokedShareIds, recordingRow],
   );
-
-  const isOwner = Boolean(currentUser?.id && currentUser.id === recording.createdByUserId);
-  const canManage = isOwner;
 
   const sharedUserIds = useMemo(
     () => new Set(shares.map(share => share.userId).filter((id): id is string => Boolean(id))),
@@ -64,47 +87,76 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     [shares],
   );
 
-  // Combined "share with" search results — active workspace users, user groups,
-  // and channels. Groups/channels are shared as a single row keyed by
-  // userGroupId/channelId (dynamic membership), not expanded to individual users.
-  const options = useMemo(() => {
-    const userOptions = activeUsers
-      .filter(u => u.id !== recording.createdByUserId && !sharedUserIds.has(u.id))
-      .map(u => ({
-        label: getUserDisplayName(u),
-        subtitle: u.email ?? '',
-        value: `user:${u.id}`,
-        icon: <Avatar userId={u.id} size='sm' showActiveStatus={false} />,
-      }));
+  const excludedUserIds = useMemo(
+    () =>
+      new Set(
+        [recording.createdByUserId, currentUser?.id, ...sharedUserIds].filter((id): id is string =>
+          Boolean(id),
+        ),
+      ),
+    [currentUser?.id, recording.createdByUserId, sharedUserIds],
+  );
 
-    const groupOptions = userGroups
-      .filter(group => !sharedUserGroupIds.has(group.id))
-      .map(group => ({
-        label: group.name,
-        subtitle: 'Group',
-        value: `user_group:${group.id}`,
-        icon: <Users className='size-3.5 text-muted-foreground' />,
-      }));
+  // Configure the share message composer.
+  const selectedChannelId = useMemo(
+    () =>
+      selectedValues.find(value => value.startsWith('channel:'))?.replace('channel:', '') ??
+      undefined,
+    [selectedValues],
+  );
 
-    const channelOptions = channels
-      .filter(channel => !sharedChannelIds.has(channel.id))
-      .map(channel => ({
-        label: channel.name,
-        subtitle: 'Channel',
-        value: `channel:${channel.id}`,
-        icon: <Hash className='size-3.5 text-muted-foreground' />,
-      }));
+  const { results: channelScopedMentions, searchMentions: searchChannelScopedMentions } =
+    useMentionSearch(selectedChannelId);
 
-    return [...userOptions, ...groupOptions, ...channelOptions];
-  }, [
-    activeUsers,
-    userGroups,
-    channels,
-    sharedUserIds,
-    sharedUserGroupIds,
-    sharedChannelIds,
-    recording.createdByUserId,
-  ]);
+  // Search workspace mentions when no channel is selected.
+  const [mentionQuery, setMentionQuery] = useState('');
+  const mentionUsers = useActiveUserSearch(mentionQuery, MENTION_USER_LIMIT);
+  const mentionGroups = useUserGroupSearch(mentionQuery, MENTION_GROUP_LIMIT);
+  const workspaceMentions = useMemo<MentionResult[]>(
+    () => [
+      ...mentionUsers.map(u => userToMentionResult(u, u.id === currentUser?.id)),
+      ...mentionGroups.map(
+        (g): MentionResult => ({
+          id: g.id,
+          name: g.name,
+          type: 'group',
+          ...(g.alias && { alias: g.alias }),
+          ...(g.description && { description: g.description }),
+          memberCount: 0,
+          isDeactivated: g.isActive === false,
+        }),
+      ),
+    ],
+    [mentionUsers, mentionGroups, currentUser?.id],
+  );
+
+  const mentionResults = selectedChannelId ? channelScopedMentions : workspaceMentions;
+  const handleMentionSearch = useCallback(
+    (query: string) => {
+      if (selectedChannelId) {
+        searchChannelScopedMentions(query);
+      } else {
+        setMentionQuery(query);
+      }
+    },
+    [selectedChannelId, searchChannelScopedMentions],
+  );
+
+  // Search channel mentions.
+  const [channelMentionQuery, setChannelMentionQuery] = useState('');
+  const channelMentionResults = useChannelSearch(channelMentionQuery, 10);
+  const channelMentionItems = useMemo(
+    () =>
+      channelMentionResults
+        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
+        .map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          ...(channel.description && { description: channel.description }),
+        })),
+    [channelMentionResults],
+  );
 
   const handleShare = async (): Promise<void> => {
     if (selectedValues.length === 0) return;
@@ -118,7 +170,12 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
             ? { type: 'channel', id: value.replace('channel:', '') }
             : { type: 'user', id: value.replace('user:', '') },
       );
-      const result = await recordingService.grantRecordingAccess(recording.externalId, targets);
+      const result = await recordingService.grantRecordingAccess(
+        recording.externalId,
+        targets,
+        undefined,
+        messageContent,
+      );
       if (result.shares?.length) {
         setLocallyRevokedShareIds(current => {
           const next = new Set(current);
@@ -133,6 +190,8 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
       );
       setSelectedValues([]);
       setSearchQuery('');
+      setMessageContent('');
+      onClose?.();
     } catch (error) {
       logRecordingError('RecordingShareModal.share', error);
       toast.error('Failed to share', {
@@ -140,6 +199,35 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
       });
     } finally {
       setSharing(false);
+    }
+  };
+
+  const handleVisibilityChange = async (next: CallVisibility): Promise<void> => {
+    if (next === visibility) return;
+    setVisibilityOverride(next);
+    try {
+      await recordingService.setRecordingVisibility(recording.externalId, next);
+      toast.success(
+        next === CallVisibility.PUBLIC
+          ? 'Anyone in the workspace with the link can now view'
+          : 'Link access turned off',
+      );
+    } catch (error) {
+      setVisibilityOverride(null);
+      logRecordingError('RecordingShareModal.setVisibility', error);
+      toast.error('Failed to update link access', {
+        description: getApiErrorMessage(error, 'Unable to update recording link access'),
+      });
+    }
+  };
+
+  const handleCopyLink = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(`${shareableOrigin}/recordings/${recording.externalId}`);
+      toast.success('Link copied');
+    } catch (error) {
+      logRecordingError('RecordingShareModal.handleCopyLink', error);
+      toast.error('Failed to copy link');
     }
   };
 
@@ -174,27 +262,63 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
     }
   };
 
-  if (!canManage) {
-    return (
-      <div className='p-5 text-sm text-muted-foreground'>
-        Only the recording creator can manage sharing.
-      </div>
-    );
-  }
-
   return (
     <div className='flex flex-col w-full p-5 gap-4'>
       <div className='space-y-2'>
         <p className='text-muted-foreground text-[13px] leading-5'>
           Share with people, groups, or channels
         </p>
-        <SearchParticipants
-          options={options}
+        <UnifiedParticipantSearch
           selectedValues={selectedValues}
           onMultiSelect={setSelectedValues}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+          excludedUserIds={excludedUserIds}
+          excludedUserGroupIds={sharedUserGroupIds}
+          excludedChannelIds={sharedChannelIds}
           exclusiveSelection={false}
+        />
+      </div>
+
+      <div
+        className='space-y-1.5'
+        data-track-category='RecordingDetailV2'
+        data-track-name='share_recording_message_input'
+        onKeyDownCapture={event => {
+          if (event.key === 'Enter' && !event.shiftKey && selectedValues.length > 0) {
+            if (inputBoxRef.current?.isSuggestionOpen()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void handleShare();
+          }
+        }}
+      >
+        <label htmlFor='share-recording-message' className='text-muted-foreground text-[13px]'>
+          Add a message (optional)
+        </label>
+        <InputBox
+          ref={inputBoxRef}
+          id='share-recording-message'
+          placeholder='Say something about this recording...'
+          onSendMessage={() => {}}
+          onContentChange={(html, _text) => {
+            setMessageContent(html);
+          }}
+          mentionItems={mentionResults}
+          onMentionSearch={handleMentionSearch}
+          channelItems={channelMentionItems}
+          onChannelSearch={setChannelMentionQuery}
+          features={{
+            richText: true,
+            mentions: true,
+            commands: false,
+            fileAttachments: false,
+            emojiPicker: true,
+          }}
+          showTypingIndicator={false}
+          disabled={sharing}
+          disableEnterToSend
+          hideSendButton
         />
       </div>
 
@@ -206,7 +330,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
           data-track-category='RecordingDetailV2'
           data-track-name='share_recording_confirm'
         >
-          Share
+          {sharing ? 'Sharing...' : 'Share'}
         </Button>
       </div>
 
@@ -234,12 +358,25 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
               ) : (
                 <Avatar userId={share.userId ?? null} size='sm' showActiveStatus={false} />
               );
+              // Link to the posted conversation.
+              const post = getRecordingSharePost(share.metadata);
 
               return (
                 <div key={share.id} className='group flex items-center justify-between gap-2'>
                   <div className='flex items-center gap-2 min-w-0'>
                     {icon}
                     <span className='text-sm truncate'>{label}</span>
+                    {post && (
+                      <Link
+                        to={`/chat/dir/${post.channelId}/${post.conversationId}`}
+                        className='shrink-0 text-muted-foreground transition-colors hover:text-foreground'
+                        aria-label='Open shared conversation'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='open_recording_share_conversation'
+                      >
+                        <LinkChainSlant className='size-3.5' aria-hidden='true' />
+                      </Link>
+                    )}
                   </div>
                   <button
                     type='button'
@@ -257,6 +394,52 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
           </div>
         </div>
       )}
+
+      <div className='space-y-2 border-t border-border pt-3'>
+        <p className='text-muted-foreground text-[13px]'>General access</p>
+        <div className='flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5'>
+          <span className='w-9 h-9 rounded-full bg-background border border-border grid place-items-center shrink-0 text-muted-foreground'>
+            {isPublic ? <Globe className='w-4 h-4' /> : <Lock className='w-4 h-4' />}
+          </span>
+          <div className='min-w-0 flex-1'>
+            <div className='text-sm font-medium'>
+              {isPublic ? 'Anyone with the link' : 'Restricted'}
+            </div>
+            <div className='text-xs text-muted-foreground mt-0.5'>
+              {isPublic
+                ? 'Anyone in the workspace with the link can view'
+                : 'Only people with access can open'}
+            </div>
+          </div>
+          {isCreator && (
+            <Switch
+              checked={isPublic}
+              onCheckedChange={checked =>
+                void handleVisibilityChange(
+                  checked ? CallVisibility.PUBLIC : CallVisibility.PRIVATE,
+                )
+              }
+              aria-label='Anyone with the link'
+              id='recording-visibility-toggle'
+            />
+          )}
+        </div>
+        {isPublic && (
+          <div className='flex justify-end'>
+            <button
+              type='button'
+              onClick={() => void handleCopyLink()}
+              className='inline-flex items-center gap-2 text-sm font-medium text-foreground rounded-md px-2.5 py-1.5 -mr-2.5 transition-colors hover:bg-accent hover:text-primary'
+              data-testid='recording-copy-link-button'
+              data-track-category='RecordingDetailV2'
+              data-track-name='copy_recording_link'
+            >
+              <Link2 className='w-4 h-4' />
+              Copy link
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

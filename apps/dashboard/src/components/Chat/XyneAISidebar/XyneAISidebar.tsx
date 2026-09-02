@@ -63,6 +63,7 @@ import {
   type SelectedRecording,
   type ContextSelections,
   toAttachedContext,
+  attachedContextToSelections,
 } from './components/ContextPickerPanel';
 import { MessageItem, ConversationToolInvocationsContext } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
@@ -130,6 +131,8 @@ interface XyneAISidebarProps {
   kbChannelId?: string;
   kbDocId?: string;
   kbDocName?: string;
+  kbFolderId?: string;
+  kbFolderName?: string;
   // Bumped by xyneAIMachine each time OPEN is dispatched with a kbCollectionId.
   // The input box re-attaches the KB collection chip on every bump.
   kbOpenNonce?: number;
@@ -165,6 +168,8 @@ const XyneAISidebar = ({
   kbCollectionId: kbCollectionIdProp,
   kbDocId: kbDocIdProp,
   kbDocName: kbDocNameProp,
+  kbFolderId: kbFolderIdProp,
+  kbFolderName: kbFolderNameProp,
   kbOpenNonce,
   visible = true,
   forcedAgentSlug,
@@ -257,6 +262,24 @@ const XyneAISidebar = ({
   useEffect(() => {
     setFileScopes(kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : []);
   }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
+  // Folder scope(s) — multi-select, from the collection picker. Sent to
+  // claw-auth as a single 'folder' attached_context pointer per id — NOT
+  // expanded to a recursive file list here (xyneAIControllerV2.ts doesn't do
+  // that); claw-auth resolves it itself, at Vespa-query time, since Vespa's
+  // collectionId filter only ever matches a doc's ROOT collection and can't
+  // filter on a folder id directly.
+  // Seeded with the folder Ask AI was opened from (browsing inside a
+  // sub-folder in the KB screen, not its root); re-synced below like
+  // fileScopes so re-opening Ask AI from a folder re-attaches the chip even
+  // after it was manually removed.
+  const [folderScopes, setFolderScopes] = useState<{ id: string; name: string }[]>(
+    kbFolderIdProp ? [{ id: kbFolderIdProp, name: kbFolderNameProp || 'this folder' }] : [],
+  );
+  useEffect(() => {
+    setFolderScopes(
+      kbFolderIdProp ? [{ id: kbFolderIdProp, name: kbFolderNameProp || 'this folder' }] : [],
+    );
+  }, [kbFolderIdProp, kbFolderNameProp, kbOpenNonce]);
   // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
   const autoSendPendingQueryRef = useRef<string | null>(null);
   const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
@@ -676,6 +699,9 @@ const XyneAISidebar = ({
   // the previous agent's key may not exist on the new one.
   const modelAgentSlug = effectiveAgentSlug ?? 'ask-ai';
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [thinkingLevel, setThinkingLevel] = useState<
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | null
+  >(null);
   const { data: agentModelsData } = useQuery({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
@@ -684,6 +710,7 @@ const XyneAISidebar = ({
   });
   useEffect(() => {
     setSelectedModel(null);
+    setThinkingLevel(null);
   }, [modelAgentSlug]);
 
   useEffect(() => {
@@ -735,6 +762,7 @@ const XyneAISidebar = ({
     activities: selectedActivities,
     collectionIds: selectedCollectionIds ?? [],
     fileIds: fileScopes.map(f => f.id),
+    folderIds: folderScopes.map(f => f.id),
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
@@ -764,6 +792,8 @@ const XyneAISidebar = ({
     }),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
+    modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
+    thinkingLevel,
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -1104,6 +1134,7 @@ const XyneAISidebar = ({
           isStreaming: false,
         }));
         setMessages(messagesWithoutStreaming);
+        seedContextFromMessages(messagesWithoutStreaming);
         setConversationId(conversation.sessionId);
         setConversationChannelId(conversation.channelId || null);
         setBranchSelections({});
@@ -1357,6 +1388,26 @@ const XyneAISidebar = ({
   }, []);
   const handleRemoveRecording = useCallback((id: string) => {
     setSelectedRecordings(prev => prev.filter(r => r.id !== id));
+  }, []);
+
+  // On switching to a conversation, carry its last user-turn context into the
+  // composer so the input is pre-filled with the context last used there.
+  // Context is chat-wise: REPLACE the editable context with this chat's last-turn
+  // context, and CLEAR it when that turn had none — so one chat's context never
+  // leaks into another. NOTE: collection PILLS are owned by XyneAIInputBox (only
+  // ids reach the sidebar), so we sync the ids here for what's sent, but the
+  // pill display for collections still only fully reflects on reload.
+  const seedContextFromMessages = useCallback((msgs: Message[]): void => {
+    const lastUser = [...msgs].reverse().find(m => m.type === 'user');
+    const c = attachedContextToSelections(lastUser?.attachedContext ?? []);
+    setSelectedChannels(c.channels);
+    setSelectedTickets(c.tickets);
+    setSelectedCanvases(c.canvases);
+    setSelectedTranscripts(c.transcripts);
+    setSelectedRecordings(c.recordings);
+    setFileScopes(c.fileScopes);
+    setFolderScopes(c.folderScopes);
+    setSelectedCollectionIds(c.collections.map(col => col.id));
   }, []);
 
   const handleAddActivities = useCallback((activities: UserActivity[]): void => {
@@ -1840,6 +1891,8 @@ const XyneAISidebar = ({
     defaultModel: agentModelsData?.defaultModel ?? null,
     selectedModel,
     onSelectModel: setSelectedModel,
+    thinkingLevel,
+    onSelectThinking: setThinkingLevel,
     showContextModal,
     onCloseContextModal: handleCloseContextModal,
     onConfirmContext: handleConfirmContext,
@@ -1871,6 +1924,8 @@ const XyneAISidebar = ({
       : {}),
     fileScopes,
     onFileScopesChange: setFileScopes,
+    folderScopes,
+    onFolderScopesChange: setFolderScopes,
     onOpenContextModal: handleOpenContextModal,
     selectedTickets,
     onRemoveTicket: handleRemoveTicket,

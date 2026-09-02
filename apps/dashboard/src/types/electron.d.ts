@@ -52,6 +52,7 @@ export interface ElectronAPI {
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
+  onAppWindowLimitReached: (callback: (limit: number) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
@@ -100,6 +101,7 @@ export interface ElectronAPI {
   ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
+  onRecordingStopForTeardown?: (callback: () => void) => () => void;
   onRecordingResumeRequest?: (callback: () => void) => () => void;
   onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
@@ -189,6 +191,16 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
+  localHarness?: {
+    getStatus: () => Promise<LocalHarnessStatus>;
+    detect: () => Promise<LocalHarnessInstallation[]>;
+    connect: () => Promise<LocalHarnessStatus>;
+    disconnect: () => Promise<LocalHarnessStatus>;
+    setProviderEnabled: (
+      provider: LocalHarnessInstallation['provider'],
+      enabled: boolean,
+    ) => Promise<LocalHarnessStatus>;
+  };
   saveErrorReportFile?(
     fileName: string,
     buffer: ArrayBuffer | null,
@@ -200,6 +212,25 @@ export interface ElectronAPI {
   readErrorReportRecordingFile?(recordingToken: string): Promise<ArrayBuffer>;
   cleanupErrorReportRecording?(filePath: string): Promise<void>;
   onErrorReportRecordingProgress?(callback: (data: { elapsedSeconds: number }) => void): () => void;
+}
+
+export interface LocalHarnessInstallation {
+  provider: 'claude-code' | 'codex-cli';
+  binaryPath: string;
+  version: string;
+  authenticated: boolean;
+  /** Whether the user connected this harness on this device. */
+  enabled?: boolean;
+}
+
+export interface LocalHarnessStatus {
+  supported: boolean;
+  connected: boolean;
+  deviceId: string | null;
+  deviceName: string;
+  platform: string;
+  installations: LocalHarnessInstallation[];
+  lastError: string | null;
 }
 
 declare global {

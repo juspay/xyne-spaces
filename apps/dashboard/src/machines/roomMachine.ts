@@ -30,10 +30,12 @@ import {
 } from '@xyne/shared';
 // import type { Mutators } from '../zero/mutators';
 import { callService } from '../services/Call/callService';
+import { openLink } from '../utils/openLink';
 import { CallType } from '@xyne/shared';
 import { mixpanelService } from '../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
+import { isCallUrlApiAllowed, type CallUrlOverrides } from '../utils/callUrlOverrides';
 import { toast } from 'sonner';
 import { MACOS_PRIVACY_URLS } from '../constants/permissions';
 import {
@@ -75,6 +77,23 @@ const logRoomMachineEvent = (
     callId: callId ?? null,
     eventName,
   });
+};
+
+/**
+ * HTTP status behind a rejected API call, when it carried one.
+ *
+ * Read as a field rather than off a typed error class on purpose: the shared
+ * axios instance rewrites every failure into a plain `Error` with `status`
+ * attached (see the response interceptor in services/clients/apiClient), so the
+ * `ApiError` callService would otherwise construct never reaches a caller.
+ * Both shapes expose `status`, so the field is the thing they agree on.
+ */
+const apiErrorStatus = (error: unknown): number | undefined => {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
 };
 
 export interface ParticipantInfo {
@@ -159,6 +178,9 @@ export interface RoomContext {
   viewMode: 'mini' | 'full';
   callId: string | null;
   channelId: string | null;
+  // The invite URL the current join attempt came from, or null when the join
+  // started inside the app. See the JOIN_CALL event and `routeToExternalCallLobby`.
+  externalLobbyUrl: string | null;
   scopeType: string | null; // Channel scope type (DM, GROUP_DM, DEFAULT, etc.)
   invitedUserId: string | null;
   conversationId: string | null;
@@ -204,6 +226,19 @@ export interface RoomContext {
   hostControls: HostControls;
   // Background blur on the local camera feed (web only). Off by default.
   isBackgroundBlurEnabled: boolean;
+  // What a call URL asked for, when the join was driven by one rather than by a
+  // person clicking Join (see utils/callUrlOverrides). `null` is the normal case
+  // and means "no request": enableLocalTracks falls back to the user's saved join
+  // preferences, and failures surface as a toast.
+  //
+  // Non-null also marks the join as URL-driven, which is what makes it retry on
+  // its own and stay silent while doing so — on an unattended display there is
+  // nobody to read or dismiss a toast mid-recovery.
+  //
+  // Carried here rather than read from the URL at the point of use so it stays
+  // scoped to one call and clears with the rest of the context on disconnect.
+  // Every consumer re-checks the CAC flag before acting on it.
+  callUrlOverrides: CallUrlOverrides | null;
 }
 
 // Events for Room operations
@@ -228,12 +263,19 @@ export type RoomMachineEvent =
       conversationId?: string; // Optional: for thread-initiated calls
       artifactMessageId?: string; // Exact slash-command artifact that owns the call
       sdlcLink?: SdlcCallLink; // Optional: SDLC entity to link the call to
+      // Omit for a join a person drove themselves (see RoomContext).
+      callUrlOverrides?: CallUrlOverrides;
     }
   | {
       type: 'JOIN_CALL';
       callId: string;
       zero: Zero | null;
       viewMode?: 'mini' | 'full';
+      // Omit for a join a person drove themselves (see RoomContext).
+      callUrlOverrides?: CallUrlOverrides;
+      // Set by the invite-link entry points, and only by them: where to send
+      // the user if this call turns out not to be theirs to join.
+      externalLobbyUrl?: string;
     }
   | { type: 'TOGGLE_MIC' }
   | { type: 'PUSH_TO_TALK_START' }
@@ -1294,6 +1336,7 @@ export const roomMachine = setup({
       callId: () => null,
       channelId: () => null,
       externalId: () => null,
+      externalLobbyUrl: () => null,
       invitedUserId: () => null,
       conversationId: () => null,
       artifactMessageId: () => null,
@@ -1327,6 +1370,7 @@ export const roomMachine = setup({
       unreadCallChatCount: () => 0,
       isBackgroundBlurEnabled: () => false,
       hostControls: () => DEFAULT_HOST_CONTROLS,
+      callUrlOverrides: () => null,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1355,13 +1399,29 @@ export const roomMachine = setup({
               'turnOffCamera',
             );
 
-            // Respect user preference: if joinMuted is true, always mute
-            // If joinMuted is false, use the existing threshold logic
-            const enableMic = !audioTurnedOffByHost && !joinMuted && !shouldMuteByDefault;
-            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
+            // The CAC flag is re-checked here, at the point the override is acted
+            // on, rather than being trusted from whoever sent the event: the hook
+            // that reads the URL gates entry, and this gates effect. A caller that
+            // sets callUrlOverrides without the flag gets the saved preferences,
+            // exactly as if it had asked for nothing.
+            const urlOverrides = isCallUrlApiAllowed() ? context.callUrlOverrides : null;
 
-            // For video: respect user preference
-            const enableCamera = !cameraTurnedOffByHost && !joinWithoutVideo;
+            // Precedence, strongest first:
+            //   1. host controls — never overridable by anyone but the host
+            //   2. an explicit request from the call URL (e.g. ?mic=on), once the
+            //      flag above allows it
+            //   3. the user's saved join preferences + the crowded-room mute threshold
+            // Applying (2) here rather than toggling after 'connected' is deliberate:
+            // this action is the single writer of the initial track state, so there is
+            // no window where a post-connect compare-and-toggle could read a value
+            // these very awaits are about to overwrite and end up inverted.
+            const enableMic =
+              !audioTurnedOffByHost && (urlOverrides?.mic ?? (!joinMuted && !shouldMuteByDefault));
+
+            const enableCamera =
+              !cameraTurnedOffByHost && (urlOverrides?.camera ?? !joinWithoutVideo);
+
+            await context.room!.localParticipant.setMicrophoneEnabled(enableMic);
 
             await context.room!.localParticipant.setCameraEnabled(enableCamera);
 
@@ -1378,7 +1438,28 @@ export const roomMachine = setup({
       }
     },
 
-    showJoinCallErrorToast: () => {
+    /**
+     * Hand a call this session cannot see over to the guest lobby.
+     *
+     * Calls are read through the tenant ACL, so one belonging to another
+     * workspace is not "forbidden" to /calls/join — it is absent, and comes
+     * back 404 (403 when the workspace check catches it after a recurring-series
+     * hop). The person holding the link is not necessarily a stranger to it,
+     * though: they may be a member of that other workspace. The lobby is what
+     * settles that, so the invite URL they arrived on is where they go.
+     *
+     * In a new tab, and only ever a new tab: the workspace they are working in
+     * is not the one the call lives in, and joining someone else's call is no
+     * reason to tear them out of it. `openLink` is the app's one external-link
+     * path, so this picks up the Electron and React Native handling for free.
+     */
+    routeToExternalCallLobby: ({ context }) => {
+      if (!context.externalLobbyUrl) return;
+      openLink(context.externalLobbyUrl, null, { force: 'external' });
+    },
+
+    showJoinCallErrorToast: ({ context }) => {
+      if (context.callUrlOverrides) return;
       toast.error('Failed to join call', {
         description: 'Unable to connect to the room. Please try again.',
         duration: 4000,
@@ -1449,6 +1530,7 @@ export const roomMachine = setup({
     viewMode: 'mini',
     callId: null,
     channelId: null,
+    externalLobbyUrl: null,
     sdlcLink: null,
     scopeType: null,
     invitedUserId: null,
@@ -1493,6 +1575,7 @@ export const roomMachine = setup({
     unreadCallChatCount: 0,
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
+    callUrlOverrides: null,
   },
   id: 'roomMachine',
   on: {
@@ -1549,6 +1632,8 @@ export const roomMachine = setup({
               event.type === 'INITIATE_CALL' ? (event.artifactMessageId ?? null) : null,
             sdlcLink: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.sdlcLink ?? null) : null,
+            callUrlOverrides: ({ event }) =>
+              event.type === 'INITIATE_CALL' ? (event.callUrlOverrides ?? null) : null,
             isInitiator: () => true,
           }),
         },
@@ -1564,6 +1649,10 @@ export const roomMachine = setup({
               zero: ({ event }) => (event.type === 'JOIN_CALL' ? (event.zero ?? null) : null),
               viewMode: ({ event }) =>
                 event.type === 'JOIN_CALL' && event.viewMode ? event.viewMode : ('mini' as const),
+              callUrlOverrides: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.callUrlOverrides ?? null) : null,
+              externalLobbyUrl: ({ event }) =>
+                event.type === 'JOIN_CALL' ? (event.externalLobbyUrl ?? null) : null,
               isInitiator: () => false,
             }),
           ],
@@ -1721,16 +1810,38 @@ export const roomMachine = setup({
             ],
           },
         ],
-        onError: {
-          target: 'failed',
-          actions: [
-            assign({
-              error: ({ event }) =>
-                event.error instanceof Error ? event.error.message : 'Failed to join call',
-            }),
-            'showJoinCallErrorToast',
-          ],
-        },
+        onError: [
+          {
+            // Not a failure to report — the call is simply not one this
+            // workspace can see, and the lobby takes it from here. Guarded on
+            // the invite URL so only link-borne joins open one: an in-app join
+            // button hitting 404 means the call ended, and that belongs in a
+            // toast rather than a tab.
+            guard: ({ context, event }): boolean =>
+              Boolean(context.externalLobbyUrl) &&
+              [403, 404].includes(apiErrorStatus(event.error) ?? 0),
+            target: 'failed',
+            actions: [
+              ({ context }): void => {
+                logRoomMachineEvent(context.callId, 'join_call_routed_to_external_lobby');
+              },
+              assign({
+                error: () => 'Call is not in this workspace',
+              }),
+              'routeToExternalCallLobby',
+            ],
+          },
+          {
+            target: 'failed',
+            actions: [
+              assign({
+                error: ({ event }) =>
+                  event.error instanceof Error ? event.error.message : 'Failed to join call',
+              }),
+              'showJoinCallErrorToast',
+            ],
+          },
+        ],
       },
     },
     connecting: {
@@ -2502,6 +2613,41 @@ export const roomMachine = setup({
 
 // Create the global Room actor instance
 export const roomActor = createActor(roomMachine).start();
+
+/**
+ * Join a call from outside the React tree, leaving any call already running.
+ *
+ * JOIN_CALL is only accepted from `idle`, so a join raised mid-call has to wait
+ * out the teardown. Inside the tree that waiting is what useCallJoinOrInitiate
+ * does — a pending ref plus an effect on the machine state — which is how the
+ * "Switch" button on a call message works. The document-level link handler in
+ * App.tsx sits above the providers that hook needs, so it comes through here.
+ */
+export const joinCallSwitchingIfNeeded = (
+  event: Extract<RoomMachineEvent, { type: 'JOIN_CALL' }>,
+): void => {
+  if (reactNativeBridge.isAvailable()) {
+    reactNativeBridge.requestMediaPermissions({
+      permissions: ['microphone', 'camera', 'screenShare'],
+    });
+  }
+
+  if (roomActor.getSnapshot().value === 'idle') {
+    roomActor.send(event);
+    return;
+  }
+
+  // Subscribed before the disconnect is sent, so the transition to idle cannot
+  // be missed. Reading `subscription` inside its own callback is safe: this runs
+  // only when the machine is not idle, so an implementation that replayed the
+  // current state on subscribe would hit the early return first.
+  const subscription = roomActor.subscribe(state => {
+    if (state.value !== 'idle') return;
+    subscription.unsubscribe();
+    roomActor.send(event);
+  });
+  roomActor.send({ type: 'DISCONNECT' });
+};
 
 // Expose roomActor on window for debugging in development
 if (typeof window !== 'undefined') {

@@ -25,6 +25,7 @@ import {
   CallOrigin,
   CallStatus,
   CallType,
+  CallVisibility,
   ChannelScopeType,
   InvitationResponse,
   MeetingStatus,
@@ -160,6 +161,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
     instanceDate: null,
     recordingEnabled: false,
     recordingUrl: null,
+    recordingParticipants: '[]',
     transcript: context?.hasTranscript ? 'available' : undefined,
     aiSummary: null,
     startedAt,
@@ -186,6 +188,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
     labels: [],
     markedItems: [],
     xyneManaged: false,
+    visibility: CallVisibility.PRIVATE,
     participants: Array.from({ length: participantCount }, (_, index) => {
       const userId = participantUserIds[index] || '';
       const displayName = stripSearchHighlight(participantNames[index]);
@@ -936,7 +939,7 @@ const CallHistoryScreen = (): ReactElement => {
             <button
               data-testid='start-instant-call-option'
               onClick={() => setIsInstantCallModalOpen(true)}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='start-instant-call'
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
@@ -956,7 +959,7 @@ const CallHistoryScreen = (): ReactElement => {
             <button
               data-testid='schedule-call-option'
               onClick={() => setIsScheduleModalOpen(true)}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='schedule-call'
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
@@ -999,7 +1002,7 @@ const CallHistoryScreen = (): ReactElement => {
                             })
                           }
                           disabled={isPrevDisabled}
-                          data-track-category='Calls'
+                          data-track-category='CALLS'
                           data-track-name='upcoming-prev-day'
                           className={cn(
                             'p-1.5 rounded transition-colors',
@@ -1019,7 +1022,7 @@ const CallHistoryScreen = (): ReactElement => {
                               return next;
                             })
                           }
-                          data-track-category='Calls'
+                          data-track-category='CALLS'
                           data-track-name='upcoming-next-day'
                           className='p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground'
                           aria-label='Next day'
@@ -1038,7 +1041,7 @@ const CallHistoryScreen = (): ReactElement => {
                     <div className='flex items-center'>
                       <button
                         onClick={handleCalendarPrev}
-                        data-track-category='Calls'
+                        data-track-category='CALLS'
                         data-track-name='calendar-prev'
                         className='p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground'
                         aria-label='Previous'
@@ -1048,7 +1051,7 @@ const CallHistoryScreen = (): ReactElement => {
                       <button
                         onClick={handleCalendarNext}
                         disabled={isNextDisabled}
-                        data-track-category='Calls'
+                        data-track-category='CALLS'
                         data-track-name='calendar-next'
                         className={cn(
                           'p-1.5 rounded transition-colors',
@@ -1077,7 +1080,7 @@ const CallHistoryScreen = (): ReactElement => {
                     <button
                       onClick={handleCalendarToday}
                       disabled={isTodayDisabled}
-                      data-track-category='Calls'
+                      data-track-category='CALLS'
                       data-track-name='calendar-today'
                       className={cn(
                         'px-2.5 py-1.5 text-sm font-medium border border-border rounded-lg transition-colors',
@@ -1117,7 +1120,7 @@ const CallHistoryScreen = (): ReactElement => {
                 <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                   <button
                     onClick={() => setViewMode('list')}
-                    data-track-category='Calls'
+                    data-track-category='CALLS'
                     data-track-name='switch-to-list'
                     className={cn(
                       'p-2 transition-colors',
@@ -1131,7 +1134,7 @@ const CallHistoryScreen = (): ReactElement => {
                   </button>
                   <button
                     onClick={() => setViewMode('calendar')}
-                    data-track-category='Calls'
+                    data-track-category='CALLS'
                     data-track-name='switch-to-calendar'
                     className={cn(
                       'p-2 transition-colors',

@@ -19,7 +19,7 @@ import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
-import { findRemotePresenter } from '../ParticipantGrid/sortParticipants';
+import { findPresentationParticipant } from '../ParticipantGrid/sortParticipants';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
@@ -27,6 +27,7 @@ import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
+import { useAutoPresentationMode } from '../useAutoPresentationMode';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 import { CallWhiteboardView } from '../CallWhiteboard';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
@@ -145,6 +146,7 @@ export function MiniCallView({
   // State for participants sidebar
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  useAutoPresentationMode(isTelepresenceEnabled, setIsPresentationMode);
 
   // Close participants sidebar when chat opens
   useEffect(() => {
@@ -254,8 +256,8 @@ export function MiniCallView({
     p => p.identity === focusedScreenShareIdentity,
   );
 
-  const remoteParticipant = useMemo(
-    () => findRemotePresenter(participants, localParticipantId),
+  const presentationParticipant = useMemo(
+    () => findPresentationParticipant(participants, localParticipantId),
     [participants, localParticipantId],
   );
 
@@ -323,6 +325,8 @@ export function MiniCallView({
         aria-label='Resize width'
         className='absolute top-0 right-0 w-1 h-full cursor-ew-resize z-20'
         onMouseDown={e => handleResizeStart(e, 'right')}
+        data-track-category='CALLS'
+        data-track-name='RESIZE_MINI_CALL_WIDTH'
         onPointerDown={(e): void => e.stopPropagation()}
         onKeyDown={(e): void => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -339,6 +343,8 @@ export function MiniCallView({
           aria-label='Resize width and height'
           className='absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-30'
           onMouseDown={e => handleResizeStart(e, 'corner')}
+          data-track-category='CALLS'
+          data-track-name='RESIZE_MINI_CALL_CORNER'
           onPointerDown={(e): void => e.stopPropagation()}
           onKeyDown={(e): void => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -449,7 +455,7 @@ export function MiniCallView({
         <PresentationModeOverlay
           callId={callId}
           isOpen={isPresentationMode}
-          participant={remoteParticipant ?? null}
+          participant={presentationParticipant ?? null}
           aiController={aiController}
           requestedAiController={requestedAiController}
           onExit={() => setIsPresentationMode(false)}
@@ -673,7 +679,7 @@ export function MiniCallView({
       <PresentationModeOverlay
         callId={callId}
         isOpen={isPresentationMode}
-        participant={remoteParticipant ?? null}
+        participant={presentationParticipant ?? null}
         aiController={aiController}
         requestedAiController={requestedAiController}
         onExit={() => setIsPresentationMode(false)}

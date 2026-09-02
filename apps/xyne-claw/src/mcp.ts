@@ -6,6 +6,7 @@ import { promoteIfOversized } from "./tool-output.js";
 import { writeAttachmentToContext } from "./attachment-write.js";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve as resolvePath, isAbsolute, sep } from "node:path";
+import crypto from "node:crypto";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("mcp");
@@ -17,7 +18,7 @@ const log = createLogger("mcp");
  * (multi-sheet markdown / unpdf), text gets utf-8 decoded, images and
  * unknown binaries are written as-is. Returns null if no marker is found.
  */
-async function persistSpacesAttachmentIfMarker(
+export async function persistSpacesAttachmentIfMarker(
   workspaceDir: string,
   content: string,
 ): Promise<string | null> {
@@ -35,7 +36,12 @@ async function persistSpacesAttachmentIfMarker(
       mimeType,
       buf,
     );
-    return `Saved attachment to \`${relPath}\` (${kind}, ${byteSize} bytes). Use the read tool to view it.`;
+    const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
+    return [
+      `Saved attachment to \`${relPath}\` (${kind}, ${byteSize} bytes). Use the read tool to view it.`,
+      `Workspace file marker: {{file:${relPath}}}`,
+      `Attachment metadata: ${JSON.stringify({ fileName, mimeType, sha256 })}`,
+    ].join("\n");
   } catch (err) {
     return `Failed to persist attachment ${fileName}: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -139,7 +145,7 @@ export interface McpToolGroup {
 // Allowlist source: the CLAW_FILE_INPUT_FORWARDING_SERVERS env var (comma-
 // separated serverTypes). Mirrors claw-auth's FILE_FORWARDING_SERVERS pattern.
 const FILE_INPUT_FORWARDING_SERVERS = new Set<string>(
-  (process.env["CLAW_FILE_INPUT_FORWARDING_SERVERS"] ?? "")
+  (process.env["CLAW_FILE_INPUT_FORWARDING_SERVERS"] ?? "github")
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean),

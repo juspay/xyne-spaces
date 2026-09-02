@@ -12,8 +12,9 @@
 export interface TaskCommand {
   /** The literal command, including the leading slash. */
   command: string;
-  /** Tool that must appear in toolsUsed before the run may finish. */
-  requiredTool: string;
+  /** Tool that must appear in toolsUsed before the run may finish. Omit for a
+   * delivery contract (agentConfigOverlay.outputFormat). */
+  requiredTool?: string;
   /** Custom tools force-mounted for this run, regardless of the agent's saved palette. */
   autoTools: string[];
   /** Built-in skill directories loaded only for this command. Paths are
@@ -24,12 +25,16 @@ export interface TaskCommand {
    * from the agent-workspace-browser warm pool (seconds) instead of cold-
    * booting the default kata template (~80s, prod 2026-08-08). */
   sandboxProfile?: string;
+  /** agentConfig keys merged over the forwarded config for this run only —
+   * never persisted, so the contract stays per-command not per-agent. */
+  agentConfigOverlay?: Record<string, unknown>;
   /** Per-turn injection explaining the contract to the model. */
   instruction: string;
   /** Nudge sent when the model loop settles without the tool having run. */
   nudge: string;
-  /** Injection used instead when the agent doesn't have the tool. */
-  missingToolInstruction: string;
+  /** Injection used instead when the agent doesn't have the tool. Unreachable
+   * without `requiredTool`, so a delivery contract may omit it. */
+  missingToolInstruction?: string;
 }
 
 export const DESIGN_SYSTEM_MAX_CHARS = 32_000;
@@ -68,6 +73,24 @@ export function buildDesignSystemPromptInjection(
     },
   };
 }
+
+/** Context-first interview guard. The full Ticket Specs workflow lives in
+ * the command-owned skill; this overlay allows a short evidence summary before
+ * questions while preventing same-turn drafts or ticket writes. */
+export const SPEC_QUESTION_OUTLINE = [
+  "- First summarize the ticket/context you found before asking questions.",
+  "- Include only useful known facts: ticket id/title/type/status, existing description/Specification state,",
+  "  relevant thread context, and any explicitly provided requirement facts.",
+  "- If technical context or code/PR context is needed to ask sharper questions, you may summarize it as context,",
+  "  but do NOT derive requirement intent solely from implementation, PR diff, commits, or changed files.",
+  "- Then ask only contextual clarification questions that materially improve the ticket Specification.",
+  "- Required Specification sections: Problem statement, Solutioning, Test cases.",
+  "- Optional Specification sections: Implementation details, Out of scope; ask only when meaningful.",
+  "- Do NOT mechanically ask the section headings as generic questions.",
+  "- Do NOT ask the user to repeat information already explicitly provided.",
+  "- Ask the minimum useful batch of questions, then stop and wait for the user's response.",
+  "- Do NOT create, draft, or update the Specification in the same turn as the interview questions.",
+].join("\n");
 
 const TASK_COMMANDS: TaskCommand[] = [
   {
@@ -211,6 +234,28 @@ const TASK_COMMANDS: TaskCommand[] = [
     missingToolInstruction:
       "The /record-skill runtime could not mount its recording analyzer or create-skill approval tool. Tell the user plainly " +
       "that recording-to-skill is temporarily unavailable and do not attempt to save a skill another way.",
+  },
+  {
+    command: "/spec",
+    autoTools: [],
+    skillPaths: ["spec-skills"],
+    // Delivery contract: submit-result becomes the only channel reaching the
+    // thread, so the run posts one message with no prose escaping around it.
+    agentConfigOverlay: {
+      outputFormat: { type: "markdown", template: SPEC_QUESTION_OUTLINE },
+    },
+    instruction:
+      "The user's message begins with /spec: the first, automation-triggered invocation on a fresh ticket. Use the " +
+      "Ticket Specs skill loaded for this run as the workflow playbook. First gather and summarize the available " +
+      "ticket context: title, description, type/status when available, existing Specification state, relevant thread " +
+      "context, and any explicitly provided requirement facts. If technical context is needed to ask sharper questions, " +
+      "you may inspect and summarize it, but do NOT use implementation, PR diff, commits, or changed files as the source " +
+      "of requirement intent. Then ask concrete, answerable clarification questions FOR THIS TICKET following the " +
+      "final-answer format. Invoking the command IS approval to post, so do not ask whether to start.",
+    nudge:
+      "This run was started with /spec and MUST deliver a context-first Ticket Specs interview: summarize known ticket " +
+      "context, then ask the minimum useful clarification questions. Do not draft or update the Specification yet. " +
+      "DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
   },
 ];
 

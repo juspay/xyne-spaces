@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
+import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
 import { useFileSearchContext } from './FileSearchContext';
 import { MAX_MATCHES } from './types';
 
@@ -151,31 +152,33 @@ export const FindBar: React.FC = () => {
 
       <div className='mx-0.5 h-4 w-px shrink-0 bg-white/15' />
 
-      <button
-        type='button'
-        onClick={prev}
-        disabled={!hasResults}
-        className={navClass(!hasResults)}
-        title='Previous match (Shift+Enter)'
-        aria-label='Previous match'
-        data-track-category='FileViewer'
-        data-track-name='FindPrevious'
-      >
-        <ChevronUp className='h-4 w-4' />
-      </button>
+      <ShortcutTooltip label='Previous match' shortcut='viewer.findPrevious' side='bottom'>
+        <button
+          type='button'
+          onClick={prev}
+          disabled={!hasResults}
+          className={navClass(!hasResults)}
+          aria-label='Previous match'
+          data-track-category='FileViewer'
+          data-track-name='FindPrevious'
+        >
+          <ChevronUp className='h-4 w-4' />
+        </button>
+      </ShortcutTooltip>
 
-      <button
-        type='button'
-        onClick={next}
-        disabled={!hasResults}
-        className={navClass(!hasResults)}
-        title='Next match (Enter)'
-        aria-label='Next match'
-        data-track-category='FileViewer'
-        data-track-name='FindNext'
-      >
-        <ChevronDown className='h-4 w-4' />
-      </button>
+      <ShortcutTooltip label='Next match' shortcut='viewer.findNext' side='bottom'>
+        <button
+          type='button'
+          onClick={next}
+          disabled={!hasResults}
+          className={navClass(!hasResults)}
+          aria-label='Next match'
+          data-track-category='FileViewer'
+          data-track-name='FindNext'
+        >
+          <ChevronDown className='h-4 w-4' />
+        </button>
+      </ShortcutTooltip>
 
       <button
         type='button'

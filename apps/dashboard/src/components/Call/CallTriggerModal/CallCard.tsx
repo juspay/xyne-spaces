@@ -1,4 +1,5 @@
 import React, { useMemo, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
@@ -6,6 +7,10 @@ import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
+import { useRouteContext } from '../../../hooks/useRouteContext';
+import { standaloneNavigate } from '../../../utils/electronApp';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { roomActor } from '../../../machines/roomMachine';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -37,10 +42,42 @@ export const CallCard: React.FC<CallCardProps> = ({
 }) => {
   const allUsers = useUsers();
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { baseRoute } = useRouteContext();
 
   const isCurrentCall = currentCallId === call.externalId;
   const channel = useChannel(call.channelId || '');
   const participantCount = getCallParticipantCount(call);
+  const conversationId = call.metadata?.conversationId;
+
+  // Same ticketId lookup and route shape as ChatListV2/V3/V4's handleOpenThread
+  // (.../{conversationId}/{ticketId}?selectedTab=thread for ticket-linked threads,
+  // plain .../{conversationId} otherwise), so this title lands on the same route.
+  const [conversationDetails] = useCachedQuery(
+    queries.getConversationById({ conversationId: conversationId || '' }),
+    { enabled: !!conversationId },
+  );
+  const conversationMetadata = conversationDetails?.metadata as { ticketId?: string } | null;
+  const messageMetadata = conversationDetails?.initialMessage?.metadata as {
+    ticketId?: string;
+  } | null;
+  const ticketId = conversationMetadata?.ticketId || messageMetadata?.ticketId;
+
+  const handleOpenThread = (e?: React.MouseEvent): void => {
+    if (!conversationId || !call.channelId) return;
+    onActionClick?.();
+    if (ticketId) {
+      standaloneNavigate(
+        navigate,
+        `${baseRoute}/${call.channelId}/${conversationId}/${ticketId}?selectedTab=thread`,
+        { event: e },
+      );
+    } else {
+      standaloneNavigate(navigate, `${baseRoute}/${call.channelId}/${conversationId}`, {
+        event: e,
+      });
+    }
+  };
 
   // ── Confirmation modal for switching calls ──
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
@@ -127,14 +164,33 @@ export const CallCard: React.FC<CallCardProps> = ({
         {/* Call info */}
         <div className='flex-1 min-w-0'>
           <div className={cn('flex items-center gap-2', isMobileLiveCall ? 'justify-center' : '')}>
-            <div
-              className={cn(
-                'text-sm font-semibold text-foreground',
-                isMobileLiveCall ? 'text-md mb-1' : '',
-              )}
-            >
-              {callTitle}
-            </div>
+            {conversationId ? (
+              <button
+                type='button'
+                onClick={e => {
+                  e.stopPropagation();
+                  handleOpenThread(e);
+                }}
+                title='Open conversation'
+                data-track-category='CALLS'
+                data-track-name='OpenThreadFromCallCard'
+                className={cn(
+                  'text-sm font-semibold text-foreground text-left bg-transparent border-0 p-0 cursor-pointer hover:underline focus-visible:underline focus:outline-none',
+                  isMobileLiveCall ? 'text-md mb-1' : '',
+                )}
+              >
+                {callTitle}
+              </button>
+            ) : (
+              <div
+                className={cn(
+                  'text-sm font-semibold text-foreground',
+                  isMobileLiveCall ? 'text-md mb-1' : '',
+                )}
+              >
+                {callTitle}
+              </div>
+            )}
             {!isCurrentCall && (
               <div className='text-xs text-muted-foreground mt-0.5'>
                 {call.startedAt
@@ -174,7 +230,7 @@ export const CallCard: React.FC<CallCardProps> = ({
               )}
               <button
                 onClick={handleLeaveCall}
-                data-track-category='CALL'
+                data-track-category='CALLS'
                 data-track-name='LeaveCall'
                 data-track-metadata={JSON.stringify({
                   callId: call.externalId,
@@ -210,7 +266,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                     ? 'waiting-to-join-button'
                     : 'request-to-join-button'
               }
-              trackCategory='CALL'
+              trackCategory='CALLS'
               trackJoinName={userIsActiveInCall ? 'SwitchCall' : 'JoinCall'}
               trackRequestName='RequestToJoinCall'
               trackMetadata={{ callId: call.externalId, channelId: call.channelId }}

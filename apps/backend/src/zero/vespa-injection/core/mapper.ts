@@ -14,6 +14,7 @@ import {
   VespaOperationType as VespaOpType,
 } from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
+import { indexableTagNames, parseAppliedTags } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
 import {
@@ -85,6 +86,9 @@ const loadTicketFormFields = async (ticketId: string) => {
 };
 
 const getRef = (schema: VespaSchema, docId: string) => `id:${NAMESPACE}:${schema}::${docId}`
+// One-hot of the doc's channel, matched against user-doc channelWeights by the `personalized` rank profile.
+const channelWeightedSetFor = (channelId: string | null | undefined) =>
+  channelId ? { [`channel:${channelId}`]: 1 } : undefined;
 
 /**
  * Convert timestamp to number (Unix timestamp in milliseconds)
@@ -455,36 +459,14 @@ export const mapMessage = async (
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
-  // Message acts, denormalized onto the doc so search can filter on them. Stored as a
-  // stringified JSON array; parsed defensively because it is plain TEXT with no DB-level
-  // guarantee of shape.
-  let messageActs: string[] = [];
-  if (args.messageActs) {
-    try {
-      const parsed: unknown = JSON.parse(args.messageActs);
-      if (Array.isArray(parsed)) {
-        messageActs = parsed.filter((v): v is string => typeof v === 'string');
-      }
-    } catch {
-      logger.warn('[VESPA] Ignoring malformed messageActs', { messageId: args.messageId });
-    }
-  }
-
-  // Thread types, same stringified-array shape as messageActs.
-  let threadType: string[] = [];
-  if (conversation.threadType) {
-    try {
-      const parsed: unknown = JSON.parse(conversation.threadType);
-      threadType = Array.isArray(parsed)
-        ? parsed.filter((v): v is string => typeof v === 'string')
-        : typeof parsed === 'string'
-          ? [parsed]
-          : [];
-    } catch {
-      // Rows written before the column held an array stored a bare name.
-      threadType = [conversation.threadType];
-    }
-  }
+  // Tag names, denormalized onto the doc so search can filter on them. Everything on the
+  // thread is indexed as soon as it lands — classifier or person, vocabulary or free-form —
+  // minus anything removed.
+  //
+  // messageActs holds the thread types this message is the EVIDENCE for: the classifier
+  // cites a message per type, and that citation is stored on both sides.
+  const messageActs = indexableTagNames(parseAppliedTags(args.messageActs));
+  const threadType = indexableTagNames(parseAppliedTags(conversation.threadType));
 
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
@@ -709,6 +691,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     convId: args.conversationId,
     userGroupId: args.userGroupId,
     channelRef: getRef(channelSchema, conversation?.channelId || ""),// if there is no channelId we can refer it with projectRef
+    channelWeightedSet: channelWeightedSetFor(conversation?.channelId),
     projectRef: getRef(projectSchema, args.projectId),
     threadId: args.conversationId,
     status: (args.statusV2 || mapStatusToStatusV2(args.status as TicketStatus)) as TicketStatusV2,
@@ -893,6 +876,7 @@ export const mapCollection = async (
     clFd: collectionItem.collectionId,
     projectId,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(rootCollection.scopeType === 'CHANNEL' ? rootCollection.scopeId : undefined),
     workspaceId,
     orgId,
   };
@@ -999,6 +983,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     mimeType: 'application/json',
     subApp: SubApp.CANVAS,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(args.channelId),
     conversationId: undefined,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
@@ -1099,6 +1084,7 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
     mimeType: 'text/plain',
     subApp: SubApp.TRANSCRIPT,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(args.channelId),
     conversationId,
     callType: args.callType,
     workspaceId: effectiveWorkspaceId,
@@ -1409,6 +1395,7 @@ export const mapFile = async (
     mimeType: args.mimetype,
     subApp: args.entityType === 'TICKET' ? SubApp.TICKET_ATTACHMENT : SubApp.CHAT_ATTACHMENT,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(channelId),
     conversationId,
     messageId: args.entityType === 'CHAT' ? args.entityId : undefined,
     ticketId: args.entityType === 'TICKET' ? args.entityId : undefined,
@@ -1457,7 +1444,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
 
   const ticket = await db.ticket.findFirst({
     where: { conversationId: email.conversationId },
-    select: { id: true, xyneId: true },
+    select: { id: true, xyneId: true, project: { select: { code: true } } },
   });
   const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
@@ -1518,6 +1505,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     parentThreadId: email.externalThreadId || undefined,
     mailId: email.externalMessageId || undefined,
     xyneId: ticket?.xyneId ?? undefined,
+    projectCode: ticket?.project?.code ?? undefined,
     ticketFormFields,
     ticketFormFieldValues: Array.from(new Set(ticketFormFields.map(field => field.fieldValue))),
     subject: email.subject,
@@ -1528,6 +1516,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     /** entity = "support_desk"; future: "personal" for Gmail */
     entity: 'support_desk',
     channelRef: getRef(channelSchema, channelId),
+    channelWeightedSet: channelWeightedSetFor(channelId),
     from: email.from,
     to: email.to,
     cc: email.cc.length > 0 ? email.cc : undefined,

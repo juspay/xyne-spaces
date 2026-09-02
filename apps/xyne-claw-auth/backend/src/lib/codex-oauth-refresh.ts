@@ -14,6 +14,7 @@
  */
 
 import { decrypt, encrypt } from "../crypto.js";
+import { errMsg } from "./errors.js";
 import { CONFIG } from "../config.js";
 import { parseCodexCred, type CodexOAuthBundle } from "./codex-creds.js";
 
@@ -87,7 +88,7 @@ export async function getValidCodexBearer(
         signal: AbortSignal.timeout(10_000),
       });
     } catch (err) {
-      throw new CodexAuthError(`Codex token refresh request failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new CodexAuthError(`Codex token refresh request failed: ${errMsg(err)}`);
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");

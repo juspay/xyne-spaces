@@ -10,6 +10,11 @@ export const isTestEnv =
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;
 
+// Availability in the client is prod-agnostic now; the server's LOCAL_HARNESS_ENABLED
+// flag is the real gate for whether runs actually route to a local device.
+export const isLocalHarnessAvailable = (): boolean =>
+  typeof window !== 'undefined' && !!window.electronAPI?.localHarness;
+
 const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
 const ELECTRON_BACKEND_URL = isProd
@@ -101,6 +106,10 @@ export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
 export const DEFAULT_WORKSPACE_ID: string =
   (import.meta.env['VITE_DEFAULT_WORKSPACE_ID'] as string) ?? '';
 
+// Slack app install page (user's own OAuth token for DM migration). Workspace-specific, so env-only;
+// set VITE_SLACK_APP_INSTALL_URL in .env.local — the UI hides the link when unset.
+export const SLACK_APP_INSTALL_URL: string =
+  (import.meta.env['VITE_SLACK_APP_INSTALL_URL'] as string) || '';
 // Deployment lane. The same source builds a second 'sdlc' bundle served at
 // '/sdlc-app/' with its own backend and zero-cache. Inert when VITE_XYNE_SURFACE
 // is unset. See docs/sdlc-fast-lane.md.

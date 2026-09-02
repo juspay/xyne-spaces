@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Users } from 'lucide-react';
+import { UserTwo as Users } from '@xyne/icons';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';

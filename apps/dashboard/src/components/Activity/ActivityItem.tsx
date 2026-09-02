@@ -16,10 +16,12 @@ import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
+import { RecordingSummaryActivity } from './RecordingSummaryActivity';
 import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
 import { StageApprovalActivity } from './StageApprovalActivity';
 import { KbIngestionActivity } from './KbIngestionActivity';
 import { SlashCommandArtifactActivity } from './SlashCommandArtifactActivity';
+import { MaxWorkloadActivity } from './MaxWorkloadActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -126,6 +128,9 @@ export const ActivityItem = memo(function ActivityItem({
     case 'recording_access_revoked':
       return <RecordingSharedActivity activity={activity} isExpanded={isExpanded} />;
 
+    case 'recording_summary_ready':
+      return <RecordingSummaryActivity activity={activity} isExpanded={isExpanded} />;
+
     case 'summary_template_shared':
     case 'summary_template_access_revoked':
       return <SummaryTemplateSharedActivity activity={activity} isExpanded={isExpanded} />;
@@ -137,6 +142,9 @@ export const ActivityItem = memo(function ActivityItem({
 
     case 'kb_ingestion_completed':
       return <KbIngestionActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'max_workload_reached':
+      return <MaxWorkloadActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

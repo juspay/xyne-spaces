@@ -14,13 +14,10 @@ import {
 } from 'react';
 import {
   ArrowUp,
-  Paperclip,
   Square,
   X,
   FileText,
-  Globe,
-  Microscope,
-  File as FileIcon,
+  Folder,
   BookOpen,
   Ticket,
   Phone,
@@ -29,21 +26,28 @@ import {
   Lock,
   Zap,
 } from 'lucide-react';
+import { PlusDefault } from '@xyne/icons';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
+import { ModelThinkingSelector, formatModelLabel } from './ModelThinkingSelector';
+import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
 import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
   ContextPickerPanel,
+  attachedContextToSelections,
   type ContextSelections,
+  type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
+import { XyneAIPlusMenu } from '../Chat/XyneAISidebar/components/XyneAIPlusMenu';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import useMeasure from '../../hooks/useMeasure';
 
 export interface AIComposerAttachment {
   id: string;
@@ -61,6 +65,10 @@ export interface AIComposerHandle {
   clearContent: () => void;
   focus: () => void;
   setPrompt: (value: string) => void;
+  /** REPLACE the composer's editable context with these items (empty clears it).
+   *  Used on chat switch to carry the opened conversation's last-turn context
+   *  into the composer. */
+  setContext: (items: AttachedContextItem[]) => void;
 }
 
 interface AIComposerProps {
@@ -106,6 +114,17 @@ const LARGE_PASTE_THRESHOLD = 11500;
 
 const blockedExtensions = new Set(DANGEROUS_EXTENSIONS.map(ext => ext.toLowerCase()));
 
+/**
+ * Outer composer width below which the agent + model pills fold into the "+"
+ * menu. Both pills are text-sized (agent name truncates at 140px, model name at
+ * 160px), so together with the mic and send buttons the right cluster can ask
+ * for ~480px on its own — enough to push send past the right edge once the
+ * artifact pane or a narrow window shrinks the composer. The thread composer is
+ * max-w-3xl (768px) and the landing one max-w-2xl (672px), so at this threshold
+ * neither folds at its natural size; only a genuinely squeezed one does.
+ */
+const COMPACT_TOOLBAR_WIDTH = 600;
+
 const isValidBase64 = (str: string): boolean => {
   if (!str || str.length === 0) return false;
   const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -131,8 +150,8 @@ function ContextPill({
       {icon}
       <span
         className={cn(
-          'max-w-[140px] truncate text-[12.5px] font-medium',
-          accent ? 'text-[#7C3AED]' : 'text-foreground',
+          'max-w-[140px] truncate text-sm font-medium',
+          accent ? 'text-claw-ai-fg' : 'text-foreground',
         )}
       >
         {label}
@@ -151,51 +170,37 @@ function ContextPill({
   );
 }
 
-// Ghost toolbar button matching the /ai composer's look. `visibleText` is
-// opt-in — when set, the button widens into a pill with the icon plus a text
-// node instead of the default icon-only circle (used for the Instant toggle
-// so it reads as a named mode, not just an icon other buttons could be
-// mistaken for).
+// Ghost icon button matching the /ai composer's look.
 function ToolbarButton({
   icon,
   label,
-  visibleText,
   onClick,
   active,
-  activeClass,
-  disabled,
   trackName,
 }: {
   icon: ReactElement;
   label: string;
-  visibleText?: string;
   onClick: () => void;
   active?: boolean;
-  activeClass?: string;
-  disabled?: boolean;
   trackName: string;
 }): ReactElement {
   return (
     <button
       type='button'
       onClick={onClick}
-      disabled={disabled}
       aria-label={label}
       title={label}
       aria-pressed={active}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center justify-center rounded-full transition',
-        visibleText ? 'gap-1 px-2.5' : 'w-8',
+        'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
         active
-          ? (activeClass ?? 'bg-secondary text-foreground')
+          ? 'bg-secondary text-foreground'
           : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-        disabled && 'cursor-not-allowed opacity-50',
       )}
       data-track-category='XyneAI'
       data-track-name={trackName}
     >
       {icon}
-      {visibleText && <span className='text-xs font-medium'>{visibleText}</span>}
     </button>
   );
 }
@@ -221,9 +226,23 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Measured off the composer box rather than the viewport: the same window can
+  // hold a full-width composer or a squeezed one depending on whether the
+  // artifact pane is open, and only the box knows which. Width is 0 before the
+  // first measurement and while the composer is detached — don't fold on that,
+  // or the toolbar renders compact for a frame on every mount.
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const { width: composerWidth } = useMeasure({ ref: wrapperRef, observeResize: true });
+  const compactToolbar = composerWidth > 0 && composerWidth < COMPACT_TOOLBAR_WIDTH;
+
   // ── Extra composer context/toggles (seeded from initialExtras once) ──────────
   const seed = initialExtras ?? EMPTY_COMPOSER_CONTEXT;
   const [showContextModal, setShowContextModal] = useState(false);
+  const [showCollectionPicker, setShowCollectionPicker] = useState(false);
+  // Popovers for the agent / model selectors. Only used while compact, where
+  // the pills are hidden and the "+" menu opens them instead.
+  const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [selections, setSelections] = useState<ContextSelections>(() => ({
     channels: seed.channels,
     tickets: seed.tickets,
@@ -233,9 +252,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   }));
   const [collections, setCollections] = useState(() => seed.collections);
   const [fileScopes, setFileScopes] = useState(() => seed.fileScopes);
+  const [folderScopes, setFolderScopes] = useState(() => seed.folderScopes);
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
+  // Per-run model pin + thinking level. The model list is the account's allowed
+  // models off the selected agent's shared LiteLLM key; "Default" = the model
+  // configured in the DB. Both reset when the agent changes — a pick from one
+  // agent's list may not exist on another's.
+  const [selectedModel, setSelectedModel] = useState<string | null>(() => seed.model);
+  const [thinkingLevel, setThinkingLevel] = useState<
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | null
+  >(() => seed.thinkingLevel);
 
   // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
   // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
@@ -255,6 +283,22 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   );
   const instant = selectedAgent?.instantAgent === true;
 
+  const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
+  const { data: agentModelsData } = useQuery({
+    queryKey: ['claw-agent-models', modelAgentSlug],
+    queryFn: () => fetchClawAgentModels(modelAgentSlug),
+    staleTime: 60_000,
+  });
+  // Reset the pin/thinking picks when the AGENT changes — but not on mount,
+  // where they may be seeded from initialExtras (landing → chat handoff).
+  const prevModelAgentSlug = useRef(modelAgentSlug);
+  useEffect(() => {
+    if (prevModelAgentSlug.current === modelAgentSlug) return;
+    prevModelAgentSlug.current = modelAgentSlug;
+    setSelectedModel(null);
+    setThinkingLevel(null);
+  }, [modelAgentSlug]);
+
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
     queryFn: async (): Promise<XyneAIConfigResponse> => {
@@ -266,6 +310,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
   const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
 
+  const modelPinProvider = agentModelsData?.pinProvider ?? 'litellm';
+
   const buildContext = useCallback(
     (): ComposerContext => ({
       channels: selections.channels,
@@ -275,20 +321,28 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       recordings: selections.recordings,
       collections,
       fileScopes,
+      folderScopes,
       research: null,
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
       instant,
+      model: selectedModel,
+      modelProvider: selectedModel ? modelPinProvider : null,
+      thinkingLevel,
     }),
     [
       selections,
       collections,
       fileScopes,
+      folderScopes,
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
       instant,
+      selectedModel,
+      modelPinProvider,
+      thinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -436,6 +490,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         setValue(nextValue);
         window.setTimeout(() => textareaRef.current?.focus(), 0);
       },
+      setContext: (items: AttachedContextItem[]): void => {
+        const next = attachedContextToSelections(items);
+        setSelections({
+          channels: next.channels,
+          tickets: next.tickets,
+          canvases: next.canvases,
+          transcripts: next.transcripts,
+          recordings: next.recordings,
+        });
+        setCollections(next.collections);
+        setFileScopes(next.fileScopes);
+        setFolderScopes(next.folderScopes);
+      },
     }),
     [handleFilesAdded],
   );
@@ -544,11 +611,56 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections.transcripts.length > 0 ||
       selections.recordings.length > 0 ||
       collections.length > 0 ||
-      fileScopes.length > 0,
-    [attachments, selections, collections, fileScopes],
+      fileScopes.length > 0 ||
+      folderScopes.length > 0,
+    [attachments, selections, collections, fileScopes, folderScopes],
   );
 
   const canSend = value.trim().length > 0;
+
+  // Labels for the "+" menu's agent/model rows, so a folded toolbar still shows
+  // what is selected without opening either picker. Mirrors what the pills read.
+  const agentLabel = selectedAgent?.name ?? 'Ask AI';
+  const modelLabel = useMemo(() => {
+    const pinned = (agentModelsData?.models ?? []).find(m => m.id === selectedModel);
+    if (pinned) return formatModelLabel(pinned.name);
+    const fallback = agentModelsData?.defaultModel;
+    return fallback ? formatModelLabel(fallback) : 'Recommended';
+  }, [agentModelsData, selectedModel]);
+
+  const agentSelectorNode = showAgentSelector ? (
+    <AIAgentSelector
+      disabled={pending}
+      onAgentChange={slug => onAgentChange?.(slug, buildContext())}
+      hideTrigger={compactToolbar}
+      {...(compactToolbar && { open: showAgentPicker, onOpenChange: setShowAgentPicker })}
+    />
+  ) : null;
+
+  const modelSelectorNode = (
+    <ModelThinkingSelector
+      models={agentModelsData?.models ?? []}
+      defaultModel={agentModelsData?.defaultModel ?? null}
+      selectedModel={selectedModel}
+      onSelectModel={setSelectedModel}
+      thinkingLevel={thinkingLevel}
+      onSelectThinking={setThinkingLevel}
+      disabled={pending}
+      hideTrigger={compactToolbar}
+      {...(compactToolbar && { open: showModelPicker, onOpenChange: setShowModelPicker })}
+    />
+  );
+
+  // Anything the "+" menu owns that is currently on. Collections/files/folders
+  // count even though they also show as pills — the menu is where they're
+  // cleared from, so the trigger should point back at it.
+  const hasMenuOptionActive =
+    webSearchEnabled ||
+    deepResearchEnabled ||
+    createCanvasEnabled ||
+    collections.length > 0 ||
+    fileScopes.length > 0 ||
+    folderScopes.length > 0;
 
   return (
     <form onSubmit={handleSubmit} className='relative'>
@@ -586,11 +698,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       />
       <div
         className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
-        style={isVoiceRecording ? { borderRadius: '1.6rem' } : undefined}
+        style={isVoiceRecording ? { borderRadius: '1.125rem' } : undefined}
       >
         <div
+          ref={wrapperRef}
           className={cn(
-            'ai-composer-wrapper group flex flex-col gap-1 rounded-3xl border border-[#c0bcb4] bg-[#f5f4f0] px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:border-[#a09c94] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
+            'ai-composer-wrapper group flex flex-col gap-1 rounded-2xl border border-chat-composer-border-active bg-background px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
           )}
         >
           {hasPills && (
@@ -653,7 +766,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {collections.map(collection => (
                 <ContextPill
                   key={`co-${collection.id}`}
-                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<BookOpen className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={collection.name}
                   accent
                   onRemove={() => setCollections(prev => prev.filter(c => c.id !== collection.id))}
@@ -662,10 +775,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {fileScopes.map(fs => (
                 <ContextPill
                   key={`fs-${fs.id}`}
-                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-[#7C3AED]' aria-hidden />}
+                  icon={<FileText className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
                   label={fs.name}
                   accent
                   onRemove={() => setFileScopes(prev => prev.filter(f => f.id !== fs.id))}
+                />
+              ))}
+              {folderScopes.map(folder => (
+                <ContextPill
+                  key={`fo-${folder.id}`}
+                  icon={<Folder className='h-3.5 w-3.5 shrink-0 text-claw-ai-fg' aria-hidden />}
+                  label={folder.name}
+                  accent
+                  onRemove={() => setFolderScopes(prev => prev.filter(f => f.id !== folder.id))}
                 />
               ))}
               {attachments.map(attachment => (
@@ -691,7 +813,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               placeholder={placeholder}
               rows={1}
               className={cn(
-                'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-[15px] leading-6 placeholder:text-muted-foreground/80 focus:outline-none',
+                'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-sm leading-6 placeholder:text-muted-foreground/80 focus:outline-none',
                 isVoiceRecording && !value && 'invisible',
               )}
               data-track-category='XyneAI'
@@ -714,73 +836,79 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           </div>
 
           <div className='flex items-center justify-between gap-2'>
-            {/* Left cluster: attach + all context / mode buttons. Kept on one row
-              (no wrap) so the toolbar never grows vertically; the fixed button
-              set fits within the composer width. Not scroll-clipped, so the
-              collection / research dropdowns can overflow upward freely. */}
+            {/* Left cluster. Attach, collections, canvas and the two search
+              toggles all live behind the "+" menu — same consolidation the
+              XyneAI sidebar uses — so the row stays two buttons wide however
+              many options exist. Not scroll-clipped, so the collection picker
+              can overflow upward freely. */}
             <div className='flex flex-nowrap items-center gap-0.5'>
+              <div className='relative flex items-center'>
+                <XyneAIPlusMenu
+                  onAttachFiles={handleAttachClick}
+                  onOpenCollections={() => setShowCollectionPicker(true)}
+                  onCreateCanvasToggle={() => setCreateCanvasEnabled(v => !v)}
+                  createCanvasEnabled={createCanvasEnabled}
+                  onWebSearchToggle={() => {
+                    if (webSearchAccessible) setWebSearchEnabled(v => !v);
+                  }}
+                  webSearchEnabled={webSearchEnabled}
+                  webSearchAccessible={webSearchAccessible}
+                  onDeepResearchToggle={() => {
+                    if (deepResearchAccessible) setDeepResearchEnabled(v => !v);
+                  }}
+                  deepResearchEnabled={deepResearchEnabled}
+                  deepResearchAccessible={deepResearchAccessible}
+                  selectorsDisabled={pending}
+                  {...(compactToolbar &&
+                    showAgentSelector && {
+                      onOpenAgentSelector: () => setShowAgentPicker(true),
+                      agentLabel,
+                    })}
+                  {...(compactToolbar && {
+                    onOpenModelSelector: () => setShowModelPicker(true),
+                    modelLabel,
+                  })}
+                >
+                  <button
+                    type='button'
+                    aria-label='Add to conversation'
+                    title='Add to conversation'
+                    className={cn(
+                      'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
+                      // The menu hides which modes are on, so the trigger carries
+                      // the "something is enabled" signal the flat row used to
+                      // give through per-button active states.
+                      hasMenuOptionActive
+                        ? 'bg-secondary text-foreground'
+                        : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                    )}
+                    data-track-category='XyneAI'
+                    data-track-name='OPEN_PLUS_MENU'
+                  >
+                    <PlusDefault className='h-4 w-4' aria-hidden />
+                  </button>
+                </XyneAIPlusMenu>
+                <ComposerCollectionPicker
+                  collections={collections}
+                  fileScopes={fileScopes}
+                  folderScopes={folderScopes}
+                  onCollectionsChange={setCollections}
+                  onFileScopesChange={setFileScopes}
+                  onFolderScopesChange={setFolderScopes}
+                  open={showCollectionPicker}
+                  onOpenChange={setShowCollectionPicker}
+                />
+                {/* Folded away: the pills are gone but their popovers still
+                    anchor here, beside the "+" button that now opens them. */}
+                {compactToolbar && agentSelectorNode}
+                {compactToolbar && modelSelectorNode}
+              </div>
               <ToolbarButton
-                icon={<Paperclip className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
-                label='Attach'
-                onClick={handleAttachClick}
-                trackName='ATTACH_FILE'
-              />
-              <ToolbarButton
-                icon={<span className='text-[15px] font-semibold leading-none'>/</span>}
+                icon={<span className='text-sm font-semibold leading-none'>/</span>}
                 label='Add context'
                 onClick={() => setShowContextModal(v => !v)}
                 active={showContextModal}
                 trackName='OPEN_CONTEXT_MODAL'
-              />
-              <ComposerCollectionPicker
-                collections={collections}
-                fileScopes={fileScopes}
-                onCollectionsChange={setCollections}
-                onFileScopesChange={setFileScopes}
-              />
-              <div className='mx-0.5 h-4 w-px bg-border' />
-
-              <ToolbarButton
-                icon={<Globe className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
-                label={
-                  webSearchAccessible
-                    ? webSearchEnabled
-                      ? 'Web search enabled'
-                      : 'Enable web search'
-                    : "You don't have access to web search."
-                }
-                onClick={() => {
-                  if (webSearchAccessible) setWebSearchEnabled(v => !v);
-                }}
-                active={webSearchEnabled}
-                activeClass='bg-secondary text-status-success'
-                disabled={!webSearchAccessible}
-                trackName='TOGGLE_WEB_SEARCH'
-              />
-              <ToolbarButton
-                icon={<Microscope className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
-                label={
-                  deepResearchAccessible
-                    ? deepResearchEnabled
-                      ? 'Deep research enabled'
-                      : 'Enable deep research'
-                    : "You don't have access to deep research."
-                }
-                onClick={() => {
-                  if (deepResearchAccessible) setDeepResearchEnabled(v => !v);
-                }}
-                active={deepResearchEnabled}
-                activeClass='bg-secondary text-status-pending'
-                disabled={!deepResearchAccessible}
-                trackName='TOGGLE_DEEP_RESEARCH'
-              />
-              <ToolbarButton
-                icon={<FileIcon className='h-4 w-4' aria-hidden strokeWidth={1.75} />}
-                label={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}
-                onClick={() => setCreateCanvasEnabled(v => !v)}
-                active={createCanvasEnabled}
-                activeClass='bg-secondary text-primary'
-                trackName='TOGGLE_CREATE_CANVAS'
               />
               {/* Locked indicator, not a toggle — only rendered when the
                   selected agent is configured as an "Instant Agent"
@@ -803,12 +931,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             </div>
 
             <div className='flex shrink-0 items-center gap-1.5'>
-              {showAgentSelector && (
-                <AIAgentSelector
-                  disabled={pending}
-                  onAgentChange={slug => onAgentChange?.(slug, buildContext())}
-                />
-              )}
+              {!compactToolbar && agentSelectorNode}
+              {!compactToolbar && modelSelectorNode}
               <ComposerVoiceButton
                 onTranscript={handleTranscript}
                 onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
@@ -833,6 +957,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   disabled={!canSend}
                   aria-label='Send'
                   title='Send'
+                  data-track-category='XyneAI'
+                  data-track-name='SEND_MESSAGE'
                   className={cn(
                     'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
                   )}
@@ -845,7 +971,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         </div>
       </div>
       {hideDisclaimer ? null : (
-        <p className='mt-2 text-center text-[11px] text-muted-foreground/80'>
+        <p className='mt-1.5 text-center text-[11px] text-muted-foreground/80'>
           Xyne can make mistakes. Verify important details.
         </p>
       )}

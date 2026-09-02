@@ -30,7 +30,7 @@ const TICKET_SEARCH_LIMIT = 20;
 
 /** Matches the header's other pills (date, labels, share). */
 const CHIP_CLASS_NAME =
-  'inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
+  'inline-flex h-6 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
 
 /**
  * Links a recording to exactly one ticket.
@@ -82,10 +82,12 @@ export function RecordingTicketLink({
     [isUpdating, searchResults],
   );
 
-  /* A recording lives outside any project, so the ticket carries its own route. */
-  const ticketHref = linkedTicket
-    ? `/projects/${linkedTicket.projectId}/${linkedTicket.boardId}/${linkedTicket.id}`
-    : null;
+  /* The channel thread — where the rest of the app opens tickets; the
+     `/projects/:projectId/:boardId/:ticketId` route drops the channel context. */
+  const ticketHref =
+    linkedTicket?.channelId && linkedTicket.conversationId
+      ? `/chat/dir/${linkedTicket.channelId}/${linkedTicket.conversationId}/${linkedTicket.id}?selectedTab=details`
+      : null;
 
   const handleSelect = (ticketId: string | null): void => {
     if (isUpdating) return;
@@ -166,7 +168,7 @@ export function RecordingTicketLink({
       disableClientFiltering
       showIndicator={false}
       inputIcon={<LinkChainSlant className='size-3.5' aria-hidden='true' />}
-      inputClassName='h-7 gap-1.5 rounded-lg border border-dashed border-muted-foreground/40 px-3 text-xs font-normal text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+      inputClassName='h-6 gap-1.5 rounded-lg border border-dashed border-muted-foreground/40 px-3 text-xs font-normal text-muted-foreground hover:border-foreground/30 hover:text-foreground'
       testId='recording-ticket-link'
     />
   );

@@ -247,12 +247,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     [userGroups],
   );
 
-  const orgName = 'default';
-
   const { data: duplicateCheck } = useQuery({
-    queryKey: ['checkDuplicateChannel', debouncedChannelName, orgName],
-    queryFn: () => channelService.checkDuplicateChannel(debouncedChannelName, orgName),
-    enabled: Boolean(debouncedChannelName.trim() && orgName.trim()),
+    queryKey: ['checkDuplicateChannel', debouncedChannelName],
+    queryFn: () => channelService.checkDuplicateChannel(debouncedChannelName),
+    enabled: Boolean(debouncedChannelName.trim()),
     staleTime: 0,
     retry: 1,
     refetchOnWindowFocus: false,

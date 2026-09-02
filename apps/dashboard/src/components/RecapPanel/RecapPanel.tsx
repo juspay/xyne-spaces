@@ -24,6 +24,9 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useCacConfig } from '@xyne/shared/hooks';
+import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
+import { XyneAIStar } from '../icons/xyne-ai';
+import { Tooltip } from '../ui/Tooltip';
 
 type RecapTab = 'channel' | 'project';
 
@@ -316,6 +319,51 @@ const RecapPanel = (): ReactElement => {
     });
   };
 
+  const buildAskAIThreadInfo = useCallback(
+    (
+      card: RecapCard,
+      pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
+      drilldown?: { conversationId: string | null; messageId: string | null },
+    ): ThreadInfo | null => {
+      const firstCitation = Object.values(pointCitations ?? {}).find(
+        citation => citation.conversationId,
+      );
+      const conversationId =
+        firstCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
+      if (!conversationId) return null;
+
+      const messageId = firstCitation?.messageId ?? drilldown?.messageId ?? undefined;
+      return {
+        conversationId,
+        channelId: card.channelId,
+        senderName: card.channelName,
+        previewText: `${card.channelName} recap reference`,
+        ...(messageId && { messageId }),
+        isThreadMessage: true,
+      };
+    },
+    [],
+  );
+
+  const handleAskAIAboutRecapReference = useCallback(
+    (
+      card: RecapCard,
+      pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
+      drilldown?: { conversationId: string | null; messageId: string | null },
+    ): void => {
+      const threadInfo = buildAskAIThreadInfo(card, pointCitations, drilldown);
+      if (!threadInfo) return;
+
+      xyneAIActor.send({
+        type: 'OPEN',
+        channelId: card.channelId,
+        threadInfo,
+        startFreshChat: true,
+      });
+    },
+    [buildAskAIThreadInfo],
+  );
+
   // Render recap cards content (left/center panel)
   const renderRecapCards = (): ReactElement => {
     // Show loading spinner when fetching historical data
@@ -478,34 +526,52 @@ const RecapPanel = (): ReactElement => {
           </div>
 
           {/* Card footer */}
-          <div className='flex items-center justify-between pt-4 border-t border-border'>
+          <div className='flex items-center justify-between gap-3 pt-4 border-t border-border'>
             <span className={`text-muted-foreground ${isMobile ? 'text-xs' : 'text-sm'}`}>
               {displayMessageCount} {isMobile ? 'messages' : 'messages summarized'}
             </span>
-            {!isHistoricalView && (
-              <button
-                onClick={() => void handleToggleRead(card.channelId, isRead)}
-                className={`flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border ${
-                  isRead
-                    ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
-                    : 'border-green-500/30 text-green-600 hover:bg-green-500/10'
-                }`}
-                data-track-category='RECAP_PANEL'
-                data-track-name={isRead ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'}
-              >
-                {isRead ? (
-                  <>
-                    <MailOpen size={13} />
-                    <span>Mark as unread</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle size={13} />
-                    <span>Mark as read</span>
-                  </>
-                )}
-              </button>
-            )}
+            <div className='flex items-center gap-2'>
+              {buildAskAIThreadInfo(card, displayPointCitations, displayDrilldown) && (
+                <Tooltip content='Ask AI about the referenced thread'>
+                  <button
+                    type='button'
+                    onClick={() =>
+                      handleAskAIAboutRecapReference(card, displayPointCitations, displayDrilldown)
+                    }
+                    className='flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
+                    data-track-category='RECAP_PANEL'
+                    data-track-name='ASK_AI_RECAP_REFERENCE'
+                  >
+                    <XyneAIStar size={13} />
+                    <span>Ask AI</span>
+                  </button>
+                </Tooltip>
+              )}
+              {!isHistoricalView && (
+                <button
+                  onClick={() => void handleToggleRead(card.channelId, isRead)}
+                  className={`flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border ${
+                    isRead
+                      ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
+                      : 'border-green-500/30 text-green-600 hover:bg-green-500/10'
+                  }`}
+                  data-track-category='RECAP_PANEL'
+                  data-track-name={isRead ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'}
+                >
+                  {isRead ? (
+                    <>
+                      <MailOpen size={13} />
+                      <span>Mark as unread</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={13} />
+                      <span>Mark as read</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       );

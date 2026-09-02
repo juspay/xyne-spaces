@@ -62,6 +62,7 @@ import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
+import { RunOriginChip } from './RunOriginChip';
 import HuddleIcon from '../../icons/HuddleIcon';
 import { MicOn } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
@@ -201,7 +202,10 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   }
 
   const orderedAttachments = [...attachments].sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+    (a, b) =>
+      (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) ||
+      a.createdAt - b.createdAt ||
+      a.id.localeCompare(b.id),
   );
 
   // Separate attachments by deleted status first
@@ -280,7 +284,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 ? `${activeAttachments.length} files`
                 : activeAttachments[0]?.originalFilename}
             </span>
-            <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
+            <button
+              type='button'
+              onClick={() => setIsExpanded(!isExpanded)}
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_ATTACHMENT_LIST'
+            >
               {isExpanded ? (
                 <ChevronDown className='w-4 h-4 text-muted-foreground' />
               ) : (
@@ -299,6 +308,8 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                     void downloadAttachment(attachment.id, attachment.originalFilename);
                   });
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='DOWNLOAD_ALL_ATTACHMENTS'
                 className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
               >
                 <span>Download all</span>
@@ -603,6 +614,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // picks up call-only behavior (transcript dimming, forwarding-as-call, PRD
   // buttons, etc).
   const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+  // Only live recording anchors use the system-style sender.
+  const isHeadlessRecordingAnchor =
+    isRecordingMessage && metadata?.['isHeadlessRecording'] === true;
   // Synchronous end-signal from the message's own metadata (stamped by
   // noteTakerCallRepository.updateThreadMessageOnEnd) — mirrors isActiveCall's
   // active/ended split for the avatar box below, without needing a live query
@@ -837,6 +851,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         data-component='MessageBubble'
         className={messageBubbleClassName}
         onClick={onClick}
+        {...(onClick
+          ? {
+              'data-track-category': 'MESSAGE',
+              'data-track-name': 'OPEN_MESSAGE_BUBBLE',
+              // Static label: the auto-label would capture message content.
+              'data-track-label': 'message_bubble',
+            }
+          : {})}
         onKeyDown={
           onClick
             ? (e): void => {
@@ -854,7 +876,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* ================== LEFT AVATAR ================== */}
         {!contentOnly && (
           <div
-            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage && !isRecordingMessage ? 'pt-[4px]' : ''}`}
+            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage && !isHeadlessRecordingAnchor ? 'pt-[4px]' : ''}`}
           >
             {message.isDeleted ? (
               <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted'>
@@ -875,7 +897,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--foreground) / 0.8)'}
                 />
               </div>
-            ) : showAvatar && isRecordingMessage && !isForwardedMessage ? (
+            ) : showAvatar && isHeadlessRecordingAnchor && !isForwardedMessage ? (
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center self-center shrink-0 border ${isRecordingEnded ? 'bg-muted-foreground/10 border-border/25' : 'bg-status-failure/15 border-status-failure/30'}`}
               >
@@ -889,6 +911,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ) : showAvatar && sender?.userType === UserType.APP ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -991,6 +1015,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ) : showAvatar && sender ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -1057,7 +1083,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       message.content ||
                       'A call happened'}
                 </h3>
-              ) : isRecordingMessage && !isForwardedMessage ? (
+              ) : isHeadlessRecordingAnchor && !isForwardedMessage ? (
                 <h3 className='text-sm font-medium text-foreground'>Recording</h3>
               ) : isXyneBot ? (
                 <h3 className='text-sm font-medium text-foreground'>
@@ -1086,6 +1112,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <Button
                       variant='ghost'
                       onClick={() => handleUserClick(sender.id)}
+                      data-track-category='MESSAGE'
+                      data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                       className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
                       aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                     >
@@ -1106,6 +1134,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <Button
                           variant='ghost'
                           onClick={() => handleUserClick(sender.id)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                           className='text-sm font-semibold text-foreground hover:underline p-0 h-auto min-w-0'
                           aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                         >
@@ -1147,6 +1177,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <Tooltip content={formatFullTimestamp(message.createdAt)} side='top'>
                 <h3
                   onClick={searchItemView ? undefined : handleTimestampClick}
+                  data-track-category='MESSAGE'
+                  data-track-name='OPEN_THREAD_FROM_TIMESTAMP'
                   onKeyDown={
                     searchItemView
                       ? undefined
@@ -1164,6 +1196,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {metadata?.['clawRunOrigin'] ? (
+                <RunOriginChip origin={metadata['clawRunOrigin']} />
+              ) : null}
               {headerContent}
             </div>
           )}
@@ -1190,7 +1225,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isRecordingMessage && metadata?.callId && !isForwardedMessage ? (
+          {isRecordingMessage && metadata?.callId && !isForwardedMessage && !message.isDeleted ? (
             <RecordingBubble
               message={{
                 messageId: message.messageId,
@@ -1366,6 +1401,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <button
                           type='button'
                           onClick={() => handleUserClick(forwardedMessageData.originalSenderId)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_ORIGINAL_SENDER_PROFILE'
                           className='text-xs font-medium text-foreground hover:underline cursor-pointer bg-transparent border-0 p-0'
                         >
                           {getUserDisplayName(originalSender) ||
@@ -1807,6 +1844,8 @@ export const ReactionView = ({
                   });
                   e.stopPropagation();
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='TOGGLE_REACTION'
                 onTouchStart={e => {
                   if (isMobile) {
                     e.stopPropagation();
@@ -1867,6 +1906,8 @@ export const ReactionView = ({
                 type='button'
                 className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
                 onClick={e => e.stopPropagation()}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_EMOJI_PICKER'
               >
                 <span className='text-sm font-medium'>+</span>
               </button>

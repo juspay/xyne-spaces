@@ -121,6 +121,7 @@ export class GoogleRefetch extends BaseRefetch {
               });
               return null;
             }
+            logger.info(`${TAG} fetched new email for channel ${ingestChannelId}`, { messageId: id, threadId });
 
             const parsedEmail = google.parseEmailData(messageData);
             const preDownloadedAttachments = await preDownloadGmailAttachments({
@@ -223,7 +224,10 @@ export class GoogleRefetch extends BaseRefetch {
       }
     }
 
-    logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
+    logger.info(
+      `${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`,
+      { dlEmail: options.dlEmail, ingestChannelId },
+    );
     return { processed, newTickets, skipped, errors };
   }
 

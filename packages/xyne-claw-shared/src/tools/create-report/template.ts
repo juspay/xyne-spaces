@@ -10,6 +10,8 @@
  * `marked.parse()`). Any sanitization happens BEFORE this template wraps it.
  */
 
+import sanitizeHtml from "sanitize-html";
+
 export interface HtmlTemplateInput {
   /** Becomes both <title> and the visible <h1>. */
   title: string;
@@ -165,27 +167,34 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/**
- * Strip the small set of HTML tags that pose real script-execution risk
- * when the resulting file is opened in a browser. Defense in depth — agents
- * aren't expected to emit these, but a prompt-injected agent could be
- * convinced to. We're explicitly NOT installing DOMPurify (would need jsdom
- * server-side, heavy dep) since the threat model is narrow: agent-emitted
- * markdown rendered to a downloadable file, not user-uploaded HTML.
- *
- * Removed: <script>...</script>, <style>...</style>, <iframe>, <object>,
- * <embed>, <link>, <meta>, <form>, on* event handler attributes,
- * javascript: URLs in href/src.
- */
 export function sanitizeHtmlBody(html: string): string {
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<(iframe|object|embed|form|link|meta)\b[^>]*>/gi, "")
-    .replace(/<\/(iframe|object|embed|form)>/gi, "")
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
-    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
-    .replace(/(href|src)\s*=\s*"\s*javascript:[^"]*"/gi, "$1=\"#\"")
-    .replace(/(href|src)\s*=\s*'\s*javascript:[^']*'/gi, "$1='#'");
+  return sanitizeHtml(html, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+      "img",
+      "h1",
+      "h2",
+      "details",
+      "summary",
+    ]),
+    allowedAttributes: {
+      "*": ["class", "id", "align"],
+      a: ["href", "name", "target", "rel"],
+      img: ["src", "alt", "title", "width", "height"],
+      details: ["open"],
+      ol: ["start", "type"],
+      td: ["colspan", "rowspan"],
+      th: ["colspan", "rowspan", "scope"],
+    },
+    allowedSchemes: ["http", "https", "mailto"],
+    allowedSchemesByTag: { img: ["http", "https", "data"] },
+    allowProtocolRelative: false,
+    exclusiveFilter: (frame) => {
+      if (frame.tag !== "img") return false;
+      const src = (frame.attribs?.src ?? "").trim().toLowerCase();
+      return (
+        src.startsWith("data:text/html") ||
+        src.startsWith("data:image/svg+xml")
+      );
+    },
+  });
 }

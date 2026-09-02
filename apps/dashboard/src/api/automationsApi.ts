@@ -1,3 +1,4 @@
+import { WorkflowEventType } from '@xyne/shared';
 import { apiInstance } from '../services/clients/apiClient';
 
 interface SuccessEnvelope<T> {
@@ -44,6 +45,7 @@ export function isTerminalProposalStatus(status: string): boolean {
 }
 
 export const AutomationRunStatusValues = {
+  PENDING: 'PENDING',
   SCHEDULED: 'SCHEDULED',
   RUNNING: 'RUNNING',
   EXTERNAL_WAIT: 'EXTERNAL_WAIT',
@@ -226,6 +228,7 @@ export interface Automation {
   createdAt: string;
   updatedAt: string;
   automationSeriesId: string | null;
+  eventType: WorkflowEventType;
 }
 
 export interface DeskLabelRulesPayload {
@@ -480,6 +483,15 @@ export interface RunDetail {
     createdAt: string;
     updatedAt: string;
   }>;
+}
+
+/** Every row in this automation's lineage (all past + current versions), newest first. */
+export function fetchAutomationVersions(automationId: string): Promise<Automation[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<Automation[]>>(
+      `/automations/${encodeURIComponent(automationId)}/versions`,
+    ),
+  );
 }
 
 export function fetchAutomationRun(executionId: string): Promise<RunDetail> {

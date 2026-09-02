@@ -115,7 +115,14 @@ export function SchemaJsonEditor({
           )}
         </div>
         {isEmpty && !readOnly && example && (
-          <Button type='button' variant='outline' size='sm' onClick={insertExample}>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            onClick={insertExample}
+            data-track-category='automation-builder'
+            data-track-name='INSERT_SCHEMA_EXAMPLE'
+          >
             Insert example
           </Button>
         )}

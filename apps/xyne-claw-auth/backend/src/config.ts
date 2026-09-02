@@ -70,7 +70,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -88,6 +88,14 @@ export const CONFIG = {
   cliTokensEnabled: ["1", "true", "on", "yes"].includes(
     (process.env["CLI_TOKENS_ENABLED"] ?? "").trim().toLowerCase(),
   ),
+  localHarnessEnabled: ["1", "true", "on", "yes"].includes(
+    (process.env["LOCAL_HARNESS_ENABLED"] ?? "").trim().toLowerCase(),
+  ),
+  localHarnessDefaultAll: ["1", "true", "on", "yes"].includes(
+    (process.env["LOCAL_HARNESS_DEFAULT_ALL"] ?? "").trim().toLowerCase(),
+  ),
+  localHarnessPollTimeoutMs: Number(process.env["LOCAL_HARNESS_POLL_TIMEOUT_MS"] ?? 25_000),
+  localHarnessRunTimeoutMs: Number(process.env["LOCAL_HARNESS_RUN_TIMEOUT_MS"] ?? 900_000),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
@@ -267,6 +275,30 @@ export const CONFIG = {
    */
   searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
   /**
+   * EnterpriseRAG-Bench (Onyx) eval harness — targets a SEPARATE Vespa cluster
+   * holding the benchmark corpus, never the prod-connected one above.
+   *
+   *   ONYX_EVAL_VESPA_ENDPOINT  benchmark Vespa query endpoint — used ONLY by
+   *                             the harness's gold-material fetch by id
+   *                             (§5.3 search); the agent-under-test NEVER
+   *                             touches this — retrieval runs via spaces-search
+   *                             (the prod code path).
+   *   ONYX_EVAL_WORKSPACE_ID    workspaceId stamped on every benchmark doc —
+   *                             used verbatim as the YQL `workspaceId contains`
+   *                             filter for the gold fetch (Vespa only, is a
+   *                             string literal there; no DB validates it).
+   *   ONYX_EVAL_CLAW_TIMEOUT_MS the claw run timeout applied to the S2S call.
+   *
+   * The dispatch fires the SEEDED "onyx-ask-ai" agent row — slug hardcoded in
+   * the worker; bench tool narrowing (onyx-bench-search only) is also
+   * programmatic. Retrieval reaches the benchmark Vespa DIRECTLY
+   * (CONFIG.onyxVespaEndpoint) from the tool child — no spaces backend in the
+   * path.
+   */
+  onyxVespaEndpoint: (process.env["ONYX_EVAL_VESPA_ENDPOINT"] ?? "").replace(/\/+$/, ""),
+  onyxWorkspaceId: process.env["ONYX_EVAL_WORKSPACE_ID"] ?? "",
+  onyxEvalClawTimeoutMs: Number(process.env["ONYX_EVAL_CLAW_TIMEOUT_MS"] ?? 300_000),
+  /**
    * Entity extraction — reads a channel's threads/tickets out of Vespa and
    * discovers the entity types the org talks about. The completions run on
    * xyne-claw (see services/entityExtraction/entityLlmClient.ts), so the model
@@ -331,6 +363,17 @@ export const CONFIG = {
   ).replace(/\/+$/, ""),
 } as const;
 
+// Prod safety gate: the claw-auth → session-MCP relay and the run callbacks
+// authenticate to xyne-claw with x-s2s-key. If the local harness is enabled in
+// production without that shared secret, every relay/callback would be sent
+// UNAUTHENTICATED — fail fast at boot instead of shipping an open bridge.
+if (CONFIG.localHarnessEnabled && CONFIG.isProduction && !CONFIG.xyneClawS2sKey) {
+  throw new Error(
+    "LOCAL_HARNESS_ENABLED=true in production requires XYNE_CLAW_S2S_KEY to be set " +
+    "(the local-harness MCP relay and run callbacks must be S2S-authenticated).",
+  );
+}
+
 // Grafana → error auto-fix pipeline (lives here — claw stays stateless; the
 // queues + fix records ride this service's existing Redis).
 export const ERROR_PIPELINE = {
@@ -346,3 +389,20 @@ export const ERROR_PIPELINE = {
   agentUserId: process.env["ERROR_PIPELINE_AGENT_USER_ID"] ?? "",
   agentTimeoutMs: 30 * 60 * 1000,
 } as const;
+
+export const CLAUDE_OAUTH = {
+  clientId: process.env["CLAUDE_OAUTH_CLIENT_ID"] ?? "",
+  authorizeUrl: process.env["CLAUDE_OAUTH_AUTHORIZE_URL"] ?? "",
+  tokenUrl: process.env["CLAUDE_OAUTH_TOKEN_URL"] ?? "",
+  redirectUri: process.env["CLAUDE_OAUTH_REDIRECT_URI"] ?? "",
+  scopes: process.env["CLAUDE_OAUTH_SCOPES"] ?? "",
+  pkcePrefix: process.env["CLAUDE_OAUTH_PKCE_PREFIX"] ?? "claude-pkce-user:",
+} as const;
+
+export const claudeOAuthConfigured = (): boolean =>
+  Boolean(
+    CLAUDE_OAUTH.clientId &&
+      CLAUDE_OAUTH.authorizeUrl &&
+      CLAUDE_OAUTH.tokenUrl &&
+      CLAUDE_OAUTH.redirectUri,
+  );

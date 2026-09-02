@@ -124,6 +124,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           createdBy: fullTicket.createdBy,
           userGroupId: fullTicket.userGroupId,
           ticketType: fullTicket.ticketType,
+          isStageOverdue: Boolean((fullTicket as typeof fullTicket & { isStageOverdue?: boolean | null }).isStageOverdue),
           eta: fullTicket.eta?.getTime() ?? null,
           createdAt: fullTicket.createdAt.getTime(),
           tags: [],

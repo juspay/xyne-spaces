@@ -1,5 +1,6 @@
 import { isStatusExpired } from './statusUtils';
 import { UserStatus } from '@xyne/shared';
+import { matchesAllTokens } from '@xyne/shared/utils';
 import type { User } from '../machines/stateMachine';
 import type { MentionResult } from '@xyne/shared';
 
@@ -56,6 +57,31 @@ export function getUserDisplayName(
   }
 
   return baseName;
+}
+
+/**
+ * Shared predicate for filtering users by a typed query — the standard the cmd+K / DM matchers use.
+ * Matches BOTH `displayName` AND raw `name` (so a full-name query still hits a user whose displayName
+ * is a short nickname), with `matchesAllTokens` for out-of-order / partial tokens; email stays a
+ * whole-query substring match. Empty query matches everyone.
+ */
+export function matchesUserQuery(
+  user: { name?: string | null; displayName?: string | null; email?: string | null },
+  query: string,
+): boolean {
+  const trimmed = query.trim();
+  if (!trimmed) return true;
+  // Match displayName OR raw name independently — all tokens must appear within one of them, so a
+  // nickname displayName and the full name are each searchable. Only run the displayName pass when
+  // it's non-empty and distinct from name. Email is a whole-query substring.
+  const name = user.name ?? '';
+  return (
+    matchesAllTokens(name, trimmed) ||
+    (!!user.displayName &&
+      user.displayName !== name &&
+      matchesAllTokens(user.displayName, trimmed)) ||
+    (user.email?.toLowerCase().includes(trimmed.toLowerCase()) ?? false)
+  );
 }
 
 /**

@@ -8,6 +8,8 @@ import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { websocketService } from '../../services/clients/socketClient';
 import { sendSosAlertEvent, useSosAlertStore, type SosAlert } from '../../stores/sosAlertStore';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton audio element (same leak-avoidance pattern as NotificationHandler).
 let sirenAudio: HTMLAudioElement | null = null;
@@ -141,6 +143,7 @@ export const SosAlertBanner: React.FC = () => {
         alert.actionUrl || (alert.workspaceId ? `/${alert.workspaceId}/chat` : '/chat');
 
       if (alert.workspaceId && alert.workspaceId !== activeWorkspaceId) {
+        if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
         try {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,
@@ -182,11 +185,13 @@ export const SosAlertBanner: React.FC = () => {
         action: {
           label: 'View',
           onClick: (): void => {
+            globalClickTracker.trackManualEvent('CALLS', 'VIEW_SOS_ALERT');
             void view(alert);
           },
         },
         // Fires when the user closes the toast (X) — that's the acknowledgment.
         onDismiss: (): void => {
+          globalClickTracker.trackManualEvent('CALLS', 'DISMISS_SOS_ALERT');
           acknowledge(alert.id);
         },
       });

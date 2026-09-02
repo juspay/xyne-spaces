@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import { useCallback } from 'react';
+import { useCallback, useContext } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
@@ -22,32 +22,31 @@ import {
   toSelectOptions,
   type User as UserType,
 } from '@xyne/shared';
+import { KanbanBoard as SquareKanban, TicketToken as Ticket, PauseCircle } from '@xyne/icons';
 import {
-  CircleCheck,
+  CheckTickCircle as CircleCheck,
   CircleDashed,
   CircleDot,
-  CircleX,
-  Copy,
-  Ellipsis,
-  Hash,
-  Link as LinkIcon,
-  Loader2,
-  Paperclip,
-  Signature,
-  SquareArrowOutUpRight,
-  SquareKanban,
+  MultipleCrossCancelCircle as CircleX,
+  CopyDefault as Copy,
+  ThreeDotsMenuHorizontal as Ellipsis,
+  Hashtag as Hash,
+  LinkChainHorizontal as LinkIcon,
+  Spinner as Loader2,
+  PaperclipSlant as Paperclip,
+  ExternalLink as SquareArrowOutUpRight,
   Tag,
-  Ticket,
-  Trash2,
-  User,
-  Users,
-  X,
-} from 'lucide-react';
+  DeleteDustbin01 as Trash2,
+  UserDefault as User,
+  UserTwo as Users,
+  MultipleCrossCancelDefault as X,
+} from '@xyne/icons';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../../hooks/useAuth';
+import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/EntityLinkContext';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
@@ -101,7 +100,7 @@ import { isReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
-import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel, matchesUserQuery } from '../../../utils/userDisplayName';
 import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
@@ -117,7 +116,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
   selectedBoardName?: string | undefined;
@@ -131,6 +130,8 @@ interface CreateTicketModalProps {
   initialStageName?: string | null;
   initialTags?: string[];
   sourceConversation?: ConversationWithTicket | undefined;
+  sourceMessageId?: string | undefined;
+  entityLinkContext?: EntityLinkScope | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
   ticketSequence?: { current: number; total: number };
@@ -218,6 +219,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   ticketSequence,
   parentTicketId,
   sourceConversation,
+  sourceMessageId,
+  entityLinkContext: entityLinkContextProp,
   onBeforeCreate,
   onTicketCreated,
   standalone = false,
@@ -227,6 +230,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const zero = useZero();
   const shareableOrigin = useShareableOrigin();
   const { user } = useAuth();
+  const inheritedEntityLinkScope = useContext(EntityLinkContext);
+  const entityLinkScope = entityLinkContextProp ?? inheritedEntityLinkScope;
   const {
     addDroppedFiles: providerAddDroppedFiles,
     removeDroppedFile: providerRemoveDroppedFile,
@@ -469,9 +474,46 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     (isFromSubTicket || isFromAI) && selectedChannel?.projectId
       ? selectedChannel.projectId
       : projectId;
-  const [boards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId }),
+  const effectiveChannelId =
+    isFromSubTicket || isFromAI ? (selectedChannelId ?? channelId) : channelId;
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: effectiveChannelId }),
+    { enabled: !!effectiveChannelId },
   );
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
+    { enabled: !!selectedChannelProjectId },
+  );
+  const boards = useMemo(() => {
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'CreateTicketModal',
+        resolution: 'channel-board-mapping',
+        channelId: effectiveChannelId,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    // Only fall back to project boards once the mapping query has fully synced —
+    // an empty result before that is just the zero cache warming up, not a truly
+    // unmapped channel.
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'CreateTicketModal',
+      resolution: 'project-boards-fallback',
+      channelId: effectiveChannelId,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId]);
 
   // Get selected board's metadata for ticket form configuration
   const selectedBoard = useMemo(
@@ -595,7 +637,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useDuplicateTicketCheck({
     title: titleValue,
     description: descriptionValue,
-    projectId: selectedChannelProjectId,
+    projectId: selectedBoard?.projectId ?? '',
     boardId: formValues?.boardId,
     isOpen,
     debounceMs: 2000,
@@ -625,7 +667,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const { boardSuggestion, isCheckingBoard, resetBoardSuggestionState } = useBoardSuggestion({
     title: titleValue,
     description: descriptionValue,
-    projectId: selectedChannelProjectId,
+    projectId: selectedChannelProjectId ?? '',
     currentBoardId: formValues?.boardId || '',
     isOpen: isOpen && !boardAISuggestionSuppressed && !selectedBoardId,
     debounceMs: 2000,
@@ -634,8 +676,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
   const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: selectedChannelProjectId }),
-    { enabled: tagsQueried },
+    queries.projectTagsByProjectId({ projectId: selectedBoard?.projectId ?? '' }),
+    { enabled: tagsQueried && !!selectedBoard?.projectId },
   );
 
   const userGroupOptions = useUserGroups();
@@ -1187,8 +1229,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           'channelId',
           isFromSubTicket || isFromAI ? formData.channelId : channelId,
         );
-        if (selectedChannelProjectId) {
-          formDataPayload.append('projectId', selectedChannelProjectId);
+        if (selectedBoard?.projectId) {
+          formDataPayload.append('projectId', selectedBoard.projectId);
         }
 
         if (assignedTo) {
@@ -1232,6 +1274,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           draftAttachmentIds.forEach(id => {
             formDataPayload.append('draftAttachmentIds[]', id);
           });
+        }
+
+        if (sourceMessageId) {
+          formDataPayload.append('sourceMessageId', sourceMessageId);
+        }
+
+        if (entityLinkScope) {
+          formDataPayload.append('entityLinkContext', JSON.stringify(entityLinkScope));
         }
 
         if (sourceConversation) {
@@ -1290,12 +1340,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
           channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
           fromTicketsTab: isFromTicketsTab,
-          ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
+          ...(selectedBoard?.projectId && { projectId: selectedBoard.projectId }),
           ticketType: formData.ticketType,
           ...(draftAttachmentIds.length > 0 && { draftAttachmentIds }),
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),
           ...(formData.tags && formData.tags.length > 0 && { tags: formData.tags }),
           ...(sourceConversation && { sourceConversationId: sourceConversation.conversationId }),
+          ...(sourceMessageId && { sourceMessageId }),
+          ...(entityLinkScope && { entityLinkContext: entityLinkScope }),
           ...(formData.workflowType && { workflowType: formData.workflowType }),
           ...(sourceConversation &&
             excludedChatAttachmentIds.size > 0 && {
@@ -1423,9 +1475,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       popoutId,
       workspaceId: user?.workspaceId,
       channelId,
-      projectId,
+      ...(projectId ? { projectId } : {}),
       tab: tab || undefined,
       sourceConversationId: sourceConversation?.conversationId,
+      sourceMessageId,
+      entityLinkContext: entityLinkScope ?? undefined,
       initialMessageId: sourceConversation?.initialMessageId,
       parentTicketId,
       isFromSubTicket,
@@ -1576,7 +1630,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     {
       label: 'Paused',
       value: 'PAUSED',
-      icon: <Signature strokeWidth={2.5} className='size-3.5 text-teal-500' />,
+      icon: <PauseCircle strokeWidth={2.5} className='size-3.5 text-teal-500' />,
     },
     {
       label: 'Cancelled',
@@ -1606,11 +1660,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const query = assigneeSearchValue.trim().toLowerCase();
     const matchedUsers = !query
       ? activeUsers
-      : activeUsers.filter(
-          user =>
-            getUserDisplayName(user).toLowerCase().includes(query) ||
-            (user.email ?? '').toLowerCase().includes(query),
-        );
+      : activeUsers.filter(user => matchesUserQuery(user, assigneeSearchValue));
     // You first, then channel members, then cap the rows (this list isn't
     // virtualized). Deactivated users aren't shown here — the source is active-only.
     const membersFirst = channelMembersFirst(matchedUsers, user => user.id, assigneeMemberIds);
@@ -1850,7 +1900,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   aria-label='Ticket Title'
                   placeholder='Enter Ticket Title...'
                   data-testid='ticket-title-input'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='EDIT_TICKET_TITLE'
                   data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                   className={cn(
@@ -1890,7 +1940,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 placeholder='Enter Ticket Description...'
                 aria-label='Ticket Description'
                 data-testid='ticket-description-input'
-                data-track-category='TICKETS'
+                data-track-category='Tickets'
                 data-track-name='EDIT_TICKET_DESCRIPTION'
                 data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                 onChange={e => {
@@ -1946,7 +1996,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             type='button'
                             onClick={saveEditedSubTicket}
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='SaveEditedSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -1983,7 +2033,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             type='button'
                             onClick={() => beginEditSubTicket(index)}
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='EditSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -1994,7 +2044,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             onClick={() => deleteSubTicket(index)}
                             aria-label={`Delete subticket ${index + 1}`}
                             className='text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='DeleteSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -2071,7 +2121,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         resetBoardSuggestionState();
                         setTimeout(() => setBoardSelectorOpen(true), 0);
                       }}
-                      data-track-category='TICKETS'
+                      data-track-category='Tickets'
                       data-track-name='CancelAISuggestedBoard'
                     >
                       <X className='size-3.5 shrink-0' strokeWidth={2.33} />
@@ -2110,7 +2160,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             resetBoardSuggestionState();
                           }
                         }}
-                        data-track-category='TICKETS'
+                        data-track-category='Tickets'
                         data-track-name='AcceptAISuggestedBoard'
                       >
                         Accept
@@ -2124,7 +2174,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           // Defer open until EntitySelector has mounted in DOM
                           setTimeout(() => setBoardSelectorOpen(true), 0);
                         }}
-                        data-track-category='TICKETS'
+                        data-track-category='Tickets'
                         data-track-name='RejectAISuggestedBoard'
                       >
                         Reject
@@ -2400,6 +2450,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     variant='ghost'
                     size='icon'
                     onClick={resetDuplicateState}
+                    data-track-category='Tickets'
+                    data-track-name='RESET_DUPLICATE_STATE'
                     className='size-6 '
                   >
                     <X strokeWidth={2.33} className='size-3.5' />
@@ -2760,7 +2812,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             disabled={form.state.isSubmitting}
             className='size-6'
             data-testid='ticket-attachment-button'
-            data-track-category='TICKETS'
+            data-track-category='Tickets'
             data-track-name='ATTACH_FILE'
             data-track-metadata={JSON.stringify({
               boardId: selectedBoardId,
@@ -2780,7 +2832,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                     className='pointer-events-none'
                     data-testid='ticket-submit-button'
-                    data-track-category='TICKETS'
+                    data-track-category='Tickets'
                     data-track-name='SUBMIT_CREATE_TICKET_MODAL'
                     data-track-metadata={JSON.stringify({
                       boardId: selectedBoardId,
@@ -2799,7 +2851,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 loading={form.state.isSubmitting}
                 disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                 data-testid='ticket-submit-button'
-                data-track-category='TICKETS'
+                data-track-category='Tickets'
                 data-track-name='SUBMIT_CREATE_TICKET_MODAL'
                 data-track-metadata={JSON.stringify({
                   boardId: selectedBoardId,

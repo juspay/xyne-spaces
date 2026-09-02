@@ -30,6 +30,12 @@ schema ticket {
       indexing: attribute
     }
 
+    # One-hot of channelRef ({"channel:<id>": 1}), fed by the backend
+    # (mapper.ts channelWeightedSetFor); read by personalization rank profiles.
+    field channelWeightedSet type tensor<float>(key{}) {
+      indexing: attribute | summary
+    }
+
     field projectRef type reference<project> {
       indexing: attribute
     }
@@ -211,6 +217,11 @@ schema ticket {
       index: enable-bm25
     }
 
+    field projectCode type string {
+      indexing: index | attribute | summary
+      index: enable-bm25
+    }
+
     field ticketMentions type array<string> {
       indexing: index | attribute | summary
       index: enable-bm25
@@ -326,7 +337,7 @@ schema ticket {
   }
 
   fieldset default {
-    fields: title, title_fuzzy, description_fuzzy, initialMessage_fuzzy, description, chunks, status, priority, ticketType, workflowType, assignedTo, ownerEmail, createdBy, eta, projectId, stage, permissions, channelName, boardName, xyneId, tags, createdByName, assignedToName, closedByName, projectName, ticketMentions, threadMentions, threadSenders, initialMessage, initialMessageSender, parentTicketXyneId, childTicketXyneIds, formFields.fieldValue, entityNames, createdAt, updatedAt, closedAt, deletedAt
+    fields: title, title_fuzzy, description_fuzzy, initialMessage_fuzzy, description, chunks, status, priority, ticketType, workflowType, assignedTo, ownerEmail, createdBy, eta, projectId, stage, permissions, channelName, boardName, xyneId, tags, createdByName, assignedToName, closedByName, projectName, projectCode, ticketMentions, threadMentions, threadSenders, initialMessage, initialMessageSender, parentTicketXyneId, childTicketXyneIds, formFields.fieldValue, entityNames, createdAt, updatedAt, closedAt, deletedAt
   }
 
   rank-profile initial {

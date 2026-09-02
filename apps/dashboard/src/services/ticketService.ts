@@ -10,10 +10,12 @@ export interface CreateTicketRequest {
   title: string;
   description: string;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   ticketType: BaseTicketType;
   boardId?: string;
   sourceConversationId?: string;
+  sourceMessageId?: string;
+  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK'; sourceId: string };
 }
 
 export interface CreateTicketResponse {

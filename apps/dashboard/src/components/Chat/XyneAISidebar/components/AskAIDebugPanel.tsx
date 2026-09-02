@@ -369,7 +369,16 @@ function JsonViewerModal({
   const modal = (
     <div
       role='presentation'
-      className='fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm'
+      // Portalled to <body>, so when this opens above the twin's reasoning
+      // popover it is a SIBLING of it, not a child — Radix therefore counts
+      // clicks here as "outside" and Escape would close both layers at once.
+      // `data-debug-json-modal` is what that popover's onInteractOutside /
+      // onEscapeKeyDown guards match on to yield to this layer instead.
+      // `pointer-events-auto` is belt-and-braces: harmless now the popover is
+      // non-modal, and it keeps this usable if it is ever hosted under a modal
+      // dialog, which zeroes body pointer-events.
+      data-debug-json-modal=''
+      className='pointer-events-auto fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm'
       onMouseDown={event => {
         // Close only on a true backdrop click — clicks inside the dialog don't
         // bubble a close (avoids a stop-propagation handler on the dialog, which

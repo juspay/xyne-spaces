@@ -1286,10 +1286,29 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           },
         });
 
-        const board = await tx.board.findFirst({
+        const boards = await tx.board.findMany({
           where: { projectId: cd.projectId },
           orderBy: { createdAt: 'asc' },
+          select: { id: true },
         });
+        const board = boards[0] ?? null;
+
+        // Dual-write: mirror the channel→project board set into ChannelBoardMapping
+        // so downstream consumers never need to read channel.projectId.
+        if (boards.length > 0) {
+          await tx.channelBoardMapping.createMany({
+            data: boards.map((b, index) => ({
+              channelId: ch.id,
+              boardId: b.id,
+              workspaceId: cd.workspaceId,
+              isDefault: cd.boardId ? b.id === cd.boardId : index === 0,
+              createdBy: cd.userId,
+              createdAt: now,
+              updatedAt: now,
+            })),
+            skipDuplicates: true,
+          });
+        }
 
         await tx.externalSource.create({
           data: {

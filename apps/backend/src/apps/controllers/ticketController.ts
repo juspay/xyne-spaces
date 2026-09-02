@@ -56,6 +56,7 @@ import {
   type CustomFieldWritePayload,
 } from '@/services/ticketCustomFieldService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
+import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
@@ -405,6 +406,8 @@ const transferTicketToBoard = async (params: {
       });
     }
 
+    await syncStageOverdueFlag(tx, ticketId, now);
+
     await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
   });
 };
@@ -562,14 +565,6 @@ export class TicketController {
         });
         return;
       }
-      if (board.projectId !== projectId) {
-        res.status(400).json({
-          error: `Board does not belong to the specified project`,
-          code: 'BOARD_PROJECT_MISMATCH',
-        });
-        return;
-      }
-
       let resolvedStageName: string | undefined;
       if (requestedStageName) {
         const stage = await prismaClient.stage.findFirst({
@@ -621,13 +616,6 @@ export class TicketController {
         res.status(404).json({
           error: `Channel with ID ${resolvedChannelId} not found`,
           code: 'CHANNEL_NOT_FOUND',
-        });
-        return;
-      }
-      if (channel.projectId !== projectId) {
-        res.status(400).json({
-          error: `Channel does not belong to the specified project`,
-          code: 'CHANNEL_PROJECT_MISMATCH',
         });
         return;
       }
@@ -851,13 +839,6 @@ export class TicketController {
           res.status(404).json({
             error: `Board with ID ${boardId} not found`,
             code: 'BOARD_NOT_FOUND',
-          });
-          return;
-        }
-        if (board.projectId !== ticket.projectId) {
-          res.status(400).json({
-            error: 'Board does not belong to the ticket project',
-            code: 'BOARD_PROJECT_MISMATCH',
           });
           return;
         }
@@ -2096,13 +2077,6 @@ export class TicketController {
           });
           return;
         }
-        if (board.projectId !== channel.projectId) {
-          res.status(400).json({
-            error: 'Board does not belong to the channel project',
-            code: 'BOARD_PROJECT_MISMATCH',
-          });
-          return;
-        }
         await emailChannelPreferenceRepo.upsert({
           channelId,
           deskType: (channelPref?.deskType ?? DeskType.EMAIL) as DeskType,
@@ -2313,22 +2287,7 @@ export class TicketController {
         );
       }
 
-      // Check for duplicate tickets and persist references
-      if (ticket?.id) {
-        ticketDuplicateService.persistDuplicateReferences({
-          ticketId: ticket.id,
-          ticketCreatedBy: userId,
-          title: subject,
-          description: body,
-          projectId: ticket.projectId,
-          userId,
-        }).catch(error => {
-          logger.error('[Apps Email Ticket Creation] Failed to persist duplicate references for ticket', {
-            ticketId: ticket.id,
-            error,
-          });
-        });
-      }
+      // Duplicate detection runs inside emailService.createConversationWithEmail.
 
       // Apply optional fields to the created ticket
       if (priority !== undefined || resolvedAssignedTo !== undefined || userGroupId !== undefined || stageName !== undefined || ticketType !== undefined) {

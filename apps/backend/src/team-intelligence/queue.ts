@@ -25,18 +25,18 @@ class TeamIntelligenceQueue {
           lazyConnect: false,
         },
         defaultJobOptions: {
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 2000,
-          },
+          attempts: 1,
           removeOnComplete: true,
           removeOnFail: { count: 100 },
         },
         settings: {
-          lockDuration: 60000,
-          stalledInterval: 30000,
-          maxStalledCount: 1,
+          // LLM-backed user-summary jobs can legitimately run longer than a
+          // normal queue task, especially when large evidence is chunked.
+          // Keep the lock above the configured Team Intelligence LLM timeout so
+          // Bull does not lose ownership while a healthy worker is waiting on I/O.
+          lockDuration: 30 * 60 * 1000,
+          stalledInterval: 5 * 60 * 1000,
+          maxStalledCount: 3,
         },
       });
 
@@ -113,10 +113,15 @@ class TeamIntelligenceQueue {
         return;
       }
 
-      logger.error(
-        `[TEAM-INTEL-QUEUE] Job ${job.id} failed batchId=${job.data.batchId} userEmail=${job.data.userEmail}:`,
-        err
-      );
+      const configuredAttempts = job.opts.attempts ?? 1;
+      const message =
+        `[TEAM-INTEL-QUEUE] Job ${job.id} attempt ${job.attemptsMade}/${configuredAttempts} failed ` +
+        `batchId=${job.data.batchId} userEmail=${job.data.userEmail}`;
+      if (job.attemptsMade >= configuredAttempts) {
+        logger.error(`${message}; no attempts remain:`, err);
+      } else {
+        logger.warn(`${message}; retry scheduled:`, err);
+      }
     });
 
     this.queue.on('stalled', (job) => {

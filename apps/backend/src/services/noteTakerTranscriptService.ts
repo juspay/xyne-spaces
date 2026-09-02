@@ -1,18 +1,24 @@
 import { Prisma, type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
+import { db } from '@/database/client';
 import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
+import type { SummaryModelType } from '@/services/callLlmRetry';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
+import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagService, TagServiceError } from '@/tags/service';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess } from '@xyne/shared';
+import { normalizeTagName, TAG_FORMAT_REGEX, TagMethod, EntityUserAccess, NotificationType, ActivityClassification } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
+import { notificationService } from '@/services/notificationService';
+import { activityService } from '@/services/activity/activityService';
 import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
@@ -23,6 +29,14 @@ import {
 // configured" check entirely (see assertManualCategoryOrOverride).
 const NOTE_TAKER_TAG_SOURCE_TYPE = 'CALL';
 const NOTE_TAKER_LABEL_CATEGORY = 'topic';
+
+// Upper bound on auto-generated labels per call — transcriptService already
+// trims the model's output to the same limit; this is the persistence-side guard.
+const MAX_CALL_LABEL_TAGS = 3;
+
+// Activity.actorAction for "the AI summary for this recording is ready".
+// Rendered by the dashboard's RecordingSummaryActivity.
+const RECORDING_SUMMARY_READY_ACTION = 'recording_summary_ready';
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
@@ -126,11 +140,15 @@ class NoteTakerTranscriptService {
       const formattedTranscript = await this.getFormattedTranscript(callId, entries);
       if (!formattedTranscript) return;
 
+      // The recording creator's model preference (fast/thinking) drives which
+      // LLM tier generates the summary, title, and detailed-summary canvas.
+      const summaryModelType = await this.getSummaryModelPreference(call);
+
       // These workloads are independent once the transcript is available, so
       // start them together. The detailed-summary result is also the sole source
       // for generated decisions/actions and their transcript timestamps.
-      const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript);
-      const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript);
+      const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript, summaryModelType);
+      const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript, undefined, summaryModelType);
       const labelsPromise = this.generateAndSaveLabels(call, formattedTranscript);
 
       const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
@@ -153,10 +171,15 @@ class NoteTakerTranscriptService {
           transcriptEntryCount: entries.length,
           detailedSummaryCanvasId: detailedSummary?.canvasId,
           detailedSummaryReady: detailedSummary ? true : undefined,
+          detailedSummaryStatus: detailedSummary ? 'ready' : 'failed',
+          summaryModelUsed: summaryModelType,
         },
         summaryTemplateId: detailedSummary?.summaryTemplateId,
         ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
       });
+      if (detailedSummary) {
+        await this.notifySummaryReady(call);
+      }
       await this.queueVespaIndexing(call);
 
       // Thread-linked recording: already auto-shared to the thread's channel
@@ -179,20 +202,48 @@ class NoteTakerTranscriptService {
   async regenerateSummary(
     call: Call,
     templateId: string,
+    modelType?: SummaryModelType,
   ): Promise<{
     summaryTemplateId: string;
     detailedSummaryCanvasId: string | null;
     detailedSummaryReady: boolean;
+    summaryModelUsed: SummaryModelType;
   } | null> {
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
-    if (!formattedTranscript) return null;
+    if (!formattedTranscript) {
+      // No transcript at all is a terminal 'failed' state — the button offer
+      // should still surface so the user isn't left staring at a stale 'ready'.
+      await this.markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
 
-    const detailedSummary = await this.generateDetailedSummaryCanvas(
-      call,
-      formattedTranscript,
-      templateId,
-    );
-    if (!detailedSummary) return null;
+    // Publish 'pending' up front so the UI can shimmer while the LLM runs
+    // (the underlying call already retries transient failures internally).
+    await this.markDetailedSummaryStatus(call, 'pending');
+
+    // An explicit modelType (e.g. the "Try the thinking model" button) wins;
+    // otherwise fall back to the creator's saved preference.
+    const resolvedModelType = modelType ?? (await this.getSummaryModelPreference(call));
+
+    let detailedSummary: DetailedSummaryCanvasResult | null;
+    try {
+      detailedSummary = await this.generateDetailedSummaryCanvas(
+        call,
+        formattedTranscript,
+        templateId,
+        resolvedModelType,
+      );
+    } catch (error) {
+      // generateDetailedSummaryCanvas swallows its own failures, so reaching
+      // here means something outside it threw and nothing has logged yet.
+      logDetailedSummaryFailed(call.externalId, 'unexpected_error', error);
+      await this.markDetailedSummaryStatus(call, 'failed');
+      throw error;
+    }
+    if (!detailedSummary) {
+      await this.markDetailedSummaryStatus(call, 'failed');
+      return null;
+    }
 
     const current = await repositories.calls.findByExternalId(call.externalId);
     const currentMetadata =
@@ -210,16 +261,152 @@ class NoteTakerTranscriptService {
         ...currentMetadata,
         detailedSummaryCanvasId: detailedSummary.canvasId,
         detailedSummaryReady: true,
+        detailedSummaryStatus: 'ready',
+        summaryModelUsed: resolvedModelType,
       },
       summaryTemplateId: detailedSummary.summaryTemplateId,
       markedItems,
     });
 
+    await this.notifySummaryReady(call);
+
     return {
       summaryTemplateId: detailedSummary.summaryTemplateId,
       detailedSummaryCanvasId: detailedSummary.canvasId,
       detailedSummaryReady: true,
+      summaryModelUsed: resolvedModelType,
     };
+  }
+
+  /**
+   * Notify the recording owner that the detailed summary finished generating:
+   * an ephemeral notification plus a persistent Activity-feed entry.
+   * Best-effort: neither may fail the generation flow, so each is wrapped
+   * independently and its errors are logged and swallowed.
+   */
+  private async notifySummaryReady(call: Call): Promise<void> {
+    try {
+      if (!call.workspaceId) return;
+      // The AI title may have landed after our `call` snapshot was taken —
+      // re-read so the notification names the recording the way the UI does.
+      const currentTitle =
+        (await repositories.calls.findByExternalId(call.externalId))?.title ?? call.title;
+      const recordingName = currentTitle || 'your recording';
+      await notificationService.createNotification(call.createdByUserId, {
+        type: NotificationType.RECORDING_SUMMARY_READY,
+        title: 'Summary ready',
+        message: `The summary for "${recordingName}" is ready to view`,
+        relatedEntityType: 'call',
+        relatedEntityId: call.externalId,
+        actionUrl: `/recordings/${call.externalId}`,
+        workspaceId: call.workspaceId,
+        metadata: { callExternalId: call.externalId },
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] summary_ready_notification_failed`, {
+        path: 'note_taker',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    await this.recordSummaryReadyActivity(call);
+  }
+
+  /**
+   * Persist the Activity-feed entry for a finished summary, so the owner can
+   * still find it after the notification toast is gone (same reasoning as the
+   * KB ingestion activity). Regenerating a summary bumps the existing row back
+   * to unread instead of stacking a second entry for the same recording.
+   */
+  private async recordSummaryReadyActivity(call: Call): Promise<void> {
+    try {
+      if (!call.workspaceId) return;
+
+      const existing = await db.activity.findFirst({
+        where: {
+          callId: call.id,
+          userId: call.createdByUserId,
+          actorAction: RECORDING_SUMMARY_READY_ACTION,
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        // `updatedAt` is @updatedAt, so this also re-sorts the row to the top
+        // of the feed (which orders by updatedAt desc).
+        await db.activity.update({ where: { id: existing.id }, data: { isRead: false } });
+        return;
+      }
+
+      await activityService.createActivity({
+        userId: call.createdByUserId,
+        // System event: the recording is the subject, and its owner is both the
+        // notional actor and the only recipient.
+        actorId: call.createdByUserId,
+        actorAction: RECORDING_SUMMARY_READY_ACTION,
+        actionSource: 'call',
+        actionSourceId: call.id,
+        callId: call.id,
+        workspaceId: call.workspaceId,
+        // Purely informational — classify up front so the LLM classifier
+        // worker never picks it up (it claims every PENDING row).
+        classification: ActivityClassification.FYI,
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] summary_ready_activity_failed`, {
+        path: 'note_taker',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * On-demand label generation for a headless recording that has none yet
+   * (list-view "Generate labels" action).
+   */
+  async regenerateLabels(call: Call): Promise<string[] | null> {
+    const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
+    if (!formattedTranscript) return null;
+
+    const labelIds = await this.generateAndSaveLabels(call, formattedTranscript, TagMethod.AUTOMATED);
+    if (labelIds.length > 0) {
+      await repositories.calls.appendLabels(call.id, labelIds);
+    }
+    return labelIds;
+  }
+
+  /**
+   * Resolve the recording creator's summary model preference (fast/thinking),
+   * defaulting to 'fast' when there's no preference row or the lookup fails.
+   * Resolve the recording's summary model tier (fast/thinking), read from the
+   * detailed summary canvas metadata where the client stamped it at recording
+   * start (see callController.initiateCall) — the browser's localStorage is
+   * unreachable from this headless call-end path. Defaults to 'fast' when the
+   * canvas is missing, predates this feature, or the lookup fails.
+   */
+  private async getSummaryModelPreference(call: Call): Promise<SummaryModelType> {
+    const metadata =
+      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+        ? (call.metadata as Record<string, unknown>)
+        : {};
+    const detailedSummaryCanvasId =
+      typeof metadata.detailedSummaryCanvasId === 'string'
+        ? metadata.detailedSummaryCanvasId
+        : null;
+    if (!detailedSummaryCanvasId) return 'fast';
+    try {
+      const canvas = await db.canvas.findUnique({
+        where: { id: detailedSummaryCanvasId },
+        select: { metadata: true },
+      });
+      const canvasMeta =
+        canvas?.metadata && typeof canvas.metadata === 'object' && !Array.isArray(canvas.metadata)
+          ? (canvas.metadata as Record<string, unknown>)
+          : {};
+      return canvasMeta.summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
+    } catch (error) {
+      logger.warn('summary_model_preference_lookup_failed', { callId: call.id, error });
+      return 'fast';
+    }
   }
 
   /**
@@ -374,6 +561,34 @@ class NoteTakerTranscriptService {
   }
 
   /**
+   * Merge just the detailed-summary status onto Call.metadata. Used by the
+   * queue worker to publish 'pending'/'failed' transitions without touching
+   * detailedSummaryCanvasId or detailedSummaryReady — those are owned by the
+   * success paths in processFinalTranscript and regenerateSummary and must
+   * remain the source of truth for readers on older recordings.
+   */
+  async markDetailedSummaryStatus(
+    call: Pick<Call, 'id' | 'externalId'>,
+    status: 'pending' | 'ready' | 'failed',
+  ): Promise<void> {
+    try {
+      const current = await repositories.calls.findByExternalId(call.externalId);
+      const currentMetadata =
+        current?.metadata && typeof current.metadata === 'object' && !Array.isArray(current.metadata)
+          ? (current.metadata as Record<string, unknown>)
+          : {};
+      await repositories.calls.update(call.id, {
+        metadata: { ...currentMetadata, detailedSummaryStatus: status },
+      });
+    } catch (error) {
+      logger.error(`[${call.externalId}] detailed_summary_status_update_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+        status,
+      });
+    }
+  }
+
+  /**
    * Upload the formatted transcript to storage and persist the path onto the
    * Call record directly — no message, no conversation, no MessageAttachment.
    * `entries` is passed in from processTranscript (which already fetched/parsed
@@ -414,6 +629,7 @@ class NoteTakerTranscriptService {
   private async generateAndSaveSummary(
     call: Call,
     formattedTranscript: string,
+    modelType?: SummaryModelType,
   ): Promise<void> {
     const callId = call.externalId;
 
@@ -421,7 +637,7 @@ class NoteTakerTranscriptService {
     // The tokens stay inline in the stored aiSummary and are parsed client-side.
     const { numbered: numberedTranscript } = numberTranscriptSegments(formattedTranscript);
 
-    const summaryPromise = transcriptService.generateCallSummary(numberedTranscript, callId).catch((err) => {
+    const summaryPromise = transcriptService.generateCallSummary(numberedTranscript, callId, modelType).catch((err) => {
         logger.error(`[${callId}] generate_summary_threw`, {
           path: 'note_taker',
           error: err,
@@ -431,7 +647,7 @@ class NoteTakerTranscriptService {
       });
     const titlePromise = call.title
       ? Promise.resolve(null)
-      : transcriptService.generateRecordingTitle(formattedTranscript, callId).catch((err) => {
+      : transcriptService.generateRecordingTitle(formattedTranscript, callId, modelType).catch((err) => {
             logger.error(`[${callId}] generate_title_threw`, {
               path: 'note_taker',
               error: err,
@@ -470,6 +686,16 @@ class NoteTakerTranscriptService {
       try {
         await repositories.calls.update(call.id, { title });
         logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
+        try {
+          await canvasAuthService.syncNotesCanvasTitle(call.id, title);
+        } catch (syncError) {
+          logger.error(`[${callId}] notes_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
+        }
+        try {
+          await canvasAuthService.syncDetailedSummaryCanvasTitle(call.id, title);
+        } catch (syncError) {
+          logger.error(`[${callId}] detailed_summary_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
+        }
         // Thread-linked recording: patch the anchor message's content with
         // this title too (mirrors how a regular call's ended message shows its
         // AI text as message.content) so RecordingBubble never needs its own
@@ -509,6 +735,7 @@ class NoteTakerTranscriptService {
     call: Call,
     formattedTranscript: string,
     templateId?: string,
+    modelType?: SummaryModelType,
   ): Promise<DetailedSummaryCanvasResult | null> {
     const callId = call.externalId;
 
@@ -551,23 +778,24 @@ class NoteTakerTranscriptService {
           templateId,
           undefined,
           citationCtx.segments,
+          modelType,
         );
         if (!generated) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'generation_failed',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'generation_failed');
           return null;
         }
 
         const xyneAutomaticBot = await xyneAutomaticBotPromise;
         if (!xyneAutomaticBot) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'bot_not_found',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'bot_not_found');
           return null;
         }
+
+        // Re-read the title here rather than reuse resolvedCallTitle: the AI title
+        // generation runs concurrently with generateRecordingSummary above and may
+        // have finished (and already synced the canvas title) while that LLM call
+        // was in flight. Using the stale value would clobber that sync right back.
+        const freshCallTitle = (await repositories.calls.findByExternalId(callId))?.title ?? resolvedCallTitle;
 
         const { canvasId } = await callDocumentService.createOrUpdateDetailedSummaryCanvas(
           callId,
@@ -577,15 +805,12 @@ class NoteTakerTranscriptService {
           null,
           call.startedAt,
           call.createdByUserId,
-          resolvedCallTitle,
+          freshCallTitle,
           citationCtx,
           workspaceId,
         );
         if (!canvasId) {
-          logger.error(`[${callId}] detailed_summary_skipped`, {
-            reason: 'canvas_update_failed',
-            path: 'note_taker',
-          });
+          logDetailedSummaryFailed(callId, 'canvas_update_failed');
           return null;
         }
 
@@ -612,9 +837,18 @@ class NoteTakerTranscriptService {
         if (!newCanvasId || latestMarkdown === renderedMarkdown) return;
 
         const snapshot = latestMarkdown;
+        const xyneAutomaticBot = await xyneAutomaticBotPromise;
+        if (!xyneAutomaticBot) {
+          logger.warn(`[${callId}] recording_summary_canvas_stream_sync_failed`, {
+            canvas_id: newCanvasId,
+            reason: 'xyne_automatic_bot_not_found',
+          });
+          return;
+        }
         const synced = await callDocumentService.syncStreamingDetailedSummaryCanvas(
           newCanvasId,
           snapshot,
+          xyneAutomaticBot.id,
           citationCtx,
         );
         if (synced) {
@@ -711,6 +945,7 @@ class NoteTakerTranscriptService {
             await ensureStreamingCanvas(accumulated);
           },
           citationCtx.segments,
+          modelType,
         );
       } finally {
         writerActive = false;
@@ -719,10 +954,7 @@ class NoteTakerTranscriptService {
       }
 
       if (!generated) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'generation_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'generation_failed');
         return null;
       }
 
@@ -735,21 +967,21 @@ class NoteTakerTranscriptService {
 
       const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: initializationFailure?.message ?? 'canvas_create_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'canvas_create_failed', initializationFailure);
         return null;
       }
 
       const xyneAutomaticBot = await xyneAutomaticBotPromise;
       if (!xyneAutomaticBot) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'bot_not_found',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'bot_not_found');
         return null;
       }
+
+      // Re-read the title here rather than reuse resolvedCallTitle: the AI title
+      // generation runs concurrently with the summary streaming above and may have
+      // finished (and already synced the canvas title) while that was in flight.
+      // Using the stale value would clobber that sync right back on finalize.
+      const freshCallTitle = (await repositories.calls.findByExternalId(callId))?.title ?? resolvedCallTitle;
 
       const finalized = await callDocumentService.finalizeDetailedSummaryCanvas(
         newCanvasId,
@@ -758,14 +990,11 @@ class NoteTakerTranscriptService {
         null,
         callId,
         call.startedAt,
-        resolvedCallTitle,
+        freshCallTitle,
         citationCtx,
       );
       if (!finalized) {
-        logger.error(`[${callId}] detailed_summary_skipped`, {
-          reason: 'canvas_finalize_failed',
-          path: 'note_taker',
-        });
+        logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
         return null;
       }
 
@@ -775,12 +1004,7 @@ class NoteTakerTranscriptService {
         markedItems: generated.markedItems,
       };
     } catch (error) {
-      logger.error(`[${callId}] detailed_summary_failed`, {
-        stage: 'detailed_summary_generation',
-        path: 'note_taker',
-        error,
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      logDetailedSummaryFailed(callId, 'unexpected_error', error);
       return null;
     }
   }
@@ -791,7 +1015,11 @@ class NoteTakerTranscriptService {
    * tag ids for Call.labels. Returns [] on any failure — callers treat that
    * as "nothing to add", never clobbering a previously-saved good result.
    */
-  private async generateAndSaveLabels(call: Call, formattedTranscript: string): Promise<string[]> {
+  private async generateAndSaveLabels(
+    call: Call,
+    formattedTranscript: string,
+    method: TagMethod = TagMethod.LLM,
+  ): Promise<string[]> {
     const callId = call.externalId;
     if (!call.workspaceId) {
       logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: 'note_taker' });
@@ -810,16 +1038,17 @@ class NoteTakerTranscriptService {
 
     const tagIds: string[] = [];
     for (const rawLabel of labels) {
-      if (tagIds.length >= 4) break;
+      if (tagIds.length >= MAX_CALL_LABEL_TAGS) break;
       const slug = this.slugifyLabel(rawLabel);
       if (!slug) continue;
       try {
-        const tagId = await this.getOrCreateLabelTag(call, slug, TagMethod.LLM);
+        const tagId = await this.getOrCreateLabelTag(call, slug, method);
         if (tagId && !tagIds.includes(tagId)) tagIds.push(tagId);
       } catch (error) {
         logger.error(`[${callId}] label_tag_failed`, { label: slug, path: 'note_taker', error });
       }
     }
+
     return tagIds;
   }
 
@@ -869,8 +1098,8 @@ class NoteTakerTranscriptService {
   ): Promise<string | null> {
     const existing = await tagRepository.findActiveTag(call.id, NOTE_TAKER_TAG_SOURCE_TYPE, NOTE_TAKER_LABEL_CATEGORY, slug);
     if (existing) {
-      // Typing a label the LLM only suggested asserts it just as the tick button does.
-      if (method === TagMethod.MANUAL && existing.method === TagMethod.LLM) {
+      // Typing a label an LLM/automated pass only suggested asserts it just as the tick button does.
+      if (method === TagMethod.MANUAL && existing.method !== TagMethod.MANUAL) {
         await tagService.confirmTag(existing.id, call.workspaceId!);
       }
       return existing.id;

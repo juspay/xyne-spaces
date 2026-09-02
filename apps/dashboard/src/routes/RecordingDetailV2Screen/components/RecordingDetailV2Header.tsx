@@ -1,27 +1,28 @@
-import { type ReactElement, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import {
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+  type TouchEvent as ReactTouchEvent,
+  useState,
+} from 'react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { MinimizeLineArrow, Share02, Spinner, UturnLeft } from '@xyne/icons';
+import { MinimizeLineArrow, Spinner } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
-import { Dialog } from '../../../components/ui/Dialog';
 import { Tooltip } from '../../../components/ui/Tooltip';
-import XyneAIStar from '../../../components/icons/xyne-ai/XyneAIStar';
 import { useSelf } from '../../../hooks/useUsers';
 import {
   recordingService,
   type RecordingDetail,
   type RecordingTicketLinkState,
 } from '../../../services/Recording/recordingService';
-import {
-  DEFAULT_RECORDING_TITLE,
-  logRecordingError,
-  type RecordingTitleState,
-} from '../../../utils/recordingUtils';
+import { logRecordingError, type RecordingTitleState } from '../../../utils/recordingUtils';
+import { useApplyRecordingLabelsChange } from '../../../hooks/useResolvedRecordingLabels';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { formatDuration } from '../../../utils/dateUtils';
+import { RecordingParticipants } from './RecordingParticipants';
+import { useEditableRecordingTitle } from '../useEditableRecordingTitle';
 import { RecordingLabelPicker } from './RecordingLabelPicker';
-import { RecordingShareModal } from './RecordingShareModal';
 import { RecordingSharedWithAvatars } from './RecordingSharedWithAvatars';
 import { RecordingTicketLink, type RecordingTicketTarget } from './RecordingTicketLink';
 
@@ -32,7 +33,7 @@ export interface RecordingDetailV2HeaderProps {
   onTitleUpdated: (title: string) => void;
   onLabelsUpdated: (labels: string[]) => void;
   onTicketLinkUpdated: (ticketLink: RecordingTicketLinkState) => void;
-  onAskAI: () => void;
+  onOpenShare: () => void;
   onMinimize?: () => void;
 }
 
@@ -57,6 +58,47 @@ const HeaderTitle = ({
     <span className='truncate'>{title}</span>
   );
 
+export interface EditableTitleInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  disabled: boolean;
+  className: string;
+  trackCategory: string;
+  onMouseDown?: (event: ReactMouseEvent<HTMLInputElement>) => void;
+  onTouchStart?: (event: ReactTouchEvent<HTMLInputElement>) => void;
+}
+
+export const EditableTitleInput = ({
+  value,
+  onChange,
+  onSave,
+  onKeyDown,
+  disabled,
+  className,
+  trackCategory,
+  onMouseDown,
+  onTouchStart,
+}: EditableTitleInputProps): ReactElement => (
+  <input
+    type='text'
+    value={value}
+    onChange={event => onChange(event.target.value)}
+    onBlur={onSave}
+    onFocus={event => event.currentTarget.select()}
+    onKeyDown={onKeyDown}
+    disabled={disabled}
+    className={className}
+    // eslint-disable-next-line jsx-a11y/no-autofocus
+    autoFocus
+    data-track-category={trackCategory}
+    data-track-name='edit_title_input'
+    {...(onMouseDown ? { onMouseDown } : {})}
+    {...(onTouchStart ? { onTouchStart } : {})}
+  />
+);
+
 export const RecordingDetailV2Header = ({
   recording,
   isLive,
@@ -64,24 +106,35 @@ export const RecordingDetailV2Header = ({
   onTitleUpdated,
   onLabelsUpdated,
   onTicketLinkUpdated,
-  onAskAI,
+  onOpenShare,
   onMinimize,
 }: RecordingDetailV2HeaderProps): ReactElement => {
-  const navigate = useNavigate();
   const currentUser = useSelf();
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editedTitle, setEditedTitle] = useState(recording.title);
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
   const [isUpdatingTicketLink, setIsUpdatingTicketLink] = useState(false);
+  const applyLabelsChange = useApplyRecordingLabelsChange(onLabelsUpdated);
 
   // Only the creator can rename or relabel; a recording shared with you is read-only.
   const isOwner = recording.createdByUserId === currentUser?.id;
+  const canShare = !isLive && Boolean(recording.detailedSummaryCanvasId);
   const isGeneratingTitle = titleState?.kind === 'generating';
+  const {
+    currentTitle,
+    isEditingTitle,
+    editedTitle,
+    isSavingTitle,
+    handleStartEdit,
+    handleSaveTitle,
+    handleTitleChange,
+    handleTitleKeyDown,
+  } = useEditableRecordingTitle({
+    recordingId: recording.externalId,
+    title: recording.title,
+    onTitleUpdated,
+    disabled: isGeneratingTitle,
+    context: 'RecordingDetailV2Header',
+  });
   const displayTitle =
-    titleState && titleState.kind !== 'generating'
-      ? titleState.text
-      : recording.title?.trim() || DEFAULT_RECORDING_TITLE;
+    titleState && titleState.kind !== 'generating' ? titleState.text : currentTitle;
   // A still-running recording has no length yet, so the meta line is just when it started.
   const durationMs =
     recording.durationMs ??
@@ -95,49 +148,8 @@ export const RecordingDetailV2Header = ({
     .filter(Boolean)
     .join(' · ');
 
-  const handleSaveTitle = async (): Promise<void> => {
-    if (isSavingTitle) return;
-
-    const trimmed = editedTitle.trim();
-    if (!trimmed) {
-      setEditedTitle(recording.title);
-      setIsEditingTitle(false);
-      toast.error('Title cannot be empty');
-      return;
-    }
-
-    if (trimmed === recording.title) {
-      setIsEditingTitle(false);
-      return;
-    }
-
-    setIsSavingTitle(true);
-    try {
-      await recordingService.updateRecordingTitle(recording.externalId, trimmed);
-      onTitleUpdated(trimmed);
-      toast.success('Title updated');
-    } catch (err) {
-      logRecordingError('RecordingDetailV2Header.updateTitle', err);
-      toast.error('Failed to update title');
-      setEditedTitle(recording.title);
-    } finally {
-      setIsSavingTitle(false);
-      setIsEditingTitle(false);
-    }
-  };
-
-  /** Labels apply optimistically and roll back if the recording rejects the write. */
   const handleLabelsChange = async (labels: string[]): Promise<void> => {
-    const previousLabels = recording.labels ?? [];
-    onLabelsUpdated(labels);
-
-    try {
-      await recordingService.updateRecording(recording.externalId, { labels });
-    } catch (err) {
-      logRecordingError('RecordingDetailV2Header.updateLabels', err);
-      toast.error('Failed to update labels');
-      onLabelsUpdated(previousLabels);
-    }
+    await applyLabelsChange(recording.externalId, labels, 'RecordingDetailV2Header.updateLabels');
   };
 
   /**
@@ -173,55 +185,8 @@ export const RecordingDetailV2Header = ({
     }
   };
 
-  const handleCancelEdit = (): void => {
-    if (isSavingTitle) return;
-    setEditedTitle(recording.title);
-    setIsEditingTitle(false);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      event.currentTarget.blur();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      handleCancelEdit();
-    }
-  };
-
-  const handleStartEdit = (): void => {
-    if (isEditingTitle || isSavingTitle || isGeneratingTitle) return;
-    setEditedTitle(recording.title);
-    setIsEditingTitle(true);
-  };
-
   return (
     <header className='mb-6'>
-      {/* Breadcrumb */}
-      <nav aria-label='Breadcrumb' className='mb-3'>
-        <ol className='flex items-center gap-1.5 text-sm'>
-          <li>
-            <button
-              type='button'
-              onClick={() => void navigate('/recordings')}
-              className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
-              data-track-category='RecordingDetailV2'
-              data-track-name='breadcrumb_recordings'
-            >
-              <UturnLeft className='size-3.5' variant='Stroke' aria-hidden='true' />
-              Recordings
-            </button>
-          </li>
-          <li aria-hidden='true' className='text-muted-foreground'>
-            /
-          </li>
-          {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
-          <li className='truncate text-foreground'>
-            {isGeneratingTitle ? 'Generating title…' : displayTitle}
-          </li>
-        </ol>
-      </nav>
-
       {/* Title */}
       <div className='mb-4 flex items-start gap-3'>
         <div className='min-w-0'>
@@ -239,19 +204,14 @@ export const RecordingDetailV2Header = ({
                 >
                   {editedTitle || ' '}
                 </span>
-                <input
-                  type='text'
+                <EditableTitleInput
                   value={editedTitle}
-                  onChange={event => setEditedTitle(event.target.value)}
-                  onBlur={() => void handleSaveTitle()}
-                  onFocus={event => event.currentTarget.select()}
-                  onKeyDown={handleKeyDown}
+                  onChange={handleTitleChange}
+                  onSave={() => void handleSaveTitle()}
+                  onKeyDown={handleTitleKeyDown}
                   disabled={isSavingTitle}
                   className='absolute inset-0 w-full bg-transparent border-0 p-0 text-3xl font-medium text-foreground focus:outline-none focus:ring-0 disabled:opacity-50'
-                  // eslint-disable-next-line jsx-a11y/no-autofocus
-                  autoFocus
-                  data-track-category='RecordingDetailV2'
-                  data-track-name='edit_title_input'
+                  trackCategory='RecordingDetailV2'
                 />
               </div>
             </div>
@@ -300,12 +260,18 @@ export const RecordingDetailV2Header = ({
       </div>
 
       {/* Actions row */}
-      <div className='flex items-start'>
+      <div className='flex items-start gap-2'>
         <div className='flex flex-wrap items-center gap-2'>
+          <RecordingParticipants
+            recordingExternalId={recording.externalId}
+            createdByUserId={recording.createdByUserId}
+            recordingParticipants={recording.recordingParticipants}
+            shares={recording.shares}
+          />
           {!isLive && recording.detailedSummaryCanvasId && (
             <RecordingTicketLink
               linkedTicketId={recording.linkedTicketId ?? null}
-              canEdit={isOwner}
+              canEdit={canShare}
               isUpdating={isUpdatingTicketLink}
               onChange={(ticketId, ticket) => void handleTicketLinkChange(ticketId, ticket)}
             />
@@ -315,27 +281,11 @@ export const RecordingDetailV2Header = ({
             canEdit={recording.createdByUserId === currentUser?.id}
             onChange={labels => void handleLabelsChange(labels)}
           />
-          {isOwner && !isLive && recording.detailedSummaryCanvasId && (
-            <>
-              <RecordingSharedWithAvatars
-                recordingExternalId={recording.externalId}
-                onOpen={() => setShowShareModal(true)}
-              />
-              <Tooltip content='Share' side='top'>
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='iconSm'
-                  onClick={() => setShowShareModal(true)}
-                  className='w-8 h-7 rounded-lg text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-                  aria-label='Share recording'
-                  data-track-category='RecordingDetailV2'
-                  data-track-name='share_recording'
-                >
-                  <Share02 className='size-3.5' />
-                </Button>
-              </Tooltip>
-            </>
+          {canShare && (
+            <RecordingSharedWithAvatars
+              recordingExternalId={recording.externalId}
+              onOpen={onOpenShare}
+            />
           )}
           {onMinimize && (
             <Tooltip content='Minimize to overlay' side='top'>
@@ -353,38 +303,7 @@ export const RecordingDetailV2Header = ({
               </Button>
             </Tooltip>
           )}
-
-          {isOwner && !isLive && showShareModal && recording.detailedSummaryCanvasId && (
-            <Dialog
-              open={showShareModal}
-              onOpenChange={open => !open && setShowShareModal(false)}
-              title='Share recording'
-              data-testid='recording-share-modal'
-            >
-              <RecordingShareModal
-                recording={recording}
-                onClose={() => setShowShareModal(false)}
-                onTicketLinkUpdated={onTicketLinkUpdated}
-              />
-            </Dialog>
-          )}
         </div>
-        {!isLive && (
-          <Tooltip content='Ask AI about this recording' side='top'>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={onAskAI}
-              className='ml-auto h-8 gap-2 rounded-xl w-24 text-[13px] font-medium border-muted-foreground/20'
-              data-track-category='RecordingDetailV2'
-              data-track-name='ask_ai_recording'
-            >
-              <XyneAIStar />
-              Ask AI
-            </Button>
-          </Tooltip>
-        )}
       </div>
     </header>
   );

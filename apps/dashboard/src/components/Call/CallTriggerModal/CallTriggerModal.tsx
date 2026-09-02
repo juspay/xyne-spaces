@@ -31,6 +31,10 @@ export interface CallData {
   participantPreviewUserIds?: string | null;
   participants?: readonly CallParticipant[];
   callOrigin?: CallOrigin;
+  // Every call's metadata carries the conversationId of the message it posted
+  // into (the thread's own conversation for a thread call, a fresh one for a
+  // channel call) — see callRepository.createCallWithParticipantsAndMessage.
+  metadata?: { conversationId?: string } | null;
 }
 
 interface CallTriggerModalProps {
@@ -221,7 +225,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           <button
             className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-muted transition-colors'
             onClick={() => handleCallAction(handleInitiateCall)}
-            data-track-category='CALL'
+            data-track-category='CALLS'
             data-track-name='StartCallNow'
             data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >

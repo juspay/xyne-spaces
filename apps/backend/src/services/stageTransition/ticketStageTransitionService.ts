@@ -8,6 +8,7 @@ import { FormEntityType, BoardType, VisitSlaMode, ReenterMode, TicketStageReques
 import { formService } from '@/services/formService';
 import { decideVisitVersion, foldFormRowsToValues } from './visitVersioning';
 import { maybeCreateEntryApprovalRequest } from './stageEntryApproval';
+import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -438,6 +439,8 @@ export class TicketStageTransitionService {
           updatedAt: now,
         },
       });
+
+      await syncStageOverdueFlag(tx, ticketId, now);
 
       // 8f. Persist form values (scoped to stage + visitIndex)
       if (formValues && transition?.formId) {

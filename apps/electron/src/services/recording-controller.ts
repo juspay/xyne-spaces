@@ -36,6 +36,7 @@ let focusRequestTimer: ReturnType<typeof setTimeout> | null = null;
 
 let active = false;
 let startingRecording = false;
+let callActive = false;
 let startingRecordingExpiry: ReturnType<typeof setTimeout> | null = null;
 let startTime: number | null = null;
 let paused = false;
@@ -85,12 +86,17 @@ function watchRendererLifecycle(win: BrowserWindow): void {
   watchedRenderers.add(win);
   win.webContents.on('did-start-loading', () => {
     rendererReady = false;
+    // A reload tears down the LiveKit connection, so any call is over; the
+    // remounted renderer resends call state either way. Without this a renderer
+    // that hangs mid-reload would strand the flag true and mute detection.
+    callActive = false;
   });
   win.webContents.on('render-process-gone', () => {
     rendererReady = false;
     // syncRecordingState early-returns on inactive -> inactive, so a crash
     // mid-start would strand the flag.
     setRecordingStarting(false);
+    callActive = false;
     syncRecordingState(false);
   });
 }
@@ -299,6 +305,30 @@ export function stopRecording(trigger: RecordingTrigger): void {
   log.info(`[RecordingController] Stop requested from ${trigger}`);
 }
 
+export async function stopRecordingForReload(timeoutMs = 3000): Promise<void> {
+  if (!isRecordingInProgress()) return;
+
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  mainWindow.webContents.send('recording:stop-for-teardown');
+  log.info('[RecordingController] Stop requested before reload');
+
+  await new Promise<void>(resolve => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: (() => void) | null = null;
+    const finish = (): void => {
+      if (timer) clearTimeout(timer);
+      unsubscribe?.();
+      resolve();
+    };
+    unsubscribe = onRecordingStateChange(() => {
+      if (!isRecordingInProgress()) finish();
+    });
+    timer = setTimeout(finish, timeoutMs);
+  });
+}
+
 export function pauseRecordingFromOutside(trigger: RecordingTrigger): void {
   if (!active || paused) return;
   const mainWindow = getMainWindow();
@@ -345,6 +375,17 @@ export function setRecordingStarting(next: boolean): void {
 
 export function isRecordingInProgress(): boolean {
   return active || startingRecording;
+}
+
+// Calls enable the mic the same way recordings do, so the meeting detector must
+// treat both as ours. The renderer reports call state on every transition and on
+// mount; the lifecycle hooks above clear it when the renderer reloads or dies.
+export function setCallActive(next: boolean): void {
+  callActive = next;
+}
+
+export function isMicOwnedByXyne(): boolean {
+  return active || startingRecording || callActive;
 }
 
 export function syncRecordingState(

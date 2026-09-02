@@ -2233,7 +2233,7 @@ export const EmailComposer = ({
               type='button'
               className='w-full flex items-center gap-2 cursor-pointer text-left py-1'
               onClick={handleExpand}
-              data-track-category='SUPPORT'
+              data-track-category='Support'
               data-track-name='ExpandReplyComposer'
               data-track-metadata={JSON.stringify({
                 toCount: toEmails.length,
@@ -2283,7 +2283,7 @@ export const EmailComposer = ({
                         type='button'
                         className='flex items-center gap-2 pb-1 pt-1 rounded-lg hover:bg-accent hover:text-accent-foreground transition-colors'
                         aria-label={`Switch reply mode. Current: ${replyMode === 'replyAll' ? 'Reply all' : 'Reply'}`}
-                        data-track-category='SUPPORT'
+                        data-track-category='Support'
                         data-track-name='ComposerReplyModeDropdown'
                       >
                         <div className='flex items-center gap-1'>
@@ -2340,7 +2340,7 @@ export const EmailComposer = ({
                     onClick={() => setIsExpanded(false)}
                     className='flex-shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
                     title='Collapse'
-                    data-track-category='SUPPORT'
+                    data-track-category='Support'
                     data-track-name='CollapseReplyComposer'
                     data-track-metadata={JSON.stringify({
                       toEmails: toEmails,
@@ -2397,7 +2397,7 @@ export const EmailComposer = ({
                         <button
                           onClick={() => setShowCc(true)}
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                          data-track-category='SUPPORT'
+                          data-track-category='Support'
                           data-track-name='ShowCcField'
                           data-track-metadata={JSON.stringify({
                             ccMails: ccEmails,
@@ -2413,7 +2413,7 @@ export const EmailComposer = ({
                         <button
                           onClick={() => setShowBcc(true)}
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                          data-track-category='SUPPORT'
+                          data-track-category='Support'
                           data-track-name='ShowBccField'
                           data-track-metadata={JSON.stringify({
                             ccCount: ccEmails.length,
@@ -2615,7 +2615,7 @@ export const EmailComposer = ({
               className='flex-1 text-sm py-1 outline-none bg-transparent'
               disabled={isSending}
               aria-label='Subject'
-              data-track-category='SUPPORT'
+              data-track-category='Support'
               data-track-name='EditComposeSubject'
             />
             {/* AI subject suggestion — disabled until the body has content
@@ -2884,7 +2884,7 @@ export const EmailComposer = ({
                     disabled={isSending || isUploadingAttachments}
                     className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                     aria-label='Attach files'
-                    data-track-category='SUPPORT'
+                    data-track-category='Support'
                     data-track-name='AddEmailAttachment'
                     data-track-metadata={JSON.stringify({
                       conversationId,
@@ -2921,6 +2921,8 @@ export const EmailComposer = ({
                         const base = channelId ? `${supportBase}/${channelId}` : supportBase;
                         void composerNavigate(`${base}?openSettings=signatures`);
                       }}
+                      data-track-category='Support'
+                      data-track-name='OPEN_SUPPORT_FROM_COMPOSER'
                       className='text-xs text-muted-foreground'
                     >
                       Manage signatures
@@ -2928,6 +2930,8 @@ export const EmailComposer = ({
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={() => setSelectedSignatureId(null)}
+                      data-track-category='Support'
+                      data-track-name='CLEAR_EMAIL_SIGNATURE'
                       className={!selectedSignatureId ? 'font-medium' : ''}
                     >
                       No signature
@@ -2936,6 +2940,8 @@ export const EmailComposer = ({
                       <DropdownMenuItem
                         key={sig.id}
                         onClick={() => setSelectedSignatureId(sig.id)}
+                        data-track-category='Support'
+                        data-track-name='SELECT_EMAIL_SIGNATURE'
                         className={selectedSignatureId === sig.id ? 'font-medium' : ''}
                       >
                         {sig.name}

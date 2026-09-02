@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { TicketPriority } from '@xyne/shared';
 import { PriorityFilterProps } from '../types';
 import { Button } from '../../../ui/Button';

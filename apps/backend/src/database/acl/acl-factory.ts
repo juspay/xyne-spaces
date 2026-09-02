@@ -175,6 +175,18 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'summaryTemplate':
       return new BaseQueryACL(ctx, prisma)
+    // Radar execution engine: non_zero derived data, workspace-scoped; the
+    // feed API layers thread-membership checks in its own queries.
+    case 'executionItem':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionThreadState':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionItemMutation':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionRunLog':
+      return new BaseQueryACL(ctx, prisma)
+    case 'radarTeam':
+      return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':
@@ -457,6 +469,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'tagsConfig':
       return new BaseQueryACL(ctx, prisma)
+    // Workspace-scoped config, reached only through the thread-type-vocabulary API, which
+    // does its own admin check. Listed so the switch stays exhaustive over ModelName.
+    case 'threadTypeVocabulary':
+      return new BaseQueryACL(ctx, prisma)
     case 'teamIntelligenceIngestionBatchV2':
       return new UnscopedACL(ctx, prisma)
     case 'teamIntelligenceOrgSummaryV2':
@@ -505,7 +521,7 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
-    default:
+    case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
     }
   }

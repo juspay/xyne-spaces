@@ -1,4 +1,3 @@
-/* eslint-disable local-rules/require-tracking-on-click */
 import { CSSProperties, ReactElement, useEffect, useMemo, useState } from 'react';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -107,6 +106,8 @@ const SelectionCard = ({
   <button
     type='button'
     onClick={onClick}
+    data-track-category='Release'
+    data-track-name='WIZARD_STEP_CLICK'
     disabled={isDisabled}
     aria-disabled={isDisabled}
     className={cn(
@@ -213,6 +214,8 @@ const PathChipsInput = ({
           <button
             type='button'
             onClick={() => remove(p)}
+            data-track-category='Release'
+            data-track-name='REMOVE_PATH_CHIP'
             className='text-muted-foreground hover:text-destructive shrink-0'
             aria-label={`Remove ${p}`}
           >
@@ -225,6 +228,8 @@ const PathChipsInput = ({
         value={draft}
         aria-label={ariaLabel}
         placeholder={paths.length === 0 ? placeholder : ''}
+        data-track-category='Release'
+        data-track-name='PATH_DRAFT_INPUT'
         onChange={e => {
           const v = e.target.value;
           // Pasting or typing a comma commits everything up to the last comma
@@ -331,6 +336,8 @@ const ApplicationRow = ({
         <button
           type='button'
           onClick={() => onRemove(app.id)}
+          data-track-category='Release'
+          data-track-name='REMOVE_WIZARD_APP'
           className='text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10'
           aria-label={isLocked ? 'Delete on save' : 'Remove'}
           title={isLocked ? 'This application will be deleted on Save' : 'Remove'}
@@ -351,6 +358,8 @@ const ApplicationRow = ({
           value={app.name}
           disabled={isLocked}
           onChange={e => onUpdate(app.id, 'name', e.target.value)}
+          data-track-category='Release'
+          data-track-name='APPLICATION_NAME_INPUT'
           placeholder='e.g., backend'
           className={INPUT_CLASS}
         />
@@ -365,6 +374,8 @@ const ApplicationRow = ({
           type='text'
           value={app.regex}
           onChange={e => onUpdate(app.id, 'regex', e.target.value)}
+          data-track-category='Release'
+          data-track-name='APPLICATION_REGEX_INPUT'
           placeholder='e.g., ^backend/'
           className={INPUT_CLASS}
         />
@@ -464,6 +475,8 @@ const Step3Applications = ({
                   type='text'
                   value={sharedRepoUrl}
                   onChange={e => onSharedRepoUrlChange(e.target.value)}
+                  data-track-category='Release'
+                  data-track-name='REPOSITORY_URL_INPUT'
                   placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
                   className={INPUT_CLASS}
                 />
@@ -471,6 +484,8 @@ const Step3Applications = ({
                   variant='secondary'
                   size='sm'
                   onClick={() => void onTestConnection()}
+                  data-track-category='Release'
+                  data-track-name='TEST_REPO_CONNECTION'
                   disabled={isTestingConnection || !sharedRepoUrl.trim()}
                   title='Verify the repo URL and token before configuring applications'
                 >
@@ -557,7 +572,14 @@ const Step3Applications = ({
       </div>
 
       {allowApplicationListChanges && (
-        <Button variant='secondary' onClick={onAddApplication} className='w-full' size='sm'>
+        <Button
+          variant='secondary'
+          onClick={onAddApplication}
+          data-track-category='Release'
+          data-track-name='ADD_APPLICATION'
+          className='w-full'
+          size='sm'
+        >
           + Add Another Application
         </Button>
       )}
@@ -775,6 +797,8 @@ const ReleaseConfigWizardForm = ({
           <Button
             variant='secondary'
             onClick={showCancelOnLeft ? onClose : form.handleBack}
+            data-track-category='Release'
+            data-track-name='WIZARD_BACK_OR_CANCEL'
             disabled={form.isSaving}
           >
             {showCancelOnLeft ? (
@@ -787,13 +811,21 @@ const ReleaseConfigWizardForm = ({
           </Button>
 
           {form.currentStep < 2 ? (
-            <Button variant='default' onClick={form.handleNext} disabled={!canProceed}>
+            <Button
+              variant='default'
+              onClick={form.handleNext}
+              data-track-category='Release'
+              data-track-name='WIZARD_NEXT'
+              disabled={!canProceed}
+            >
               Next <ChevronRight size={16} />
             </Button>
           ) : (
             <Button
               variant='default'
               onClick={() => void form.handleSave()}
+              data-track-category='Release'
+              data-track-name='SAVE_RELEASE_CONFIG'
               disabled={!canSave || form.isSaving}
             >
               {form.isSaving

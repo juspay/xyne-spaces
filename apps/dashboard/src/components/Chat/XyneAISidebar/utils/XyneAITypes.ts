@@ -1,4 +1,5 @@
 import type { ToolOutput as GeniusToolOutput } from '../../../../types/toolOutput';
+import type { AttachedContextItem } from '../components/ContextPickerPanel';
 
 // ============================================================================
 // Input context snapshot
@@ -10,9 +11,18 @@ export interface SelectedChannel {
   isPrivate: boolean;
 }
 
+/**
+ * What a canvas IS, for screens that attach one on the user's behalf.
+ * `call-notes` = the human's own notes taken during the call; `call-summary` =
+ * the AI-generated summary of it. The two are easy to confuse from the row
+ * alone but carry very different authority, so the role travels with the item.
+ */
+export type CanvasRole = 'call-notes' | 'call-summary';
+
 export interface SelectedCanvas {
   id: string;
   title: string;
+  canvasRole?: CanvasRole;
 }
 
 export interface SelectedTicket {
@@ -109,7 +119,7 @@ export interface StoredMessage {
  */
 export interface ClawCitation {
   label?: string;
-  kind: 'thread' | 'canvas' | 'ticket' | 'external' | 'collection-item';
+  kind: 'thread' | 'canvas' | 'ticket' | 'external' | 'collection-item' | 'recording';
   channelId?: string;
   conversationId?: string;
   messageId?: string;
@@ -117,6 +127,13 @@ export interface ClawCitation {
   channelType?: string;
   channelKind?: string;
   canvasId?: string;
+  /** For kind="recording": the call's externalId — the `/recordings/:id` segment.
+   *  Note-taker recordings have no channel or thread, so this is their only link. */
+  recordingId?: string;
+  /** Canvas citations key on `viewAccessId` (the id in `/chat/canvas/<id>`),
+   *  which is what claw's `pushCanvasCitation` emits — `canvasId` is never set
+   *  for kind="canvas". The URL builder / panel doc read this first. */
+  viewAccessId?: string;
   ticketId?: string;
   xyneId?: string;
   mailId?: string;
@@ -363,6 +380,56 @@ export interface Participant {
   email: string;
   picture: string;
 }
+/** Live data a generated artifact declared it wants. Inert today — the host-data
+ *  bridge is not built yet — but carried end-to-end so enabling it later needs
+ *  no format change. */
+export interface ReactArtifactDataRequirement {
+  name: string;
+  description?: string;
+  /** Where the data comes from. Absent on requirements authored before live
+   *  data existed — those resolve to an explicit error, not an endless load.
+   *  Shape mirrored in ReactArtifact/artifactData.constants.ts. */
+  source?:
+    | { kind: 'query'; query: string; args?: Record<string, unknown> }
+    | {
+        kind: 'ast';
+        model: string;
+        operation?: 'findMany' | 'count';
+        where?: Record<string, unknown>;
+        orderBy?: Record<string, unknown> | Array<Record<string, unknown>>;
+        take?: number;
+      };
+}
+
+/**
+ * Small descriptor for an agent-generated React app, produced by the
+ * `create-react-artifact` tool and stored on the attachment row. Deliberately
+ * excludes file contents: the full project rides the attachment bytes and is
+ * fetched only when the artifact is opened, so this stays cheap to replay on
+ * every history load.
+ */
+export interface ReactArtifactManifest {
+  version: number;
+  title: string;
+  entry: string;
+  fileCount: number;
+  files: string[];
+  dependencies: string[];
+  dataRequirements: ReactArtifactDataRequirement[];
+  /** The app changes workspace data (useXyneMutate). Badge only. */
+  writes?: boolean;
+  /** The app runs claw agents (useXyneAgent). Badge only. */
+  invokesAgents?: boolean;
+  /** Agents the app prefers. Narrowing hint; the viewer's access is the ceiling. */
+  agents?: string[];
+  /** Stamped server-side once the conversation's app exists. A thread owns ONE
+   *  app, so every artifact in it shares `appId`; `versionId` is the specific
+   *  build this turn produced, which is what its card renders. */
+  appId?: string;
+  versionId?: string;
+  versionNumber?: number;
+}
+
 export interface MessageAttachment {
   /** Unique attachment ID (for persisted attachments from claw-auth) */
   id?: string;
@@ -387,6 +454,8 @@ export interface MessageAttachment {
       background?: { color?: string } | string;
       objects: unknown[];
     }>;
+    /** Present when this attachment is an agent-generated React app. */
+    reactArtifact?: ReactArtifactManifest;
   };
 }
 
@@ -423,6 +492,10 @@ export interface Message {
   traceId?: string; // Langfuse trace ID for feedback
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
   attachments?: MessageAttachment[]; // Attachments sent with the message
+  /** Context pills (channels/tickets/canvases/calls) the user attached to THIS
+   *  turn. Persisted per user message in claw-auth and shown read-only above the
+   *  message on reload. Set only on user messages. */
+  attachedContext?: AttachedContextItem[];
   userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts

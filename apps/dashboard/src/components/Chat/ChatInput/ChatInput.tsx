@@ -2,6 +2,8 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useContext,
+  useMemo,
   forwardRef,
   useRef,
   useImperativeHandle,
@@ -13,7 +15,6 @@ import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 
 import { InputBox } from '../../ui/InputBox';
 import {
-  type SdlcDiscussion,
   MessageType,
   ChannelScopeType,
   ChannelVisibility,
@@ -24,6 +25,11 @@ import {
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { intentClassifier } from '../../../services/onDeviceIntent';
+import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
+import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
+import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
+import Dialog from '../../ui/Dialog';
 import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
@@ -35,6 +41,7 @@ import { saveDraft, useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
+import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
 import {
   mixpanelService,
   EVENTS,
@@ -46,6 +53,11 @@ import { getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { sendMessage, type ConversationRef, type PendingAttachment } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
+import {
+  ATTACHMENT_STILL_UPLOADING,
+  isAttachmentUploaded,
+  isAttachmentUploadInFlight,
+} from '@xyne/shared/zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
@@ -79,6 +91,7 @@ import {
   getSlashCommandArtifactBodyText,
   stripSlashCommandFromHtml,
 } from '../SlashCommandArtifacts';
+import { useSlashCommandArtifactSideEffects } from '../SlashCommandArtifactSideEffects';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -122,8 +135,6 @@ interface ChatInputProps {
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
-  /** SDLC discussion binding: new channel conversations are linked to this owner. */
-  sdlcDiscussion?: Omit<SdlcDiscussion, 'linkId'>;
 }
 
 const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
@@ -145,13 +156,13 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       threadParticipantIds,
       dockSlot,
       twinEdit,
-      sdlcDiscussion,
     },
     ref,
   ) => {
     const zero = useZero();
     const navigate = useNavigate();
     const { user } = useAuth();
+    const entityLinkScope = useContext(EntityLinkContext);
     const canCreateTicket = useCanCreateTicket();
     const { isOffline, showOfflineBanner, isReconnecting, isReconnected, refreshConnection } =
       useZeroOfflineState();
@@ -201,6 +212,22 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const channelResults = useChannelSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
 
+    // A thread is one incident's workspace, so it holds at most one open artifact
+    // of a given command. The channel root is unrestricted — it has no
+    // conversation yet, so this can never match there.
+    const { bannerItems: openArtifacts } = useSlashCommandArtifactSideEffects();
+    const openArtifactCommandsInThread = useMemo(
+      () =>
+        new Set(
+          conversationId
+            ? openArtifacts
+                .filter(artifact => artifact.conversationId === conversationId)
+                .map(artifact => artifact.definition.command)
+            : [],
+        ),
+      [conversationId, openArtifacts],
+    );
+
     // Slash commands for this channel — filtered by context (thread vs chat)
     const [channelCommands, setChannelCommands] = useState<CommandItem[]>(
       SLASH_COMMAND_ARTIFACT_COMMAND_ITEMS,
@@ -245,6 +272,22 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         .catch(() => undefined);
     }, [channelId, conversation?.conversationId]);
 
+    // Hide, don't just reject: an artifact the user cannot post here should not
+    // be offered. The send guards below still fire, because the command can also
+    // be typed inline or left over in `activeArtifactCommand`.
+    const availableCommands = useMemo(
+      () =>
+        openArtifactCommandsInThread.size === 0
+          ? channelCommands
+          : channelCommands.filter(
+              command =>
+                command.kind !== 'slash-command-artifact' ||
+                !command.slashCommandArtifactCommand ||
+                !openArtifactCommandsInThread.has(command.slashCommandArtifactCommand),
+            ),
+      [channelCommands, openArtifactCommandsInThread],
+    );
+
     const handleCommandSelect = useCallback(
       async (command: CommandItem, text?: string) => {
         if (command.kind === 'slash-command-artifact' && command.slashCommandArtifactCommand) {
@@ -283,6 +326,16 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+    const [scheduleCallOpen, setScheduleCallOpen] = useState(false);
+    const [addPeopleOpen, setAddPeopleOpen] = useState(false);
+    // On-device intent detections surface as a toast; its action opens the modal below.
+    // The toast hook owns no modal state — ChatInput does, for all three — so a
+    // suggestion opens exactly the same modal the toolbar does.
+    useIntentSuggestionToast({
+      openScheduleCall: () => setScheduleCallOpen(true),
+      openCreateTicket: () => setIsCreateTicketModalOpen(true),
+      openAddPeople: () => setAddPeopleOpen(true),
+    });
     const [ticketDescription, setTicketDescription] = useState('');
     const [recentScheduledFor, setRecentScheduledFor] = useState<number | null>(null);
 
@@ -411,6 +464,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // DB-backed draft (with already-uploaded attachments) for the channel
     // composer; used to carry attachments through the pending-message send.
     const channelDraftForSend = useDraftFromDB(channelId, conversationId ?? null);
+
+    // An attachment row exists from the moment a file is picked; its bytes land later over
+    // a separate upload request. Sending in between would publish a tile with no file behind
+    // it, so the send button stays disabled until the upload finishes. Attachments whose
+    // upload died long ago are not held: the send mutator drops those instead.
+    const isAttachmentUploading = useMemo(
+      () =>
+        !messageId &&
+        (channelDraftForSend?.attachments ?? []).some(
+          a => !isAttachmentUploaded(a) && isAttachmentUploadInFlight(a),
+        ),
+      [messageId, channelDraftForSend?.attachments],
+    );
 
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
@@ -592,6 +658,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           toast.error(`Describe the ${artifactDraft.definition.bodyNoun} before sending`);
           throw new Error(`${artifactDraft.definition.command} body is required`);
         }
+        if (artifactDraft && openArtifactCommandsInThread.has(artifactDraft.definition.command)) {
+          toast.error(`A ${artifactDraft.definition.badge} is already open in this thread`, {
+            description: 'Close it first, or declare this one in the channel instead.',
+          });
+          throw new Error(`${artifactDraft.definition.command} already open in this thread`);
+        }
 
         const bodyHtml = processMessageForSending(
           artifactDraft?.typedInline
@@ -607,6 +679,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             )
           : bodyHtml;
         const hasFiles = files && files.length > 0;
+
+        // Backstop for callers that reach the send handler with the button bypassed
+        // (the send mutators reject it too — this is only so the user is told why).
+        if (isAttachmentUploading) {
+          toast.warning('Attachment is still uploading', {
+            description: 'It will be ready in a moment — try sending again.',
+          });
+          throw new Error(ATTACHMENT_STILL_UPLOADING);
+        }
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
@@ -716,6 +797,18 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
         };
 
+        // On-device intent classification. Fire-and-forget and never awaited — it must
+        // not add a single millisecond to the send path. Gated inside the service on the
+        // user preference and public-channel visibility, both fail closed. A detection
+        // raises a local toast; nothing leaves the device. See docs/ON_DEVICE_INTENT.md
+        const classifyIntent = (sentMessageId: string): void => {
+          intentClassifier.submitForMessage({
+            text: _plainText,
+            messageId: sentMessageId,
+            channel,
+          });
+        };
+
         if (messageId) {
           // When editing a message, ignore alsoSendToChannel state to prevent metadata corruption
           const result = zero.mutate(
@@ -764,11 +857,21 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             );
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
-            handleMutationResult(result, restoreDraft, undefined, undefined, {
-              channelId,
-              conversationId,
-              isReply: true,
-            });
+            handleMutationResult(
+              result,
+              restoreDraft,
+              undefined,
+              // onServerSuccess, NOT here — waiting for the server ack means we never
+              // classify a message that failed to send. (It also used to matter for the
+              // server suggestion path, which raced Zero's optimistic write and 404'd
+              // as `message-not-found`; that path is gone, this reason is not.)
+              () => classifyIntent(newMessageId),
+              {
+                channelId,
+                conversationId,
+                isReply: true,
+              },
+            );
             // Sender has implicitly read up to their own message
             setThreadLastRead(conversationId, messageCreatedAt);
 
@@ -846,14 +949,20 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageId: newMessageId,
               timestamp: messageCreatedAt,
               ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
-              ...(sdlcDiscussion !== undefined && {
-                sdlcDiscussion: { ...sdlcDiscussion, linkId: uuidv4() },
+              ...(entityLinkScope && {
+                entityLinkContext: { ...entityLinkScope, linkId: uuidv4() },
               }),
             });
 
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
             dispatchChatMessageSentEvent(channelId);
+            // Called directly, unlike the two zero.mutate paths which classify from
+            // `onServerSuccess`. sendMessage() returns `{ messageId, conversationId }`
+            // synchronously — there is no server ack to wait on. Worst case is a
+            // suggestion for a message that later fails to send, which costs nothing:
+            // the toast is local and the user simply ignores it.
+            classifyIntent(newMessageId);
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
@@ -903,12 +1012,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         allUsersForMentionResolution,
         onMessageChange,
         isOffline,
+        isAttachmentUploading,
         user?.id,
         context.workspaceId,
         allowThreadBroadcastMentions,
         twinEdit,
         channelDraftForSend,
         activeArtifactCommand,
+        openArtifactCommandsInThread,
       ],
     );
 
@@ -926,6 +1037,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         const artifactDraft = detectSlashCommandArtifact(activeArtifactCommand, plainText);
         if (artifactDraft && !getSlashCommandArtifactBodyText(artifactDraft, plainText)) {
           toast.error(`Describe the ${artifactDraft.definition.bodyNoun} before scheduling`);
+          return;
+        }
+        if (artifactDraft && openArtifactCommandsInThread.has(artifactDraft.definition.command)) {
+          toast.error(`A ${artifactDraft.definition.badge} is already open in this thread`, {
+            description: 'Close it first, or declare this one in the channel instead.',
+          });
           return;
         }
         const bodyHtml = processMessageForSending(
@@ -994,6 +1111,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         setRecentScheduledFor,
         allowThreadBroadcastMentions,
         activeArtifactCommand,
+        openArtifactCommandsInThread,
       ],
     );
 
@@ -1009,10 +1127,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           </div>
         ) : (
           <>
-            <AgentProgressIndicator
-              sessionId={agentProgressConversationId ?? currentSessionId}
-              conversationId={agentProgressConversationId}
-            />
             {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>
@@ -1055,7 +1169,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                     type='button'
                     onClick={() => void navigate('/chat/scheduled')}
                     className='font-semibold text-primary hover:underline'
-                    data-track-category='chat-input'
+                    data-track-category='CHAT_INPUT'
                     data-track-name='open-delayed-messages-from-banner'
                   >
                     See all scheduled messages
@@ -1091,7 +1205,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                   onActiveChange={setAgentActive}
                 />
               }
-              commandItems={channelCommands}
+              commandItems={availableCommands}
               onCommandSelect={handleCommandSelect}
               {...(activeArtifactCommand && {
                 slashCommandArtifactCommand: activeArtifactCommand,
@@ -1134,7 +1248,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                             title: messageContent,
                             description: messageContent,
                             channelId: channelId,
-                            projectId: (channel.projectId as string | null) || '',
                             ticketType: BaseTicketType.Support,
                             ...(conversationId && { sourceConversationId: conversationId }),
                           };
@@ -1168,7 +1281,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }}
               onCreateCanvas={handleCreateCanvasFromComposer}
               hasTicket={hasTicket}
-              sendDisabled={isOffline}
+              sendDisabled={isOffline || isAttachmentUploading}
+              {...(isAttachmentUploading && {
+                sendDisabledReason: 'Attachment is still uploading',
+              })}
               onScheduleSend={handleScheduleSend}
               {...(globalShortcuts.length > 0 && {
                 bottomLeftSlot: (
@@ -1179,7 +1295,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                         onClick={() => setShortcutModalOpen(true)}
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Open shortcuts'
-                        data-track-category='chat-input'
+                        data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'
                       >
                         <Zap className='h-4 w-4 text-muted-foreground' />
@@ -1213,6 +1329,22 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             sourceConversation={conversation ?? undefined}
             onTicketCreated={handleTicketCreated}
           />
+        ) : null}
+        {/* Opened by the intent-suggestion toast. */}
+        <ScheduleCallModal
+          isOpen={scheduleCallOpen}
+          onClose={() => setScheduleCallOpen(false)}
+          channelId={channelId}
+          {...(conversation?.conversationId ? { conversationId: conversation.conversationId } : {})}
+        />
+        {channel && addPeopleOpen ? (
+          <Dialog open={addPeopleOpen} onOpenChange={setAddPeopleOpen} title='Add Members'>
+            <AddPeopleForm
+              channelId={channelId}
+              onSuccess={() => setAddPeopleOpen(false)}
+              onCancel={() => setAddPeopleOpen(false)}
+            />
+          </Dialog>
         ) : null}
       </>
     );

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -108,6 +109,9 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // Per-run thinking level from the composer's dropdown. Absent = the agent's
+  // configured default (modelSettings.thinkingLevel or provider default).
+  thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -171,6 +175,13 @@ const XyneAIRequestSchemaV2 = z.object({
   collection_ids: z.array(z.string().min(1)).optional(),
   fileIds: z.array(z.string().min(1)).optional(),
   file_ids: z.array(z.string().min(1)).optional(),
+  // A folder scope from the composer picker. Forwarded to claw-auth as a
+  // single 'folder' attached_context pointer (like collectionIds is) — NOT
+  // expanded to individual file ids here. claw-auth resolves it to files
+  // itself at Vespa-query time; expanding it here could blow up to
+  // thousands of ids for one folder.
+  folderIds: z.array(z.string().min(1)).optional(),
+  folder_ids: z.array(z.string().min(1)).optional(),
   attachedContext: AttachedContextSchema,
   attached_context: AttachedContextSchema,
   displayQuery: z.string().optional(),
@@ -182,6 +193,11 @@ const XyneAIRequestSchemaV2 = z.object({
    *  no-ops the pin when it can't serve it, so an unservable id can't silently
    *  swap the model. */
   model: z.string().min(1).optional(),
+  /** Which provider the model pin rides: "litellm" = the agent's shared
+   *  LiteLLM credential, "spaces" = the keyless platform provider (the models
+   *  endpoint's pinProvider says which). Defaults to "litellm" for old
+   *  clients. */
+  modelProvider: z.enum(['litellm', 'spaces']).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -245,6 +261,7 @@ export class XyneAIControllerV2 {
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
       instant,
+      thinkingLevel,
       researchContext,
       research_context,
       attachments,
@@ -269,11 +286,14 @@ export class XyneAIControllerV2 {
       collection_ids,
       fileIds,
       file_ids,
+      folderIds,
+      folder_ids,
       attachedContext,
       attached_context,
       draftMode,
       provider,
       model,
+      modelProvider,
       agentSlug,
     } = parseResult.data;
 
@@ -296,6 +316,7 @@ export class XyneAIControllerV2 {
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
     const effectiveCollectionIds = collectionIds?.length ? collectionIds : collection_ids;
     const effectiveFileIds = fileIds?.length ? fileIds : file_ids;
+    const effectiveFolderIds = folderIds?.length ? folderIds : folder_ids;
     // Same snake-case fallback rationale for branching params — the worker
     // sends snake_case; HTTP callers may use either.
     const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
@@ -348,9 +369,28 @@ export class XyneAIControllerV2 {
       }
 
       let sdlcDashboardContext: string | undefined;
-      const sdlcRepo = effectiveChannelIds[0]
+      // Honour the caller's pinned repository; otherwise the hub's oldest membership,
+      // which is exact whenever the hub covers one.
+      const sdlcChannelId = effectiveChannelIds[0];
+      const pinnedRepoId =
+        effectiveResearchContext?.type === 'repository' ? effectiveResearchContext.id : null;
+      const sdlcRepoId = sdlcChannelId
+        ? ((
+            await db.sdlcEntityLink.findFirst({
+              where: {
+                channelId: sdlcChannelId,
+                targetType: 'REPOSITORY',
+                relationType: SDLC_MEMBERSHIP_RELATION,
+                ...(pinnedRepoId ? { targetId: pinnedRepoId } : {}),
+              },
+              orderBy: { createdAt: 'asc' },
+              select: { targetId: true },
+            })
+          )?.targetId ?? null)
+        : null;
+      const sdlcRepo = sdlcRepoId
         ? await db.repo.findFirst({
-            where: { channelId: effectiveChannelIds[0] },
+            where: { id: sdlcRepoId },
             select: {
               id: true,
               name: true,
@@ -370,7 +410,7 @@ export class XyneAIControllerV2 {
           };
         }
         const contextLinks = await db.sdlcEntityLink.findMany({
-          where: { repoId: sdlcRepo.id, relationType: 'CONTEXT' },
+          where: { channelId: sdlcChannelId, relationType: 'CONTEXT' },
           orderBy: { createdAt: 'desc' },
           take: 50,
           select: { targetType: true, targetId: true },
@@ -404,7 +444,6 @@ export class XyneAIControllerV2 {
           sdlcVcs.resolveBaseBranchHead(sdlcRepo.id).catch(() => null),
           db.sdlcEntityLink.findMany({
             where: {
-              repoId: sdlcRepo.id,
               sourceType: 'REPOSITORY',
               sourceId: sdlcRepo.id,
               targetType: 'WORKFLOW_EXECUTION',
@@ -435,12 +474,35 @@ export class XyneAIControllerV2 {
             wikiCommitSha = null;
           }
         }
+        // Membership points at the repository through the polymorphic targetId, so
+        // no relation covers it: read the edges, then the repositories they name.
+        const siblingLinks = await db.sdlcEntityLink.findMany({
+          where: {
+            channelId: sdlcChannelId,
+            targetType: 'REPOSITORY',
+            relationType: SDLC_MEMBERSHIP_RELATION,
+            targetId: { not: sdlcRepo.id },
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { targetId: true },
+        });
+        const siblingRepos = siblingLinks.length
+          ? await db.repo.findMany({
+              where: { id: { in: siblingLinks.map((link) => link.targetId) } },
+              select: { id: true, name: true, url: true, canonicalUrl: true },
+            })
+          : [];
         sdlcDashboardContext = buildSdlcAskAiContext({
           repo: {
             id: sdlcRepo.id,
             name: sdlcRepo.name,
             url: sdlcRepo.canonicalUrl || sdlcRepo.url,
           },
+          otherRepos: siblingRepos.map((sibling) => ({
+            id: sibling.id,
+            name: sibling.name,
+            url: sibling.canonicalUrl || sibling.url,
+          })),
           channelId: effectiveChannelIds[0],
           baselineDocuments: approvedBaseline,
           linkedContext,
@@ -472,16 +534,23 @@ export class XyneAIControllerV2 {
         agentSlug,
       });
 
-      // Resolve KB context (collections + files) → attached_context items so
-      // claw-auth's existing prompt-prefix mechanism surfaces them in the
-      // agent's prompt. We translate:
+      // Resolve KB context (collections + folders + files) → attached_context
+      // items so claw-auth's existing prompt-prefix mechanism surfaces them
+      // in the agent's prompt. We translate:
       //   • Collection.id (cuid)         → 'collection' attached_context item
+      //   • Collection.id (cuid, folder) → 'folder' attached_context item
       //   • CollectionItem.fileId (UUID) → CollectionItem.id (cuid) +
       //                                    'file' attached_context item
       // The cuid is what the agent's kb-* tools expect as fileId — see the
       // KB-tools handlers and the validateKbGrants files-set in claw-auth.
+      // A folder is deliberately sent as ONE pointer, not expanded to its
+      // (potentially thousands of) files here — attachedContext is a small,
+      // model-facing prompt list (claw-auth caps it at 20 items total), not a
+      // bulk id manifest. claw-auth resolves the folder to files itself, at
+      // Vespa-query time (buildVespaScope in kb-handlers.ts), from the KB
+      // tree it already fetches for permission checks.
       const kbAttachedContextItems: Array<{
-        type: 'collection' | 'file';
+        type: 'collection' | 'folder' | 'file';
         id: string;
         title: string;
       }> = [];
@@ -492,6 +561,15 @@ export class XyneAIControllerV2 {
         });
         for (const row of rows) {
           kbAttachedContextItems.push({ type: 'collection', id: row.id, title: row.name });
+        }
+      }
+      if (effectiveFolderIds && effectiveFolderIds.length > 0) {
+        const rows = await db.collection.findMany({
+          where: { id: { in: effectiveFolderIds }, deletedAt: null },
+          select: { id: true, name: true },
+        });
+        for (const row of rows) {
+          kbAttachedContextItems.push({ type: 'folder', id: row.id, title: row.name });
         }
       }
       if (effectiveFileIds && effectiveFileIds.length > 0) {
@@ -525,7 +603,7 @@ export class XyneAIControllerV2 {
           // agentConfig: claw-auth merges that over the agent's stored config,
           // and its platform-key strip covers secrets but NOT `tools` /
           // `subagents` / `outputFormat`. A bare model id can't reach those.
-          ...(model && { providerOverride: { provider: 'litellm', model } }),
+          ...(model && { providerOverride: { provider: modelProvider ?? 'litellm', model } }),
           conversationId: effectiveConversationId || '',
           channelId: effectiveChannelIds[0] || '',
           canvasIds: effectiveCanvasIds,
@@ -538,6 +616,7 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          ...(thinkingLevel ? { thinkingLevel } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
@@ -921,7 +1000,7 @@ export class XyneAIControllerV2 {
 
   /**
    * GET /api/xyne-ai/v2/conversations/:convId/live
-   * SSE proxy to claw-auth's live stream so a Spaces AI tab that reloaded
+   * SSE proxy to claw-auth's live stream so a Hubs AI tab that reloaded
    * mid-run can re-attach and stream the in-flight answer (snapshot + deltas)
    * instead of waiting for the run to finish. Verbatim frame passthrough.
    */
@@ -1100,7 +1179,8 @@ export class XyneAIControllerV2 {
     try {
       const result = await listClawAgentModels(
         { headers: req.headers, userId },
-        req.params['slug']
+        req.params['slug'],
+        (req as any).user?.workspaceId
       );
       res.json(result);
     } catch (error) {

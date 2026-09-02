@@ -94,6 +94,8 @@ const ThreadContextPanel = ({
           className='w-full text-xs'
           disabled={items.length === 0}
           onClick={onConfirm}
+          data-track-category='THREAD_CONTEXT'
+          data-track-name='CONFIRM_THREAD_CONTEXT'
         >
           Add to Thread
         </Button>

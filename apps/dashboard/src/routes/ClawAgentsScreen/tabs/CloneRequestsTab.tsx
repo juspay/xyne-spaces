@@ -69,6 +69,8 @@ const CloneRequestsTab = ({ agent }: { agent: Agent }): ReactElement => {
                     disabled={!!busyId}
                     loading={busyId === request.id && approve.isPending}
                     onClick={() => void resolve(request, 'approve')}
+                    data-track-category='Claw Agents'
+                    data-track-name='APPROVE_CLONE_REQUEST'
                   >
                     <Check className='size-4' /> Approve
                   </Button>
@@ -79,6 +81,8 @@ const CloneRequestsTab = ({ agent }: { agent: Agent }): ReactElement => {
                     disabled={!!busyId}
                     loading={busyId === request.id && reject.isPending}
                     onClick={() => void resolve(request, 'reject')}
+                    data-track-category='Claw Agents'
+                    data-track-name='REJECT_CLONE_REQUEST'
                   >
                     <X className='size-4' /> Decline
                   </Button>

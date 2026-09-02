@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import {
   PriorityOptions,
   StatusOptions,
@@ -18,7 +20,7 @@ import {
 } from './TicketTableTypes';
 import { TagSelector } from './TagSelector';
 
-const GenericCellEditor = ({
+export const GenericCellEditor = ({
   value,
   onValueChange,
   stopEditing,
@@ -102,8 +104,17 @@ export const StageCellEditor = ({
   onValueChange,
   stopEditing,
   stages,
+  data,
 }: StageCellEditorProps) => {
-  const options = useStageOptions(stages);
+  const boardId = data?.boardId ?? '';
+  const [boardStages] = useCachedQuery(queries.stagesByBoard({ boardId }), {
+    enabled: !!boardId && !stages,
+  });
+  const resolvedStages = useMemo(
+    () => stages ?? (boardStages ?? []).map(stage => ({ id: stage.id, name: stage.name })),
+    [stages, boardStages],
+  );
+  const options = useStageOptions(resolvedStages);
   return (
     <GenericCellEditor
       value={value}

@@ -13,8 +13,9 @@ import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisi
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
-import { ServerBlockNoteEditor } from '@blocknote/server-util';
+import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -68,7 +69,7 @@ interface CanvasSideEffectContext {
   workspaceId: string;
 }
 
-import { executeStreamingLlmRequest } from './callLlmRetry';
+import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -84,6 +85,33 @@ function sanitizeInput(input: string | null): string {
   // Limit length to prevent excessive token usage (adjust as needed)
   const maxLength = 100000; // ~100K chars
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
+}
+
+/**
+ * Some legacy custom-template prompts cause the model to copy the template
+ * prompt-generation response shape and return { "systemPrompt": "..." }.
+ * Accept that response defensively, but keep ordinary Markdown untouched.
+ */
+function normalizeDetailedSummaryMarkdown(content: string): string {
+  const trimmed = content.trim();
+  const fencedJson = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+  const candidate = fencedJson ?? trimmed;
+
+  try {
+    const parsed: unknown = JSON.parse(candidate);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>).systemPrompt === 'string'
+    ) {
+      return ((parsed as Record<string, unknown>).systemPrompt as string).trim();
+    }
+  } catch {
+    // Normal Markdown is not JSON and should pass through unchanged.
+  }
+
+  return content;
 }
 
 function renderPromptTemplate(template: string, values: Record<string, string>): string {
@@ -624,8 +652,7 @@ async function convertMarkdownToBlockNote(
   citationCtx?: CitationContext,
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   try {
-    const editor = ServerBlockNoteEditor.create();
-    const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+    const parsed = await withServerEditor((editor) => editor.tryParseMarkdownToBlocks(markdown));
 
     // Collect mentioned IDs during the mention-processing pass
     const mentionedIds = new Set<string>();
@@ -986,6 +1013,7 @@ export class CallDocumentService {
     templateId?: string,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     citationSegments?: CitationContext['segments'],
+    modelType?: SummaryModelType,
   ): Promise<{
     summary: string;
     template: SummaryTemplate;
@@ -1033,16 +1061,22 @@ export class CallDocumentService {
       RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta
-        ? accumulated => onDelta(stripRecordingSummaryMarkedItemAnnotations(accumulated))
+        ? accumulated => onDelta(
+            stripRecordingSummaryMarkedItemAnnotations(
+              normalizeDetailedSummaryMarkdown(accumulated),
+            ),
+          )
         : undefined,
+      modelType,
     );
 
     if (!rawSummary) return null;
 
+    const normalizedSummary = normalizeDetailedSummaryMarkdown(rawSummary);
     const markedItems = citationSegments
-      ? extractMarkedItemsFromRecordingSummary(rawSummary, citationSegments)
+      ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
       : [];
-    const summary = stripRecordingSummaryMarkedItemAnnotations(rawSummary);
+    const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
     return { summary, template, markedItems };
   }
@@ -1059,6 +1093,7 @@ export class CallDocumentService {
     promptTemplate = DETAILED_SUMMARY_PROMPT,
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
+    modelType?: SummaryModelType,
   ): Promise<string | null> {
     // Use people who actually spoke in the transcript. A channel roster can contain
     // members who never joined or contributed to this particular call.
@@ -1091,6 +1126,14 @@ export class CallDocumentService {
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
     const sanitizedSystemPrompt = systemPrompt ? sanitizeInput(systemPrompt) : '';
+    const effectiveSystemPrompt = sanitizedSystemPrompt
+      ? `${sanitizedSystemPrompt}
+
+MANDATORY OUTPUT CONTRACT:
+- Return only the completed meeting summary as Markdown.
+- Never wrap the summary in JSON or emit a systemPrompt, summary, content, or markdown property.
+- Follow the section structure, formatting, citation, and marked-item requirements in the user prompt.`
+      : '';
 
     const buildPrompt = () => {
       let prompt = renderPromptTemplate(promptTemplate, {
@@ -1109,12 +1152,15 @@ export class CallDocumentService {
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
-      ...(sanitizedSystemPrompt ? { systemPrompt: sanitizedSystemPrompt } : {}),
+      ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
+      ...(modelType ? { modelType } : {}),
       onDelta,
     });
 
     if (!result.ok) {
-      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: result.reason });
+      // Diagnostic for the LLM step itself; the caller that gives up on the
+      // summary emits the alertable detailed_summary_generation_failed event.
+      logger.error(`[${callId}] detailed_summary_llm_request_failed`, { reason: result.reason });
       return null;
     }
 
@@ -1276,7 +1322,7 @@ export class CallDocumentService {
       });
 
       // Initialize Y-Sweet for collaborative editing
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, content);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, content, createdByUserId);
       if (!ysweetInitialized) {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for PRD canvas ${canvasId}`);
       }
@@ -1310,7 +1356,10 @@ export class CallDocumentService {
     callTitle?: string | null,
     citationCtx?: CitationContext,
     workspaceIdOverride?: string,
-    options: { deferInsertSideEffects?: boolean } = {},
+    options: {
+      deferInsertSideEffects?: boolean;
+      summaryModelPreference?: 'fast' | 'thinking';
+    } = {},
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1371,6 +1420,12 @@ export class CallDocumentService {
               generatedAt: now.toISOString(),
               mentionedUserIds, // Store mentioned users for side effect handler
               version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
+              // Recording summary LLM tier the client carried from its
+              // localStorage at recording start; read back on the headless
+              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
+              ...(options.summaryModelPreference
+                ? { summaryModelPreference: options.summaryModelPreference }
+                : {}),
             },
           },
         });
@@ -1387,7 +1442,7 @@ export class CallDocumentService {
       });
 
       // Initialize Y-Sweet for collaborative editing
-      const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[], createdByUserId);
       if (!ysweetInitialized) {
         logger.warn(`[CallDocumentService] Y-Sweet init failed for detailed summary canvas ${canvasId}`);
       }
@@ -1429,17 +1484,20 @@ export class CallDocumentService {
     currentVersion: number,
     callId: string,
     callTitle?: string | null,
-    citationCtx?: CitationContext
+    citationCtx?: CitationContext,
+    callStartedAt?: Date
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
       const now = new Date();
 
-      // Prepare canvas content (title, content, mentions, citations)
+      // Prepare canvas content (title, content, mentions, citations). Falls back to
+      // a timestamp-based title (instead of the bare "(Updated)" placeholder) when
+      // callTitle isn't ready yet — e.g. AI title generation is still racing this update.
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
-        undefined,
+        callStartedAt,
         callTitle,
         citationCtx
       );
@@ -1450,7 +1508,7 @@ export class CallDocumentService {
       // DB version/metadata — return null so the caller reports the failure
       // instead of leaving a canvas whose recorded version doesn't match its
       // (unchanged) content.
-      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[], updatedByUserId);
       if (!ysweetSynced) {
         logger.error(`[CallDocumentService] Y-Sweet sync failed for canvas ${canvasId}; aborting update`);
         return null;
@@ -1521,7 +1579,7 @@ export class CallDocumentService {
 
       // Y-Sweet is the source of truth; write the authoritative content first and
       // bail out if it fails rather than reporting a success that never landed.
-      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[]);
+      const ysweetSynced = await syncToYSweet(canvasId, sanitizedContent as unknown as BlockNoteBlock[], updatedByUserId);
       if (!ysweetSynced) {
         logger.error(`[CallDocumentService] Final Y-Sweet sync failed for canvas ${canvasId}`);
         return false;
@@ -1583,6 +1641,7 @@ export class CallDocumentService {
   async syncStreamingDetailedSummaryCanvas(
     canvasId: string,
     markdownSummary: string,
+    updatedByUserId: string,
     citationCtx?: CitationContext,
   ): Promise<boolean> {
     try {
@@ -1596,6 +1655,7 @@ export class CallDocumentService {
       return await syncToYSweet(
         canvasId,
         sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+        updatedByUserId,
       );
     } catch (error) {
       logger.error(
@@ -1635,7 +1695,8 @@ export class CallDocumentService {
         existingCanvas.version,
         callId,
         callTitle,
-        citationCtx
+        citationCtx,
+        callStartedAt
       );
 
       return {
@@ -1939,6 +2000,7 @@ A comprehensive detailed summary has been generated from this call.
     canvasId: string,
     conversationId: string,
     callId: string,
+    userId: string,
   ): Promise<void> {
     logger.warn(`[CallDocumentService] Cleaning up failed detailed summary canvas ${canvasId} for call ${callId}`);
 
@@ -1963,7 +2025,7 @@ A comprehensive detailed summary has been generated from this call.
     // This is not physical deletion: CRDT history remains subject to Y-Sweet's
     // own retention policy until its SDK exposes a supported delete operation.
     try {
-      const ysweetCleared = await syncToYSweet(canvasId, []);
+      const ysweetCleared = await syncToYSweet(canvasId, [], userId);
       if (!ysweetCleared) {
         logger.warn(`[CallDocumentService] Cleanup: failed to clear Y-Sweet canvas ${canvasId}`);
       }
@@ -2084,6 +2146,9 @@ A comprehensive detailed summary has been generated from this call.
     // Tracks a brand-new, lazily-created streaming canvas so any failure after
     // its first chunk can tear down the canvas and published message.
     let newCanvasId: string | null = null;
+    // Mirrors xyneAutomaticBot.id outside the try block's scope so the outer
+    // catch can still identify the actor for cleanup after a mid-generation failure.
+    let xyneAutomaticBotId: string | undefined;
     try {
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) {
@@ -2134,6 +2199,7 @@ A comprehensive detailed summary has been generated from this call.
       if (!xyneAutomaticBot) {
         throw new Error('Xyne Automatic bot not found');
       }
+      xyneAutomaticBotId = xyneAutomaticBot.id;
 
       let resolvedCallTitle = call.title;
       const callTitlePromise = (options.callTitlePromise ?? Promise.resolve(null))
@@ -2169,6 +2235,7 @@ A comprehensive detailed summary has been generated from this call.
           channel.callSummaryPrompt ?? undefined,
         );
         if (!detailedSummaryMarkdown) {
+          logDetailedSummaryFailed(callId, 'generation_failed');
           return { success: false, error: 'Failed to generate detailed summary' };
         }
 
@@ -2193,6 +2260,7 @@ A comprehensive detailed summary has been generated from this call.
           citationCtx,
         );
         if (!canvasId) {
+          logDetailedSummaryFailed(callId, 'canvas_update_failed');
           return { success: false, error: 'Failed to update detailed summary canvas' };
         }
 
@@ -2237,6 +2305,7 @@ A comprehensive detailed summary has been generated from this call.
             const synced = await syncToYSweet(
               newCanvasId,
               sanitizeBlockNoteContent(blocks) as unknown as BlockNoteBlock[],
+              xyneAutomaticBot.id,
             );
             if (!synced) {
               throw new Error('Y-Sweet sync returned false');
@@ -2361,8 +2430,9 @@ A comprehensive detailed summary has been generated from this call.
       }
 
       if (!detailedSummaryMarkdown) {
+        logDetailedSummaryFailed(callId, 'generation_failed');
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBot.id);
         }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
@@ -2375,8 +2445,9 @@ A comprehensive detailed summary has been generated from this call.
       }
       const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId || !canvasUrl) {
+        logDetailedSummaryFailed(callId, 'canvas_create_failed', initializationFailure);
         if (newCanvasId) {
-          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+          await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBot.id);
         }
         return {
           success: false,
@@ -2403,7 +2474,8 @@ A comprehensive detailed summary has been generated from this call.
         sideEffectContextPromise ?? undefined,
       );
       if (!finalized) {
-        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId);
+        logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
+        await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId, xyneAutomaticBot.id);
         return { success: false, error: 'Failed to write final detailed summary content' };
       }
 
@@ -2430,11 +2502,16 @@ A comprehensive detailed summary has been generated from this call.
 
       return { success: true, canvasUrl: finalizedCanvasUrl };
     } catch (error) {
-      logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
+      logDetailedSummaryFailed(callId, 'unexpected_error', error);
       // If a brand-new canvas + link was already published before the throw,
       // tear it down so an exception doesn't leave a dangling canvas/message.
       if (newCanvasId) {
-        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
+        if (!xyneAutomaticBotId) {
+          throw new Error(
+            `[CallDocumentService] Cannot clean up canvas ${newCanvasId}: xyneAutomaticBotId was never resolved`,
+          );
+        }
+        await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId, xyneAutomaticBotId);
       }
       return {
         success: false,

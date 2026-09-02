@@ -43,7 +43,7 @@ interface GoogleUserData {
 }
 
 export interface UserWithOrgRole extends User {
-  orgRole?: string;
+  orgRole: string;
 }
 
 export class UserService {
@@ -117,8 +117,11 @@ export class UserService {
    */
   async findUserByEmail(email: string, workspaceId: string): Promise<User | null> {
     try {
-      return await this.prisma.user.findUnique({
-        where: { email_workspaceId: { email, workspaceId } }
+      return await this.prisma.user.findFirst({
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          workspaceId,
+        }
       });
     } catch (error) {
       logger.error('Error finding user by email:', error);
@@ -147,7 +150,11 @@ export class UserService {
     }
     try {
       const result = await this.prisma.user.updateMany({
-        where: { email, authProvider, providerUserId: oldProviderUserId },
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          authProvider,
+          providerUserId: oldProviderUserId,
+        },
         data: { providerUserId: newProviderUserId },
       });
       if (result.count > 0) {
@@ -173,7 +180,7 @@ export class UserService {
   ): Promise<{ authProvider: AuthProvider; providerUserId: string } | null> {
     try {
       const user = await this.prisma.user.findFirst({
-        where: { email },
+        where: { email: { equals: email, mode: 'insensitive' } },
         select: { authProvider: true, providerUserId: true },
         orderBy: { createdAt: 'asc' },
       });
@@ -197,8 +204,8 @@ export class UserService {
 
       // Fetch existing orgMember by email to get memberId
       // orgMember should already exist (created during invitation or org setup)
-      const orgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email },
+      const orgMember = await this.prisma.orgMember.findFirst({
+        where: { email: { equals: userData.email, mode: 'insensitive' } },
         select: { memberId: true }
       });
 
@@ -411,7 +418,8 @@ export class UserService {
         }
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -432,7 +440,8 @@ export class UserService {
         });
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -443,7 +452,8 @@ export class UserService {
       isNewUser = true;
 
       // Fetch org role for new user
-      const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+      const orgRole = await this.getOrgRole(user.orgMemberId);
+      if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
       // Note: ensureUserPresence is called in createUser(), so no need to call it here
 
@@ -481,7 +491,7 @@ export class UserService {
   /**
    * Get user by ID with org member data
    */
-  async getUserById(userId: string): Promise<(User & { orgMember?: { memberId: string; role: string } | null }) | null> {
+  async getUserById(userId: string): Promise<(User & { orgMember: { memberId: string; role: string } }) | null> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -492,14 +502,19 @@ export class UserService {
       }
       
       // Fetch org member separately since there's no explicit relation
-      const orgMember = user.orgMemberId ? await this.prisma.orgMember.findUnique({
+      const orgMember = await this.prisma.orgMember.findUnique({
         where: { memberId: user.orgMemberId },
         select: {
           memberId: true,
           role: true,
         },
-      }) : null;
-      
+      });
+
+      if (!orgMember) {
+        logger.warn(`getUserById: orgMember not found for user ${userId}`);
+        return null;
+      }
+
       return {
         ...user,
         orgMember,
@@ -637,7 +652,7 @@ export class UserService {
         logger.info(`[getWorkspacesByEmail] Querying workspaces for email: ${email}`);
         const workspaceUsers = await this.prisma.user.findMany({
           where: {
-            email,
+            email: { equals: email, mode: 'insensitive' },
             status: UserStatus.ACTIVE,
             leftAt: null,
           },
@@ -665,7 +680,7 @@ export class UserService {
 
         const approvedJoinRequests = await this.prisma.workspaceJoinRequest.findMany({
           where: {
-            email: email,
+            email: { equals: email, mode: 'insensitive' },
             status: WorkspaceJoinRequestStatus.APPROVED,
           },
           orderBy: { updatedAt: 'desc' },
@@ -752,13 +767,13 @@ export class UserService {
     try {
       const userCount = await this.prisma.user.count({
         where: {
-          email,
+          email: { equals: email, mode: 'insensitive' },
         },
       });
 
       const activeCount = await this.prisma.user.count({
         where: {
-          email,
+          email: { equals: email, mode: 'insensitive' },
           status: UserStatus.ACTIVE,
           leftAt: null,
         },
@@ -846,7 +861,7 @@ export class UserService {
       const invitation = await this.prisma.invitation.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email,
+          email: { equals: userData.email, mode: 'insensitive' },
           acceptedAt: null,
           expiredAt: { gt: new Date() }
         }
@@ -859,7 +874,7 @@ export class UserService {
       const approvedJoinRequest = await this.prisma.workspaceJoinRequest.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email,
+          email: { equals: userData.email, mode: 'insensitive' },
           status: WorkspaceJoinRequestStatus.APPROVED,
         },
         orderBy: { updatedAt: 'desc' },
@@ -872,8 +887,8 @@ export class UserService {
       const role = invitation?.role || 'MEMBER';
 
       // Fetch existing orgMember by email
-      let orgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email },
+      let orgMember = await this.prisma.orgMember.findFirst({
+        where: { email: { equals: userData.email, mode: 'insensitive' } },
         select: { memberId: true }
       });
 

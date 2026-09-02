@@ -12,6 +12,8 @@ import {
   useCreateBlockNote,
   SuggestionMenuController,
   FormattingToolbarController,
+  FilePanelController,
+  LinkToolbarController,
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
@@ -34,6 +36,10 @@ import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-layout-extensions';
 import { asBlockNoteEditorForView } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
+import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
+import { withHeadingsTogether } from '../canvasSlashMenu';
+import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
+import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import {
   canvasSchema,
   canvasTableOptions,
@@ -224,17 +230,20 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
-    // Get slash menu items with custom blocks
+    // Every slash item, each already showing the key that reaches it.
+    const allSlashItems = useMemo(() => {
+      if (!editor) return [];
+      const defaultItems = getDefaultReactSlashMenuItems(asBlockNoteEditorForView(editor));
+      return withBlockShortcutBadges(withHeadingsTogether([...defaultItems, ...customSlashItems]));
+    }, [editor, customSlashItems]);
+
     const getSlashMenuItems = useCallback(
-      (query: string): Promise<DefaultReactSuggestionItem[]> => {
-        if (!editor) return Promise.resolve([]);
-        const defaultItems = getDefaultReactSlashMenuItems(asBlockNoteEditorForView(editor));
-        return Promise.resolve(
-          filterSuggestionItems([...defaultItems, ...customSlashItems], query),
-        );
-      },
-      [editor, customSlashItems],
+      (query: string): Promise<DefaultReactSuggestionItem[]> =>
+        Promise.resolve(filterSuggestionItems(allSlashItems, query)),
+      [allSlashItems],
     );
+
+    useCanvasBlockShortcuts(editor, allSlashItems);
 
     // Get mention suggestion menu items for '@' trigger – same list as DM/channel: users + user groups
     // Event-based: on mention selection, insert + notify (blockId for activity redirect)
@@ -584,8 +593,13 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 formattingToolbar={false}
                 tableHandles={editable}
                 slashMenu={false}
+                linkToolbar={false}
+                filePanel={false}
               >
                 <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
+                <CanvasPastedLinkToolbar />
+                <FilePanelController filePanel={CanvasFilePanel} />
                 <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
                 <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
               </BlockNoteView>

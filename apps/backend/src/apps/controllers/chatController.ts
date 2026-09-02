@@ -94,6 +94,7 @@ const AgentProgressBodySchema = z.object({
   conversationId: z.string().min(1).trim(),
   channelId: z.string().min(1).trim().optional(),
   agentSlug: z.string().min(1).trim().optional(),
+  agentName: z.string().min(1).trim().optional(),
   toolLabel: z.string().optional(),
   status: z.enum(['working', 'done']).default('working'),
   triggeredByUserId: z.string().min(1).trim().optional(), // human who started the run — gates the Stop button
@@ -419,7 +420,7 @@ export class ChatController {
         res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.errors });
         return;
       }
-      const { conversationId, channelId, agentSlug, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
+      const { conversationId, channelId, agentSlug, agentName, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
       const userId = req.user!.id; // agent's spacesAppUserId from the verified app token
 
       // Resolve channelId if only conversationId was given — dashboard subscribes on channel.
@@ -443,15 +444,18 @@ export class ChatController {
         return;
       }
 
-      // Tool-label updates from the runner don't carry the triggerer; carry it
-      // forward from the existing hash field so the Stop button stays visible to
-      // the initiator across the whole run (and after a thread reopen/rehydrate).
+      // Tool-label updates from the runner don't carry all presentation metadata;
+      // carry it forward from the existing hash field so the Stop button and display
+      // name survive across the whole run (and after a thread reopen/rehydrate).
       let resolvedTriggeredBy = triggeredByUserId ?? null;
-      if (!resolvedTriggeredBy && status !== 'done') {
+      let resolvedAgentName = agentName ?? null;
+      if ((!resolvedTriggeredBy || !resolvedAgentName) && status !== 'done') {
         const existingRaw = await redisService.getHashField(stateKey, userId);
         if (existingRaw) {
           try {
-            resolvedTriggeredBy = (JSON.parse(existingRaw) as { triggeredByUserId?: string }).triggeredByUserId ?? null;
+            const existing = JSON.parse(existingRaw) as { triggeredByUserId?: string; agentName?: string };
+            resolvedTriggeredBy = resolvedTriggeredBy ?? existing.triggeredByUserId ?? null;
+            resolvedAgentName = resolvedAgentName ?? existing.agentName ?? null;
           } catch { /* ignore malformed */ }
         }
       }
@@ -461,6 +465,7 @@ export class ChatController {
         conversationId,
         channelId: resolvedChannelId,
         agentSlug,
+        agentName: resolvedAgentName ?? agentSlug ?? null,
         agentUserId: userId,
         sessionId: sessionId ?? null,
         toolLabel: toolLabel ?? null,
@@ -485,7 +490,7 @@ export class ChatController {
         messageId: `agent_progress_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         conversationId,
         senderId: userId,
-        senderName: agentSlug ?? 'agent',
+        senderName: resolvedAgentName ?? agentSlug ?? 'agent',
         content: JSON.stringify({ type: 'agent_progress', data: payload }),
         msgType: MessageType.SYSTEM as const,
         createdAt: new Date(),

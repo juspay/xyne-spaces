@@ -135,6 +135,8 @@ const MemoryTab = ({ agent, permissions }: MemoryTabProps): ReactElement => {
                       size='iconSm'
                       disabled={remove.isPending}
                       onClick={() => void deleteMemory(memory.hindsightMemoryId)}
+                      data-track-category='Claw Agents'
+                      data-track-name='DELETE_MEMORY'
                       aria-label='Delete memory'
                       className='ml-auto text-muted-foreground hover:text-destructive'
                     >

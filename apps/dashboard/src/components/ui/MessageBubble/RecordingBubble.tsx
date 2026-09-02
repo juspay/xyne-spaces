@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AudioLines } from 'lucide-react';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCallDuration } from '../../../hooks/useCalls';
+import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { RecordingSharePill } from './RecordingSharePill';
 import { MessageMetadata } from './MessageBubble.utils';
 
@@ -55,17 +56,26 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
   if (isEnded) {
     const durationMs = typeof metadata?.['durationMs'] === 'number' ? metadata['durationMs'] : null;
     const title = message.content || 'Recording notes';
+    const messageContent =
+      typeof metadata?.['messageContent'] === 'string' ? metadata['messageContent'] : null;
 
     // Reuses the exact same pill used when a recording is manually shared to
     // a channel (RecordingShareContent/RecordingSharePill) — keeps "a
     // recording card in a message" looking identical everywhere instead of
     // maintaining a second, slightly-different design here.
     return (
-      <RecordingSharePill
-        title={title}
-        durationMs={durationMs}
-        onOpen={canView ? goToRecording : undefined}
-      />
+      <div className='flex w-full max-w-lg flex-col gap-1'>
+        {messageContent && (
+          <div className='jp-message-html whitespace-pre-wrap break-words text-sm text-foreground'>
+            <RenderMessageWithHTML message={messageContent} />
+          </div>
+        )}
+        <RecordingSharePill
+          title={title}
+          durationMs={durationMs}
+          onOpen={canView ? goToRecording : undefined}
+        />
+      </div>
     );
   }
 

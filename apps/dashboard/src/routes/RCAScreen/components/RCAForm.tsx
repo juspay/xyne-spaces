@@ -569,6 +569,8 @@ export const RCAForm = ({
                 type='button'
                 variant='outline'
                 onClick={() => void handleSaveDraftClick()}
+                data-track-category='RCA'
+                data-track-name='SAVE_RCA_DRAFT'
                 loading={isSubmitting}
                 disabled={isSubmitting}
               >

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, Database, Download, X } from 'lucide-react';
+import { ArrowLeft, Database, Download, Share2, X } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import { XyneAIStar } from '../../icons/xyne-ai';
@@ -11,6 +11,7 @@ import { KbCodeViewer } from './KbCodeViewer';
 import { KbTxtViewer } from './KbTxtViewer';
 import { KbPdfViewer } from './KbPdfViewer';
 import { VespaDocView } from './VespaDocView';
+import { ShareLinkModal } from '../../knowledgeBaseV2/components/ShareLinkModal';
 
 // KB-local override map. Substitutes the shared viewers with the thin
 // wrappers under `./Kb*Viewer.tsx`, which supply the full-size shell the KB
@@ -66,6 +67,7 @@ export const FileViewerPanel: React.FC<{
   const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined);
   const [highlightQuery, setHighlightQuery] = useState<string | undefined>(undefined);
   const [vespaInspectorOpen, setVespaInspectorOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const fileIdRef = useRef<string | undefined>(fileId);
   fileIdRef.current = fileId;
@@ -222,6 +224,8 @@ export const FileViewerPanel: React.FC<{
             onClick={() => {
               handleBackNavigation();
             }}
+            data-track-category='knowledge-base'
+            data-track-name='BACK_FROM_FILE_VIEWER'
           >
             <ArrowLeft size={16} />
             Back to Collections
@@ -255,6 +259,8 @@ export const FileViewerPanel: React.FC<{
               onClick={() => {
                 handleBackNavigation();
               }}
+              data-track-category='knowledge-base'
+              data-track-name='BACK_FROM_FILE_VIEWER'
             >
               <ArrowLeft size={16} />
               Back
@@ -317,41 +323,21 @@ export const FileViewerPanel: React.FC<{
     // `bg-background` is the shared page surface, so the file panel sits on
     // the same colour as the listing it came from.
     <div className='h-full w-full flex flex-col bg-background' ref={contentRef}>
-      {/* Slim toolbar — back / filename · meta / download. Mirrors
-          xyne-search's PdfViewer top bar; no gradient, no Ask-AI. */}
-      <div className='flex h-12 flex-shrink-0 items-center gap-3 border-b border-border bg-background px-3'>
-        <button
-          type='button'
-          onClick={handleBackNavigation}
-          aria-label='Back'
-          title='Back'
-          className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
-          data-track-category='knowledge-base'
-          data-track-name='file-viewer-back'
-        >
-          <ArrowLeft className='h-4 w-4' strokeWidth={1.75} />
-        </button>
-
-        <div className='min-w-0 flex flex-1 items-baseline gap-2'>
-          <span className='truncate text-[13.5px] font-medium text-foreground' title={file.name}>
-            {file.name}
-          </span>
-          <span className='flex-shrink-0 text-[12px] text-muted-foreground'>
-            {extLabel(file.name)} · {formatBytes(file.size)}
-          </span>
-        </div>
-
+      {/* Two-row toolbar, mirroring KnowledgeBaseV2Screen's header/breadcrumbRow
+          split: an actions row (Ask AI / Vespa / Share / Download) with the
+          divider, then a nav row below it (back / filename · meta). */}
+      <div className='flex flex-shrink-0 items-center justify-end gap-2 border-b border-border bg-background px-5 py-2.5'>
         {onOpenChat && (
           <Tooltip content='Ask AI about this file' side='bottom'>
             <button
               type='button'
               onClick={() => onOpenChat(file.fileId, file.name)}
+              aria-label='Ask AI'
               data-track-category='knowledge-base'
               data-track-name='file-viewer-open-ai-chat'
-              className='inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+              className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
             >
-              <XyneAIStar size={14} />
-              <span>Ask AI</span>
+              <XyneAIStar size={22} />
             </button>
           </Tooltip>
         )}
@@ -374,6 +360,19 @@ export const FileViewerPanel: React.FC<{
           </button>
         </Tooltip>
 
+        <Tooltip content='Share' side='bottom'>
+          <button
+            type='button'
+            onClick={() => setShareOpen(true)}
+            aria-label='Share'
+            data-track-category='knowledge-base'
+            data-track-name='file-viewer-share'
+            className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-primary'
+          >
+            <Share2 className='h-4 w-4' strokeWidth={1.75} />
+          </button>
+        </Tooltip>
+
         <button
           type='button'
           onClick={() => {
@@ -387,6 +386,29 @@ export const FileViewerPanel: React.FC<{
         >
           <Download className='h-4 w-4' strokeWidth={1.75} />
         </button>
+      </div>
+
+      <div className='flex min-w-0 items-center gap-2 px-5 py-2.5'>
+        <button
+          type='button'
+          onClick={handleBackNavigation}
+          aria-label='Back'
+          title='Back'
+          className='grid h-7 w-7 flex-shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+          data-track-category='knowledge-base'
+          data-track-name='file-viewer-back'
+        >
+          <ArrowLeft className='h-3.5 w-3.5' strokeWidth={1.75} />
+        </button>
+
+        <div className='min-w-0 flex flex-1 items-baseline gap-2'>
+          <span className='truncate text-[13.5px] font-medium text-foreground' title={file.name}>
+            {file.name}
+          </span>
+          <span className='flex-shrink-0 text-[12px] text-muted-foreground'>
+            {extLabel(file.name)} · {formatBytes(file.size)}
+          </span>
+        </div>
       </div>
 
       <div className='flex min-h-0 flex-1 bg-background'>
@@ -419,6 +441,15 @@ export const FileViewerPanel: React.FC<{
           </aside>
         )}
       </div>
+
+      {shareOpen && (
+        <ShareLinkModal
+          isOpen
+          onClose={() => setShareOpen(false)}
+          title={file.name}
+          link={`${window.location.origin}${window.location.pathname}`}
+        />
+      )}
     </div>
   );
 };

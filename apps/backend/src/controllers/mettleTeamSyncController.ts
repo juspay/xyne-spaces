@@ -13,7 +13,7 @@ export class MettleTeamSyncController {
 
       res.status(200).json({
         success: true,
-        data: result,
+        data: result.teams,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {

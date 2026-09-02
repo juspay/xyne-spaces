@@ -58,8 +58,10 @@ import { toast } from 'sonner';
 import {
   filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
+  filterExcludedRecordingGeneratedCanvases,
   filterStarredCanvases,
-  isExcludedCallGeneratedCanvas,
+  isAnyCallGeneratedCanvas,
+  isExcludedRecordingGeneratedCanvas,
   withStarredCanvasState,
 } from '../canvasFilters';
 import { cn } from '../../../utils/classNames';
@@ -486,6 +488,8 @@ const getFilteredCanvasItems = ({
   canvases,
   onlyCallGeneratedCanvases,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
+  onlyRecordingGeneratedCanvases,
   showStarredOnly,
   activeFilter,
   currentUserId,
@@ -499,6 +503,8 @@ const getFilteredCanvasItems = ({
   canvases: Canvas[];
   onlyCallGeneratedCanvases: boolean;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
+  onlyRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
   activeFilter: FilterTab;
   currentUserId?: string | undefined;
@@ -510,8 +516,13 @@ const getFilteredCanvasItems = ({
   filterSearchQuery?: boolean;
 }): Canvas[] => {
   let filtered = onlyCallGeneratedCanvases
-    ? canvases.filter(isExcludedCallGeneratedCanvas)
-    : filterExcludedCallGeneratedCanvases(canvases, excludeCallGeneratedCanvases);
+    ? canvases.filter(isAnyCallGeneratedCanvas)
+    : onlyRecordingGeneratedCanvases
+      ? canvases.filter(isExcludedRecordingGeneratedCanvas)
+      : filterExcludedRecordingGeneratedCanvases(
+          filterExcludedCallGeneratedCanvases(canvases, excludeCallGeneratedCanvases),
+          excludeRecordingGeneratedCanvases,
+        );
   filtered = filterStarredCanvases(filtered, showStarredOnly);
 
   filtered = filtered.filter(canvas =>
@@ -661,6 +672,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   searchQuery: string;
   onlyCallGeneratedCanvases: boolean;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
+  onlyRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
   includeArchived: boolean;
   onlyArchived: boolean;
@@ -679,6 +692,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   searchQuery,
   onlyCallGeneratedCanvases,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
+  onlyRecordingGeneratedCanvases,
   showStarredOnly,
   includeArchived,
   onlyArchived,
@@ -709,6 +724,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
         canvases: archiveFilteredFolderCanvases,
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
+        excludeRecordingGeneratedCanvases,
+        onlyRecordingGeneratedCanvases,
         showStarredOnly,
         activeFilter,
         currentUserId,
@@ -724,7 +741,9 @@ const ChannelScopeFolderGroupSection: React.FC<{
       archiveFilteredFolderCanvases,
       currentUserId,
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       onlyCallGeneratedCanvases,
+      onlyRecordingGeneratedCanvases,
       searchQuery,
       searchScope,
       selectedLabel,
@@ -809,7 +828,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   paginated = false,
   channelId,
   excludeCallGeneratedCanvases = true,
+  excludeRecordingGeneratedCanvases = true,
   onlyCallGeneratedCanvases = false,
+  onlyRecordingGeneratedCanvases = false,
   showStarredOnly = false,
   includeArchived = false,
   onlyArchived = false,
@@ -988,9 +1009,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     activeFilter,
     channelId,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     includeArchived,
     onlyArchived,
     onlyCallGeneratedCanvases,
+    onlyRecordingGeneratedCanvases,
     paginated,
     debouncedSearchQuery,
     searchScope,
@@ -1151,12 +1174,43 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     return (): void => cancelAnimationFrame(rafId);
   }, [activeFilter, isMobile]);
 
+  const STARRED_SECTION_PAGE_SIZE = 3;
+  const [isStarredSectionExpanded, setIsStarredSectionExpanded] = useState(false);
+
+  const starredCanvases = useMemo(
+    () => itemsWithStarState.filter(canvas => canvas.isStarred),
+    [itemsWithStarState],
+  );
+
+  const visibleStarredCanvases = isStarredSectionExpanded
+    ? starredCanvases
+    : starredCanvases.slice(0, STARRED_SECTION_PAGE_SIZE);
+  const hiddenStarredCount = starredCanvases.length - visibleStarredCanvases.length;
+
+  // The pinned Starred section (below) is its own render of these canvases. Once it's
+  // showing, the chronological list must not also render the same canvas.id a second
+  // time -- two DOM copies sharing one canvas.id would both react to the single
+  // `openCanvasMenuId` state, so opening the "..." menu on either copy marks both as
+  // open and Radix's outside-click handling on the other duplicate closes it back out.
+  const isStarredSectionVisible =
+    starredCanvases.length > 0 &&
+    !showStarredOnly &&
+    !isSpecificChannelScope &&
+    !debouncedSearchQuery.trim();
+  const itemsForMainList = useMemo(() => {
+    if (!isStarredSectionVisible) return itemsWithStarState;
+    const starredIds = new Set(starredCanvases.map(canvas => canvas.id));
+    return itemsWithStarState.filter(canvas => !starredIds.has(canvas.id));
+  }, [isStarredSectionVisible, itemsWithStarState, starredCanvases]);
+
   const filteredCanvases = useMemo(
     () =>
       getFilteredCanvasItems({
-        canvases: itemsWithStarState,
+        canvases: itemsForMainList,
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
+        excludeRecordingGeneratedCanvases,
+        onlyRecordingGeneratedCanvases,
         showStarredOnly,
         activeFilter,
         currentUserId,
@@ -1172,8 +1226,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       effectiveSearchScope,
       effectiveSelectedScopeChannelId,
       excludeCallGeneratedCanvases,
-      itemsWithStarState,
+      excludeRecordingGeneratedCanvases,
+      itemsForMainList,
       onlyCallGeneratedCanvases,
+      onlyRecordingGeneratedCanvases,
       debouncedSearchQuery,
       selectedLabel,
       selectedSharedByUserId,
@@ -1183,6 +1239,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   const hasPrimaryCanvasFilters =
     onlyCallGeneratedCanvases ||
+    onlyRecordingGeneratedCanvases ||
     onlyArchived ||
     showStarredOnly ||
     activeFilter !== 'all' ||
@@ -1197,6 +1254,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     trimmedSearchQuery || 'no-search'
   }:${onlyCallGeneratedCanvases ? 'only-call' : 'mixed-call'}:${
     excludeCallGeneratedCanvases ? 'exclude-call' : 'include-call'
+  }:${excludeRecordingGeneratedCanvases ? 'exclude-recording' : 'include-recording'}:${
+    onlyRecordingGeneratedCanvases ? 'only-recording' : 'mixed-recording'
   }:${onlyArchived ? 'only-archived' : includeArchived ? 'with-archived' : 'without-archived'}:${
     showStarredOnly ? 'starred' : 'all-stars'
   }`;
@@ -1204,13 +1263,16 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     !hasPrimaryCanvasFilters ||
     filteredCanvases.length >= CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD;
   const shouldRenderChannelFolderGroups = isSpecificChannelScope;
+
+  const shouldShowStarredSection = isStarredSectionVisible;
   const hasClientSideResultFilters =
     effectiveSearchScope === 'direct' ||
     activeFilter !== 'all' ||
     Boolean(selectedLabel) ||
     trimmedSearchQuery.length > 0 ||
     showStarredOnly ||
-    onlyCallGeneratedCanvases;
+    onlyCallGeneratedCanvases ||
+    onlyRecordingGeneratedCanvases;
   const shouldScanFilteredUserPages =
     hasClientSideResultFilters &&
     effectiveSearchScope !== 'via_channel' &&
@@ -1248,6 +1310,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ),
         onlyCallGeneratedCanvases,
         excludeCallGeneratedCanvases,
+        excludeRecordingGeneratedCanvases,
+        onlyRecordingGeneratedCanvases,
         showStarredOnly,
         activeFilter,
         currentUserId,
@@ -1263,9 +1327,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       effectiveSearchScope,
       effectiveSelectedScopeChannelId,
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       includeArchived,
       onlyArchived,
       onlyCallGeneratedCanvases,
+      onlyRecordingGeneratedCanvases,
       debouncedSearchQuery,
       selectedChannelRootCanvasesResult,
       selectedLabel,
@@ -1282,9 +1348,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     effectiveSearchScope,
     effectiveSelectedScopeChannelId,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     includeArchived,
     onlyArchived,
     onlyCallGeneratedCanvases,
+    onlyRecordingGeneratedCanvases,
     debouncedSearchQuery,
     selectedLabel,
     selectedSharedByUserId,
@@ -1551,7 +1619,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ? 'you'
         : userNameById.get(editorUserId) || (editorUserId ? 'Unknown' : 'someone');
     const labels = getCanvasLabels(canvas);
-    const isBotGeneratedCanvas = isExcludedCallGeneratedCanvas(canvas);
+    const isBotGeneratedCanvas = isAnyCallGeneratedCanvas(canvas);
     const isCanvasCreator = canvas.createdBy === currentUserId;
     const menuItems: CanvasCardMenuItem[] = [
       ...(onToggleStar
@@ -1648,11 +1716,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         tabIndex={0}
         className={cn(
           'group relative flex min-h-[50px] cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 transition-colors hover:bg-background hover:text-sidebar-accent-foreground hover:shadow-sm',
-          isMenuOpen
+          isMenuOpen || isSelected
             ? 'bg-background text-sidebar-accent-foreground shadow-sm'
-            : isSelected
-              ? 'bg-sidebar-accent/80 text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground',
+            : 'text-sidebar-foreground',
         )}
         onClick={e => onSelect(e, canvas)}
         data-track-category='CANVAS'
@@ -1812,7 +1878,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     const shouldShowSection = !previousCanvas || getCanvasDateSection(previousCanvas) !== section;
 
     return (
-      <div>
+      <div className='pb-1'>
         {shouldShowSection && (
           <div
             className={`px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50 ${
@@ -1859,6 +1925,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 searchQuery={debouncedSearchQuery}
                 onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
                 excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+                excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
+                onlyRecordingGeneratedCanvases={onlyRecordingGeneratedCanvases}
                 showStarredOnly={showStarredOnly}
                 includeArchived={includeArchived}
                 onlyArchived={onlyArchived}
@@ -2329,6 +2397,41 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           )}
         </div>
       </div>
+
+      {shouldShowStarredSection && (
+        <div className='shrink-0 px-2.5 pt-1'>
+          <div className='px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50'>
+            Starred
+          </div>
+          {visibleStarredCanvases.map(canvas => (
+            <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
+          ))}
+          {hiddenStarredCount > 0 && (
+            <button
+              type='button'
+              onClick={() => setIsStarredSectionExpanded(true)}
+              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              data-track-category='CANVAS'
+              data-track-name='SHOW_MORE_STARRED_CANVASES'
+            >
+              <ChevronDown className='size-3.5 shrink-0' strokeWidth={2.2} />
+              See {hiddenStarredCount} more
+            </button>
+          )}
+          {isStarredSectionExpanded && starredCanvases.length > STARRED_SECTION_PAGE_SIZE && (
+            <button
+              type='button'
+              onClick={() => setIsStarredSectionExpanded(false)}
+              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              data-track-category='CANVAS'
+              data-track-name='SHOW_LESS_STARRED_CANVASES'
+            >
+              <ChevronRight className='size-3.5 shrink-0 -rotate-90' strokeWidth={2.2} />
+              Show less
+            </button>
+          )}
+        </div>
+      )}
 
       <div className='flex-1 min-h-0'>
         {isInitialLoading || isChannelFolderViewInitialLoading ? (

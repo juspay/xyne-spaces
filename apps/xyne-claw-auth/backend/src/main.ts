@@ -7,9 +7,15 @@ process.env.SERVICE_NAME ||= "xyne-claw-auth";
 import express, { type Request, type Response } from "express";
 import { CONFIG } from "./config.js";
 import { requestLogger } from "./middleware/requestLogger.js";
+import { errorMiddleware } from "./lib/http.js";
 import { serversRouter } from "./routes/servers.js";
 import { connectionsRouter } from "./routes/connections.js";
 import { mcpRouter } from "./routes/mcp.js";
+import { awakeningRouter } from "./routes/awakening.js";
+import { ensureTickScheduler, closeAwakeningQueues } from "./queue/awakening-queue.js";
+import { initAwakeningTickWorker, closeAwakeningTickWorker } from "./queue/awakening-tick-worker.js";
+import { initAwakeningWindowWorker, closeAwakeningWindowWorker } from "./queue/awakening-window-worker.js";
+import { initAwakeningReflexWorker, closeAwakeningReflexWorker } from "./queue/awakening-reflex-worker.js";
 import { runRouter } from "./routes/run.js";
 import { runStreamRouter, runStreamInternalRouter } from "./routes/run-stream.js";
 import { usersRouter } from "./routes/users.js";
@@ -35,6 +41,8 @@ import { organizationsRouter } from "./routes/organizations.js";
 import { adminBackfillSigningSecretsRouter } from "./routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { agentChatRouter, agentChatInternalRouter } from "./routes/agent-chat.js";
+import { artifactAppsRouter } from "./routes/artifact-apps.js";
+import { artifactAppAgentsRouter } from "./routes/artifact-app-agents.js";
 import { designSharesRouter, publicDesignSharesRouter } from "./routes/design-shares.js";
 import { sessionsArchiveRouter } from "./routes/sessions-archive.js";
 import { experimentsInternalRouter } from "./routes/experiments-internal.js";
@@ -61,6 +69,8 @@ import { dailyBriefRouter } from "./routes/daily-brief.js";
 import { pendingQuestionsRouter } from "./routes/pending-questions.js";
 import { ttsRouter } from "./routes/tts.js";
 import { settingsRouter } from "./routes/settings.js";
+import { beginLocalHarnessDrain, localHarnessBridgeRouter, localHarnessRouter } from "./routes/local-harness.js";
+import { initLocalHarnessExpirySweep } from "./services/localHarnessExpiry.js";
 import { runsRouter } from "./routes/runs.js";
 import { metricsRouter } from "./routes/metrics.js";
 import { memoryRouter } from "./routes/memory.js";
@@ -209,6 +219,8 @@ app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
 app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
 app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
 app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
+app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
+app.use(`${BASE}/artifact-app-agents`, requireAuth, artifactAppAgentsRouter);
 app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designSharesRouter);
 app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
 app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
@@ -273,6 +285,9 @@ app.use(`${BASE}/internal`, requireStrictS2S, runRouter);
 app.use(`${BASE}/run/stream`, runStreamRouter);
 app.use(`${BASE}/internal/run-stream`, requireStrictS2S, runStreamInternalRouter);
 app.use(BASE, runRouter);
+// Awakening: the result callback self-protects with requireStrictS2S and the
+// status route carries its own admin gate, so no mount-level auth here.
+app.use(BASE, awakeningRouter);
 // No mount-level auth on /webhook by design: it mixes auth schemes per route.
 // POST / , /result and /progress are S2S callbacks; POST /:agentSlug is hit
 // directly by Spaces and self-protects via verifySpacesSignature (per-agent
@@ -290,6 +305,10 @@ app.use(`${BASE}/scheduled-jobs`, requireAuth, requireNoAccessToken, scheduledJo
 // flow-action consumes them through the module's atomic Redis helper.
 app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
 app.use(`${BASE}/settings`, requireAuth, requireNoAccessToken, settingsRouter);
+// Local harness: device management is user-authed; the bridge router is
+// device-token authed inside (requireDevice) and rate-limited per device.
+app.use(`${BASE}/local-harness`, requireUserAuth, localHarnessRouter);
+app.use(`${BASE}/local-harness-bridge`, localHarnessBridgeRouter);
 // allowReadAccessToken (NOT the hard barrier): CLI tokens carry runs:read so
 // the CLI can list/search/fetch its own runs (GET /runs/light, /runs/search,
 // /runs/:id). Reads pass with the scope; token writes are still rejected.
@@ -314,6 +333,7 @@ app.use(`${BASE}/entity-extraction`, requireAuth, requireNoAccessToken, requireC
 // routes authenticate per-route with gatewayTenantAuth + gatewayRegistrationAuth
 // (mcpgateway/middleware/gateway-auth.ts) against the registration API key.
 app.use(`${BASE}/gateway`, mcpGatewayRouter);
+app.use(errorMiddleware);
 
 initializeOpenTelemetry();
 registerDailyBriefGauges();
@@ -367,6 +387,17 @@ listen(CONFIG.port, () => {
     initDailyBriefCron();
     initFailureCuratorWorker();
     initOrphanFinalizerWorker();
+    // Awakened agents: one fleet-wide tick fans out to per-agent window jobs.
+    // ensureTickScheduler is idempotent, so every pod calling it converges on
+    // a single scheduler — which is also what makes a Redis wipe self-heal on
+    // the next boot instead of silently stopping every awakened agent.
+    initAwakeningTickWorker();
+    initAwakeningWindowWorker();
+    initAwakeningReflexWorker();
+    void ensureTickScheduler().catch((err) =>
+      log.error("[boot] awakening tick scheduler registration failed:", err),
+    );
+    initLocalHarnessExpirySweep();
   // Upsert custom tools from the shared registry so newly added tools (e.g.
     // google-sheets-create, google-forms-create) show up in the agent UI on
     // restart without needing a manual POST /tools/sync call.
@@ -386,6 +417,9 @@ async function shutdown(signal: string): Promise<void> {
     errorPipelineRunner.stop();
   } else {
     // API pod: drain the background fleet (none of it ran on the runner pod).
+    // Stop parking new local-harness long-polls first so in-flight bridge
+    // connections return idle and the pod can exit without dropping a run.
+    beginLocalHarnessDrain();
     stopBitbucketStatsBackgroundRefresh();
     await closeWorker().catch(() => {});
     await closeRunRecoveryWorker().catch(() => {});
@@ -399,6 +433,10 @@ async function shutdown(signal: string): Promise<void> {
     await closeEntityExtractionQueue().catch(() => {});
     closeFailureCuratorWorker();
     closeOrphanFinalizerWorker();
+    await closeAwakeningTickWorker().catch(() => {});
+    await closeAwakeningWindowWorker().catch(() => {});
+    await closeAwakeningReflexWorker().catch(() => {});
+    await closeAwakeningQueues().catch(() => {});
     await closeQueue().catch(() => {});
     await closeDailyBriefWorker().catch(() => {});
     await closeDailyBriefQueue().catch(() => {});
