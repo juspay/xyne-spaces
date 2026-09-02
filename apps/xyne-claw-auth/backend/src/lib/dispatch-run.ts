@@ -1,4 +1,3 @@
-import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { enqueueRun, getRunExecutionQueue } from "../queue/run-execution-queue.js";
 
@@ -16,37 +15,29 @@ export interface RunDispatchResult {
 }
 
 export interface DispatchRunOptions {
-  httpDispatch: () => Promise<RunDispatchResult>;
   onEnqueued?: (sessionId: string) => Promise<void>;
-}
-
-export function runQueueEnabled(): boolean {
-  return CONFIG.runQueueEnabled;
 }
 
 export async function dispatchRun(
   payload: RunDispatchPayload,
-  options: DispatchRunOptions,
+  options: DispatchRunOptions = {},
 ): Promise<RunDispatchResult> {
   const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
-  if (runQueueEnabled()) {
-    if (!sessionId) {
-      log.error("[dispatch-run] XYNE_RUN_QUEUE=1 but the payload carries no sessionId — falling back to HTTP dispatch");
-    } else {
-      await enqueueRun({ ...payload, sessionId });
-      log.info(`[metric] name=run_queue_enqueued kind=count value=1 session=${sessionId}`);
-      const waiting = await getRunExecutionQueue()
-        .getWaitingCount()
-        .catch(() => undefined);
-      if (options.onEnqueued) await options.onEnqueued(sessionId);
-      return {
-        success: true,
-        sessionId,
-        status: 202,
-        queued: true,
-        ...(typeof waiting === "number" ? { queuePosition: waiting } : {}),
-      };
-    }
+  if (!sessionId) {
+    log.error("[dispatch-run] refusing to enqueue a run whose payload carries no sessionId");
+    return { success: false, error: "Run dispatch payload is missing a sessionId", status: 500 };
   }
-  return options.httpDispatch();
+  await enqueueRun({ ...payload, sessionId });
+  log.info(`[metric] name=run_queue_enqueued kind=count value=1 session=${sessionId}`);
+  const waiting = await getRunExecutionQueue()
+    .getWaitingCount()
+    .catch(() => undefined);
+  if (options.onEnqueued) await options.onEnqueued(sessionId);
+  return {
+    success: true,
+    sessionId,
+    status: 202,
+    queued: true,
+    ...(typeof waiting === "number" ? { queuePosition: waiting } : {}),
+  };
 }

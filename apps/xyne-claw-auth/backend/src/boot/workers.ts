@@ -24,7 +24,6 @@ import { initEntityExtractionWorker, closeEntityExtractionWorker } from "../queu
 import { closeEntityExtractionQueue } from "../queue/entity-extraction-queue.js";
 import { initEvalJudgeWorker, closeEvalJudgeWorker } from "../queue/eval-judge-worker.js";
 import { initFailureCuratorWorker, closeFailureCuratorWorker } from "../services/failure-curator-worker.js";
-import { initOrphanFinalizerWorker, closeOrphanFinalizerWorker } from "../services/orphan-finalizer-worker.js";
 import { closeBackfillQueue } from "../queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "../bootstrap-tools.js";
 import { initMemoryCron } from "../services/memoryCronService.js";
@@ -70,7 +69,6 @@ const WORKERS: WorkerEntry[] = [
   { name: "daily-brief-queue", close: closeDailyBriefQueue },
   { name: "daily-brief-cron", init: initDailyBriefCron },
   { name: "failure-curator-worker", init: initFailureCuratorWorker, closeSync: closeFailureCuratorWorker },
-  { name: "orphan-finalizer-worker", init: initOrphanFinalizerWorker, closeSync: closeOrphanFinalizerWorker },
   // Awakened agents: one fleet-wide tick fans out to per-agent window jobs.
   // ensureTickScheduler is idempotent, so every pod calling it converges on
   // a single scheduler — which is also what makes a Redis wipe self-heal on
@@ -94,7 +92,6 @@ const SHUTDOWN_SEQUENCE: string[] = [
   "entity-extraction-worker",
   "entity-extraction-queue",
   "failure-curator-worker",
-  "orphan-finalizer-worker",
   "awakening-tick-worker",
   "awakening-window-worker",
   "awakening-reflex-worker",

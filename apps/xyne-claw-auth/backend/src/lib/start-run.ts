@@ -52,9 +52,8 @@ import type { VerifiedCliToken } from "./cli-tokens.js";
 import { agentScopeAllows } from "./service-tokens.js";
 import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
-import { fetchClawRunWithRetry } from "./claw-fetch.js";
-import { isScheduledOrAutomationEvent, runBridgeForProbeResponse } from "./run-bridge.js";
-import { dispatchRun, type RunDispatchResult } from "./dispatch-run.js";
+import { isScheduledOrAutomationEvent } from "./run-bridge.js";
+import { dispatchRun } from "./dispatch-run.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
 
@@ -1408,147 +1407,6 @@ export async function prepareRun(
   }
 }
 
-async function httpForwardRun(prepared: PreparedRun): Promise<RunDispatchResult> {
-  const {
-    sessionId,
-    sessionToken,
-    forwardBody,
-    conversationId,
-    agentSlug,
-    eventType,
-    progressUrl,
-    effectiveCallbackUrl,
-  } = prepared;
-
-  if (prepared.detached) {
-    log.info(`[run] proxy: detached mode (sessionId=${sessionId})`);
-    const clawRes = await fetchClawRunWithRetry(
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        },
-        body: JSON.stringify(forwardBody),
-      },
-      "detached-json",
-    );
-
-    const body = (await clawRes.json().catch(() => null)) as {
-      success?: boolean;
-      sessionId?: string;
-      error?: string;
-    } | null;
-    if (clawRes.status !== 202 || !body?.success || !body.sessionId) {
-      const error = body?.error ?? `Detached /run failed: HTTP ${clawRes.status}`;
-      log.error(`[run] proxy: detached claw /run rejected (sessionId=${sessionId}): ${error}`);
-      return { success: false, error, status: clawRes.status || 502 };
-    }
-
-    // Persist the AgentRun BEFORE acking. This branch used to return with
-    // no row writer at all, so every detached API/service-token dispatch
-    // ran invisibly: no history, no metrics, no token audit trail, and
-    // status lookups 404'd (found 2026-07-20 during the first xyne_svc_
-    // end-to-end test — the run completed but "didn't exist").
-    await persistDetachedRunStart(prepared);
-
-    return { success: true, sessionId: body.sessionId, status: 202 };
-  }
-
-  // SSE-with-legacy-translation: the caller (webhook / agent-chat / etc.)
-  // didn't ask for SSE — they expect the fire-and-forget {success, sessionId}
-  // hand-off and POSTs from claw to their own progressUrl. We give them
-  // exactly that, but the wire to claw is SSE: one ordered connection. A
-  // background bridge translates each SSE frame back into the POST body
-  // shape claw's old push functions used, hitting the caller's progressUrl
-  // serially so ordering is preserved by construction. ZERO caller code
-  // changes — this is the unified-wire migration for the legacy callers.
-  if (CONFIG.clawSseTransport) {
-    log.info(`[run] proxy: SSE bridge mode (caller is legacy POST consumer, sessionId=${sessionId})`);
-
-    // Probe with the SSE Accept header. If claw rejects (auth, validation),
-    // we want to surface the same HTTP status the legacy path would have so
-    // the caller's error handling stays identical. We can't actually
-    // consume in the foreground (the legacy contract is fire-and-forget),
-    // so we just buy a quick "did /run accept" signal by waiting for the
-    // first response chunk.
-    const probeRes = await fetchClawRunWithRetry(
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        },
-        body: JSON.stringify(forwardBody),
-      },
-      "sse-bridge",
-    );
-
-    if (!probeRes.ok || !probeRes.body) {
-      const errText = await probeRes.text().catch(() => "");
-      log.error(
-        `[run] proxy: claw SSE returned ${probeRes.status} (legacy bridge, sessionId=${sessionId}): ${errText.slice(0, 300)}`,
-      );
-      return {
-        success: false,
-        error: errText || "Failed to reach agent service",
-        status: probeRes.status || 502,
-      };
-    }
-
-    // Replicate the legacy persistence + tracking before we hand back
-    // {success, sessionId}, because the caller treats that response as the
-    // signal to add Control Center / AgentRun rows. sessionId is the one we
-    // already minted above and forwardBody carries it.
-    await persistRunStart(prepared);
-
-    // We already have probeRes open; pass its body straight into the bridge
-    // so we don't re-open the connection to claw and the started frame
-    // (already on the wire) is the first thing the bridge consumes.
-    void runBridgeForProbeResponse({
-      probeRes,
-      progressUrl,
-      callbackUrl: effectiveCallbackUrl,
-      sessionId,
-      sessionToken,
-      conversationId: typeof conversationId === "string" ? conversationId : undefined,
-      agentSlug: typeof agentSlug === "string" ? agentSlug : undefined,
-      eventType,
-      forwardBody,
-    });
-    return { success: true, sessionId, status: 200 };
-  }
-
-  // Legacy JSON path — unchanged. Used when CLAW_SSE_TRANSPORT=off so a flag
-  // flip is the only thing required to roll back to per-chunk POSTs.
-  const clawRes = await fetchClawRunWithRetry(
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      },
-      body: JSON.stringify(forwardBody),
-    },
-    "legacy-json",
-  );
-
-  const body = (await clawRes.json()) as { success: boolean; sessionId?: string; error?: string };
-
-  if (!body.success || !body.sessionId) {
-    return {
-      success: false,
-      ...(body.error ? { error: body.error } : {}),
-      status: clawRes.status,
-    };
-  }
-
-  await persistRunStart(prepared, body.sessionId);
-
-  return { success: true, sessionId: body.sessionId, status: 200 };
-}
-
 export async function startRun(input: StartRunInput, caller: RunCaller): Promise<StartRunResult> {
   try {
     const preparation = await prepareRun(input, caller);
@@ -1556,7 +1414,6 @@ export async function startRun(input: StartRunInput, caller: RunCaller): Promise
     const prepared = preparation.prepared;
 
     const dispatched = await dispatchRun(prepared.forwardBody, {
-      httpDispatch: () => httpForwardRun(prepared),
       onEnqueued: async () => {
         if (prepared.detached) await persistDetachedRunStart(prepared);
         else await persistRunStart(prepared);

@@ -34,7 +34,6 @@ import {
 import { getDigitalTwinAgent, type ResolvedAgent } from "../lib/digital-twin-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
-import { isTransientUpstream } from "../lib/claw-fetch.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
@@ -76,8 +75,6 @@ import {
   touchRunRecovery,
   handleRunCompletion,
   classifyRunRecoveryCallback,
-  handleRunHandoff,
-  hasActiveRunRecovery,
   getRecoveryContextForSession,
   cancelRunRecovery,
   type RecoverySessionContext,
@@ -2099,18 +2096,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
       await setSession(body.sessionId, sessionContext);
 
-      // Run-recovery / goal-replay reuses the SAME dispatchPayload that was
-      // dispatched above (built once before the per-user gate) — byte-identical
-      // replay, no mention-note drift.
-      await registerRunRecovery({
-        rootSessionId: body.sessionId,
-        maxRetries: CONFIG.runRecoveryMaxRetries,
-        timeoutMs: CONFIG.runRecoveryTimeoutMs,
-        retryBackoffMs: CONFIG.runRecoveryBackoffMs,
-        dispatchPayload,
-        sessionContext,
-      });
-
       // /goal turn-0 persistence: same dispatchPayload is replayed by the
       // relooper for each subsequent turn (task is overwritten with the
       // relooper template each loop).
@@ -2158,15 +2143,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // noise), and resultForward callers get the failure via their callback.
     if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
       const refusal = body.error ?? "the run could not be started";
-      // Three shapes of refusal, three honest messages. A transient upstream
-      // failure that survived the retries above is an infra blip, not a broken
-      // agent — saying "I couldn't start this request: no healthy upstream"
-      // reads as an agent fault and tells the user nothing actionable.
       const notice = /disabled/i.test(refusal)
         ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : isTransientUpstream(body.status, refusal)
-          ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
-          : `⚠️ I couldn't start this request: ${refusal}`;
+        : `⚠️ I couldn't start this request: ${refusal}`;
       await postAgentMessage(
         { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
         {
@@ -3583,49 +3562,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   res.json({ success: true });
 
   // Free the twin concurrency slot on ANY terminal callback (completed /
-  // failed / handoff). Cheap no-op ZREM for non-twin sessions; the limiter's
+  // failed). Cheap no-op ZREM for non-twin sessions; the limiter's
   // TTL prune is the backstop when a callback never arrives.
   if (sessionId) void releaseTwinSlot(sessionId);
-
-  if (payload.status === "handoff") {
-    const lastTurn = typeof (payload as { lastTurn?: unknown }).lastTurn === "number"
-      ? (payload as { lastTurn: number }).lastTurn
-      : undefined;
-    clog.info(`[webhook/result] handoff callback session=${sessionId} conversation=${payload.conversationId ?? ""} agent=${payload.agentSlug ?? ""} lastTurn=${lastTurn ?? "unknown"}`);
-    const handoff = await handleRunHandoff(sessionId).catch((err) => {
-      clog.warn(`[webhook/result] handoff re-dispatch failed session=${sessionId}:`, errMsg(err));
-      return null;
-    });
-    if (handoff) {
-      clog.info(`[webhook/result] handoff re-dispatched root=${handoff.rootSessionId} newSession=${handoff.newSessionId}`);
-    } else if (await hasActiveRunRecovery(sessionId).catch(() => false)) {
-      // A failed handoff dispatch schedules a recovery retry. A duplicate/stale
-      // handoff can also race a live continuation; both will produce a result later.
-      clog.info(`[webhook/result] handoff continuation remains active session=${sessionId}`);
-    } else {
-      clog.warn(`[webhook/result] handoff callback had no recovery state session=${sessionId}`);
-      // No new run was dispatched, so this handoff is terminal for an external
-      // caller. Notify it now instead of waiting for a result that cannot arrive.
-      let handoffCtx = await resolveSessionContext(sessionId, payload.conversationId, payload.agentSlug, payload.userId);
-      handoffCtx = await ensureSessionContextOrg(handoffCtx, sessionId);
-      let callback = handoffCtx?.externalResultCallback;
-      if (!handoffCtx && sessionId) {
-        const storedRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
-        const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
-        callback = metadata?.externalResultCallback;
-      }
-      if (callback) {
-        await sendStoredExternalResultCallback(callback, {
-          sessionId,
-          status: "failed",
-          result: "",
-          error: "run_handoff_not_recoverable",
-        });
-        await deleteSession(sessionId);
-      }
-    }
-    return;
-  }
 
   // ── Mid-run message queue: this /result is the END of the active run for
   // this conversation. On EVERY exit path below (success, empty, failed, early

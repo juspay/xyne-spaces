@@ -31,9 +31,11 @@ describe("run-execution module surface", () => {
     expect(getActiveSessionIds()).not.toContain(sessionId);
   });
 
-  it("startRunQueueWorker is a no-op unless XYNE_RUN_QUEUE=1", async () => {
+  it("startRunQueueWorker returns null when REDIS_HOST is unset", async () => {
     const { startRunQueueWorker } = await import("../src/run-queue-worker.js");
-    delete process.env["XYNE_RUN_QUEUE"];
+    const prev = process.env["REDIS_HOST"];
+    delete process.env["REDIS_HOST"];
     expect(startRunQueueWorker()).toBeNull();
+    if (prev !== undefined) process.env["REDIS_HOST"] = prev;
   });
 });

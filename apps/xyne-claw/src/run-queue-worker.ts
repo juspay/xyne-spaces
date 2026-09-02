@@ -99,10 +99,6 @@ async function notifyTerminalFailure(job: Job<InternalRunPayload> | undefined, e
 
 export const RUN_EXECUTION_QUEUE_NAME = "run-execution";
 
-function queueEnabled(): boolean {
-  return process.env["XYNE_RUN_QUEUE"] === "1";
-}
-
 function connectionOptions(): {
   host: string;
   port: number;
@@ -122,10 +118,9 @@ function connectionOptions(): {
 }
 
 export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
-  if (!queueEnabled()) return null;
   const connection = connectionOptions();
   if (!connection) {
-    clog.error("[run-queue] XYNE_RUN_QUEUE=1 but REDIS_HOST is not set — worker not started");
+    clog.error("[run-queue] REDIS_HOST is not set — run queue worker not started");
     return null;
   }
 

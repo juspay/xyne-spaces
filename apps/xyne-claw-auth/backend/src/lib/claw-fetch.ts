@@ -34,13 +34,6 @@ function isConnectionRefusedClassError(err: unknown): boolean {
   return codes.includes("ECONNREFUSED") || codes.includes("EAI_AGAIN");
 }
 
-export function isTransientUpstream(status: number, body: string): boolean {
-  return (
-    status === 502 || status === 503 || status === 504 ||
-    /no healthy upstream|upstream connect error|connection (refused|reset)|EAI_AGAIN|ECONNREFUSED|fetch failed/i.test(body)
-  );
-}
-
 export async function fetchClawRunWithRetry(init: RequestInit, label: string): Promise<globalThis.Response> {
   let retried = false;
   for (;;) {

@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { publishHandoffSignal } from "../handoff-redis.js";
 import { isFencedSession } from "../run-ownership.js";
 import { buildPublishReviewRoomTool } from "../pr-review-room.js";
 import {
@@ -1136,33 +1135,6 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
-/**
- * Liveness probe for claw-auth's run-recovery watchdog.
- *
- * The watchdog previously inferred death from heartbeat age alone, but a
- * heartbeat only lands on progress events — so a run sitting inside ONE long
- * tool call (a /design browser QA pass, a big sandbox build) looks dead while
- * it is working perfectly. It would then re-dispatch the whole request, and
- * the retry raced the original: two agents, two sandboxes, duplicate
- * deliverables (2026-08-18 /design thread — one request produced four runs and
- * shipped the same HTML twice).
- *
- * `activeRuns` is the authoritative answer to "is this still executing"; it is
- * in-process, which is sound while xyne-claw runs a single replica. If that
- * ever scales out this must move to Redis, otherwise a run on another replica
- * reads as dead. Deliberately NOT ownership-checked like /cancel: this returns
- * one boolean about a session id the caller already holds, and it must keep
- * working for recovery paths that have no user context.
- */
-router.get("/run/:sessionId/alive", validateS2SKey, (req, res: Response) => {
-  const { sessionId } = req.params as { sessionId?: string };
-  if (!sessionId) {
-    res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
-  res.json({ success: true, sessionId, alive: activeRuns.has(sessionId) });
-});
-
 router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
@@ -1437,58 +1409,6 @@ export async function processTask(
       if (active) active.handoffLastTurn = Math.max(active.handoffLastTurn ?? 0, lastTurn);
     },
   };
-  const sendHandoffCallback = async (lastTurn?: number): Promise<void> => {
-    const active = activeRuns.get(sessionId);
-    const resolvedLastTurn = Math.max(0, lastTurn ?? active?.handoffLastTurn ?? 0);
-    log(`Session handoff checkpointed: ${sessionId} lastTurn=${resolvedLastTurn} aborted=${active?.handoffCapFired === true}`);
-    // NEVER deliver handoff over an in-process SSE emitter: during a drain the
-    // bridge is dead (or dying) almost by definition — the first live drill
-    // (2026-07-15, session c304df10) lost the handoff exactly this way. Force
-    // the HTTP /sessions/:id/result fallback (sendCallback builds it when
-    // callbackUrl is null), whose claw-auth handler owns the handoff branch.
-    // Real string callback URLs (scheduled-jobs result etc.) stay as-is —
-    // their handlers have handoff branches too.
-    // PRIMARY channel: Redis. The recovery worker only needs the sessionId —
-    // all run state lives in its Redis registration — and the HTTP hop to
-    // claw-auth failed three different ways in two days (zero-endpoint window,
-    // purge-on-boot, and a version-skew 401 on 2026-07-16 that dropped ~50
-    // handoffs in one drain). One LPUSH has no endpoint, no auth contract,
-    // and no rollout-timing dependency. See handoff-redis.ts.
-    const viaRedis = await publishHandoffSignal(sessionId, resolvedLastTurn);
-    if (viaRedis) {
-      log(`Handoff signal published to Redis for ${sessionId} (lastTurn=${resolvedLastTurn})`);
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId, channel: "redis" });
-      return;
-    }
-    const handoffDest = typeof callbackUrl === "string" ? callbackUrl : undefined;
-    // HTTP FALLBACK (Redis unreachable/unconfigured only). Long retry schedule
-    // (~90s total): when claw and claw-auth roll in the same window, the auth
-    // Service can briefly have ZERO ready endpoints (old pod Terminating, new
-    // pod Pending on node scale-up) and the default ~4s budget drops the
-    // callback — round-6 drill (2026-07-15) lost 3 handoffs exactly this way.
-    // The draining pod has DRAIN_TIMEOUT (900s) / grace (1000s) to live, so
-    // waiting out the endpoint gap is free.
-    const delivered = await sendCallback(
-      handoffDest,
-      sessionToken,
-      {
-        sessionId,
-        userId,
-        conversationId: conversationId ?? null,
-        agentSlug: agentSlug ?? null,
-        fastMode: fastModeForCallback,
-        status: "handoff",
-        lastTurn: resolvedLastTurn,
-      },
-      { backoffsMs: [1_000, 2_000, 5_000, 10_000, 15_000, 15_000, 15_000, 15_000, 15_000] },
-    );
-    if (delivered) {
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId });
-    } else {
-      metric.count("handoff_callback_lost", { agent: agentSlug ?? "unknown", session: sessionId });
-    }
-  };
-
   // Idempotency backstop: only re-dispatches carry idempotencyKey (the recovery
   // rootSessionId). If a terminal-result marker for it already exists in GCS,
   // this run already finished and its completion callback was lost — replay the
@@ -4501,11 +4421,11 @@ export async function processTask(
         const decision = await execution.hooks.onDrainRequested();
         if (decision === "reschedule") {
           execution.outcome = "rescheduled";
-          log(`Run rescheduled instead of handoff-signalled: ${sessionId} lastTurn=${err.lastTurn}`);
+          log(`Run rescheduled for drain: ${sessionId} lastTurn=${err.lastTurn}`);
           return;
         }
       }
-      await sendHandoffCallback(err.lastTurn);
+      log(`Run drain-signalled with no reschedule hook: ${sessionId} lastTurn=${err.lastTurn}`);
       return;
     }
     // HA: another pod already owns this conversation's lock. In callback mode
