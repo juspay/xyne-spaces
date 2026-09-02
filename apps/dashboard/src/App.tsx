@@ -20,6 +20,7 @@ import { useTheme } from './hooks/useTheme';
 import { ShortcutsProvider } from './shortcuts';
 import { TooltipProvider } from './components/ui/Tooltip';
 import Wallpaper from './components/Wallpaper/Wallpaper';
+import OpenInAppGate from './components/OpenInAppGate/OpenInAppGate';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
@@ -157,6 +158,7 @@ const App = (): ReactElement => {
                       <RouterProvider router={router}></RouterProvider>
                     </main>
                     <SwitchLoadingOverlay />
+                    <OpenInAppGate />
                     <RecordingInterruptGuard />
                     <WorkspaceSwitchToastListener />
                     <Toaster
