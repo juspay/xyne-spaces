@@ -7,5 +7,7 @@ const internalController = new InternalController();
 
 router.get('/org-members/check', internalServiceAuth, internalController.checkOrgMember);
 router.post('/auth/email/login', internalServiceAuth, internalController.loginOrgMember);
+router.post('/sync/subscribe', internalServiceAuth, internalController.subscribeSync);
+router.post('/sync/unsubscribe', internalServiceAuth, internalController.unsubscribeSync);
 
 export default router;

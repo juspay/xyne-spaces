@@ -33,6 +33,9 @@ import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
+import { verifySyncServiceToken } from './sync/serviceIdentity';
+import { resolveSharedBase } from './sync/baseQueries';
+import { isGrantQuery, buildGrantBase } from './sync/grantQueries';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
@@ -386,6 +389,27 @@ export async function handleMutate(request: Request): Promise<unknown> {
 export async function handleQueries(request: Request): Promise<any> {
   const startTime = Date.now();
   let capturedQueryName: string | null = null;
+
+  // Sync-service principal (audience-isolated token): may ONLY resolve an
+  // allowlisted query's ACL-stripped base — no fused data, no mutations, no other
+  // query. `syncCtx` is an inert placeholder; allowlisted bases are principal-free.
+  const syncCtx = verifySyncServiceToken(request.headers.get('Authorization'));
+  if (syncCtx) {
+    return handleQueryRequest(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (queryName, args): any => {
+        const base = isGrantQuery(queryName)
+          ? buildGrantBase(queryName, args)
+          : resolveSharedBase(queryName, syncCtx, args);
+        if (!base) {
+          throw new Error(`Query '${queryName}' is not a shared-base query`);
+        }
+        return base;
+      },
+      schema,
+      request,
+    );
+  }
 
   const authData = await extractAuthDataFromRequest(request);
   if (!authData) {

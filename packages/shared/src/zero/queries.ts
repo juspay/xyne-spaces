@@ -3179,6 +3179,39 @@ export const queries = defineQueries({
       return limit ? query.limit(limit) : query;
     },
   ),
+  // V4: identical to V3 without the (now-dormant) initialMessageNudgeCounts relation.
+  channelConversationsPaginatedV4: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      limit: z.number(),
+      start: z.object({ createdAt: z.number() }).nullable(),
+      direction: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ args: { channelId, limit, start, direction } }) => {
+      let query = zql.conversations
+        .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
+        .related('initialMessageAttachments');
+
+      // Apply ordering based on direction
+      const orderDirection = direction === 'forward' ? 'desc' : 'asc';
+      query = query.orderBy('createdAt', orderDirection);
+
+      // Apply cursor pagination if start is provided
+      if (start) {
+        query = query.start({ createdAt: start.createdAt }, { inclusive: direction === 'forward' });
+      }
+
+      // Apply limit
+      return limit ? query.limit(limit) : query;
+    },
+  ),
   channelLatestMultipleConversations: defineQuery(
     z.object({
       channelId: z.string(),
@@ -3286,6 +3319,27 @@ export const queries = defineQueries({
             ),
           ),
         )
+        .orderBy('createdAt', 'desc')
+        .limit(limit);
+    },
+  ),
+  // V4: identical to V3 without the (now-dormant) initialMessageNudgeCounts relation.
+  channelLatestMultipleConversationsV4: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      limit: z.number(),
+    }),
+    ({ args: { channelId, limit } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('doNotPostToChannel', 'IS', null),
+            helpers.cmp('doNotPostToChannel', '=', false),
+          ),
+        )
+        .related('initialMessageAttachments')
         .orderBy('createdAt', 'desc')
         .limit(limit);
     },

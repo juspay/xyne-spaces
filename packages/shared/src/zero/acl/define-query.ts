@@ -1,5 +1,6 @@
 import {
   defineQuery as zeroDefineQuery,
+  type AnyQuery,
   type Query,
   type QueryDefinition,
 } from '@rocicorp/zero';
@@ -121,6 +122,15 @@ type QueryDefinitionFunctionNoArgs<TTable extends TableName, TReturn> = (
   params: { ctx: Context }
 ) => Query<TTable, Schema, TReturn>;
 
+/**
+ * The principal-free base of a defined query: the query body as `queryFn` builds
+ * it, BEFORE `applyQueryACL` and BEFORE the per-subscriber `lastUpdatedAt` delta.
+ * Attached to every defined query as a non-enumerable `base` property; the
+ * shared-base syncer materializes this once across principals while the served
+ * `.fn` (the ACL-fused query) stays exactly as-is.
+ */
+export type BaseQueryResolver = (params: { ctx: Context; args?: SelectArgs }) => AnyQuery;
+
 export function defineQuery<
   TInput extends ReadonlyJSONValue | undefined,
   TOutput extends ReadonlyJSONValue | undefined,
@@ -150,24 +160,22 @@ export function defineQuery<
 ): QueryDefinition<TTable, TInput, TOutput, TReturn, Context> {
   if (typeof validatorOrQueryFn === 'function') {
     const queryFn = validatorOrQueryFn as QueryDefinitionFunctionNoArgs<TTable, TReturn>;
-    
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return zeroDefineQuery(defaultValidator, (params: any) => {
-      const { lastUpdatedAt, ..._restArgs } = params.args || {};
-      const query = (queryFn as any)({ ctx: params.ctx });
+    const def = zeroDefineQuery(defaultValidator, (params: any) => {
+      const { lastUpdatedAt } = params.args || {};
+      const query = queryFn({ ctx: params.ctx });
       const queryWithACL = applyQueryACL(query, params.ctx, params.args);
       if (lastUpdatedAt && hasQueryAST(queryWithACL)) {
-        const tableName = getTableNameFromQuery(queryWithACL);
-        
-          
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (queryWithACL as any).where('updatedAt', '>=', lastUpdatedAt);
-        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (queryWithACL as any).where('updatedAt', '>=', lastUpdatedAt);
       }
-      
       return queryWithACL;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    }) as any;
+    });
+    // Shared base: the query body with no ACL and no delta (this query takes no args).
+    withBase(def, ({ ctx }) => queryFn({ ctx }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return def as any;
   }
 
   // With validator case - don't extend, just use original validator
@@ -175,20 +183,31 @@ export function defineQuery<
   const validator = validatorOrQueryFn;
   const queryFn = maybeQueryFn!;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return zeroDefineQuery(validator as any, (params: any) => {
+  const def = zeroDefineQuery(validator as any, (params: any) => {
     // Extract lastUpdatedAt from args, pass rest to queryFn
     const { lastUpdatedAt, ...restArgs } = params.args || {};
-    
+
     const query = queryFn({ ctx: params.ctx, args: restArgs });
     const queryWithACL = applyQueryACL(query, params.ctx, params.args as SelectArgs);
-    
+
     // Apply delta filter if lastUpdatedAt is provided and table has updatedAt column
     if (lastUpdatedAt && hasQueryAST(queryWithACL)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return (queryWithACL as any).where('updatedAt', '>=', lastUpdatedAt);
     }
-    
+
     return queryWithACL;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  }) as any;
+  });
+  // Shared base: the query body with no ACL and no delta (strip lastUpdatedAt from args).
+  withBase(def, ({ ctx, args }) => {
+    const { lastUpdatedAt: _drop, ...restArgs } = (args as Record<string, unknown>) || {};
+    return queryFn({ ctx, args: restArgs as TOutput });
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return def as any;
+}
+
+/** Attach a query's principal-free base resolver as a non-enumerable `base` property. */
+function withBase(def: object, base: BaseQueryResolver): void {
+  Object.defineProperty(def, 'base', { value: base, enumerable: false, configurable: true });
 }

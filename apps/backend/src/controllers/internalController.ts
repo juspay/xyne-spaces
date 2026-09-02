@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { verifyPassword } from '@/utils/passwordUtils';
+import { syncEngine } from '@/zero/sync/syncEngine';
 
 export interface OrgMemberCheckResponse {
   isActiveMember: boolean;
@@ -170,5 +171,29 @@ export class InternalController {
     } catch (error) {
       res.status(503).json({ error: 'Service Unavailable' });
     }
+  };
+
+  subscribeSync = (req: Request, res: Response): void => {
+    const { queryName, args, subscriberId } = req.body ?? {};
+    if (typeof queryName !== 'string' || !Array.isArray(args) || typeof subscriberId !== 'string') {
+      res.status(400).json({ error: 'queryName, args[], subscriberId required' });
+      return;
+    }
+    const instanceKey = syncEngine.subscribe(queryName, args, subscriberId);
+    if (!instanceKey) {
+      res.status(404).json({ error: 'not a shared-base query' });
+      return;
+    }
+    res.status(200).json({ instanceKey });
+  };
+
+  unsubscribeSync = (req: Request, res: Response): void => {
+    const { instanceKey, subscriberId } = req.body ?? {};
+    if (typeof instanceKey !== 'string' || typeof subscriberId !== 'string') {
+      res.status(400).json({ error: 'instanceKey, subscriberId required' });
+      return;
+    }
+    syncEngine.unsubscribe(instanceKey, subscriberId);
+    res.status(200).json({ ok: true });
   };
 }

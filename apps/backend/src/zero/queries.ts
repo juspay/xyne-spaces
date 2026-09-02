@@ -579,7 +579,10 @@ const applyArchiveFilter = <T extends { where: Function }>(
   return query;
 };
 
-export const queries: AnyQueryRegistry = defineQueries({
+// The raw query definitions retain the `.base` resolver that defineQuery attaches;
+// defineQueries() rebuilds each entry via createQuery and drops it, so the sync
+// engine reads bases from `queryDefs`, not `queries`.
+const queryDefs = {
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)
@@ -3751,6 +3754,33 @@ export const queries: AnyQueryRegistry = defineQueries({
       return limit ? query.limit(limit) : query;
     },
   ),
+  // V4: identical to V3 without the (now-dormant) initialMessageNudgeCounts relation.
+  channelConversationsPaginatedV4: defineQuery(
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      limit: z.number(),
+      start: z.object({ createdAt: z.number() }).nullable(),
+      direction: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ args: { channelId, limit, start, direction } }) => {
+      let query = zql.conversations
+        .where('channelId', channelId)
+        .related('initialMessageAttachments');
+
+      // Apply ordering based on direction
+      const orderDirection = direction === 'forward' ? 'desc' : 'asc';
+      query = query.orderBy('createdAt', orderDirection);
+
+      // Apply cursor pagination if start is provided
+      if (start) {
+        query = query.start({ createdAt: start.createdAt }, { inclusive: direction === 'forward' });
+      }
+
+      // Apply limit
+      return limit ? query.limit(limit) : query;
+    },
+  ),
   channelLatestMultipleConversations: defineQuery(
     z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
@@ -3834,6 +3864,17 @@ export const queries: AnyQueryRegistry = defineQueries({
             ),
           ),
         )
+        .orderBy('createdAt', 'desc')
+        .limit(limit);
+    },
+  ),
+  // V4: identical to V3 without the (now-dormant) initialMessageNudgeCounts relation.
+  channelLatestMultipleConversationsV4: defineQuery(
+    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
+    ({ args: { channelId, limit } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .related('initialMessageAttachments')
         .orderBy('createdAt', 'desc')
         .limit(limit);
     },
@@ -5433,4 +5474,11 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('userMappings')
       .one();
   }),
-}) as unknown as QueryRegistry<Record<string, AnyQueryDefinition>, typeof schema>;
+};
+
+export const queries: AnyQueryRegistry = defineQueries(queryDefs) as unknown as QueryRegistry<
+  Record<string, AnyQueryDefinition>,
+  typeof schema
+>;
+
+export { queryDefs };

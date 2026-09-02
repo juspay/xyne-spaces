@@ -8,6 +8,7 @@ import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
 import { apiKeyService } from '../services/apiKeyService';
 import { jwtService } from '../services/jwtService';
+import { verifySyncServiceToken } from '@/zero/sync/serviceIdentity';
 import '../types/express'; // Import the Express type extensions
 import { config } from '@/config/env';
 
@@ -810,6 +811,14 @@ export class AuthMiddleware {
           error: 'Authentication required',
           message: 'No token provided',
         });
+        return;
+      }
+
+      // Sync-service principal (audience-isolated token): pass through to the
+      // get-queries base branch, which serves only an allowlisted base. It is not
+      // a user, so no req.user is attached.
+      if (verifySyncServiceToken(`Bearer ${token}`)) {
+        next();
         return;
       }
 

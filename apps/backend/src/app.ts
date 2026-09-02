@@ -87,6 +87,9 @@ import draftAttachmentRoutes from '@/routes/draftAttachments';
 import { notificationService } from '@/notification-service';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
+import { syncEngine } from '@/zero/sync/syncEngine';
+import { fanout } from '@/zero/sync/fanout';
+import { attachSyncClientGateway } from '@/zero/sync/clientGateway';
 import linkPreviewRoutes from '@/routes/linkPreview';
 import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
@@ -923,6 +926,13 @@ export class App {
     logger.info('Initializing bookmark reminder service...');
     await bookmarkReminderService.initialize();
 
+    if (config.enableSyncEngine) {
+      logger.info('Starting shared-base sync engine...');
+      syncEngine.start();
+      fanout.start();
+      attachSyncClientGateway(this.httpServer);
+    }
+
     // Ensure default model and tools exist before synchronizing config
     await configSyncService.ensureDefaultModelAndTools();
 
@@ -1111,6 +1121,11 @@ export class App {
 
       // Shutdown bookmark reminder service
       await bookmarkReminderService.shutdown();
+
+      if (config.enableSyncEngine) {
+        fanout.stop();
+        syncEngine.stop();
+      }
 
       await DatabaseClient.disconnect();
       await CommonDatabaseClient.disconnect();

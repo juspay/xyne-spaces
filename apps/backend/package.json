@@ -9,7 +9,9 @@
     "#zero-internal/pg-query-executor": "./node_modules/@rocicorp/zero/out/zero-server/src/pg-query-executor.js",
     "#zero-internal/schema": "./node_modules/@rocicorp/zero/out/zero-server/src/schema.js",
     "#zero-internal/compiler": "./node_modules/@rocicorp/zero/out/z2s/src/compiler.js",
-    "#zero-internal/sql": "./node_modules/@rocicorp/zero/out/z2s/src/sql.js"
+    "#zero-internal/sql": "./node_modules/@rocicorp/zero/out/z2s/src/sql.js",
+    "#zero-internal/connect": "./node_modules/@rocicorp/zero/out/zero-protocol/src/connect.js",
+    "#zero-internal/query-hash": "./node_modules/@rocicorp/zero/out/zero-protocol/src/query-hash.js"
   },
   "scripts": {
     "build": "tsc",

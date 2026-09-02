@@ -1,6 +1,7 @@
 // Barrel export - allows clean imports from @xyne/shared
 export * from './zero/schema';
-export { defineQuery } from './zero/acl';
+export { defineQuery, QueryACLFactory } from './zero/acl';
+export type { BaseQueryResolver } from './zero/acl';
 export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
 export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
 export * from './ai';
