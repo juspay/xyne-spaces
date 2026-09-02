@@ -246,6 +246,9 @@ async function resolveKbContext(
   // don't fail the resolution if it's missing — link builders just fall back
   // to a workspace-less URL (which 404s today, but at least the rest of the
   // handler still works).
+  // First lookup, so no workspace hint exists yet: the unscoped resolution
+  // relies on the user having a single active Spaces identity. Handlers below
+  // re-scope their follow-up lookups with the workspace this one returns.
   const authForLinks = await getSpacesAuthForUser(userId, "agent-chat");
   const workspaceId = authForLinks?.workspaceId;
 
@@ -667,7 +670,9 @@ export async function handleKbSearch(args: {
   const scope = buildVespaScope(ctx, args.collectionId);
   if ("error" in scope) return { content: scope.error, isError: true };
 
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Re-scope the identity resolution to the workspace resolveKbContext
+  // already selected (session-derived) — safe for two-workspace users.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) return { content: "Spaces session unavailable — cannot search the Knowledge Base.", isError: true };
 
   // Fetch a bit more than `limit` so the post-filter pass (single-file grants,
@@ -1022,7 +1027,8 @@ export async function handleKbReadFile(args: {
   const fileMeta = ctx.filesById.get(args.fileId)!;
 
   // Fetch the binary via spaces' download endpoint, with the user's session auth.
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Scoped to ctx.workspaceId — see handleKbSearch for why.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) return { content: "Spaces session unavailable — cannot fetch file content.", isError: true };
 
   try {
@@ -1180,7 +1186,8 @@ export async function handleKbGetChunks(args: {
     };
   }
 
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Scoped to ctx.workspaceId — see handleKbSearch for why.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) {
     return { content: "Spaces session unavailable — cannot fetch chunks.", isError: true };
   }
@@ -1316,7 +1323,8 @@ export async function handleKbSearchWithinDoc(args: {
     };
   }
 
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat");
+  // Scoped to ctx.workspaceId — see handleKbSearch for why.
+  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
   if (!auth) {
     return {
       content: "Spaces session unavailable — cannot search within document.",

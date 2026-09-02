@@ -8,6 +8,7 @@ import { awakeningRouter } from "../routes/awakening.js";
 import { runRouter } from "../routes/run.js";
 import { runStreamRouter, runStreamInternalRouter } from "../routes/run-stream.js";
 import { usersRouter } from "../routes/users.js";
+import { spacesSyncRouter } from "../routes/spaces-sync.js";
 import { gatewaysRouter } from "../routes/gateways.js";
 import { webhookRouter } from "../routes/webhook.js";
 import { flowActionRouter } from "../routes/flow-action.js";
@@ -166,6 +167,10 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
+  // Spaces → org/workspace/user provisioning. The Spaces provisioning worker
+  // authenticates with the shared XYNE_CLAW_S2S_KEY (x-s2s-key) and drives the
+  // org/workspace/user upserts — see services/clawSpacesSyncClient.ts in Spaces.
+  app.use(`${BASE}/internal/spaces-sync`, requireStrictS2S, spacesSyncRouter);
   app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
   app.use(`${BASE}/internal/artifact-apps`, requireStrictS2S, artifactAppsInternalRouter); // create-app reads the conversation's head build before an incremental update
   app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)

@@ -154,9 +154,12 @@ const REDACTED_TOOL_RESULT = "[result hidden — another user's run]";
  * redaction to protect — and an admin needs to read exactly what it did.
  * See lib/agent-owned-runs.ts.
  */
-function shouldRedactRun(crossUser: boolean, runUserId: string | null | undefined, requesterId: string, triggerSource?: string | null): boolean {
+function shouldRedactRun(crossUser: boolean, runUserId: string | null | undefined, requesterIds: string | string[], triggerSource?: string | null): boolean {
   if (!crossUser) return false;
-  if (runUserId === requesterId) return false;
+  const mine = Array.isArray(requesterIds)
+    ? !!runUserId && requesterIds.includes(runUserId)
+    : runUserId === requesterIds;
+  if (mine) return false;
   return !isAgentOwnedRun(triggerSource);
 }
 
@@ -573,8 +576,9 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
   }
 
   try {
+    // Legacy rows may be keyed by the raw Spaces id under the same caller.
     const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "xyne-spaces" } },
+      where: { userId: { in: getRequesterAliases(req) }, mcpServer: { type: "xyne-spaces" } },
     });
 
     if (connection) {
@@ -690,7 +694,9 @@ router.get("/attachments/:id/download", async (req: Request<{ id: string }>, res
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
-    const allowed = att.uploaderUserId === requesterId || await isClawAdmin(requesterId);
+    // uploaderUserId may hold either verified representation of the caller —
+    // legacy rows predate canonicalization, so compare against both.
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     res.setHeader("Content-Type", att.mimeType);
@@ -732,7 +738,7 @@ router.get("/attachments/:id/slide-json", async (req: Request<{ id: string }>, r
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
-    const allowed = att.uploaderUserId === requesterId || await isClawAdmin(requesterId);
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     const metadata = (att as unknown as { metadata?: Record<string, unknown> | null }).metadata;
@@ -757,7 +763,7 @@ router.get("/attachments/:id/thumbnail", async (req: Request<{ id: string }>, re
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
-    const allowed = att.uploaderUserId === requesterId || await isClawAdmin(requesterId);
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     if (!att.thumbnailUrl) { res.status(404).json({ success: false, error: "No thumbnail" }); return; }
@@ -782,7 +788,7 @@ router.get("/attachments/:id/stream", async (req: Request<{ id: string }>, res: 
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
-    const allowed = att.uploaderUserId === requesterId || await isClawAdmin(requesterId);
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     const total = att.size;
@@ -1821,7 +1827,10 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
     }
 
     const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId || run.agentSlug !== slug) {
+    // run.userId may be keyed by either verified representation of this
+    // caller (canonical Claw id or raw Spaces id) — accept both, and forward
+    // the run's stored owner id to preserve it across the S2S hop.
+    if (!run || (run.userId !== userId && !matchesAuthenticatedUserId(req, run.userId)) || run.agentSlug !== slug) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
@@ -1836,7 +1845,7 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
 
     // Ownership was checked above; preserve it across the S2S hop.
     try {
-      await cancelRunSession(sessionId, userId);
+      await cancelRunSession(sessionId, run.userId);
     } catch (err) {
       res.status(502).json({ success: false, error: errMsg(err) });
       return;
@@ -1866,8 +1875,9 @@ router.post("/:slug/chat/:convId/regenerate", async (req: Request<{ slug: string
       return;
     }
 
+    const regenAliases = new Set(getRequesterAliases(req));
     const messages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
-      (m) => m.userId === userId,
+      (m) => regenAliases.has(m.userId),
     );
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant) {
@@ -2211,8 +2221,9 @@ router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; conv
       return;
     }
 
+    const forkAliases = new Set(getRequesterAliases(req));
     const sourceMessages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
-      (m) => m.userId === userId,
+      (m) => forkAliases.has(m.userId),
     );
     if (sourceMessages.length === 0) {
       res.status(404).json({ success: false, error: "Source conversation is empty" });
@@ -2315,6 +2326,9 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // id in x-spaces-user-id) — match both so older/misscoordinated turns
     // don't vanish from the transcript.
     const userAliases = getRequesterAliases(req);
+    // `userId` was required above, so the canonical id is always a valid
+    // fallback when no aliases were stamped (defensive; narrowing-friendly).
+    const callerMessageIds = userAliases.length > 0 ? userAliases : [userId];
     const visibleForUser = crossUser ? allMessages : allMessages.filter((m) => userAliases.includes(m.userId));
     // Hide the in-progress "running" assistant placeholder from the transcript:
     // the in-flight turn is rendered by the /live stream (snapshot `partial` +
@@ -2327,7 +2341,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // user-scoped via listByUser (admins use the conversation-wide view).
     const agentRuns = crossUser
       ? await agentRunRepository.listByConversation(req.params.convId, userId)
-      : await agentRunRepository.listByUser(userAliases.length ? userAliases : [userId!], { conversationId: req.params.convId });
+      : await agentRunRepository.listByUser(callerMessageIds, { conversationId: req.params.convId });
 
     // Strip internal GCS paths from attachment metadata before sending to client.
     // `reactArtifact` is the one metadata key allowed through: it is the small
@@ -2388,7 +2402,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         const visibleInvocations = withoutFollowUpRecorderInvocations(invocations as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[linkedId] =
-            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
+            shouldRedactRun(crossUser, run.userId, userAliases, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2425,7 +2439,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         // chips sharing the Spaces mark cost one copy, not N.
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
+            shouldRedactRun(crossUser, run.userId, userAliases, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2483,9 +2497,12 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       res.status(400).json({ success: false, error: "userId and sessionId are required" });
       return;
     }
+    // run.userId may be keyed by either verified representation of this
+    // caller — match both, and forward the stored owner id (it is the key
+    // the pod's run was dispatched under).
     const run = await prisma.agentRun.findFirst({
-      where: { sessionId, userId },
-      select: { sessionId: true, status: true },
+      where: { sessionId, userId: { in: getRequesterAliases(req) } },
+      select: { sessionId: true, status: true, userId: true },
     });
     if (!run) {
       res.status(404).json({ success: false, error: "Run not found" });
@@ -2499,7 +2516,7 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
         headers: {
           "Content-Type": "application/json",
           ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-          "x-user-id": userId,
+          "x-user-id": run.userId,
         },
       },
     ).catch(() => null);
@@ -2547,15 +2564,18 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
   // Only cross-user (admin + All Runs) viewers receive events for other users'
   // runs; everyone else — including admins in the normal chat view — gets only
   // the runs they triggered.
-  const allow = (evtUserId: string) => crossUser || evtUserId === userId;
+  // Rows may be keyed by either verified representation of this caller
+  // (canonical Claw id or the workspace's raw Spaces id) — match both.
+  const liveUserAliases = getRequesterAliases(req);
+  const allow = (evtUserId: string) => crossUser || liveUserAliases.includes(evtUserId);
 
   // 1) Snapshot from Postgres so a mid-run joiner sees tool calls already made.
   try {
     const messages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
-    const visible = crossUser ? messages : messages.filter((m) => m.userId === userId);
+    const visible = crossUser ? messages : messages.filter((m) => liveUserAliases.includes(m.userId));
     const agentRuns = crossUser
       ? await agentRunRepository.listByConversation(convId, userId)
-      : await agentRunRepository.listByUser(userId, { conversationId: convId });
+      : await agentRunRepository.listByUser(liveUserAliases, { conversationId: convId });
 
     // Pair completed runs to assistant messages by chronological index — same
     // logic as the /messages read (see its comment for why we don't pre-filter).
@@ -2575,7 +2595,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(invs as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
+            shouldRedactRun(crossUser, run.userId, liveUserAliases, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2591,7 +2611,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(
           r.toolInvocations as unknown[],
         );
-        return shouldRedactRun(crossUser, r.userId, userId, r.triggerSource)
+        return shouldRedactRun(crossUser, r.userId, liveUserAliases, r.triggerSource)
           ? redactToolResults(visibleInvocations)
           : visibleInvocations;
       });
@@ -2622,7 +2642,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     // Same rule as the stored transcript above — without this an awakened run
     // streamed its tool results pre-redacted and only became readable after it
     // completed and the viewer refetched from Postgres.
-    if (evt.type === "invocation" && shouldRedactRun(crossUser, evt.userId, userId, evt.triggerSource)) {
+    if (evt.type === "invocation" && shouldRedactRun(crossUser, evt.userId, liveUserAliases, evt.triggerSource)) {
       data = { ...evt, toolInvocation: redactToolResults([evt.toolInvocation])[0] };
     }
     try {
@@ -2682,11 +2702,15 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       ? null
       : await getAgentEditAccess(requesterId, req.params.slug, getOrgId(req));
     const hasElevatedDebugAccess = isAdmin || Boolean(editAccess?.canEdit);
+    // Rows may be keyed by either verified representation of this caller
+    // (canonical Claw id or the workspace's raw Spaces id) — match both.
+    const requesterAliases = getRequesterAliases(req);
+    const requesterAliasSet = new Set(requesterAliases);
     if (!hasElevatedDebugAccess) {
-      const hasMessage = convMessages.some((m) => m.userId === requesterId);
+      const hasMessage = convMessages.some((m) => requesterAliasSet.has(m.userId));
       const hasRun =
         hasMessage ||
-        (await agentRunRepository.listByUser(requesterId, { conversationId: req.params.convId, limit: 1 })).length > 0;
+        (await agentRunRepository.listByUser(requesterAliases, { conversationId: req.params.convId, limit: 1 })).length > 0;
       if (!hasMessage && !hasRun) {
         res.status(403).json({ success: false, error: "Not authorized to view this conversation" });
         return;
@@ -2760,7 +2784,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       // per-user ACL/redaction below via each synth run's data.userId.
       const inProgressRuns = hasElevatedDebugAccess
         ? await agentRunRepository.listByConversation(req.params.convId, requesterId)
-        : await agentRunRepository.listByUser(requesterId, { conversationId: req.params.convId, agentSlug: req.params.slug });
+        : await agentRunRepository.listByUser(requesterAliases, { conversationId: req.params.convId, agentSlug: req.params.slug });
       const active = inProgressRuns.filter((r) => !r.completedAt && Array.isArray(r.toolInvocations));
       if (active.length === 0) {
         res.status(404).json({ success: false, error: "Debug artifacts not found" });
@@ -2805,9 +2829,9 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     // those runs. Admins and agent contributors use the elevated All Runs view.
     if (!hasElevatedDebugAccess && body?.data) {
       const d = body.data;
-      const ownRuns = (d.runs ?? []).filter((r) => r.data?.userId === requesterId);
+      const ownRuns = (d.runs ?? []).filter((r) => !!r.data?.userId && requesterAliasSet.has(r.data.userId));
       const ownSessionIds = new Set(ownRuns.map((r) => r.data?.sessionId).filter(Boolean) as string[]);
-      const ownSession = d.debugSession && d.debugSession.userId === requesterId ? d.debugSession : null;
+      const ownSession = d.debugSession && !!d.debugSession.userId && requesterAliasSet.has(d.debugSession.userId) ? d.debugSession : null;
       if (ownSession?.sessionId) ownSessionIds.add(ownSession.sessionId);
       body.data = {
         ...d,
@@ -2834,7 +2858,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       // carry usedUserToken), so resolve sessionId → {owner, hidden} here.
       const aclRuns = await agentRunRepository.listSessionAclForConversation(req.params.convId);
       const hiddenSessionIds = new Set(
-        aclRuns.filter((r) => r.usedUserToken && r.userId !== requesterId).map((r) => r.sessionId),
+        aclRuns.filter((r) => r.usedUserToken && !requesterAliasSet.has(r.userId)).map((r) => r.sessionId),
       );
       const ownerBySession = new Map(aclRuns.map((r) => [r.sessionId, r.userId]));
       // Awakened runs have no human owner, so "readable" for them means the
@@ -2844,10 +2868,10 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         aclRuns.filter((r) => isAgentOwnedRun(r.triggerSource)).map((r) => r.sessionId),
       );
       const readable = (sid: string | undefined, ownerUserId?: string | null): boolean =>
-        ownerUserId === requesterId ||
-        (!!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId));
+        (!!ownerUserId && requesterAliasSet.has(ownerUserId)) ||
+        (!!sid && (agentOwnedSessions.has(sid) || requesterAliasSet.has(ownerBySession.get(sid) ?? "")));
       const ownsSession = (sid: string | undefined): boolean =>
-        !!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId);
+        !!sid && (agentOwnedSessions.has(sid) || requesterAliasSet.has(ownerBySession.get(sid) ?? ""));
 
       const d = body.data;
       const hideDebugSession = d.debugSession?.sessionId ? hiddenSessionIds.has(d.debugSession.sessionId) : false;
@@ -2881,7 +2905,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     if (body.data) {
       const diagnosticRuns = hasElevatedDebugAccess
         ? await agentRunRepository.listByConversation(req.params.convId, requesterId, { limit: 100 })
-        : await agentRunRepository.listByUser(requesterId, {
+        : await agentRunRepository.listByUser(requesterAliases, {
             conversationId: req.params.convId,
             agentSlug: req.params.slug,
             limit: 100,
@@ -3022,7 +3046,8 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // ?userId previously overrode the authenticated user, letting anyone list
     // another user's conversations. Only an admin may target another user.
     const userAliases = getRequesterAliases(req);
-    if (!userAliases.length) {
+    const callerId = userAliases[0];
+    if (!callerId) {
       res.status(401).json({ success: false, error: "Authentication required" });
       return;
     }
@@ -3033,17 +3058,34 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // org-wide fan-out: the alias pair is already workspace-scoped by auth.
     let userIds = userAliases;
     if (requestedUserId && !matchesAuthenticatedUserId(req, requestedUserId)) {
-      if (!(await isClawAdmin(userAliases[0]!))) {
+      if (!(await isClawAdmin(callerId))) {
         res.status(403).json({ success: false, error: "Cannot list another user's conversations" });
         return;
       }
       // Admin targeting another user: resolve the target's other
-      // representation within THIS request's workspace context only, so the
-      // admin sees exactly the chats that user would see themselves.
+      // representation(s) within THIS request's workspace context only, so the
+      // admin sees exactly the chats that user would see themselves. The
+      // target may arrive in EITHER form, so resolve both directions: a raw
+      // Spaces id forward to the canonical Claw id, and a canonical id
+      // backward to its Spaces aliases via UserSurfaceIdentity.
       const ws = req.headers["x-spaces-workspace-id"];
       const workspaceId = typeof ws === "string" && ws.trim() ? ws.trim() : undefined;
+      const targetIds = new Set<string>([requestedUserId]);
       const canonical = await resolveClawUserIdForSpacesIdentity(requestedUserId, workspaceId).catch(() => undefined);
-      userIds = canonical && canonical !== requestedUserId ? [requestedUserId, canonical] : [requestedUserId];
+      if (canonical) targetIds.add(canonical);
+      const surfaceAliases = await prisma.userSurfaceIdentity
+        .findMany({
+          where: {
+            surfaceId: "spaces",
+            userId: canonical ?? requestedUserId,
+            status: "ACTIVE",
+            ...(workspaceId ? { surfaceWorkspaceId: workspaceId } : {}),
+          },
+          select: { surfaceUserId: true },
+        })
+        .catch(() => []);
+      for (const alias of surfaceAliases) targetIds.add(alias.surfaceUserId);
+      userIds = [...targetIds];
     }
 
     // Get all messages for this user+agent, grouped by conversation

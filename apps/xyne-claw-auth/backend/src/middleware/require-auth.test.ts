@@ -10,6 +10,7 @@ process.env["CLI_TOKENS_ENABLED"] = "true";
 const state = vi.hoisted(() => ({
   rawToken: "",
   verifyCalls: 0,
+  clawUserId: undefined as string | undefined,
   config: {
     cliTokensEnabled: true,
     xyneClawS2sKey: "s2s-secret",
@@ -35,6 +36,7 @@ vi.mock("../lib/cli-tokens.js", () => ({
 
 vi.mock("../lib/users-jit.js", () => ({
   ensureUserExists: vi.fn(async () => undefined),
+  resolveClawUserIdForSpacesIdentity: vi.fn(async () => state.clawUserId),
 }));
 
 vi.mock("../db.js", () => ({
@@ -249,6 +251,81 @@ describe("requireAuth CLI bearer branch", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
+  });
+});
+
+describe("x-spaces-* header trust boundary", () => {
+  beforeEach(() => {
+    state.rawToken = "";
+    state.verifyCalls = 0;
+    state.clawUserId = undefined;
+    state.config.cliTokensEnabled = true;
+  });
+
+  it("strips forged x-spaces-* headers so a token caller cannot impersonate a Spaces identity", async () => {
+    const { requireAuth } = await import("./require-auth.js");
+    const req = {
+      headers: {
+        authorization: "Bearer xyne_cli_real",
+        "x-spaces-user-id": "victim-spaces-id",
+        "x-spaces-workspace-id": "victim-workspace",
+        "x-spaces-org-member-id": "victim-member",
+      },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const next: NextFunction = vi.fn();
+
+    await requireAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.headers["x-user-id"]).toBe("token-owner");
+    expect(req.headers["x-org-id"]).toBe("org-token");
+    // The forged trust-bearing headers must NOT survive entry; only verified
+    // branches (cookie /me success, or a validated S2S key) may stamp them.
+    expect(req.headers["x-spaces-user-id"]).toBeUndefined();
+    expect(req.headers["x-spaces-workspace-id"]).toBeUndefined();
+    expect(req.headers["x-spaces-org-member-id"]).toBeUndefined();
+
+    // Concretely: the pin/alias helpers must not treat the forged id as verified.
+    const { matchesAuthenticatedUserId, getRequesterAliases } = await import("./pin-user-id-param.js");
+    expect(matchesAuthenticatedUserId(req, "victim-spaces-id")).toBe(false);
+    expect(matchesAuthenticatedUserId(req, "token-owner")).toBe(true);
+    expect(getRequesterAliases(req)).toEqual(["token-owner"]);
+  });
+
+  it("keeps the verified S2S contract: a valid key may pin x-spaces-* identity", async () => {
+    state.clawUserId = "claw-canonical-1";
+    const { requireAuth } = await import("./require-auth.js");
+    const req = {
+      headers: {
+        "x-s2s-key": "s2s-secret",
+        "x-user-id": "ws-member-1",
+        "x-spaces-user-id": "ws-member-1",
+        "x-spaces-workspace-id": "ws-1",
+      },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const next: NextFunction = vi.fn();
+
+    await requireAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+    // Canonical Claw id is stamped in x-user-id; the raw workspace identity is
+    // retained on the side headers as the verified alias pair.
+    expect(req.headers["x-user-id"]).toBe("claw-canonical-1");
+    expect(req.headers["x-spaces-user-id"]).toBe("ws-member-1");
+    expect(req.headers["x-spaces-workspace-id"]).toBe("ws-1");
+
+    const { matchesAuthenticatedUserId } = await import("./pin-user-id-param.js");
+    expect(matchesAuthenticatedUserId(req, "claw-canonical-1")).toBe(true);
+    expect(matchesAuthenticatedUserId(req, "ws-member-1")).toBe(true);
   });
 });
 

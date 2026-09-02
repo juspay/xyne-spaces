@@ -10,6 +10,7 @@ import {
   getDefaultOrgId,
   ensureOrgMembership,
   ensureUserExists,
+  findUserByAnyId,
   resolveClawUserIdForSpacesIdentity,
 } from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
@@ -148,15 +149,28 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
       throw new HttpError(503, "Default organization not provisioned");
     }
-    user = await prisma.user.create({
-      data: {
-        id: `claw-user-${randomUUID()}`,
-        email: email.trim(),
-        name: name.trim(),
-        orgId,
-      },
-    });
-    await ensureOrgMembership(user.id, orgId);
+    // The user may already exist locally under a canonical id (provisioned
+    // via spaces-sync or an earlier flow) even when the Spaces profile is
+    // unreachable. Resolve before creating or we'd mint a duplicate person.
+    const existingUser = await findUserByAnyId(id.trim());
+    if (existingUser) {
+      user = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: { email: email.trim(), name: name.trim() },
+      });
+    } else {
+      user = await prisma.user.create({
+        data: {
+          id: `claw-user-${randomUUID()}`,
+          email: email.trim(),
+          name: name.trim(),
+          orgId,
+        },
+      });
+    }
+    // Re-assert membership in the org the row belongs to (the resolved
+    // existing row's org may differ from the default used for new rows).
+    await ensureOrgMembership(user.id, user.orgId);
   }
 
   // Auto-configure xyne-spaces MCP connection if token provided
