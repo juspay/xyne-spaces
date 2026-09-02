@@ -202,6 +202,7 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
+import certificateRotationRoutes from '@/routes/certificateRotation';
 
 
 export class App {
@@ -352,6 +353,7 @@ export class App {
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     this.app.use(decryptRequestBodyMiddleware);
+    this.app.use('/api', certificateRotationRoutes);
     this.app.use(encryptResponseBodyMiddleware);
 
     // Public SDK API. Uses the same cookie-based auth as the dashboard via
