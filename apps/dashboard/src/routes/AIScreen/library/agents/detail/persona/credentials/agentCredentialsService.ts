@@ -62,3 +62,60 @@ export function shareAgentProviderCredential(
     { method: 'POST', body: JSON.stringify(payload) },
   );
 }
+
+export interface AgentOauthFlow {
+  url: string;
+  state: string;
+  expiresIn: number;
+}
+
+/**
+ * Agent-scoped browser OAuth. Only codex and claude expose these routes — both
+ * capture a refreshable token bundle, unlike a pasted key. Anthropic and OpenAI
+ * both redirect to a loopback port we don't own, hence the paste-back step.
+ */
+export interface AgentCopilotDeviceCode {
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
+  interval: number;
+}
+
+export type AgentCopilotPollStatus = 'approved' | 'pending' | 'slow_down';
+
+/** Copilot uses GitHub's device flow — a code the user types on github.com,
+ *  then we poll. No redirect, so nothing to paste back. */
+export function startAgentCopilotLogin(slug: string): Promise<AgentCopilotDeviceCode> {
+  return clawApiRequest<AgentCopilotDeviceCode>(`${base(slug)}/copilot/github-login`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function pollAgentCopilotLogin(slug: string): Promise<{ status: AgentCopilotPollStatus }> {
+  return clawApiRequest<{ status: AgentCopilotPollStatus }>(`${base(slug)}/copilot/github-poll`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function startAgentOauth(
+  slug: string,
+  provider: 'codex' | 'claude',
+): Promise<AgentOauthFlow> {
+  return clawApiRequest<AgentOauthFlow>(`${base(slug)}/${provider}/oauth/start`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function exchangeAgentOauth(
+  slug: string,
+  provider: 'codex' | 'claude',
+  payload: { code: string; state: string },
+): Promise<unknown> {
+  return clawApiRequest<unknown>(`${base(slug)}/${provider}/oauth/exchange`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

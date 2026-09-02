@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { MultipleCrossCancelDefault, PencilEditLine, PlusDefault } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
@@ -12,11 +13,16 @@ import {
   CREDENTIAL_PROVIDER_LABELS,
   EMPTY_CREDENTIAL_FORM,
   formFromCredential,
+  supportsOauth,
   supportsReasoning,
   type CredentialForm,
   type CredentialProvider,
 } from './credentialForm';
-import { useAgentCredentialMutations, useAgentCredentials } from './useAgentCredentials';
+import {
+  agentCredentialsKey,
+  useAgentCredentialMutations,
+  useAgentCredentials,
+} from './useAgentCredentials';
 
 const ICON_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
@@ -44,6 +50,7 @@ export function AgentKeysDialog({
   slug,
   canManage,
 }: AgentKeysDialogProps): ReactElement {
+  const queryClient = useQueryClient();
   const { data: credentials, isLoading } = useAgentCredentials(slug, open);
   const { save, remove, saving, removing } = useAgentCredentialMutations(slug);
 
@@ -60,7 +67,12 @@ export function AgentKeysDialog({
   };
 
   const editing = editingProvider !== null;
-  const canSubmit = form !== null && (editing || form.apiKey.trim().length > 0);
+  // The OAuth exchange writes the credential itself, so Save only carries the
+  // model/base-URL fields — requiring a pasted key there is what made the
+  // OAuth option unusable.
+  const oauthPath =
+    form !== null && form.authType === 'oauth_token' && supportsOauth(form.provider);
+  const canSubmit = form !== null && (editing || oauthPath || form.apiKey.trim().length > 0);
 
   const submit = async (): Promise<void> => {
     if (!form || !canSubmit) return;
@@ -223,7 +235,20 @@ export function AgentKeysDialog({
           <span className={SECTION_LABEL}>
             {editing ? `Edit ${label(form.provider)}` : `New ${label(form.provider)} key`}
           </span>
-          <CredentialFormFields form={form} onChange={setForm} editing={editing} />
+          <CredentialFormFields
+            form={form}
+            onChange={setForm}
+            editing={editing}
+            slug={slug}
+            onOauthConnected={() => {
+              void queryClient.invalidateQueries({ queryKey: agentCredentialsKey(slug) });
+              // The exchange already stored the bundle. Stay open in edit mode so
+              // a model/base URL can follow — the backend allows that update
+              // without an apiKey precisely because OAuth saved the credential.
+              setEditingProvider(form.provider);
+              setForm({ ...form, apiKey: '' });
+            }}
+          />
         </section>
       )}
     </V2Dialog>
