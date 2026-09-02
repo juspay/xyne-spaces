@@ -8,9 +8,17 @@
  */
 
 import type { ReactElement } from 'react';
-import { Refresh, CheckTickSingle, GridDashboardBento, Hashtag, PlusDefault } from '@xyne/icons';
+import {
+  Refresh,
+  CheckTickSingle,
+  GridDashboardBento,
+  Hashtag,
+  PlusDefault,
+  Spinner,
+} from '@xyne/icons';
 import { XyneAIStar } from '@/components/icons/xyne-ai';
 import { cn } from '../../utils/classNames';
+import { Tooltip } from '../ui/Tooltip';
 import type { SummaryTemplateMenuProps, SummaryTemplateOption } from './SummaryTemplateMenu.types';
 import {
   getSummaryTemplateLabel,
@@ -49,6 +57,7 @@ export function SummaryTemplateMenu({
   templates,
   isLoading = false,
   isRegenerating = false,
+  regeneratingTemplateId,
   canRegenerate = true,
   onSelectTemplate,
   onRegenerate,
@@ -59,15 +68,59 @@ export function SummaryTemplateMenu({
 }: SummaryTemplateMenuProps): ReactElement {
   const fullLabel = getSummaryTemplateLabel(selectedTemplate);
   const label = truncateTemplateName(fullLabel);
+  const selectedTemplateId = selectedTemplate?.id ?? 'default';
+  const activeRegeneratingTemplateId = isRegenerating
+    ? (regeneratingTemplateId ?? selectedTemplateId)
+    : null;
+  const regeneratingTemplate =
+    templates.find(template => template.id === activeRegeneratingTemplateId) ??
+    (selectedTemplateId === activeRegeneratingTemplateId ? selectedTemplate : undefined);
+  const regeneratingTemplateLabel = regeneratingTemplate
+    ? getSummaryTemplateLabel(regeneratingTemplate)
+    : activeRegeneratingTemplateId === 'default' || !activeRegeneratingTemplateId
+      ? getSummaryTemplateLabel(undefined)
+      : 'selected template';
+  const regeneratingTooltipContent = `Generating ${regeneratingTemplateLabel} summary`;
+  const isSelectedTemplateRegenerating = activeRegeneratingTemplateId === selectedTemplateId;
+  const isDisabledDuringRegeneration = isRegenerating;
+  const renderRegeneratingSpinner = (): ReactElement => (
+    <Tooltip content={regeneratingTooltipContent} side='right'>
+      <span
+        className='flex size-full items-center justify-center'
+        aria-label={regeneratingTooltipContent}
+      >
+        <Spinner size={14} className='animate-spin text-muted-foreground' />
+      </span>
+    </Tooltip>
+  );
 
   return (
     <>
       <div className='flex items-center gap-0.5 rounded-lg p-0.5'>
-        <span className='flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-semibold text-foreground'>
-          <span className='flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm'>
-            <SummaryTemplateGlyph template={selectedTemplate} size='menu' />
+        <span
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-semibold',
+            isDisabledDuringRegeneration && !isSelectedTemplateRegenerating
+              ? 'text-muted-foreground'
+              : 'text-foreground',
+          )}
+        >
+          <span
+            className={cn(
+              'flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm',
+              isDisabledDuringRegeneration && !isSelectedTemplateRegenerating && 'opacity-50',
+            )}
+          >
+            {isSelectedTemplateRegenerating ? (
+              renderRegeneratingSpinner()
+            ) : (
+              <SummaryTemplateGlyph template={selectedTemplate} size='menu' />
+            )}
           </span>
-          <span className='min-w-0 flex-1 truncate' title={fullLabel}>
+          <span
+            className='min-w-0 flex-1 truncate'
+            title={isSelectedTemplateRegenerating ? regeneratingTooltipContent : fullLabel}
+          >
             {label}
           </span>
         </span>
@@ -83,7 +136,7 @@ export function SummaryTemplateMenu({
           data-track-category={trackCategory}
           data-track-name='regenerate_selected_summary_template'
         >
-          <Refresh strokeWidth={2.5} className={cn('size-4', isRegenerating && 'animate-spin')} />
+          <Refresh strokeWidth={2.5} className='size-4' />
         </button>
         <span className='flex w-5 shrink-0 items-center justify-center'>
           <CheckTickSingle
@@ -104,57 +157,97 @@ export function SummaryTemplateMenu({
         ) : (
           templates
             .filter(template => template.id !== selectedTemplate?.id)
-            .map(template => (
-              <button
-                key={template.id}
-                type='button'
-                onClick={() => {
-                  onRequestClose();
-                  onSelectTemplate(template.id);
-                }}
-                title={template.name}
-                className='flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
-                data-track-category={trackCategory}
-                data-track-name='select_summary_template'
-              >
-                <span className='flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm'>
-                  {template.icon}
-                </span>
-                <span className='min-w-0 flex-1 truncate'>
-                  {truncateTemplateName(template.name)}
-                </span>
-              </button>
-            ))
+            .map(template => {
+              const isTemplateRegenerating = activeRegeneratingTemplateId === template.id;
+              return (
+                <button
+                  key={template.id}
+                  type='button'
+                  aria-disabled={isDisabledDuringRegeneration}
+                  tabIndex={isDisabledDuringRegeneration ? -1 : undefined}
+                  onClick={() => {
+                    if (isDisabledDuringRegeneration) return;
+                    onRequestClose();
+                    onSelectTemplate(template.id);
+                  }}
+                  title={isTemplateRegenerating ? regeneratingTooltipContent : template.name}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors',
+                    isTemplateRegenerating
+                      ? 'text-foreground'
+                      : isDisabledDuringRegeneration
+                        ? 'cursor-not-allowed text-muted-foreground/55'
+                        : 'text-foreground hover:bg-muted',
+                  )}
+                  data-track-category={trackCategory}
+                  data-track-name='select_summary_template'
+                >
+                  <span
+                    className={cn(
+                      'flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm',
+                      isDisabledDuringRegeneration && !isTemplateRegenerating && 'opacity-45',
+                    )}
+                  >
+                    {isTemplateRegenerating ? renderRegeneratingSpinner() : template.icon}
+                  </span>
+                  <span className='min-w-0 flex-1 truncate'>
+                    {truncateTemplateName(template.name)}
+                  </span>
+                </button>
+              );
+            })
         )}
       </div>
 
       <div className='mx-1.5 my-1.5 h-px bg-border' />
       <button
         type='button'
+        disabled={isDisabledDuringRegeneration}
         onClick={() => {
           onRequestClose();
           onOpenTemplates();
         }}
-        className='flex w-full items-center gap-3 rounded-lg px-1.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
+        className={cn(
+          'flex w-full items-center gap-3 rounded-lg px-1.5 py-1.5 text-left text-sm transition-colors',
+          isDisabledDuringRegeneration
+            ? 'cursor-not-allowed text-muted-foreground/55'
+            : 'text-foreground hover:bg-muted',
+        )}
         data-track-category={trackCategory}
         data-track-name='open_all_summary_templates'
       >
-        <span className='flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground'>
+        <span
+          className={cn(
+            'flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground',
+            isDisabledDuringRegeneration && 'opacity-45',
+          )}
+        >
           <GridDashboardBento strokeWidth={2} className='size-4' />
         </span>
         All templates…
       </button>
       <button
         type='button'
+        disabled={isDisabledDuringRegeneration}
         onClick={() => {
           onRequestClose();
           onNewTemplate();
         }}
-        className='flex w-full items-center gap-3 rounded-lg px-1.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted'
+        className={cn(
+          'flex w-full items-center gap-3 rounded-lg px-1.5 py-1.5 text-left text-sm transition-colors',
+          isDisabledDuringRegeneration
+            ? 'cursor-not-allowed text-muted-foreground/55'
+            : 'text-foreground hover:bg-muted',
+        )}
         data-track-category={trackCategory}
         data-track-name='new_summary_template'
       >
-        <span className='flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground'>
+        <span
+          className={cn(
+            'flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground',
+            isDisabledDuringRegeneration && 'opacity-45',
+          )}
+        >
           <PlusDefault className='size-4' />
         </span>
         New template

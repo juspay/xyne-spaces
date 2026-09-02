@@ -224,6 +224,7 @@ export class App {
           url.startsWith(`${apiPathPrefix}?`);
         if (isPrefixed) {
           req.url = `/api${url.slice(apiPathPrefix.length)}`;
+          req.originalUrl = req.url;
         }
         next();
       });
@@ -421,6 +422,8 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
+    // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
     this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
@@ -949,11 +952,14 @@ export class App {
       );
     }
 
-    // Initialize calendar sync queues
-    logger.info('Initializing Microsoft Calendar sync queue...');
+    // Initialize calendar sync queues as PRODUCERS only. The calendar webhook
+    // routes live here and must stay here (they are the publicly reachable
+    // endpoints Google/Microsoft push to), but the sync work they enqueue is
+    // drained by the worker process — see ENABLE_CALENDAR_SYNC_WORKER.
+    logger.info('Initializing Microsoft Calendar sync queue (producer)...');
     await microsoftCalendarSyncQueue.initialize();
 
-    logger.info('Initializing Google Calendar sync queue...');
+    logger.info('Initializing Google Calendar sync queue (producer)...');
     await googleCalendarSyncQueue.initialize();
 
     // Initialize unified watch renewal queue (replaces Gmail + Calendar renewal queues)

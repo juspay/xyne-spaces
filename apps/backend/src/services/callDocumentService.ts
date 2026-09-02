@@ -15,6 +15,7 @@ import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
 import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -1157,7 +1158,9 @@ MANDATORY OUTPUT CONTRACT:
     });
 
     if (!result.ok) {
-      logger.error(`[${callId}] detailed_summary_generation_failed`, { reason: result.reason });
+      // Diagnostic for the LLM step itself; the caller that gives up on the
+      // summary emits the alertable detailed_summary_generation_failed event.
+      logger.error(`[${callId}] detailed_summary_llm_request_failed`, { reason: result.reason });
       return null;
     }
 
@@ -2225,6 +2228,7 @@ A comprehensive detailed summary has been generated from this call.
           channel.callSummaryPrompt ?? undefined,
         );
         if (!detailedSummaryMarkdown) {
+          logDetailedSummaryFailed(callId, 'generation_failed');
           return { success: false, error: 'Failed to generate detailed summary' };
         }
 
@@ -2249,6 +2253,7 @@ A comprehensive detailed summary has been generated from this call.
           citationCtx,
         );
         if (!canvasId) {
+          logDetailedSummaryFailed(callId, 'canvas_update_failed');
           return { success: false, error: 'Failed to update detailed summary canvas' };
         }
 
@@ -2417,6 +2422,7 @@ A comprehensive detailed summary has been generated from this call.
       }
 
       if (!detailedSummaryMarkdown) {
+        logDetailedSummaryFailed(callId, 'generation_failed');
         if (newCanvasId) {
           await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
         }
@@ -2431,6 +2437,7 @@ A comprehensive detailed summary has been generated from this call.
       }
       const initializationFailure = getCanvasInitializationError();
       if (initializationFailure || !newCanvasId || !canvasUrl) {
+        logDetailedSummaryFailed(callId, 'canvas_create_failed', initializationFailure);
         if (newCanvasId) {
           await this.cleanupFailedDetailedSummaryCanvas(newCanvasId, conversationId, callId);
         }
@@ -2459,6 +2466,7 @@ A comprehensive detailed summary has been generated from this call.
         sideEffectContextPromise ?? undefined,
       );
       if (!finalized) {
+        logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
         await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId);
         return { success: false, error: 'Failed to write final detailed summary content' };
       }
@@ -2486,7 +2494,7 @@ A comprehensive detailed summary has been generated from this call.
 
       return { success: true, canvasUrl: finalizedCanvasUrl };
     } catch (error) {
-      logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
+      logDetailedSummaryFailed(callId, 'unexpected_error', error);
       // If a brand-new canvas + link was already published before the throw,
       // tear it down so an exception doesn't leave a dangling canvas/message.
       if (newCanvasId) {

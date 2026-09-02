@@ -65,8 +65,9 @@ const RecordingsV2Screen = (): ReactElement => {
   const shouldOpenTemplatesFromUrl =
     searchParams.get('templates') === '1' || requestedSummaryTemplateId !== null;
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
+  const listTabParam = searchParams.get('tab');
   const activeListTab: RecordingOwnershipTab =
-    searchParams.get('tab') === 'shared' ? 'shared' : 'created';
+    listTabParam === 'created' || listTabParam === 'shared' ? listTabParam : 'all';
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -184,7 +185,7 @@ const RecordingsV2Screen = (): ReactElement => {
     liveRecording?.startedAt ?? (isLocalRecordingActive ? recordingStartTime : null);
   const liveRecordingTitle = liveRecording?.title ?? recordingTitle ?? DEFAULT_RECORDING_TITLE;
   const isOwnRecordingView =
-    activeListTab === 'created' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
+    activeListTab !== 'shared' && (!selectedCreatorId || selectedCreatorId === currentUser?.id);
   const showLiveRecording =
     isOwnRecordingView && liveRecordingStartedAt !== null && isLocalRecordingActive;
   const hiddenLiveRecordingId =
@@ -222,8 +223,8 @@ const RecordingsV2Screen = (): ReactElement => {
       setSearchParams(
         prev => {
           const next = new URLSearchParams(prev);
-          if (tab === 'shared') next.set('tab', 'shared');
-          else next.delete('tab');
+          if (tab === 'all') next.delete('tab');
+          else next.set('tab', tab);
           return next;
         },
         { replace: true },
@@ -400,6 +401,21 @@ const RecordingsV2Screen = (): ReactElement => {
                   role='group'
                   aria-label='Filter recordings by ownership'
                 >
+                  <button
+                    type='button'
+                    aria-pressed={activeListTab === 'all'}
+                    onClick={() => handleTabChange('all')}
+                    className={cn(
+                      LIST_TAB_CLASS_NAME,
+                      activeListTab === 'all'
+                        ? 'bg-background text-foreground font-medium'
+                        : 'text-muted-foreground/80 hover:text-foreground',
+                    )}
+                    data-track-category='RecordingsV2'
+                    data-track-name='show_all_recordings'
+                  >
+                    All
+                  </button>
                   <button
                     type='button'
                     aria-pressed={activeListTab === 'created'}
