@@ -10,6 +10,7 @@ import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegra
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { Button } from '../../../ui/Button/Button';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
@@ -467,8 +468,11 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                     </div>
                     <div className='flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0'>
                       {!sig.isDefault && (
-                        <button
+                        <Button
                           type='button'
+                          variant='ghost'
+                          size='sm'
+                          trackId='set_default_signature'
                           onClick={() =>
                             zero.mutate(
                               mutators.emailSignature.setDefault({
@@ -477,12 +481,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                               }),
                             )
                           }
-                          className='text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground'
+                          className='h-auto p-0 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground hover:bg-transparent'
                           data-track-category='DeskSettings'
                           data-track-name='SetDefaultSignature'
                         >
                           Set as default
-                        </button>
+                        </Button>
                       )}
                       <button
                         type='button'
@@ -498,17 +502,20 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       >
                         <Pencil size={16} />
                       </button>
-                      <button
+                      <Button
                         type='button'
+                        variant='ghost'
+                        size='icon'
+                        trackId='delete_signature'
                         onClick={() => zero.mutate(mutators.emailSignature.delete({ id: sig.id }))}
-                        className='text-desk-muted transition-colors hover:text-red-500'
+                        className='size-auto p-0 text-desk-muted transition-colors hover:bg-transparent hover:text-red-500'
                         title='Delete signature'
                         aria-label='Delete signature'
                         data-track-category='DeskSettings'
                         data-track-name='DeleteSignature'
                       >
                         <Trash2 size={16} />
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ))}

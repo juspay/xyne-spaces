@@ -285,6 +285,10 @@ export class ACLFactory {
       return new ReleaseChangeTypesACL(ctx, prisma)
     case 'releaseEvent':
       return new ReleaseEventsACL(ctx, prisma)
+    case 'releaseRepository':
+      // non_zero table (not Zero-synced); tenant scoping is enforced inline in
+      // the route/repo, so the generic ACL suffices for switch exhaustiveness.
+      return new BaseQueryACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
     case 'sdlcEntityLink':
@@ -470,6 +474,10 @@ export class ACLFactory {
     case 'tag':
       return new BaseQueryACL(ctx, prisma)
     case 'tagsConfig':
+      return new BaseQueryACL(ctx, prisma)
+    // Workspace-scoped config, reached only through the thread-type-vocabulary API, which
+    // does its own admin check. Listed so the switch stays exhaustive over ModelName.
+    case 'threadTypeVocabulary':
       return new BaseQueryACL(ctx, prisma)
     case 'teamIntelligenceIngestionBatchV2':
       return new UnscopedACL(ctx, prisma)

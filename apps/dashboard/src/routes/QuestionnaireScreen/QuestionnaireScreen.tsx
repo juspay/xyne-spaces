@@ -14,6 +14,16 @@ import {
   uploadProfilePicture as uploadProfilePictureViaApi,
 } from '../../services/userProfile/userProfileService';
 import { v4 as uuidv4 } from 'uuid';
+import type { LocalHarnessInstallation } from '../../types/electron';
+import {
+  LocalHarnessStepPanel,
+  LocalHarnessStepPreview,
+  machineLabel,
+  platformNoun,
+  type HarnessProvider,
+} from './LocalHarnessStep';
+
+type StepKey = 'name' | 'company' | 'harness' | 'ai';
 
 const TEAM_SIZE_OPTIONS = ['0-10', '11-100', '100-1000', '1000+'] as const;
 type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
@@ -27,6 +37,8 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   const [currentStep, setCurrentStep] = useState(0);
   const [isCompleting, setIsCompleting] = useState(false);
+  const currentStepRef = useRef(0);
+  currentStepRef.current = currentStep;
 
   const [displayName, setDisplayName] = useState(user?.['displayName'] || user?.name || '');
   const [role, setRole] = useState('');
@@ -36,8 +48,21 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [harnesses, setHarnesses] = useState<LocalHarnessInstallation[]>([]);
+  const [harnessDevice, setHarnessDevice] = useState({ name: 'This machine', platform: '' });
+  const [selectedHarness, setSelectedHarness] = useState<HarnessProvider | null>(null);
+  const [connectedHarness, setConnectedHarness] = useState<HarnessProvider | null>(null);
+
   const { url: existingPictureUrl } = useProfilePictureUrl(user?.id || '', user?.picture);
   const effectivePhotoUrl = photoPreviewUrl || existingPictureUrl || null;
+
+  const steps: StepKey[] = [
+    'name',
+    'company',
+    ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
+    'ai',
+  ];
+  const step: StepKey = steps[currentStep] ?? 'name';
 
   useEffect(() => {
     const isNewUserCookie = Cookies.get('is_new_user');
@@ -45,6 +70,22 @@ const QuestionnaireScreen = (): ReactElement | null => {
       void navigate('/');
     }
   }, [navigate]);
+
+  useEffect(() => {
+    const api = window.electronAPI?.localHarness;
+    if (!api) return;
+    let cancelled = false;
+    void Promise.all([api.detect(), api.getStatus()])
+      .then(([found, status]) => {
+        if (cancelled || currentStepRef.current > 1) return;
+        setHarnesses(found.filter(install => install.authenticated));
+        setHarnessDevice({ name: machineLabel(status.deviceName), platform: status.platform });
+      })
+      .catch(() => {});
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!displayName && user) {
@@ -125,13 +166,13 @@ const QuestionnaireScreen = (): ReactElement | null => {
   };
 
   const canAdvance = (): boolean => {
-    if (currentStep === 0) return displayName.trim().length > 0;
-    if (currentStep === 1) return companyName.trim().length > 0 && companySize !== '';
+    if (step === 'name') return displayName.trim().length > 0;
+    if (step === 'company') return companyName.trim().length > 0 && companySize !== '';
     return true;
   };
 
   const handleNext = (): void => {
-    if (currentStep < 2) {
+    if (currentStep < steps.length - 1) {
       if (!canAdvance()) return;
       setCurrentStep(currentStep + 1);
       return;
@@ -139,7 +180,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
     void handleComplete();
   };
 
-  if (currentStep === 2) {
+  if (step === 'ai') {
     return (
       <div className='relative h-[100dvh] w-full overflow-hidden bg-white'>
         <img
@@ -245,7 +286,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
           className='h-7 w-auto self-start md:absolute md:left-12 lg:left-16 md:top-[34px] md:h-[30px]'
         />
 
-        {currentStep === 0 && (
+        {step === 'name' && (
           <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-16 md:top-[329px] md:bottom-[38px] md:w-[calc(100%_-_96px)] md:max-w-[600px] md:justify-start'>
             <h1 className='text-[30px] leading-[36px] md:text-[30px] md:leading-[36px] font-bold text-[#1f2430]'>
               Whats your name?
@@ -323,7 +364,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
           </div>
         )}
 
-        {currentStep === 1 && (
+        {step === 'company' && (
           <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-[100px] md:top-[276px] md:bottom-[38px] md:w-[calc(100%_-_96px)] lg:w-[calc(100%_-_200px)] md:max-w-[776px] md:justify-start'>
             <h1 className='text-[28px] leading-[34px] font-bold text-[#242936]'>
               Tell us about your company
@@ -408,11 +449,24 @@ const QuestionnaireScreen = (): ReactElement | null => {
             </div>
           </div>
         )}
+
+        {step === 'harness' && (
+          <LocalHarnessStepPanel
+            installations={harnesses}
+            noun={platformNoun(harnessDevice.platform)}
+            selected={selectedHarness}
+            onSelect={setSelectedHarness}
+            connected={connectedHarness}
+            onConnected={setConnectedHarness}
+            onBack={() => setCurrentStep(currentStep - 1)}
+            onNext={handleNext}
+          />
+        )}
       </div>
 
       {/* Right panel */}
       <div className='hidden md:flex items-center justify-center bg-[#F8F9FB] border-l border-[#ECEFF3]'>
-        {currentStep === 0 && (
+        {step === 'name' && (
           <div className='w-[368px] rounded-[16px] border border-[#E2E5EA] bg-white shadow-[0_18px_38px_rgba(27,36,52,0.13)] overflow-hidden'>
             <div className='h-[48px] flex items-center justify-center'>
               <div className='w-[86px] h-[20px] rounded-full border border-[#E5EAF0] bg-[#F3F5F8] shadow-[inset_0_1px_3px_rgba(20,31,48,0.08)]' />
@@ -439,7 +493,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
           </div>
         )}
 
-        {currentStep === 1 && (
+        {step === 'company' && (
           <div className='relative h-full w-full overflow-hidden bg-[#F8F9FB]'>
             <div className='absolute left-0 right-0 top-[164px] h-[calc(100%-164px)] bg-[#F5F8FC]' />
             <div className='absolute left-[16.5%] right-0 top-[164px] z-[3] h-[18px] border-t border-[#DDE5F0] bg-white' />
@@ -484,6 +538,15 @@ const QuestionnaireScreen = (): ReactElement | null => {
               </div>
             </div>
           </div>
+        )}
+
+        {step === 'harness' && (
+          <LocalHarnessStepPreview
+            installations={harnesses}
+            selected={selectedHarness}
+            connected={connectedHarness}
+            deviceName={harnessDevice.name}
+          />
         )}
       </div>
     </div>

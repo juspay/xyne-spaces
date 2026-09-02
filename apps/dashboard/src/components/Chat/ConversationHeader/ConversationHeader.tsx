@@ -25,6 +25,7 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Dialog from '../../ui/Dialog';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
+import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
 import { mutators } from '../../../zero/mutators';
 import Tooltip from '../../ui/Tooltip';
 import Info, { ChannelTab } from '../Info/Info';
@@ -256,6 +257,7 @@ const ConversationHeader = ({
                 e.stopPropagation();
                 handleStarToggle();
               }}
+              trackId='toggle_star_channel'
               className={cn('h-7 w-7 rounded-lg shrink-0', actionIconClass)}
               style={APP_NO_DRAG_STYLE}
               data-track-category='CHANNELS'
@@ -381,7 +383,7 @@ const ConversationHeader = ({
             </Button>
           </Tooltip>
           {!isCompact && (
-            <Tooltip content='Search in this channel'>
+            <ShortcutTooltip label='Search in this channel' shortcut='global.findInChannel'>
               <Button
                 variant='ghost'
                 size='sm'
@@ -393,7 +395,7 @@ const ConversationHeader = ({
               >
                 <SearchDefault size={16} />
               </Button>
-            </Tooltip>
+            </ShortcutTooltip>
           )}
           {isCompact && (
             <CompactActionsMenu
@@ -513,28 +515,43 @@ const ConversationHeader = ({
           className='flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
           style={APP_NO_DRAG_STYLE}
         >
-          {channelTabs?.map(tab => (
-            <Tabs.Trigger key={tab.value} value={tab.value} asChild>
-              <button
-                data-testid={`channel-tab-${tab.value}`}
-                data-track-category='CHANNELS'
-                data-track-name='SWITCH_TAB'
-                data-track-metadata={JSON.stringify({ tabValue: tab.value })}
-                onClick={e => setActiveTab?.(tab.value || '', e)}
-                className={cn(
-                  'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
-                  activeTab === tab.value
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                )}
+          {channelTabs?.map(tab => {
+            const trigger = (
+              <Tabs.Trigger key={tab.value} value={tab.value} asChild>
+                <button
+                  data-testid={`channel-tab-${tab.value}`}
+                  data-track-category='CHANNELS'
+                  data-track-name='SWITCH_TAB'
+                  data-track-metadata={JSON.stringify({ tabValue: tab.value })}
+                  onClick={e => setActiveTab?.(tab.value || '', e)}
+                  className={cn(
+                    'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
+                    activeTab === tab.value
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  <span className='shrink-0'>
+                    {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
+                  </span>
+                  <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
+                </button>
+              </Tabs.Trigger>
+            );
+
+            if (tab.value !== 'canvas') return trigger;
+
+            return (
+              <ShortcutTooltip
+                key={tab.value}
+                label={tab.label}
+                shortcut='global.openCanvasTab'
+                side='bottom'
               >
-                <span className='shrink-0'>
-                  {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
-                </span>
-                <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
-              </button>
-            </Tabs.Trigger>
-          ))}
+                {trigger}
+              </ShortcutTooltip>
+            );
+          })}
         </Tabs.List>
       </Tabs.Root>
 

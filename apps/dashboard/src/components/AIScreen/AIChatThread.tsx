@@ -2,6 +2,7 @@ import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
   useEffect,
+  Fragment,
   useRef,
   useState,
   useCallback,
@@ -68,8 +69,13 @@ import {
   resolveCitationIconUrl,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
+import { Button } from '../ui/Button/Button';
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
-import { MessageReactArtifacts } from './ReactArtifact';
+import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
+import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
+import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
+import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
+import { SidebarLeftClose, SidebarLeftOpen } from '@xyne/icons';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -107,7 +113,16 @@ interface AIChatThreadProps {
    *  auto-submitted turn and used to seed the chat composer. */
   initialExtras?: ComposerContext | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
+  /** Desktop sidebar toggle for the header; state drives which icon shows. */
+  onToggleSidebar?: (() => void) | undefined;
+  sidebarCollapsed?: boolean | undefined;
   onConversationChange?: ((sessionId: string) => void) | undefined;
+  /** App Creation mode: the id of the app this thread is building, or null.
+   *  A conversation owns exactly one app (Step 1), so the last artifact's
+   *  appId identifies it unambiguously. */
+  onAppChange?:
+    | ((appId: string | null, latestVersionId: string | null, generatedLive: boolean) => void)
+    | undefined;
   /** Forwarded to the composer's AIAgentSelector — fires when the user picks
    *  a different agent from inside an active chat, so the parent can open a
    *  fresh conversation scoped to that agent. Carries the current composer
@@ -201,12 +216,18 @@ function stripUnknownCiteLinks(content: string, validCitationKeys: Set<string>):
 function ChatTopbar({
   title,
   onOpenSidebar,
+  onToggleSidebar,
+  sidebarCollapsed,
 }: {
   title: string;
   onOpenSidebar?: () => void;
+  onToggleSidebar?: (() => void) | undefined;
+  sidebarCollapsed?: boolean | undefined;
 }): ReactElement {
   return (
-    <header className='ai-chat-topbar flex h-12 shrink-0 items-center gap-1 border-b border-[#e5e2dc] bg-transparent px-3 backdrop-blur-md sm:px-4'>
+    <header
+      className={`ai-chat-topbar flex h-[53px] shrink-0 items-center gap-1 border-b border-sidebar-border-muted bg-transparent px-3 backdrop-blur-md sm:px-4`}
+    >
       <button
         type='button'
         onClick={onOpenSidebar}
@@ -218,7 +239,25 @@ function ChatTopbar({
       >
         <Menu className='h-4 w-4' aria-hidden strokeWidth={1.75} />
       </button>
-      <h1 className='flex-1 truncate text-[13.5px] font-medium text-foreground'>{title}</h1>
+      {onToggleSidebar && (
+        <button
+          type='button'
+          onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-controls='ai-sidebar'
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className='hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:grid'
+          data-track-category='XyneAI'
+          data-track-name='TOGGLE_DESKTOP_SIDEBAR'
+        >
+          {sidebarCollapsed ? (
+            <SidebarLeftOpen size={16} aria-hidden='true' />
+          ) : (
+            <SidebarLeftClose size={16} aria-hidden='true' />
+          )}
+        </button>
+      )}
+      <h1 className='flex-1 truncate text-base font-medium text-foreground'>{title}</h1>
     </header>
   );
 }
@@ -309,7 +348,7 @@ function ReasoningSection({
       style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
     >
       <div className='overflow-hidden'>
-        <div className='my-1 text-[12.5px]'>
+        <div className='my-1 text-xs'>
           <button
             type='button'
             onClick={() => {
@@ -515,7 +554,7 @@ function ClawCitationChip({
         className={chipClass}
         aria-label={tooltip}
         onClick={openInPanel}
-        data-track-category='ask-ai'
+        data-track-category='AskAI'
         data-track-name='citation-open-doc-panel'
       >
         {chipInner}
@@ -1016,6 +1055,12 @@ function ChatMessageBubble({
 
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
+  // Everything an assistant message attached EXCEPT its React artifacts, which
+  // MessageReactArtifacts renders as the app itself.
+  const botAttachments = useMemo(
+    () => (message.attachments ?? []).filter(a => toArtifactRef(a) === null),
+    [message.attachments],
+  );
   const hasAttachedContext =
     isUser && !!message.attachedContext && message.attachedContext.length > 0;
   if (isUser && !hasUserContent && !hasUserAttachments) {
@@ -1057,7 +1102,7 @@ function ChatMessageBubble({
             )}
             <div
               className={cn(
-                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-[14.5px] leading-relaxed text-gray-900',
+                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900',
                 isEditing ? 'w-full' : 'max-w-full',
               )}
             >
@@ -1079,7 +1124,7 @@ function ChatMessageBubble({
                         setIsEditing(false);
                       }
                     }}
-                    className='min-h-[60px] w-full resize-none bg-transparent text-[14.5px] leading-relaxed text-gray-900 outline-none'
+                    className='min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-gray-900 outline-none'
                     rows={Math.max(2, editText.split('\n').length)}
                     data-track-category='XyneAI'
                     data-track-name='EDIT_TEXTAREA'
@@ -1094,7 +1139,9 @@ function ChatMessageBubble({
                     >
                       Cancel
                     </button>
-                    <button
+                    <Button
+                      variant='ghost'
+                      trackId='ai_chat_edit_submit'
                       type='button'
                       onClick={() => {
                         if (editText.trim()) {
@@ -1108,7 +1155,7 @@ function ChatMessageBubble({
                       data-track-name='EDIT_SUBMIT'
                     >
                       Send
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -1167,7 +1214,7 @@ function ChatMessageBubble({
 
           {displayContent && displayContent.length > 0 && (
             <div
-              className={`bot-markdown-content xyne-ai-markdown text-[15px] font-normal leading-7 text-foreground${
+              className={`bot-markdown-content xyne-ai-markdown text-sm font-normal leading-7 text-foreground${
                 // Keyed off everStreamed (not isStreaming) so content that
                 // lands AT completion — the final tail words, finalized
                 // citation chips — still fades in instead of popping the
@@ -1187,10 +1234,16 @@ function ChatMessageBubble({
 
           {!isUser && <MessageReactArtifacts message={message} />}
 
-          {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool) */}
-          {!isUser && message.attachments && message.attachments.length > 0 && (
+          {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool).
+              React artifacts are excluded: MessageReactArtifacts above already
+              renders each one as a running app (or a pane reference), so listing
+              them here too produced a second "artifact.json (click to download)"
+              row under every generated app — the raw bytes of the thing sitting
+              directly above it. `toArtifactRef` is the same predicate that
+              component selects on, so the two can never disagree. */}
+          {!isUser && botAttachments.length > 0 && (
             <div className='mt-2 space-y-2'>
-              {message.attachments.map((attachment, index) => (
+              {botAttachments.map((attachment, index) => (
                 <AttachmentPreview key={index} attachment={attachment} />
               ))}
             </div>
@@ -1299,7 +1352,9 @@ function ChatMessageBubble({
               {/* Regenerate — re-runs the last user query as a new bot sibling.
                   Only wired on the latest bot message. */}
               {onRegenerate && (
-                <button
+                <Button
+                  variant='ghost'
+                  trackId='ai_chat_regenerate'
                   type='button'
                   onClick={onRegenerate}
                   title='Regenerate response'
@@ -1308,7 +1363,7 @@ function ChatMessageBubble({
                   data-track-name='REGENERATE_MESSAGE'
                 >
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                </button>
+                </Button>
               )}
               {/* Branch switcher for bot-response versions (created via regenerate). */}
               {branchInfo && onBranchNavigate && (
@@ -1337,7 +1392,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialAttachments,
     initialExtras,
     onSetMobileSidebarOpen,
+    onToggleSidebar,
+    sidebarCollapsed,
     onConversationChange,
+    onAppChange,
     onAgentChange,
     onContextChange,
     onInitialQueryConsumed,
@@ -1839,6 +1897,48 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     }
   }, [conversationId, onConversationChange]);
 
+  // Surface this thread's app to the shell, so App Creation mode can render it
+  // in the right-hand pane. Scanned newest-first: a thread owns ONE app, so the
+  // most recent artifact carrying an appId names it, and older turns of the
+  // same app agree. Attachments that predate session-scoping have no appId and
+  // are correctly ignored — they never became apps.
+  // Which messages were seen streaming during THIS mount. An artifact whose
+  // message is in this set was generated live in front of the user; one loaded
+  // from history never streamed here. That distinction is what lets "collapse
+  // the sidebar when an app is being created" fire on creation only, and never
+  // on merely opening an old thread that happens to contain an app. The set
+  // resets with the component (chatKey remounts on thread switch), so history
+  // can never masquerade as live.
+  const streamedMessageIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const m of displayMessages) {
+      if (m.isStreaming) streamedMessageIds.current.add(m.id);
+    }
+  }, [displayMessages]);
+
+  useEffect(() => {
+    if (!onAppChange) return;
+    let foundApp: string | null = null;
+    let foundVersion: string | null = null;
+    let generatedLive = false;
+    for (let i = displayMessages.length - 1; i >= 0 && !foundApp; i--) {
+      const message = displayMessages[i];
+      for (const att of message?.attachments ?? []) {
+        const artifact = att.metadata?.reactArtifact;
+        if (artifact?.appId) {
+          foundApp = artifact.appId;
+          // The newest generation's build. The pane's app query is cached, so
+          // this is the freshness signal: a versionId the loaded version list
+          // does not contain means "a generation just landed — refetch".
+          foundVersion = artifact.versionId ?? null;
+          generatedLive = Boolean(message && streamedMessageIds.current.has(message.id));
+          break;
+        }
+      }
+    }
+    onAppChange(foundApp, foundVersion, generatedLive);
+  }, [displayMessages, onAppChange]);
+
   // Reset stick-to-bottom + hide the jump pill whenever the conversation
   // identity changes (draft → real session, or sidebar session swap that
   // doesn't trigger a remount). Matches xyne-search /ai behaviour where
@@ -2102,6 +2202,35 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return all;
   }, [displayMessages]);
 
+  // Restores are not messages — they are events with a timestamp — so they are
+  // merged into the transcript by anchoring each one to the last message that
+  // preceded it. Anchoring rather than concatenating keeps the render loop
+  // driven by `displayMessages` alone, so branch selection, sibling pagers and
+  // turn indices all keep counting messages and only messages.
+  //
+  // Read from the context, not from props: the events must survive closing the
+  // pane. History that vanishes when a panel is dismissed is not history.
+  const { restores: appRestores } = useAppCreationModeSignal();
+  const restoresByMessageId = useMemo(() => {
+    const byMessage = new Map<string, ArtifactAppRestoreEvent[]>();
+    if (appRestores.length === 0 || displayMessages.length === 0) return byMessage;
+    for (const event of appRestores) {
+      const at = new Date(event.createdAt).getTime();
+      if (Number.isNaN(at)) continue;
+      // Falls back to the first message, so an event that somehow predates the
+      // whole thread still renders instead of disappearing.
+      let anchorId = displayMessages[0]!.id;
+      for (const m of displayMessages) {
+        if (new Date(m.timestamp).getTime() > at) break;
+        anchorId = m.id;
+      }
+      const existing = byMessage.get(anchorId);
+      if (existing) existing.push(event);
+      else byMessage.set(anchorId, [event]);
+    }
+    return byMessage;
+  }, [appRestores, displayMessages]);
+
   const title =
     messages.length > 0
       ? (messages.find(m => m.type === 'user')?.content.slice(0, 40) ?? 'New chat')
@@ -2125,7 +2254,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             </div>
           </div>
         )}
-        <ChatTopbar title={title} onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)} />
+        <ChatTopbar
+          title={title}
+          onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)}
+          onToggleSidebar={onToggleSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+        />
 
         {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
           which the auto-scroll effect listens for to unstick from bottom. */}
@@ -2156,69 +2290,74 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                   branchEnabled && siblingCount > 1
                     ? { index: siblingIndexById.get(message.id) ?? 0, total: siblingCount }
                     : undefined;
+                const restoresHere = restoresByMessageId.get(message.id);
                 return (
-                  <ChatMessageBubble
-                    // Stable key so the bubble doesn't remount when the id swaps
-                    // temp→server at completion (which would kill the reasoning
-                    // section's transitions).
-                    key={message.stableKey ?? message.id}
-                    message={message}
-                    onCopy={() => {
-                      void navigator.clipboard.writeText(
-                        message.content || message.streamingContent || '',
-                      );
-                    }}
-                    onFeedback={(id, type) => {
-                      void handleFeedback(id, type);
-                    }}
-                    feedbackValue={feedbackValue}
-                    isV2={isV2}
-                    onRatingChange={handleRatingChange}
-                    onDebug={
-                      isV2 && message.type === 'bot'
-                        ? () => {
-                            setDebugTurnIndex(botTurnIndex);
-                            // Pin to this message's run when known (branching-safe);
-                            // null falls back to turn-index for unlinked live runs.
-                            setDebugSessionId(message.debugSessionId ?? null);
-                            setDebugFocusToolCallId(null);
-                            setShowDebugger(true);
-                          }
-                        : undefined
-                    }
-                    onOpenToolDebug={
-                      isV2 && message.type === 'bot'
-                        ? (toolCallId: string) => {
-                            setDebugTurnIndex(botTurnIndex);
-                            setDebugSessionId(message.debugSessionId ?? null);
-                            setDebugFocusToolCallId(toolCallId);
-                            setShowDebugger(true);
-                          }
-                        : undefined
-                    }
-                    onEditSubmit={
-                      branchEnabled && isLatestUserMessage
-                        ? (newContent: string) => void handleEditMessage(message.id, newContent)
-                        : undefined
-                    }
-                    onRegenerate={
-                      branchEnabled && isLatestBotMessage && !message.isStreaming
-                        ? () => void handleRegenerate()
-                        : undefined
-                    }
-                    onFollowUpSuggestionClick={
-                      isV2 && isLatestBotMessage && !message.isStreaming
-                        ? handleFollowUpSuggestion
-                        : undefined
-                    }
-                    branchInfo={branchInfo}
-                    onBranchNavigate={
-                      branchInfo
-                        ? (direction: 'prev' | 'next') =>
-                            handleBranchNavigate(message.id, direction)
-                        : undefined
-                    }
-                  />
+                  // Stable key so the bubble doesn't remount when the id swaps
+                  // temp→server at completion (which would kill the reasoning
+                  // section's transitions).
+                  <Fragment key={message.stableKey ?? message.id}>
+                    <ChatMessageBubble
+                      message={message}
+                      onCopy={() => {
+                        void navigator.clipboard.writeText(
+                          message.content || message.streamingContent || '',
+                        );
+                      }}
+                      onFeedback={(id, type) => {
+                        void handleFeedback(id, type);
+                      }}
+                      feedbackValue={feedbackValue}
+                      isV2={isV2}
+                      onRatingChange={handleRatingChange}
+                      onDebug={
+                        isV2 && message.type === 'bot'
+                          ? () => {
+                              setDebugTurnIndex(botTurnIndex);
+                              // Pin to this message's run when known (branching-safe);
+                              // null falls back to turn-index for unlinked live runs.
+                              setDebugSessionId(message.debugSessionId ?? null);
+                              setDebugFocusToolCallId(null);
+                              setShowDebugger(true);
+                            }
+                          : undefined
+                      }
+                      onOpenToolDebug={
+                        isV2 && message.type === 'bot'
+                          ? (toolCallId: string) => {
+                              setDebugTurnIndex(botTurnIndex);
+                              setDebugSessionId(message.debugSessionId ?? null);
+                              setDebugFocusToolCallId(toolCallId);
+                              setShowDebugger(true);
+                            }
+                          : undefined
+                      }
+                      onEditSubmit={
+                        branchEnabled && isLatestUserMessage
+                          ? (newContent: string) => void handleEditMessage(message.id, newContent)
+                          : undefined
+                      }
+                      onRegenerate={
+                        branchEnabled && isLatestBotMessage && !message.isStreaming
+                          ? () => void handleRegenerate()
+                          : undefined
+                      }
+                      onFollowUpSuggestionClick={
+                        isV2 && isLatestBotMessage && !message.isStreaming
+                          ? handleFollowUpSuggestion
+                          : undefined
+                      }
+                      branchInfo={branchInfo}
+                      onBranchNavigate={
+                        branchInfo
+                          ? (direction: 'prev' | 'next') =>
+                              handleBranchNavigate(message.id, direction)
+                          : undefined
+                      }
+                    />
+                    {restoresHere?.map(event => (
+                      <ArtifactRestoreNotice key={event.id} event={event} />
+                    ))}
+                  </Fragment>
                 );
               })}
             </ConversationToolInvocationsContext.Provider>
@@ -2227,7 +2366,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         </div>
 
         {/* Bottom composer — pill sits above it, mirroring xyne-search /ai. */}
-        <div className='relative shrink-0 px-4 pb-4 pt-3 sm:px-6'>
+        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6'>
           {showJumpPill && (
             <button
               type='button'

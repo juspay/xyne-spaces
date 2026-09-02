@@ -276,16 +276,18 @@ const NotificationKeywordsCard: FC = () => {
           {keywords.map(keyword => (
             <Badge key={keyword} variant='primary' className='flex items-center gap-1.5 pr-1'>
               <span className='text-xs'>{keyword}</span>
-              <button
+              <Button
                 type='button'
+                variant='ghost'
                 onClick={() => removeKeyword(keyword)}
+                trackId='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
                 data-track-name='RemoveNotificationKeyword'
               >
                 <X className='h-3 w-3' />
-              </button>
+              </Button>
             </Badge>
           ))}
         </div>
@@ -335,9 +337,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                trackId='set_global_desktop_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -348,7 +353,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -361,9 +366,12 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
           <div className='flex gap-2'>
             {GLOBAL_NOTIFICATION_LEVELS.map(level => (
-              <button
+              <Button
                 key={level.value}
+                variant='ghost'
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                trackId='set_global_mobile_notification_level'
+                trackProps={{ level: level.value }}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -374,7 +382,7 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 )}
               >
                 {level.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -665,6 +673,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           size='sm'
           disabled={isDisconnecting}
           onClick={() => void handleDisconnectCalendar()}
+          trackId='disconnect_calendar'
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
         >
@@ -804,6 +813,21 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
         />
       </div>
       <DailyBriefToggle available={state.aiLandingDefault} />
+      <div className='mt-3 border-t border-border pt-3'>
+        <div className='flex items-center justify-between gap-4'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
+            <p className='mt-0.5 text-xs text-muted-foreground'>
+              Hide the sidebar when a chat is building an app
+            </p>
+          </div>
+          <Switch
+            id='app-mode-collapse-sidebar'
+            checked={state.appModeCollapseSidebar}
+            onCheckedChange={state.setAppModeCollapseSidebar}
+          />
+        </div>
+      </div>
     </div>
     <ClawOverlayToggle />
   </div>
@@ -947,6 +971,7 @@ const PasswordSection: FC = () => {
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
           className='w-full'
+          trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
         >

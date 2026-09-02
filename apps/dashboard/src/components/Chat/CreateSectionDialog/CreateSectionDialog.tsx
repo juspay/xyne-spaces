@@ -283,6 +283,7 @@ export const CreateSectionDialog = ({
                 type='submit'
                 variant='default'
                 size='default'
+                trackId='create_section'
                 disabled={!!nameError}
                 className={cn(
                   'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90',
@@ -375,6 +376,7 @@ export const CreateSectionDialog = ({
             variant='default'
             size='default'
             onClick={handleAddChannels}
+            trackId='add_channels_to_section'
             data-track-category='CHAT_SIDEBAR'
             data-track-name='ADD_CHANNELS_TO_SECTION'
             disabled={selected.size === 0}

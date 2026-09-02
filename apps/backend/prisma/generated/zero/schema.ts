@@ -85,6 +85,7 @@ export const ticketTable = table("tickets")
     statusUpdatedAt: number(),
     merchantId: string().optional(),
     conversationId: string(),
+    messageId: string().optional(),
     channelId: string(),
     eta: number().optional(),
     firstRespondedAt: number().optional(),
@@ -1197,6 +1198,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(),
     initial_message_md: string().optional(),
     parent_message_md: string().optional(),
+    sub_tickets_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
     threadType: string().optional(),
@@ -2023,7 +2025,8 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   .columns({
     id: string(),
     workspaceId: string(),
-    repoId: string(),
+    repoId: string().optional(),
+    channelId: string(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
@@ -2038,7 +2041,7 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
     artifactId: string(),
-    repoId: string(),
+    repoId: string().optional(),
     artifactType: string(),
     artifactStatus: string(),
     workflowExecutionId: string().optional(),
@@ -2055,7 +2058,7 @@ export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
     workspaceId: string(),
     id: string(),
-    repoId: string(),
+    repoId: string().optional(),
     name: string(),
     description: string().optional(),
     status: string(),
@@ -2853,6 +2856,26 @@ export const tagsConfigTable = table("tags_config")
     createdAt: number(),
     updatedAt: number(),
     isDeleted: boolean(),
+  })
+  .primaryKey("id");
+
+export const threadTypeVocabularyTable = table("thread_type_vocabulary")
+  .columns({
+    id: string(),
+    scope: string(),
+    scopeId: string(),
+    workspaceId: string(),
+    name: string(),
+    label: string(),
+    summary: string(),
+    color: string(),
+    description: string(),
+    status: string(),
+    isDeleted: boolean(),
+    createdBy: string().optional(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -4175,6 +4198,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ["channelId"],
     destSchema: repoTable,
   }),
+  sdlcEntityLinks: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: sdlcEntityLinkTable,
+  }),
   collectionPermissions: many({
     sourceField: ["id"],
     destField: ["channelId"],
@@ -4606,6 +4634,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     sourceField: ["repoId"],
     destField: ["id"],
     destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 
@@ -5205,6 +5238,7 @@ export const schema = createSchema(
       installedAppPermissionTable,
       tagTable,
       tagsConfigTable,
+      threadTypeVocabularyTable,
       doclingAsyncFileTable,
       doclingAsyncPartTable,
       entityTable,
@@ -5509,6 +5543,7 @@ export type AppPermission = Row<typeof schema.tables.app_permission>;
 export type InstalledAppPermission = Row<typeof schema.tables.installed_app_permissions>;
 export type Tag = Row<typeof schema.tables.tags>;
 export type TagsConfig = Row<typeof schema.tables.tags_config>;
+export type ThreadTypeVocabulary = Row<typeof schema.tables.thread_type_vocabulary>;
 export type DoclingAsyncFile = Row<typeof schema.tables.docling_async_files>;
 export type DoclingAsyncPart = Row<typeof schema.tables.docling_async_parts>;
 export type Entity = Row<typeof schema.tables.entities>;

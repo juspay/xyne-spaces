@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { Prisma } from '@prisma/client';
+import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
@@ -20,6 +20,7 @@ import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics
 import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callDocumentService } from '@/services/callDocumentService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -227,13 +228,18 @@ TRANSCRIPT:
 
 // Short topical labels for browsing/search. Kept intentionally simple (no
 // categories/config) — persisted as generic Tag rows by noteTakerTranscriptService.
+// Each label is a single word; multi-word labels would be slugified into
+// hyphenated tags downstream.
+const MAX_CALL_LABELS = 3;
+
 const CALL_LABELS_PROMPT = `
 You are analyzing a call transcript to generate a small set of short topical labels/tags for browsing and search.
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Generate 1-4 short labels that best describe the topics/themes discussed
-- Each label must be 1-3 words, lowercase, describing a topic (e.g. "pricing", "bug report", "onboarding")
+- Generate 1-3 short labels that best describe the topics/themes discussed
+- Each label must be EXACTLY ONE word, lowercase (e.g. "pricing", "onboarding", "billing", "latency")
+- NEVER use multi-word labels, spaces, hyphens or underscores (write "pricing", not "pricing-discussion" or "bug report")
 - Do NOT include people's names, company names, or dates as labels
 - Do NOT duplicate labels
 
@@ -243,7 +249,7 @@ BRAND NAME CORRECTION:
 
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
-  "labels": ["[short topic label]", "[short topic label]"]
+  "labels": ["[one-word topic label]", "[one-word topic label]"]
 }
 
 Only output valid JSON.
@@ -1299,7 +1305,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       const labels = parsed.labels
         .filter((l: unknown): l is string => typeof l === 'string' && l.trim().length > 0)
-        .slice(0, 4);
+        .slice(0, MAX_CALL_LABELS);
 
       logger.info(`Generated ${labels.length} call labels`);
       return labels;
@@ -1717,10 +1723,40 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Queue Vespa indexing for the stored transcript (call.id is the doc id).
+   * Best-effort: a queue failure is logged, never thrown, so it can run from
+   * both the normal tail of processing and the solo-call early exit.
+   */
+  private async queueTranscriptIndexing(
+    call: Pick<Call, 'id' | 'channelId' | 'createdByUserId'>,
+  ): Promise<void> {
+    try {
+      const callChannel = call.channelId
+        ? await db.channel.findUnique({ where: { id: call.channelId }, select: { workspaceId: true } })
+        : null;
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: call.id,
+        jobType: 'feed',
+        userId: call.createdByUserId,
+        app: SubApp.TRANSCRIPT,
+        ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
+      });
+      logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
+    } catch (vespaError) {
+      logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+    }
+  }
+
+  /**
    * NOTE_TAKER (HEADLESS / "Xyne Oats") calls never reach this method — their
    * entire pipeline (transcriptReady webhook, reconcile) is routed straight to
    * noteTakerTranscriptService, which never creates or posts a message. This
    * method is for the channel/conversation-based flow only.
+   *
+   * Solo or very short calls (see callRepository.getPostCallAiSkipReason) attach
+   * and index the transcript but produce no AI outputs — no summary, title,
+   * tickets, or detailed-summary canvas.
    */
 
   async processCallWithSummary(
@@ -1799,6 +1835,20 @@ Output ONLY the processed transcript, nothing else.`;
         // may still succeed even if the DB-side attachment step inside postCallTranscript failed.
       }
 
+      // Solo or very short calls: keep the transcript but skip every LLM output.
+      // Headless recordings never reach this method, so the rule cannot misfire on
+      // note-taker calls.
+      const aiSkip = await repositories.calls.getPostCallAiSkipReason(call);
+      if (aiSkip.reason) {
+        logger.info(`[${callId}] ai_summary_skipped`, {
+          reason: aiSkip.reason,
+          joined_count: aiSkip.joinedCount,
+          duration_seconds: aiSkip.durationSeconds,
+        });
+        await this.queueTranscriptIndexing(call);
+        return;
+      }
+
       // Retrieve and format transcript for AI.
       const transcriptContent = await this.retrieveTranscript(callId);
       if (!transcriptContent) {
@@ -1854,11 +1904,9 @@ Output ONLY the processed transcript, nothing else.`;
         undefined,
         { callTitlePromise },
       ).catch((error) => {
-        logger.error(`[${callId}] detailed_summary_failed`, {
-          stage: 'detailed_summary_generation',
-          error,
-          stack: error instanceof Error ? error.stack : undefined,
-        });
+        // generateAndPostDetailedSummary logs its own failure exits; reaching
+        // here means it threw outside them, so this is the only record.
+        logDetailedSummaryFailed(callId, 'unexpected_error', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
       });
 
@@ -2022,38 +2070,19 @@ Output ONLY the processed transcript, nothing else.`;
             const detailedSummaryResult = await detailedSummaryPromise;
             if (detailedSummaryResult.success) {
               logger.info(`Auto-generated detailed summary for call: ${callId}`);
-            } else {
-              logger.error(`[${callId}] detailed_summary_failed`, {
-                stage: 'detailed_summary_generation',
-                error: detailedSummaryResult.error || 'Unknown detailed summary failure',
-              });
             }
+            // A failure here was already logged by whichever exit gave up, so
+            // there is no second line and the alert counts one per recording.
           } catch (error) {
-            // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-            logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+            logDetailedSummaryFailed(callId, 'unexpected_error', error);
           }
         }
       } else {
         // Use error (not warn) so LLM-down conditions generate alertable signal.
         logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
       }
-    // Queue Vespa indexing for the transcript (using call.id as the identifier)
-      try {
-        const callChannel = call.channelId
-          ? await db.channel.findUnique({ where: { id: call.channelId }, select: { workspaceId: true } })
-          : null;
-        await vespaQueue.addJob({
-          schema: fileSchema,
-          docId: call.id,
-          jobType: 'feed',
-          userId: call.createdByUserId,
-          app: SubApp.TRANSCRIPT,
-          ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
-        });
-        logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
-      } catch (vespaError) {
-        logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
-      }
+      // Queue Vespa indexing for the transcript (using call.id as the identifier)
+      await this.queueTranscriptIndexing(call);
 
     } catch (error) {
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });

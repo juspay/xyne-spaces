@@ -22,6 +22,7 @@ import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import {
+  GridDashboard01,
   LayoutGridTwoVertical as Columns3,
   TicketToken as TicketIcon,
   Hashtag,
@@ -192,6 +193,7 @@ import { attachmentViewerActor, type AttachmentRef } from '../../machines/attach
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
+import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
@@ -609,6 +611,7 @@ const SupportScreen = (): ReactElement => {
       const params = new URLSearchParams(searchParams);
       clearTicketFilterParams(params);
       params.delete('metrics');
+      params.delete('topics');
       params.delete('settings');
       const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
@@ -1240,6 +1243,7 @@ const SupportScreen = (): ReactElement => {
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
+  const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1507,6 +1511,7 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     setIsMetricsOpen(searchParams.get('metrics') === 'open');
+    setIsTopicsOpen(searchParams.get('topics') === 'open');
   }, [searchParams]);
 
   useEffect(() => {
@@ -1564,6 +1569,11 @@ const SupportScreen = (): ReactElement => {
   // and to flip the body to a Join-channel CTA when the user is on a public
   // channel they haven't joined yet.
   const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+  // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
+  const canExploreTopics =
+    isSelectedChannelJoined &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.metricsEnabled;
 
   const metricsSelectableDesks = useMemo(
     () =>
@@ -1892,7 +1902,11 @@ const SupportScreen = (): ReactElement => {
         setShowMergeDialog(false);
         if (parentTicket) {
           void navigate(`${supportBase}/${parentTicket.channelId}/${parentTicket.xyneId}`, {
-            state: { conversationId: parentTicket.conversationId, ticketId: parentTicket.id },
+            state: {
+              conversationId: parentTicket.conversationId,
+              ticketId: parentTicket.id,
+              fromDeskList: true,
+            },
           });
         }
       } catch (error: unknown) {
@@ -2199,6 +2213,7 @@ const SupportScreen = (): ReactElement => {
         state: {
           conversationId: ticketData.conversationId,
           ticketId: ticketData.id,
+          fromDeskList: true,
         },
       });
     },
@@ -2869,6 +2884,29 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         )}
+                      {canExploreTopics && (
+                        <Tooltip content='Topics explorer' side='bottom'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              const base = `${supportBase}/${selectedChannelId}`;
+                              if (isTopicsOpen) void navigate(base, { replace: true });
+                              else void navigate(`${base}?topics=open`);
+                            }}
+                            className={cn(
+                              'p-1.5 rounded transition-colors',
+                              isTopicsOpen
+                                ? 'bg-muted text-foreground'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                            )}
+                            data-track-category='Support'
+                            data-track-name='OpenTopicsExplorer'
+                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                          >
+                            <GridDashboard01 size={16} />
+                          </button>
+                        </Tooltip>
+                      )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -3566,7 +3604,7 @@ const SupportScreen = (): ReactElement => {
                   availableStages={availableStages}
                   onTicketClick={ticket => {
                     void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId },
+                      state: { ticketId: ticket.ticketId, fromDeskList: true },
                     });
                   }}
                 />
@@ -3582,6 +3620,19 @@ const SupportScreen = (): ReactElement => {
                   }}
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
+                />
+              )}
+              {isTopicsOpen && selectedChannelId && canExploreTopics && (
+                <TopicsExplorer
+                  open
+                  onClose={() =>
+                    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
+                  }
+                  channelId={selectedChannelId}
+                  channelName={selectedChannelName ?? undefined}
+                  supportBase={supportBase}
+                  availableAiCategories={availableAiCategories}
+                  availableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
@@ -3679,6 +3730,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -3700,6 +3752,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -3726,6 +3779,7 @@ const SupportScreen = (): ReactElement => {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
+                              fromDeskList: true,
                             },
                           });
                         }}
@@ -4090,6 +4144,7 @@ export const SupportTicketDetail = ({
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
+    fromDeskList?: boolean;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -4162,7 +4217,14 @@ export const SupportTicketDetail = ({
             : undefined,
         });
         if (sourceTicketXyneId && channelIdParam) {
-          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`);
+          // Same in-place swap as prev/next — the opener stays directly behind us.
+          void navigate(`${navBasePath ?? supportBase}/${channelIdParam}/${sourceTicketXyneId}`, {
+            replace: true,
+            state: {
+              ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
+            },
+          });
         }
       } catch (err) {
         toast.error('Unmerge Failed', {
@@ -4171,7 +4233,14 @@ export const SupportTicketDetail = ({
         });
       }
     },
-    [channelIdParam, navigate, navBasePath, supportBase],
+    [
+      channelIdParam,
+      navigate,
+      navBasePath,
+      routerState?.fromDeskList,
+      routerState?.returnToUrl,
+      supportBase,
+    ],
   );
 
   const [allEmails] = useCachedQuery(
@@ -4322,10 +4391,15 @@ export const SupportTicketDetail = ({
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
+    // Swap the ticket in place: pushing would bury the opener under the ticket chain
+    // and leave the back arrow one entry short of it.
     void navigate(`${navBasePath ?? supportBase}/${nextChannelId}/${t.xyneId}`, {
+      replace: true,
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
+        ...(routerState?.fromDeskList ? { fromDeskList: true } : {}),
+        ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
     });
   };
@@ -4381,20 +4455,25 @@ export const SupportTicketDetail = ({
       onBack();
       return;
     }
-    // Ticket boards (Kanban, My Tickets) hand us the URL they came from, so
-    // "back" returns to that board instead of dumping the user in the channel
-    // inbox they never visited. Only same-origin paths are honoured — reject
-    // absolute URLs and the "//host" / "/\host" protocol-relative forms so
-    // router state can't drive an off-site redirect.
-    const returnToUrl = routerState?.returnToUrl;
-    if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
-      void navigate(returnToUrl);
+    // Both markers are stamped by the opener (desk list, Kanban, My Tickets) as it pushes
+    // this entry, so its page is one Back away — pop it rather than stacking a second copy.
+    // returnToUrl is only a signal now; we never navigate to it, so it needs no URL check.
+    if (routerState?.fromDeskList || routerState?.returnToUrl) {
+      void navigate(-1);
       return;
     }
     const base = navBasePath ?? supportBase;
     const back = channelIdParam ? `${base}/${channelIdParam}` : base;
-    void navigate(back);
-  }, [channelIdParam, navBasePath, navigate, onBack, routerState?.returnToUrl, supportBase]);
+    void navigate(back, { replace: true });
+  }, [
+    channelIdParam,
+    navBasePath,
+    navigate,
+    onBack,
+    routerState?.fromDeskList,
+    routerState?.returnToUrl,
+    supportBase,
+  ]);
 
   const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
     const windowTarget = dir === 'forward' ? windowNext : windowPrev;
@@ -5613,6 +5692,10 @@ const EmailThreadItem = ({
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
+  const emailRouterState = useLocation().state as {
+    fromDeskList?: boolean;
+    returnToUrl?: string | null;
+  } | null;
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
   const ccList = email.cc || [];
@@ -5651,11 +5734,17 @@ const EmailThreadItem = ({
         });
 
         if (channelIdParam) {
+          // In-place swap like the ticket-level unmerge — the opener stays directly behind.
           void navigate(`/support/${channelIdParam}/${response.data.newTicket.xyneId}`, {
+            replace: true,
             state: {
               conversationId: response.data.newTicket.conversationId,
               title: email.subject,
               ticketId: response.data.newTicket.ticketId,
+              ...(emailRouterState?.fromDeskList ? { fromDeskList: true } : {}),
+              ...(emailRouterState?.returnToUrl
+                ? { returnToUrl: emailRouterState.returnToUrl }
+                : {}),
             },
           });
         }
@@ -5685,7 +5774,7 @@ const EmailThreadItem = ({
       disabled={isDemerging}
       className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
       title={mergedSource ? 'Unmerge this ticket' : 'Unmerge this email to a new ticket'}
-      data-track-category='SUPPORT'
+      data-track-category='Support'
       data-track-name={mergedSource ? 'UnmergeTicket' : 'DemergeEmail'}
       data-track-metadata={JSON.stringify({
         emailId: email.id,

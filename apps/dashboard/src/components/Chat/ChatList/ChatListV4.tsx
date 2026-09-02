@@ -20,7 +20,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
@@ -43,6 +43,8 @@ export type ChatListProps = {
   channelId: string;
   projectId?: string | undefined;
   cachedConversations: Conversation[];
+  conversationIds?: string[] | undefined;
+  onOpenThread?: ((conversationId: string, e?: React.MouseEvent) => void) | undefined;
   linkedItemCreatedAt?: Anchor;
   linkedCutoffCreatedAt?: Anchor;
   linkedConversationId?: string | null;
@@ -196,6 +198,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   channelId,
   projectId,
   cachedConversations,
+  conversationIds: conversationIdsFilter,
+  onOpenThread: onOpenThreadOverride,
   linkedItemCreatedAt,
   linkedCutoffCreatedAt,
   linkedConversationId,
@@ -220,7 +224,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const activityNavigationNonce =
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const { baseRoute } = useRouteContext();
-  const { editingMessageId, requestEdit } = useEditContext();
+  const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
   const isMember = !!channelParticipation;
   const channel = useVisibleChannel(channelId);
@@ -411,16 +415,22 @@ const ChatListV4: React.FC<ChatListProps> = ({
   );
 
   // ── Queries ───────────────────────────────────────────────────────────────────
+  const conversationFilterEnabled =
+    conversationIdsFilter === undefined || conversationIdsFilter.length > 0;
+  useEffect(() => {
+    if (!conversationFilterEnabled) setIsInitialLoadComplete(true);
+  }, [conversationFilterEnabled]);
   const [updatedConversations, updatedConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
       channelId,
       isMember,
+      ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
       limit: PAGE_SIZE,
     }),
     {
-      enabled: !shouldUseCutoffQuery && inViewAnchor !== null,
+      enabled: !shouldUseCutoffQuery && inViewAnchor !== null && conversationFilterEnabled,
     },
   );
 
@@ -437,12 +447,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
     queries.channelConversationsPaginatedV3({
       channelId,
       isMember,
+      ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
       start: cutoffAnchor,
       direction: 'backward',
       limit: PAGE_SIZE,
     }),
     {
-      enabled: shouldUseCutoffQuery && cutoffAnchor !== null,
+      enabled: shouldUseCutoffQuery && cutoffAnchor !== null && conversationFilterEnabled,
     },
   );
 
@@ -450,8 +461,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
     queries.channelLatestMultipleConversationsV3({
       channelId,
       isMember,
+      ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
       limit: PAGE_SIZE / 2,
     }),
+    { enabled: conversationFilterEnabled },
   );
 
   // ── Initial load (normal path) ────────────────────────────────────────────────
@@ -465,6 +478,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         queries.channelConversationsPaginatedV3({
           channelId,
           isMember,
+          ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
           start: oldConversationsAnchorRef.current,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -596,6 +610,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         queries.channelConversationsPaginatedV3({
           channelId,
           isMember,
+          ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
           start: oldConversationsAnchorRef.current,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -646,6 +661,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         queries.channelConversationsPaginatedV3({
           channelId,
           isMember,
+          ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
           start: newConversationsAnchor,
           direction: 'backward',
           limit: PAGE_SIZE,
@@ -999,7 +1015,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
-    if (!channelId) return;
+    if (!channelId || conversationIdsFilter) return;
 
     const flushToCache = (): void => {
       const latest = conversationsRef.current;
@@ -1028,7 +1044,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       flushToCache();
     };
-  }, [channelId]);
+  }, [channelId, conversationIdsFilter]);
 
   // ── Thread opening scroll ──────────────────────────────────────────────────────
   const { conversationId: activeThreadConversationId } = useParams<{ conversationId?: string }>();
@@ -1067,6 +1083,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   const handleOpenThread = useCallback(
     (conversationId: string, e?: React.MouseEvent): void => {
+      if (onOpenThreadOverride) {
+        onOpenThreadOverride(conversationId, e);
+        return;
+      }
       const conversation = conversations.find(c => c.conversationId === conversationId);
       const conversationMetadata = conversation?.metadata as { ticketId?: string } | null;
       const initMsg = conversation ? getInitialMessageFromConversation(conversation) : null;
@@ -1083,7 +1103,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event: e });
       }
     },
-    [channelId, conversations, navigate],
+    [channelId, conversations, navigate, onOpenThreadOverride],
   );
 
   const isEventFromChannelInput = useCallback(
@@ -1105,12 +1125,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
       virtualizer.scrollToIndex(index, { align: 'center' });
     };
 
-    if (editingMessageId === message.messageId) {
+    if (isEditingMessage(message.messageId)) {
       scrollToConversation();
       return;
     }
     requestEdit(message.messageId, scrollToConversation);
-  }, [conversations, user?.id, editingMessageId, requestEdit, virtualizer]);
+  }, [conversations, user?.id, isEditingMessage, requestEdit, virtualizer]);
 
   useShortcutById('composer.editLastMessage', handleEditLastMessage, {
     enabled: conversations.length > 0,
@@ -1487,4 +1507,4 @@ const ChatListV4: React.FC<ChatListProps> = ({
   );
 };
 
-export default withProfiler(ChatListV4, 'ChatListV4');
+export default withProfiler(withEditSurface(ChatListV4), 'ChatListV4');

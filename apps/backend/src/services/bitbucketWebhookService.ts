@@ -345,18 +345,18 @@ export class BitbucketWebhookService {
   private async validatePRTitle(
     context: PREventContext
   ): Promise<{ isValid: boolean; ticketId?: string }> {
-    return await pullRequestValidationService.validatePullRequest(
-      context.pr.title,
-      context.prId,
-      context.pr.fromRef.latestCommit,
-      context.sourceBranch,
-      context.destinationBranch,
-      context.workspace,
-      context.repoName,
-      context.repoUrl,
-      context.prUrl,
-      context.numberOfComments,
-    );
+    return await pullRequestValidationService.validatePullRequest({
+      prTitle: context.pr.title,
+      prId: context.prId,
+      commitHash: context.pr.fromRef.latestCommit,
+      sourceBranch: context.sourceBranch,
+      destinationBranch: context.destinationBranch,
+      workspaceId: context.workspace,
+      repoName: context.repoName,
+      repoUrl: context.repoUrl,
+      prUrl: context.prUrl,
+      numberOfComments: context.numberOfComments,
+    });
   }
 
   /**

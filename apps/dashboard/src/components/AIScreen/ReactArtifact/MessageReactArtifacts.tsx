@@ -1,22 +1,13 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useCacConfig } from '@xyne/shared/hooks';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ReactArtifactView } from './ReactArtifactView';
 import { ReactArtifactDialog } from './ReactArtifactDialog';
 import { toArtifactRef, type ReactArtifactRef } from './ReactArtifact.types';
+import { useIsShownInPane } from './appCreationModeContext';
+import { ArtifactPaneReference } from './ArtifactPaneReference';
 import { saveArtifactApp } from '../../../services/claw/artifactAppsService';
 import { clawErrorText } from '../../../services/claw/clawRequest';
-import {
-  REACT_ARTIFACT_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_CAC_CONFIG,
-  type ReactArtifactCacConfig,
-} from './reactArtifactCacConfig';
-import {
-  REACT_ARTIFACT_PUBLISH_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_PUBLISH_CAC_CONFIG,
-  type ReactArtifactPublishCacConfig,
-} from './reactArtifactPublishCacConfig';
 
 type SaveState = 'idle' | 'saving' | 'saved';
 
@@ -28,15 +19,6 @@ type SaveState = 'idle' | 'saving' | 'saved';
  * surface, so this is additive — anything that isn't an artifact is left alone.
  */
 export function MessageReactArtifacts({ message }: { message: Message }): ReactElement | null {
-  const { config } = useCacConfig<ReactArtifactCacConfig>({
-    key: REACT_ARTIFACT_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_CAC_CONFIG,
-  });
-  const { config: publishConfig } = useCacConfig<ReactArtifactPublishCacConfig>({
-    key: REACT_ARTIFACT_PUBLISH_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_PUBLISH_CAC_CONFIG,
-  });
-
   const [expanded, setExpanded] = useState<ReactArtifactRef | null>(null);
   // Keyed by attachmentId: one message can carry several artifacts, and each
   // saves independently.
@@ -50,6 +32,10 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
     setExpanded(null);
   }, []);
 
+  // Anything generated since session-scoping is ALREADY an app — the thread owns
+  // one and each generation versioned it — so Save would create a confusing
+  // duplicate. The button survives only for pre-scoping artifacts and for the
+  // rare case where materialization failed. Publishing stays explicit either way.
   const saveMutation = useMutation({
     mutationFn: (artifact: ReactArtifactRef) =>
       saveArtifactApp({
@@ -83,22 +69,51 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
     [message.attachments],
   );
 
-  if (!config.enabled) return null;
   if (artifacts.length === 0) return null;
 
   return (
     <>
       {artifacts.map(artifact => (
-        <ReactArtifactView
+        <ArtifactCard
           key={artifact.attachmentId}
           artifact={artifact}
           onExpand={handleExpand}
-          {...(publishConfig.enabled ? { onSave: handleSave } : {})}
+          {...(artifact.savedAppId ? {} : { onSave: handleSave })}
           saveState={saveStates[artifact.attachmentId] ?? 'idle'}
         />
       ))}
       {saveError && <p className='mb-2 text-xs text-destructive'>{saveError}</p>}
       <ReactArtifactDialog artifact={expanded} onClose={handleClose} />
     </>
+  );
+}
+
+/**
+ * One artifact in the transcript — live, or a reference when App Creation mode
+ * is already running this app in the pane. Split into its own component because
+ * the decision needs a hook, and hooks cannot be called inside a `.map`.
+ */
+function ArtifactCard({
+  artifact,
+  onExpand,
+  onSave,
+  saveState,
+}: {
+  artifact: ReactArtifactRef;
+  onExpand: (a: ReactArtifactRef) => void;
+  onSave?: (a: ReactArtifactRef) => void;
+  saveState: SaveState;
+}): ReactElement {
+  const shownInPane = useIsShownInPane(artifact.savedAppId);
+
+  if (shownInPane) return <ArtifactPaneReference artifact={artifact} />;
+
+  return (
+    <ReactArtifactView
+      artifact={artifact}
+      onExpand={onExpand}
+      {...(onSave ? { onSave } : {})}
+      saveState={saveState}
+    />
   );
 }

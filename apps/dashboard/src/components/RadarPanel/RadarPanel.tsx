@@ -989,7 +989,7 @@ const RadarPanel = (): ReactElement => {
                     <span
                       className={cn(
                         'ml-auto shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold',
-                        itemTrail.item.status === 'open'
+                        itemTrail.item.status === 'OPEN'
                           ? 'bg-amber-500/10 text-amber-600'
                           : 'bg-emerald-500/10 text-emerald-600',
                       )}

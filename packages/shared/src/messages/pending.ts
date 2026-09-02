@@ -4,7 +4,7 @@ import { getSyncStorage } from '../platform/syncStorage.js';
 import { queries } from '../zero/queries.js';
 import { mutators } from '../zero/mutators.js';
 import { MessageType } from '../zero/schema.js';
-import type { SdlcDiscussion } from '../sdlc.js';
+import type { EntityLinkContextInput } from '../sdlc.js';
 import type { ConversationRef } from './conversationRef.js';
 import { subscribeSendLifecycle } from './mutationLifecycle.js';
 
@@ -44,7 +44,7 @@ export type PendingMessage = {
   alsoSendToChannel?: boolean;
   childConversationId?: string;
   attachments?: PendingAttachment[];
-  sdlcDiscussion?: SdlcDiscussion;
+  entityLinkContext?: EntityLinkContextInput;
   sessionId: string;
   zeroStateAtSend: ZeroStateName;
   mutatorFired: boolean;
@@ -186,7 +186,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
         timestamp: fireTimestamp,
         type: entry.type,
         attachmentIds,
-        ...(entry.sdlcDiscussion !== undefined && { sdlcDiscussion: entry.sdlcDiscussion }),
+        ...(entry.entityLinkContext !== undefined && { entityLinkContext: entry.entityLinkContext }),
       }),
     );
   } else {

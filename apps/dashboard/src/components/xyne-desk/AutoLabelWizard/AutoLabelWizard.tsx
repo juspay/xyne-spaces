@@ -215,6 +215,8 @@ export function AutoLabelWizard({
               size='iconSm'
               className='mt-0.5'
               onClick={() => setView('create')}
+              data-track-category='xyne-desk'
+              data-track-name='auto-label-back-to-create'
               aria-label='Back to create rule'
               title='Back to create rule'
             >
@@ -419,10 +421,23 @@ export function AutoLabelWizard({
       <div className='flex items-center justify-between gap-2 border-t border-border px-5 py-4'>
         {view === 'rules' ? (
           <>
-            <Button type='button' variant='ghost' size='sm' onClick={() => onOpenChange(false)}>
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              onClick={() => onOpenChange(false)}
+              data-track-category='xyne-desk'
+              data-track-name='auto-label-rules-close'
+            >
               Close
             </Button>
-            <Button type='button' size='sm' onClick={() => setView('create')}>
+            <Button
+              type='button'
+              size='sm'
+              onClick={() => setView('create')}
+              data-track-category='xyne-desk'
+              data-track-name='auto-label-new-rule'
+            >
               <Plus className='size-4' />
               New rule
             </Button>
@@ -456,6 +471,7 @@ export function AutoLabelWizard({
             size='sm'
             disabled={!canSave || saveMutation.isPending}
             onClick={() => saveMutation.mutate()}
+            trackId='create_auto_label_rule'
             data-track-category='xyne-desk'
             data-track-name='auto-label-wizard-save'
           >

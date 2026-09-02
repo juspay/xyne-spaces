@@ -1,7 +1,8 @@
 import { logger } from '@/utils/logger';
-import { db } from '@/database/client';
+import { db, readReplicaDb } from '@/database/client';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { OPEN_STATUSES } from '@/utils/etaNotificationUtils';
+import { Prisma } from '@prisma/client';
 
 const BATCH_SIZE = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SIZE || '15', 10);
 const BATCH_SLEEP_MS = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SLEEP_MS || '1000', 10);
@@ -62,13 +63,13 @@ class StageEtaDeadlineWorker {
     if (overdueTicketIds.length === 0) return;
 
     for (let i = 0; i < overdueTicketIds.length; i += BATCH_SIZE) {
-      await db.ticket.updateMany({
-        where: {
-          id: { in: overdueTicketIds.slice(i, i + BATCH_SIZE) },
-          isStageOverdue: false,
-        } as any,
-        data: { isStageOverdue: true } as any,
-      });
+      const batchIds = overdueTicketIds.slice(i, i + BATCH_SIZE);
+      await db.$executeRaw`
+        UPDATE "tickets"
+        SET "isStageOverdue" = true
+        WHERE "id" IN (${Prisma.join(batchIds)})
+          AND ("isStageOverdue" = false OR "isStageOverdue" IS NULL)
+      `;
       if (i + BATCH_SIZE < overdueTicketIds.length) {
         await sleep(BATCH_SLEEP_MS);
       }
@@ -76,18 +77,19 @@ class StageEtaDeadlineWorker {
   }
 
   private async getOverdueTicketIds(now: Date): Promise<string[]> {
+    const readerDb = readReplicaDb ?? db;
     const allOverdueTicketIds: string[] = [];
     const QUERY_BATCH_SIZE = 10000;
     let cursor: string | undefined;
 
     while (true) {
-      const overdueEntries = await db.ticketStageEta.findMany({
+      const overdueEntries = await readerDb.ticketStageEta.findMany({
         where: {
           stageLeftAt: null,
           stageEta: { lte: now },
           // Ensure stage exists (filters out orphaned records with deleted stages)
           // ticket is implicitly checked via the statusV2 filter (JOIN filters out missing tickets)
-          stage: { isNot: null } as any,
+          stage: { id: { not: '' } },
           ticket: {
             statusV2: { in: OPEN_STATUSES },
             // Only fetch tickets not already marked as overdue

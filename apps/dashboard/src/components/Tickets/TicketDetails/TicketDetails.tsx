@@ -23,8 +23,10 @@ import {
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
+  ExternalLink as SquareArrowOutUpRight,
   GitBranch,
   LockClose as Lock,
+  LinkBrokenSlant as Unlink,
 } from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
@@ -49,6 +51,8 @@ import {
   RCAStatus,
   LookupType,
   BoardType,
+  isManualSubTicketBoard,
+  linkedSubTicketId,
   ApproverType,
   ReenterMode,
   isFieldActive,
@@ -82,9 +86,15 @@ import { getReachableStageIds, findMatchingTransition } from '../../../utils/sta
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
+import {
+  useProjectTicketSearch,
+  VESPA_MAX_BOARD_FILTER_VALUES,
+} from '../../../hooks/useProjectTicketSearch';
+import { getSubTicketLinkErrorMessage, subTicketService } from '../../../services/subTicketService';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import {
   formatIncomingReferenceLabel,
   formatReferenceLabel,
@@ -125,6 +135,8 @@ type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
 
 interface SubTicketTreeNode {
   subTicket: SubTicketTreeSubTicket;
+  /** ticket_sub_ticket_mappings row id — the edge that `subTicket.unlink` removes. */
+  mappingId: string;
   parentTicketId: string;
   depth: number;
   children: SubTicketTreeNode[];
@@ -1232,7 +1244,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
-      enabled: !!ticket?.projectId && hasBoardDropdownOpened,
+      // Also needed by the sub-ticket picker, which must know each board's type.
+      enabled:
+        !!ticket?.projectId &&
+        (hasBoardDropdownOpened || isManualSubTicketBoard(boardData?.boardType)),
     },
   );
 
@@ -1321,9 +1336,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       const mappings = subTicketMappingsByParentTicketId.get(parentTicketId) ?? [];
 
       return mappings
-        .map(mapping => mapping.subTicket)
-        .filter((st): st is SubTicketTreeSubTicket => st !== null && st !== undefined)
-        .map(subTicket => {
+        .filter(
+          (mapping): mapping is SubTicketTreeMapping & { subTicket: SubTicketTreeSubTicket } =>
+            mapping.subTicket !== null && mapping.subTicket !== undefined,
+        )
+        .map(mapping => {
+          const subTicket = mapping.subTicket;
           const mappedTicketId = subTicket.mappedTicketId ?? undefined;
           const canRenderChildren =
             mappedTicketId &&
@@ -1332,6 +1350,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
           return {
             subTicket,
+            mappingId: mapping.id,
             parentTicketId,
             depth,
             children: canRenderChildren
@@ -1360,6 +1379,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
+  // Gates the Create Sub-Ticket button only, mirroring subTicket.create's row-existence
+  // guard. linkExisting has no depth limit, so the picker below is deliberately not gated.
   const canCreateNestedSubTicket =
     (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
@@ -1928,6 +1949,137 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return (): void => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
+
+  // FLOW/RELEASE boards own their mappings, so their tickets are never linkable by hand.
+  const manualBoardIds = useMemo(
+    () => (boards ?? []).filter(board => isManualSubTicketBoard(board.boardType)).map(b => b.id),
+    [boards],
+  );
+  // Past the API's cap the filter is dropped; subTicketPickerOptions filters instead.
+  const manualBoardIdsFilter = useMemo(
+    () =>
+      manualBoardIds.length > 0 && manualBoardIds.length <= VESPA_MAX_BOARD_FILTER_VALUES
+        ? manualBoardIds.join(',')
+        : '',
+    [manualBoardIds],
+  );
+
+  // Own search state — the Related Tickets picker below keeps its own.
+  const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
+  const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
+  const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
+  const subTicketSearch = useProjectTicketSearch({
+    projectId: ticket?.projectId ?? undefined,
+    boardIds: manualBoardIdsFilter,
+    isActive: isAddSubTicketMenuOpen,
+  });
+
+  // The component is reused across tickets rather than remounted.
+  useEffect(() => {
+    setIsAddSubTicketMenuOpen(false);
+    setIsLinkingSubTicket(false);
+    setUnlinkingMappingIds(new Set());
+  }, [ticketId]);
+
+  const handleAddSubTicketMenuOpenChange = useCallback((open: boolean): void => {
+    setIsAddSubTicketMenuOpen(open);
+  }, []);
+
+  // Everything already in the loaded tree, so a deeper child is not offered again.
+  const linkedSubTicketMappedIds = useMemo(() => {
+    const ids = new Set<string>();
+    loadedSubTickets.forEach(st => {
+      if (st.mappedTicketId) ids.add(st.mappedTicketId);
+    });
+    return ids;
+  }, [loadedSubTickets]);
+
+  const subTicketPickerOptions = useMemo<SelectorOption[]>(() => {
+    // Direct parents only — deeper ancestors aren't loaded here, and the server's
+    // ancestor walk rejects those with a toast rather than silently linking a loop.
+    const parentIds = new Set(parentTicketIds);
+    // Backstop for the Vespa board filter, which is dropped past its value cap.
+    const manualBoardIdSet = new Set(manualBoardIds);
+    return (subTicketSearch.tickets ?? [])
+      .filter(
+        candidate =>
+          candidate.id !== ticketId &&
+          !linkedSubTicketMappedIds.has(candidate.id) &&
+          !parentIds.has(candidate.id) &&
+          (manualBoardIdSet.size === 0 ||
+            !candidate.boardId ||
+            manualBoardIdSet.has(candidate.boardId)),
+      )
+      .map(candidate => ({
+        value: candidate.id,
+        label: candidate.title || candidate.xyneId || candidate.id,
+        subtitle: candidate.xyneId || candidate.id,
+        icon: null,
+      }));
+  }, [
+    subTicketSearch.tickets,
+    ticketId,
+    linkedSubTicketMappedIds,
+    parentTicketIds,
+    manualBoardIds,
+  ]);
+
+  const handleLinkSubTicket = useCallback(
+    (mappedTicketId: string | null): void => {
+      if (!mappedTicketId || !ticket?.id || isLinkingSubTicket) {
+        return;
+      }
+
+      const candidate = subTicketSearch.tickets?.find(entry => entry.id === mappedTicketId);
+      setIsAddSubTicketMenuOpen(false);
+      subTicketSearch.reset();
+      setIsLinkingSubTicket(true);
+
+      // The row appears once the write replicates back through Zero, not optimistically.
+      void subTicketService
+        .link(
+          ticket.id,
+          mappedTicketId,
+          // Fallback only — the row renders from the linked ticket itself.
+          candidate?.xyneId || candidate?.title || 'Subticket',
+        )
+        .catch((error: unknown) => {
+          toast.error(getSubTicketLinkErrorMessage(error, 'Failed to link sub-ticket'));
+        })
+        .finally(() => {
+          setIsLinkingSubTicket(false);
+        });
+    },
+    [isLinkingSubTicket, subTicketSearch, ticket?.id],
+  );
+
+  const handleUnlinkSubTicket = useCallback(
+    (mappingId: string): void => {
+      if (unlinkingMappingIds.has(mappingId)) {
+        return;
+      }
+
+      setUnlinkingMappingIds(previous => new Set(previous).add(mappingId));
+
+      const clearInFlight = (): void => {
+        setUnlinkingMappingIds(previous => {
+          const next = new Set(previous);
+          next.delete(mappingId);
+          return next;
+        });
+      };
+
+      void subTicketService
+        .unlink(mappingId)
+        .catch((error: unknown) => {
+          toast.error(getSubTicketLinkErrorMessage(error, 'Failed to unlink sub-ticket'));
+        })
+        .finally(clearInFlight);
+    },
+    [unlinkingMappingIds],
+  );
 
   // Early return if no ticket data - after all hooks
   if (!ticket) {
@@ -2839,28 +2991,32 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             )}
           </div>
           {onUnmerge && (
-            <button
+            <Button
               type='button'
+              variant='ghost'
               onClick={onUnmerge}
+              trackId='unmerge_ticket'
               className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='UnmergeTicket'
             >
               Unmerge
-            </button>
+            </Button>
           )}
           {allowEdit && (
-            <button
+            <Button
               type='button'
+              variant='ghost'
               className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
+              trackId='remove_ticket_reference'
               aria-label='Remove reference'
               data-track-category='Tickets'
               data-track-name='RemoveReference'
               data-track-metadata={JSON.stringify({ referenceId: reference.id })}
             >
               <X size={14} />
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -2897,6 +3053,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
+    // Mirrors subTicket.unlink: only rows carrying the derived id are unlinkable. Keyed on
+    // `node.parentTicketId`, so a nested row is checked against its own parent.
+    const canUnlink =
+      Boolean(mappedTicketId) &&
+      subTicket.id === linkedSubTicketId(node.parentTicketId, mappedTicketId ?? '');
+    const isUnlinking = unlinkingMappingIds.has(node.mappingId);
 
     const handleRowClick = (): void => {
       if (mappedTicketId) {
@@ -2987,6 +3149,35 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </button>
               </Tooltip>
             )}
+            {canUnlink && (
+              <Tooltip content='Unlink sub-ticket'>
+                <button
+                  type='button'
+                  disabled={isUnlinking}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    isUnlinking
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'hover:bg-background hover:text-destructive',
+                  )}
+                  onClick={event => {
+                    event.stopPropagation();
+                    handleUnlinkSubTicket(node.mappingId);
+                  }}
+                  aria-label='Unlink sub-ticket'
+                  data-track-category='Tickets'
+                  data-track-name='UnlinkSubTicket'
+                  data-track-metadata={JSON.stringify({
+                    subTicketId: subTicket.id,
+                    mappingId: node.mappingId,
+                    mappedTicketId,
+                    depth: node.depth,
+                  })}
+                >
+                  <Unlink size={14} />
+                </button>
+              </Tooltip>
+            )}
             {boardStages && boardStages.length > 0 && (
               <div className='flex items-center gap-1.5'>
                 <TicketStageIcon progressPercentage={displayProgress} size={18} />
@@ -3016,6 +3207,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
+  // Hidden only on machine-owned boards. A sub-ticket can take sub-tickets of its own —
+  // trees nest, and the server rejects anything that would close a loop.
+  const addSubTicketPicker = !canManageSubTicketLinks ? null : (
+    <div
+      className={cn(
+        'mt-3 rounded-lg border border-border px-3 py-2 flex items-center',
+        isLinkingSubTicket ? 'opacity-60 pointer-events-none' : undefined,
+      )}
+      data-testid='add-sub-ticket-picker'
+    >
+      <EntitySelector
+        options={subTicketPickerOptions}
+        selectedValue={null}
+        onSelect={value => handleLinkSubTicket(value)}
+        placeholder='+ Add existing sub-ticket'
+        searchPlaceholder='Search by ticket ID or name'
+        isOpen={isAddSubTicketMenuOpen}
+        onOpenChange={handleAddSubTicketMenuOpenChange}
+        onSearchChange={subTicketSearch.handleSearchChange}
+        onScrollEnd={subTicketSearch.handleScrollEnd}
+        hasMore={subTicketSearch.hasMore}
+        isLoading={subTicketSearch.isLoading}
+        disableClientFiltering={true}
+        width='100%'
+        noBorder
+        testId='add-sub-ticket-selector'
+      />
+    </div>
+  );
+
   const createSubTicketButton =
     boardData?.boardType === BoardType.FLOW ? null : (
       <button
@@ -3023,7 +3244,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         disabled={!canCreateNestedSubTicket}
         data-testid='create-sub-ticket-button'
         data-track-event='BUTTON_CLICK'
-        data-track-category='TICKETS'
+        data-track-category='Tickets'
         data-track-name='CREATE_SUB_TICKET'
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
         title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
@@ -3443,8 +3664,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
                             {tag.tagName}
                             {
-                              <button
+                              <Button
+                                variant='ghost'
                                 onClick={() => void handleRemoveTag(tag.id)}
+                                trackId='remove_ticket_tag'
                                 className={`ml-1 p-0.5 rounded transition-colors`}
                                 aria-label='Remove label'
                                 data-track-category='Tickets'
@@ -3455,7 +3678,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 })}
                               >
                                 <X size={12} />
-                              </button>
+                              </Button>
                             }
                           </span>
                         );
@@ -3493,8 +3716,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       {/* Tag List */}
                       <div className='max-h-48 overflow-y-auto'>
                         {tagSearchQuery.trim() && !exactMatch && (
-                          <button
+                          <Button
+                            variant='ghost'
                             onClick={() => void handleToggleTag(tagSearchQuery)}
+                            trackId='create_ticket_tag'
                             className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
                             data-track-category='Tickets'
                             data-track-name='CreateTag'
@@ -3504,16 +3729,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <span className='text-foreground font-medium'>
                               Create &quot;{tagSearchQuery.trim()}&quot;
                             </span>
-                          </button>
+                          </Button>
                         )}
 
                         {filteredTags.map(tagName => {
                           const isSelected = selectedTagNames.has(tagName);
 
                           return (
-                            <button
+                            <Button
                               key={tagName}
+                              variant='ghost'
                               onClick={() => void handleToggleTag(tagName)}
+                              trackId='toggle_ticket_tag'
                               className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
                               data-track-category='Tickets'
                               data-track-name='ToggleTag'
@@ -3532,7 +3759,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   <Check size={14} />
                                 </span>
                               )}
-                            </button>
+                            </Button>
                           );
                         })}
                       </div>
@@ -3553,7 +3780,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   data-testid='ticket-detail-status-selector'
                   className='flex items-center gap-2'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_STATUS'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
@@ -3619,7 +3846,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   data-testid='ticket-detail-priority-selector'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_PRIORITY'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
@@ -4153,7 +4380,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isDraft && !item.formId && (
-                                <button
+                                <Button
+                                  variant='ghost'
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4168,13 +4396,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Request submitted for approval');
                                   }}
+                                  trackId='submit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='SubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Submit Request
-                                </button>
+                                </Button>
                               )}
                               {isSubmitted && item.formId && (
                                 <>
@@ -4340,7 +4569,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 </button>
                               )}
                               {isRejected && !item.formId && (
-                                <button
+                                <Button
+                                  variant='ghost'
                                   onClick={() => {
                                     void zero.mutate(
                                       mutators.ticketStageRequest.upsert({
@@ -4355,13 +4585,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Stage change request resubmitted for approval');
                                   }}
+                                  trackId='resubmit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
                                 >
                                   Resubmit request
-                                </button>
+                                </Button>
                               )}
                             </>
                           ) : (
@@ -4424,6 +4655,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <span className='flex flex-col text-left'>
                   <span className='text-sm font-semibold text-foreground'>{rcaButtonTitle}</span>
                   <span className='text-xs text-muted-foreground'>{rcaButtonSubtitle}</span>
+                </span>
+              </span>
+              <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
+            </button>
+          </div>
+        )}
+
+        {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
+          <div className='mt-4'>
+            <button
+              type='button'
+              onClick={() =>
+                void navigate(`/listProjects/${ticket.projectId}/releases/${ticket.id}`, {
+                  state: { returnToUrl: location.pathname + location.search },
+                })
+              }
+              data-track-category='Tickets'
+              data-track-name='OpenReleaseViewFromTicket'
+              data-testid='open-release-view-button'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+            >
+              <span className='inline-flex items-center gap-3'>
+                <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
+                  <SquareArrowOutUpRight size={18} />
+                </span>
+                <span className='flex flex-col text-left'>
+                  <span className='text-sm font-semibold text-foreground'>Open release view</span>
+                  <span className='text-xs text-muted-foreground'>
+                    Dev tickets, envs, migrations &amp; timeline for this release
+                  </span>
                 </span>
               </span>
               <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
@@ -4579,6 +4840,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </div>
               )}
               {createSubTicketButton}
+              {addSubTicketPicker}
             </div>
           </div>
         </div>

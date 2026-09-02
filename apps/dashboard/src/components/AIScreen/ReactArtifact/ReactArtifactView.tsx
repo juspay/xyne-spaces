@@ -20,7 +20,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { useCacConfig } from '@xyne/shared/hooks';
+import { Button } from '../../ui/Button/Button';
 import { SandpackProvider, SandpackLayout, SandpackPreview } from '@codesandbox/sandpack-react';
 import {
   loadArtifactPayload,
@@ -34,16 +34,12 @@ import type { ReactArtifactPayload, ReactArtifactViewProps } from './ReactArtifa
 import { ArtifactCodeView } from './ArtifactCodeView';
 import { useArtifactDataBridge, type PreviewClientRef } from './useArtifactDataBridge';
 import { useArtifactAgentBridge } from './useArtifactAgentBridge';
-import {
-  DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
-  REACT_ARTIFACT_AGENT_CAC_KEY,
-  type ReactArtifactAgentCacConfig,
-} from './reactArtifactAgentCacConfig';
-import {
-  REACT_ARTIFACT_WRITE_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_WRITE_CAC_CONFIG,
-  type ReactArtifactWriteCacConfig,
-} from './reactArtifactWriteCacConfig';
+import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
+import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
+import { ArtifactBootOverlay } from './ArtifactBootOverlay';
+import { AppLoaderMark } from '../../AppLoader/AppLoaderMark';
+import { useAuthContextValues } from '../../../hooks/useAuth';
+import { TOP_BAR_HEIGHT_CLASS } from '../../AppNavigator/topBarHeight';
 // Forces Sandpack's own auto-height wrapper elements to fill the frame; see the
 // file header for why `--sp-layout-height` alone is not enough.
 import './sandpackOverrides.css';
@@ -63,6 +59,7 @@ const SANDPACK_FILL_CSS = `
 .xyne-artifact-sandpack .sp-stack,
 .xyne-artifact-sandpack .sp-preview-container { height: 100%; min-height: 0; }
 .xyne-artifact-sandpack .sp-layout { border: none; border-radius: 0; }
+.xyne-artifact-sandpack .sp-overlay.sp-loading { display: none; }
 .xyne-artifact-sandpack .sp-preview-iframe {
   height: 100% !important;
   min-height: 0 !important;
@@ -97,19 +94,26 @@ const ArtifactSandpack = memo(
     refreshRef,
     canWrite,
     canInvokeAgents,
+    currentUserId,
     appId,
     attachmentId,
+    fill,
   }: {
     payload: ReactArtifactPayload;
     theme: 'light' | 'dark';
     canWrite: boolean;
     canInvokeAgents: boolean;
+    /** Resolves DM names and excludes the viewer from participant lists. */
+    currentUserId: string;
     appId?: string;
     /** Identifies an artifact that has not been saved yet, so it can still run
      *  agents from the chat thread it was generated in. */
     attachmentId?: string;
     /** Stable ref object — passing a changing prop here would remount the sandbox. */
     refreshRef: MutableRefObject<(() => Promise<void>) | null>;
+    /** Drives the boot overlay's scale and surface. A plain boolean, so the
+     *  memo's shallow compare still holds and the iframe is never torn down. */
+    fill: boolean;
   }): ReactElement => {
     const previewRef = useRef<PreviewClientRef | null>(null);
 
@@ -133,6 +137,11 @@ const ArtifactSandpack = memo(
       previewRef,
     });
 
+    // Ids are opaque and two of the naming rules are not guessable, so the host
+    // resolves them with the app's own helpers rather than letting generated
+    // code join a user table and get it wrong.
+    useArtifactDirectoryBridge({ currentUserId, previewRef });
+
     const files = useMemo(() => toSandpackFiles(payload), [payload]);
     const customSetup = useMemo(
       () => ({
@@ -150,6 +159,7 @@ const ArtifactSandpack = memo(
         <SandpackLayout>
           <SandpackPreview ref={previewRef} showOpenInCodeSandbox={false} />
         </SandpackLayout>
+        <ArtifactBootOverlay fill={fill} />
       </SandpackProvider>
     );
   },
@@ -171,6 +181,7 @@ export const ReactArtifactView = ({
   fill = false,
   onExpand,
   onClose,
+  titleSlot,
   onSave,
   saveState = 'idle',
 }: ReactArtifactViewProps): ReactElement => {
@@ -178,16 +189,9 @@ export const ReactArtifactView = ({
   const [tab, setTab] = useState<'preview' | 'code'>('preview');
   const [refreshingData, setRefreshingData] = useState(false);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
-  const { config: writeConfig } = useCacConfig<ReactArtifactWriteCacConfig>({
-    key: REACT_ARTIFACT_WRITE_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_WRITE_CAC_CONFIG,
-  });
-  const { config: agentConfig } = useCacConfig<ReactArtifactAgentCacConfig>({
-    key: REACT_ARTIFACT_AGENT_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_AGENT_CAC_CONFIG,
-  });
+  const auth = useAuthContextValues();
   const theme = useMemo(() => sandpackThemeName(), []);
-  const { attachmentId, inlineData, savedAppId } = artifact;
+  const { attachmentId, inlineData, savedAppId, versionId } = artifact;
 
   // Keyed on the ids, NOT on `artifact`: callers rebuild that object each
   // render, and depending on its identity would re-enter `loading` — tearing
@@ -196,11 +200,18 @@ export const ReactArtifactView = ({
     let cancelled = false;
     setState({ status: 'loading' });
 
-    // A saved app is addressed by its own id, which is the only route that works
-    // for someone who was never in the originating chat.
-    const load = savedAppId
-      ? loadSavedArtifactPayload(savedAppId)
-      : loadArtifactPayload({ attachmentId, ...(inlineData ? { inlineData } : {}) });
+    // Inline bytes win when present: the artifact was just generated in this
+    // session, so they are already here and exactly what this turn produced —
+    // fetching would be a needless round trip against a row written moments ago.
+    // Otherwise address the app by id, the only route that works for someone who
+    // was never in the originating chat, pinned to THIS turn's version so a card
+    // keeps rendering what its message described even after later generations
+    // move the app on.
+    const load = inlineData
+      ? loadArtifactPayload({ attachmentId, inlineData })
+      : savedAppId
+        ? loadSavedArtifactPayload(savedAppId, versionId)
+        : loadArtifactPayload({ attachmentId });
 
     load
       .then(payload => {
@@ -217,7 +228,7 @@ export const ReactArtifactView = ({
     return (): void => {
       cancelled = true;
     };
-  }, [attachmentId, inlineData, savedAppId]);
+  }, [attachmentId, inlineData, savedAppId, versionId]);
 
   const shellClass = fill
     ? 'flex h-full min-h-0 flex-1 flex-col'
@@ -232,10 +243,12 @@ export const ReactArtifactView = ({
           style={bodyStyle}
         >
           {state.status === 'loading' ? (
-            <span className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <span className='h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent' />
-              Loading app…
-            </span>
+            // Same mark the sandbox overlay uses, so fetching the payload and
+            // booting the bundler read as one wait instead of two loaders
+            // swapping places.
+            <div role='status' aria-label='Loading app'>
+              <AppLoaderMark size={fill ? 'md' : 'sm'} />
+            </div>
           ) : (
             <>
               <p className='text-sm font-medium text-foreground'>Could not open this app</p>
@@ -251,8 +264,25 @@ export const ReactArtifactView = ({
 
   return (
     <div className={shellClass} data-testid='react-artifact'>
-      <div className='flex items-center justify-between gap-2 border-b border-border px-3 py-2'>
-        <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
+      <div
+        className={`flex items-center justify-between gap-2 border-b px-3 ${
+          // Only when filling a panel does this sit on the same row as the
+          // AppNavigator, so it has to match both its height and its seam
+          // colour. Inline in a transcript it is a card header, not a top bar:
+          // content-sized, with the ordinary card border.
+          fill
+            ? // Filling a panel, this sits on the same row as the chat's own
+              // top bar, which reads white because it is transparent over a
+              // `bg-background` panel. The pane's shell has no background of
+              // its own, so state it here or the window grey shows through and
+              // the two headers do not match across the split.
+              `${TOP_BAR_HEIGHT_CLASS} border-sidebar-border-muted bg-background`
+            : 'border-border py-2'
+        }`}
+      >
+        {titleSlot ?? (
+          <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
+        )}
 
         {/* One group, so the bar reads as title | actions. Without it,
             justify-between spreads every control evenly across the header. */}
@@ -285,7 +315,7 @@ export const ReactArtifactView = ({
               ))}
             </div>
           )}
-          {payload.invokesAgents && agentConfig.enabled && (
+          {payload.invokesAgents && (
             <span
               className='flex shrink-0 items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400'
               title='This app can run an AI agent as you. Runs continue if you close the app.'
@@ -294,7 +324,7 @@ export const ReactArtifactView = ({
               Uses AI agents
             </span>
           )}
-          {payload.writes && writeConfig.enabled && (
+          {payload.writes && (
             <span
               className='flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400'
               title='This app can change data in your workspace. Changes are immediate and cannot be undone.'
@@ -303,8 +333,13 @@ export const ReactArtifactView = ({
               Can make changes
             </span>
           )}
+          {savedAppId && (
+            <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
+          )}
           {payload.dataRequirements?.some(r => r.source) && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_refresh_data'
               type='button'
               onClick={() => {
                 setRefreshingData(true);
@@ -321,10 +356,12 @@ export const ReactArtifactView = ({
                 className={`h-3.5 w-3.5 ${refreshingData ? 'animate-spin' : ''}`}
                 aria-hidden='true'
               />
-            </button>
+            </Button>
           )}
           {onSave && (
-            <button
+            <Button
+              variant='ghost'
+              trackId='react_artifact_save'
               type='button'
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
@@ -341,7 +378,7 @@ export const ReactArtifactView = ({
               ) : (
                 <Save className='h-3.5 w-3.5' aria-hidden='true' />
               )}
-            </button>
+            </Button>
           )}
           {onExpand && (
             <button
@@ -388,8 +425,10 @@ export const ReactArtifactView = ({
           payload={payload}
           theme={theme}
           refreshRef={refreshRef}
-          canWrite={writeConfig.enabled}
-          canInvokeAgents={agentConfig.enabled}
+          fill={fill}
+          canWrite
+          canInvokeAgents
+          currentUserId={auth.userID ?? ''}
           {...(artifact.savedAppId ? { appId: artifact.savedAppId } : {})}
           {...(!artifact.savedAppId && attachmentId ? { attachmentId } : {})}
         />

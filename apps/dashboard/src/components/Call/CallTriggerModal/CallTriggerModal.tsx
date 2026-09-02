@@ -3,6 +3,7 @@ import type { SdlcCallLink } from '@xyne/shared';
 import { Headphones, ChevronDown } from '@xyne/icons';
 import { Popover } from '../../ui/Popover/Popover';
 import { Drawer } from '../../ui/Drawer/Drawer';
+import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallTrigger } from '../CallTrigger/CallTrigger';
@@ -222,10 +223,12 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           >
             Other Options
           </div>
-          <button
-            className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-muted transition-colors'
+          <Button
+            variant='ghost'
+            className='flex items-center gap-3 w-full h-auto justify-start px-6 py-4 rounded-lg hover:bg-muted transition-colors'
             onClick={() => handleCallAction(handleInitiateCall)}
-            data-track-category='CALL'
+            data-track-category='CALLS'
+            trackId='start_call_now'
             data-track-name='StartCallNow'
             data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >
@@ -233,7 +236,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
               <Headphones className='w-5 h-5 text-foreground' />
             </div>
             <span className='text-sm font-semibold text-foreground'>Start call now</span>
-          </button>
+          </Button>
         </div>
       )}
     </div>

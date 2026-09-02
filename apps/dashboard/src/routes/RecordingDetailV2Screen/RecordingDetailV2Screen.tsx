@@ -76,6 +76,7 @@ import {
   type RecordingSummaryTemplate,
 } from './components/RecordingContentTabs';
 import { SummaryGenerationPanel } from './components/SummaryGenerationPill/SummaryGenerationPanel';
+import { deriveSummaryPanelState } from './summaryPanelState';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
 import { GoogleDocPreviewModal } from './components/GoogleDocPreviewModal';
@@ -485,6 +486,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
         notesCanvasId: null,
         detailedSummaryCanvasId: null,
         detailedSummaryReady: null,
+        detailedSummaryStatus: null,
         summaryModelUsed: null,
         citationSegments: [],
       };
@@ -498,6 +500,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const rawLinkedTicketMessageId = metadata?.['linkedTicketMessageId'];
       const rawDetailedSummaryCanvasId = metadata?.['detailedSummaryCanvasId'];
       const rawDetailedSummaryReady = metadata?.['detailedSummaryReady'];
+      const rawDetailedSummaryStatus = metadata?.['detailedSummaryStatus'];
       const rawNotesCanvasId = metadata?.['notesCanvasId'] ?? metadata?.['notesCanvasViewAccessId'];
       const googleDocs = parseRecordingGoogleDocLinks(metadata?.['googleDocs']);
       const rawSummaryModelUsed = metadata?.['summaryModelUsed'];
@@ -518,6 +521,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
           typeof rawDetailedSummaryReady === 'boolean'
             ? rawDetailedSummaryReady
             : base.detailedSummaryReady,
+        detailedSummaryStatus:
+          rawDetailedSummaryStatus === 'pending' ||
+          rawDetailedSummaryStatus === 'ready' ||
+          rawDetailedSummaryStatus === 'failed'
+            ? rawDetailedSummaryStatus
+            : base.detailedSummaryStatus,
         summaryModelUsed:
           rawSummaryModelUsed === 'fast' || rawSummaryModelUsed === 'thinking'
             ? rawSummaryModelUsed
@@ -546,15 +555,37 @@ export default function RecordingDetailV2Screen(): ReactElement {
   useEffect(() => {
     const request = getSummaryRequest(recordingId);
     if (!request || recording?.externalId !== recordingId) return;
+    // Prefer the explicit status when the backend has published it; the boolean
+    // fallback keeps this working for recordings that predate the status field.
+    const readyFromStatus = recording?.detailedSummaryStatus === 'ready';
+    const hasExplicitSummaryStatus =
+      recording?.detailedSummaryStatus === 'pending' ||
+      recording?.detailedSummaryStatus === 'ready' ||
+      recording?.detailedSummaryStatus === 'failed';
+    const readyFromLegacyFlag = !hasExplicitSummaryStatus && !!recording?.detailedSummaryReady;
+    const isReady = readyFromStatus || readyFromLegacyFlag;
     const requestedSummaryIsReady = request.templateId
-      ? recording?.summaryTemplateId === request.templateId && !!recording?.detailedSummaryReady
-      : !!recording?.detailedSummaryReady;
-    if (!requestedSummaryIsReady) return;
+      ? recording?.summaryTemplateId === request.templateId && isReady
+      : isReady;
+    // A 'failed' status is terminal too — drop the awaiting marker so the
+    // shimmer stops and the "Generate again" offer surfaces. Without this,
+    // an older marker (from a previous visit or a mount before the backend
+    // published its status) would keep isAwaiting truthy, and the panel
+    // internals `showFailed = hasFailed && !isAwaiting` would suppress the
+    // failed view behind the shimmer.
+    const isFailedTerminal = recording?.detailedSummaryStatus === 'failed';
+    if (!requestedSummaryIsReady && !isFailedTerminal) return;
     setAwaitingSummary(false);
     setPendingSummaryTemplateId(null);
     clearSummaryRequested(recordingId);
+    // A regeneration that reused the same canvas id won't remount via the
+    // key — bump the nonce so the freshly-written content is refetched.
+    if (requestedSummaryIsReady) {
+      setSummaryCanvasNonce(value => value + 1);
+    }
   }, [
     recording?.detailedSummaryReady,
+    recording?.detailedSummaryStatus,
     recording?.externalId,
     recording?.summaryTemplateId,
     recordingId,
@@ -697,45 +728,43 @@ export default function RecordingDetailV2Screen(): ReactElement {
     try {
       // The default template is code-backed and intentionally has no database row.
       setPendingSummaryTemplateId(resolvedTemplateId);
-      const result = await recordingService.regenerateSummary(
-        recording.externalId,
-        resolvedTemplateId,
-        modelType,
-      );
+      // 202-only: the server continues generating after this resolves. The
+      // shimmer stays up via awaitingSummary + the local 'pending' write
+      // below, and the panel flips when the Zero-replicated
+      // detailedSummaryStatus lands ('ready' clears the awaiting marker,
+      // 'failed' surfaces "Try again"). Completion also raises an in-app
+      // notification, so navigating away mid-generation is fine.
+      await recordingService.regenerateSummary(recording.externalId, resolvedTemplateId, modelType);
       setRecording(current =>
         current
           ? {
               ...current,
-              summaryTemplateId: result.summaryTemplateId,
-              detailedSummaryCanvasId:
-                result.detailedSummaryCanvasId ?? current.detailedSummaryCanvasId,
-              detailedSummaryReady: result.detailedSummaryReady,
-              ...(result.summaryModelUsed ? { summaryModelUsed: result.summaryModelUsed } : {}),
+              summaryTemplateId: resolvedTemplateId,
+              detailedSummaryStatus: 'pending',
             }
           : current,
       );
-      setSummaryCanvasNonce(value => value + 1);
-      setAwaitingSummary(false);
-      clearSummaryRequested(recordingId);
-      const selected = summaryTemplates.find(template => template.id === result.summaryTemplateId);
+      const selected = summaryTemplates.find(template => template.id === resolvedTemplateId);
       const selectedName =
-        selected?.name ?? (result.summaryTemplateId === 'default' ? 'Default' : 'Recording');
-      toast.success(`${selectedName} summary generated`);
+        selected?.name ?? (resolvedTemplateId === 'default' ? 'Default' : 'Recording');
+      toast.success(`Generating ${selectedName} summary`, {
+        description: "We'll notify you when it's ready.",
+      });
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.regenerateSummary', err);
       // Drop the placeholder too: a failed request leaves nothing on its way, and
       // leaving the mark set would restore the skeleton on the next visit.
       setAwaitingSummary(false);
+      setPendingSummaryTemplateId(null);
       setSummaryFailed(true);
       clearSummaryRequested(recordingId);
       const message = axios.isAxiosError(err)
         ? (err.response?.data as { error?: string } | undefined)?.error
         : undefined;
-      toast.error('Failed to generate summary', {
+      toast.error('Failed to start summary generation', {
         description: message ?? 'Please try again.',
       });
     } finally {
-      setPendingSummaryTemplateId(null);
       setIsRegeneratingSummary(false);
     }
   };
@@ -875,6 +904,15 @@ export default function RecordingDetailV2Screen(): ReactElement {
   useEffect(() => {
     if (!recordingId || recording?.externalId !== recordingId) return;
     if (awaitingSummary || summaryFailed) return;
+    // If the backend has explicitly marked the status, trust it — a 'failed'
+    // status must surface the retry offer immediately, and a 'pending' one is
+    // already handled by the polling effect above.
+    if (
+      recording?.detailedSummaryStatus === 'failed' ||
+      recording?.detailedSummaryStatus === 'pending'
+    ) {
+      return;
+    }
     const hasDetailedSummaryNow =
       !!recording?.detailedSummaryCanvasId && recording?.detailedSummaryReady !== false;
     const hasTranscriptNow =
@@ -934,10 +972,12 @@ export default function RecordingDetailV2Screen(): ReactElement {
         icon: getTemplateIcon(template.name),
       })),
   ];
-  const activeSummaryTemplateId = pendingSummaryTemplateId ?? storedSummaryTemplateId;
+  const selectedSummaryTemplateId = storedSummaryTemplateId;
+  const regeneratingSummaryTemplateId =
+    (pendingSummaryTemplateId ?? selectedSummaryTemplateId) || DEFAULT_SUMMARY_TEMPLATE_OPTION.id;
   const selectedSummaryTemplate: RecordingSummaryTemplate =
-    summaryTemplateOptions.find(template => template.id === activeSummaryTemplateId) ??
-    (storedSummaryTemplate?.id === activeSummaryTemplateId
+    summaryTemplateOptions.find(template => template.id === selectedSummaryTemplateId) ??
+    (storedSummaryTemplate?.id === selectedSummaryTemplateId
       ? {
           id: storedSummaryTemplate.id,
           name: storedSummaryTemplate.name,
@@ -955,16 +995,18 @@ export default function RecordingDetailV2Screen(): ReactElement {
     !!recordingRow?.transcript ||
     !!recording.hasTranscript;
 
-  // Past the grace window the auto-pending shimmer would be a lie — the in-call
-  // generation isn't coming. An explicit regenerate still shimmers via
-  // `awaitingSummary`.
-  const endedAtMs = recording.endedAt ? Date.parse(recording.endedAt) : null;
-  const summaryPendingExpired =
-    !hasDetailedSummary && endedAtMs !== null && Date.now() - endedAtMs > SUMMARY_PENDING_GRACE_MS;
-
-  const showSummaryShimmer =
-    awaitingSummary ||
-    (!hasDetailedSummary && hasTranscript && !summaryFailed && !summaryPendingExpired);
+  // Single source of truth for what the panel/canvas region shows. Priority:
+  // backend status → local UI state → legacy inference. The panel's
+  // shimmer/failed/idle branches map directly off this state, which prevents
+  // the "shimmer wins over failed" bug that comes from combining multiple
+  // flags in the render tree.
+  const summaryPanelState = deriveSummaryPanelState({
+    recording,
+    awaitingSummary,
+    summaryFailed,
+  });
+  const showSummaryShimmer = summaryPanelState === 'pending';
+  const summaryFailedEffective = summaryPanelState === 'failed';
 
   const handleMarkerSelect = (item: MarkedItem): void => {
     // A moment already announces itself in the transcript with a divider, so only
@@ -1129,7 +1171,11 @@ export default function RecordingDetailV2Screen(): ReactElement {
                 {...(isLive || !isOwner
                   ? {}
                   : {
-                      isRegenerating: isRegeneratingSummary || awaitingSummary,
+                      // showSummaryShimmer covers both a click in this tab and a
+                      // backend-published 'pending' (e.g. auto-generation after
+                      // the call ended, or a regen started from another tab).
+                      isRegenerating: isRegeneratingSummary || showSummaryShimmer,
+                      regeneratingTemplateId: regeneratingSummaryTemplateId,
                       templates: summaryTemplateOptions,
                       templatesLoading: summaryTemplatesLoading,
                       onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
@@ -1290,7 +1336,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   </Tooltip>
                 ) : null}
               </div>
-              {hasDetailedSummary && !awaitingSummary ? (
+              {hasDetailedSummary ? (
                 <>
                   <DetailedSummaryCanvas
                     key={`${recording.detailedSummaryCanvasId}:${summaryCanvasNonce}`}
@@ -1447,7 +1493,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   canGenerate={hasTranscript}
                   onGenerate={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
                   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
-                  hasFailed={summaryFailed}
+                  hasFailed={summaryFailedEffective}
                   generationRunId={summaryRunNonce}
                   initialProgress={getSummaryProgress(recordingId)}
                   initialStageIndex={getSummaryStage(recordingId)}
@@ -1633,6 +1679,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       editable={true}
       placeholder='Detailed summary'
       autoFocus={false}
+      trackEditedRecordingSummaryBlocks={true}
       className={`w-full ${CANVAS_POPOVER_LAYER_CLASS}
         detailed-summary-canvas-editor
         [&_.bn-side-menu]:!hidden
