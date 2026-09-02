@@ -23,9 +23,12 @@ export function withUnifiedUpload(
         ...item,
         title: 'Upload',
         subtext: 'Image, video, audio or any other file',
+        // Replacing rather than extending the defaults: those still carry 'embed'
+        // and 'url' from the embed-by-url flow, which this item cannot do.
         aliases: [
-          ...(item.aliases ?? []),
           'upload',
+          'file',
+          'attachment',
           'image',
           'img',
           'photo',
@@ -34,7 +37,6 @@ export function withUnifiedUpload(
           'audio',
           'sound',
           'media',
-          'attachment',
         ],
       },
     ];

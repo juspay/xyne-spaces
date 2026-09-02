@@ -3,6 +3,7 @@ import {
   AddFileButton,
   createReactBlockSpec,
   FileBlockWrapper,
+  useResolveUrl,
   useUploadLoading,
 } from '@blocknote/react';
 import axios from 'axios';
@@ -42,6 +43,12 @@ async function downloadFile(url: string, name: string): Promise<void> {
 }
 
 function FileCard({ url, name }: { url: string; name: string }): ReactElement {
+  // props.url holds an attachment id, not a url. The image, video and audio blocks
+  // resolve it through the editor; without doing the same the download fetches a
+  // relative path and hands back the app's own HTML. Resolved here rather than in
+  // the caller so it never runs for a block that has nothing to resolve yet.
+  const resolved = useResolveUrl(url);
+  const downloadUrl = (resolved.loadingState === 'loading' ? url : resolved.downloadUrl) || url;
   const label = name || url;
 
   return (
@@ -67,7 +74,7 @@ function FileCard({ url, name }: { url: string; name: string }): ReactElement {
           // The editor reclaims the selection on mouseup, so a click never lands.
           event.preventDefault();
           event.stopPropagation();
-          void downloadFile(url, label);
+          void downloadFile(downloadUrl, label);
         }}
       >
         <Download size={16} />

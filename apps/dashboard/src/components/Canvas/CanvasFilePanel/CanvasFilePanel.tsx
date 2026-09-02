@@ -54,11 +54,13 @@ interface UploadingEditor {
  * The panel leaves a node selection on the block; replacing the node under it
  * makes Yjs throw when it later tries to restore that selection.
  */
-const releaseNodeSelection = (editor: unknown): void => {
+const releaseNodeSelection = (editor: unknown, blockId: string): void => {
   const view = editorView(editor);
   if (!view) return;
   const { selection } = view.state;
-  if (!(selection instanceof NodeSelection)) return;
+  // Only this block's own selection: by now the upload may have taken long enough
+  // for the reader to have selected something else, which is not ours to move.
+  if (!(selection instanceof NodeSelection) || selection.node.attrs['id'] !== blockId) return;
   view.dispatch(view.state.tr.setSelection(Selection.near(selection.$to, 1)));
 };
 
@@ -94,27 +96,31 @@ export const CanvasFilePanel: FC<FilePanelProps> = ({ blockId }): null => {
     promptedFor.current = blockId;
 
     void (async (): Promise<void> => {
-      const blockType = api.getBlock(blockId)?.type ?? '';
-      const file = await promptForFile(ACCEPT_BY_BLOCK[blockType] ?? '*/*');
+      const file = await promptForFile(ACCEPT_BY_BLOCK[api.getBlock(blockId)?.type ?? ''] ?? '*/*');
       if (!file) {
         discardIfEmpty(api, blockId);
         return;
       }
-      // Named before the upload starts so the uploading card can show which file.
-      api.updateBlock(blockId, { props: { name: file.name } });
 
       try {
+        // Named before the upload starts so the uploading card can show which file.
+        api.updateBlock(blockId, { props: { name: file.name } });
+
         const uploaded = await upload(file, blockId);
         const url = typeof uploaded === 'string' ? uploaded : uploaded['url'];
         if (typeof url !== 'string' || !url) throw new Error('upload returned no url');
 
+        // Read again rather than reusing the type from before the picker: an upload
+        // is long enough for a collaborator to have changed the block underneath.
+        const blockType = api.getBlock(blockId)?.type ?? '';
         // Only the generic block is undecided.
         const kind = blockType === 'file' ? classifyMediaKind(file.type, file.name) : blockType;
+        const converts = kind !== blockType;
 
-        if (kind !== blockType) releaseNodeSelection(editor);
+        if (converts) releaseNodeSelection(editor, blockId);
 
         api.updateBlock(blockId, {
-          ...(kind === blockType ? {} : { type: kind }),
+          ...(converts ? { type: kind } : {}),
           props: { url, name: file.name },
         });
       } catch {
