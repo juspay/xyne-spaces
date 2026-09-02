@@ -7,7 +7,7 @@ import {
   TicketPriority,
   TicketStatusV2,
   WorkspaceRole,
-} from '@prisma/client';
+} from '@xyne/shared';
 import { db } from '@/database/client';
 import { authMiddleware } from '@/middleware/auth';
 import { config } from '@/config/env';
@@ -288,23 +288,13 @@ router.post('/desk/workspace-mailbox', async (req, res, next) => {
     if (!email || !validateEmailResponse(email, 'workspace mailbox', res)) return;
     const name = `${sourceType}-mock-workspace-${workspaceId}`;
     const existingSource = await db.externalSource.findUnique({
-      where: {
-        workspaceId_sourceType: {
-          workspaceId,
-          sourceType,
-        },
-      },
+      where: { name },
       select: { id: true, credentials: true },
     });
     if (rejectNonMockSourceOverwrite(existingSource, res)) return;
 
     const externalSource = await db.externalSource.upsert({
-      where: {
-        workspaceId_sourceType: {
-          workspaceId,
-          sourceType,
-        },
-      },
+      where: { name },
       create: {
         name,
         sourceType,
@@ -401,6 +391,7 @@ router.post('/desk/channel-source', async (req, res, next) => {
         where: { name },
         create: {
           name,
+          workspaceId,
           sourceType: persistedSourceType,
           displayName: email,
           channelId,
@@ -545,23 +536,13 @@ router.post('/desk/slack-workspace', async (req, res, next) => {
 
     const name = `slack-mock-workspace-${workspaceId}`;
     const existingSource = await db.externalSource.findUnique({
-      where: {
-        workspaceId_sourceType: {
-          workspaceId,
-          sourceType: 'slack',
-        },
-      },
+      where: { name },
       select: { id: true, credentials: true },
     });
     if (rejectNonMockSourceOverwrite(existingSource, res)) return;
 
     const externalSource = await db.externalSource.upsert({
-      where: {
-        workspaceId_sourceType: {
-          workspaceId,
-          sourceType: 'slack',
-        },
-      },
+      where: { name },
       create: {
         name,
         sourceType: 'slack',
