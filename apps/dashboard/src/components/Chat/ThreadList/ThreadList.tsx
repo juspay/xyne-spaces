@@ -155,6 +155,13 @@ const ThreadList = ({
     isNearBottomRef.current = isNearBottom;
   }, [isNearBottom]);
 
+  const isEditingRef = useRef(false);
+  useEffect(() => {
+    isEditingRef.current = editingMessageId !== null;
+  }, [editingMessageId]);
+
+  const lastAutoScrolledMessageIdRef = useRef<string | null>(null);
+
   const threadTicketId = useMemo(() => {
     if (!isTicketThread || !conversation) return '';
     const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
@@ -217,6 +224,7 @@ const ThreadList = ({
 
   useEffect(() => {
     hasAppliedInitialScrollRef.current = false;
+    lastAutoScrolledMessageIdRef.current = null;
     setIsNearBottom(false);
     setIsNearTop(true);
     setHasOverflow(false);
@@ -316,12 +324,17 @@ const ThreadList = ({
    *    - Skip if we've navigated to a specific message via link
    */
   useEffect(() => {
+    const latestMessage = threadMessages?.[threadMessages.length - 1];
+    const latestMessageId = latestMessage?.messageId ?? null;
+    const isAppend = latestMessageId !== lastAutoScrolledMessageIdRef.current;
+    lastAutoScrolledMessageIdRef.current = latestMessageId;
+
     const container = scrollContainerRef.current;
     if (!container || !threadMessages?.length) return;
     if (!hasAppliedInitialScrollRef.current) return;
     if (!enableJumpFab && !hasOverflow) return;
+    if (!isAppend) return;
 
-    const latestMessage = threadMessages[threadMessages.length - 1];
     const isFromCurrentUser = latestMessage?.senderId === user?.id;
 
     const threshold = 100;
@@ -346,6 +359,7 @@ const ThreadList = ({
       // overflow purely because of the padding and switch on the jump FAB.
       const overflow = container.scrollHeight > container.clientHeight + 8 + ACTIVITY_BAR_PADDING;
       setHasOverflow(overflow);
+      if (isEditingRef.current) return;
       if (!overflow) {
         setIsNearBottom(true);
         return;
@@ -386,7 +400,9 @@ const ThreadList = ({
     const handleScroll = (): void => {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
-      setIsNearBottom(distanceFromBottom < 150);
+      if (!isEditingRef.current) {
+        setIsNearBottom(distanceFromBottom < 150);
+      }
       setIsNearTop(container.scrollTop < 150);
 
       setIsScrolling(true);
