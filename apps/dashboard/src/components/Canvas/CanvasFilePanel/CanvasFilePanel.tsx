@@ -1,7 +1,9 @@
 import { type FilePanelProps, useBlockNoteEditor } from '@blocknote/react';
+import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { classifyMediaKind } from '@xyne/shared';
 import { type FC, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
+import { editorView } from '../canvasEditorView';
 
 const ACCEPT_BY_BLOCK: Readonly<Record<string, string>> = {
   file: '*/*',
@@ -45,6 +47,20 @@ interface UploadingEditor {
   updateBlock: (blockId: string, update: { type?: string; props: Record<string, unknown> }) => void;
   removeBlocks: (blockIds: string[]) => void;
 }
+
+/**
+ * Moves the cursor off the block the panel selected.
+ *
+ * The panel leaves a node selection on the block; replacing the node under it
+ * makes Yjs throw when it later tries to restore that selection.
+ */
+const releaseNodeSelection = (editor: unknown): void => {
+  const view = editorView(editor);
+  if (!view) return;
+  const { selection } = view.state;
+  if (!(selection instanceof NodeSelection)) return;
+  view.dispatch(view.state.tr.setSelection(Selection.near(selection.$to, 1)));
+};
 
 /** An empty file block is only ever a placeholder for the picker, so drop it. */
 const discardIfEmpty = (api: UploadingEditor, blockId: string): void => {
@@ -94,6 +110,8 @@ export const CanvasFilePanel: FC<FilePanelProps> = ({ blockId }): null => {
 
         // Only the generic block is undecided.
         const kind = blockType === 'file' ? classifyMediaKind(file.type, file.name) : blockType;
+
+        if (kind !== blockType) releaseNodeSelection(editor);
 
         api.updateBlock(blockId, {
           ...(kind === blockType ? {} : { type: kind }),
