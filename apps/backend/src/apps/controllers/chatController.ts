@@ -263,7 +263,7 @@ export class ChatController {
           return;
         }
 
-        const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
+        const escapedJSON = encodeHtmlAttr(JSON.stringify(flowResult.data));
         // Inner text = notification/preview fallback (shown when the widget
         // isn't rendered). Prefer flow.data.fallbackText, then the flow title,
         // else a generic label — never worse than the old hardcoded "Flow JSON".
@@ -364,7 +364,7 @@ export class ChatController {
           return;
         }
         const flowId = (flowResult.data.screenId) ?? crypto.randomUUID();
-        const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
+        const escapedJSON = encodeHtmlAttr(JSON.stringify(flowResult.data));
         // Inner text = notification/preview fallback (see postMessage above).
         const fbRaw = (flowResult.data.data as Record<string, unknown> | undefined)?.['fallbackText'];
         const flowFallback = encodeHtmlAttr(

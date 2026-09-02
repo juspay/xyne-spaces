@@ -36,6 +36,9 @@ export function parseFlowJsonComponents(content: string): FlowComponent[] | null
       .replace(/&quot;/g, '"')
       .replace(/&#10;/g, "\n")
       .replace(/&#13;/g, "\r")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
       // Repair stray backslashes that are NOT valid JSON escape sequences.
       // Slack mrkdwn leaves fragments like "\1" / "\6" in the content, which
       // are invalid JSON escapes; without this, JSON.parse aborts the ENTIRE
