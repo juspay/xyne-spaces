@@ -24,6 +24,7 @@ import {
 } from '../../machines/attachmentViewerMachine';
 import { ZoomState } from './utils';
 import { FileSearchControls, FileSearchProvider, useFileSearchContext } from './search';
+import { Button } from '../ui/Button/Button';
 
 export interface FileItem {
   fileName: string;
@@ -238,15 +239,17 @@ const ErrorState: React.FC<{
       <div className='text-red-300 text-sm mb-4'>{error}</div>
     </div>
     <div className='flex gap-2'>
-      <button
+      <Button
         onClick={onRetry}
+        variant='ghost'
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 transition-colors text-sm backdrop-blur-sm'
         data-track-category='FileViewer'
         data-track-name='RETRY_LOAD_FILE'
         data-track-metadata={JSON.stringify({ error })}
+        trackId='retry_load_file'
       >
         Try Again
-      </button>
+      </Button>
       <button
         onClick={onDownload}
         className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'

@@ -1,5 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/Button/Button';
 import type { MemoryBankMemory } from '@/services/claw/digitalTwinTypes';
 import { CategoryBadge } from './CategoryBadge';
 import { fmtRelative } from './format';
@@ -73,9 +74,11 @@ export const MemoryCard = ({
           )}
         </div>
         {onDelete && (
-          <button
+          <Button
+            variant='ghost'
             type='button'
             onClick={() => onDelete(memory.hindsightMemoryId)}
+            trackId='digital_twin_delete_memory'
             data-track-category='Claw Agents'
             data-track-name='Digital Twin delete memory'
             className='shrink-0 text-muted-foreground transition-colors hover:text-destructive'
@@ -83,7 +86,7 @@ export const MemoryCard = ({
             aria-label='Delete memory'
           >
             <Trash2 className='size-3.5' />
-          </button>
+          </Button>
         )}
       </div>
     </div>
