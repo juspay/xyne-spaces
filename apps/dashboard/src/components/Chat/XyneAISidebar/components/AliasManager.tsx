@@ -2,6 +2,7 @@
 import { ReactElement, useState, useCallback } from 'react';
 import { X, Trash2, Edit2, Ban } from 'lucide-react';
 import type { ActivityAlias } from '../../../../hooks/useActivityAliases';
+import { Button } from '../../../ui/Button/Button';
 
 interface AliasManagerProps {
   isOpen: boolean;
@@ -135,15 +136,17 @@ export const AliasManager = ({
                           </button>
                           {confirmDeleteId === alias.id ? (
                             <div className='flex items-center gap-1'>
-                              <button
+                              <Button
+                                variant='ghost'
                                 onClick={() => handleConfirmDelete(alias.id)}
+                                trackId='confirm_delete_alias'
                                 data-track-category='XYNE_AI_SIDEBAR'
                                 data-track-name='CONFIRM_DELETE_ALIAS'
                                 className='px-2 py-1 text-xs font-medium text-destructive-foreground bg-destructive rounded hover:bg-destructive/90 transition-colors'
                                 type='button'
                               >
                                 Confirm
-                              </button>
+                              </Button>
                               <button
                                 onClick={handleCancelDelete}
                                 data-track-category='XYNE_AI_SIDEBAR'
