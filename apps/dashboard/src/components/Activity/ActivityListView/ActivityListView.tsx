@@ -60,7 +60,6 @@ import {
   NotificationBellOn,
 } from '@xyne/icons';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { Button } from '../../ui/Button/Button';
 
 type ActivityTab =
   | 'all'
@@ -1002,10 +1001,9 @@ const ActivityListView = (): ReactElement => {
               {showMobileMenu && (
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                   {/* Mark as Read */}
-                  <Button
-                    variant='ghost'
-                    trackId='mark_tab_as_read'
-                    trackProps={{ tab: activeTab }}
+                  <button
+                    data-ph-capture-attribute-track-id='mark_tab_as_read'
+                    data-ph-capture-attribute-tab={activeTab}
                     onClick={() => {
                       markActiveTabUnread();
                       setShowMobileMenu(false);
@@ -1021,7 +1019,7 @@ const ActivityListView = (): ReactElement => {
                   >
                     <MarkAsRead size={16} />
                     <span>Mark as read</span>
-                  </Button>
+                  </button>
 
                   {/* Divider */}
                   <div className='border-t border-border my-1'></div>
