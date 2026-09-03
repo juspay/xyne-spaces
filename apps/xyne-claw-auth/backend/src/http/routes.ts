@@ -31,7 +31,7 @@ import { dashboardRouter } from "../routes/dashboard.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
-import { artifactAppStorageRouter } from "../routes/artifact-app-storage.js";
+import { artifactAppStorageRouter, storageBearerAuthBridge } from "../routes/artifact-app-storage.js";
 import { designSharesRouter, publicDesignSharesRouter } from "../routes/design-shares.js";
 import { sessionsArchiveRouter } from "../routes/sessions-archive.js";
 import { experimentsInternalRouter } from "../routes/experiments-internal.js";
@@ -156,7 +156,10 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
   app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
   app.use(`${BASE}/artifact-app-agents`, requireAuth, artifactAppAgentsRouter);
-  app.use(`${BASE}/artifact-app-storage`, requireAuth, artifactAppStorageRouter);
+  // storageBearerAuthBridge runs first: bare-Bearer SDK calls get the token's
+  // own workspaceId claim turned into the cookie form requireAuth expects.
+  // Scoped to this path only — requireAuth itself is untouched.
+  app.use(`${BASE}/artifact-app-storage`, storageBearerAuthBridge, requireAuth, artifactAppStorageRouter);
   app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designSharesRouter);
   app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
