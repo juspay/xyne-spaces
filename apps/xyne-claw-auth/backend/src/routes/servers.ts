@@ -8,6 +8,7 @@ import { getCredentialFieldsByServerType } from "../mcp/connector-definitions.js
 import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { isOAuthConnector } from "./oauth-token.js";
+import { evictSession } from "../mcp/runner.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("servers");
@@ -701,7 +702,30 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(403).json({ success: false, error: "Only the connector owner or a CLAW_ADMIN can delete it" });
       return;
     }
+    // Snapshot connection owners before deleting the McpServer: the DB relation
+    // cascades UserMcpConnection rows, so this is the last point where we can
+    // identify cached MCP runner sessions to evict. Without this, a spawned
+    // stdio/http MCP client can remain callable until the normal idle eviction.
+    const connections = await prisma.userMcpConnection.findMany({
+      where: { mcpServerId: id },
+      select: { userId: true },
+    });
+
+    for (const connection of connections) {
+      await evictSession(connection.userId, existing.type).catch((err) => {
+        log.error(`[servers] evictSession failed for ${existing.type}:`, err);
+      });
+    }
+
     await prisma.mcpServer.delete({ where: { id } });
+
+    // Tools synced from MCPs are keyed by a plain string source (not an FK to
+    // McpServer), so the cascade above cannot remove them. Delete them
+    // explicitly; AgentTool links cascade through Tool -> AgentTool.
+    const deletedTools = await prisma.tool.deleteMany({
+      where: { source: `mcp:${existing.type}` },
+    });
+
     await writeAuditLog({
       actorUserId: requesterId,
       eventType: "MCP_CONNECTOR_DELETED",
@@ -714,6 +738,7 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
         launchConfigTemplate: existing.launchConfigTemplate,
         httpConfigTemplate: existing.httpConfigTemplate,
         credentialForm: existing.credentialForm,
+        deletedToolsCount: deletedTools.count,
       },
     });
     res.json({ success: true });
