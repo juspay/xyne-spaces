@@ -1,3 +1,10 @@
+## [1.268.1](https://github.com/juspay/xyne-spaces/compare/v1.268.0...v1.268.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* made ai priority toggle independent of classification toggle ([#1435](https://github.com/juspay/xyne-spaces/issues/1435)) ([96feae5](https://github.com/juspay/xyne-spaces/commit/96feae54eaa0d6491a64f83df6737a53d4c86e0a))
+
 ## [1.268.0](https://github.com/juspay/xyne-spaces/compare/v1.267.0...v1.268.0) (2026-09-03)
 
 
