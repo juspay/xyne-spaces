@@ -8,6 +8,7 @@
     "dev": "tsx --env-file=.env --watch src/main.ts",
     "start": "node --import tsx/esm src/main.ts",
     "lint:slack": "eslint src/surfaces/slack",
+    "lint:http": "eslint src/routes src/middleware",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

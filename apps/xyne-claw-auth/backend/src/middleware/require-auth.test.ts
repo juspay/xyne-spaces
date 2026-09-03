@@ -230,6 +230,11 @@ describe("requireAuth CLI bearer branch", () => {
     expect(state.verifyCalls).toBe(0);
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "Authentication required",
+      code: "AUTHENTICATION_REQUIRED",
+    });
   });
 
   it("rejects CLI bearer tokens on strict S2S endpoints", async () => {
@@ -249,6 +254,11 @@ describe("requireAuth CLI bearer branch", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "s2s key required",
+      code: "SERVICE_AUTHENTICATION_REQUIRED",
+    });
   });
 });
 
