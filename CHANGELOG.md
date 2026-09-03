@@ -1,3 +1,10 @@
+## [1.268.0-release-20260903.5](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.4...v1.268.0-release-20260903.5) (2026-09-03)
+
+
+### Features
+
+* integrated workflow-sdk ([#1516](https://github.com/juspay/xyne-spaces/issues/1516)) ([cb65fcc](https://github.com/juspay/xyne-spaces/commit/cb65fcc382f77529b64c73b70167222686cc5b9a))
+
 ## [1.268.0-release-20260903.4](https://github.com/juspay/xyne-spaces/compare/v1.268.0-release-20260903.3...v1.268.0-release-20260903.4) (2026-09-03)
 
 
